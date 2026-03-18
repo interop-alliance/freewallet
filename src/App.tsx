@@ -1,118 +1,83 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import walletLogo from './assets/wallet.svg'
-import './App.css'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Link from '@mui/material/Link'
+import Stack from '@mui/material/Stack'
+import Typography from '@mui/material/Typography'
+import { FaGhost } from 'react-icons/fa'
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={walletLogo} className="base" width="150" height="150" alt="Wallet logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
+    <Box
+      component="main"
+      sx={{
+        minHeight: '100dvh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        px: 2,
+      }}
+    >
+      <Box sx={{ textAlign: 'center', maxWidth: 760, width: '100%' }}>
+        <Typography
+          variant="h2"
+          component="h1"
+          sx={{ fontWeight: 500, mb: 2, fontSize: { xs: '2.2rem', sm: '3rem' } }}
         >
-          Count is {count}
-        </button>
-      </section>
+          Freewallet
+        </Typography>
 
-      <div className="ticks"></div>
+        <Typography
+          variant="h6"
+          component="p"
+          sx={{
+            color: 'text.secondary',
+            fontWeight: 400,
+            lineHeight: 1.45,
+            mb: 6,
+            maxWidth: 620,
+            mx: 'auto',
+            fontSize: { xs: '1.125rem', sm: '1.45rem' },
+          }}
+        >
+          is an open source, open specs web app for managing{' '}
+          <Link href="#" underline="always">
+            Verifiable Credentials
+          </Link>
+          ,{' '}
+          <Link href="#" underline="always">
+            DIDs
+          </Link>
+          , and{' '}
+          <Link href="#" underline="always">
+            keys
+          </Link>
+          .
+        </Typography>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank" rel="noreferrer">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank" rel="noreferrer">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank" rel="noreferrer">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank" rel="noreferrer">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank" rel="noreferrer">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank" rel="noreferrer">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          justifyContent="center"
+          alignItems="stretch"
+        >
+          <Button variant="contained" color="primary" size="large" sx={{ minWidth: 180, py: 1.25 }}>
+            Log in
+          </Button>
+          <Button variant="outlined" color="primary" size="large" sx={{ minWidth: 180, py: 1.25 }}>
+            Sign Up
+          </Button>
+          <Button
+            variant="contained"
+            color="secondary"
+            size="large"
+            startIcon={<FaGhost />}
+            sx={{ minWidth: 230, py: 1.25, textTransform: 'uppercase', letterSpacing: 0.8 }}
+          >
+            Guest Mode
+          </Button>
+        </Stack>
+      </Box>
+    </Box>
   )
 }
 
