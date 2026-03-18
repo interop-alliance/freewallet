@@ -18,32 +18,36 @@ See:
 
 ### Supported Features
 
+### Tech Stack
+
+Development:
+
+* Javascript/TypeScript, Node.js 22+
+* React + ReactDOM 19
+* React Router 7 (in library mode)
+* Vite bundler
+* Prettier for code formatting, and React-aware eslint for linting
+
 ## Install
 
 ```
-yarn install
+pnpm install
 ```
 ## Usage
 
 ### Starting the Server
 
 ```
-yarn start
+vite
 ```
 
 ### Running Tests
 
 ```
-npm test
-```
-or
-```
-yarn test
+pnpm test
 ```
 
 ## Security
-
-
 
 ## License
 Copyright 2026 Interop Alliance.
