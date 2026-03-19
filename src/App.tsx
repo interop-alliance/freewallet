@@ -4,66 +4,37 @@ import Link from '@mui/material/Link'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { FaGhost } from 'react-icons/fa'
+import { landingStyles } from './styles/landingStyles.ts'
 
 function App() {
   return (
-    <Box
-      component="main"
-      sx={{
-        minHeight: '100dvh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        px: 2,
-      }}
-    >
-      <Box sx={{ textAlign: 'center', maxWidth: 760, width: '100%' }}>
-        <Typography
-          variant="h2"
-          component="h1"
-          sx={{ fontWeight: 500, mb: 2, fontSize: { xs: '2.2rem', sm: '3rem' } }}
-        >
+    <Box component="main" sx={landingStyles.main}>
+      <Box sx={landingStyles.content}>
+        <Typography variant="h2" component="h1" sx={landingStyles.title}>
           Freewallet
         </Typography>
 
-        <Typography
-          variant="h6"
-          component="p"
-          sx={{
-            color: 'text.secondary',
-            fontWeight: 400,
-            lineHeight: 1.45,
-            mb: 6,
-            maxWidth: 620,
-            mx: 'auto',
-            fontSize: { xs: '1.125rem', sm: '1.45rem' },
-          }}
-        >
+        <Typography variant="h6" component="p" sx={landingStyles.subtitle}>
           is an open source, open specs web app for managing{' '}
-          <Link href="#" underline="always">
+          <Link href="#" underline="always" sx={landingStyles.link}>
             Verifiable Credentials
           </Link>
           ,{' '}
-          <Link href="#" underline="always">
+          <Link href="#" underline="always" sx={landingStyles.link}>
             DIDs
           </Link>
           , and{' '}
-          <Link href="#" underline="always">
+          <Link href="#" underline="always" sx={landingStyles.link}>
             keys
           </Link>
           .
         </Typography>
 
-        <Stack
-          direction={{ xs: 'column', sm: 'row' }}
-          spacing={2}
-          justifyContent="center"
-          alignItems="stretch"
-        >
-          <Button variant="contained" color="primary" size="large" sx={{ minWidth: 180, py: 1.25 }}>
+        <Stack sx={landingStyles.actions}>
+          <Button variant="contained" color="primary" size="large" sx={landingStyles.button}>
             Log in
           </Button>
-          <Button variant="outlined" color="primary" size="large" sx={{ minWidth: 180, py: 1.25 }}>
+          <Button variant="outlined" color="primary" size="large" sx={landingStyles.button}>
             Sign Up
           </Button>
           <Button
@@ -71,7 +42,7 @@ function App() {
             color="secondary"
             size="large"
             startIcon={<FaGhost />}
-            sx={{ minWidth: 230, py: 1.25, textTransform: 'uppercase', letterSpacing: 0.8 }}
+            sx={{ ...landingStyles.button, ...landingStyles.guestButton }}
           >
             Guest Mode
           </Button>
