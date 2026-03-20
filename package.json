@@ -1,8 +1,9 @@
 {
   "name": "freewallet",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "start": "npx serve dist/",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
@@ -10,6 +11,9 @@
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
     "check": "prettier --check \"src/**/*.{ts,tsx,css,json}\""
+  },
+  "engines": {
+    "node": ">=24"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -36,6 +40,7 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
     "prettier": "^3.8.1",
+    "serve": "^14.2.6",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.56.1",
     "vite": "^8.0.0"
