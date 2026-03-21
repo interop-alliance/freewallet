@@ -7,9 +7,20 @@ import Typography from '@mui/material/Typography'
 import { useNavigate } from 'react-router'
 import walletIcon from '../assets/wallet.svg'
 import { dashboardStyles } from '../styles/appStyles.ts'
+import { useAuthStore } from '../stores/authStore.ts'
+import { useEffect } from 'react'
 
 export function DashboardPage() {
   const navigate = useNavigate()
+  const session = useAuthStore(state => state.session)
+
+  useEffect(() => {
+    console.log('Dashboard, logged in:', session)
+    if (!session) {
+      console.log('No session, redirecting to /login')
+      navigate('/login')
+    }
+  }, [navigate, session])
 
   return (
     <Box sx={dashboardStyles.container}>
