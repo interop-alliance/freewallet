@@ -4,17 +4,17 @@ export const landingStyles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    px: 2,
+    px: 2
   },
   content: {
     textAlign: 'center',
     maxWidth: 760,
-    width: '100%',
+    width: '100%'
   },
   title: {
     fontWeight: 500,
     mb: 2,
-    fontSize: { xs: '2.2rem', sm: '3rem' },
+    fontSize: { xs: '2.2rem', sm: '3rem' }
   },
   subtitle: {
     color: 'text.secondary',
@@ -23,24 +23,24 @@ export const landingStyles = {
     mb: 6,
     maxWidth: 620,
     mx: 'auto',
-    fontSize: { xs: '1.125rem', sm: '1.45rem' },
+    fontSize: { xs: '1.125rem', sm: '1.45rem' }
   },
   link: {
-    color: 'inherit',
+    color: 'inherit'
   },
   actions: {
     flexDirection: { xs: 'column', sm: 'row' },
     justifyContent: 'center',
     alignItems: 'stretch',
-    gap: 2,
+    gap: 2
   },
   button: {
     minWidth: 180,
-    py: 1.25,
+    py: 1.25
   },
   guestButton: {
     minWidth: 230,
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
+    letterSpacing: 0.8
+  }
 } as const

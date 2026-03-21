@@ -10,7 +10,8 @@
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
-    "check": "prettier --check \"src/**/*.{ts,tsx,css,json}\""
+    "check": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
+    "fix": "npm run lint:fix && npm run format"
   },
   "engines": {
     "node": ">=24"

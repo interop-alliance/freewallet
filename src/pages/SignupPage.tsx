@@ -21,7 +21,12 @@ export function SignupPage() {
         <Typography variant="h5" component="label" htmlFor="signup-email">
           Email:
         </Typography>
-        <TextField id="signup-email" defaultValue="alice@example.com" type="email" sx={authStyles.input} />
+        <TextField
+          id="signup-email"
+          defaultValue="alice@example.com"
+          type="email"
+          sx={authStyles.input}
+        />
 
         <Typography variant="h5" component="label" htmlFor="signup-passphrase">
           Passphrase:
@@ -34,7 +39,11 @@ export function SignupPage() {
           sx={authStyles.input}
         />
 
-        <Button variant="contained" sx={authStyles.actionButton} onClick={() => navigate('/dashboard')}>
+        <Button
+          variant="contained"
+          sx={authStyles.actionButton}
+          onClick={() => navigate('/dashboard')}
+        >
           Create Wallet
         </Button>
       </Box>

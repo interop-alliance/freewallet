@@ -17,7 +17,12 @@ export function DashboardPage() {
         <Toolbar />
         <Box sx={dashboardStyles.navHeader}>
           <Stack direction="row" spacing={1.5} alignItems="center">
-            <Box component="img" src={walletIcon} alt="Wallet icon" sx={dashboardStyles.walletIcon} />
+            <Box
+              component="img"
+              src={walletIcon}
+              alt="Wallet icon"
+              sx={dashboardStyles.walletIcon}
+            />
             <Typography variant="h5" component="p" fontWeight={600}>
               Freewallet
             </Typography>
@@ -26,7 +31,11 @@ export function DashboardPage() {
       </Drawer>
 
       <Box component="main" sx={dashboardStyles.main}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
+        <Stack
+          direction="row"
+          justifyContent="space-between"
+          alignItems="center"
+        >
           <Typography variant="h2" component="h1" sx={dashboardStyles.title}>
             Freewallet Dashboard
           </Typography>

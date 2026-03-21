@@ -30,7 +30,11 @@ export function LoginPage() {
           sx={authStyles.input}
         />
 
-        <Button variant="contained" sx={authStyles.actionButton} onClick={() => navigate('/dashboard')}>
+        <Button
+          variant="contained"
+          sx={authStyles.actionButton}
+          onClick={() => navigate('/dashboard')}
+        >
           Go
         </Button>
 

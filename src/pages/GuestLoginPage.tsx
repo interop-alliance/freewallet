@@ -28,7 +28,11 @@ export function GuestLoginPage() {
           - login and storage will be deleted at end of session
         </Typography>
 
-        <Button variant="contained" sx={authStyles.actionButton} onClick={() => navigate('/dashboard')}>
+        <Button
+          variant="contained"
+          sx={authStyles.actionButton}
+          onClick={() => navigate('/dashboard')}
+        >
           Go
         </Button>
       </Box>

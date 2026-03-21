@@ -9,12 +9,12 @@ const theme = createTheme({
   palette: {
     mode: 'light',
     background: {
-      default: '#f7f7f7',
-    },
+      default: '#f7f7f7'
+    }
   },
   typography: {
-    fontFamily: '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-  },
+    fontFamily: '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+  }
 })
 
 createRoot(document.getElementById('root')!).render(
@@ -25,5 +25,5 @@ createRoot(document.getElementById('root')!).render(
         <App />
       </HashRouter>
     </ThemeProvider>
-  </StrictMode>,
+  </StrictMode>
 )
