@@ -1,10 +1,11 @@
 import { Route, Routes } from 'react-router'
-import { DashboardPage } from '@/pages/DashboardPage.tsx'
-import { GuestLoginPage } from '@/pages/GuestLoginPage.tsx'
-import { LandingPage } from '@/pages/LandingPage.tsx'
-import { LoginPage } from '@/pages/LoginPage.tsx'
-import { SignupPage } from '@/pages/SignupPage.tsx'
+import { DashboardPage } from '@/pages/dashboard/DashboardPage'
+import { GuestLoginPage } from '@/pages/auth/GuestLoginPage'
+import { LandingPage } from '@/pages/LandingPage'
+import { LoginPage } from '@/pages/auth/LoginPage'
+import { SignupPage } from '@/pages/auth/SignupPage'
 import { ProtectedRoute } from '@/components/ProtectedRoute.tsx'
+import { SettingsPage } from '@/pages/dashboard/SettingsPage'
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
 
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
     </Routes>
   )

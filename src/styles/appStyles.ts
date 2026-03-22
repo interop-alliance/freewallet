@@ -48,7 +48,30 @@ export const dashboardStyles = {
   },
   navHeader: {
     px: 3,
-    py: 3
+    py: 3,
+    borderBottom: 1,
+    borderColor: 'divider'
+  },
+  navList: {
+    px: 1.5,
+    py: 1.5,
+    gap: 0.5
+  },
+  navItem: {
+    borderRadius: 2,
+    color: 'text.primary',
+    '&.Mui-selected': {
+      bgcolor: 'action.selected',
+      fontWeight: 600
+    },
+    '&.Mui-selected:hover': {
+      bgcolor: 'action.selected'
+    }
+  },
+  navItemText: {
+    '& .MuiTypography-root': {
+      fontWeight: 500
+    }
   },
   walletIcon: {
     width: 28,
@@ -60,5 +83,25 @@ export const dashboardStyles = {
   },
   title: {
     fontWeight: 500
+  },
+  settingsRow: {
+    mt: 4,
+    alignItems: 'center',
+    gap: 3
+  },
+  deleteAccountButton: {
+    textTransform: 'none',
+    px: 4,
+    py: 1.5,
+    borderRadius: 2,
+    backgroundColor: '#d79393',
+    color: '#1f1f1f',
+    border: '2px solid #2f2f2f',
+    '&:hover': {
+      backgroundColor: '#ce8686'
+    }
+  },
+  deleteAccountDescription: {
+    color: 'text.primary'
   }
 } as const
