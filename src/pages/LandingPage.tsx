@@ -6,8 +6,15 @@ import Typography from '@mui/material/Typography'
 import { FaGhost } from 'react-icons/fa'
 import { Link as RouterLink } from 'react-router'
 import { landingStyles } from '@/styles/landingStyles.ts'
+import { useEffect } from 'react'
+import { useAuthStore } from '@/stores/authStore.ts'
 
 export function LandingPage() {
+  const session = useAuthStore(state => state.session)
+  useEffect(() => {
+    console.log('Landing page, session:', session)
+  }, [session])
+
   return (
     <Box component="main" sx={landingStyles.main}>
       <Box sx={landingStyles.content}>

@@ -4,14 +4,12 @@ import Drawer from '@mui/material/Drawer'
 import Stack from '@mui/material/Stack'
 import Toolbar from '@mui/material/Toolbar'
 import Typography from '@mui/material/Typography'
-import { useNavigate } from 'react-router'
 import walletIcon from '@/assets/wallet.svg'
 import { dashboardStyles } from '@/styles/appStyles.ts'
 import { useAuthStore } from '@/stores/authStore.ts'
 import { useEffect } from 'react'
 
 export function DashboardPage() {
-  const navigate = useNavigate()
   const session = useAuthStore(state => state.session)
   const logout = useAuthStore(state => state.logout)
 
@@ -21,7 +19,6 @@ export function DashboardPage() {
 
   const handleLogout = () => {
     logout() // clears session
-    navigate('/')
   }
 
   return (

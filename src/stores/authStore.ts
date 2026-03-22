@@ -15,7 +15,7 @@ export const useAuthStore = create<AuthState>()(set => ({
   session: null,
   login: (session: Session) => set({ session }),
   logout: () => {
-    console.log('Logging out...')
+    console.log('Clearing session...')
     set({ session: null })
   }
 }))

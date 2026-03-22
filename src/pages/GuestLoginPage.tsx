@@ -4,13 +4,27 @@ import Typography from '@mui/material/Typography'
 import { FaGhost } from 'react-icons/fa'
 import { useNavigate } from 'react-router'
 import { authStyles } from '@/styles/appStyles.ts'
+import type { SubmitEvent } from 'react'
+import { createGuestSession } from '@/session/createMockSession.ts'
+import { useAuthStore } from '@/stores/authStore.ts'
 
 export function GuestLoginPage() {
   const navigate = useNavigate()
+  const login = useAuthStore(state => state.login)
+
+  /**
+   * Handles form submit event
+   */
+  const handleGuestLogin = async (event: SubmitEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const { session } = await createGuestSession()
+    login(session)
+    navigate('/dashboard')
+  }
 
   return (
     <Box component="main" sx={authStyles.page}>
-      <Box sx={authStyles.content}>
+      <Box component="form" onSubmit={handleGuestLogin} sx={authStyles.content}>
         <Typography variant="h2" component="h1" sx={authStyles.title}>
           Freewallet
         </Typography>
@@ -28,12 +42,8 @@ export function GuestLoginPage() {
           - login and storage will be deleted at end of session
         </Typography>
 
-        <Button
-          variant="contained"
-          sx={authStyles.actionButton}
-          onClick={() => navigate('/dashboard')}
-        >
-          Go
+        <Button variant="contained" type="submit" sx={authStyles.actionButton}>
+          Guest Mode Log In
         </Button>
       </Box>
     </Box>
