@@ -1,5 +1,5 @@
 import { Navigate, Outlet } from 'react-router'
-import { useAuthStore } from '@/stores/authStore.ts'
+import { useAuthStore } from '@/stores/authStore'
 
 export function ProtectedRoute() {
   const session = useAuthStore(state => state.session)

@@ -4,10 +4,10 @@ import Link from '@mui/material/Link'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { Link as RouterLink, useNavigate } from 'react-router'
-import { authStyles } from '@/styles/appStyles.ts'
-import { useAuthStore } from '@/stores/authStore.ts'
+import { authStyles } from '@/styles/appStyles'
+import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
-import { createMockSession } from '@/session/createMockSession.ts'
+import { createMockSession } from '@/session/createMockSession'
 
 export function LoginPage() {
   const navigate = useNavigate()

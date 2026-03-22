@@ -1,5 +1,5 @@
 import Button from '@mui/material/Button'
-import { useAuthStore } from '@/stores/authStore.ts'
+import { useAuthStore } from '@/stores/authStore'
 import { useEffect } from 'react'
 import { DashboardLayout } from '@/components/DashboardLayout'
 

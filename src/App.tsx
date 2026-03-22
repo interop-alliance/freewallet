@@ -4,7 +4,7 @@ import { GuestLoginPage } from '@/pages/auth/GuestLoginPage'
 import { LandingPage } from '@/pages/LandingPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
 import { SignupPage } from '@/pages/auth/SignupPage'
-import { ProtectedRoute } from '@/components/ProtectedRoute.tsx'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { SettingsPage } from '@/pages/dashboard/SettingsPage'
 
 function App() {

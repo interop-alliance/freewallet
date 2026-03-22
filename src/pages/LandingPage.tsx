@@ -5,9 +5,9 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { FaGhost } from 'react-icons/fa'
 import { Link as RouterLink } from 'react-router'
-import { landingStyles } from '@/styles/landingStyles.ts'
+import { landingStyles } from '@/styles/landingStyles'
 import { useEffect } from 'react'
-import { useAuthStore } from '@/stores/authStore.ts'
+import { useAuthStore } from '@/stores/authStore'
 
 export function LandingPage() {
   const session = useAuthStore(state => state.session)

@@ -2,8 +2,8 @@ import Button from '@mui/material/Button'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { DashboardLayout } from '@/components/DashboardLayout'
-import { dashboardStyles } from '@/styles/appStyles.ts'
-import { deleteAccount } from '@/lib/deleteAccount.ts'
+import { dashboardStyles } from '@/styles/appStyles'
+import { deleteAccount } from '@/lib/deleteAccount'
 
 export function SettingsPage() {
   return (

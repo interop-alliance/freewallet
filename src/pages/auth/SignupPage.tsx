@@ -3,10 +3,10 @@ import Button from '@mui/material/Button'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { useNavigate } from 'react-router'
-import { authStyles } from '@/styles/appStyles.ts'
+import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
-import { createMockSession } from '@/session/createMockSession.ts'
-import { useAuthStore } from '@/stores/authStore.ts'
+import { createMockSession } from '@/session/createMockSession'
+import { useAuthStore } from '@/stores/authStore'
 
 export function SignupPage() {
   const navigate = useNavigate()
