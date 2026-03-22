@@ -3,7 +3,7 @@ import Button from '@mui/material/Button'
 import Typography from '@mui/material/Typography'
 import { FaGhost } from 'react-icons/fa'
 import { useNavigate } from 'react-router'
-import { authStyles } from '../styles/appStyles.ts'
+import { authStyles } from '@/styles/appStyles.ts'
 
 export function GuestLoginPage() {
   const navigate = useNavigate()

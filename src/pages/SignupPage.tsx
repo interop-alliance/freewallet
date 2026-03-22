@@ -3,7 +3,7 @@ import Button from '@mui/material/Button'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { useNavigate } from 'react-router'
-import { authStyles } from '../styles/appStyles.ts'
+import { authStyles } from '@/styles/appStyles.ts'
 
 export function SignupPage() {
   const navigate = useNavigate()

@@ -1,4 +1,4 @@
-import type { ControllerProfile, Session, User } from '../types/auth.ts'
+import type { ControllerProfile, Session, User } from '@/types/auth.ts'
 
 /**
  * Mock hardcoded login session

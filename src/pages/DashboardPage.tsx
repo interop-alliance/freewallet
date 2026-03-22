@@ -5,22 +5,24 @@ import Stack from '@mui/material/Stack'
 import Toolbar from '@mui/material/Toolbar'
 import Typography from '@mui/material/Typography'
 import { useNavigate } from 'react-router'
-import walletIcon from '../assets/wallet.svg'
-import { dashboardStyles } from '../styles/appStyles.ts'
-import { useAuthStore } from '../stores/authStore.ts'
+import walletIcon from '@/assets/wallet.svg'
+import { dashboardStyles } from '@/styles/appStyles.ts'
+import { useAuthStore } from '@/stores/authStore.ts'
 import { useEffect } from 'react'
 
 export function DashboardPage() {
   const navigate = useNavigate()
   const session = useAuthStore(state => state.session)
+  const logout = useAuthStore(state => state.logout)
 
   useEffect(() => {
     console.log('Dashboard, logged in:', session)
-    if (!session) {
-      console.log('No session, redirecting to /login')
-      navigate('/login')
-    }
-  }, [navigate, session])
+  }, [session])
+
+  const handleLogout = () => {
+    logout() // clears session
+    navigate('/')
+  }
 
   return (
     <Box sx={dashboardStyles.container}>
@@ -50,7 +52,7 @@ export function DashboardPage() {
           <Typography variant="h2" component="h1" sx={dashboardStyles.title}>
             Freewallet Dashboard
           </Typography>
-          <Button variant="outlined" onClick={() => navigate('/')}>
+          <Button variant="outlined" onClick={handleLogout}>
             Log out
           </Button>
         </Stack>

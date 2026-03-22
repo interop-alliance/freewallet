@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Session } from '../types/auth'
+import type { Session } from '@/types/auth'
 
 interface AuthState {
   // Typically, Session would be persisted to sessionStorage
@@ -14,5 +14,8 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()(set => ({
   session: null,
   login: (session: Session) => set({ session }),
-  logout: () => set({ session: null })
+  logout: () => {
+    console.log('Logging out...')
+    set({ session: null })
+  }
 }))

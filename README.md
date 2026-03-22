@@ -24,8 +24,9 @@ Development:
 
 * Javascript/TypeScript, Node.js 22+
 * React + ReactDOM 19
-* React Router 7 (in library mode)
-* Vite bundler
+* React Router 7 (in library mode), using `HashRouter`
+* `zustand` for state management
+* Vite 8 bundler (so it can deploy as a static SPA)
 * Prettier for code formatting, and React-aware eslint for linting
 
 ## Install
