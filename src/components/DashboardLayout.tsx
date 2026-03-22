@@ -6,7 +6,7 @@ import ListItemText from '@mui/material/ListItemText'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import walletIcon from '@/assets/wallet.svg'
-import { dashboardStyles } from '@/styles/appStyles.ts'
+import { dashboardStyles } from '@/styles/appStyles'
 import { Link as RouterLink, useLocation } from 'react-router'
 import type { ReactNode } from 'react'
 

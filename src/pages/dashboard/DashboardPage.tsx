@@ -9,6 +9,9 @@ export function DashboardPage() {
 
   useEffect(() => {
     console.log('Dashboard, logged in:', session)
+    session?.storage
+      ?.listCredentials()
+      .then(docs => console.log('Credentials:', JSON.stringify(docs)))
   }, [session])
 
   const handleLogout = () => {

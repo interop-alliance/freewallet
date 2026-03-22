@@ -1,4 +1,5 @@
 // import type { IKeyPair } from '@digitalcredentials/ssi'
+import { StorageManager } from '@/stores/storageManager'
 
 /**
  * Session and User types broadly compatible with Auth.js / 'next-auth'
@@ -21,4 +22,5 @@ export interface Session {
   user: User
   expires?: string // ISO date string, matches Auth.js convention
   profile: ControllerProfile
+  storage?: StorageManager
 }
