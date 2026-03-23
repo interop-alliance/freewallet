@@ -1,6 +1,6 @@
 import type { ControllerProfile, Session, User } from '@/types/auth'
 import { StorageManager } from '@/stores/storageManager'
-import { mockCredential } from '@/fixtures/mockCredential'
+import { welcomeCredential } from '@/fixtures/welcomeCredential.ts'
 
 export async function createGuestSession() {
   const user = {
@@ -36,7 +36,7 @@ export async function createMockSession({
   const { storage } = await StorageManager.initStorage({ user })
 
   // Add a "welcome" credential to storage
-  await storage.addCredential({ credential: mockCredential })
+  await storage.addCredential({ credential: welcomeCredential })
 
   const session = { user, profile, storage } as Session
 

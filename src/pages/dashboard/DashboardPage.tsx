@@ -15,7 +15,7 @@ export function DashboardPage() {
   }, [session])
 
   const handleLogout = () => {
-    logout() // clears session
+    logout(session!) // clears session
   }
 
   return (

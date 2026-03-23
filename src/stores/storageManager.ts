@@ -25,8 +25,10 @@ export const VcBlobSchema = {
  */
 export class StorageManager {
   public db
-  constructor({ db }: { db: RxDatabase }) {
+  public dbName
+  constructor({ db, dbName }: { db: RxDatabase; dbName: string }) {
     this.db = db
+    this.dbName = dbName
   }
 
   /**
@@ -34,16 +36,14 @@ export class StorageManager {
    * @param user {User}
    */
   static async initStorage({ user }: { user: User }) {
-    const db = await createRxDatabase({
-      name: `${user.id}-credentials-db`,
-      storage: getRxStorageDexie()
-    })
+    const { db, dbName } = await dbInstance({ user })
+    // addCollections is an idempotent operation
     await db.addCollections({
       credentials: {
         schema: VcBlobSchema
       }
     })
-    const storage = new StorageManager({ db })
+    const storage = new StorageManager({ db, dbName })
     return { storage }
   }
 
@@ -64,9 +64,45 @@ export class StorageManager {
    * Lists available VCs in session storage.
    * @see https://rxdb.info/rx-collection.html#find
    *
-   * @returns {Array<{ id, data }>} List of JSON docs (that match VcBlobSchema)
+   * @returns {Array<{ cid, doc }>} List of JSON docs (that match VcBlobSchema)
    */
   async listCredentials() {
     return await this.db.credentials.find().exec()
   }
+
+  /**
+   * @see https://rxdb.info/rx-database.html#remove
+   */
+  async clearStorage() {
+    await this.db.remove()
+    const databases = await indexedDB.databases()
+    for (const db of databases) {
+      if (db.name!.includes(this.dbName)) {
+        indexedDB.deleteDatabase(db.name!)
+      }
+    }
+  }
+}
+
+export function dbNameFor({ user }: { user: User }) {
+  return `${user.id}-credentials-db`
+}
+
+export async function dbInstance({ user }: { user: User }) {
+  const dbName = dbNameFor({ user })
+  let db
+  /**
+   * Add a global singleton workaround, to fix the "duplicate database" error.
+   */
+  // @ts-expect-error Suppress implicit any
+  if (globalThis.__rxdb_instance__) {
+    // @ts-expect-error Suppress implicit any
+    db = globalThis.__rxdb_instance__
+  } else {
+    db = await createRxDatabase({
+      name: dbName,
+      storage: getRxStorageDexie()
+    })
+  }
+  return { db, dbName }
 }
