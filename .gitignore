@@ -26,3 +26,7 @@ dist-ssr
 
 .pnpm-store
 pnpm-lock.yaml
+
+# Playwright
+/test-results/
+/playwright-report/
