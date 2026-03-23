@@ -12,8 +12,8 @@ export const VcBlobSchema = {
   primaryKey: 'id',
   type: 'object',
   properties: {
-    id: { type: 'string', maxLength: 128 },
-    data: { type: 'object', additionalProperties: true }
+    cid: { type: 'string', maxLength: 128 },
+    doc: { type: 'object', additionalProperties: true }
   },
   required: ['id']
 }
@@ -55,8 +55,8 @@ export class StorageManager {
    */
   async addCredential({ credential }: { credential: IVerifiableCredential }) {
     await this.db.credentials.insertIfNotExists({
-      id: await cidFrom({ doc: credential }),
-      data: { ...credential }
+      cid: await cidFrom({ doc: credential }),
+      doc: { ...credential }
     })
   }
 
