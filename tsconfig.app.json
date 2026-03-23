@@ -30,5 +30,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src", "playwright.config.ts", "tests/cidFrom.test.ts"]src/lib/cidFrom.test.ts
+  "include": ["src"]
 }

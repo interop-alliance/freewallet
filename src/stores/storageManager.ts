@@ -9,13 +9,13 @@ import { cidFrom } from '@/lib/cidFrom'
  */
 export const VcBlobSchema = {
   version: 0,
-  primaryKey: 'id',
+  primaryKey: 'cid',
   type: 'object',
   properties: {
     cid: { type: 'string', maxLength: 128 },
     doc: { type: 'object', additionalProperties: true }
   },
-  required: ['id']
+  required: ['cid']
 }
 
 /**
