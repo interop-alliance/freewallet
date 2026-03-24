@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import Box from '@mui/material/Box'
-import Button from '@mui/material/Button'
 import Typography from '@mui/material/Typography'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import { useAuthStore } from '@/stores/authStore'
@@ -11,7 +10,6 @@ import type { StoredCredential } from '@/types/credential'
 
 export function DashboardPage() {
   const session = useAuthStore(state => state.session)
-  const logout = useAuthStore(state => state.logout)
   const [credentials, setCredentials] = useState<StoredCredential[]>([])
 
   useEffect(() => {
@@ -25,19 +23,8 @@ export function DashboardPage() {
     })
   }, [session])
 
-  const handleLogout = () => {
-    logout(session!) // clears session
-  }
-
   return (
-    <DashboardLayout
-      title="Freewallet Dashboard"
-      actions={
-        <Button variant="outlined" onClick={handleLogout}>
-          Log out
-        </Button>
-      }
-    >
+    <DashboardLayout title="Freewallet Dashboard">
       <Box sx={dashboardStyles.credentialsSection}>
         <Typography variant="h5" sx={dashboardStyles.credentialsHeading}>
           Credentials
