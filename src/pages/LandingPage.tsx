@@ -8,11 +8,13 @@ import { Link as RouterLink } from 'react-router'
 import { landingStyles } from '@/styles/landingStyles'
 import { useEffect } from 'react'
 import { useAuthStore } from '@/stores/authStore'
+import { WAS_SERVER_URL } from '@/app.config'
 
 export function LandingPage() {
   const session = useAuthStore(state => state.session)
   useEffect(() => {
     console.log('Landing page, session:', session)
+    console.log('WAS_SERVER_URL:', WAS_SERVER_URL)
   }, [session])
 
   return (
