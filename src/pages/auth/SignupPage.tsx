@@ -5,7 +5,7 @@ import Typography from '@mui/material/Typography'
 import { useNavigate } from 'react-router'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
-import { createMockSession } from '@/session/createMockSession'
+import { initSessionFromSecret } from '@/session/initSession'
 import { useAuthStore } from '@/stores/authStore'
 
 export function SignupPage() {
@@ -24,7 +24,7 @@ export function SignupPage() {
       return
     }
     const email = data.get('signup-email') as string
-    const { session } = await createMockSession({ email, passphrase })
+    const { session } = await initSessionFromSecret({ email, passphrase })
     login(session)
     // Login successful, send user back to where they were redirected from
     //  (or to /dashboard if no 'from' specified)

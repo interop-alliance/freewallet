@@ -1,4 +1,3 @@
-// import type { IKeyPair } from '@digitalcredentials/ssi'
 import { StorageManager } from '@/stores/storageManager'
 import type { ISigner } from '@digitalcredentials/ssi'
 import type { ZcapClient } from '@digitalcredentials/ezcap'
@@ -30,7 +29,7 @@ export interface ControllerProfile {
 
 export interface Session {
   user: User
-  expires?: string // ISO date string, matches Auth.js convention
   profile: ControllerProfile
   storage?: StorageManager
+  expires?: string // ISO date string, matches Auth.js convention
 }

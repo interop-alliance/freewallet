@@ -5,7 +5,7 @@ import { FaGhost } from 'react-icons/fa'
 import { useNavigate } from 'react-router'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
-import { createGuestSession } from '@/session/createMockSession'
+import { initGuestSession } from '@/session/initSession'
 import { useAuthStore } from '@/stores/authStore'
 
 export function GuestLoginPage() {
@@ -17,7 +17,7 @@ export function GuestLoginPage() {
    */
   const handleGuestLogin = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const { session } = await createGuestSession()
+    const { session } = await initGuestSession()
     login(session)
     navigate('/dashboard')
   }

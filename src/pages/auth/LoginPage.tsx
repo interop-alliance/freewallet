@@ -7,7 +7,7 @@ import { Link as RouterLink, useNavigate } from 'react-router'
 import { authStyles } from '@/styles/appStyles'
 import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
-import { createMockSession } from '@/session/createMockSession'
+import { initSessionFromSecret } from '@/session/initSession'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -25,7 +25,7 @@ export function LoginPage() {
       return
     }
     const email = 'alice@example.com' // TODO: replace hardcoded value
-    const { session } = await createMockSession({ email, passphrase })
+    const { session } = await initSessionFromSecret({ email, passphrase })
     login(session)
     navigate('/dashboard', { replace: true })
   }
