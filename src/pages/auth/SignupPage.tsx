@@ -24,7 +24,10 @@ export function SignupPage() {
       return
     }
     const email = data.get('signup-email') as string
-    const { session } = await initSessionFromSecret({ email, passphrase })
+    const { session } = await initSessionFromSecret({
+      email,
+      secret: passphrase
+    })
     login(session)
     // Login successful, send user back to where they were redirected from
     //  (or to /dashboard if no 'from' specified)

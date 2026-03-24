@@ -25,7 +25,10 @@ export function LoginPage() {
       return
     }
     const email = 'alice@example.com' // TODO: replace hardcoded value
-    const { session } = await initSessionFromSecret({ email, passphrase })
+    const { session } = await initSessionFromSecret({
+      email,
+      secret: passphrase
+    })
     login(session)
     navigate('/dashboard', { replace: true })
   }

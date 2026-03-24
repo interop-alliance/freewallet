@@ -38,7 +38,7 @@ export async function initGuestSession() {
   const guestEmail = 'guest@example.com'
 
   return initSessionFromSecret({
-    passphrase: randomGuestSecret,
+    secret: randomGuestSecret,
     email: guestEmail
   })
 }
@@ -49,13 +49,13 @@ export async function initGuestSession() {
  */
 export async function initSessionFromSecret({
   email,
-  passphrase
+  secret
 }: {
   email?: string
-  passphrase: string | Uint8Array
+  secret: string | Uint8Array
 }) {
   const { keyAgent, zcapClient } = await agentsFromSecret({
-    secret: passphrase
+    secret: secret
   })
 
   const user: User = {
