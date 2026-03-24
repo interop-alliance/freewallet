@@ -6,6 +6,7 @@ import { LoginPage } from '@/pages/auth/LoginPage'
 import { SignupPage } from '@/pages/auth/SignupPage'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { SettingsPage } from '@/pages/dashboard/SettingsPage'
+import { CredentialDetailPage } from '@/pages/dashboard/CredentialDetailPage'
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/credential/:cid" element={<CredentialDetailPage />} />
       </Route>
     </Routes>
   )

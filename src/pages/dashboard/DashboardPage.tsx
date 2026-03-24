@@ -48,7 +48,7 @@ export function DashboardPage() {
         </Typography>
         <Box sx={dashboardStyles.credentialsGrid}>
           {credentials.map(({ cid, vc }) => (
-            <CredentialCard key={cid} credential={vc} />
+            <CredentialCard key={cid} cid={cid} credential={vc} />
           ))}
         </Box>
       </Box>
