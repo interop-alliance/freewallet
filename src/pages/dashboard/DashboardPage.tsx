@@ -7,11 +7,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { dashboardStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialCard } from '@/components/CredentialCard'
-
-interface StoredCredential {
-  cid: string
-  vc: IVerifiableCredential
-}
+import type { StoredCredential } from '@/types/credential'
 
 export function DashboardPage() {
   const session = useAuthStore(state => state.session)

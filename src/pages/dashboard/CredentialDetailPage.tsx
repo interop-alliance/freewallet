@@ -9,11 +9,7 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { credentialTitle } from '@/lib/credentialTitle'
 import { useAuthStore } from '@/stores/authStore'
 import { credentialDetailStyles } from '@/styles/appStyles'
-
-interface StoredCredential {
-  cid: string
-  vc: IVerifiableCredential
-}
+import type { StoredCredential } from '@/types/credential'
 
 export function CredentialDetailPage() {
   const session = useAuthStore(state => state.session)
