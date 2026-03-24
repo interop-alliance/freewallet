@@ -85,6 +85,7 @@ export const dashboardStyles = {
     fontWeight: 500
   },
   settingsRow: {
+    flexDirection: 'row',
     mt: 4,
     alignItems: 'center',
     gap: 3
@@ -103,5 +104,62 @@ export const dashboardStyles = {
   },
   deleteAccountDescription: {
     color: 'text.primary'
+  },
+  /** Dashboard page — Credentials block */
+  credentialsSection: {
+    mt: 4
+  },
+  credentialsHeading: {
+    fontWeight: 600
+  },
+  credentialsGrid: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 2,
+    mt: 2
+  },
+  /** Sidebar brand row (icon + title) */
+  navHeaderStack: {
+    flexDirection: 'row',
+    gap: 1.5
+  },
+  navBrandTitle: {
+    fontWeight: 600
+  },
+  /** Main area: page title + actions */
+  mainToolbarStack: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  }
+} as const
+
+export const credentialCardStyles = {
+  title: {
+    fontWeight: 700
+  },
+  card: {
+    width: 220,
+    minHeight: 160,
+    display: 'flex',
+    flexDirection: 'column',
+    borderRadius: 3
+  },
+  cardContent: {
+    flexGrow: 1,
+    position: 'relative',
+    pb: '16px !important'
+  },
+  description: {
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitLineClamp: 3,
+    WebkitBoxOrient: 'vertical'
+  },
+  badge: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    color: 'text.disabled'
   }
 } as const

@@ -11,7 +11,11 @@ export async function createGuestSession() {
     email: 'guest@example.com'
   } as User
   const profile = {} as ControllerProfile
-  const session = { user, profile } as Session
+
+  const { storage } = await StorageManager.initStorage({ user })
+  await storage.addCredential({ credential: welcomeCredential })
+
+  const session = { user, profile, storage } as Session
 
   return { session }
 }

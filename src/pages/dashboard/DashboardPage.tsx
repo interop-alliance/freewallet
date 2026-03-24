@@ -1,17 +1,32 @@
+import { useState, useEffect } from 'react'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Typography from '@mui/material/Typography'
+import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import { useAuthStore } from '@/stores/authStore'
-import { useEffect } from 'react'
+import { dashboardStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
+import { CredentialCard } from '@/components/CredentialCard'
+
+interface StoredCredential {
+  cid: string
+  vc: IVerifiableCredential
+}
 
 export function DashboardPage() {
   const session = useAuthStore(state => state.session)
   const logout = useAuthStore(state => state.logout)
+  const [credentials, setCredentials] = useState<StoredCredential[]>([])
 
   useEffect(() => {
-    console.log('Dashboard, logged in:', session)
-    session?.storage
-      ?.listCredentials()
-      .then(docs => console.log('Credentials:', JSON.stringify(docs)))
+    session?.storage?.listCredentials().then(docs => {
+      setCredentials(
+        docs.map(d => ({
+          cid: d.cid as string,
+          vc: d.doc as IVerifiableCredential
+        }))
+      )
+    })
   }, [session])
 
   const handleLogout = () => {
@@ -26,6 +41,17 @@ export function DashboardPage() {
           Log out
         </Button>
       }
-    />
+    >
+      <Box sx={dashboardStyles.credentialsSection}>
+        <Typography variant="h5" sx={dashboardStyles.credentialsHeading}>
+          Credentials
+        </Typography>
+        <Box sx={dashboardStyles.credentialsGrid}>
+          {credentials.map(({ cid, vc }) => (
+            <CredentialCard key={cid} credential={vc} />
+          ))}
+        </Box>
+      </Box>
+    </DashboardLayout>
   )
 }

@@ -38,8 +38,10 @@ export const landingStyles = {
     minWidth: 180,
     py: 1.25
   },
-  guestButton: {
+  /** Guest Mode CTA: base button sizing + guest emphasis */
+  guestModeButton: {
     minWidth: 230,
+    py: 1.25,
     textTransform: 'uppercase',
     letterSpacing: 0.8
   }
