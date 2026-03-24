@@ -67,7 +67,7 @@ export async function initSessionFromSecret({
     zcapClient
   }
 
-  const { storage } = await StorageManager.initStorage({ user })
+  const { storage } = await StorageManager.initStorage({ user, profile })
 
   // Add a "welcome" credential to storage
   await storage.addCredential({ credential: welcomeCredential })

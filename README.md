@@ -39,13 +39,36 @@ pnpm install
 ### Starting the Server
 
 ```
-vite
+npm start
 ```
+Optional env vars:
+
+* `PORT` - Used by Docker, Dokku, etc. Automatically handled by Vite.
+* `VITE_API_URL` - URL to a [WAS](https://digitalcredentials.github.io/wallet-attached-storage-spec/)
+  server instance. If not provided, the server will run in a local-only mode
+  (storing VCs in browser IndexedDB).
 
 ### Running Tests
 
+Freewallet uses two frameworks for testing: Vitest for unit tests, and
+Playwright for end-to-end browser tests.
+If you want to run the e2e Playwright tests, you will need to install them
+the first time:
+
 ```
-pnpm test
+npx playwright install
+```
+
+To run the Vitest unit tests:
+
+```
+npm test
+```
+
+To run the e2e Playwright tests:
+
+```
+npm run test:e2e
 ```
 
 ## Security

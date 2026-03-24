@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import { useAuthStore } from '@/stores/authStore'
 import { dashboardStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
@@ -13,13 +12,8 @@ export function DashboardPage() {
   const [credentials, setCredentials] = useState<StoredCredential[]>([])
 
   useEffect(() => {
-    session?.storage?.listCredentials().then(docs => {
-      setCredentials(
-        docs.map(d => ({
-          cid: d.cid as string,
-          vc: d.doc as IVerifiableCredential
-        }))
-      )
+    session?.storage?.listCredentials().then(vcs => {
+      setCredentials(vcs)
     })
   }, [session])
 

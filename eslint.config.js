@@ -16,9 +16,9 @@ export default defineConfig([
       tseslint.configs.recommended,
       reactHooks.configs.flat.recommended,
       reactRefresh.configs.vite,
-      react.configs.flat.recommended,    // added
+      react.configs.flat.recommended, // added
       react.configs.flat['jsx-runtime'], // added — suppresses react/react-in-jsx-scope
-      prettierConfig                     // added — must be last in extends
+      prettierConfig // added — must be last in extends
     ],
     languageOptions: {
       ecmaVersion: 2020,
@@ -29,18 +29,21 @@ export default defineConfig([
       }
     },
     settings: {
-      react: { version: 'detect' }       // added
+      react: { version: 'detect' } // added
     },
     rules: {
       // From @typescript-eslint recommended — already included, but be explicit:
       'no-unused-vars': 'off',
-      '@typescript-eslint/no-unused-vars': ['error', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_'
-      }],
-
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_'
+        }
+      ],
+      '@typescript-eslint/no-explicit-any': 'off',
       // Always require curly braces
-      'curly': ['error', 'all'],
+      curly: ['error', 'all'],
 
       // Prefer modern JS
       'no-var': 'error',
@@ -48,7 +51,7 @@ export default defineConfig([
 
       // React:
       'react/react-in-jsx-scope': 'off',
-      'react-refresh/only-export-components': 'warn'   // warn, not error
+      'react-refresh/only-export-components': 'warn' // warn, not error
     }
   }
 ])

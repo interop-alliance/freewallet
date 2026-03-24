@@ -31,7 +31,7 @@ export function CredentialDetailPage() {
       setIsNotFound(false)
       setCredential({
         cid: match.cid as string,
-        vc: match.doc as IVerifiableCredential
+        vc: match.vc as IVerifiableCredential
       })
     })
   }, [cid, session])

@@ -4,8 +4,15 @@ import Typography from '@mui/material/Typography'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { dashboardStyles } from '@/styles/appStyles'
 import { deleteAccount } from '@/lib/deleteAccount'
+import { useEffect } from 'react'
+import { useAuthStore } from '@/stores/authStore'
 
 export function SettingsPage() {
+  const session = useAuthStore(state => state.session)
+  useEffect(() => {
+    console.log('Session:', session)
+  })
+
   return (
     <DashboardLayout title="Settings">
       <Stack direction="row" sx={dashboardStyles.settingsRow}>
