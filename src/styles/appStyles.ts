@@ -121,6 +121,11 @@ export const dashboardStyles = {
   credentialsHeading: {
     fontWeight: 600
   },
+  credentialsLoading: {
+    display: 'flex',
+    justifyContent: 'center',
+    py: 6
+  },
   credentialsGrid: {
     display: 'flex',
     flexWrap: 'wrap',
