@@ -8,30 +8,41 @@ import {
   type StoredCredential,
   StoredCredentialSchema
 } from '@/types/credential'
+import type { ZcapClient } from '@digitalcredentials/ezcap'
 
-export interface IStorageManager {
+export interface IWalletStore {
   addCredential: ({
+    cid,
     credential
   }: {
+    cid: string
     credential: IVerifiableCredential
   }) => Promise<void>
   listCredentials: () => Promise<Array<StoredCredential>>
   wipeStorage: ({ profile }: { profile: ControllerProfile }) => Promise<void>
 }
 
-export class StorageManager implements IStorageManager {
-  public localStore: BrowserStore
-  public remoteStore?: WASRemoteStore
+/**
+ * Manages local and remote storage operations for the wallet and a logged-in
+ * user profile.
+ */
+export class StorageManager {
+  public localStore?: BrowserStore
+  public remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
+  public remoteOnly: boolean
 
   constructor({
     localStore,
-    remoteStore
+    remoteStore,
+    remoteOnly = false
   }: {
-    localStore: BrowserStore
+    localStore?: BrowserStore
     remoteStore?: WASRemoteStore
+    remoteOnly: boolean
   }) {
     this.localStore = localStore
     this.remoteStore = remoteStore
+    this.remoteOnly = remoteOnly
   }
 
   static async initStorage({
@@ -41,30 +52,59 @@ export class StorageManager implements IStorageManager {
     user: User
     profile: ControllerProfile
   }) {
-    const serverUrl = WAS_SERVER_URL
-    const { localStore } = await BrowserStore.initStore({ user })
-    let remoteStore
-    if (serverUrl) {
+    const storageServerUrl = WAS_SERVER_URL
+    const remoteOnly = !!storageServerUrl
+    let remoteStore, localStore
+
+    if (!remoteOnly) {
+      ;({ localStore } = await BrowserStore.initStore({ user }))
+    }
+
+    if (storageServerUrl) {
       ;({ remoteStore } = await WASRemoteStore.initStore({
-        serverUrl,
+        storageServerUrl,
         user,
         profile
       }))
     }
-    const storage = new StorageManager({ localStore, remoteStore })
+    const storage = new StorageManager({ localStore, remoteStore, remoteOnly })
     return { storage }
   }
 
   async addCredential({ credential }: { credential: IVerifiableCredential }) {
-    await this.localStore.addCredential({ credential })
+    const cid = await cidFrom({ doc: credential })
+    if (!this.remoteOnly) {
+      await this.localStore!.addCredential({ cid, credential })
+    }
+    if (this.remoteStore) {
+      await this.remoteStore.addCredential({ cid, credential })
+    }
   }
+
   async wipeStorage({ profile }: { profile: ControllerProfile }) {
-    await this.localStore.wipeStorage()
-    await this.remoteStore?.wipeStorage({ profile })
+    if (!this.remoteOnly) {
+      await this.localStore!.wipeStorage()
+    }
+    if (this.remoteStore) {
+      await this.remoteStore.wipeStorage({ profile })
+    }
   }
+
   async listCredentials(): Promise<Array<StoredCredential>> {
-    const vcs = await this.localStore.listCredentials()
+    let vcs: Array<StoredCredential> = []
+    if (!this.remoteOnly) {
+      vcs = await this.localStore!.listCredentials()
+    }
+    if (this.remoteStore) {
+      vcs = await this.remoteStore.listCredentials()
+    }
     return vcs.map(vc => vc as StoredCredential)
+  }
+}
+
+export interface ICollectionsSet {
+  credentials: {
+    url: string
   }
 }
 
@@ -72,47 +112,160 @@ export class StorageManager implements IStorageManager {
  * @see https://digitalcredentials.github.io/wallet-attached-storage-spec/
  * @see https://github.com/interop-alliance/zcap-developer-guide
  */
-export class WASRemoteStore implements IStorageManager {
+export class WASRemoteStore implements IWalletStore {
+  public storageServerUrl: string
   public spaceUrl: string
+  public zcapClient: ZcapClient
+  public collections: ICollectionsSet
 
-  constructor({ spaceUrl }: { spaceUrl: string }) {
+  constructor({
+    storageServerUrl,
+    spaceUrl,
+    zcapClient
+  }: {
+    storageServerUrl: string
+    spaceUrl: string
+    zcapClient: ZcapClient
+  }) {
+    this.storageServerUrl = storageServerUrl
     this.spaceUrl = spaceUrl
+    this.zcapClient = zcapClient
+    this.collections = {
+      credentials: { url: '' }
+    }
   }
 
   static async initStore({
-    serverUrl,
+    storageServerUrl,
     user,
     profile
   }: {
-    serverUrl: string
+    storageServerUrl: string
     user: User
     profile: ControllerProfile
   }) {
-    const body = {
+    const { zcapClient } = profile
+    const spaceDescription = {
       name: 'Freewallet Space',
       controller: user.id
     }
-    const spaceId = await cidFrom({ doc: body })
-    const spaceUrl = new URL(`/space/${spaceId}`, serverUrl).toString()
+    const spaceId = await cidFrom({ doc: spaceDescription })
+    const spaceUrl = new URL(`/space/${spaceId}`, storageServerUrl).toString()
     try {
-      await profile.zcapClient.request({
+      await zcapClient.request({
         url: spaceUrl,
         method: 'PUT',
-        json: body
+        json: spaceDescription
       })
     } catch (e: any) {
       console.error('Error creating space:', JSON.stringify(e.data, null, 2))
     }
-    const remoteStore = new WASRemoteStore({ spaceUrl })
+    const remoteStore = new WASRemoteStore({
+      storageServerUrl,
+      spaceUrl,
+      zcapClient
+    })
+
+    // Space created, now create collections
+    const vcCollectionUrl = new URL(
+      `/space/${spaceId}/private-credentials`,
+      storageServerUrl
+    ).toString()
+
+    const collectionDescription = {
+      id: 'private-credentials',
+      name: 'Verifiable Credentials',
+      type: ['Collection']
+    }
+
+    try {
+      await zcapClient.request({
+        url: vcCollectionUrl,
+        method: 'PUT',
+        json: collectionDescription
+      })
+    } catch (e: any) {
+      console.error(
+        'Error creating collection:',
+        JSON.stringify(e.data, null, 2)
+      )
+    }
+    const vcCollectionBaseUrl = `${vcCollectionUrl}/` // ensure trailing slash
+
+    remoteStore.collections.credentials = {
+      url: vcCollectionBaseUrl
+    }
+
     return { remoteStore }
   }
 
-  async addCredential({ credential }: { credential: IVerifiableCredential }) {
-    console.log(credential)
+  async addCredential({
+    cid,
+    credential
+  }: {
+    cid: string
+    credential: IVerifiableCredential
+  }) {
+    const vcCollectionBaseUrl = this.collections.credentials.url
+    const vcUrl = new URL(cid, vcCollectionBaseUrl).toString()
+    try {
+      await this.zcapClient.request({
+        url: vcUrl,
+        method: 'PUT',
+        json: credential
+      })
+    } catch (e: any) {
+      console.log('Attempted to add credential to:', vcUrl)
+      console.error('Error adding credential:', JSON.stringify(e.data, null, 2))
+    }
   }
 
   async listCredentials() {
-    return []
+    const vcCollectionBaseUrl = this.collections.credentials.url
+    let response
+    try {
+      response = await this.zcapClient.request({
+        url: vcCollectionBaseUrl,
+        method: 'GET'
+      })
+    } catch (e: any) {
+      console.log('Attempted to list credentials:', vcCollectionBaseUrl)
+      console.error(
+        'Error listing credentials:',
+        JSON.stringify(e.data, null, 2)
+      )
+    }
+    const { data } = response!
+    console.log('Fetched credentials list:', data)
+    // data looks like: { offset: 0, total_rows, rows: [{ id, url, contentType }] }
+
+    return this.fetchAll({ rows: data.rows })
+  }
+
+  async fetchAll({ rows }: { rows: any[] }) {
+    const docs = await Promise.all(
+      rows.map(collectionRow => this.fetchDocument({ collectionRow }))
+    )
+    return docs.map(({ id, doc }) => {
+      return { cid: id, vc: doc }
+    })
+  }
+
+  async fetchDocument({ collectionRow }: { collectionRow: any }) {
+    const { storageServerUrl } = this
+    const objectUrl = new URL(collectionRow.url, storageServerUrl).toString()
+    let result
+    try {
+      result = await this.zcapClient.request({
+        url: objectUrl,
+        method: 'GET',
+        headers: { accept: collectionRow.contentType }
+      })
+    } catch (e: any) {
+      console.log('Attempted to add credential to:', vcUrl)
+      console.error('Error adding credential:', JSON.stringify(e.data, null, 2))
+    }
+    return { id: collectionRow.id, doc: result!.data }
   }
 
   async wipeStorage({ profile }: { profile: ControllerProfile }) {
@@ -133,7 +286,7 @@ export class WASRemoteStore implements IStorageManager {
  * storage. Currently only storing VCs locally, using IndexDB (via Dexie.js),
  * will add replication next.
  */
-export class BrowserStore implements IStorageManager {
+export class BrowserStore implements IWalletStore {
   public db
   public dbName
   constructor({ db, dbName }: { db: RxDatabase; dbName: string }) {
@@ -160,12 +313,16 @@ export class BrowserStore implements IStorageManager {
   /**
    * Adds a VC to session storage. Note the `insertIfNotExists()` logic.
    * @see https://rxdb.info/rx-collection.html#insertifnotexists
-   *
-   * @param credential {IVerifiableCredential}
    */
-  async addCredential({ credential }: { credential: IVerifiableCredential }) {
+  async addCredential({
+    cid,
+    credential
+  }: {
+    cid: string
+    credential: IVerifiableCredential
+  }) {
     await this.db.credentials.insertIfNotExists({
-      cid: await cidFrom({ doc: credential }),
+      cid,
       vc: { ...credential }
     })
   }

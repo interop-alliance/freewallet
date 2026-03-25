@@ -29,8 +29,6 @@ export function SignupPage() {
       secret: passphrase
     })
     login(session)
-    // Login successful, send user back to where they were redirected from
-    //  (or to /dashboard if no 'from' specified)
     navigate('/dashboard')
   }
 
