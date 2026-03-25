@@ -50,7 +50,12 @@ export function SignupPage() {
           Sign up
         </Typography>
 
-        <Typography variant="h5" component="label" htmlFor="signup-email">
+        <Typography
+          variant="h5"
+          component="label"
+          htmlFor="signup-email"
+          sx={authStyles.label}
+        >
           Email:
         </Typography>
         <TextField
@@ -65,8 +70,13 @@ export function SignupPage() {
           sx={authStyles.input}
         />
 
-        <Typography variant="h5" component="label" htmlFor="signup-passphrase">
-          Passphrase:
+        <Typography
+          variant="h5"
+          component="label"
+          htmlFor="signup-passphrase"
+          sx={authStyles.label}
+        >
+          Password:
         </Typography>
         <TextField
           id="signup-passphrase"

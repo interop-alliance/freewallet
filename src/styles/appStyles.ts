@@ -19,12 +19,21 @@ export const authStyles = {
     mb: 1
   },
   input: {
-    maxWidth: 360
+    width: '100%',
+    maxWidth: 360,
+    alignSelf: 'center'
+  },
+  label: {
+    width: '100%',
+    maxWidth: 360,
+    alignSelf: 'center',
+    fontSize: '1rem'
   },
   actionButton: {
     width: 180,
     textTransform: 'none',
-    py: 1
+    py: 1,
+    alignSelf: 'center'
   },
   guestIcon: {
     mr: 1.5
