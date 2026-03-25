@@ -121,11 +121,6 @@ export const dashboardStyles = {
   credentialsHeading: {
     fontWeight: 600
   },
-  credentialsLoading: {
-    display: 'flex',
-    justifyContent: 'center',
-    py: 6
-  },
   credentialsGrid: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -204,4 +199,10 @@ export const credentialCardStyles = {
     right: 12,
     color: 'text.disabled'
   }
+} as const
+
+export const loadingSpinnerStyles = {
+  display: 'flex',
+  justifyContent: 'center',
+  py: 6
 } as const

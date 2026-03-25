@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import Box from '@mui/material/Box'
-import CircularProgress from '@mui/material/CircularProgress'
 import Typography from '@mui/material/Typography'
 import { useAuthStore } from '@/stores/authStore'
 import { dashboardStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialCard } from '@/components/CredentialCard'
+import { LoadingSpinner } from '@/components/LoadingSpinner'
 import type { StoredCredential } from '@/types/credential'
 import { delay } from '@/lib/delay'
 
@@ -44,9 +44,7 @@ export function DashboardPage() {
           Credentials
         </Typography>
         {loading ? (
-          <Box sx={dashboardStyles.credentialsLoading}>
-            <CircularProgress />
-          </Box>
+          <LoadingSpinner />
         ) : (
           <Box sx={dashboardStyles.credentialsGrid}>
             {credentials.map(({ cid, vc }) => (
