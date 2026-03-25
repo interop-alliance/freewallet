@@ -1,29 +1,37 @@
-import Box from '@mui/material/Box'
-import Button from '@mui/material/Button'
-import TextField from '@mui/material/TextField'
-import Typography from '@mui/material/Typography'
+import { useState } from 'react'
+import { Box, Button, Stack, TextField, Typography } from '@mui/material'
 import { useNavigate } from 'react-router'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
 import { useAuthStore } from '@/stores/authStore'
+import PasswordStrengthBarModule from 'react-password-strength-bar'
+import { PASSWORD_RULES } from '@/app.config'
+
+const PasswordStrengthBar =
+  (
+    PasswordStrengthBarModule as unknown as {
+      default: typeof PasswordStrengthBarModule
+    }
+  ).default ?? PasswordStrengthBarModule
 
 export function SignupPage() {
   const navigate = useNavigate()
   const login = useAuthStore(state => state.login)
+  const [email, setEmail] = useState('')
+  const [passphrase, setPassphrase] = useState('')
+  const [score, setScore] = useState(0)
 
-  /**
-   * Handles form submit event
-   */
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  const lengthPassed = passphrase.length >= PASSWORD_RULES.minlength
+  const scorePassed = score >= PASSWORD_RULES.minscore
+  const canSubmit = emailValid && lengthPassed && scorePassed
+
   const handleSignup = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const data = new FormData(event.currentTarget)
-    const passphrase = data.get('signup-passphrase') as string
-    if (!passphrase) {
-      console.log('No passphrase entered.')
+    if (!canSubmit) {
       return
     }
-    const email = data.get('signup-email') as string
     const { session } = await initSessionFromSecret({
       email,
       secret: passphrase
@@ -46,9 +54,14 @@ export function SignupPage() {
           Email:
         </Typography>
         <TextField
+          id="signup-email"
           name="signup-email"
-          defaultValue="alice@example.com"
+          placeholder="alice@example.com"
           type="email"
+          required
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          autoComplete="email"
           sx={authStyles.input}
         />
 
@@ -56,17 +69,50 @@ export function SignupPage() {
           Passphrase:
         </Typography>
         <TextField
+          id="signup-passphrase"
           name="signup-passphrase"
-          defaultValue="not a real password"
+          value={passphrase}
+          onChange={e => setPassphrase(e.target.value)}
           type="password"
           autoComplete="new-password"
           sx={authStyles.input}
         />
+        <Box sx={authStyles.input}>
+          <PasswordStrengthBar
+            password={passphrase}
+            onChangeScore={setScore}
+            scoreWords={['Weak', 'Weak', 'Fair', 'Strong', 'Very strong']}
+            shortScoreWord="Too short"
+          />
+        </Box>
 
-        <Button variant="contained" type="submit" sx={authStyles.actionButton}>
+        <Stack spacing={0.5} sx={authStyles.input}>
+          <RuleIndicator
+            passed={lengthPassed}
+            label={`At least ${PASSWORD_RULES.minlength} characters`}
+          />
+        </Stack>
+
+        <Button
+          variant="contained"
+          type="submit"
+          disabled={!canSubmit}
+          sx={authStyles.actionButton}
+        >
           Create Wallet
         </Button>
       </Box>
     </Box>
+  )
+}
+
+function RuleIndicator({ passed, label }: { passed: boolean; label: string }) {
+  return (
+    <Typography
+      variant="body2"
+      color={passed ? 'success.main' : 'text.secondary'}
+    >
+      {passed ? '\u2713' : '\u2717'} {label}
+    </Typography>
   )
 }
