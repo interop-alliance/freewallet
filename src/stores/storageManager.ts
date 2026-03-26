@@ -115,6 +115,15 @@ export class StorageManager {
     }
     return vc
   }
+
+  async deleteCredential({ cid }: { cid: string }) {
+    if (!this.remoteOnly) {
+      await this.localStore!.deleteCredential({ cid })
+    }
+    if (this.remoteStore) {
+      await this.remoteStore.deleteCredential({ cid })
+    }
+  }
 }
 
 export interface ICollectionsSet {
@@ -267,6 +276,23 @@ export class WASRemoteStore implements IWalletStore {
     return doc
   }
 
+  async deleteCredential({ cid }: { cid: string }) {
+    const vcCollectionBaseUrl = this.collections.credentials.url
+    const vcUrl = new URL(cid, vcCollectionBaseUrl).toString()
+    try {
+      await this.zcapClient.request({
+        url: vcUrl,
+        method: 'DELETE'
+      })
+    } catch (e: any) {
+      console.log('Attempted to delete credential:', vcUrl)
+      console.error(
+        'Error deleting credential:',
+        JSON.stringify(e.data, null, 2)
+      )
+    }
+  }
+
   async fetchAll({ rows }: { rows: any[] }) {
     const docs = await Promise.all(
       rows.map(collectionRow => this.fetchRow({ collectionRow }))
@@ -387,6 +413,13 @@ export class BrowserStore implements IWalletStore {
       return doc.vc
     } else {
       return undefined
+    }
+  }
+
+  async deleteCredential({ cid }: { cid: string }) {
+    const doc = await this.db.credentials.findOne({ selector: { cid } }).exec()
+    if (doc) {
+      await doc.remove()
     }
   }
 
