@@ -52,8 +52,8 @@ Optional env vars:
 
 Freewallet uses two frameworks for testing: Vitest for unit tests, and
 Playwright for end-to-end browser tests.
-If you want to run the e2e Playwright tests, you will need to install them
-the first time:
+If you want to run the e2e Playwright tests, you will need to install the 
+framework the first time:
 
 ```
 npx playwright install

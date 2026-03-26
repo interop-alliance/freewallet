@@ -35,12 +35,14 @@ export function GuestLoginPage() {
           Guest Mode Login
         </Typography>
 
-        <Typography variant="h5" component="p">
-          - a random login will be created
-        </Typography>
-        <Typography variant="h5" component="p">
-          - login and storage will be deleted at end of session
-        </Typography>
+        <ul>
+          <Typography variant="h5" component="li">
+            a random login will be created
+          </Typography>
+          <Typography variant="h5" component="li">
+            login and storage will be deleted at end of session
+          </Typography>
+        </ul>
 
         <Button variant="contained" type="submit" sx={authStyles.actionButton}>
           Guest Mode Log In
