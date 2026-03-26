@@ -20,10 +20,7 @@ const navItems = [
   { label: 'Settings', to: '/settings' }
 ]
 
-export function DashboardLayout({
-  title,
-  children
-}: DashboardLayoutProps) {
+export function DashboardLayout({ title, children }: DashboardLayoutProps) {
   const { pathname } = useLocation()
 
   return (

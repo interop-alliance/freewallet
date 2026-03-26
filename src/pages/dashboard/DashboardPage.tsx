@@ -7,7 +7,6 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialCard } from '@/components/CredentialCard'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import type { StoredCredential } from '@/types/credential'
-import { delay } from '@/lib/delay'
 
 export function DashboardPage() {
   const session = useAuthStore(state => state.session)
@@ -21,10 +20,7 @@ export function DashboardPage() {
     let cancelled = false
 
     async function load() {
-      const [vcs] = await Promise.all([
-        session!.storage!.listCredentials(),
-        delay(3000)
-      ])
+      const vcs = await session!.storage!.listCredentials()
       if (!cancelled) {
         setCredentials(vcs)
         setLoading(false)

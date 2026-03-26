@@ -8,7 +8,7 @@ interface AuthState {
   // which means it will get cleared on page refresh
   session: Session | null
   login: (session: Session) => void
-  logout: (session: Session) => void
+  logout: (session: Session) => Promise<void>
 }
 
 export const useAuthStore = create<AuthState>()(set => ({

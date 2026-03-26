@@ -8,6 +8,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { HistoryPage } from '@/pages/dashboard/HistoryPage'
 import { SettingsPage } from '@/pages/dashboard/SettingsPage'
 import { CredentialDetailPage } from '@/pages/dashboard/CredentialDetailPage'
+import { LogoutPage } from '@/pages/auth/LogoutPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/guest-login" element={<GuestLoginPage />} />
+      <Route path="/logout" element={<LogoutPage />} />
 
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardPage />} />

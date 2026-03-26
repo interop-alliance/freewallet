@@ -1,4 +1,4 @@
-import { Navigate, Outlet } from 'react-router'
+import { Navigate, Outlet, useNavigate } from 'react-router'
 import { AppBar, Box, Button, Toolbar, Typography } from '@mui/material'
 import walletIcon from '@/assets/wallet.svg'
 import { useAuthStore } from '@/stores/authStore'
@@ -6,17 +6,17 @@ import { useEffect } from 'react'
 
 export function ProtectedRoute() {
   const session = useAuthStore(state => state.session)
-  const logout = useAuthStore(state => state.logout)
+  const navigate = useNavigate()
   useEffect(() => {
     console.log('Session:', session)
   })
 
   if (!session) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/logout" replace />
   }
 
   const handleLogout = () => {
-    logout(session)
+    navigate('/logout')
   }
 
   return (
