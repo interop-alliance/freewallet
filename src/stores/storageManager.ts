@@ -235,6 +235,7 @@ export class WASRemoteStore implements IWalletStore {
         JSON.stringify(e.data, null, 2)
       )
     }
+    // @ts-expect-error TODO add a type to the response
     const { data } = response!
     console.log('Fetched credentials list:', data)
     // data looks like: { offset: 0, total_rows, rows: [{ id, url, contentType }] }
@@ -262,9 +263,10 @@ export class WASRemoteStore implements IWalletStore {
         headers: { accept: collectionRow.contentType }
       })
     } catch (e: any) {
-      console.log('Attempted to add credential to:', vcUrl)
+      console.log('Attempted to add credential to:', objectUrl)
       console.error('Error adding credential:', JSON.stringify(e.data, null, 2))
     }
+    // @ts-expect-error TODO add a type to the response
     return { id: collectionRow.id, doc: result!.data }
   }
 
