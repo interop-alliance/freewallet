@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import { useParams } from 'react-router'
 import { reset as microlightReset } from 'microlight'
 import { DashboardLayout } from '@/components/DashboardLayout'
@@ -21,17 +20,16 @@ export function CredentialDetailPage() {
     if (!session || !cid) {
       return
     }
-    session.storage?.listCredentials().then(docs => {
-      const match = docs.find(doc => (doc.cid as string) === cid)
-      if (!match) {
+    session.storage?.loadCredential({ cid }).then(vc => {
+      if (!vc) {
         setIsNotFound(true)
         setCredential(null)
         return
       }
       setIsNotFound(false)
       setCredential({
-        cid: match.cid as string,
-        vc: match.vc as IVerifiableCredential
+        cid,
+        vc
       })
     })
   }, [cid, session])

@@ -100,6 +100,21 @@ export class StorageManager {
     }
     return vcs.map(vc => vc as StoredCredential)
   }
+
+  async loadCredential({
+    cid
+  }: {
+    cid: string
+  }): Promise<IVerifiableCredential | undefined> {
+    let vc: IVerifiableCredential | undefined
+    if (!this.remoteOnly) {
+      vc = await this.localStore!.loadCredential({ cid })
+    }
+    if (this.remoteStore) {
+      vc = await this.remoteStore.loadCredential({ cid })
+    }
+    return vc
+  }
 }
 
 export interface ICollectionsSet {
@@ -243,31 +258,68 @@ export class WASRemoteStore implements IWalletStore {
     return this.fetchAll({ rows: data.rows })
   }
 
+  async loadCredential({ cid }: { cid: string }) {
+    const vcCollectionBaseUrl = this.collections.credentials.url
+    const vcUrl = new URL(cid, vcCollectionBaseUrl).toString()
+    const doc: IVerifiableCredential | undefined = await this.fetchDocument({
+      objectUrl: vcUrl
+    })
+    return doc
+  }
+
   async fetchAll({ rows }: { rows: any[] }) {
     const docs = await Promise.all(
-      rows.map(collectionRow => this.fetchDocument({ collectionRow }))
+      rows.map(collectionRow => this.fetchRow({ collectionRow }))
     )
     return docs.map(({ id, doc }) => {
       return { cid: id, vc: doc }
     })
   }
 
-  async fetchDocument({ collectionRow }: { collectionRow: any }) {
+  async fetchRow({ collectionRow }: { collectionRow: any }) {
+    const { id, url: relativeUrl, contentType } = collectionRow
+    const doc: any | undefined = await this.fetchDocument({
+      relativeUrl,
+      contentType
+    })
+    return { id, doc }
+  }
+
+  /**
+   * Fetches a document from the remote storage server, returns undefined if
+   * not found.
+   */
+  async fetchDocument({
+    objectUrl,
+    relativeUrl,
+    contentType = 'application/json'
+  }: {
+    objectUrl?: string
+    relativeUrl?: string
+    contentType?: string
+  }): Promise<any | undefined> {
     const { storageServerUrl } = this
-    const objectUrl = new URL(collectionRow.url, storageServerUrl).toString()
+    if (relativeUrl && !objectUrl) {
+      objectUrl = new URL(relativeUrl, storageServerUrl).toString()
+    }
+    let headers
+    if (contentType) {
+      headers = { accept: contentType }
+    }
     let result
     try {
       result = await this.zcapClient.request({
         url: objectUrl,
         method: 'GET',
-        headers: { accept: collectionRow.contentType }
+        headers
       })
     } catch (e: any) {
       console.log('Attempted to add credential to:', objectUrl)
       console.error('Error adding credential:', JSON.stringify(e.data, null, 2))
+      return
     }
     // @ts-expect-error TODO add a type to the response
-    return { id: collectionRow.id, doc: result!.data }
+    return result!.data
   }
 
   async wipeStorage({ profile }: { profile: ControllerProfile }) {
@@ -327,6 +379,15 @@ export class BrowserStore implements IWalletStore {
       cid,
       vc: { ...credential }
     })
+  }
+
+  async loadCredential({ cid }: { cid: string }) {
+    const doc = await this.db.credentials.findOne({ selector: { cid } }).exec()
+    if (doc) {
+      return doc.vc
+    } else {
+      return undefined
+    }
   }
 
   /**
