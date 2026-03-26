@@ -206,3 +206,15 @@ export const loadingSpinnerStyles = {
   justifyContent: 'center',
   py: 6
 } as const
+
+export const notFoundStyles = {
+  page: {
+    minHeight: '100dvh',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    px: 2
+  }
+} as const

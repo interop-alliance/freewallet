@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import { useParams } from 'react-router'
 import { reset as microlightReset } from 'microlight'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { credentialTitle } from '@/lib/credentialTitle'
+import { NotFoundPage } from '@/pages/NotFoundPage'
 import { useAuthStore } from '@/stores/authStore'
 import { credentialDetailStyles } from '@/styles/appStyles'
 import type { StoredCredential } from '@/types/credential'
@@ -45,42 +45,32 @@ export function CredentialDetailPage() {
     return JSON.stringify(credential.vc, null, 2)
   }, [credential])
 
-  if (!cid) {
-    return (
-      <DashboardLayout title="Credential">
-        <Alert severity="error">No credential id provided in route.</Alert>
-      </DashboardLayout>
-    )
+  if (!cid || isNotFound) {
+    return <NotFoundPage />
   }
 
   return (
     <DashboardLayout title="Credential">
-      {isNotFound ? (
-        <Alert severity="warning">
-          Credential with cid <code>{cid}</code> was not found.
-        </Alert>
-      ) : (
-        <Box sx={credentialDetailStyles.wrapper}>
-          <Typography
-            variant="h4"
-            component="h2"
-            sx={credentialDetailStyles.title}
+      <Box sx={credentialDetailStyles.wrapper}>
+        <Typography
+          variant="h4"
+          component="h2"
+          sx={credentialDetailStyles.title}
+        >
+          {credential
+            ? credentialTitle(credential.vc)
+            : 'Loading credential...'}
+        </Typography>
+        {credential && (
+          <Box
+            component="pre"
+            className="microlight"
+            sx={credentialDetailStyles.codeBlock}
           >
-            {credential
-              ? credentialTitle(credential.vc)
-              : 'Loading credential...'}
-          </Typography>
-          {credential && (
-            <Box
-              component="pre"
-              className="microlight"
-              sx={credentialDetailStyles.codeBlock}
-            >
-              {rawVc}
-            </Box>
-          )}
-        </Box>
-      )}
+            {rawVc}
+          </Box>
+        )}
+      </Box>
     </DashboardLayout>
   )
 }
