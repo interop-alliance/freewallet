@@ -30,6 +30,7 @@ export interface ControllerProfile {
 export interface Session {
   user: User
   profile: ControllerProfile
-  storage?: StorageManager
+  storage: StorageManager
   expires?: string // ISO date string, matches Auth.js convention
+  isGuest: boolean
 }
