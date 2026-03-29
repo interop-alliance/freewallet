@@ -29,6 +29,11 @@ export const authStyles = {
     alignSelf: 'center',
     fontSize: '1rem'
   },
+  userMessage: {
+    width: '100%',
+    maxWidth: 360,
+    alignSelf: 'center'
+  },
   actionButton: {
     width: 180,
     textTransform: 'none',
