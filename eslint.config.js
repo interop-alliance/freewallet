@@ -38,7 +38,9 @@ export default defineConfig([
         'error',
         {
           argsIgnorePattern: '^_',
-          varsIgnorePattern: '^_'
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_'
         }
       ],
       '@typescript-eslint/no-explicit-any': 'off',
