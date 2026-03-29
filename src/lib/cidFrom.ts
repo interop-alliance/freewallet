@@ -7,11 +7,15 @@ import { canonicalize as jcsCanonicalize } from 'json-canonicalize'
  */
 export async function cidFrom({ doc }: { doc: object }) {
   const canonicalized = JSON.stringify(jcsCanonicalize(doc))
-  // encode as (utf-8) Uint8Array
-  const msgUint8 = new TextEncoder().encode(canonicalized)
-  const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgUint8)
-
+  const hashBuffer = await digestHash(canonicalized)
   return bufferToBase64Url(hashBuffer)
+}
+
+export async function digestHash(original: string) {
+  // encode as (utf-8) Uint8Array
+  const msgUint8 = new TextEncoder().encode(original)
+
+  return await window.crypto.subtle.digest('SHA-256', msgUint8)
 }
 
 export function bufferToBase64Url(buffer: ArrayBuffer) {
