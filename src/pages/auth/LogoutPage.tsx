@@ -10,9 +10,16 @@ export function LogoutPage() {
 
   useEffect(() => {
     if (session) {
-      logout(session).then(() => navigate('/'))
+      if (session.isGuest) {
+        console.log('Wiping user data...')
+        session.storage?.wipeStorage({ profile: session.profile }).then(() => {
+          console.log('User data cleared.')
+          window.location.href = '/'
+        })
+      }
+      logout().then(() => navigate('/', { replace: true }))
     } else {
-      navigate('/')
+      navigate('/', { replace: true })
     }
   }, [logout, navigate, session])
 

@@ -66,7 +66,7 @@ export function LandingPage() {
             color="secondary"
             size="large"
             startIcon={<FaGhost />}
-            sx={{ ...landingStyles.button, ...landingStyles.guestButton }}
+            sx={{ ...landingStyles.button, ...landingStyles.guestModeButton }}
             component={RouterLink}
             to="/guest-login"
           >

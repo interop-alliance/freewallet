@@ -198,7 +198,7 @@ export class WASRemoteStore implements IWalletStore {
       name: 'Freewallet Space',
       controller: user.id
     }
-    const spaceId = await cidFrom({ doc: spaceDescription })
+    const { spaceId } = this
     const spaceUrl = new URL(`/space/${spaceId}`, storageServerUrl).toString()
     try {
       await zcapClient.request({
@@ -444,7 +444,8 @@ export class BrowserStore implements IWalletStore {
     } else {
       db = await createRxDatabase({
         name: dbName,
-        storage: getRxStorageDexie()
+        storage: getRxStorageDexie(),
+        closeDuplicates: true
       })
     }
     // addCollections is an idempotent operation and will be called on Login also

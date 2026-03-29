@@ -8,20 +8,14 @@ interface AuthState {
   // which means it will get cleared on page refresh
   session: Session | null
   login: (session: Session) => void
-  logout: (session: Session) => Promise<void>
+  logout: () => Promise<void>
 }
 
 export const useAuthStore = create<AuthState>()(set => ({
   session: null,
   login: (session: Session) => set({ session }),
-  logout: async (session: Session) => {
+  logout: async () => {
     console.log('Clearing session...')
-    try {
-      await session.storage?.wipeStorage({ profile: session.profile })
-    } catch (e) {
-      console.error('Error wiping session:', e)
-    }
-
     set({ session: null })
   }
 }))
