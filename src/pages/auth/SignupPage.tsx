@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Box, Button, Stack, TextField, Typography } from '@mui/material'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
 import { useAuthStore } from '@/stores/authStore'
 import PasswordStrengthBarModule from 'react-password-strength-bar'
 import { PASSWORD_RULES } from '@/app.config'
+import { welcomeCredential } from '@/fixtures/welcomeCredential'
+import { StorageManager } from '@/stores/storageManager'
 
 const PasswordStrengthBar =
   (
@@ -21,11 +23,8 @@ export function SignupPage() {
   const [email, setEmail] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [score, setScore] = useState(0)
-
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-  const lengthPassed = passphrase.length >= PASSWORD_RULES.minlength
-  const scorePassed = score >= PASSWORD_RULES.minscore
-  const canSubmit = emailValid && lengthPassed && scorePassed
+  const location = useLocation()
+  const { userMessage } = location.state || {}
 
   const handleSignup = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -36,9 +35,25 @@ export function SignupPage() {
       email,
       secret: passphrase
     })
+    const { storage, userExists } =
+      await StorageManager.initStorageClients(session)
+    session.storage = storage
+    if (userExists) {
+      const userMessage = 'This profile already exists, please log in.'
+      console.log('User already exists, redirecting to login page.')
+      return navigate('/login', { state: { userMessage } })
+    }
+    await storage.ensureUserCollections({ user: session.user })
+    // Add a "welcome" credential to storage
+    await session.storage!.addCredential({ credential: welcomeCredential })
     login(session)
     navigate('/dashboard')
   }
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  const lengthPassed = passphrase.length >= PASSWORD_RULES.minlength
+  const scorePassed = score >= PASSWORD_RULES.minscore
+  const canSubmit = emailValid && lengthPassed && scorePassed
 
   return (
     <Box component="main" sx={authStyles.page}>
@@ -49,6 +64,12 @@ export function SignupPage() {
         <Typography variant="h3" component="h2" sx={authStyles.title}>
           Sign up
         </Typography>
+
+        {userMessage && (
+          <Typography variant="body1" color="error" sx={authStyles.userMessage}>
+            {userMessage}
+          </Typography>
+        )}
 
         <Typography
           variant="h5"

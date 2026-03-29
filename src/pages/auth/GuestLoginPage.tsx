@@ -7,6 +7,8 @@ import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initGuestSession } from '@/session/initSession'
 import { useAuthStore } from '@/stores/authStore'
+import { StorageManager } from '@/stores/storageManager'
+import { welcomeCredential } from '@/fixtures/welcomeCredential'
 
 export function GuestLoginPage() {
   const navigate = useNavigate()
@@ -18,6 +20,13 @@ export function GuestLoginPage() {
   const handleGuestLogin = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
     const { session } = await initGuestSession()
+
+    const { storage } = await StorageManager.initStorageClients(session)
+    await storage.ensureUserCollections({ user: session.user })
+    session.storage = storage
+
+    // Add a "welcome" credential to storage
+    await session.storage!.addCredential({ credential: welcomeCredential })
     login(session)
     navigate('/dashboard')
   }

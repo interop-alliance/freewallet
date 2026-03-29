@@ -3,7 +3,7 @@ import Button from '@mui/material/Button'
 import Link from '@mui/material/Link'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { Link as RouterLink, useNavigate } from 'react-router'
+import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
 import { authStyles } from '@/styles/appStyles'
 import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
@@ -12,6 +12,8 @@ import { initSessionFromSecret } from '@/session/initSession'
 export function LoginPage() {
   const navigate = useNavigate()
   const login = useAuthStore(state => state.login)
+  const location = useLocation()
+  const { userMessage } = location.state || {}
 
   /**
    * Handles form submit event
@@ -24,11 +26,15 @@ export function LoginPage() {
       console.log('No passphrase entered.')
       return
     }
-    const email = 'alice@example.com' // TODO: replace hardcoded value
-    const { session } = await initSessionFromSecret({
-      email,
+    const { session, userExists } = await initSessionFromSecret({
       secret: passphrase
     })
+    if (!userExists) {
+      const userMessage = 'This profile does not exist, please sign up.'
+      console.log('User does not exist, redirecting to signup page.')
+      return navigate('/signup', { state: { userMessage } })
+    }
+    await session.storage.ensureUserCollections({ user: session.user })
     login(session)
     navigate('/dashboard', { replace: true })
   }
@@ -42,6 +48,12 @@ export function LoginPage() {
         <Typography variant="h3" component="h2" sx={authStyles.title}>
           Log in
         </Typography>
+
+        {userMessage && (
+          <Typography variant="body1" color="error" sx={authStyles.userMessage}>
+            {userMessage}
+          </Typography>
+        )}
 
         <Typography variant="h5" component="label" htmlFor="login-passphrase">
           Passphrase:

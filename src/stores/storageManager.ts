@@ -2,7 +2,7 @@ import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import { createRxDatabase, type RxDatabase } from 'rxdb/plugins/core'
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
 import type { ControllerProfile, User } from '@/types/auth'
-import { cidFrom } from '@/lib/cidFrom'
+import { bufferToBase64Url, cidFrom, digestHash } from '@/lib/cidFrom'
 import { WAS_SERVER_URL } from '@/app.config'
 import {
   type StoredCredential,
@@ -11,6 +11,7 @@ import {
 import type { ZcapClient } from '@digitalcredentials/ezcap'
 
 export interface IWalletStore {
+  userExists: () => Promise<boolean>
   addCredential: ({
     cid,
     credential
@@ -45,7 +46,7 @@ export class StorageManager {
     this.remoteOnly = remoteOnly
   }
 
-  static async initStorage({
+  static async initStorageClients({
     user,
     profile
   }: {
@@ -55,20 +56,24 @@ export class StorageManager {
     const storageServerUrl = WAS_SERVER_URL
     const remoteOnly = !!storageServerUrl
     let remoteStore, localStore
+    let userExists = false
+    // For the moment, localStore and remoteStore are mutually exclusive
 
     if (!remoteOnly) {
-      ;({ localStore } = await BrowserStore.initStore({ user }))
+      ;({ localStore } = await BrowserStore.initClient({ user }))
+      userExists = await localStore.userExists()
     }
 
     if (storageServerUrl) {
-      ;({ remoteStore } = await WASRemoteStore.initStore({
+      ;({ remoteStore } = await WASRemoteStore.initClient({
         storageServerUrl,
         user,
         profile
       }))
+      userExists = await remoteStore.userExists()
     }
     const storage = new StorageManager({ localStore, remoteStore, remoteOnly })
-    return { storage }
+    return { storage, userExists }
   }
 
   async addCredential({ credential }: { credential: IVerifiableCredential }) {
@@ -87,6 +92,15 @@ export class StorageManager {
     }
     if (this.remoteStore) {
       await this.remoteStore.wipeStorage({ profile })
+    }
+  }
+
+  async ensureUserCollections({ user }: { user: User }) {
+    if (!this.remoteOnly) {
+      await this.localStore!.ensureUserCollections({ user })
+    }
+    if (this.remoteStore) {
+      await this.remoteStore.ensureUserCollections({ user })
     }
   }
 
@@ -138,37 +152,48 @@ export interface ICollectionsSet {
  */
 export class WASRemoteStore implements IWalletStore {
   public storageServerUrl: string
-  public spaceUrl: string
   public zcapClient: ZcapClient
+  public spaceId: string
+  public controller: string
+
+  public spaceUrl: string
   public collections: ICollectionsSet
 
   constructor({
     storageServerUrl,
-    spaceUrl,
-    zcapClient
+    zcapClient,
+    spaceId,
+    controller
   }: {
     storageServerUrl: string
-    spaceUrl: string
     zcapClient: ZcapClient
+    spaceId: string
+    controller: string
   }) {
     this.storageServerUrl = storageServerUrl
-    this.spaceUrl = spaceUrl
     this.zcapClient = zcapClient
+    this.spaceId = spaceId
+    this.controller = controller
+    this.spaceUrl = new URL(`/space/${spaceId}`, storageServerUrl).toString()
     this.collections = {
       credentials: { url: '' }
     }
   }
 
-  static async initStore({
-    storageServerUrl,
-    user,
-    profile
-  }: {
-    storageServerUrl: string
-    user: User
-    profile: ControllerProfile
-  }) {
-    const { zcapClient } = profile
+  async userExists() {
+    try {
+      await this.zcapClient.request({
+        url: this.spaceUrl,
+        method: 'GET'
+      })
+    } catch (_: any) {
+      return false
+    }
+    return true
+  }
+
+  async ensureUserCollections({ user }: { user: User }) {
+    const { storageServerUrl, zcapClient } = this
     const spaceDescription = {
       name: 'Freewallet Space',
       controller: user.id
@@ -184,11 +209,6 @@ export class WASRemoteStore implements IWalletStore {
     } catch (e: any) {
       console.error('Error creating space:', JSON.stringify(e.data, null, 2))
     }
-    const remoteStore = new WASRemoteStore({
-      storageServerUrl,
-      spaceUrl,
-      zcapClient
-    })
 
     // Space created, now create collections
     const vcCollectionUrl = new URL(
@@ -216,9 +236,28 @@ export class WASRemoteStore implements IWalletStore {
     }
     const vcCollectionBaseUrl = `${vcCollectionUrl}/` // ensure trailing slash
 
-    remoteStore.collections.credentials = {
+    this.collections.credentials = {
       url: vcCollectionBaseUrl
     }
+  }
+
+  static async initClient({
+    storageServerUrl,
+    user,
+    profile
+  }: {
+    storageServerUrl: string
+    user: User
+    profile: ControllerProfile
+  }) {
+    const controller = user.id
+    const spaceId = bufferToBase64Url(await digestHash(controller))
+    const remoteStore = new WASRemoteStore({
+      storageServerUrl,
+      zcapClient: profile.zcapClient,
+      spaceId,
+      controller
+    })
 
     return { remoteStore }
   }
@@ -367,27 +406,62 @@ export class WASRemoteStore implements IWalletStore {
  * will add replication next.
  */
 export class BrowserStore implements IWalletStore {
-  public db
-  public dbName
-  constructor({ db, dbName }: { db: RxDatabase; dbName: string }) {
-    this.db = db
-    this.dbName = dbName
+  public dbPrefix: string
+  public db?: RxDatabase
+  public dbName?: string
+
+  constructor({ dbPrefix }: { dbPrefix: string }) {
+    this.dbPrefix = dbPrefix
+  }
+
+  async userExists() {
+    const databases = await indexedDB.databases()
+    return databases.some(db => db.name!.includes(this.dbPrefix))
   }
 
   /**
    * @see https://rxdb.info/rx-storage-dexie.html
    * @param user {User}
    */
-  static async initStore({ user }: { user: User }) {
-    const { db, dbName } = await dbInstance({ user })
-    // addCollections is an idempotent operation
+  static async initClient({ user }: { user: User }) {
+    // Local DBs will have a prefix of <hash of user.id>
+    const dbPrefix = bufferToBase64Url(await digestHash(user.id))
+
+    const localStore = new BrowserStore({ dbPrefix })
+    return { localStore }
+  }
+
+  static async dbInstanceFor({ dbPrefix }: { dbPrefix: string }) {
+    const dbName = `${dbPrefix}-credentials-db`
+    let db
+    /**
+     * Add a global singleton workaround, to fix the "duplicate database" error.
+     */
+    // @ts-expect-error Suppress implicit any
+    if (globalThis.__rxdb_instance__) {
+      // @ts-expect-error Suppress implicit any
+      db = globalThis.__rxdb_instance__
+    } else {
+      db = await createRxDatabase({
+        name: dbName,
+        storage: getRxStorageDexie()
+      })
+    }
+    // addCollections is an idempotent operation and will be called on Login also
     await db.addCollections({
       credentials: {
         schema: StoredCredentialSchema
       }
     })
-    const localStore = new BrowserStore({ db, dbName })
-    return { localStore }
+    return { db, dbName }
+  }
+
+  async ensureUserCollections({ user }: { user: User }) {
+    const { dbPrefix } = this
+    const { db, dbName } = await BrowserStore.dbInstanceFor({ dbPrefix })
+    console.log('Initialed user collections in', dbName, 'user:', user.id)
+    this.db = db
+    this.dbName = dbName
   }
 
   /**
@@ -401,14 +475,14 @@ export class BrowserStore implements IWalletStore {
     cid: string
     credential: IVerifiableCredential
   }) {
-    await this.db.credentials.insertIfNotExists({
+    await this.db!.credentials.insertIfNotExists({
       cid,
       vc: { ...credential }
     })
   }
 
   async loadCredential({ cid }: { cid: string }) {
-    const doc = await this.db.credentials.findOne({ selector: { cid } }).exec()
+    const doc = await this.db!.credentials.findOne({ selector: { cid } }).exec()
     if (doc) {
       return doc.vc
     } else {
@@ -417,7 +491,7 @@ export class BrowserStore implements IWalletStore {
   }
 
   async deleteCredential({ cid }: { cid: string }) {
-    const doc = await this.db.credentials.findOne({ selector: { cid } }).exec()
+    const doc = await this.db!.credentials.findOne({ selector: { cid } }).exec()
     if (doc) {
       await doc.remove()
     }
@@ -430,7 +504,7 @@ export class BrowserStore implements IWalletStore {
    * @returns {Array<{ cid, doc }>} List of JSON docs (that match VcBlobSchema)
    */
   async listCredentials() {
-    return await this.db.credentials.find().exec()
+    return await this.db!.credentials.find().exec()
   }
 
   /**
@@ -439,35 +513,12 @@ export class BrowserStore implements IWalletStore {
   async wipeStorage() {
     // @ts-expect-error Suppress implicit any
     globalThis.__rxdb_instance__ = null
-    await this.db.remove()
+    await this.db!.remove()
     const databases = await indexedDB.databases()
     for (const db of databases) {
-      if (db.name!.includes(this.dbName)) {
+      if (db.name!.includes(this.dbName!)) {
         indexedDB.deleteDatabase(db.name!)
       }
     }
   }
-}
-
-export function dbNameFor({ user }: { user: User }) {
-  return `${user.id}-credentials-db`
-}
-
-export async function dbInstance({ user }: { user: User }) {
-  const dbName = dbNameFor({ user })
-  let db
-  /**
-   * Add a global singleton workaround, to fix the "duplicate database" error.
-   */
-  // @ts-expect-error Suppress implicit any
-  if (globalThis.__rxdb_instance__) {
-    // @ts-expect-error Suppress implicit any
-    db = globalThis.__rxdb_instance__
-  } else {
-    db = await createRxDatabase({
-      name: dbName,
-      storage: getRxStorageDexie()
-    })
-  }
-  return { db, dbName }
 }

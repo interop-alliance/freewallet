@@ -16,7 +16,12 @@ export const useAuthStore = create<AuthState>()(set => ({
   login: (session: Session) => set({ session }),
   logout: async (session: Session) => {
     console.log('Clearing session...')
-    await session.storage?.wipeStorage({ profile: session.profile })
+    try {
+      await session.storage?.wipeStorage({ profile: session.profile })
+    } catch (e) {
+      console.error('Error wiping session:', e)
+    }
+
     set({ session: null })
   }
 }))
