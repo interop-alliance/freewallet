@@ -1,6 +1,6 @@
 {
   "name": "freewallet",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "scripts": {
     "prepare": "mkdir -p public/js && cp node_modules/credential-handler-polyfill/dist/credential-handler-polyfill.min.js public/js/ && cp node_modules/web-credential-handler/dist/web-credential-handler.min.js public/js/",
