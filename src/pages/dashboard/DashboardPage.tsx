@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
+import Button from '@mui/material/Button'
+import { MdAddCircleOutline } from 'react-icons/md'
+import { Link as RouterLink } from 'react-router'
 import { useAuthStore } from '@/stores/authStore'
 import { dashboardStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
@@ -35,6 +38,16 @@ export function DashboardPage() {
 
   return (
     <DashboardLayout title="Freewallet Dashboard">
+      <Button
+        variant="outlined"
+        component={RouterLink}
+        to="/add-credential"
+        startIcon={<MdAddCircleOutline size={20} />}
+        sx={dashboardStyles.addCredentialLink}
+      >
+        Add Credential
+      </Button>
+
       <Box sx={dashboardStyles.credentialsSection}>
         <Typography variant="h5" sx={dashboardStyles.credentialsHeading}>
           Credentials

@@ -145,6 +145,27 @@ export const dashboardStyles = {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center'
+  },
+  addCredentialLink: {
+    mt: 3,
+    textTransform: 'none',
+    borderRadius: 2,
+    px: 2.5,
+    py: 1
+  },
+  addCredentialForm: {
+    mt: 4,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    maxWidth: 520
+  },
+  addCredentialButton: {
+    alignSelf: 'flex-start',
+    textTransform: 'none',
+    px: 4,
+    py: 1,
+    borderRadius: 2
   }
 } as const
 
