@@ -31,7 +31,7 @@ test.describe('Sign up page', () => {
 
   test('successful sign up navigates to dashboard', async ({ page }) => {
     await page.locator('input[type="email"]').fill('alice@example.com')
-    await page.locator('input[type="password"]').fill('test-passphrase')
+    await page.locator('input[type="password"]').fill('Str0ng-passphrase!')
     await page.getByRole('button', { name: 'Create Wallet' }).click()
     await expect(page).toHaveURL(/#\/dashboard/)
   })
