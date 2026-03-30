@@ -11,6 +11,8 @@ import { CredentialDetailPage } from '@/pages/dashboard/CredentialDetailPage'
 import { AddCredentialPage } from '@/pages/dashboard/AddCredentialPage'
 import { LogoutPage } from '@/pages/auth/LogoutPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { WalletGetPage } from '@/pages/chapi/WalletGetPage'
+import { WalletStorePage } from '@/pages/chapi/WalletStorePage'
 
 function App() {
   return (
@@ -20,6 +22,10 @@ function App() {
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/guest-login" element={<GuestLoginPage />} />
       <Route path="/logout" element={<LogoutPage />} />
+
+      {/* CHAPI wallet UI — no ProtectedRoute, runs in a CHAPI-managed popup */}
+      <Route path="/wallet/get" element={<WalletGetPage />} />
+      <Route path="/wallet/store" element={<WalletStorePage />} />
 
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardPage />} />

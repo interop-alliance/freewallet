@@ -34,6 +34,7 @@ Development:
 ```
 pnpm install
 ```
+
 ## Usage
 
 ### Starting the Server
@@ -41,18 +42,23 @@ pnpm install
 ```
 npm start
 ```
+
 Optional env vars:
 
 * `PORT` - Used by Docker, Dokku, etc. Automatically handled by Vite.
-* `VITE_API_URL` - URL to a [WAS](https://digitalcredentials.github.io/wallet-attached-storage-spec/)
+* `VITE_WAS_SERVER_URL` - URL to a [WAS](https://digitalcredentials.github.io/wallet-attached-storage-spec/)
   server instance. If not provided, the server will run in a local-only mode
   (storing VCs in browser IndexedDB).
+* `VITE_ALLOWED_HOST` - Additional hostname that the server will accept
+  requests from. This is useful when testing CHAPI wallet functionality behind
+  a reverse proxy such as Ngrok. If not provided, the server will only accept
+  requests from localhost. So, for example: `VITE_ALLOWED_HOST=example.ngrok.dev npm run dev`
 
 ### Running Tests
 
 Freewallet uses two frameworks for testing: Vitest for unit tests, and
 Playwright for end-to-end browser tests.
-If you want to run the e2e Playwright tests, you will need to install the 
+If you want to run the e2e Playwright tests, you will need to install the
 framework the first time:
 
 ```
@@ -74,5 +80,6 @@ npm run test:e2e
 ## Security
 
 ## License
+
 Copyright 2026 Interop Alliance.
 [GNU AFFERO GENERAL PUBLIC LICENSE v3](LICENSE)

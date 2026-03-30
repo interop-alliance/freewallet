@@ -8,6 +8,7 @@ import { authStyles } from '@/styles/appStyles'
 import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
+import { registerWallet } from '@/lib/registerWallet'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -36,6 +37,7 @@ export function LoginPage() {
     }
     await session.storage.ensureUserCollections({ user: session.user })
     login(session)
+    void registerWallet()
     navigate('/dashboard', { replace: true })
   }
 

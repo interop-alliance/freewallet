@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Freewallet Worker</title>
+  <script src="/js/credential-handler-polyfill.min.js"></script>
+  <script src="/js/web-credential-handler.min.js"></script>
+</head>
+<body>
+<script>
+  const MEDIATOR =
+    'https://authn.io/mediator?origin=' + encodeURIComponent(window.location.origin);
+  const WALLET_LOCATION = window.location.origin + '/';
+
+  async function activateWalletEventHandler() {
+    try {
+      await credentialHandlerPolyfill.loadOnce(MEDIATOR);
+    } catch (e) {
+      console.error('Error in loadOnce:', e);
+    }
+
+    return WebCredentialHandler.activateHandler({
+      mediatorOrigin: MEDIATOR,
+      async get() {
+        return {type: 'redirect', url: WALLET_LOCATION + '#/wallet/get'};
+      },
+      async store() {
+        return {type: 'redirect', url: WALLET_LOCATION + '#/wallet/store'};
+      }
+    });
+  }
+
+  activateWalletEventHandler();
+</script>
+</body>
+</html>

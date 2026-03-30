@@ -16,5 +16,12 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'tests/**/*.test.ts']
+  },
+  server: {
+    allowedHosts: [
+      'localhost',
+      '127.0.0.1',
+      ...(process.env.VITE_ALLOWED_HOST ? [process.env.VITE_ALLOWED_HOST] : [])
+    ]
   }
 })

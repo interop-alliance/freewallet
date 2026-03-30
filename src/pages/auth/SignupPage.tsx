@@ -9,6 +9,7 @@ import PasswordStrengthBarModule from 'react-password-strength-bar'
 import { PASSWORD_RULES } from '@/app.config'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
 import { StorageManager } from '@/stores/storageManager'
+import { registerWallet } from '@/lib/registerWallet'
 
 const PasswordStrengthBar =
   (
@@ -47,6 +48,7 @@ export function SignupPage() {
     // Add a "welcome" credential to storage
     await session.storage!.addCredential({ credential: welcomeCredential })
     login(session)
+    void registerWallet()
     navigate('/dashboard')
   }
 

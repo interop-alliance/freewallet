@@ -19,10 +19,9 @@ export interface User {
   image?: string
 }
 
-// TODO: Need a better name, ControllerProfile is not quite right
-//  it's more of a "bootstrap cryptographic materials"
 // In memory only, never persisted
 export interface ControllerProfile {
+  // TODO: Need a better name, ControllerProfile is not quite right
   keyAgent: ICapabilityAgent
   zcapClient: ZcapClient
 }

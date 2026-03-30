@@ -246,6 +246,65 @@ export const loadingSpinnerStyles = {
   py: 6
 } as const
 
+export const chapiStyles = {
+  page: {
+    minHeight: '100dvh',
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    px: 2,
+    pt: 4
+  },
+  card: {
+    width: '100%',
+    maxWidth: 480,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2
+  },
+  originChip: {
+    display: 'inline-block',
+    bgcolor: 'action.hover',
+    px: 1,
+    py: 0.25,
+    borderRadius: 1,
+    fontSize: '0.8rem',
+    wordBreak: 'break-all' as const,
+    fontFamily: 'monospace'
+  },
+  credentialList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1
+  },
+  credentialRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 1,
+    p: 1.5,
+    border: 1,
+    borderColor: 'divider',
+    borderRadius: 2
+  },
+  credentialInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 0.25
+  },
+  credentialSummary: {
+    p: 2,
+    border: 1,
+    borderColor: 'divider',
+    borderRadius: 2
+  },
+  doneMessage: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 1.5
+  }
+} as const
+
 export const notFoundStyles = {
   page: {
     minHeight: '100dvh',

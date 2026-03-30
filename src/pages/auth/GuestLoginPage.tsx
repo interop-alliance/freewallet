@@ -9,6 +9,7 @@ import { initGuestSession } from '@/session/initSession'
 import { useAuthStore } from '@/stores/authStore'
 import { StorageManager } from '@/stores/storageManager'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
+import { registerWallet } from '@/lib/registerWallet'
 
 export function GuestLoginPage() {
   const navigate = useNavigate()
@@ -28,6 +29,7 @@ export function GuestLoginPage() {
     // Add a "welcome" credential to storage
     await session.storage!.addCredential({ credential: welcomeCredential })
     login(session)
+    void registerWallet()
     navigate('/dashboard')
   }
 
