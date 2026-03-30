@@ -119,6 +119,19 @@ export const dashboardStyles = {
   deleteAccountDescription: {
     color: 'text.primary'
   },
+  deleteCredentialButton: {
+    mt: 3,
+    textTransform: 'none',
+    px: 4,
+    py: 1.5,
+    borderRadius: 2,
+    backgroundColor: '#d79393',
+    color: '#1f1f1f',
+    border: '2px solid #2f2f2f',
+    '&:hover': {
+      backgroundColor: '#ce8686'
+    }
+  },
   /** Dashboard page — Credentials block */
   credentialsSection: {
     mt: 4

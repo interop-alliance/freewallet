@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
-import { useParams } from 'react-router'
+import Button from '@mui/material/Button'
+import { useParams, useNavigate } from 'react-router'
 import { reset as microlightReset } from 'microlight'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { credentialTitle } from '@/lib/credentialTitle'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { useAuthStore } from '@/stores/authStore'
-import { credentialDetailStyles } from '@/styles/appStyles'
+import { credentialDetailStyles, dashboardStyles } from '@/styles/appStyles'
 import type { StoredCredential } from '@/types/credential'
 
 export function CredentialDetailPage() {
   const session = useAuthStore(state => state.session)
+  const navigate = useNavigate()
   const { cid } = useParams()
   const [credential, setCredential] = useState<StoredCredential | null>(null)
   const [isNotFound, setIsNotFound] = useState(false)
@@ -45,6 +47,14 @@ export function CredentialDetailPage() {
     return JSON.stringify(credential.vc, null, 2)
   }, [credential])
 
+  async function handleDelete() {
+    if (!session) {
+      return
+    }
+    await session.storage.deleteCredential({ cid: cid! })
+    navigate('/dashboard')
+  }
+
   if (!cid || isNotFound) {
     return <NotFoundPage />
   }
@@ -62,13 +72,22 @@ export function CredentialDetailPage() {
             : 'Loading credential...'}
         </Typography>
         {credential && (
-          <Box
-            component="pre"
-            className="microlight"
-            sx={credentialDetailStyles.codeBlock}
-          >
-            {rawVc}
-          </Box>
+          <>
+            <Box
+              component="pre"
+              className="microlight"
+              sx={credentialDetailStyles.codeBlock}
+            >
+              {rawVc}
+            </Box>
+            <Button
+              variant="contained"
+              sx={dashboardStyles.deleteCredentialButton}
+              onClick={handleDelete}
+            >
+              Delete Credential
+            </Button>
+          </>
         )}
       </Box>
     </DashboardLayout>
