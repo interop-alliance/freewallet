@@ -15,7 +15,7 @@ export async function digestHash(original: string) {
   // encode as (utf-8) Uint8Array
   const msgUint8 = new TextEncoder().encode(original)
 
-  return await window.crypto.subtle.digest('SHA-256', msgUint8)
+  return await globalThis.crypto.subtle.digest('SHA-256', msgUint8)
 }
 
 export function bufferToBase64Url(buffer: ArrayBuffer) {
