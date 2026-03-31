@@ -34,3 +34,6 @@ pnpm-lock.yaml
 
 # Generated CHAPI polyfill bundles (copied from node_modules by `prepare`)
 public/js/
+
+# Environment variables
+.env
