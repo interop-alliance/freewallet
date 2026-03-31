@@ -180,6 +180,19 @@ export const dashboardStyles = {
     px: 4,
     py: 1,
     borderRadius: 2
+  },
+  acceptCredentialsList: {
+    mt: 3,
+    gap: 2,
+    maxWidth: 520
+  },
+  appBarBrandLink: {
+    display: 'flex',
+    alignItems: 'center',
+    textDecoration: 'none',
+    color: 'inherit',
+    flexGrow: 1,
+    gap: 1.5
   }
 } as const
 
