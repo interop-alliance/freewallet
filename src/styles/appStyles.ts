@@ -151,7 +151,8 @@ export const dashboardStyles = {
     gap: 1.5
   },
   navBrandTitle: {
-    fontWeight: 600
+    fontWeight: 600,
+    ml: 1
   },
   /** Main area: page title + actions */
   mainToolbarStack: {
@@ -302,6 +303,22 @@ export const chapiStyles = {
     display: 'flex',
     alignItems: 'center',
     gap: 1.5
+  }
+} as const
+
+export const docsStyles = {
+  content: {
+    maxWidth: 780,
+    mt: 2,
+    '& table': { borderCollapse: 'collapse', width: '100%', my: 2 },
+    '& th, & td': {
+      border: '1px solid',
+      borderColor: 'divider',
+      px: 2,
+      py: 1,
+      textAlign: 'left'
+    },
+    '& th': { fontWeight: 600, bgcolor: 'action.hover' }
   }
 } as const
 

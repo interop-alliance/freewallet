@@ -1,4 +1,6 @@
+import AppBar from '@mui/material/AppBar'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import Drawer from '@mui/material/Drawer'
 import List from '@mui/material/List'
 import ListItemButton from '@mui/material/ListItemButton'
@@ -6,7 +8,9 @@ import ListItemText from '@mui/material/ListItemText'
 import Toolbar from '@mui/material/Toolbar'
 import Typography from '@mui/material/Typography'
 import { dashboardStyles } from '@/styles/appStyles'
-import { Link as RouterLink, useLocation } from 'react-router'
+import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
+import { useAuthStore } from '@/stores/authStore'
+import walletIcon from '@/assets/wallet.svg'
 import type { ReactNode } from 'react'
 
 interface DashboardLayoutProps {
@@ -22,9 +26,43 @@ const navItems = [
 
 export function DashboardLayout({ title, children }: DashboardLayoutProps) {
   const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const session = useAuthStore(state => state.session)
+
+  function handleLogout() {
+    navigate('/logout')
+  }
 
   return (
     <Box sx={dashboardStyles.container}>
+      <AppBar
+        position="fixed"
+        color="default"
+        elevation={1}
+        sx={{ zIndex: theme => theme.zIndex.drawer + 1 }}
+      >
+        <Toolbar>
+          <Box
+            component="img"
+            src={walletIcon}
+            alt="Freewallet"
+            sx={dashboardStyles.walletIcon}
+          />
+          <Typography variant="h6" sx={{ flexGrow: 1, ...dashboardStyles.navBrandTitle }}>
+            Freewallet
+          </Typography>
+          {session ? (
+            <Button variant="outlined" onClick={handleLogout}>
+              Log out
+            </Button>
+          ) : (
+            <Button variant="outlined" component={RouterLink} to="/login">
+              Log in
+            </Button>
+          )}
+        </Toolbar>
+      </AppBar>
+
       <Drawer variant="permanent" sx={dashboardStyles.drawer}>
         <Toolbar />
         <List sx={dashboardStyles.navList}>

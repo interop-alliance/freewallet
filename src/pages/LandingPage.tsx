@@ -26,15 +26,15 @@ export function LandingPage() {
 
         <Typography variant="h6" component="p" sx={landingStyles.subtitle}>
           is an open source, open specs web app for managing{' '}
-          <Link href="#" underline="always" sx={landingStyles.link}>
+          <Link component={RouterLink} to="/docs/vcs" underline="always" sx={landingStyles.link}>
             Verifiable Credentials
           </Link>
           ,{' '}
-          <Link href="#" underline="always" sx={landingStyles.link}>
+          <Link component={RouterLink} to="/docs/dids" underline="always" sx={landingStyles.link}>
             DIDs
           </Link>
           , and{' '}
-          <Link href="#" underline="always" sx={landingStyles.link}>
+          <Link component={RouterLink} to="/docs/keys" underline="always" sx={landingStyles.link}>
             keys
           </Link>
           .
