@@ -1,8 +1,23 @@
+import { httpClient } from '@digitalcredentials/http-client'
+import { CORS_PROXY_URL } from '@/app.config'
+
 export async function fetchFromURL(url: string): Promise<string> {
+  const target = CORS_PROXY_URL
+    ? `${CORS_PROXY_URL}${encodeURIComponent(url)}`
+    : url
+
   console.log('Fetching credential from URL:', url)
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} ${response.statusText}`)
+  if (CORS_PROXY_URL) {
+    console.log('Using CORS proxy:', CORS_PROXY_URL)
+  }
+
+  const response = await httpClient.get(target, {
+    headers: { Accept: 'application/ld+json, application/json' }
+  })
+
+  if (response.data) {
+    console.log('Fetched credential JSON from URL')
+    return JSON.stringify(response.data)
   }
 
   const text = await response.text()

@@ -24,7 +24,7 @@ export function AcceptCredentialsPage() {
 
   if (credentials.length === 0) {
     navigate('/dashboard')
-    return null
+    return
   }
 
   async function handleAcceptAll() {
