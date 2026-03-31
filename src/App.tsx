@@ -9,6 +9,7 @@ import { HistoryPage } from '@/pages/dashboard/HistoryPage'
 import { SettingsPage } from '@/pages/dashboard/SettingsPage'
 import { CredentialDetailPage } from '@/pages/dashboard/CredentialDetailPage'
 import { AddCredentialPage } from '@/pages/dashboard/AddCredentialPage'
+import { AcceptCredentialsPage } from '@/pages/dashboard/AcceptCredentialsPage'
 import { DocsPage } from '@/pages/dashboard/DocsPage'
 import { LogoutPage } from '@/pages/auth/LogoutPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -34,6 +35,7 @@ function App() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/credential/:cid" element={<CredentialDetailPage />} />
         <Route path="/add-credential" element={<AddCredentialPage />} />
+        <Route path="/accept-credentials" element={<AcceptCredentialsPage />} />
       </Route>
 
       <Route path="/docs/:fileName" element={<DocsPage />} />
