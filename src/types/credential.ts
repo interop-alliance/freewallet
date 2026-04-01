@@ -1,5 +1,23 @@
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 
+export interface AlignmentItem {
+  targetName: string
+  targetUrl: string
+  targetDescription: string
+}
+
+export interface CredentialDisplayFields {
+  credentialName: string
+  issuedTo: string
+  issuanceDate: string
+  expirationDate: string
+  credentialDescription: string
+  criteria: string
+  achievementImage: string
+  achievementType: string
+  alignments: AlignmentItem[]
+}
+
 export interface StoredCredential {
   cid: string
   vc: IVerifiableCredential

@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import Button from '@mui/material/Button'
 import { useParams, useNavigate } from 'react-router'
-import { reset as microlightReset } from 'microlight'
 import { DashboardLayout } from '@/components/DashboardLayout'
-import { credentialTitle } from '@/lib/credentialTitle'
+import { CredentialDetail } from '@/components/credentialDetails/CredentialDetail'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { useAuthStore } from '@/stores/authStore'
 import { credentialDetailStyles, dashboardStyles } from '@/styles/appStyles'
@@ -29,23 +28,9 @@ export function CredentialDetailPage() {
         return
       }
       setIsNotFound(false)
-      setCredential({
-        cid,
-        vc
-      })
+      setCredential({ cid, vc })
     })
   }, [cid, session])
-
-  useEffect(() => {
-    microlightReset()
-  }, [credential])
-
-  const rawVc = useMemo(() => {
-    if (!credential) {
-      return ''
-    }
-    return JSON.stringify(credential.vc, null, 2)
-  }, [credential])
 
   async function handleDelete() {
     if (!session) {
@@ -62,24 +47,9 @@ export function CredentialDetailPage() {
   return (
     <DashboardLayout title="Credential">
       <Box sx={credentialDetailStyles.wrapper}>
-        <Typography
-          variant="h4"
-          component="h2"
-          sx={credentialDetailStyles.title}
-        >
-          {credential
-            ? credentialTitle(credential.vc)
-            : 'Loading credential...'}
-        </Typography>
-        {credential && (
+        {credential ? (
           <>
-            <Box
-              component="pre"
-              className="microlight"
-              sx={credentialDetailStyles.codeBlock}
-            >
-              {rawVc}
-            </Box>
+            <CredentialDetail vc={credential.vc} />
             <Button
               variant="contained"
               sx={dashboardStyles.deleteCredentialButton}
@@ -88,6 +58,10 @@ export function CredentialDetailPage() {
               Delete Credential
             </Button>
           </>
+        ) : (
+          <Typography variant="h5" color="text.secondary">
+            Loading credential...
+          </Typography>
         )}
       </Box>
     </DashboardLayout>
