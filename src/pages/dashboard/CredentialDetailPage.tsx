@@ -7,7 +7,8 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialDetail } from '@/components/credentialDetails/CredentialDetail'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { useAuthStore } from '@/stores/authStore'
-import { credentialDetailStyles, dashboardStyles } from '@/styles/appStyles'
+import { dashboardStyles } from '@/styles/appStyles'
+import { credentialDetailStyles } from '@/styles/credentialStyles'
 import type { StoredCredential } from '@/types/credential'
 
 export function CredentialDetailPage() {

@@ -1,6 +1,26 @@
-/** Styles for credential display components (CredentialDetail, IssuerInfo) */
+export const credentialDetailStyles = {
+  wrapper: {
+    mt: 3,
+    width: '100%',
+    maxWidth: { xs: '100%', md: 820 }
+  },
+  codeBlock: {
+    p: { xs: 1.5, sm: 2, md: 2.5 },
+    borderRadius: 2,
+    backgroundColor: '#111',
+    color: '#e5e7eb',
+    overflowX: 'auto',
+    fontSize: { xs: 12, sm: 13, md: 14 },
+    lineHeight: 1.6,
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-all' as const,
+    maxHeight: { xs: '60vh', md: '70vh' },
+    overflowY: 'auto',
+    m: 0
+  }
+} as const
 
-export const credentialCardStyles = {
+export const credentialDetailCardStyles = {
   card: {
     borderRadius: '10px',
     boxShadow: '0px 15px 30px rgba(6,16,36,0.13)',
@@ -122,5 +142,5 @@ export const issuerInfoStyles = {
   },
   urlLink: {
     display: 'block'
-  },
+  }
 } as const

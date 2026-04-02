@@ -21,8 +21,10 @@ import {
   InfoBlock,
   SectionHeader
 } from '@/components/credentialDetails/InfoBlock'
-import { credentialDetailStyles } from '@/styles/appStyles'
-import { credentialCardStyles as sx } from '@/styles/credentialStyles'
+import {
+  credentialDetailStyles,
+  credentialDetailCardStyles as sx
+} from '@/styles/credentialStyles'
 
 interface CredentialDetailProps {
   vc: IVerifiableCredential

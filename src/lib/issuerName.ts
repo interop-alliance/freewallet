@@ -20,10 +20,7 @@ export function issuerName(credential: IVerifiableCredential): string {
 
 /**
  * Maps VC `issuer` to display fields. Matches VerifierPlus `IssuerObject`:
- * `id`, `name?`, `url?`, `image?` (see verifier-plus `app/types/credential.d.ts`).
- * `issuer` may also be a bare IRI string (`IssuerURI`).
- *
- * OBv3 sometimes uses `image: { id: "..." }`; we resolve that to a string URL.
+ * `id`, `name?`, `url?`, `image?`
  */
 export function getIssuerDetails(
   issuer: IVerifiableCredential['issuer']
