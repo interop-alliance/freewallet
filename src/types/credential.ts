@@ -1,10 +1,4 @@
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
-
-export interface AlignmentItem {
-  targetName: string
-  targetUrl: string
-  targetDescription: string
-}
+import type { IVerifiableCredential, IAlignment } from '@digitalcredentials/ssi'
 
 export interface CredentialDisplayFields {
   credentialName: string
@@ -15,7 +9,7 @@ export interface CredentialDisplayFields {
   criteria: string
   achievementImage: string
   achievementType: string
-  alignments: AlignmentItem[]
+  alignments: IAlignment[]
 }
 
 export interface StoredCredential {

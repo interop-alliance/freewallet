@@ -1,5 +1,5 @@
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
-import type { AlignmentItem, CredentialDisplayFields } from '@/types/credential'
+import type { IVerifiableCredential, IAlignment } from '@digitalcredentials/ssi'
+import type { CredentialDisplayFields } from '@/types/credential'
 
 export function getIssuanceDate(vc: IVerifiableCredential): string {
   return (vc as any).validFrom ?? (vc as any).issuanceDate ?? ''
@@ -10,21 +10,21 @@ export function getExpirationDate(vc: IVerifiableCredential): string {
 }
 
 function subject(vc: IVerifiableCredential): any {
-  const s = vc.credentialSubject
-  return Array.isArray(s) ? s[0] : s
+  const sbj = vc.credentialSubject
+  return Array.isArray(sbj) ? sbj[0] : sbj
 }
 
 function extractIssuedTo(vc: IVerifiableCredential): string {
-  const s = subject(vc)
-  if (!s) {
+  const sbj = subject(vc)
+  if (!sbj) {
     return ''
   }
-  if (s.name) {
-    return s.name
+  if (sbj.name) {
+    return sbj.name
   }
 
-  if (Array.isArray(s.identifier)) {
-    const nameEntry = s.identifier.find(
+  if (Array.isArray(sbj.identifier)) {
+    const nameEntry = sbj.identifier.find(
       (id: any) => id.identityType === 'name' || id.type === 'name'
     )
     if (nameEntry?.identityHash) {
@@ -49,10 +49,10 @@ export function getDisplayFields(
     expirationDate: getExpirationDate(vc)
   }
 
-  const s = subject(vc)
+  const sbj = subject(vc)
 
   if (isOBv3(vc)) {
-    const achievement = s?.achievement
+    const achievement = sbj?.achievement
     return {
       ...common,
       credentialName:
@@ -65,12 +65,12 @@ export function getDisplayFields(
     }
   }
 
-  const hasCredential = s?.hasCredential
+  const hasCredential = sbj?.hasCredential
   return {
     ...common,
     credentialName:
       hasCredential?.name ?? (vc as any).name ?? 'Verifiable Credential',
-    credentialDescription: hasCredential?.description ?? s?.description ?? '',
+    credentialDescription: hasCredential?.description ?? sbj?.description ?? '',
     criteria: hasCredential?.competencyRequired ?? '',
     achievementImage: '',
     achievementType: '',
@@ -78,18 +78,16 @@ export function getDisplayFields(
   }
 }
 
-function normalizeAlignments(raw: unknown): AlignmentItem[] {
+function normalizeAlignments(raw: unknown): IAlignment[] {
   if (!raw) {
     return []
   }
   const arr = Array.isArray(raw) ? raw : [raw]
   return arr
-    .map((a: any) => ({
-      targetName: (a?.targetName ?? '').trim(),
-      targetUrl: (a?.targetUrl ?? '').trim(),
-      targetDescription: (a?.targetDescription ?? '').trim()
+    .map((field: any) => ({
+      targetName: (field?.targetName ?? '').trim(),
+      targetUrl: (field?.targetUrl ?? '').trim(),
+      targetDescription: (field?.targetDescription ?? '').trim()
     }))
-    .filter((a: AlignmentItem) => !!a.targetName)
+    .filter((field: IAlignment) => !!field?.targetName)
 }
-
-export type { AlignmentItem } from '@/types/credential'

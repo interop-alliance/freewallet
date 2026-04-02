@@ -7,14 +7,16 @@ import {
   Divider,
   Link,
   Collapse,
-  Button
+  Button,
+  IconButton
 } from '@mui/material'
+import { MdDeleteOutline } from 'react-icons/md'
 import { reset as microlightReset } from 'microlight'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getDisplayFields } from '@/lib/credentialDisplayFields'
 import { formatDate } from '@/lib/formatDate'
-import type { AlignmentItem } from '@/types/credential'
+import { getProofCreatedIso } from '@/lib/getProofCreatedIso'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import { IssuerInfo } from '@/components/credentialDetails/IssuerInfo'
 import {
@@ -25,20 +27,36 @@ import {
   credentialDetailStyles,
   credentialDetailCardStyles as sx
 } from '@/styles/credentialStyles'
+import type { IAlignment } from '@digitalcredentials/ssi'
 
-interface CredentialDetailProps {
+export function CredentialDetail({
+  vc,
+  onDelete
+}: {
   vc: IVerifiableCredential
-}
-
-export function CredentialDetail({ vc }: CredentialDetailProps) {
+  onDelete?: () => void
+}) {
   const fields = useMemo(() => getDisplayFields(vc), [vc])
+  const signatureCreatedIso = useMemo(() => getProofCreatedIso(vc), [vc])
   const [showRaw, setShowRaw] = useState(false)
   const rawJson = useMemo(() => JSON.stringify(vc, null, 2), [vc])
 
   return (
     <Paper variant="outlined" sx={sx.card}>
+      {onDelete && (
+        <IconButton
+          size="small"
+          onClick={onDelete}
+          aria-label="Delete credential"
+          sx={sx.cardDeleteIcon}
+        >
+          <MdDeleteOutline size={24} />
+        </IconButton>
+      )}
       {/* ── Top section: achievement image + name + type ── */}
-      <Box sx={sx.topCard}>
+      <Box
+        sx={{ ...sx.topCard, ...(onDelete ? { pr: { xs: 5, md: 6 } } : {}) }}
+      >
         <Box sx={sx.achievementRow}>
           {fields.achievementImage && (
             <Box
@@ -73,18 +91,18 @@ export function CredentialDetail({ vc }: CredentialDetailProps) {
             <IssuerInfo issuer={vc.issuer} />
 
             <Box>
-              {fields.issuanceDate && (
+              {signatureCreatedIso && (
                 <InfoBlock
-                  header="Issuance Date"
-                  value={formatDate(fields.issuanceDate)}
+                  header="Signature date"
+                  value={formatDate({ isoDate: signatureCreatedIso })}
                 />
               )}
-              <Box sx={{ mt: fields.issuanceDate ? 2 : 0 }}>
+              <Box sx={{ mt: signatureCreatedIso ? 2 : 0 }}>
                 <InfoBlock
                   header="Expiration Date"
                   value={
                     fields.expirationDate
-                      ? formatDate(fields.expirationDate)
+                      ? formatDate({ isoDate: fields.expirationDate })
                       : 'N/A'
                   }
                 />
@@ -124,24 +142,24 @@ export function CredentialDetail({ vc }: CredentialDetailProps) {
             <Box>
               <SectionHeader>Alignments</SectionHeader>
               <Stack spacing={1}>
-                {fields.alignments.map((a: AlignmentItem, i: number) => (
+                {fields.alignments.map((field: IAlignment, i: number) => (
                   <Box key={i}>
                     <Typography variant="body2" sx={sx.alignmentName}>
-                      {a.targetName}
+                      {field.targetName}
                     </Typography>
-                    {a.targetUrl && (
+                    {field.targetUrl && (
                       <Link
-                        href={a.targetUrl}
+                        href={field.targetUrl}
                         target="_blank"
                         rel="noopener"
                         variant="caption"
                       >
-                        {a.targetUrl}
+                        {field.targetUrl}
                       </Link>
                     )}
-                    {a.targetDescription && (
+                    {field.targetDescription && (
                       <Typography variant="body2" color="text.secondary">
-                        {a.targetDescription}
+                        {field.targetDescription}
                       </Typography>
                     )}
                   </Box>

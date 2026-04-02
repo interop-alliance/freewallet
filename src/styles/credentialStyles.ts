@@ -22,9 +22,22 @@ export const credentialDetailStyles = {
 
 export const credentialDetailCardStyles = {
   card: {
+    position: 'relative',
     borderRadius: '10px',
     boxShadow: '0px 15px 30px rgba(6,16,36,0.13)',
     overflow: 'hidden'
+  },
+  cardDeleteIcon: {
+    position: 'absolute',
+    top: 25,
+    right: 25,
+    zIndex: 1,
+    padding: 0.5,
+    color: 'text.secondary',
+    '&:hover': {
+      color: 'error.main',
+      backgroundColor: 'action.hover'
+    }
   },
   topCard: {
     px: { xs: 2, md: 3 },

@@ -12,6 +12,12 @@ export const PASSWORD_RULES = {
   minscore: 3
 }
 
+export const DATE_FMT: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric'
+}
+
 export const MEDIATOR =
   'https://authn.io/mediator?origin=' +
   encodeURIComponent(window.location.origin)

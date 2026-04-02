@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
-import Button from '@mui/material/Button'
 import { useParams, useNavigate } from 'react-router'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialDetail } from '@/components/credentialDetails/CredentialDetail'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { useAuthStore } from '@/stores/authStore'
-import { dashboardStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
 import type { StoredCredential } from '@/types/credential'
 
@@ -50,14 +48,7 @@ export function CredentialDetailPage() {
       <Box sx={credentialDetailStyles.wrapper}>
         {credential ? (
           <>
-            <CredentialDetail vc={credential.vc} />
-            <Button
-              variant="contained"
-              sx={dashboardStyles.deleteCredentialButton}
-              onClick={handleDelete}
-            >
-              Delete Credential
-            </Button>
+            <CredentialDetail vc={credential.vc} onDelete={handleDelete} />
           </>
         ) : (
           <Typography variant="h5" color="text.secondary">
