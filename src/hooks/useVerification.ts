@@ -5,10 +5,6 @@ import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 
 import type { VerificationResult } from '@/types/verification'
 
-export interface UseVerificationOptions {
-  runOnMount?: boolean
-}
-
 export interface UseVerificationReturn {
   result: VerificationResult | null
   loading: boolean
@@ -20,7 +16,7 @@ export interface UseVerificationReturn {
 
 export function useVerification(
   credential: IVerifiableCredential | null | undefined,
-  options: UseVerificationOptions = {}
+  options: { runOnMount?: boolean } = { runOnMount: true }
 ): UseVerificationReturn {
   const { runOnMount = true } = options
   const [result, setResult] = useState<VerificationResult | null>(null)
