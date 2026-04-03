@@ -107,6 +107,149 @@ export const credentialDetailCardStyles = {
   },
   alignmentName: {
     fontWeight: 600
+  },
+  verificationPanel: {
+    mt: 0
+  },
+  verificationLoadingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 1.25,
+    py: 0.5
+  },
+  verificationSpinner: {
+    flexShrink: 0
+  },
+  verificationRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 1.25
+  },
+  verificationIconSuccess: {
+    color: 'success.main',
+    lineHeight: 0,
+    flexShrink: 0,
+    pt: 0.125
+  },
+  verificationIconError: {
+    color: 'error.main',
+    lineHeight: 0,
+    flexShrink: 0,
+    pt: 0.125
+  },
+  verificationText: {
+    minWidth: 0,
+    flex: 1
+  },
+  verificationLabel: {
+    fontWeight: 600
+  },
+  /** VerifierPlus-style status pill (card 1) */
+  vpStatusBadge: {
+    display: 'inline-flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 0.75,
+    px: 1.5,
+    py: 0.5,
+    borderRadius: 999,
+    backgroundColor: 'action.hover'
+  },
+  vpStatusBadgeOk: {
+    backgroundColor: 'success.light',
+    color: 'success.dark',
+    '& .MuiTypography-root': { color: 'success.dark' }
+  },
+  vpStatusBadgeError: {
+    backgroundColor: 'error.light',
+    color: 'error.dark',
+    '& .MuiTypography-root': { color: 'black' }
+  },
+  vpStatusSpinner: {
+    flexShrink: 0
+  },
+  vpStatusIconWrap: {
+    display: 'flex',
+    lineHeight: 0
+  },
+  vpStatusBadgeLabel: {
+    fontWeight: 700,
+    fontSize: '0.8125rem'
+  },
+  /** VerifierPlus verification card (card 2) */
+  vpCard: {
+    px: { xs: 2, md: 3 },
+    py: { xs: 2, md: 2.5 }
+  },
+  vpCardColumns: {
+    display: 'flex',
+    flexDirection: { xs: 'column', md: 'row' },
+    gap: { xs: 2, md: 3 },
+    alignItems: { xs: 'stretch', md: 'stretch' }
+  },
+  vpGrayBox: {
+    flex: { md: '1 1 55%' },
+    minWidth: 0,
+    p: 2,
+    borderRadius: 2,
+    backgroundColor: 'grey.100',
+    border: 1,
+    borderColor: 'divider'
+  },
+  vpGrayTitle: {
+    fontWeight: 700,
+    fontSize: '0.7rem',
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+    color: 'text.secondary',
+    display: 'block',
+    mb: 1.5
+  },
+  vpHeadline: {
+    fontWeight: 700,
+    fontSize: '1rem',
+    lineHeight: 1.4,
+    mb: 1
+  },
+  vpBody: {
+    lineHeight: 1.5
+  },
+  vpLastChecked: {
+    display: 'block',
+    mt: 2,
+    pt: 1.5,
+    borderTop: 1,
+    borderColor: 'divider'
+  },
+  vpChecklistRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 0.75
+  },
+  vpSummaryColumn: {
+    flex: { md: '1 1 40%' },
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    px: { xs: 0, md: 2 },
+    py: { xs: 1, md: 0 }
+  },
+  vpSummaryText: {
+    textAlign: { xs: 'left', md: 'center' },
+    maxWidth: 320
+  },
+  credentialStack: {
+    width: '100%'
+  },
+  badgeRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    mb: 2
   }
 } as const
 

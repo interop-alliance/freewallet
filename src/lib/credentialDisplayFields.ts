@@ -1,13 +1,6 @@
 import type { IVerifiableCredential, IAlignment } from '@digitalcredentials/ssi'
 import type { CredentialDisplayFields } from '@/types/credential'
-
-export function getIssuanceDate(vc: IVerifiableCredential): string {
-  return (vc as any).validFrom ?? (vc as any).issuanceDate ?? ''
-}
-
-export function getExpirationDate(vc: IVerifiableCredential): string {
-  return (vc as any).validUntil ?? (vc as any).expirationDate ?? ''
-}
+import { getExpirationDateIso } from '@/lib/vcDateFields'
 
 function subject(vc: IVerifiableCredential): any {
   const sbj = vc.credentialSubject
@@ -45,8 +38,7 @@ export function getDisplayFields(
 ): CredentialDisplayFields {
   const common = {
     issuedTo: extractIssuedTo(vc),
-    issuanceDate: getIssuanceDate(vc),
-    expirationDate: getExpirationDate(vc)
+    expirationDate: getExpirationDateIso(vc) ?? ''
   }
 
   const sbj = subject(vc)

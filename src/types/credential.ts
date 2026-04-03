@@ -3,7 +3,6 @@ import type { IVerifiableCredential, IAlignment } from '@digitalcredentials/ssi'
 export interface CredentialDisplayFields {
   credentialName: string
   issuedTo: string
-  issuanceDate: string
   expirationDate: string
   credentialDescription: string
   criteria: string

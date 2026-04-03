@@ -23,3 +23,7 @@ export const MEDIATOR =
   encodeURIComponent(window.location.origin)
 
 export const WALLET_LOCATION = window.location.origin + '/'
+
+export const VC_V2_CONTEXT_URL = 'https://www.w3.org/ns/credentials/v2'
+export const EXPIRED_MESSAGE = 'Credential has expired.'
+export const MAX_CLOCK_SKEW_SEC = 300

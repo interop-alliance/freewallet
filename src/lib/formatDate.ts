@@ -20,3 +20,14 @@ export function formatDate({
     return isoDate
   }
 }
+
+export function formatDateTime(date: Date, locale = 'en-US'): string {
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      dateStyle: 'medium',
+      timeStyle: 'short'
+    }).format(date)
+  } catch {
+    return date.toISOString()
+  }
+}
