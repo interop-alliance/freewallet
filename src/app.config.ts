@@ -25,5 +25,6 @@ export const MEDIATOR =
 export const WALLET_LOCATION = window.location.origin + '/'
 
 export const VC_V2_CONTEXT_URL = 'https://www.w3.org/ns/credentials/v2'
-export const EXPIRED_MESSAGE = 'Credential has expired.'
-export const MAX_CLOCK_SKEW_SEC = 300
+
+export const KNOWN_REGISTRIES_URL =
+  'https://digitalcredentials.github.io/dcc-known-registries/known-did-registries.json'

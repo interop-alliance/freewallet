@@ -18,7 +18,6 @@ import { getDisplayFields } from '@/lib/credentialDisplayFields'
 import { formatDate } from '@/lib/formatDate'
 import { getProofCreatedIso } from '@/lib/getProofCreatedIso'
 import { useVerification } from '@/hooks/useVerification'
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import { IssuerInfo } from '@/components/credentialDetails/IssuerInfo'
 import {
   VerificationPanel,
@@ -32,7 +31,7 @@ import {
   credentialDetailStyles,
   credentialDetailCardStyles as sx
 } from '@/styles/credentialStyles'
-import type { IAlignment } from '@digitalcredentials/ssi'
+import type { IAlignment, IVerifiableCredential } from '@digitalcredentials/ssi'
 
 export function CredentialDetail({
   vc,

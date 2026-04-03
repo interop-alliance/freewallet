@@ -6,6 +6,7 @@ import Typography from '@mui/material/Typography'
 import { Link as RouterLink } from 'react-router'
 import { BsAward } from 'react-icons/bs'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import { getDisplayFields } from '@/lib/credentialDisplayFields'
 import { credentialTitle } from '@/lib/credentialTitle'
 import { credentialCardStyles } from '@/styles/appStyles'
 
@@ -15,10 +16,9 @@ interface CredentialCardProps {
 }
 
 export function CredentialCard({ cid, credential }: CredentialCardProps) {
+  const { credentialDescription } = getDisplayFields(credential)
   const description =
-    'description' in credential.credentialSubject
-      ? credential.credentialSubject.description
-      : 'No Description'
+    credentialDescription.trim() !== '' ? credentialDescription : 'No Description'
   return (
     <Card variant="outlined">
       <CardActionArea

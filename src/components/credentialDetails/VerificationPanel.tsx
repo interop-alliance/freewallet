@@ -6,7 +6,6 @@ import {
   Typography
 } from '@mui/material'
 import { MdCancel, MdCheckCircle } from 'react-icons/md'
-
 import type { UseVerificationReturn } from '@/hooks/useVerification'
 import { formatDateTime } from '@/lib/formatDate'
 import {
@@ -14,7 +13,6 @@ import {
   getVerificationNarrative
 } from '@/lib/verificationMessages'
 import { credentialDetailCardStyles as sx } from '@/styles/credentialStyles'
-import type { VerificationStep } from '@/types/verification'
 
 function ChecklistRow({
   label,

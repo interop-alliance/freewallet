@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-
-import { verifyCredential } from '@/lib/verifyCredential'
+import { verifyResultToChecklist } from '@/lib/mapVerificationToUi'
+import { verifyCredential } from '@/lib/verify'
+import type { VerificationResult } from '@/types/credential'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
-
-import type { VerificationResult } from '@/types/verification'
 
 export interface UseVerificationReturn {
   result: VerificationResult | null
@@ -37,7 +36,13 @@ export function useVerification(
     setLoading(true)
     setError(null)
     try {
-      setResult(await verifyCredential(credential))
+      const verifyPayload = await verifyCredential(credential)
+      setResult(
+        verifyResultToChecklist(
+          verifyPayload as Record<string, unknown>,
+          credential
+        )
+      )
       setLastCheckedAt(new Date())
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e))

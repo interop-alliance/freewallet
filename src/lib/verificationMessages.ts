@@ -1,23 +1,14 @@
-import type { VerificationResult, VerificationStep } from '@/types/verification'
+import type { VerificationResult } from '@/types/credential'
 
 export function isFullyVerified(result: VerificationResult | null): boolean {
   if (!result) {
     return false
   }
-  return result.signature.valid && result.expiry.valid && result.status.valid
-}
-
-export function isFailed(result: VerificationResult): VerificationStep | null {
-  if (!result.signature.valid) {
-    return result.signature
-  }
-  if (!result.expiry.valid) {
-    return result.expiry
-  }
-  if (!result.status.valid) {
-    return result.status
-  }
-  return null
+  return (
+    result.signature.valid &&
+    result.expiry.valid &&
+    result.status.valid
+  )
 }
 
 /** User-facing headline + body for the verification panel (not crypto data). */
@@ -38,7 +29,9 @@ export function getVerificationNarrative(
     }
   }
   if (result) {
-    const failed = isFailed(result)
+    const failed = [result.signature, result.expiry, result.status].find(
+      step => !step.valid
+    )
     const detail =
       failed?.error ??
       failed?.message ??
