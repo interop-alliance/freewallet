@@ -10,7 +10,7 @@ import { securityLoader } from '@digitalcredentials/security-document-loader'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 
 import type { VerificationResult, VerificationStep } from '@/types/verification'
-import { getExpirationInstant } from '@/lib/vcDateFields'
+import { getExpirationInstant } from '@/lib/formatDate'
 import { MAX_CLOCK_SKEW_SEC, EXPIRED_MESSAGE } from '@/app.config'
 
 let loaderInstance: ReturnType<typeof securityLoader> | null = null

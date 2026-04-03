@@ -1,14 +1,10 @@
 import type { IVerifiableCredential, IAlignment } from '@digitalcredentials/ssi'
 import type { CredentialDisplayFields } from '@/types/credential'
-import { getExpirationDateIso } from '@/lib/vcDateFields'
-
-function subject(vc: IVerifiableCredential): any {
-  const sbj = vc.credentialSubject
-  return Array.isArray(sbj) ? sbj[0] : sbj
-}
+import { getCredentialSubject } from '@/lib/getCredentialSubject'
+import { getExpirationDateIso } from '@/lib/formatDate'
 
 function extractIssuedTo(vc: IVerifiableCredential): string {
-  const sbj = subject(vc)
+  const sbj = getCredentialSubject(vc)
   if (!sbj) {
     return ''
   }
@@ -41,7 +37,7 @@ export function getDisplayFields(
     expirationDate: getExpirationDateIso(vc) ?? ''
   }
 
-  const sbj = subject(vc)
+  const sbj = getCredentialSubject(vc)
 
   if (isOBv3(vc)) {
     const achievement = sbj?.achievement
