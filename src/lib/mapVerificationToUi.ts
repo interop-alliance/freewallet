@@ -16,6 +16,19 @@ type LogLine = {
   foundInRegistries?: string[]
 }
 
+function getVerifyLogLines(raw: Record<string, unknown>): LogLine[] {
+  const results = raw.results as Array<{ log?: LogLine[] }> | undefined
+  const logFromFirstResult = results?.[0]?.log
+  if (logFromFirstResult && Array.isArray(logFromFirstResult)) {
+    return logFromFirstResult
+  }
+  const topLevelLog = raw.log
+  if (Array.isArray(topLevelLog)) {
+    return topLevelLog as LogLine[]
+  }
+  return []
+}
+
 function stepFromLogEntry(
   entry: LogLine | undefined,
   okMessage: string,
@@ -74,20 +87,18 @@ export function verifyResultToChecklist(
   raw: Record<string, unknown>,
   credential: IVerifiableCredential
 ): VerificationResult {
-  const r = raw.results as Array<{ log?: LogLine[] }> | undefined
-  const log: LogLine[] =
-    r?.[0]?.log && Array.isArray(r[0].log)
-      ? r[0].log
-      : Array.isArray(raw.log)
-        ? (raw.log as LogLine[])
-        : []
-  const byId = (id: string) => log.find(s => s.id === id)
+  const log = getVerifyLogLines(raw)
+  const byId = (id: string) =>
+    log.find(line => line.id === id)
 
-  const r0 = (
-    raw.results as Array<{ error?: { message?: string } }> | undefined
-  )?.[0]
+  const resultsWithError = raw.results as
+    | Array<{ error?: { message?: string } }>
+    | undefined
+  const firstResult = resultsWithError?.[0]
   const globalErr =
-    typeof r0?.error?.message === 'string' ? r0.error.message : undefined
+    typeof firstResult?.error?.message === 'string'
+      ? firstResult.error.message
+      : undefined
 
   const withGlobalErr = (step: VerificationStep) =>
     !step.valid && !step.error && globalErr

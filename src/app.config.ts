@@ -24,7 +24,5 @@ export const MEDIATOR =
 
 export const WALLET_LOCATION = window.location.origin + '/'
 
-export const VC_V2_CONTEXT_URL = 'https://www.w3.org/ns/credentials/v2'
-
 export const KNOWN_REGISTRIES_URL =
   'https://digitalcredentials.github.io/dcc-known-registries/known-did-registries.json'

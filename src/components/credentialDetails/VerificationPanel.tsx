@@ -13,6 +13,7 @@ import {
   getVerificationNarrative
 } from '@/lib/verificationMessages'
 import { credentialDetailCardStyles as sx } from '@/styles/credentialStyles'
+import type { VerificationStep } from '@/types/credential'
 
 function ChecklistRow({
   label,
