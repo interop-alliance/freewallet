@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@digitalbazaar/webkms-client": "^14.3.0",
+    "@digitalcredentials/ed25519-signature-2020": "^7.0.0",
     "@digitalcredentials/ezcap": "^6.1.0",
     "@digitalcredentials/http-client": "^5.0.4",
     "@digitalcredentials/ssi": "^5.4.2",
