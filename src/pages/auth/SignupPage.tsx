@@ -11,7 +11,7 @@ import {
   useMediaQuery,
   useTheme
 } from '@mui/material'
-import { useLocation, useNavigate } from 'react-router'
+import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
@@ -35,13 +35,16 @@ export function SignupPage() {
   const theme = useTheme()
   const isCompactStepper = useMediaQuery(theme.breakpoints.down('sm'))
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const login = useAuthStore(state => state.login)
-  const [activeStep, setActiveStep] = useState(0)
+  const location = useLocation()
+  const { userMessage } = location.state || {}
+
   const [email, setEmail] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [score, setScore] = useState(0)
-  const location = useLocation()
-  const { userMessage } = location.state || {}
+
+  const activeStep = searchParams.get('step') === 'email' ? 1 : 0
 
   const handleSignup = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -75,13 +78,14 @@ export function SignupPage() {
   const canSubmit = emailValid && passphraseStepComplete
 
   const goNext = () => {
-    if (passphraseStepComplete) {
-      setActiveStep(1)
+    if (!passphraseStepComplete) {
+      return
     }
+    setSearchParams({ ['step']: 'email' })
   }
 
   const goBack = () => {
-    setActiveStep(0)
+    navigate(-1)
   }
 
   return (
