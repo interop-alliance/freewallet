@@ -18,20 +18,37 @@ test.describe('Sign up page', () => {
     ).toBeVisible()
   })
 
-  test('shows email and passphrase fields', async ({ page }) => {
-    await expect(page.locator('input[type="email"]')).toBeVisible()
+  test('shows passphrase step first, then email after Next', async ({
+    page
+  }) => {
     await expect(page.locator('input[type="password"]')).toBeVisible()
+    await expect(page.locator('input[type="email"]')).not.toBeVisible()
+    await page
+      .locator('input[type="password"]')
+      .fill('Str0ng-passphrase!')
+    await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Next' }).click()
+    await expect(page.locator('input[type="email"]')).toBeVisible()
   })
 
   test('shows "Create Wallet" submit button', async ({ page }) => {
+    await page
+      .locator('input[type="password"]')
+      .fill('Str0ng-passphrase!')
+    await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Next' }).click()
     await expect(
       page.getByRole('button', { name: 'Create Wallet' })
     ).toBeVisible()
   })
 
   test('successful sign up navigates to dashboard', async ({ page }) => {
+    await page
+      .locator('input[type="password"]')
+      .fill('Str0ng-passphrase!')
+    await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Next' }).click()
     await page.locator('input[type="email"]').fill('alice@example.com')
-    await page.locator('input[type="password"]').fill('Str0ng-passphrase!')
     await page.getByRole('button', { name: 'Create Wallet' }).click()
     await expect(page).toHaveURL(/#\/dashboard/)
   })
