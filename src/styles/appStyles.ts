@@ -40,6 +40,30 @@ export const authStyles = {
     py: 1,
     alignSelf: 'center'
   },
+  signupStepperWrap: {
+    width: '100%',
+    maxWidth: 360,
+    alignSelf: 'center'
+  },
+  signupStepper: {
+    '& .MuiStepLabel-label': { typography: 'body2' }
+  },
+  signupWizardActions: {
+    width: '100%',
+    maxWidth: 360,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 2
+  },
+  signupBackButton: {
+    width: 'auto',
+    minWidth: 100,
+    textTransform: 'none',
+    py: 1,
+    alignSelf: 'center'
+  },
   guestIcon: {
     mr: 1.5
   }

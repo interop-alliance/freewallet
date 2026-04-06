@@ -100,14 +100,12 @@ export function SignupPage() {
           </Typography>
         )}
 
-        <Box sx={{ width: '100%', maxWidth: 360, alignSelf: 'center' }}>
+        <Box sx={authStyles.signupStepperWrap}>
           <Stepper
             activeStep={activeStep}
             orientation={isCompactStepper ? 'vertical' : 'horizontal'}
             alternativeLabel={!isCompactStepper}
-            sx={{
-              '& .MuiStepLabel-label': { typography: 'body2' }
-            }}
+            sx={authStyles.signupStepper}
           >
             {STEPS.map(label => (
               <Step key={label}>
@@ -186,18 +184,12 @@ export function SignupPage() {
               sx={authStyles.input}
             />
 
-            <Stack
-              direction="row"
-              spacing={2}
-              justifyContent="center"
-              alignItems="center"
-              sx={{ ...authStyles.input, maxWidth: 360 }}
-            >
+            <Stack sx={authStyles.signupWizardActions}>
               <Button
                 variant="outlined"
                 type="button"
                 onClick={goBack}
-                sx={{ ...authStyles.actionButton, width: 'auto', minWidth: 100 }}
+                sx={authStyles.signupBackButton}
               >
                 Back
               </Button>
