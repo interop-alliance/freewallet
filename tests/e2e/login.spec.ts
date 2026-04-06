@@ -31,8 +31,10 @@ test.describe('Login page', () => {
   test('successful login navigates to dashboard', async ({ page }) => {
     // Sign up first to create the user
     await page.goto('/#/signup')
-    await page.locator('input[type="email"]').fill('alice@example.com')
     await page.locator('input[type="password"]').fill('Str0ng-passphrase!')
+    await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Next' }).click()
+    await page.locator('input[type="email"]').fill('alice@example.com')
     await page.getByRole('button', { name: 'Create Wallet' }).click()
     await expect(page).toHaveURL(/#\/dashboard/)
 
