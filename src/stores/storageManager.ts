@@ -460,7 +460,7 @@ export class BrowserStore implements IWalletStore {
   async ensureUserCollections({ user }: { user: User }) {
     const { dbPrefix } = this
     const { db, dbName } = await BrowserStore.dbInstanceFor({ dbPrefix })
-    console.log('Initialed user collections in', dbName, 'user:', user.id)
+    console.log('Initialized user collections in', dbName, 'user:', user.id)
     this.db = db
     this.dbName = dbName
   }
