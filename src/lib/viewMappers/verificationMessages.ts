@@ -4,11 +4,14 @@ export function isFullyVerified(result: VerificationResult | null): boolean {
   if (!result) {
     return false
   }
-  return (
-    result.signature.valid &&
-    result.expiry.valid &&
-    result.status.valid
-  )
+  return result.signature.valid && result.expiry.valid && result.status.valid
+}
+
+export function isExpiredOnly(result: VerificationResult | null): boolean {
+  if (!result) {
+    return false
+  }
+  return result.signature.valid && !result.expiry.valid && result.status.valid
 }
 
 /** User-facing headline + body for the verification panel (not crypto data). */
@@ -26,6 +29,12 @@ export function getVerificationNarrative(
     return {
       headline: 'This credential was verified successfully.',
       body: 'Cryptographic proof, validity period, and revocation status (if present) were checked successfully.'
+    }
+  }
+  if (result && isExpiredOnly(result)) {
+    return {
+      headline: 'This credential:',
+      body: ''
     }
   }
   if (result) {

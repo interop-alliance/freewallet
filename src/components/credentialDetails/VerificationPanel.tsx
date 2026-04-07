@@ -5,36 +5,45 @@ import {
   Stack,
   Typography
 } from '@mui/material'
-import { MdCancel, MdCheckCircle } from 'react-icons/md'
+import { MdCancel, MdCheckCircle, MdWarning } from 'react-icons/md'
 import type { UseVerificationReturn } from '@/hooks/useVerification'
 import { formatDateTime } from '@/lib/viewMappers/formatDate'
 import {
   isFullyVerified,
+  isExpiredOnly,
   getVerificationNarrative
 } from '@/lib/viewMappers/verificationMessages'
 import { credentialDetailCardStyles as sx } from '@/styles/credentialStyles'
 import type { VerificationStep } from '@/types/credential'
 
 function ChecklistRow({
-  label,
-  step
+  step,
+  warn = false
 }: {
-  label: string
   step: VerificationStep
+  warn?: boolean
 }) {
   const ok = step.valid
+
+  let iconSx
+  let icon
+  if (ok) {
+    iconSx = sx.verificationIconSuccess
+    icon = <MdCheckCircle size={16} />
+  } else if (warn) {
+    iconSx = sx.verificationIconWarning
+    icon = <MdWarning size={16} />
+  } else {
+    iconSx = sx.verificationIconError
+    icon = <MdCancel size={16} />
+  }
+
   return (
     <Box sx={sx.vpChecklistRow}>
-      <Box
-        sx={ok ? sx.verificationIconSuccess : sx.verificationIconError}
-        aria-hidden
-      >
-        {ok ? <MdCheckCircle size={16} /> : <MdCancel size={16} />}
+      <Box sx={iconSx} aria-hidden>
+        {icon}
       </Box>
       <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
-        <Box component="span" sx={{ fontWeight: 600, color: 'text.primary' }}>
-          {label}:{' '}
-        </Box>
         {step.message}
         {step.error ? ` — ${step.error}` : ''}
       </Typography>
@@ -52,11 +61,15 @@ export function VerificationPanel({
   const narrative = getVerificationNarrative(result, error)
   const summaryOk =
     !error && result != null && isFullyVerified(result) && !pending
+  const expiredOnly = !error && result != null && isExpiredOnly(result)
 
   let summaryMessage = ''
   if (!pending) {
     if (summaryOk) {
       summaryMessage = 'This credential was verified successfully.'
+    } else if (expiredOnly) {
+      summaryMessage =
+        'This credential has expired but its cryptographic proof is still valid.'
     } else {
       summaryMessage = 'This credential was not verified successfully.'
     }
@@ -99,9 +112,9 @@ export function VerificationPanel({
               )}
               {result && (
                 <Stack spacing={0.75} sx={{ mt: 2 }}>
-                  <ChecklistRow label="Signature" step={result.signature} />
-                  <ChecklistRow label="Expiry" step={result.expiry} />
-                  <ChecklistRow label="Revocation" step={result.status} />
+                  <ChecklistRow step={result.signature} />
+                  <ChecklistRow step={result.expiry} warn={expiredOnly} />
+                  <ChecklistRow step={result.status} />
                 </Stack>
               )}
               {lastCheckedAt && (
@@ -110,7 +123,7 @@ export function VerificationPanel({
                   color="text.secondary"
                   sx={sx.vpLastChecked}
                 >
-                  Last checked: {formatDateTime(lastCheckedAt)}
+                  Last Checked: {formatDateTime(lastCheckedAt)}
                 </Typography>
               )}
             </>
@@ -143,6 +156,7 @@ export function VerificationStatusBadge({
   error
 }: Pick<UseVerificationReturn, 'loading' | 'result' | 'error'>) {
   const verified = !error && result != null && isFullyVerified(result)
+  const expiredOnly = !error && result != null && isExpiredOnly(result)
 
   if (loading) {
     return (
@@ -150,6 +164,22 @@ export function VerificationStatusBadge({
         <CircularProgress size={14} sx={sx.vpStatusSpinner} />
         <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
           Verifying…
+        </Typography>
+      </Box>
+    )
+  }
+
+  if (expiredOnly) {
+    return (
+      <Box
+        sx={{ ...sx.vpStatusBadge, ...sx.vpStatusBadgeWarning }}
+        aria-live="polite"
+      >
+        <Box sx={sx.vpStatusIconWrap} aria-hidden>
+          <MdWarning size={16} />
+        </Box>
+        <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
+          Warning
         </Typography>
       </Box>
     )

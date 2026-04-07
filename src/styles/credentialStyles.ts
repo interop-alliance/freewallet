@@ -138,6 +138,12 @@ export const credentialDetailCardStyles = {
     flexShrink: 0,
     pt: 0.125
   },
+  verificationIconWarning: {
+    color: 'warning.main',
+    lineHeight: 0,
+    flexShrink: 0,
+    pt: 0.125
+  },
   verificationText: {
     minWidth: 0,
     flex: 1
@@ -165,6 +171,11 @@ export const credentialDetailCardStyles = {
     backgroundColor: 'error.light',
     color: 'error.dark',
     '& .MuiTypography-root': { color: 'black' }
+  },
+  vpStatusBadgeWarning: {
+    backgroundColor: 'warning.light',
+    color: 'warning.dark',
+    '& .MuiTypography-root': { color: 'warning.dark' }
   },
   vpStatusSpinner: {
     flexShrink: 0
