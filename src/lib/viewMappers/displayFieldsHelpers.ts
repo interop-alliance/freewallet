@@ -1,15 +1,11 @@
-import type { IVerifiableCredential, IAlignment } from '@digitalcredentials/ssi'
+import type {
+  IVerifiableCredential,
+  IAlignment,
+  IAchievement
+} from '@digitalcredentials/ssi'
 import { getSubject } from '@/lib/viewMappers/getSubject'
 
 export type SubjectRecord = Record<string, unknown>
-export type AchievementRecord = {
-  description?: string
-  criteria?: { narrative?: string }
-  image?: { id?: string } | string
-  achievementType?: string
-  alignment?: unknown
-  name?: string
-}
 
 export function asRecord(value: unknown): SubjectRecord | undefined {
   if (!value || typeof value !== 'object') {
@@ -206,9 +202,7 @@ export function buildCriteria(
   return getTrimmedString(hasCredential?.competencyRequired)
 }
 
-export function getAchievementImage(
-  primaryAchievement?: AchievementRecord
-): string {
+export function getAchievementImage(primaryAchievement?: IAchievement): string {
   if (!primaryAchievement?.image) {
     return ''
   }
@@ -218,9 +212,7 @@ export function getAchievementImage(
   return primaryAchievement.image.id ?? ''
 }
 
-export function getAchievementType(
-  primaryAchievement?: AchievementRecord
-): string {
+export function getAchievementType(primaryAchievement?: IAchievement): string {
   if (typeof primaryAchievement?.achievementType === 'string') {
     return primaryAchievement.achievementType
   }

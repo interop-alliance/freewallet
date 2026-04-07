@@ -45,7 +45,7 @@ export function CredentialDetail({
   onDelete?: () => void
 }) {
   const fields = useMemo(() => getDisplayFields(vc), [vc])
-  const signatureCreatedIso = useMemo(() => getProofCreatedIso(vc), [vc])
+  const createdDate = useMemo(() => getProofCreatedIso(vc), [vc])
   const verification = useVerification(vc)
   const [showRaw, setShowRaw] = useState(false)
   const rawJson = useMemo(() => JSON.stringify(vc, null, 2), [vc])
@@ -81,7 +81,7 @@ export function CredentialDetail({
 
         <ResumeCredentialCard
           vc={vc}
-          signatureCreatedIso={signatureCreatedIso}
+          createdDate={createdDate}
           verification={verification}
           showRaw={showRaw}
           rawJson={rawJson}
@@ -159,11 +159,9 @@ export function CredentialDetail({
               <IssuerInfo issuer={vc.issuer} />
 
               <InfoBlock
-                header="Signature date"
+                header="Created date"
                 value={
-                  signatureCreatedIso
-                    ? formatDate({ isoDate: signatureCreatedIso })
-                    : 'N/A'
+                  createdDate ? formatDate({ isoDate: createdDate }) : 'N/A'
                 }
               />
               <Box sx={{ mt: 0 }}>

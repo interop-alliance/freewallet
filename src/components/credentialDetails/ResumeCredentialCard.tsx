@@ -29,17 +29,21 @@ function CheckRow({
   valid?: boolean
   loading: boolean
 }) {
+  let checkColor = 'text.disabled'
+  if (loading) {
+    checkColor = 'text.disabled'
+  } else if (valid) {
+    checkColor = 'success.main'
+  } else {
+    checkColor = 'error.main'
+  }
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
       <Box
         sx={{
           display: 'flex',
           lineHeight: 0,
-          color: loading
-            ? 'text.disabled'
-            : valid
-              ? 'success.main'
-              : 'error.main'
+          color: checkColor
         }}
         aria-hidden
       >
@@ -60,7 +64,7 @@ function CheckRow({
 
 interface Props {
   vc: IVerifiableCredential
-  signatureCreatedIso: string | null
+  createdDate: string | null
   verification: UseVerificationReturn
   showRaw: boolean
   rawJson: string
@@ -69,7 +73,7 @@ interface Props {
 
 export function ResumeCredentialCard({
   vc,
-  signatureCreatedIso,
+  createdDate,
   verification,
   showRaw,
   rawJson,
@@ -114,9 +118,7 @@ export function ResumeCredentialCard({
               Signed:{' '}
             </Typography>
             <Typography variant="body2" sx={{ display: 'inline' }}>
-              {signatureCreatedIso
-                ? formatDate({ isoDate: signatureCreatedIso })
-                : 'N/A'}
+              {createdDate ? formatDate({ isoDate: createdDate }) : 'N/A'}
             </Typography>
           </Box>
         </Stack>
