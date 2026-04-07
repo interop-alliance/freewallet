@@ -239,13 +239,19 @@ export const credentialCardStyles = {
   cardContent: {
     flexGrow: 1,
     position: 'relative',
-    pb: '16px !important'
+    pb: '16px !important',
+    display: 'flex',
+    flexDirection: 'column'
   },
   description: {
     overflow: 'hidden',
     display: '-webkit-box',
     WebkitLineClamp: 3,
     WebkitBoxOrient: 'vertical'
+  },
+  cardStatusBadge: {
+    mt: 'auto',
+    pt: 1
   },
   badge: {
     position: 'absolute',

@@ -44,7 +44,7 @@ export function CredentialCard({ cid, credential }: CredentialCardProps) {
           >
             {description}
           </Typography>
-          <Box sx={{ mt: 1.5 }}>
+          <Box sx={credentialCardStyles.cardStatusBadge}>
             <VerificationStatusBadge
               result={result}
               loading={loading}
