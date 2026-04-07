@@ -1,4 +1,7 @@
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type {
+  IAchievement,
+  IVerifiableCredential
+} from '@digitalcredentials/ssi'
 import type { CredentialDisplayFields } from '@/types/credential'
 import { getExpirationDateIso } from '@/lib/viewMappers/formatDate'
 import { getSubject } from '@/lib/viewMappers/getSubject'
@@ -6,7 +9,6 @@ import {
   asRecord,
   extractIssuedTo,
   achievementsList,
-  type AchievementRecord,
   normalizeAlignments,
   getAchievementImage,
   getAchievementType,
@@ -36,7 +38,7 @@ export function getDisplayFields(
   }
 
   const achievements = achievementsList(subject)
-  const primaryAchievement = achievements[0] as AchievementRecord | undefined
+  const primaryAchievement = achievements[0] as IAchievement | undefined
   const alignments = achievements.flatMap(achievement =>
     normalizeAlignments((achievement as { alignment?: unknown }).alignment)
   )
