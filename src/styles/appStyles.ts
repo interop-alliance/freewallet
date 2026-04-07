@@ -1,3 +1,5 @@
+import type React from 'react'
+
 export const authStyles = {
   page: {
     minHeight: '100dvh',
@@ -147,9 +149,25 @@ export const dashboardStyles = {
   credentialsSection: {
     mt: 4
   },
+  credentialsHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2
+  },
   credentialsHeading: {
     fontWeight: 600
   },
+  syncButton: {
+    textTransform: 'none',
+    borderRadius: 2,
+    px: 1.5,
+    py: 0.5
+  },
+  syncIcon: (syncing: boolean) =>
+    ({
+      transition: 'transform 0.6s linear',
+      transform: syncing ? 'rotate(360deg)' : 'rotate(0deg)'
+    }) as React.CSSProperties,
   credentialsGrid: {
     display: 'flex',
     flexWrap: 'wrap',
