@@ -161,7 +161,7 @@ export function VerificationStatusBadge({
   if (loading) {
     return (
       <Box sx={sx.vpStatusBadge} aria-live="polite">
-        <CircularProgress size={14} sx={sx.vpStatusSpinner} />
+        <CircularProgress size={12} sx={sx.vpStatusSpinner} />
         <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
           Verifying…
         </Typography>
@@ -176,7 +176,7 @@ export function VerificationStatusBadge({
         aria-live="polite"
       >
         <Box sx={sx.vpStatusIconWrap} aria-hidden>
-          <MdWarning size={16} />
+          <MdWarning size={14} />
         </Box>
         <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
           Warning
@@ -192,7 +192,7 @@ export function VerificationStatusBadge({
         aria-live="polite"
       >
         <Box sx={sx.vpStatusIconWrap} aria-hidden>
-          <MdCancel size={16} />
+          <MdCancel size={14} />
         </Box>
         <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
           Not Verified
@@ -208,7 +208,7 @@ export function VerificationStatusBadge({
         aria-live="polite"
       >
         <Box sx={sx.vpStatusIconWrap} aria-hidden>
-          <MdCheckCircle size={16} />
+          <MdCheckCircle size={14} />
         </Box>
         <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
           Verified

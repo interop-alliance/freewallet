@@ -156,9 +156,9 @@ export const credentialDetailCardStyles = {
     display: 'inline-flex',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 0.75,
-    px: 1.5,
-    py: 0.5,
+    gap: 0.5,
+    px: 1,
+    py: 0.25,
     borderRadius: 999,
     backgroundColor: 'action.hover'
   },
@@ -186,7 +186,7 @@ export const credentialDetailCardStyles = {
   },
   vpStatusBadgeLabel: {
     fontWeight: 700,
-    fontSize: '0.8125rem'
+    fontSize: '0.7rem'
   },
   /** VerifierPlus verification card (card 2) */
   vpCard: {
