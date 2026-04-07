@@ -3,9 +3,9 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import Avatar from '@mui/material/Avatar'
 import Link from '@mui/material/Link'
-import { getIssuerDetails } from '@/lib/issuerName'
+import { getIssuerDetails } from '@/lib/viewMappers/issuerName'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
-import { initials } from '@/lib/initials'
+import { initials } from '@/lib/viewMappers/initials'
 import { issuerInfoStyles as sx } from '@/styles/credentialStyles'
 
 interface IssuerInfoProps {
@@ -62,10 +62,8 @@ export function IssuerInfo({ issuer }: IssuerInfoProps) {
               {details.url}
             </Link>
           )}
-
         </Box>
       </Box>
     </Box>
   )
 }
-

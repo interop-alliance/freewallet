@@ -7,11 +7,11 @@ import {
 } from '@mui/material'
 import { MdCancel, MdCheckCircle } from 'react-icons/md'
 import type { UseVerificationReturn } from '@/hooks/useVerification'
-import { formatDateTime } from '@/lib/formatDate'
+import { formatDateTime } from '@/lib/viewMappers/formatDate'
 import {
   isFullyVerified,
   getVerificationNarrative
-} from '@/lib/verificationMessages'
+} from '@/lib/viewMappers/verificationMessages'
 import { credentialDetailCardStyles as sx } from '@/styles/credentialStyles'
 import type { VerificationStep } from '@/types/credential'
 
@@ -52,6 +52,15 @@ export function VerificationPanel({
   const narrative = getVerificationNarrative(result, error)
   const summaryOk =
     !error && result != null && isFullyVerified(result) && !pending
+
+  let summaryMessage = ''
+  if (!pending) {
+    if (summaryOk) {
+      summaryMessage = 'This credential was verified successfully.'
+    } else {
+      summaryMessage = 'This credential was not verified successfully.'
+    }
+  }
 
   return (
     <Box sx={sx.vpCard}>
@@ -120,11 +129,7 @@ export function VerificationPanel({
             color="text.secondary"
             sx={sx.vpSummaryText}
           >
-            {pending
-              ? ''
-              : summaryOk
-                ? 'This credential was verified successfully.'
-                : 'This credential was not verified successfully.'}
+            {summaryMessage}
           </Typography>
         </Box>
       </Box>

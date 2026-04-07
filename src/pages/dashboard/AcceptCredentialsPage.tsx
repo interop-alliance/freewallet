@@ -9,7 +9,7 @@ import { BsAward } from 'react-icons/bs'
 import { useLocation, useNavigate } from 'react-router'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import { useAuthStore } from '@/stores/authStore'
-import { credentialTitle } from '@/lib/credentialTitle'
+import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { credentialCardStyles, dashboardStyles } from '@/styles/appStyles'
 

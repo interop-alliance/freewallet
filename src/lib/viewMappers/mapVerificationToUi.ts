@@ -1,6 +1,6 @@
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import type { VerificationResult, VerificationStep } from '@/types/credential'
-import { getExpirationInstant } from '@/lib/formatDate'
+import { getExpirationInstant } from '@/lib/viewMappers/formatDate'
 
 const STEP_ID = {
   validSignature: 'valid_signature',
@@ -88,8 +88,7 @@ export function verifyResultToChecklist(
   credential: IVerifiableCredential
 ): VerificationResult {
   const log = getVerifyLogLines(raw)
-  const byId = (id: string) =>
-    log.find(line => line.id === id)
+  const byId = (id: string) => log.find(line => line.id === id)
 
   const resultsWithError = raw.results as
     | Array<{ error?: { message?: string } }>

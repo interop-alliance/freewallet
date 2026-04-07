@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { verifyResultToChecklist } from '@/lib/mapVerificationToUi'
+import { verifyResultToChecklist } from '@/lib/viewMappers/mapVerificationToUi'
 import { verifyCredential } from '@/lib/verify'
 import type { VerificationResult } from '@/types/credential'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'

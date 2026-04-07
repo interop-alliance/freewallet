@@ -8,14 +8,17 @@ import {
   Link,
   Collapse,
   Button,
-  IconButton
+  IconButton,
+  Dialog,
+  DialogContent,
+  DialogTitle
 } from '@mui/material'
 import { MdDeleteOutline } from 'react-icons/md'
 import { reset as microlightReset } from 'microlight'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { getDisplayFields } from '@/lib/credentialDisplayFields'
-import { formatDate } from '@/lib/formatDate'
+import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
+import { formatDate } from '@/lib/viewMappers/formatDate'
 import { getProofCreatedIso } from '@/lib/getProofCreatedIso'
 import { useVerification } from '@/hooks/useVerification'
 import { IssuerInfo } from '@/components/credentialDetails/IssuerInfo'
@@ -27,6 +30,9 @@ import {
   InfoBlock,
   SectionHeader
 } from '@/components/credentialDetails/InfoBlock'
+import { ResumePreview } from '@/components/resume/ResumePreview'
+import { isResumeCredential } from '@/lib/isResumeCredential'
+import { resumeSubjectToPreviewData } from '@/lib/viewMappers/resumeSubjectToPreviewData'
 import {
   credentialDetailStyles,
   credentialDetailCardStyles as sx
@@ -44,7 +50,13 @@ export function CredentialDetail({
   const signatureCreatedIso = useMemo(() => getProofCreatedIso(vc), [vc])
   const verification = useVerification(vc)
   const [showRaw, setShowRaw] = useState(false)
+  const [resumePreviewOpen, setResumePreviewOpen] = useState(false)
   const rawJson = useMemo(() => JSON.stringify(vc, null, 2), [vc])
+  const showResumePreview = useMemo(() => isResumeCredential(vc), [vc])
+  const resumePreviewData = useMemo(
+    () => (showResumePreview ? resumeSubjectToPreviewData(vc) : null),
+    [vc, showResumePreview]
+  )
 
   return (
     <Stack spacing={2} sx={sx.credentialStack}>
@@ -186,6 +198,16 @@ export function CredentialDetail({
         <Divider />
 
         <Box sx={sx.rawToggleWrapper}>
+          {showResumePreview && resumePreviewData && (
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => setResumePreviewOpen(true)}
+              sx={{ ...sx.rawToggle, mr: 1 }}
+            >
+              Resume preview
+            </Button>
+          )}
           <Button
             size="small"
             variant="text"
@@ -214,6 +236,24 @@ export function CredentialDetail({
       <Paper variant="outlined" sx={sx.card}>
         <VerificationPanel verification={verification} />
       </Paper>
+
+      {showResumePreview && resumePreviewData && (
+        <Dialog
+          open={resumePreviewOpen}
+          onClose={() => setResumePreviewOpen(false)}
+          maxWidth="md"
+          fullWidth
+          scroll="paper"
+          aria-labelledby="resume-preview-dialog-title"
+        >
+          <DialogTitle id="resume-preview-dialog-title">
+            Resume preview
+          </DialogTitle>
+          <DialogContent dividers sx={{ bgcolor: 'grey.50', py: 2 }}>
+            <ResumePreview data={resumePreviewData} />
+          </DialogContent>
+        </Dialog>
+      )}
     </Stack>
   )
 }
