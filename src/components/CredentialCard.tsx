@@ -9,6 +9,8 @@ import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { credentialCardStyles } from '@/styles/appStyles'
+import { useVerification } from '@/hooks/useVerification'
+import { VerificationStatusBadge } from '@/components/credentialDetails/VerificationPanel'
 
 interface CredentialCardProps {
   cid: string
@@ -18,6 +20,8 @@ interface CredentialCardProps {
 export function CredentialCard({ cid, credential }: CredentialCardProps) {
   const { credentialDescription } = getDisplayFields(credential)
   const description = credentialDescription ?? 'No Description'
+  const { result, loading, error } = useVerification(credential)
+
   return (
     <Card variant="outlined">
       <CardActionArea
@@ -40,6 +44,13 @@ export function CredentialCard({ cid, credential }: CredentialCardProps) {
           >
             {description}
           </Typography>
+          <Box sx={{ mt: 1.5 }}>
+            <VerificationStatusBadge
+              result={result}
+              loading={loading}
+              error={error}
+            />
+          </Box>
           <Box sx={credentialCardStyles.badge}>
             <BsAward size={28} />
           </Box>
