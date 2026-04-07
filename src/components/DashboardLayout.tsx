@@ -48,7 +48,10 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
             alt="Freewallet"
             sx={dashboardStyles.walletIcon}
           />
-          <Typography variant="h6" sx={{ flexGrow: 1, ...dashboardStyles.navBrandTitle }}>
+          <Typography
+            variant="h6"
+            sx={{ flexGrow: 1, ...dashboardStyles.navBrandTitle }}
+          >
             Freewallet
           </Typography>
           {session ? (
@@ -85,7 +88,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
 
       <Box component="main" sx={dashboardStyles.main}>
         <Toolbar />
-        <Typography variant="h2" component="h1" sx={dashboardStyles.title}>
+        <Typography variant="h3" component="h3" sx={dashboardStyles.title}>
           {title}
         </Typography>
         {children}

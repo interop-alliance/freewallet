@@ -8,10 +8,7 @@ import {
   Link,
   Collapse,
   Button,
-  IconButton,
-  Dialog,
-  DialogContent,
-  DialogTitle
+  IconButton
 } from '@mui/material'
 import { MdDeleteOutline } from 'react-icons/md'
 import { reset as microlightReset } from 'microlight'
@@ -31,6 +28,7 @@ import {
   SectionHeader
 } from '@/components/credentialDetails/InfoBlock'
 import { ResumePreview } from '@/components/resume/ResumePreview'
+import { ResumeCredentialCard } from '@/components/credentialDetails/ResumeCredentialCard'
 import { isResumeCredential } from '@/lib/isResumeCredential'
 import { resumeSubjectToPreviewData } from '@/lib/viewMappers/resumeSubjectToPreviewData'
 import {
@@ -50,13 +48,57 @@ export function CredentialDetail({
   const signatureCreatedIso = useMemo(() => getProofCreatedIso(vc), [vc])
   const verification = useVerification(vc)
   const [showRaw, setShowRaw] = useState(false)
-  const [resumePreviewOpen, setResumePreviewOpen] = useState(false)
   const rawJson = useMemo(() => JSON.stringify(vc, null, 2), [vc])
   const showResumePreview = useMemo(() => isResumeCredential(vc), [vc])
   const resumePreviewData = useMemo(
     () => (showResumePreview ? resumeSubjectToPreviewData(vc) : null),
     [vc, showResumePreview]
   )
+
+  if (showResumePreview && resumePreviewData) {
+    return (
+      <Stack spacing={2} sx={sx.credentialStack}>
+        <Box
+          sx={{
+            position: 'relative',
+            ...(onDelete ? { pr: { xs: 5, md: 6 } } : {})
+          }}
+        >
+          {onDelete && (
+            <IconButton
+              size="small"
+              onClick={onDelete}
+              aria-label="Delete credential"
+              sx={{ position: 'absolute', top: 0, right: 0 }}
+            >
+              <MdDeleteOutline size={24} />
+            </IconButton>
+          )}
+          <Typography variant="h5" component="h2" sx={sx.credentialName}>
+            {fields.credentialName}
+          </Typography>
+        </Box>
+
+        <ResumeCredentialCard
+          vc={vc}
+          signatureCreatedIso={signatureCreatedIso}
+          verification={verification}
+          showRaw={showRaw}
+          rawJson={rawJson}
+          onToggleRaw={() => {
+            setShowRaw(prev => !prev)
+            if (!showRaw) {
+              requestAnimationFrame(() => microlightReset())
+            }
+          }}
+        />
+
+        <Divider />
+
+        <ResumePreview data={resumePreviewData} />
+      </Stack>
+    )
+  }
 
   return (
     <Stack spacing={2} sx={sx.credentialStack}>
@@ -198,16 +240,6 @@ export function CredentialDetail({
         <Divider />
 
         <Box sx={sx.rawToggleWrapper}>
-          {showResumePreview && resumePreviewData && (
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => setResumePreviewOpen(true)}
-              sx={{ ...sx.rawToggle, mr: 1 }}
-            >
-              Resume preview
-            </Button>
-          )}
           <Button
             size="small"
             variant="text"
@@ -232,28 +264,9 @@ export function CredentialDetail({
           </Collapse>
         </Box>
       </Paper>
-
       <Paper variant="outlined" sx={sx.card}>
         <VerificationPanel verification={verification} />
       </Paper>
-
-      {showResumePreview && resumePreviewData && (
-        <Dialog
-          open={resumePreviewOpen}
-          onClose={() => setResumePreviewOpen(false)}
-          maxWidth="md"
-          fullWidth
-          scroll="paper"
-          aria-labelledby="resume-preview-dialog-title"
-        >
-          <DialogTitle id="resume-preview-dialog-title">
-            Resume preview
-          </DialogTitle>
-          <DialogContent dividers sx={{ bgcolor: 'grey.50', py: 2 }}>
-            <ResumePreview data={resumePreviewData} />
-          </DialogContent>
-        </Dialog>
-      )}
     </Stack>
   )
 }

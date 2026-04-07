@@ -8,6 +8,7 @@ import { NotFoundPage } from '@/pages/NotFoundPage'
 import { useAuthStore } from '@/stores/authStore'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
 import type { StoredCredential } from '@/types/credential'
+import { isResumeCredential } from '@/lib/isResumeCredential'
 
 export function CredentialDetailPage() {
   const session = useAuthStore(state => state.session)
@@ -43,8 +44,16 @@ export function CredentialDetailPage() {
     return <NotFoundPage />
   }
 
+  let title = 'Credential'
+  if (credential?.vc) {
+    if (isResumeCredential(credential.vc)) {
+      title = 'Resume'
+    } else {
+      title = 'Credential'
+    }
+  }
   return (
-    <DashboardLayout title="Credential">
+    <DashboardLayout title={title}>
       <Box sx={credentialDetailStyles.wrapper}>
         {credential ? (
           <>

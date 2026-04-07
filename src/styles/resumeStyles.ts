@@ -35,21 +35,21 @@ export type ResumeStylesMap = {
 export const resumeStyles: ResumeStylesMap = {
   page: {
     width: '100%',
-    maxWidth: '210mm',
-    minHeight: '297mm',
     mx: 'auto',
     bgcolor: '#fff',
-    border: '1px solid #78809A',
-    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+    border: '1px solid',
+    borderColor: 'divider',
+    borderRadius: 2,
+    overflow: 'hidden',
     position: 'relative' as const,
     display: 'flex',
     flexDirection: 'column' as const
   },
   header: {
     backgroundColor: '#F5F5F5',
-    py: 2,
-    pl: { xs: 2, sm: '45px' },
-    pr: { xs: 2, sm: '45px' }
+    py: 2.5,
+    pl: { xs: 2, sm: '36px' },
+    pr: { xs: 2, sm: '36px' }
   },
   headerInner: {
     display: 'flex',
@@ -95,20 +95,23 @@ export const resumeStyles: ResumeStylesMap = {
   },
   body: {
     flex: 1,
-    px: { xs: 2, sm: '50px' },
-    py: '20px',
-    pb: '15px'
+    px: { xs: 2, sm: '36px' },
+    py: '24px',
+    pb: '20px'
   },
   sectionBlock: {
     mb: '14px'
   },
   sectionTitle: {
     fontWeight: 700,
-    mb: '10px',
-    fontSize: '17px',
+    mb: '8px',
+    pb: '4px',
+    fontSize: '16px',
     lineHeight: 1.2,
-    color: '#000',
-    fontFamily: 'Arial, sans-serif'
+    color: '#111',
+    fontFamily: 'Arial, sans-serif',
+    borderBottom: '1.5px solid',
+    borderColor: 'divider'
   },
   summaryMarkdown: {
     ...markdownBase,
