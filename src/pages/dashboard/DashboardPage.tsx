@@ -17,6 +17,7 @@ export function DashboardPage() {
   const [credentials, setCredentials] = useState<StoredCredential[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+  const [syncCount, setSyncCount] = useState(0)
 
   const loadCredentials = useCallback(async () => {
     if (!session?.storage) {
@@ -50,6 +51,7 @@ export function DashboardPage() {
   async function handleSync() {
     setSyncing(true)
     await loadCredentials()
+    setSyncCount(c => c + 1)
     setSyncing(false)
   }
 
@@ -88,7 +90,7 @@ export function DashboardPage() {
         ) : (
           <Box sx={dashboardStyles.credentialsGrid}>
             {credentials.map(({ cid, vc }) => (
-              <CredentialCard key={cid} cid={cid} credential={vc} />
+              <CredentialCard key={`${cid}-${syncCount}`} cid={cid} credential={vc} />
             ))}
           </Box>
         )}
