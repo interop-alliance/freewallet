@@ -63,6 +63,8 @@ export function SignupPage() {
       console.log('User already exists, redirecting to login page.')
       return navigate('/login', { state: { userMessage } })
     }
+    // This is a new user
+    // Create Space and init collections
     await storage.ensureUserCollections({ user: session.user })
     // Add a "welcome" credential to storage
     await session.storage!.addCredential({ credential: welcomeCredential })

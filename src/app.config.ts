@@ -4,8 +4,8 @@
 const env = import.meta.env
 
 export const BASE_URL = env.BASE_URL
-export const WAS_SERVER_URL = env.WAS_SERVER_URL
-export const CORS_PROXY_URL = env.CORS_PROXY_URL || ''
+export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
+export const CORS_PROXY_URL = env.VITE_CORS_PROXY_URL || ''
 
 export const PASSWORD_RULES = {
   minlength: 16,

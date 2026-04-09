@@ -1,4 +1,5 @@
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { ZcapClient } from '@digitalcredentials/ezcap'
 import { createRxDatabase, type RxDatabase } from 'rxdb/plugins/core'
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
 import type { ControllerProfile, User } from '@/types/auth'
@@ -8,7 +9,7 @@ import {
   type StoredCredential,
   StoredCredentialSchema
 } from '@/types/credential'
-import type { ZcapClient } from '@digitalcredentials/ezcap'
+import { uuidv7 } from 'uuidv7'
 
 export interface IWalletStore {
   userExists: () => Promise<boolean>
@@ -54,6 +55,7 @@ export class StorageManager {
     profile: ControllerProfile
   }) {
     const storageServerUrl = WAS_SERVER_URL
+    console.log('Initializing remote storage clients:', { storageServerUrl })
     const remoteOnly = !!storageServerUrl
     let remoteStore, localStore
     let userExists = false
@@ -102,6 +104,74 @@ export class StorageManager {
     if (this.remoteStore) {
       await this.remoteStore.ensureUserCollections({ user })
     }
+    // Now that we have somewhere to write _to_, start the history
+    await this.addHistoryNewAccount({ user })
+    await this.addHistorySpaceCreated({ user })
+  }
+
+  /**
+   * Records (in the `wallet-activity` collection) the Create activity for
+   * the bootstrap did:key DID.
+   */
+  async addHistoryNewAccount({ user }: { user: User }) {
+    // Skip recording history item for local storage for now
+    if (!this.remoteStore) {
+      return
+    }
+    const resourceId = uuidv7()
+    await this.remoteStore.addCollectionResource({
+      resourceId,
+      collectionId: 'walletActivity',
+      resourceBody: {
+        id: resourceId,
+        type: ['Create'],
+        summary: 'Account Sign Up. did:key DID generated.',
+        actor: { email: user.email },
+        object: user.id,
+        created: new Date().toISOString()
+      }
+    })
+  }
+
+  /**
+   * Records (in the `wallet-activity` collection) the Create activity for
+   * the space and various collections created.
+   */
+  async addHistorySpaceCreated({ user }: { user: User }) {
+    if (!this.remoteStore) {
+      return
+    }
+    const resourceId = uuidv7()
+    await this.remoteStore.addCollectionResource({
+      resourceId,
+      collectionId: 'walletActivity',
+      resourceBody: {
+        id: resourceId,
+        type: ['Create'],
+        summary:
+          'Account space created on remote storage server, collections initialized.',
+        actor: user.id,
+        object: [
+          {
+            type: ['Space'],
+            id: this.remoteStore.spaceUrl
+          },
+          {
+            type: ['Collection'],
+            id: this.remoteStore.collections!.get('privateCredentials')!.url
+          },
+          {
+            type: ['Collection'],
+            id: this.remoteStore.collections!.get('publicCredentials')!.url
+          },
+          {
+            type: ['Collection'],
+            id: this.remoteStore.collections!.get('walletActivity')!.url
+          }
+        ],
+        created: new Date().toISOString()
+      }
+    })
   }
 
   async listCredentials(): Promise<Array<StoredCredential>> {
@@ -140,11 +210,7 @@ export class StorageManager {
   }
 }
 
-export interface ICollectionsSet {
-  credentials: {
-    url: string
-  }
-}
+export type ICollectionsSet = Map<string, { url: string }>
 
 /**
  * @see https://digitalcredentials.github.io/wallet-attached-storage-spec/
@@ -157,7 +223,7 @@ export class WASRemoteStore implements IWalletStore {
   public controller: string
 
   public spaceUrl: string
-  public collections: ICollectionsSet
+  public collections?: ICollectionsSet
 
   constructor({
     storageServerUrl,
@@ -175,9 +241,6 @@ export class WASRemoteStore implements IWalletStore {
     this.spaceId = spaceId
     this.controller = controller
     this.spaceUrl = new URL(`/space/${spaceId}`, storageServerUrl).toString()
-    this.collections = {
-      credentials: { url: '' }
-    }
   }
 
   async userExists() {
@@ -194,6 +257,8 @@ export class WASRemoteStore implements IWalletStore {
 
   async ensureUserCollections({ user }: { user: User }) {
     const { storageServerUrl, zcapClient } = this
+
+    // Create Space for this user on remote storage server
     const spaceDescription = {
       name: 'Freewallet Space',
       controller: user.id
@@ -211,34 +276,64 @@ export class WASRemoteStore implements IWalletStore {
     }
 
     // Space created, now create collections
-    const vcCollectionUrl = new URL(
-      `/space/${spaceId}/private-credentials`,
+    const { url: vcPrivateCollection } = await this.createCollection({
+      spaceId,
+      collectionId: 'private-credentials',
+      name: 'Verifiable Credentials'
+    })
+
+    const { url: vcPublicCollection } = await this.createCollection({
+      spaceId,
+      collectionId: 'public-credentials',
+      name: 'Publicly Shared Verifiable Credentials'
+    })
+
+    const { url: walletActivityLog } = await this.createCollection({
+      spaceId,
+      collectionId: 'wallet-activity',
+      name: 'Wallet Activity Log'
+    })
+
+    this.collections = new Map([
+      ['privateCredentials', { url: vcPrivateCollection }],
+      ['publicCredentials', { url: vcPublicCollection }],
+      ['walletActivity', { url: walletActivityLog }]
+    ])
+  }
+
+  async createCollection({
+    spaceId,
+    collectionId,
+    name
+  }: {
+    spaceId: string
+    collectionId: string
+    name: string
+  }) {
+    const { storageServerUrl, zcapClient } = this
+    const collectionUrl = new URL(
+      `/space/${spaceId}/${collectionId}`,
       storageServerUrl
     ).toString()
-
     const collectionDescription = {
-      id: 'private-credentials',
-      name: 'Verifiable Credentials',
+      id: collectionId,
+      name,
       type: ['Collection']
     }
-
     try {
       await zcapClient.request({
-        url: vcCollectionUrl,
+        url: collectionUrl,
         method: 'PUT',
         json: collectionDescription
       })
     } catch (e: any) {
       console.error(
-        'Error creating collection:',
+        `Error creating collection "${collectionId}":`,
         JSON.stringify(e.data, null, 2)
       )
     }
-    const vcCollectionBaseUrl = `${vcCollectionUrl}/` // ensure trailing slash
-
-    this.collections.credentials = {
-      url: vcCollectionBaseUrl
-    }
+    const collectionBaseUrl = `${collectionUrl}/` // ensure trailing slash
+    return { url: collectionBaseUrl }
   }
 
   static async initClient({
@@ -262,6 +357,29 @@ export class WASRemoteStore implements IWalletStore {
     return { remoteStore }
   }
 
+  async addCollectionResource({
+    resourceId,
+    collectionId,
+    resourceBody
+  }: {
+    resourceId: string
+    collectionId: string
+    resourceBody: any
+  }) {
+    const collectionBaseUrl = this.collections!.get(collectionId)!.url
+    const resourceUrl = new URL(resourceId, collectionBaseUrl).toString()
+    try {
+      await this.zcapClient.request({
+        url: resourceUrl,
+        method: 'PUT',
+        json: resourceBody
+      })
+    } catch (e: any) {
+      console.log('Attempted to add resource to:', resourceUrl)
+      console.error('Error adding resource:', JSON.stringify(e.data, null, 2))
+    }
+  }
+
   async addCredential({
     cid,
     credential
@@ -269,22 +387,15 @@ export class WASRemoteStore implements IWalletStore {
     cid: string
     credential: IVerifiableCredential
   }) {
-    const vcCollectionBaseUrl = this.collections.credentials.url
-    const vcUrl = new URL(cid, vcCollectionBaseUrl).toString()
-    try {
-      await this.zcapClient.request({
-        url: vcUrl,
-        method: 'PUT',
-        json: credential
-      })
-    } catch (e: any) {
-      console.log('Attempted to add credential to:', vcUrl)
-      console.error('Error adding credential:', JSON.stringify(e.data, null, 2))
-    }
+    return await this.addCollectionResource({
+      resourceId: cid,
+      collectionId: 'privateCredentials',
+      resourceBody: credential
+    })
   }
 
   async listCredentials() {
-    const vcCollectionBaseUrl = this.collections.credentials.url
+    const vcCollectionBaseUrl = this.collections!.get('privateCredentials')!.url
     let response
     try {
       response = await this.zcapClient.request({
@@ -307,7 +418,7 @@ export class WASRemoteStore implements IWalletStore {
   }
 
   async loadCredential({ cid }: { cid: string }) {
-    const vcCollectionBaseUrl = this.collections.credentials.url
+    const vcCollectionBaseUrl = this.collections!.get('privateCredentials')!.url
     const vcUrl = new URL(cid, vcCollectionBaseUrl).toString()
     const doc: IVerifiableCredential | undefined = await this.fetchDocument({
       objectUrl: vcUrl
@@ -316,7 +427,7 @@ export class WASRemoteStore implements IWalletStore {
   }
 
   async deleteCredential({ cid }: { cid: string }) {
-    const vcCollectionBaseUrl = this.collections.credentials.url
+    const vcCollectionBaseUrl = this.collections!.get('privateCredentials')!.url
     const vcUrl = new URL(cid, vcCollectionBaseUrl).toString()
     try {
       await this.zcapClient.request({
@@ -435,7 +546,7 @@ export class BrowserStore implements IWalletStore {
     const dbName = `${dbPrefix}-credentials-db`
     let db
     /**
-     * Add a global singleton workaround, to fix the "duplicate database" error.
+     * Add a global singleton workaround to fix the "duplicate database" error.
      */
     // @ts-expect-error Suppress implicit any
     if (globalThis.__rxdb_instance__) {
