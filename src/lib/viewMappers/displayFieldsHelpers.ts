@@ -67,6 +67,45 @@ export function achievementsList(subject: SubjectRecord): SubjectRecord[] {
   return [achievementRaw as SubjectRecord]
 }
 
+export function skillsList(subject: SubjectRecord): SubjectRecord[] {
+  const skillRaw = subject.skill
+  if (skillRaw == null) {
+    return []
+  }
+  if (Array.isArray(skillRaw)) {
+    return skillRaw as SubjectRecord[]
+  }
+  return [skillRaw as SubjectRecord]
+}
+
+export function getSkillImage(skills: SubjectRecord[]): string {
+  if (!skills.length) {
+    return ''
+  }
+  const image = asRecord(skills[0].image)
+  if (image) {
+    return getTrimmedString(image.id)
+  }
+  return getTrimmedString(skills[0].image as string)
+}
+
+const IMAGE_EXTENSION_RE = /\.(jpe?g|png|gif|webp|svg|avif)(\?|$)/i
+
+export function getEvidenceImage(evidence: unknown[]): string {
+  for (const ev of evidence) {
+    const item = asRecord(ev)
+    if (!item) {
+      continue
+    }
+    const id = getTrimmedString(item.id)
+    const name = getTrimmedString(item.name)
+    if (id && (IMAGE_EXTENSION_RE.test(id) || IMAGE_EXTENSION_RE.test(name))) {
+      return id
+    }
+  }
+  return ''
+}
+
 export function extractIssuedTo(
   verifiableCredential: IVerifiableCredential
 ): string {
@@ -118,6 +157,17 @@ export function credentialNameFrom(
     return achievementNames[0]
   }
 
+  const skills = skillsList(subject)
+  const skillNames = skills
+    .map(skill => getTrimmedString(skill.name))
+    .filter((name): name is string => Boolean(name))
+  if (skillNames.length > 1) {
+    return skillNames.join(' · ')
+  }
+  if (skillNames.length === 1) {
+    return skillNames[0]
+  }
+
   const resumeFullName = resolvePersonFullName(subject)
   if (resumeFullName) {
     return resumeFullName
@@ -127,6 +177,13 @@ export function credentialNameFrom(
   const hasCredentialName = getTrimmedString(hasCredential?.name)
   if (hasCredentialName) {
     return hasCredentialName
+  }
+
+  const vcTypes = Array.isArray(verifiableCredential.type)
+    ? verifiableCredential.type
+    : [verifiableCredential.type]
+  if (vcTypes.includes('SkillClaimCredential')) {
+    return 'Skill Claim'
   }
 
   return 'Verifiable Credential'
@@ -143,6 +200,22 @@ export function buildCredentialDescription(
     if (achievementDescription) {
       descriptionParts.push(achievementDescription)
     }
+  }
+
+  for (const skill of skillsList(subject)) {
+    const narrative = getTrimmedString(skill.narrative)
+    if (narrative) {
+      descriptionParts.push(narrative)
+    }
+    const duration = getTrimmedString(skill.durationPerformed)
+    if (duration) {
+      descriptionParts.push(`Duration: ${duration}`)
+    }
+  }
+
+  const subjectNarrative = getTrimmedString(subject.narrative)
+  if (subjectNarrative) {
+    descriptionParts.push(subjectNarrative)
   }
 
   const evidenceDescription = getTrimmedString(subject.evidenceDescription)

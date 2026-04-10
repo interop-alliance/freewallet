@@ -9,6 +9,9 @@ import {
   asRecord,
   extractIssuedTo,
   achievementsList,
+  skillsList,
+  getSkillImage,
+  getEvidenceImage,
   normalizeAlignments,
   getAchievementImage,
   getAchievementType,
@@ -39,16 +42,26 @@ export function getDisplayFields(
 
   const achievements = achievementsList(subject)
   const primaryAchievement = achievements[0] as IAchievement | undefined
+  const skills = skillsList(subject)
   const alignments = achievements.flatMap(achievement =>
     normalizeAlignments((achievement as { alignment?: unknown }).alignment)
   )
+  const evidenceRaw = (verifiableCredential as Record<string, unknown>).evidence
+  const evidence = Array.isArray(evidenceRaw)
+    ? evidenceRaw
+    : evidenceRaw
+      ? [evidenceRaw]
+      : []
 
   return {
     ...commonFields,
     credentialName: credentialNameFrom(verifiableCredential, subject),
     credentialDescription: buildCredentialDescription(subject, achievements),
     criteria: buildCriteria(subject, achievements),
-    achievementImage: getAchievementImage(primaryAchievement),
+    achievementImage:
+      getAchievementImage(primaryAchievement) ||
+      getSkillImage(skills) ||
+      getEvidenceImage(evidence),
     achievementType: getAchievementType(primaryAchievement),
     alignments
   }

@@ -49,6 +49,14 @@ export function CredentialDetail({
   const verification = useVerification(vc)
   const [showRaw, setShowRaw] = useState(false)
   const rawJson = useMemo(() => JSON.stringify(vc, null, 2), [vc])
+  const evidenceList = useMemo(() => {
+    const raw = (vc as Record<string, unknown>).evidence
+    if (!raw) {
+      return []
+    }
+    const arr = Array.isArray(raw) ? raw : [raw]
+    return arr as Array<{ id?: string; name?: string; description?: string }>
+  }, [vc])
   const showResumePreview = useMemo(() => isResumeCredential(vc), [vc])
   const resumePreviewData = useMemo(
     () => (showResumePreview ? resumeSubjectToPreviewData(vc) : null),
@@ -225,6 +233,35 @@ export function CredentialDetail({
                       {field.targetDescription && (
                         <Typography variant="body2" color="text.secondary">
                           {field.targetDescription}
+                        </Typography>
+                      )}
+                    </Box>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+
+            {evidenceList.length > 0 && (
+              <Box>
+                <SectionHeader>Evidence</SectionHeader>
+                <Stack spacing={1}>
+                  {evidenceList.map((ev, i) => (
+                    <Box key={i}>
+                      {ev.id ? (
+                        <Link
+                          href={ev.id}
+                          target="_blank"
+                          rel="noopener"
+                          variant="body2"
+                        >
+                          {ev.name || ev.id}
+                        </Link>
+                      ) : (
+                        <Typography variant="body2">{ev.name}</Typography>
+                      )}
+                      {ev.description && (
+                        <Typography variant="caption" color="text.secondary">
+                          {ev.description}
                         </Typography>
                       )}
                     </Box>
