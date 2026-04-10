@@ -66,6 +66,10 @@ export function SignupPage() {
     // This is a new user
     // Create Space and init collections
     await storage.ensureUserCollections({ user: session.user })
+    // Now that we have somewhere to write _to_, start the history
+    await session.storage.addHistoryNewAccount({ user: session.user })
+    await session.storage.addHistorySpaceCreated({ user: session.user })
+
     // Add a "welcome" credential to storage
     await session.storage!.addCredential({ credential: welcomeCredential })
     login(session)

@@ -104,9 +104,6 @@ export class StorageManager {
     if (this.remoteStore) {
       await this.remoteStore.ensureUserCollections({ user })
     }
-    // Now that we have somewhere to write _to_, start the history
-    await this.addHistoryNewAccount({ user })
-    await this.addHistorySpaceCreated({ user })
   }
 
   /**
