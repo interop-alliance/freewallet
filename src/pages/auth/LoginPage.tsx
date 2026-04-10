@@ -62,7 +62,6 @@ export function LoginPage() {
         </Typography>
         <TextField
           name="login-passphrase"
-          defaultValue="not a real password"
           type="password"
           autoComplete="current-password"
           sx={authStyles.input}

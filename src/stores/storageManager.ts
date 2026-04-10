@@ -394,27 +394,37 @@ export class WASRemoteStore implements IWalletStore {
     })
   }
 
-  async listCredentials() {
-    const vcCollectionBaseUrl = this.collections!.get('privateCredentials')!.url
+  async listCollectionItems({ url }: { url: string }) {
     let response
     try {
       response = await this.zcapClient.request({
-        url: vcCollectionBaseUrl,
+        url: url,
         method: 'GET'
       })
-    } catch (e: any) {
-      console.log('Attempted to list credentials:', vcCollectionBaseUrl)
+    } catch (err: any) {
+      console.log('Attempted to list collection items from:', url)
       console.error(
-        'Error listing credentials:',
-        JSON.stringify(e.data, null, 2)
+        'Error listing collection items:',
+        JSON.stringify(err.data, null, 2)
       )
     }
     // @ts-expect-error TODO add a type to the response
     const { data } = response!
-    console.log('Fetched credentials list:', data)
     // data looks like: { offset: 0, total_rows, rows: [{ id, url, contentType }] }
+    return await this.fetchAll({ rows: data.rows })
+  }
 
-    return this.fetchAll({ rows: data.rows })
+  async listHistoryItems(): Promise<Array<{ id: string; doc: any }>> {
+    const walletActivityUrl = this.collections!.get('walletActivity')!.url
+    return await this.listCollectionItems({ url: walletActivityUrl })
+  }
+
+  async listCredentials() {
+    const vcCollectionBaseUrl = this.collections!.get('privateCredentials')!.url
+    const docs = await this.listCollectionItems({ url: vcCollectionBaseUrl })
+    return docs.map(({ id, doc }) => {
+      return { cid: id, vc: doc }
+    })
   }
 
   async loadCredential({ cid }: { cid: string }) {
@@ -443,13 +453,17 @@ export class WASRemoteStore implements IWalletStore {
     }
   }
 
-  async fetchAll({ rows }: { rows: any[] }) {
-    const docs = await Promise.all(
+  /**
+   * Fetches all documents from the rows of a list collection result.
+   */
+  async fetchAll({
+    rows
+  }: {
+    rows: any[]
+  }): Promise<Array<{ id: string; doc: any }>> {
+    return await Promise.all(
       rows.map(collectionRow => this.fetchRow({ collectionRow }))
     )
-    return docs.map(({ id, doc }) => {
-      return { cid: id, vc: doc }
-    })
   }
 
   async fetchRow({ collectionRow }: { collectionRow: any }) {
@@ -490,8 +504,8 @@ export class WASRemoteStore implements IWalletStore {
         headers
       })
     } catch (e: any) {
-      console.log('Attempted to add credential to:', objectUrl)
-      console.error('Error adding credential:', JSON.stringify(e.data, null, 2))
+      console.log('Attempted to fetch document:', objectUrl)
+      console.error('Error fetching:', JSON.stringify(e.data, null, 2))
       return
     }
     // @ts-expect-error TODO add a type to the response
