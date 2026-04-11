@@ -109,7 +109,7 @@ export function WalletStorePage() {
   return (
     <Box sx={chapiStyles.page}>
       <Box sx={chapiStyles.card}>
-        <Typography variant="h5" fontWeight={600}>
+        <Typography variant="h5" sx={{ fontWeight: 600 }}>
           Store Credential
         </Typography>
 
@@ -118,13 +118,13 @@ export function WalletStorePage() {
             <Typography variant="body2" color="text.secondary">
               Type
             </Typography>
-            <Typography variant="body2" fontWeight={500}>
+            <Typography variant="body2" sx={{ fontWeight: 500 }}>
               {credentialTitle(vc)}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               Issuer
             </Typography>
-            <Typography variant="body2" fontWeight={500}>
+            <Typography variant="body2" sx={{ fontWeight: 500 }}>
               {issuerName(vc)}
             </Typography>
           </Box>

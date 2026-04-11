@@ -30,10 +30,12 @@ export function IssuerInfo({ issuer }: IssuerInfoProps) {
             src={details.image}
             alt={details.name}
             sx={sx.avatar}
-            imgProps={{
-              onError: () => {
-                if (imgRef.current) {
-                  imgRef.current.style.display = 'none'
+            slotProps={{
+              img: {
+                onError: () => {
+                  if (imgRef.current) {
+                    imgRef.current.style.display = 'none'
+                  }
                 }
               }
             }}

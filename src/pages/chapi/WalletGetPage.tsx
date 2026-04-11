@@ -112,7 +112,7 @@ export function WalletGetPage() {
   return (
     <Box sx={chapiStyles.page}>
       <Box sx={chapiStyles.card}>
-        <Typography variant="h5" fontWeight={600}>
+        <Typography variant="h5" sx={{ fontWeight: 600 }}>
           Share a Credential
         </Typography>
 
@@ -133,7 +133,7 @@ export function WalletGetPage() {
 
         {pageState === 'selecting' && (
           <>
-            <Typography variant="subtitle1" fontWeight={500}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
               Select a credential to share:
             </Typography>
             {credentials.length === 0 ? (
@@ -145,7 +145,7 @@ export function WalletGetPage() {
                 {credentials.map(({ cid, vc }) => (
                   <Box key={cid} sx={chapiStyles.credentialRow}>
                     <Box sx={chapiStyles.credentialInfo}>
-                      <Typography variant="body2" fontWeight={500}>
+                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
                         {credentialTitle(vc)}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
