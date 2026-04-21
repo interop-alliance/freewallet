@@ -403,6 +403,32 @@ export const docsStyles = {
   }
 } as const
 
+export const infoBoxStyles = {
+  paper: {
+    borderRadius: 3
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    px: 3,
+    pt: 2,
+    pb: 0,
+    minHeight: 48
+  },
+  title: {
+    fontWeight: 600,
+    flexGrow: 1
+  },
+  spacer: {
+    flexGrow: 1
+  },
+  content: {
+    px: 3,
+    pt: 1,
+    pb: 3
+  }
+} as const
+
 export const notFoundStyles = {
   page: {
     minHeight: '100dvh',

@@ -1,4 +1,3 @@
-console.log('🚀 ~ BASE_URL:', BASE_URL)
 import { useEffect, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'

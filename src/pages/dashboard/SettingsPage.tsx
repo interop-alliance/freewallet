@@ -1,13 +1,16 @@
 import Button from '@mui/material/Button'
+import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { DashboardLayout } from '@/components/DashboardLayout'
+import { useInfoBox } from '@/hooks/useInfoBox'
 import { dashboardStyles } from '@/styles/appStyles'
 import { useEffect } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 
 export function SettingsPage() {
   const session = useAuthStore(state => state.session)
+  const { displayInfoBox } = useInfoBox()
 
   useEffect(() => {
     console.log('Session:', session)
@@ -35,22 +38,46 @@ export function SettingsPage() {
 
   return (
     <DashboardLayout title="Settings">
-      <Stack direction="row" sx={dashboardStyles.settingsRow}>
-        <Button
-          variant="contained"
-          disableElevation
-          sx={dashboardStyles.deleteAccountButton}
-          onClick={handleDeleteAccount}
-        >
-          Delete Account
-        </Button>
-        <Typography
-          variant="h5"
-          component="p"
-          sx={dashboardStyles.deleteAccountDescription}
-        >
-          Your login, keys, and all data will be deleted.
-        </Typography>
+      <Stack sx={{ mt: 4, gap: 4, maxWidth: 640 }}>
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 3 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            Verifiable Credentials
+          </Typography>
+          <Button
+            variant="outlined"
+            size="small"
+            sx={{
+              textTransform: 'none',
+              borderRadius: 2,
+              whiteSpace: 'nowrap'
+            }}
+            onClick={() =>
+              displayInfoBox({ docUrl: 'vcs', title: 'Verifiable Credentials' })
+            }
+          >
+            More Info
+          </Button>
+        </Stack>
+
+        <Divider />
+
+        <Stack direction="row" sx={dashboardStyles.settingsRow}>
+          <Button
+            variant="contained"
+            disableElevation
+            sx={dashboardStyles.deleteAccountButton}
+            onClick={handleDeleteAccount}
+          >
+            Delete Account
+          </Button>
+          <Typography
+            variant="h5"
+            component="p"
+            sx={dashboardStyles.deleteAccountDescription}
+          >
+            Your login, keys, and all data will be deleted.
+          </Typography>
+        </Stack>
       </Stack>
     </DashboardLayout>
   )

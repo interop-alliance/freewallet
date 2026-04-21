@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { CssBaseline, ThemeProvider, createTheme } from '@mui/material'
 import { HashRouter } from 'react-router'
+import { InfoBoxProvider } from '@/context/InfoBoxProvider'
 import './index.css'
 import App from './App'
 
@@ -22,7 +23,9 @@ createRoot(document.getElementById('root')!).render(
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <HashRouter>
-        <App />
+        <InfoBoxProvider>
+          <App />
+        </InfoBoxProvider>
       </HashRouter>
     </ThemeProvider>
   </StrictMode>
