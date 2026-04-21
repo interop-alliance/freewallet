@@ -2,6 +2,9 @@ import { useState } from 'react'
 import {
   Box,
   Button,
+  Card,
+  CardContent,
+  Link,
   Stack,
   Step,
   StepLabel,
@@ -11,7 +14,8 @@ import {
   useMediaQuery,
   useTheme
 } from '@mui/material'
-import { useLocation, useNavigate, useSearchParams } from 'react-router'
+import { FiKey } from 'react-icons/fi'
+import { Link as RouterLink, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
@@ -96,7 +100,7 @@ export function SignupPage() {
 
   return (
     <Box component="main" sx={authStyles.page}>
-      <Box component="form" onSubmit={handleSignup} sx={authStyles.content}>
+      <Box component="form" onSubmit={handleSignup} sx={authStyles.wideContent}>
         <Typography variant="h2" component="h1" sx={authStyles.title}>
           Freewallet
         </Typography>
@@ -127,38 +131,61 @@ export function SignupPage() {
 
         {activeStep === 0 && (
           <>
-            <Typography
-              variant="h5"
-              component="label"
-              htmlFor="signup-passphrase"
-              sx={authStyles.label}
-            >
-              Password:
-            </Typography>
-            <TextField
-              id="signup-passphrase"
-              name="signup-passphrase"
-              value={passphrase}
-              onChange={e => setPassphrase(e.target.value)}
-              type="password"
-              autoComplete="new-password"
-              sx={authStyles.input}
-            />
-            <Box sx={authStyles.input}>
-              <PasswordStrengthBar
-                password={passphrase}
-                onChangeScore={setScore}
-                scoreWords={['Weak', 'Weak', 'Fair', 'Strong', 'Very strong']}
-                shortScoreWord="Too short"
-              />
-            </Box>
+            <Box sx={authStyles.cardsRow}>
+              {/* Passphrase card */}
+              <Card sx={authStyles.authCard} variant="outlined">
+                <CardContent sx={authStyles.authCardContent}>
+                  <Typography
+                    variant="h5"
+                    component="label"
+                    htmlFor="signup-passphrase"
+                    sx={authStyles.label}
+                  >
+                    Passphrase:
+                  </Typography>
+                  <TextField
+                    id="signup-passphrase"
+                    name="signup-passphrase"
+                    value={passphrase}
+                    onChange={e => setPassphrase(e.target.value)}
+                    type="password"
+                    autoComplete="new-password"
+                    sx={authStyles.input}
+                  />
+                  <Box sx={authStyles.input}>
+                    <PasswordStrengthBar
+                      password={passphrase}
+                      onChangeScore={setScore}
+                      scoreWords={['Weak', 'Weak', 'Fair', 'Strong', 'Very strong']}
+                      shortScoreWord="Too short"
+                    />
+                  </Box>
+                  <Stack spacing={0.5} sx={authStyles.input}>
+                    <RuleIndicator
+                      passed={lengthPassed}
+                      label={`At least ${PASSWORD_RULES.minlength} characters`}
+                    />
+                  </Stack>
+                </CardContent>
+              </Card>
 
-            <Stack spacing={0.5} sx={authStyles.input}>
-              <RuleIndicator
-                passed={lengthPassed}
-                label={`At least ${PASSWORD_RULES.minlength} characters`}
-              />
-            </Stack>
+              {/* Passkey card */}
+              <Card sx={authStyles.passkeyCard} variant="outlined">
+                <CardContent sx={authStyles.passkeyCardContent}>
+                  <Button
+                    variant="contained"
+                    disabled
+                    startIcon={<FiKey />}
+                    sx={authStyles.passkeyButton}
+                  >
+                    Sign up with a Passkey
+                  </Button>
+                  <Typography variant="body2" color="text.secondary">
+                    (Coming soon.)
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Box>
 
             <Button
               variant="contained"
@@ -169,6 +196,14 @@ export function SignupPage() {
             >
               Next
             </Button>
+
+            <Typography variant="h6" component="p" sx={authStyles.authFooterText}>
+              Already have a wallet?{' '}
+              <Link component={RouterLink} to="/login" underline="always">
+                Log in
+              </Link>
+              .
+            </Typography>
           </>
         )}
 

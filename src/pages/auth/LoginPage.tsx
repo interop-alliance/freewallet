@@ -1,6 +1,9 @@
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
 import Link from '@mui/material/Link'
+import { FiKey } from 'react-icons/fi'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
@@ -43,41 +46,63 @@ export function LoginPage() {
 
   return (
     <Box component="main" sx={authStyles.page}>
-      <Box component="form" onSubmit={handleLogin} sx={authStyles.content}>
+      <Box sx={authStyles.pageColumn}>
         <Typography variant="h2" component="h1" sx={authStyles.title}>
           Freewallet
         </Typography>
-        <Typography variant="h3" component="h2" sx={authStyles.title}>
+
+        <Typography variant="h4" component="h2" sx={authStyles.title}>
           Log in
         </Typography>
 
-        {userMessage && (
-          <Typography variant="body1" color="error" sx={authStyles.userMessage}>
-            {userMessage}
-          </Typography>
-        )}
+        <Box sx={authStyles.cardsRow}>
+          {/* Log in card */}
+          <Card sx={authStyles.authCard} variant="outlined">
+            <CardContent sx={authStyles.authCardContent}>
+              <Box component="form" onSubmit={handleLogin} sx={authStyles.authCardForm}>
+                {userMessage && (
+                  <Typography variant="body1" color="error" sx={authStyles.userMessage}>
+                    {userMessage}
+                  </Typography>
+                )}
 
-        <Typography variant="h5" component="label" htmlFor="login-passphrase">
-          Passphrase:
-        </Typography>
-        <TextField
-          name="login-passphrase"
-          type="password"
-          autoComplete="current-password"
-          sx={authStyles.input}
-        />
+                <Typography variant="h5" component="label" htmlFor="login-passphrase">
+                  Passphrase:
+                </Typography>
+                <TextField
+                  name="login-passphrase"
+                  type="password"
+                  autoComplete="current-password"
+                  sx={authStyles.input}
+                />
 
-        <Button variant="contained" type="submit" sx={authStyles.actionButton}>
-          Log in
-        </Button>
+                <Button variant="contained" type="submit" sx={authStyles.actionButton}>
+                  Log in
+                </Button>
 
-        <Typography variant="h6" component="p">
-          Don&apos;t have an existing wallet?{' '}
-          <Link component={RouterLink} to="/signup" underline="always">
-            Sign up
-          </Link>
-          .
-        </Typography>
+                <Typography variant="h6" component="p" sx={authStyles.authFooterText}>
+                  Don&apos;t have an existing wallet?{' '}
+                  <Link component={RouterLink} to="/signup" underline="always">
+                    Sign up
+                  </Link>
+                  .
+                </Typography>
+              </Box>
+            </CardContent>
+          </Card>
+
+          {/* Passkey card */}
+          <Card sx={authStyles.passkeyCard} variant="outlined">
+            <CardContent sx={authStyles.passkeyCardContent}>
+              <Button variant="contained" disabled startIcon={<FiKey />} sx={authStyles.passkeyButton}>
+                Log in with a Passkey
+              </Button>
+              <Typography variant="body2" color="text.secondary">
+                (Coming soon.)
+              </Typography>
+            </CardContent>
+          </Card>
+        </Box>
       </Box>
     </Box>
   )

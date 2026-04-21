@@ -8,12 +8,73 @@ export const authStyles = {
     justifyContent: 'center',
     px: 2
   },
+  pageColumn: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 4,
+    width: '100%'
+  },
   content: {
     width: '100%',
     maxWidth: 480,
     display: 'flex',
     flexDirection: 'column',
     gap: 2.5
+  },
+  wideContent: {
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2.5,
+    alignItems: 'center'
+  },
+  cardsRow: {
+    display: 'flex',
+    flexDirection: { xs: 'column', md: 'row' },
+    gap: 3,
+    width: '100%',
+    maxWidth: 900,
+    justifyContent: 'center',
+    alignSelf: 'center'
+  },
+  authCard: {
+    flex: 1,
+    maxWidth: 420
+  },
+  authCardContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2.5,
+    p: 4
+  },
+  authCardForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2.5
+  },
+  passkeyCard: {
+    flex: 1,
+    maxWidth: 420,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  passkeyCardContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 2,
+    p: 4
+  },
+  passkeyButton: {
+    width: 240,
+    textTransform: 'none',
+    py: 1,
+    alignSelf: 'center'
+  },
+  authFooterText: {
+    textAlign: 'center'
   },
   title: {
     textAlign: 'center',
