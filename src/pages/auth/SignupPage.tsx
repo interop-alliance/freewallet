@@ -14,8 +14,14 @@ import {
   useMediaQuery,
   useTheme
 } from '@mui/material'
-import { FiKey } from 'react-icons/fi'
-import { Link as RouterLink, useLocation, useNavigate, useSearchParams } from 'react-router'
+import { FiCheckCircle, FiKey } from 'react-icons/fi'
+import { SiGoogledrive } from 'react-icons/si'
+import {
+  Link as RouterLink,
+  useLocation,
+  useNavigate,
+  useSearchParams
+} from 'react-router'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
@@ -33,7 +39,7 @@ const PasswordStrengthBar =
     }
   ).default ?? PasswordStrengthBarModule
 
-const STEPS = ['Passphrase', 'Email'] as const
+const STEPS = ['Passphrase', 'Email', 'Storage Selection'] as const
 
 export function SignupPage() {
   const theme = useTheme()
@@ -48,7 +54,8 @@ export function SignupPage() {
   const [passphrase, setPassphrase] = useState('')
   const [score, setScore] = useState(0)
 
-  const activeStep = searchParams.get('step') === 'email' ? 1 : 0
+  const stepParam = searchParams.get('step')
+  const activeStep = stepParam === 'storage' ? 2 : stepParam === 'email' ? 1 : 0
 
   const handleSignup = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -94,6 +101,13 @@ export function SignupPage() {
     setSearchParams({ ['step']: 'email' })
   }
 
+  const goNextFromEmail = () => {
+    if (!emailValid) {
+      return
+    }
+    setSearchParams({ ['step']: 'storage' })
+  }
+
   const goBack = () => {
     navigate(-1)
   }
@@ -113,7 +127,6 @@ export function SignupPage() {
             {userMessage}
           </Typography>
         )}
-
         <Box sx={authStyles.signupStepperWrap}>
           <Stepper
             activeStep={activeStep}
@@ -131,6 +144,9 @@ export function SignupPage() {
 
         {activeStep === 0 && (
           <>
+            <Typography variant="h4" component="h2" sx={authStyles.title}>
+              Login Security
+            </Typography>
             <Box sx={authStyles.cardsRow}>
               {/* Passphrase card */}
               <Card sx={authStyles.authCard} variant="outlined">
@@ -156,7 +172,13 @@ export function SignupPage() {
                     <PasswordStrengthBar
                       password={passphrase}
                       onChangeScore={setScore}
-                      scoreWords={['Weak', 'Weak', 'Fair', 'Strong', 'Very strong']}
+                      scoreWords={[
+                        'Weak',
+                        'Weak',
+                        'Fair',
+                        'Strong',
+                        'Very strong'
+                      ]}
                       shortScoreWord="Too short"
                     />
                   </Box>
@@ -197,7 +219,11 @@ export function SignupPage() {
               Next
             </Button>
 
-            <Typography variant="h6" component="p" sx={authStyles.authFooterText}>
+            <Typography
+              variant="h6"
+              component="p"
+              sx={authStyles.authFooterText}
+            >
               Already have a wallet?{' '}
               <Link component={RouterLink} to="/login" underline="always">
                 Log in
@@ -209,6 +235,9 @@ export function SignupPage() {
 
         {activeStep === 1 && (
           <>
+            <Typography variant="h4" component="h2" sx={authStyles.title}>
+              Email
+            </Typography>
             <Typography
               variant="h5"
               component="label"
@@ -240,8 +269,81 @@ export function SignupPage() {
               </Button>
               <Button
                 variant="contained"
+                type="button"
+                onClick={goNextFromEmail}
+                disabled={!emailValid}
+                sx={authStyles.actionButton}
+              >
+                Next
+              </Button>
+            </Stack>
+          </>
+        )}
+
+        {activeStep === 2 && (
+          <>
+            <Typography variant="h4" component="h2" sx={authStyles.title}>
+              Storage Selection
+            </Typography>
+
+            <Stack spacing={2}>
+              {/* Dropbox card */}
+              <Card sx={authStyles.authCard} variant="outlined">
+                <CardContent sx={authStyles.passkeyCardContent}>
+                  <Button
+                    variant="contained"
+                    disabled
+                    startIcon={
+                      <img
+                        src="https://cfl.dropboxstatic.com/static/metaserver/static/images/logo_catalog/blue_dropbox_glyph_m1-vflZvZxbS.png"
+                        alt="Dropbox"
+                        style={{ width: 20, height: 20, objectFit: 'contain' }}
+                      />
+                    }
+                    sx={authStyles.passkeyButton}
+                  >
+                    Connect to Dropbox
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Google Drive card */}
+              <Card sx={authStyles.authCard} variant="outlined">
+                <CardContent sx={authStyles.passkeyCardContent}>
+                  <Button
+                    variant="contained"
+                    disabled
+                    startIcon={<SiGoogledrive />}
+                    sx={authStyles.passkeyButton}
+                  >
+                    Connect to Google Drive
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Free storage card */}
+              <Card sx={authStyles.authCard} variant="outlined">
+                <CardContent sx={authStyles.passkeyCardContent}>
+                  <FiCheckCircle size={32} color="green" />
+                  <Typography variant="h6" component="h3">
+                    Courtesy 10 Mb storage (free)
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Stack>
+
+            <Stack sx={{ ...authStyles.signupWizardActions, mb: 10 }}>
+              <Button
+                variant="outlined"
+                type="button"
+                onClick={goBack}
+                sx={authStyles.signupBackButton}
+              >
+                Back
+              </Button>
+              <Button
+                variant="contained"
                 type="submit"
-                disabled={!canSubmit}
                 sx={authStyles.actionButton}
               >
                 Create Wallet
