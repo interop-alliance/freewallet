@@ -59,6 +59,7 @@ export function SignupPage() {
 
   const handleSignup = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
+    void registerWallet()
     if (activeStep !== STEPS.length - 1 || !canSubmit) {
       return
     }
@@ -84,7 +85,6 @@ export function SignupPage() {
     // Add a "welcome" credential to storage
     await session.storage!.addCredential({ credential: welcomeCredential })
     login(session)
-    void registerWallet()
     navigate('/dashboard')
   }
 

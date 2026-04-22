@@ -24,6 +24,7 @@ export function LoginPage() {
    */
   const handleLogin = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
+    void registerWallet()
     const data = new FormData(event.currentTarget)
     const passphrase = data.get('login-passphrase') as string
     if (!passphrase) {
@@ -40,7 +41,6 @@ export function LoginPage() {
     }
     await session.storage.ensureUserCollections({ user: session.user })
     login(session)
-    void registerWallet()
     navigate('/dashboard', { replace: true })
   }
 
@@ -59,14 +59,26 @@ export function LoginPage() {
           {/* Log in card */}
           <Card sx={authStyles.authCard} variant="outlined">
             <CardContent sx={authStyles.authCardContent}>
-              <Box component="form" onSubmit={handleLogin} sx={authStyles.authCardForm}>
+              <Box
+                component="form"
+                onSubmit={handleLogin}
+                sx={authStyles.authCardForm}
+              >
                 {userMessage && (
-                  <Typography variant="body1" color="error" sx={authStyles.userMessage}>
+                  <Typography
+                    variant="body1"
+                    color="error"
+                    sx={authStyles.userMessage}
+                  >
                     {userMessage}
                   </Typography>
                 )}
 
-                <Typography variant="h5" component="label" htmlFor="login-passphrase">
+                <Typography
+                  variant="h5"
+                  component="label"
+                  htmlFor="login-passphrase"
+                >
                   Passphrase:
                 </Typography>
                 <TextField
@@ -76,11 +88,19 @@ export function LoginPage() {
                   sx={authStyles.input}
                 />
 
-                <Button variant="contained" type="submit" sx={authStyles.actionButton}>
+                <Button
+                  variant="contained"
+                  type="submit"
+                  sx={authStyles.actionButton}
+                >
                   Log in
                 </Button>
 
-                <Typography variant="h6" component="p" sx={authStyles.authFooterText}>
+                <Typography
+                  variant="h6"
+                  component="p"
+                  sx={authStyles.authFooterText}
+                >
                   Don&apos;t have an existing wallet?{' '}
                   <Link component={RouterLink} to="/signup" underline="always">
                     Sign up
@@ -94,7 +114,12 @@ export function LoginPage() {
           {/* Passkey card */}
           <Card sx={authStyles.passkeyCard} variant="outlined">
             <CardContent sx={authStyles.passkeyCardContent}>
-              <Button variant="contained" disabled startIcon={<FiKey />} sx={authStyles.passkeyButton}>
+              <Button
+                variant="contained"
+                disabled
+                startIcon={<FiKey />}
+                sx={authStyles.passkeyButton}
+              >
                 Log in with a Passkey
               </Button>
               <Typography variant="body2" color="text.secondary">

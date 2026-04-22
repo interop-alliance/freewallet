@@ -20,6 +20,7 @@ export function GuestLoginPage() {
    */
   const handleGuestLogin = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
+    void registerWallet()
     const { session } = await initGuestSession()
 
     const { storage } = await StorageManager.initStorageClients(session)
@@ -34,7 +35,6 @@ export function GuestLoginPage() {
     // Add a "welcome" credential to storage
     await session.storage!.addCredential({ credential: welcomeCredential })
     login(session)
-    void registerWallet()
     navigate('/dashboard')
   }
 
