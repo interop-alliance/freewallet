@@ -2,6 +2,7 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
+import CircularProgress from '@mui/material/CircularProgress'
 import Link from '@mui/material/Link'
 import { FiKey } from 'react-icons/fi'
 import TextField from '@mui/material/TextField'
@@ -10,6 +11,7 @@ import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
 import { authStyles } from '@/styles/appStyles'
 import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
+import { useState } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
 import { registerWallet } from '@/lib/registerWallet'
 
@@ -18,30 +20,39 @@ export function LoginPage() {
   const login = useAuthStore(state => state.login)
   const location = useLocation()
   const { userMessage } = location.state || {}
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   /**
    * Handles form submit event
    */
   const handleLogin = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
-    void registerWallet()
-    const data = new FormData(event.currentTarget)
-    const passphrase = data.get('login-passphrase') as string
-    if (!passphrase) {
-      console.log('No passphrase entered.')
+    if (isSubmitting) {
       return
     }
-    const { session, userExists } = await initSessionFromSecret({
-      secret: passphrase
-    })
-    if (!userExists) {
-      const userMessage = 'This profile does not exist, please sign up.'
-      console.log('User does not exist, redirecting to signup page.')
-      return navigate('/signup', { state: { userMessage } })
+    setIsSubmitting(true)
+    void registerWallet()
+    try {
+      const data = new FormData(event.currentTarget)
+      const passphrase = data.get('login-passphrase') as string
+      if (!passphrase) {
+        console.log('No passphrase entered.')
+        return
+      }
+      const { session, userExists } = await initSessionFromSecret({
+        secret: passphrase
+      })
+      if (!userExists) {
+        const userMessage = 'This profile does not exist, please sign up.'
+        console.log('User does not exist, redirecting to signup page.')
+        return navigate('/signup', { state: { userMessage } })
+      }
+      await session.storage.ensureUserCollections({ user: session.user })
+      login(session)
+      navigate('/dashboard', { replace: true })
+    } finally {
+      setIsSubmitting(false)
     }
-    await session.storage.ensureUserCollections({ user: session.user })
-    login(session)
-    navigate('/dashboard', { replace: true })
   }
 
   return (
@@ -91,6 +102,12 @@ export function LoginPage() {
                 <Button
                   variant="contained"
                   type="submit"
+                  disabled={isSubmitting}
+                  startIcon={
+                    isSubmitting ? (
+                      <CircularProgress size={18} color="inherit" />
+                    ) : undefined
+                  }
                   sx={authStyles.actionButton}
                 >
                   Log in

@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   CardContent,
+  CircularProgress,
   Link,
   Stack,
   Step,
@@ -53,39 +54,48 @@ export function SignupPage() {
   const [email, setEmail] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [score, setScore] = useState(0)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const stepParam = searchParams.get('step')
   const activeStep = stepParam === 'storage' ? 2 : stepParam === 'email' ? 1 : 0
 
   const handleSignup = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (isSubmitting) {
+      return
+    }
     void registerWallet()
     if (activeStep !== STEPS.length - 1 || !canSubmit) {
       return
     }
-    const { session } = await initSessionFromSecret({
-      email,
-      secret: passphrase
-    })
-    const { storage, userExists } =
-      await StorageManager.initStorageClients(session)
-    session.storage = storage
-    if (userExists) {
-      const userMessage = 'This profile already exists, please log in.'
-      console.log('User already exists, redirecting to login page.')
-      return navigate('/login', { state: { userMessage } })
-    }
-    // This is a new user
-    // Create Space and init collections
-    await storage.ensureUserCollections({ user: session.user })
-    // Now that we have somewhere to write _to_, start the history
-    await session.storage.addHistoryNewAccount({ user: session.user })
-    await session.storage.addHistorySpaceCreated({ user: session.user })
+    setIsSubmitting(true)
+    try {
+      const { session } = await initSessionFromSecret({
+        email,
+        secret: passphrase
+      })
+      const { storage, userExists } =
+        await StorageManager.initStorageClients(session)
+      session.storage = storage
+      if (userExists) {
+        const userMessage = 'This profile already exists, please log in.'
+        console.log('User already exists, redirecting to login page.')
+        return navigate('/login', { state: { userMessage } })
+      }
+      // This is a new user
+      // Create Space and init collections
+      await storage.ensureUserCollections({ user: session.user })
+      // Now that we have somewhere to write _to_, start the history
+      await session.storage.addHistoryNewAccount({ user: session.user })
+      await session.storage.addHistorySpaceCreated({ user: session.user })
 
-    // Add a "welcome" credential to storage
-    await session.storage!.addCredential({ credential: welcomeCredential })
-    login(session)
-    navigate('/dashboard')
+      // Add a "welcome" credential to storage
+      await session.storage!.addCredential({ credential: welcomeCredential })
+      login(session)
+      navigate('/dashboard')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
@@ -344,6 +354,12 @@ export function SignupPage() {
               <Button
                 variant="contained"
                 type="submit"
+                disabled={isSubmitting}
+                startIcon={
+                  isSubmitting ? (
+                    <CircularProgress size={18} color="inherit" />
+                  ) : undefined
+                }
                 sx={authStyles.actionButton}
               >
                 Create Wallet
