@@ -6,7 +6,7 @@ import { FaGhost } from 'react-icons/fa'
 import { useNavigate } from 'react-router'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { initGuestSession } from '@/session/initSession'
 import { useAuthStore } from '@/stores/authStore'
 import { StorageManager } from '@/stores/storageManager'
@@ -18,6 +18,8 @@ export function GuestLoginPage() {
   const login = useAuthStore(state => state.login)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  useEffect(() => { void registerWallet() }, [])
+
   /**
    * Handles form submit event
    */
@@ -27,7 +29,6 @@ export function GuestLoginPage() {
       return
     }
     setIsSubmitting(true)
-    void registerWallet()
     try {
       const { session } = await initGuestSession()
 

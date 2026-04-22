@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Box,
   Button,
@@ -51,6 +51,8 @@ export function SignupPage() {
   const location = useLocation()
   const { userMessage } = location.state || {}
 
+  useEffect(() => { void registerWallet() }, [])
+
   const [email, setEmail] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [score, setScore] = useState(0)
@@ -64,7 +66,6 @@ export function SignupPage() {
     if (isSubmitting) {
       return
     }
-    void registerWallet()
     if (activeStep !== STEPS.length - 1 || !canSubmit) {
       return
     }

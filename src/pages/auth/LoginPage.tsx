@@ -11,7 +11,7 @@ import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
 import { authStyles } from '@/styles/appStyles'
 import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
 import { registerWallet } from '@/lib/registerWallet'
 
@@ -22,6 +22,8 @@ export function LoginPage() {
   const { userMessage } = location.state || {}
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  useEffect(() => { void registerWallet() }, [])
+
   /**
    * Handles form submit event
    */
@@ -31,7 +33,6 @@ export function LoginPage() {
       return
     }
     setIsSubmitting(true)
-    void registerWallet()
     try {
       const data = new FormData(event.currentTarget)
       const passphrase = data.get('login-passphrase') as string
