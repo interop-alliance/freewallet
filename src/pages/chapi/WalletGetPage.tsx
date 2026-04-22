@@ -6,7 +6,7 @@ import Typography from '@mui/material/Typography'
 import { loadOnce } from 'credential-handler-polyfill'
 import { receiveCredentialEvent } from 'web-credential-handler'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
-import { MEDIATOR } from '@/app.config'
+import { MEDIATOR_BASE } from '@/app.config'
 import { initSessionFromSecret } from '@/session/initSession'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
@@ -48,7 +48,7 @@ export function WalletGetPage() {
     initialized.current = true
 
     async function init() {
-      await loadOnce(MEDIATOR)
+      await loadOnce(MEDIATOR_BASE + encodeURIComponent(window.location.origin))
       const event = (await receiveCredentialEvent()) as ChapiGetEvent
       setChapiEvent(event)
       setRequestOrigin(event.credentialRequestOrigin)

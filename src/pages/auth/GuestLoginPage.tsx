@@ -18,7 +18,9 @@ export function GuestLoginPage() {
   const login = useAuthStore(state => state.login)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  useEffect(() => { void registerWallet() }, [])
+  useEffect(() => {
+    void registerWallet()
+  }, [])
 
   /**
    * Handles form submit event

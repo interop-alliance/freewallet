@@ -22,7 +22,9 @@ export function LoginPage() {
   const { userMessage } = location.state || {}
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  useEffect(() => { void registerWallet() }, [])
+  useEffect(() => {
+    void registerWallet()
+  }, [])
 
   /**
    * Handles form submit event

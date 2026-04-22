@@ -5,7 +5,7 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import { docsStyles } from '@/styles/appStyles'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
-import { BASE_URL } from '@/app.config'
+import { DEPLOY_URL } from '@/app.config'
 interface DocContentProps {
   fileName: string
   onError?: () => void
@@ -18,7 +18,7 @@ export function DocContent({ fileName, onError }: DocContentProps) {
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch(`${BASE_URL}docs/${fileName}.md`, {
+        const res = await fetch(`${DEPLOY_URL}docs/${fileName}.md`, {
           headers: { Accept: 'text/plain' }
         })
         if (!res.ok) {

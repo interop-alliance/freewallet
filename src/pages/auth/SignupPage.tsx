@@ -51,7 +51,9 @@ export function SignupPage() {
   const location = useLocation()
   const { userMessage } = location.state || {}
 
-  useEffect(() => { void registerWallet() }, [])
+  useEffect(() => {
+    void registerWallet()
+  }, [])
 
   const [email, setEmail] = useState('')
   const [passphrase, setPassphrase] = useState('')

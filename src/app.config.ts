@@ -3,7 +3,7 @@
  */
 const env = import.meta.env
 
-export const BASE_URL = env.BASE_URL
+export const DEPLOY_URL = env.VITE_DEPLOY_URL
 export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
 export const CORS_PROXY_URL = env.VITE_CORS_PROXY_URL || ''
 
@@ -18,11 +18,9 @@ export const DATE_FMT: Intl.DateTimeFormatOptions = {
   day: 'numeric'
 }
 
-export const MEDIATOR =
-  'https://authn.io/mediator?origin=' +
-  encodeURIComponent(window.location.origin)
+export const MEDIATOR_BASE = 'https://authn.io/mediator?origin='
 
-export const WALLET_LOCATION = window.location.origin + '/'
+// export const WALLET_LOCATION = window.location.origin + '/'
 
 export const KNOWN_REGISTRIES_URL =
   'https://digitalcredentials.github.io/dcc-known-registries/known-did-registries.json'

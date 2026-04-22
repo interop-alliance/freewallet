@@ -3,7 +3,7 @@
   "version": "0.0.2",
   "type": "module",
   "scripts": {
-    "prepare": "mkdir -p public/js && cp node_modules/credential-handler-polyfill/dist/credential-handler-polyfill.min.js public/js/ && cp node_modules/web-credential-handler/dist/web-credential-handler.min.js public/js/",
+    "prepare": "mkdir -p public/js && cp node_modules/credential-handler-polyfill/dist/* public/js/ && cp node_modules/web-credential-handler/dist/* public/js/",
     "start": "npx serve dist/ --cors",
     "dev": "vite --cors",
     "build": "tsc -b && vite build",
