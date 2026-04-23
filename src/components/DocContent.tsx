@@ -5,7 +5,7 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import { docsStyles } from '@/styles/appStyles'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
-import { DEPLOY_URL } from '@/app.config'
+import { BASE_URL } from '@/app.config'
 interface DocContentProps {
   fileName: string
   onError?: () => void
@@ -15,12 +15,11 @@ export function DocContent({ fileName, onError }: DocContentProps) {
   const [content, setContent] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
 
+  const target = `${BASE_URL === '/' ? '' : BASE_URL}/docs/${fileName}.md`
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch(`${DEPLOY_URL}docs/${fileName}.md`, {
-          headers: { Accept: 'text/plain' }
-        })
+        const res = await fetch(target)
         if (!res.ok) {
           setNotFound(true)
           onError?.()
@@ -34,7 +33,7 @@ export function DocContent({ fileName, onError }: DocContentProps) {
       }
     }
     load()
-  }, [fileName, onError])
+  }, [fileName, onError, target])
 
   if (notFound) {
     return (
