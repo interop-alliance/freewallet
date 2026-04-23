@@ -1,6 +1,7 @@
 # Freewallet
 
-> An open source, open standards web application for managing Verifiable Credentials, DIDs, and cryptographic keys.
+> An open source, open standards web application for managing Verifiable
+> Credentials, DIDs, and cryptographic keys.
 
 ## Table of Contents
 
@@ -46,13 +47,19 @@ npm start
 Optional env vars:
 
 * `PORT` - Used by Docker, Dokku, etc. Automatically handled by Vite.
-* `VITE_WAS_SERVER_URL` - URL to a [WAS](https://digitalcredentials.github.io/wallet-attached-storage-spec/)
+* `VITE_DEPLOY_URL` - URL to which the Freewallet app is deployed.
+  Used for CHAPI wallet registration etc.
+* `VITE_WAS_SERVER_URL` - URL to
+  a [WAS](https://digitalcredentials.github.io/wallet-attached-storage-spec/)
   server instance. If not provided, the server will run in a local-only mode
   (storing VCs in browser IndexedDB).
+* `VITE_CORS_PROXY_URL` - URL to a CORS proxy (used for fetching VCs when
+  you paste their URLs into the Add Credential box).
 * `VITE_ALLOWED_HOST` - Additional hostname that the server will accept
   requests from. This is useful when testing CHAPI wallet functionality behind
   a reverse proxy such as Ngrok. If not provided, the server will only accept
-  requests from localhost. So, for example: `VITE_ALLOWED_HOST=example.ngrok.dev npm run dev`
+  requests from localhost. So, for example:
+  `VITE_ALLOWED_HOST=example.ngrok.dev npm run dev`
 
 ### Running Tests
 
