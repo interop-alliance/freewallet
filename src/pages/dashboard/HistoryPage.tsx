@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useMemo, useState, useEffect } from 'react'
+import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import Timeline from '@mui/lab/Timeline'
 import TimelineItem from '@mui/lab/TimelineItem'
@@ -6,9 +7,16 @@ import TimelineSeparator from '@mui/lab/TimelineSeparator'
 import TimelineConnector from '@mui/lab/TimelineConnector'
 import TimelineContent from '@mui/lab/TimelineContent'
 import TimelineDot from '@mui/lab/TimelineDot'
+import Dialog from '@mui/material/Dialog'
+import DialogContent from '@mui/material/DialogContent'
+import IconButton from '@mui/material/IconButton'
 import { useAuthStore } from '@/stores/authStore'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import Button from '@mui/material/Button'
+import { MdClose } from 'react-icons/md'
+import { historyStyles, infoBoxStyles } from '@/styles/appStyles'
+import { credentialDetailStyles } from '@/styles/credentialStyles'
 
 export function HistoryPage() {
   const session = useAuthStore(state => state.session)
@@ -16,6 +24,28 @@ export function HistoryPage() {
     Array<{ id: string; doc: any }>
   >([])
   const [loading, setLoading] = useState(true)
+
+  const [sourceOpen, setSourceOpen] = useState(false)
+  const [selectedItem, setSelectedItem] = useState<{
+    id: string
+    doc: Record<string, unknown>
+  } | null>(null)
+
+  const sourceJson = useMemo(() => {
+    if (!selectedItem) {
+      return ''
+    }
+    try {
+      return JSON.stringify(selectedItem.doc, null, 2)
+    } catch {
+      return String(selectedItem.doc)
+    }
+  }, [selectedItem])
+
+  const selectedSummary = useMemo(() => {
+    const summary = selectedItem?.doc?.summary
+    return typeof summary === 'string' ? summary : null
+  }, [selectedItem])
 
   // const loadHistory = useCallback(async () => {
   //   if (!session?.storage) {
@@ -64,15 +94,64 @@ export function HistoryPage() {
                   {doc?.summary ?? doc?.type?.join(', ') ?? 'Activity'}
                 </Typography>
                 {doc?.created && (
-                  <Typography variant="caption" color="text.secondary">
-                    {new Date(doc.created).toLocaleString()}
-                  </Typography>
+                  <Box sx={historyStyles.timestampRow}>
+                    <Typography variant="caption" color="text.secondary">
+                      {new Date(doc.created).toLocaleString()}
+                    </Typography>
+                    <Button
+                      size="small"
+                      variant="text"
+                      color="secondary"
+                      sx={{ textTransform: 'none', minWidth: 'auto', px: 1 }}
+                      onClick={() => {
+                        setSelectedItem({ id, doc })
+                        setSourceOpen(true)
+                      }}
+                    >
+                      View Source
+                    </Button>
+                  </Box>
                 )}
               </TimelineContent>
             </TimelineItem>
           ))}
         </Timeline>
       )}
+
+      <Dialog
+        open={sourceOpen}
+        onClose={() => setSourceOpen(false)}
+        maxWidth="md"
+        fullWidth
+        scroll="paper"
+        slotProps={{ paper: { sx: infoBoxStyles.paper } }}
+      >
+        <Box sx={infoBoxStyles.header}>
+          <Typography variant="h6" sx={infoBoxStyles.title}>
+            History Source
+          </Typography>
+          <IconButton
+            onClick={() => setSourceOpen(false)}
+            size="small"
+            aria-label="Close"
+          >
+            <MdClose />
+          </IconButton>
+        </Box>
+
+        <DialogContent sx={infoBoxStyles.content}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {selectedSummary && (
+              <Typography variant="caption" color="text.secondary">
+                {selectedSummary}
+              </Typography>
+            )}
+            <Box component="pre" sx={credentialDetailStyles.codeBlock}>
+              {sourceJson}
+            </Box>
+          </Box>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   )
 }

@@ -429,6 +429,16 @@ export const infoBoxStyles = {
   }
 } as const
 
+export const historyStyles = {
+  timestampRow: {
+    mt: 0.5,
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 1
+  }
+} as const
+
 export const notFoundStyles = {
   page: {
     minHeight: '100dvh',
