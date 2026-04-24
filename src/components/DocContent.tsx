@@ -15,11 +15,17 @@ export function DocContent({ fileName, onError }: DocContentProps) {
   const [content, setContent] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
 
-  const target = `${BASE_URL === '/' ? '' : BASE_URL}/docs/${fileName}.md`
   useEffect(() => {
+    const target = new URL(
+      `docs/${fileName}.md`,
+      new URL(BASE_URL, window.location.origin)
+    ).href
+
     async function load() {
       try {
-        const res = await fetch(target)
+        const res = await fetch(target, {
+          headers: { Accept: 'text/plain' }
+        })
         if (!res.ok) {
           setNotFound(true)
           onError?.()
@@ -33,7 +39,7 @@ export function DocContent({ fileName, onError }: DocContentProps) {
       }
     }
     load()
-  }, [fileName, onError, target])
+  }, [fileName, onError])
 
   if (notFound) {
     return (
