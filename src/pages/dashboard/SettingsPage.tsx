@@ -40,7 +40,7 @@ export function SettingsPage() {
     <DashboardLayout title="Settings">
       <Stack sx={{ mt: 4, gap: 4, maxWidth: 640 }}>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 3 }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+          <Typography variant="h6">
             Verifiable Credentials
           </Typography>
           <Button
@@ -76,6 +76,17 @@ export function SettingsPage() {
             sx={dashboardStyles.deleteAccountDescription}
           >
             Your login, keys, and all data will be deleted.
+          </Typography>
+        </Stack>
+
+        <Divider />
+
+        <Stack sx={{ gap: 1 }}>
+          <Typography variant="h6">
+            About
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Freewallet version {__APP_VERSION__}
           </Typography>
         </Stack>
       </Stack>
