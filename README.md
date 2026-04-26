@@ -15,7 +15,7 @@
 
 See:
 
-* [Wallet Attached Storage Specification](https://digitalcredentials.github.io/wallet-attached-storage-spec/)
+- [Wallet Attached Storage Specification](https://digitalcredentials.github.io/wallet-attached-storage-spec/)
 
 ### Supported Features
 
@@ -23,12 +23,12 @@ See:
 
 Development:
 
-* Javascript/TypeScript, Node.js 22+
-* React + ReactDOM 19
-* React Router 7 (in library mode), using `HashRouter`
-* `zustand` for state management
-* Vite 8 bundler (so it can deploy as a static SPA)
-* Prettier for code formatting, and React-aware eslint for linting
+- Javascript/TypeScript, Node.js 22+
+- React + ReactDOM 19
+- React Router 7 (in library mode), using `HashRouter`
+- `zustand` for state management
+- Vite 8 bundler (so it can deploy as a static SPA)
+- Prettier for code formatting, and React-aware eslint for linting
 
 ## Install
 
@@ -46,16 +46,16 @@ npm start
 
 Optional env vars:
 
-* `PORT` - Used by Docker, Dokku, etc. Automatically handled by Vite.
-* `VITE_DEPLOY_URL` - URL to which the Freewallet app is deployed.
+- `PORT` - Used by Docker, Dokku, etc. Automatically handled by Vite.
+- `VITE_SERVER_URL` - URL to which the Freewallet app is deployed.
   Used for CHAPI wallet registration etc.
-* `VITE_WAS_SERVER_URL` - URL to
+- `VITE_WAS_SERVER_URL` - URL to
   a [WAS](https://digitalcredentials.github.io/wallet-attached-storage-spec/)
   server instance. If not provided, the server will run in a local-only mode
   (storing VCs in browser IndexedDB).
-* `VITE_CORS_PROXY_URL` - URL to a CORS proxy (used for fetching VCs when
+- `VITE_CORS_PROXY_URL` - URL to a CORS proxy (used for fetching VCs when
   you paste their URLs into the Add Credential box).
-* `VITE_ALLOWED_HOST` - Additional hostname that the server will accept
+- `VITE_ALLOWED_HOST` - Additional hostname that the server will accept
   requests from. This is useful when testing CHAPI wallet functionality behind
   a reverse proxy such as Ngrok. If not provided, the server will only accept
   requests from localhost. So, for example:

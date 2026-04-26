@@ -3,7 +3,7 @@
  */
 const env = import.meta.env
 
-export const SERVER_URL = env.BASE_URL
+export const SERVER_URL = env.VITE_SERVER_URL || 'http://localhost:5173'
 export const DEPLOY_URL = env.VITE_DEPLOY_URL
 export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
 export const CORS_PROXY_URL = env.VITE_CORS_PROXY_URL || ''
