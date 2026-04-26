@@ -35,16 +35,11 @@ export function HistoryPage() {
     if (!selectedItem) {
       return ''
     }
-    try {
-      return JSON.stringify(selectedItem.doc, null, 2)
-    } catch {
-      return String(selectedItem.doc)
-    }
+    return JSON.stringify(selectedItem.doc, null, 2)
   }, [selectedItem])
 
   const selectedSummary = useMemo(() => {
-    const summary = selectedItem?.doc?.summary
-    return typeof summary === 'string' ? summary : null
+    return selectedItem?.doc?.summary ?? ''
   }, [selectedItem])
 
   // const loadHistory = useCallback(async () => {
@@ -102,7 +97,7 @@ export function HistoryPage() {
                       size="small"
                       variant="text"
                       color="secondary"
-                      sx={{ textTransform: 'none', minWidth: 'auto', px: 1 }}
+                      sx={historyStyles.viewSourceButton}
                       onClick={() => {
                         setSelectedItem({ id, doc })
                         setSourceOpen(true)
@@ -143,7 +138,7 @@ export function HistoryPage() {
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {selectedSummary && (
               <Typography variant="caption" color="text.secondary">
-                {selectedSummary}
+                {selectedSummary as string}
               </Typography>
             )}
             <Box component="pre" sx={credentialDetailStyles.codeBlock}>

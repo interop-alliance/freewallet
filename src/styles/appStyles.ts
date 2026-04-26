@@ -436,6 +436,11 @@ export const historyStyles = {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 1
+  },
+  viewSourceButton: {
+    textTransform: 'none' as const,
+    minWidth: 'auto',
+    px: 1
   }
 } as const
 
