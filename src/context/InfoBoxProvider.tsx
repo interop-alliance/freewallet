@@ -40,7 +40,7 @@ export function InfoBoxProvider({ children }: { children: ReactNode }) {
           ) : (
             <Box sx={infoBoxStyles.spacer} />
           )}
-          <IconButton onClick={handleClose} size="small" aria-label="Close">
+          <IconButton onClick={handleClose} size="small" aria-label="Close" autoFocus>
             <MdClose />
           </IconButton>
         </Box>
