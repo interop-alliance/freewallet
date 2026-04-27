@@ -15,6 +15,7 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import Button from '@mui/material/Button'
 import { MdClose } from 'react-icons/md'
+import { formatRelativeTime } from '@/lib/formatRelativeTime'
 import { historyStyles, infoBoxStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
 
@@ -91,7 +92,7 @@ export function HistoryPage() {
                 {doc?.created && (
                   <Box sx={historyStyles.timestampRow}>
                     <Typography variant="caption" color="text.secondary">
-                      {new Date(doc.created).toLocaleString()}
+                      {formatRelativeTime(doc.created)}
                     </Typography>
                     <Button
                       size="small"
