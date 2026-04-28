@@ -444,6 +444,35 @@ export const historyStyles = {
   }
 } as const
 
+export const contactDetailStyles = {
+  card: {
+    mt: 3,
+    maxWidth: 560,
+    borderRadius: 3
+  },
+  cardContent: {
+    p: 3
+  },
+  headerRow: {
+    alignItems: 'center'
+  },
+  avatar: {
+    width: 64,
+    height: 64,
+    fontSize: '1.25rem',
+    fontWeight: 600
+  },
+  name: {
+    fontWeight: 600
+  },
+  actions: {
+    mt: 3
+  },
+  actionButton: {
+    textTransform: 'none'
+  }
+} as const
+
 export const notFoundStyles = {
   page: {
     minHeight: '100dvh',

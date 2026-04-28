@@ -9,6 +9,7 @@ import { useParams } from 'react-router'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { getContacts } from '@/lib/getContacts'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { contactDetailStyles } from '@/styles/appStyles'
 
 export function ContactDetailPage() {
   const { contactId } = useParams()
@@ -20,14 +21,14 @@ export function ContactDetailPage() {
 
   return (
     <DashboardLayout title="Contact Details">
-      <Card sx={{ mt: 3, maxWidth: 560, borderRadius: 3 }}>
-        <CardContent sx={{ p: 3 }}>
-          <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-            <Avatar sx={{ width: 64, height: 64, fontSize: '1.25rem', fontWeight: 600 }}>
+      <Card sx={contactDetailStyles.card}>
+        <CardContent sx={contactDetailStyles.cardContent}>
+          <Stack direction="row" spacing={2} sx={contactDetailStyles.headerRow}>
+            <Avatar sx={contactDetailStyles.avatar}>
               {contact.logo}
             </Avatar>
             <Box>
-              <Typography variant="h4" sx={{ fontWeight: 600 }}>
+              <Typography variant="h4" sx={contactDetailStyles.name}>
                 {contact.displayName}
               </Typography>
               <Typography variant="h6" color="text.secondary">
@@ -36,11 +37,19 @@ export function ContactDetailPage() {
             </Box>
           </Stack>
 
-          <Stack direction="row" spacing={1.5} sx={{ mt: 3 }}>
-            <Button variant="outlined" disabled sx={{ textTransform: 'none' }}>
+          <Stack direction="row" spacing={1.5} sx={contactDetailStyles.actions}>
+            <Button
+              variant="outlined"
+              disabled
+              sx={contactDetailStyles.actionButton}
+            >
               Edit
             </Button>
-            <Button variant="outlined" disabled sx={{ textTransform: 'none' }}>
+            <Button
+              variant="outlined"
+              disabled
+              sx={contactDetailStyles.actionButton}
+            >
               Message
             </Button>
           </Stack>
