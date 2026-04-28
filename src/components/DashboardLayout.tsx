@@ -20,6 +20,7 @@ interface DashboardLayoutProps {
 
 const navItems = [
   { label: 'Dashboard', to: '/dashboard' },
+  { label: 'Contacts', to: '/contacts' },
   { label: 'History', to: '/history' },
   { label: 'Settings', to: '/settings' }
 ]
