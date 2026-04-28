@@ -174,6 +174,37 @@ export const dashboardStyles = {
       fontWeight: 500
     }
   },
+  navSectionTitle: {
+    '& .MuiTypography-root': {
+      fontWeight: 600
+    }
+  },
+  navSectionTitleButton: {
+    mt: 1.5,
+    borderRadius: 2,
+    color: 'text.primary',
+    '&.Mui-selected': {
+      bgcolor: 'action.selected'
+    },
+    '&.Mui-selected:hover': {
+      bgcolor: 'action.selected'
+    }
+  },
+  navSubList: {
+    px: 0
+  },
+  navSubItem: {
+    borderRadius: 2,
+    color: 'text.primary',
+    pl: 4,
+    '&.Mui-selected': {
+      bgcolor: 'action.selected',
+      fontWeight: 600
+    },
+    '&.Mui-selected:hover': {
+      bgcolor: 'action.selected'
+    }
+  },
   walletIcon: {
     width: 28,
     height: 28
@@ -441,6 +472,93 @@ export const historyStyles = {
     textTransform: 'none' as const,
     minWidth: 'auto',
     px: 1
+  }
+} as const
+
+export const storageStyles = {
+  connectedRow: {
+    mt: 3,
+    alignItems: { md: 'center' }
+  },
+  connectedLabel: {
+    fontWeight: 600
+  },
+  connectedLink: {
+    fontSize: 16,
+    wordBreak: 'break-all'
+  },
+  sectionHeading: {
+    mt: 6,
+    fontWeight: 600
+  },
+  backendRow: {
+    mt: 2,
+    alignItems: { lg: 'stretch' }
+  },
+  backendCard: (disabled: boolean) =>
+    ({
+      minWidth: 270,
+      borderRadius: 2.5,
+      px: 3,
+      py: 2.5,
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'center',
+      gap: 1,
+      opacity: disabled ? 0.8 : 1
+    }) as const,
+  backendHeaderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 1.5
+  },
+  backendIcon: {
+    fontSize: 34,
+    color: 'text.secondary'
+  },
+  backendTitle: {
+    fontWeight: 600
+  },
+  backendDescription: (comingSoon: boolean, disabled: boolean) =>
+    ({
+      fontStyle: comingSoon ? 'italic' : 'normal',
+      color: disabled ? 'text.disabled' : 'text.secondary'
+    }) as const,
+  connectBackendWrap: {
+    display: 'flex',
+    alignItems: 'center'
+  },
+  collectionsWrap: {
+    mt: 2,
+    maxWidth: 780
+  },
+  collectionItem: {
+    spacing: 1.25
+  },
+  collectionMetaRow: {
+    alignItems: 'center',
+    flexWrap: 'wrap'
+  },
+  collectionDetailsSlot: {
+    minWidth: 180,
+    display: 'flex',
+    justifyContent: 'flex-end'
+  },
+  buttonTextLeft: {
+    textTransform: 'none',
+    justifyContent: 'flex-start',
+    textAlign: 'left'
+  },
+  buttonSize: {
+    topAction: { minWidth: 132, height: 42, px: 2 },
+    connectBackend: { minWidth: 208, height: 50, px: 2.5 },
+    collectionLabel: { minWidth: 180, height: 48, px: 2 },
+    collectionDetails: {
+      minWidth: 106,
+      height: 34,
+      px: 1.25,
+      fontSize: '0.9rem'
+    }
   }
 } as const
 

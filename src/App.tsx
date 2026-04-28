@@ -17,6 +17,7 @@ import { LogoutPage } from '@/pages/auth/LogoutPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { WalletGetPage } from '@/pages/chapi/WalletGetPage'
 import { WalletStorePage } from '@/pages/chapi/WalletStorePage'
+import { StoragePage } from './pages/dashboard/StoragePage'
 
 function App() {
   return (
@@ -34,6 +35,7 @@ function App() {
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
+        <Route path="/storage" element={<StoragePage />} />
         <Route path="/contacts/:contactId" element={<ContactDetailPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/settings" element={<SettingsPage />} />

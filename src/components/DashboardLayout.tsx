@@ -18,11 +18,14 @@ interface DashboardLayoutProps {
   children?: ReactNode
 }
 
-const navItems = [
+const primaryNavItems = [
   { label: 'Dashboard', to: '/dashboard' },
-  { label: 'Contacts', to: '/contacts' },
-  { label: 'History', to: '/history' },
-  { label: 'Settings', to: '/settings' }
+  { label: 'Contacts', to: '/contacts' }
+]
+
+const settingsNavItems = [
+  { label: 'Storage', to: '/storage' },
+  { label: 'History', to: '/history' }
 ]
 
 export function DashboardLayout({ title, children }: DashboardLayoutProps) {
@@ -70,7 +73,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
       <Drawer variant="permanent" sx={dashboardStyles.drawer}>
         <Toolbar />
         <List sx={dashboardStyles.navList}>
-          {navItems.map(item => (
+          {primaryNavItems.map(item => (
             <ListItemButton
               key={item.to}
               component={RouterLink}
@@ -84,6 +87,32 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
               />
             </ListItemButton>
           ))}
+
+          <ListItemButton
+            component={RouterLink}
+            to="/settings"
+            selected={pathname === '/settings'}
+            sx={dashboardStyles.navSectionTitleButton}
+          >
+            <ListItemText primary="Settings" sx={dashboardStyles.navSectionTitle} />
+          </ListItemButton>
+
+          <List sx={dashboardStyles.navSubList}>
+            {settingsNavItems.map(item => (
+              <ListItemButton
+                key={item.to}
+                component={RouterLink}
+                to={item.to}
+                selected={pathname === item.to}
+                sx={dashboardStyles.navSubItem}
+              >
+                <ListItemText
+                  primary={item.label}
+                  sx={dashboardStyles.navItemText}
+                />
+              </ListItemButton>
+            ))}
+          </List>
         </List>
       </Drawer>
 
