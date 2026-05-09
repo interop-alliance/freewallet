@@ -407,8 +407,9 @@ export class WASRemoteStore implements IWalletStore {
     }
     // @ts-expect-error TODO add a type to the response
     const { data } = response!
-    // data looks like: { offset: 0, total_rows, rows: [{ id, url, contentType }] }
-    return await this.fetchAll({ rows: data.rows })
+    // data looks like:
+    // { id, url, name, type, totalItems, items: [{ id, url, contentType }] }
+    return await this.fetchAll({ rows: data.items })
   }
 
   async listHistoryItems(): Promise<Array<{ id: string; doc: any }>> {
