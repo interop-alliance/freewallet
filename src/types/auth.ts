@@ -1,4 +1,4 @@
-import { StorageManager } from '@/stores/storageManager'
+import type { StorageManager } from '@/stores/storageManager'
 import type { ISigner } from '@digitalcredentials/ssi'
 import type { ZcapClient } from '@digitalcredentials/ezcap'
 
