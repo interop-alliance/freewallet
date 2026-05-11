@@ -22,7 +22,7 @@ export interface IWalletStore {
   }) => Promise<void>
   listCredentials: () => Promise<Array<StoredCredential>>
   wipeStorage: ({ profile }: { profile: ControllerProfile }) => Promise<void>
-  exportSpace?: () => Promise<Blob>
+  exportSpace?: () => Promise<ReadableStream<Uint8Array>>
 }
 
 /**
@@ -98,7 +98,7 @@ export class StorageManager {
     }
   }
 
-  async exportSpace(): Promise<Blob> {
+  async exportSpace(): Promise<ReadableStream<Uint8Array>> {
     if (!this.remoteStore) {
       throw new Error('Remote storage is not configured for this session.')
     }
@@ -536,7 +536,7 @@ export class WASRemoteStore implements IWalletStore {
     console.log('Remote space deleted.')
   }
 
-  async exportSpace(): Promise<Blob> {
+  async exportSpace(): Promise<ReadableStream<Uint8Array>> {
     const exportUrl = new URL(
       `/space/${this.spaceId}/export`,
       this.storageServerUrl
@@ -544,46 +544,23 @@ export class WASRemoteStore implements IWalletStore {
 
     let response
     try {
-      // `@digitalcredentials/http-client` only populates `response.data` for
-      // JSON responses. Disable parsing so we can read raw tar bytes.
+      // `parseBody: false` preserves the raw Response so we can stream bytes.
       response = await (this.zcapClient.request as any)({
         url: exportUrl,
         method: 'POST',
         parseBody: false,
-        headers: {
-          accept: 'application/x-tar'
-        }
+        headers: { accept: 'application/x-tar' }
       })
     } catch (e: any) {
       console.error('Error exporting space:', JSON.stringify(e.data, null, 2))
       throw new Error('Failed to export remote space.')
     }
 
-    if (response && typeof (response as Response).blob === 'function') {
-      return await (response as Response).blob()
+    if (!response || !(response instanceof Response) || !response.body) {
+      throw new Error('Unexpected export response format from storage server.')
     }
 
-    const payload = (response as { data?: unknown })?.data
-    const tarType = 'application/x-tar'
-
-    if (payload instanceof Blob) {
-      return payload
-    }
-    if (payload instanceof ArrayBuffer) {
-      return new Blob([new Uint8Array(payload)], { type: tarType })
-    }
-    if (ArrayBuffer.isView(payload)) {
-      const bytes = new Uint8Array(payload.byteLength)
-      bytes.set(
-        new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength)
-      )
-      return new Blob([bytes.buffer], { type: tarType })
-    }
-    if (typeof payload === 'string') {
-      return new Blob([payload], { type: tarType })
-    }
-
-    throw new Error('Unexpected export response format from storage server.')
+    return response.body
   }
 }
 

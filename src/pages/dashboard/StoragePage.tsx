@@ -7,6 +7,16 @@ import { MdStorage } from 'react-icons/md'
 import { FcGoogle } from 'react-icons/fc'
 import { useState } from 'react'
 
+type SaveFilePicker = (options?: {
+  suggestedName?: string
+  types?: Array<{
+    description?: string
+    accept?: Record<string, string[]>
+  }>
+}) => Promise<{
+  createWritable: () => Promise<WritableStream>
+}>
+
 export const StoragePage = () => {
   const session = useAuthStore(state => state.session)
   const backends = getBackends()
@@ -23,17 +33,33 @@ export const StoragePage = () => {
       if (!spaceId) {
         throw new Error('Remote space ID is unavailable.')
       }
-      const exportBlob = await session.storage.exportSpace()
-      const exportName = `space-${spaceId}.tar`
-      const downloadUrl = window.URL.createObjectURL(exportBlob)
-      const link = document.createElement('a')
-      link.href = downloadUrl
-      link.setAttribute('download', exportName)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      window.URL.revokeObjectURL(downloadUrl)
+
+      const stream = await session.storage.exportSpace()
+
+      const windowWithPicker = window as Window & {
+        showSaveFilePicker?: SaveFilePicker
+      }
+      if (typeof windowWithPicker.showSaveFilePicker !== 'function') {
+        throw new Error('Streaming export is not supported in this browser.')
+      }
+
+      // Ask user where to save — streams directly, no buffering
+      const fileHandle = await windowWithPicker.showSaveFilePicker({
+        suggestedName: `space-${spaceId}.tar`,
+        types: [
+          {
+            description: 'TAR archive',
+            accept: { 'application/x-tar': ['.tar'] }
+          }
+        ]
+      })
+
+      const writable = await fileHandle.createWritable()
+      await stream.pipeTo(writable) // chunks go disk
     } catch (error) {
+      if ((error as DOMException).name === 'AbortError') {
+        return
+      } // user cancelled picker
       console.error('Failed to export space:', error)
       window.alert('Could not export space. Please try again.')
     } finally {
