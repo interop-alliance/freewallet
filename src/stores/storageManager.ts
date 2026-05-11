@@ -22,6 +22,7 @@ export interface IWalletStore {
   }) => Promise<void>
   listCredentials: () => Promise<Array<StoredCredential>>
   wipeStorage: ({ profile }: { profile: ControllerProfile }) => Promise<void>
+  exportSpace?: () => Promise<Blob>
 }
 
 /**
@@ -95,6 +96,13 @@ export class StorageManager {
     if (this.remoteStore) {
       await this.remoteStore.wipeStorage({ profile })
     }
+  }
+
+  async exportSpace(): Promise<Blob> {
+    if (!this.remoteStore) {
+      throw new Error('Remote storage is not configured for this session.')
+    }
+    return await this.remoteStore.exportSpace()
   }
 
   async ensureUserCollections({ user }: { user: User }) {
@@ -258,7 +266,7 @@ export class WASRemoteStore implements IWalletStore {
     // Create Space for this user on remote storage server
     const spaceDescription = {
       name: 'Freewallet Space',
-      controller: user.id
+      controller: this.controller
     }
     const { spaceId } = this
     const spaceUrl = new URL(`/space/${spaceId}`, storageServerUrl).toString()
@@ -270,6 +278,9 @@ export class WASRemoteStore implements IWalletStore {
       })
     } catch (e: any) {
       console.error('Error creating space:', JSON.stringify(e.data, null, 2))
+      throw new Error(
+        `Error creating space for user "${user.id}" at "${spaceUrl}": ${JSON.stringify(e.data)}`
+      )
     }
 
     // Space created, now create collections
@@ -328,6 +339,9 @@ export class WASRemoteStore implements IWalletStore {
         `Error creating collection "${collectionId}":`,
         JSON.stringify(e.data, null, 2)
       )
+      throw new Error(
+        `Error creating collection "${collectionId}" at "${collectionUrl}": ${JSON.stringify(e.data)}`
+      )
     }
     const collectionBaseUrl = `${collectionUrl}/` // ensure trailing slash
     return { url: collectionBaseUrl }
@@ -342,7 +356,7 @@ export class WASRemoteStore implements IWalletStore {
     user: User
     profile: ControllerProfile
   }) {
-    const controller = user.id
+    const controller = profile.keyAgent.id || user.id
     const spaceId = bufferToBase64Url(await digestHash(controller))
     const remoteStore = new WASRemoteStore({
       storageServerUrl,
@@ -520,6 +534,56 @@ export class WASRemoteStore implements IWalletStore {
       console.error('Error deleting space:', JSON.stringify(e.data, null, 2))
     }
     console.log('Remote space deleted.')
+  }
+
+  async exportSpace(): Promise<Blob> {
+    const exportUrl = new URL(
+      `/space/${this.spaceId}/export`,
+      this.storageServerUrl
+    ).toString()
+
+    let response
+    try {
+      // `@digitalcredentials/http-client` only populates `response.data` for
+      // JSON responses. Disable parsing so we can read raw tar bytes.
+      response = await (this.zcapClient.request as any)({
+        url: exportUrl,
+        method: 'POST',
+        parseBody: false,
+        headers: {
+          accept: 'application/x-tar'
+        }
+      })
+    } catch (e: any) {
+      console.error('Error exporting space:', JSON.stringify(e.data, null, 2))
+      throw new Error('Failed to export remote space.')
+    }
+
+    if (response && typeof (response as Response).blob === 'function') {
+      return await (response as Response).blob()
+    }
+
+    const payload = (response as { data?: unknown })?.data
+    const tarType = 'application/x-tar'
+
+    if (payload instanceof Blob) {
+      return payload
+    }
+    if (payload instanceof ArrayBuffer) {
+      return new Blob([new Uint8Array(payload)], { type: tarType })
+    }
+    if (ArrayBuffer.isView(payload)) {
+      const bytes = new Uint8Array(payload.byteLength)
+      bytes.set(
+        new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength)
+      )
+      return new Blob([bytes.buffer], { type: tarType })
+    }
+    if (typeof payload === 'string') {
+      return new Blob([payload], { type: tarType })
+    }
+
+    throw new Error('Unexpected export response format from storage server.')
   }
 }
 

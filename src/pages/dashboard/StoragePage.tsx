@@ -5,11 +5,41 @@ import { useAuthStore } from '@/stores/authStore'
 import { storageStyles } from '@/styles/appStyles'
 import { MdStorage } from 'react-icons/md'
 import { FcGoogle } from 'react-icons/fc'
+import { useState } from 'react'
 
 export const StoragePage = () => {
   const session = useAuthStore(state => state.session)
   const backends = getBackends()
   const collections = getCollections()
+  const [isExporting, setIsExporting] = useState(false)
+
+  const handleExportSpace = async () => {
+    if (!session?.storage) {
+      return
+    }
+    setIsExporting(true)
+    try {
+      const spaceId = session.storage.remoteStore?.spaceId
+      if (!spaceId) {
+        throw new Error('Remote space ID is unavailable.')
+      }
+      const exportBlob = await session.storage.exportSpace()
+      const exportName = `space-${spaceId}.tar`
+      const downloadUrl = window.URL.createObjectURL(exportBlob)
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.setAttribute('download', exportName)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(downloadUrl)
+    } catch (error) {
+      console.error('Failed to export space:', error)
+      window.alert('Could not export space. Please try again.')
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
   return (
     <DashboardLayout title="Storage">
@@ -33,6 +63,17 @@ export const StoragePage = () => {
           }}
         >
           View Details
+        </Button>
+        <Button
+          variant="contained"
+          onClick={handleExportSpace}
+          disabled={isExporting || !session?.storage?.remoteStore}
+          sx={{
+            ...storageStyles.buttonTextLeft,
+            ...storageStyles.buttonSize.topAction
+          }}
+        >
+          {isExporting ? 'Exporting...' : 'Export Space'}
         </Button>
       </Stack>
 
