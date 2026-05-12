@@ -1,11 +1,11 @@
 import { DashboardLayout } from '@/components/DashboardLayout'
-import { getBackends, getCollections } from '@/lib/storage'
+import { getBackends, type StorageCollection } from '@/lib/storage'
 import { Box, Button, Paper, Stack, Typography } from '@mui/material'
 import { useAuthStore } from '@/stores/authStore'
 import { storageStyles } from '@/styles/appStyles'
 import { MdStorage } from 'react-icons/md'
 import { FcGoogle } from 'react-icons/fc'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 type SaveFilePicker = (options?: {
   suggestedName?: string
@@ -20,8 +20,34 @@ type SaveFilePicker = (options?: {
 export const StoragePage = () => {
   const session = useAuthStore(state => state.session)
   const backends = getBackends()
-  const collections = getCollections()
+  const [collections, setCollections] = useState<Array<StorageCollection>>([])
+  const [collectionsError, setCollectionsError] = useState<string | null>(null)
+  const [isLoadingCollections, setIsLoadingCollections] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+
+  useEffect(() => {
+    async function loadCollections() {
+      if (!session?.storage?.remoteStore) {
+        setCollections([])
+        return
+      }
+
+      setIsLoadingCollections(true)
+      setCollectionsError(null)
+      try {
+        const remoteCollections = await session.storage.listCollections()
+        setCollections(remoteCollections)
+      } catch (error) {
+        console.error('Failed to list storage collections:', error)
+        setCollectionsError('Could not load storage collections.')
+        setCollections([])
+      } finally {
+        setIsLoadingCollections(false)
+      }
+    }
+
+    loadCollections()
+  }, [session])
 
   const handleExportSpace = async () => {
     if (!session?.storage) {
@@ -83,10 +109,10 @@ export const StoragePage = () => {
 
         <Button
           variant="outlined"
-          sx={{
-            ...storageStyles.buttonTextLeft,
-            ...storageStyles.buttonSize.topAction
-          }}
+          sx={[
+            storageStyles.buttonTextLeft,
+            storageStyles.buttonSize.topAction
+          ]}
         >
           View Details
         </Button>
@@ -94,10 +120,10 @@ export const StoragePage = () => {
           variant="contained"
           onClick={handleExportSpace}
           disabled={isExporting || !session?.storage?.remoteStore}
-          sx={{
-            ...storageStyles.buttonTextLeft,
-            ...storageStyles.buttonSize.topAction
-          }}
+          sx={[
+            storageStyles.buttonTextLeft,
+            storageStyles.buttonSize.topAction
+          ]}
         >
           {isExporting ? 'Exporting...' : 'Export Space'}
         </Button>
@@ -119,7 +145,7 @@ export const StoragePage = () => {
           >
             <Box sx={storageStyles.backendHeaderRow}>
               {backend.id === 'google-drive' ? (
-                <FcGoogle style={{ fontSize: 32 }} />
+                <Box component={FcGoogle} sx={storageStyles.backendIcon} />
               ) : (
                 <Box component="span" sx={storageStyles.backendIcon}>
                   <MdStorage />
@@ -145,10 +171,10 @@ export const StoragePage = () => {
         <Box sx={storageStyles.connectBackendWrap}>
           <Button
             variant="outlined"
-            sx={{
-              ...storageStyles.buttonTextLeft,
-              ...storageStyles.buttonSize.connectBackend
-            }}
+            sx={[
+              storageStyles.buttonTextLeft,
+              storageStyles.buttonSize.connectBackend
+            ]}
           >
             (+) Connect Backend
           </Button>
@@ -159,19 +185,22 @@ export const StoragePage = () => {
         Collections
       </Typography>
       <Stack spacing={3} sx={storageStyles.collectionsWrap}>
+        {isLoadingCollections && (
+          <Typography variant="body1" color="text.secondary">
+            Loading collections...
+          </Typography>
+        )}
+        {collectionsError && (
+          <Typography variant="body1" color="error">
+            {collectionsError}
+          </Typography>
+        )}
         {collections.map(collection => {
           return (
             <Stack key={collection.id} spacing={1.25}>
-              <Button
-                variant="outlined"
-                sx={{
-                  ...storageStyles.buttonTextLeft,
-                  alignSelf: 'flex-start',
-                  ...storageStyles.buttonSize.collectionLabel
-                }}
-              >
-                {collection.displayName}
-              </Button>
+              <Typography variant="body1" sx={storageStyles.collectionItem}>
+                {collection.id}
+              </Typography>
 
               <Stack
                 direction="row"
@@ -182,10 +211,10 @@ export const StoragePage = () => {
                   <Button
                     variant="outlined"
                     size="small"
-                    sx={{
-                      ...storageStyles.buttonTextLeft,
-                      ...storageStyles.buttonSize.collectionDetails
-                    }}
+                    sx={[
+                      storageStyles.buttonTextLeft,
+                      storageStyles.buttonSize.collectionDetails
+                    ]}
                   >
                     View Details
                   </Button>

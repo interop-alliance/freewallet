@@ -516,6 +516,9 @@ export const storageStyles = {
     fontSize: 34,
     color: 'text.secondary'
   },
+  googleDriveIcon: {
+    fontSize: 32
+  },
   backendTitle: {
     fontWeight: 600
   },
@@ -533,7 +536,15 @@ export const storageStyles = {
     maxWidth: 780
   },
   collectionItem: {
-    spacing: 1.25
+    alignSelf: 'flex-start',
+    minWidth: 180,
+    height: 48,
+    px: 2,
+    border: '1px solid',
+    borderColor: 'text.primary',
+    borderRadius: 1,
+    display: 'flex',
+    alignItems: 'center'
   },
   collectionMetaRow: {
     alignItems: 'center',
@@ -543,6 +554,42 @@ export const storageStyles = {
     minWidth: 180,
     display: 'flex',
     justifyContent: 'flex-end'
+  },
+  topActionButton: {
+    textTransform: 'none',
+    justifyContent: 'flex-start',
+    textAlign: 'left',
+    minWidth: 132,
+    height: 42,
+    px: 2
+  },
+  connectBackendButton: {
+    textTransform: 'none',
+    justifyContent: 'flex-start',
+    textAlign: 'left',
+    minWidth: 208,
+    height: 50,
+    px: 2.5
+  },
+  collectionLabel: {
+    alignSelf: 'flex-start',
+    minWidth: 180,
+    height: 48,
+    px: 2,
+    border: '1px solid',
+    borderColor: 'text.primary',
+    borderRadius: 1,
+    display: 'flex',
+    alignItems: 'center'
+  },
+  collectionDetailsButton: {
+    textTransform: 'none',
+    justifyContent: 'flex-start',
+    textAlign: 'left',
+    minWidth: 106,
+    height: 34,
+    px: 1.25,
+    fontSize: '0.9rem'
   },
   buttonTextLeft: {
     textTransform: 'none',

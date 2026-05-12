@@ -8,28 +8,13 @@ export type StorageBackend = {
 
 export type StorageCollection = {
   id: string
-  displayName: string
-  backendId: string
+  url: string
 }
 
-export const getCollections = (): StorageCollection[] => {
-  return [
-    {
-      id: '0',
-      displayName: 'Private Credentials',
-      backendId: 'default'
-    },
-    {
-      id: '1',
-      displayName: 'Public Credentials',
-      backendId: 'default'
-    },
-    {
-      id: '2',
-      displayName: 'History',
-      backendId: 'default'
-    }
-  ]
+export type StorageCollectionList = {
+  url: string
+  totalItems: number
+  items: StorageCollection[]
 }
 
 export const getBackends = (): StorageBackend[] => {

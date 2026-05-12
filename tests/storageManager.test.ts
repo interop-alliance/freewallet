@@ -59,6 +59,41 @@ describe('WASRemoteStore.listCollectionItems', () => {
   })
 })
 
+describe('WASRemoteStore.listCollections', () => {
+  it('loads collection refs from the space collections endpoint', async () => {
+    const items = [
+      {
+        id: 'private-credentials',
+        url: '/space/space-id/private-credentials'
+      }
+    ]
+    const zcapClient = {
+      request: vi.fn().mockResolvedValue({
+        data: {
+          url: '/space/space-id/collections/',
+          totalItems: 1,
+          items
+        }
+      })
+    }
+    const store = new WASRemoteStore({
+      storageServerUrl: 'https://example.test',
+      zcapClient: zcapClient as any,
+      spaceId: 'space-id',
+      controller: 'did:key:test'
+    })
+
+    await expect(store.listCollections()).resolves.toEqual(items)
+    expect(zcapClient.request).toHaveBeenCalledWith({
+      url: 'https://example.test/space/space-id/collections/',
+      method: 'GET',
+      headers: {
+        accept: 'application/json'
+      }
+    })
+  })
+})
+
 describe('WASRemoteStore.initClient', () => {
   it('uses signer DID as controller and space-id seed', async () => {
     const controller = 'did:key:z6MktestControllerDid'

@@ -5,6 +5,7 @@ import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
 import type { ControllerProfile, User } from '@/types/auth'
 import { bufferToBase64Url, cidFrom, digestHash } from '@/lib/cidFrom'
 import { WAS_SERVER_URL } from '@/app.config'
+import type { StorageCollection, StorageCollectionList } from '@/lib/storage'
 import {
   type StoredCredential,
   StoredCredentialSchema
@@ -22,6 +23,7 @@ export interface IWalletStore {
   }) => Promise<void>
   listCredentials: () => Promise<Array<StoredCredential>>
   wipeStorage: ({ profile }: { profile: ControllerProfile }) => Promise<void>
+  listCollections?: () => Promise<Array<StorageCollection>>
   exportSpace?: () => Promise<ReadableStream<Uint8Array>>
 }
 
@@ -103,6 +105,13 @@ export class StorageManager {
       throw new Error('Remote storage is not configured for this session.')
     }
     return await this.remoteStore.exportSpace()
+  }
+
+  async listCollections(): Promise<Array<StorageCollection>> {
+    if (!this.remoteStore) {
+      return []
+    }
+    return await this.remoteStore.listCollections()
   }
 
   async ensureUserCollections({ user }: { user: User }) {
@@ -424,6 +433,32 @@ export class WASRemoteStore implements IWalletStore {
     // data looks like:
     // { id, url, name, type, totalItems, items: [{ id, url, contentType }] }
     return await this.fetchAll({ rows: data.items })
+  }
+
+  async listCollections(): Promise<Array<StorageCollection>> {
+    const collectionsUrl = new URL(
+      `/space/${this.spaceId}/collections/`,
+      this.storageServerUrl
+    ).toString()
+    let response
+    try {
+      response = await this.zcapClient.request({
+        url: collectionsUrl,
+        method: 'GET',
+        headers: {
+          accept: 'application/json'
+        }
+      })
+    } catch (err: any) {
+      console.error(
+        'Error listing collections:',
+        JSON.stringify(err.data, null, 2)
+      )
+      throw new Error('Failed to list remote storage collections.')
+    }
+
+    const { data } = response as { data?: StorageCollectionList }
+    return data?.items ?? []
   }
 
   async listHistoryItems(): Promise<Array<{ id: string; doc: any }>> {
