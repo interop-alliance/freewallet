@@ -23,17 +23,9 @@ export function LandingPage() {
   return (
     <Box component="main" sx={landingStyles.main}>
       <Box sx={landingStyles.content}>
-        <Stack
-          sx={{
-            flexDirection: 'row',
-            justifyContent: 'flex-start',
-            width: '100%',
-            mb: 1
-          }}
-        >
+        <Box sx={landingStyles.languageBar}>
           <LanguageSelector />
-        </Stack>
-
+        </Box>
         <Typography variant="h2" component="h1" sx={landingStyles.title}>
           {t('landing.title')}
         </Typography>

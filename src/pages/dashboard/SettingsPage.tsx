@@ -42,7 +42,15 @@ export function SettingsPage() {
   return (
     <DashboardLayout title="Settings">
       <Stack sx={{ mt: 4, gap: 4, maxWidth: 640 }}>
-        <Stack sx={{ gap: 2 }}>
+        <Stack
+          sx={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 2,
+          }}
+        >
           <Typography variant="h6">{t('settings.language')}</Typography>
           <LanguageSelector showLabel={false} />
         </Stack>

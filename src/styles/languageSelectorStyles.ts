@@ -2,8 +2,8 @@ import type { SxProps, Theme } from '@mui/material/styles'
 
 /** Extra-dense select (smaller than MUI `size="small"` alone). */
 const compactForm: SxProps<Theme> = {
-  minWidth: 92,
-  maxWidth: 128,
+  minWidth: 132,
+  maxWidth: 200,
   '& .MuiOutlinedInput-root': {
     fontSize: '0.6875rem',
     lineHeight: 1.2,

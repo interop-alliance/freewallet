@@ -4,7 +4,7 @@ import MenuItem from '@mui/material/MenuItem'
 import Select from '@mui/material/Select'
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
-import { UI_LANGUAGES, normalizeToUiLanguageCode, type UiLanguageCode } from '@/i18n/uiLanguages'
+import { UI_LANGUAGES, languageOptionLabel, normalizeToUiLanguageCode, type UiLanguageCode } from '@/i18n/uiLanguages'
 import { languageSelectorStyles } from '@/styles/languageSelectorStyles'
 
 type LanguageSelectorProps = {
@@ -27,6 +27,7 @@ export function LanguageSelector({ showLabel = true }: LanguageSelectorProps) {
         id={selectId}
         {...(showLabel ? { label } : {})}
         value={normalizeToUiLanguageCode(i18n.language)}
+        renderValue={(value: UiLanguageCode) => languageOptionLabel(value)}
         onChange={e => void i18n.changeLanguage(e.target.value)}
         inputProps={showLabel ? undefined : { 'aria-label': label }}
         MenuProps={{
@@ -36,9 +37,9 @@ export function LanguageSelector({ showLabel = true }: LanguageSelectorProps) {
           },
         }}
       >
-        {UI_LANGUAGES.map(({ code, label: langLabel }) => (
+        {UI_LANGUAGES.map(({ code }) => (
           <MenuItem dense key={code} value={code}>
-            {langLabel}
+            {languageOptionLabel(code)}
           </MenuItem>
         ))}
       </Select>

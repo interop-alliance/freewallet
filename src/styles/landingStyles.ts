@@ -4,7 +4,14 @@ export const landingStyles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    px: 2
+    px: 2,
+  },
+  /** Sits at the top of the hero column, above headings (aligned end = right in LTR). */
+  languageBar: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    width: '100%',
+    mb: 2,
   },
   content: {
     textAlign: 'center',
