@@ -1,4 +1,36 @@
+/*
+ * Light mode is the default. Dark mode follows the user's browser preference.
+ * These variables set the initial page colors before React/MUI renders.
+ */
+:root {
+  color-scheme: light;
+  --fw-bg: #f7f7f7;
+  --fw-surface: #ffffff;
+  --fw-text-primary: #1f1f1f;
+  --fw-text-secondary: #5f6368;
+  --fw-text-disabled: #9aa0a6;
+  --fw-divider: rgba(0, 0, 0, 0.12);
+  --fw-action-hover: rgba(0, 0, 0, 0.04);
+  --fw-action-selected: rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --fw-bg: #101418;
+    --fw-surface: #171c21;
+    --fw-text-primary: #f1f5f9;
+    --fw-text-secondary: #b6c2cf;
+    --fw-text-disabled: #6f7c8a;
+    --fw-divider: rgba(255, 255, 255, 0.14);
+    --fw-action-hover: rgba(255, 255, 255, 0.08);
+    --fw-action-selected: rgba(255, 255, 255, 0.12);
+  }
+}
+
 body {
   margin: 0;
   min-width: 320px;
+  background: var(--fw-bg);
+  color: var(--fw-text-primary);
 }
