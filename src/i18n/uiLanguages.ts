@@ -22,5 +22,5 @@ export function supportedUiLanguageCodes(): UiLanguageCode[] {
 export function normalizeToUiLanguageCode(lng: string): UiLanguageCode {
   const base = lng.split('-')[0]?.toLowerCase() ?? ''
   const match = UI_LANGUAGES.find(l => l.code === base)
-  return match?.code ?? 'es'
+  return match?.code ?? 'en'
 }
