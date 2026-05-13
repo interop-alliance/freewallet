@@ -1,5 +1,13 @@
 # History
 
+## 0.3.0 - 2026-05-13
+
+### Added
+
+- Add Export Wallet button on the Storage page.
+- Add List Collections functionality to Storage page.
+- Add Light and Dark mode styles.
+
 ## 0.2.0 - 2026-05-11
 
 ### Changed
