@@ -8,10 +8,9 @@
     "types": ["vite/client"],
     "skipLibCheck": true,
 
-    /* Directory aliasing */
-    "baseUrl": ".",
+    /* Path alias: paths are relative to this config file (no baseUrl). */
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
 
     /* Bundler mode */
@@ -19,6 +18,7 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
+    "resolveJsonModule": true,
     "noEmit": true,
     "jsx": "react-jsx",
 

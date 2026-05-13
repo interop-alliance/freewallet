@@ -2,13 +2,16 @@ import Button from '@mui/material/Button'
 import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
+import { LanguageSelector } from '@/components/LanguageSelector'
 import { useInfoBox } from '@/hooks/useInfoBox'
 import { dashboardStyles } from '@/styles/appStyles'
 import { useEffect } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 
 export function SettingsPage() {
+  const { t } = useTranslation()
   const session = useAuthStore(state => state.session)
   const { displayInfoBox } = useInfoBox()
 
@@ -39,6 +42,13 @@ export function SettingsPage() {
   return (
     <DashboardLayout title="Settings">
       <Stack sx={{ mt: 4, gap: 4, maxWidth: 640 }}>
+        <Stack sx={{ gap: 2 }}>
+          <Typography variant="h6">{t('settings.language')}</Typography>
+          <LanguageSelector showLabel={false} />
+        </Stack>
+
+        <Divider />
+
         <Stack direction="row" sx={{ alignItems: 'center', gap: 3 }}>
           <Typography variant="h6">
             Verifiable Credentials

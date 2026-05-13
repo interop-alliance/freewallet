@@ -1,0 +1,15 @@
+{
+  "common": {
+    "language": "Language"
+  },
+  "settings": {
+    "language": "Interface language"
+  },
+  "landing": {
+    "title": "Freewallet",
+    "subtitle": "is an open source, open specs web app for managing <vcs>Verifiable Credentials</vcs>, <dids>DIDs</dids>, and <keys>keys</keys>.",
+    "logIn": "Log in",
+    "signUp": "Sign Up",
+    "guestMode": "Guest Mode"
+  }
+}

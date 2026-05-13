@@ -1,0 +1,15 @@
+{
+  "common": {
+    "language": "Idioma"
+  },
+  "settings": {
+    "language": "Idioma de la interfaz"
+  },
+  "landing": {
+    "title": "Freewallet",
+    "subtitle": "es una aplicación web de código abierto y especificaciones abiertas para gestionar <vcs>credenciales verificables</vcs>, <dids>DIDs</dids> y <keys>claves</keys>.",
+    "logIn": "Iniciar sesión",
+    "signUp": "Registrarse",
+    "guestMode": "Modo invitado"
+  }
+}
