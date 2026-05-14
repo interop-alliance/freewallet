@@ -7,20 +7,22 @@ import CardContent from '@mui/material/CardContent'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { Link as RouterLink } from 'react-router'
+import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { getContacts } from '@/lib/getContacts'
 
 export function ContactsPage() {
+  const { t } = useTranslation()
   const contacts = getContacts()
 
   return (
-    <DashboardLayout title="Contacts">
+    <DashboardLayout title={t('contacts.title')}>
       <Button
         variant="outlined"
         disabled
         sx={{ mt: 3, textTransform: 'none', borderRadius: 2, px: 2.5, py: 1 }}
       >
-        Add Contacts
+        {t('contacts.addContacts')}
       </Button>
 
       <Box sx={{ mt: 3, display: 'flex', flexWrap: 'wrap', gap: 2 }}>
@@ -54,10 +56,10 @@ export function ContactsPage() {
 
             <Stack direction="row" spacing={1} sx={{ px: 2, pb: 2 }}>
               <Button variant="outlined" disabled sx={{ textTransform: 'none' }}>
-                Edit
+                {t('common.edit')}
               </Button>
               <Button variant="outlined" disabled sx={{ textTransform: 'none' }}>
-                Message
+                {t('common.message')}
               </Button>
             </Stack>
           </Card>

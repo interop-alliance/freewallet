@@ -19,6 +19,7 @@ import {
 } from '@/lib/viewMappers/displayFieldsHelpers'
 import type { UseVerificationReturn } from '@/hooks/useVerification'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import { useTranslation } from 'react-i18next'
 
 function CheckRow({
   label,
@@ -79,6 +80,7 @@ export function ResumeCredentialCard({
   rawJson,
   onToggleRaw
 }: Props) {
+  const { t } = useTranslation()
   const subject = asRecord(getSubject(vc)) ?? {}
   const personName =
     resolvePersonFullName(subject) || getIssuerDetails(vc.issuer).name
@@ -104,10 +106,10 @@ export function ResumeCredentialCard({
               variant="body2"
               sx={{ fontWeight: 700, display: 'inline' }}
             >
-              Issuer:{' '}
+              {t('resumeCard.issuer')}{' '}
             </Typography>
             <Typography variant="body2" sx={{ display: 'inline' }}>
-              {personName} (self-issued)
+              {personName} {t('resumeCard.selfIssued')}
             </Typography>
           </Box>
           <Box>
@@ -115,10 +117,10 @@ export function ResumeCredentialCard({
               variant="body2"
               sx={{ fontWeight: 700, display: 'inline' }}
             >
-              Signed:{' '}
+              {t('resumeCard.signed')}{' '}
             </Typography>
             <Typography variant="body2" sx={{ display: 'inline' }}>
-              {createdDate ? formatDate({ isoDate: createdDate }) : 'N/A'}
+              {createdDate ? formatDate({ isoDate: createdDate }) : t('common.na')}
             </Typography>
           </Box>
         </Stack>
@@ -131,17 +133,17 @@ export function ResumeCredentialCard({
 
         <Stack spacing={1}>
           <CheckRow
-            label="Signature"
+            label={t('resumeCard.signature')}
             valid={result?.signature.valid}
             loading={loading}
           />
           <CheckRow
-            label="Not expired"
+            label={t('resumeCard.notExpired')}
             valid={result?.expiry.valid}
             loading={loading}
           />
           <CheckRow
-            label="Not revoked"
+            label={t('resumeCard.notRevoked')}
             valid={result?.status.valid}
             loading={loading}
           />
@@ -157,7 +159,7 @@ export function ResumeCredentialCard({
           onClick={onToggleRaw}
           sx={{ textTransform: 'none', color: 'text.secondary', px: 0 }}
         >
-          {showRaw ? 'Hide JSON' : 'View Source'}
+          {showRaw ? t('credential.hideJson') : t('credential.viewSource')}
         </Button>
         <Collapse in={showRaw} unmountOnExit>
           <Box

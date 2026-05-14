@@ -11,6 +11,7 @@ import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { credentialCardStyles } from '@/styles/appStyles'
 import { useVerification } from '@/hooks/useVerification'
 import { VerificationStatusBadge } from '@/components/credentialDetails/VerificationPanel'
+import { useTranslation } from 'react-i18next'
 
 interface CredentialCardProps {
   cid: string
@@ -18,8 +19,9 @@ interface CredentialCardProps {
 }
 
 export function CredentialCard({ cid, credential }: CredentialCardProps) {
+  const { t } = useTranslation()
   const { credentialDescription } = getDisplayFields(credential)
-  const description = credentialDescription ?? 'No Description'
+  const description = credentialDescription ?? t('common.noDescription')
   const { result, loading, error } = useVerification(credential)
 
   return (

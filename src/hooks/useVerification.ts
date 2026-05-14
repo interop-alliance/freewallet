@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { verifyResultToChecklist } from '@/lib/viewMappers/mapVerificationToUi'
 import { verifyCredential } from '@/lib/verify'
 import type { VerificationResult } from '@/types/credential'
@@ -18,6 +19,7 @@ export function useVerification(
   options: { runOnMount?: boolean } = { runOnMount: true }
 ): UseVerificationReturn {
   const { runOnMount = true } = options
+  const { i18n } = useTranslation()
   const [result, setResult] = useState<VerificationResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
@@ -59,7 +61,7 @@ export function useVerification(
       return
     }
     void verify()
-  }, [runOnMount, credential, verify])
+  }, [runOnMount, credential, verify, i18n.language])
 
   return { result, loading, error, verify, lastCheckedAt }
 }

@@ -26,6 +26,7 @@
     "@digitalcredentials/http-client": "^5.0.4",
     "@digitalcredentials/ssi": "^5.4.2",
     "@digitalcredentials/verifier-core": "^1.0.0-beta.11",
+    "@emotion/cache": "^11.14.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/lab": "9.0.0-beta.2",

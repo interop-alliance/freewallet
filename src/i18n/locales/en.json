@@ -1,9 +1,40 @@
 {
   "common": {
-    "language": "Language"
+    "language": "Language",
+    "logOut": "Log out",
+    "logIn": "Log in",
+    "cancel": "Cancel",
+    "back": "Back",
+    "next": "Next",
+    "add": "Add",
+    "close": "Close",
+    "loading": "Loading…",
+    "saving": "Saving…",
+    "verifying": "Verifying…",
+    "continue": "Continue",
+    "done": "Done",
+    "store": "Store",
+    "share": "Share",
+    "edit": "Edit",
+    "message": "Message",
+    "sync": "Sync",
+    "activity": "Activity",
+    "na": "N/A",
+    "type": "Type",
+    "issuer": "Issuer",
+    "noDescription": "No description",
+    "brand": "Freewallet"
   },
   "settings": {
-    "language": "Interface language"
+    "language": "Interface language",
+    "title": "Settings",
+    "vcSection": "Verifiable Credentials",
+    "moreInfo": "More Info",
+    "deleteAccount": "Delete Account",
+    "deleteAccountHint": "Your login, keys, and all data will be deleted.",
+    "deleteConfirm": "Are you sure you want to delete your account? This action cannot be undone.",
+    "about": "About",
+    "version": "Freewallet version {{version}}"
   },
   "landing": {
     "title": "Freewallet",
@@ -11,5 +42,211 @@
     "logIn": "Log in",
     "signUp": "Sign Up",
     "guestMode": "Guest Mode"
+  },
+  "auth": {
+    "errors": {
+      "profileNotFound": "This profile does not exist, please sign up.",
+      "profileExists": "This profile already exists, please log in."
+    },
+    "login": {
+      "heading": "Log in",
+      "passphraseLabel": "Passphrase:",
+      "submit": "Log in",
+      "passkey": "Log in with a Passkey",
+      "comingSoon": "(Coming soon.)",
+      "noWallet": "Don't have an existing wallet?",
+      "signUpLink": "Sign up"
+    },
+    "signup": {
+      "heading": "Sign up",
+      "steps": {
+        "passphrase": "Passphrase",
+        "email": "Email",
+        "storage": "Storage Selection"
+      },
+      "loginSecurity": "Login Security",
+      "passphraseLabel": "Passphrase:",
+      "passwordScores": ["Weak", "Weak", "Fair", "Strong", "Very strong"],
+      "passwordTooShort": "Too short",
+      "minChars": "At least {{count}} characters",
+      "passkey": "Sign up with a Passkey",
+      "comingSoon": "(Coming soon.)",
+      "next": "Next",
+      "back": "Back",
+      "hasWallet": "Already have a wallet?",
+      "logInLink": "Log in",
+      "emailHeading": "Email",
+      "emailLabel": "Email:",
+      "storageHeading": "Storage Selection",
+      "connectDropbox": "Connect to Dropbox",
+      "connectDrive": "Connect to Google Drive",
+      "courtesyStorage": "Courtesy 10 Mb storage (free)",
+      "createWallet": "Create Wallet"
+    },
+    "guest": {
+      "heading": "Guest Mode Login",
+      "bulletRandom": "a random login will be created",
+      "bulletEphemeral": "login and storage will be deleted at end of session",
+      "submit": "Guest Mode Log In"
+    }
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "contacts": "Contacts",
+    "settings": "Settings",
+    "storage": "Storage",
+    "history": "History"
+  },
+  "dashboard": {
+    "title": "Freewallet Dashboard",
+    "addCredential": "Add Credential",
+    "credentialsHeading": "Credentials"
+  },
+  "contacts": {
+    "title": "Contacts",
+    "addContacts": "Add Contacts"
+  },
+  "contactDetail": {
+    "title": "Contact details"
+  },
+  "history": {
+    "title": "History",
+    "empty": "No history items found.",
+    "viewSource": "View source",
+    "dialogTitle": "History source"
+  },
+  "storage": {
+    "title": "Storage",
+    "spaceConnected": "Space (connected):",
+    "viewDetails": "View details",
+    "exportSpace": "Export space",
+    "exporting": "Exporting…",
+    "backends": "Backends",
+    "connectBackend": "(+) Connect backend",
+    "collections": "Collections",
+    "loadingCollections": "Loading collections…",
+    "collectionsLoadError": "Could not load storage collections.",
+    "exportError": "Could not export space. Please try again.",
+    "collectionBackend": "Backend: Default (WAS)",
+    "backend": {
+      "default": {
+        "name": "Default backend",
+        "description": "Wallet Attached Storage"
+      },
+      "google-drive": {
+        "name": "Google Drive",
+        "description": "Coming soon"
+      }
+    }
+  },
+  "credential": {
+    "title": "Credential",
+    "resumeTitle": "Resume",
+    "loading": "Loading credential…",
+    "deleteAria": "Delete credential",
+    "achievementType": "Achievement type:",
+    "createdDate": "Created date",
+    "expirationDate": "Expiration date",
+    "issuedTo": "Issued to",
+    "description": "Description",
+    "criteria": "Criteria",
+    "alignments": "Alignments",
+    "evidence": "Evidence",
+    "viewSource": "View source",
+    "hideJson": "Hide JSON"
+  },
+  "resumeCard": {
+    "issuer": "Issuer:",
+    "selfIssued": "(self-issued)",
+    "signed": "Signed:",
+    "signature": "Signature",
+    "notExpired": "Not expired",
+    "notRevoked": "Not revoked"
+  },
+  "addCredential": {
+    "title": "Add credential",
+    "placeholder": "Paste a URL or full credential JSON.",
+    "add": "Add",
+    "errors": {
+      "empty": "No credential entered.",
+      "invalidInput": "Input must be a URL or a JSON credential.",
+      "noneFound": "No credentials found in the provided input.",
+      "urlFetch": "Could not retrieve credential from URL.",
+      "jsonParse": "Could not parse credential JSON."
+    }
+  },
+  "acceptCredentials": {
+    "title": "Accept credentials",
+    "acceptAll": "Accept all"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "goHome": "Go home"
+  },
+  "docs": {
+    "documentNotFound": "Document not found."
+  },
+  "resumePreview": {
+    "professionalSummary": "Professional summary",
+    "workExperience": "Work experience",
+    "education": "Education",
+    "skills": "Skills",
+    "professionalAffiliations": "Professional affiliations"
+  },
+  "logout": {
+    "message": "Logging out…"
+  },
+  "chapi": {
+    "accountNotFound": "Account not found. Please create your wallet from the main app first.",
+    "loginPrompt": "Enter your wallet passphrase to continue:",
+    "passphrasePlaceholder": "Passphrase",
+    "get": {
+      "title": "Share a credential",
+      "requestedBy": "Requested by",
+      "selectPrompt": "Select a credential to share:",
+      "walletEmpty": "Your wallet is empty.",
+      "sharing": "Sharing credential…"
+    },
+    "store": {
+      "title": "Store credential",
+      "storedSuccess": "Credential stored successfully."
+    }
+  },
+  "verification": {
+    "panelTitle": "Credential verification and validation",
+    "verifyingCredential": "Verifying credential…",
+    "lastChecked": "Last checked: {{datetime}}",
+    "summaryOk": "This credential was verified successfully.",
+    "summaryExpired": "This credential has expired but its cryptographic proof is still valid.",
+    "summaryFail": "This credential was not verified successfully.",
+    "badgeVerifying": "Verifying…",
+    "badgeWarning": "Warning",
+    "badgeNotVerified": "Not verified",
+    "badgeVerified": "Verified",
+    "badgePending": "Pending verification",
+    "narrative": {
+      "hookErrorHeadline": "There was an error verifying this credential.",
+      "verifiedHeadline": "This credential was verified successfully.",
+      "verifiedBody": "Cryptographic proof, validity period, and revocation status (if present) were checked successfully.",
+      "expiredHeadline": "This credential:",
+      "failedHeadline": "There was an error verifying this credential.",
+      "failedBodyFallback": "The credential could not be fully verified. Contact the issuer if this problem continues.",
+      "pendingHeadline": "Verification has not completed yet."
+    },
+    "checklist": {
+      "signatureOk": "Cryptographic proof verified",
+      "signatureFail": "Cryptographic proof could not be verified",
+      "issuerRegistryFail": "Cryptographic or issuer registry check did not pass",
+      "issuerNotListed": "Issuer not listed in configured trusted registries",
+      "expiryOk": "Credential is within its validity period",
+      "expiryFail": "Validity period check did not pass",
+      "noExpiration": "No expiration date on credential",
+      "expiredOn": "Credential expired on {{date}}",
+      "validUntil": "Valid until {{date}}",
+      "revocationOk": "Revocation status checked; credential is not revoked",
+      "revocationFail": "Revocation status check did not pass",
+      "noRevocation": "No revocation status on credential",
+      "missingStep": "Missing verification step"
+    }
   }
 }

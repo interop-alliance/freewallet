@@ -14,6 +14,7 @@ import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
 import { chapiStyles } from '@/styles/appStyles'
 import { ChapiLoginForm } from './ChapiLoginForm'
+import { useTranslation } from 'react-i18next'
 
 type PageState = 'initializing' | 'awaiting-login' | 'confirming' | 'stored'
 
@@ -31,6 +32,7 @@ interface ChapiStoreEvent {
 }
 
 export function WalletStorePage() {
+  const { t } = useTranslation()
   const [pageState, setPageState] = useState<PageState>('initializing')
   const [chapiEvent, setChapiEvent] = useState<ChapiStoreEvent | null>(null)
   const [vc, setVc] = useState<IVerifiableCredential | null>(null)
@@ -67,9 +69,7 @@ export function WalletStorePage() {
       secret: passphrase
     })
     if (!userExists) {
-      setLoginError(
-        'Account not found. Please create your wallet from the main app first.'
-      )
+      setLoginError(t('chapi.accountNotFound'))
       return
     }
     await s.storage.ensureUserCollections({ user: s.user })
@@ -110,19 +110,19 @@ export function WalletStorePage() {
     <Box sx={chapiStyles.page}>
       <Box sx={chapiStyles.card}>
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          Store Credential
+          {t('chapi.store.title')}
         </Typography>
 
         {vc && (
           <Box sx={chapiStyles.credentialSummary}>
             <Typography variant="body2" color="text.secondary">
-              Type
+              {t('common.type')}
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 500 }}>
               {credentialTitle(vc)}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Issuer
+              {t('common.issuer')}
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 500 }}>
               {issuerName(vc)}
@@ -141,14 +141,14 @@ export function WalletStorePage() {
               sx={{ textTransform: 'none' }}
               onClick={handleConfirm}
             >
-              Store
+              {t('common.store')}
             </Button>
             <Button
               variant="outlined"
               sx={{ textTransform: 'none' }}
               onClick={handleCancel}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
           </Stack>
         )}
@@ -156,14 +156,14 @@ export function WalletStorePage() {
         {pageState === 'stored' && (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             <Typography variant="body2" color="success.main">
-              Credential stored successfully.
+              {t('chapi.store.storedSuccess')}
             </Typography>
             <Button
               variant="contained"
               sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
               onClick={handleDone}
             >
-              Done
+              {t('common.done')}
             </Button>
           </Box>
         )}

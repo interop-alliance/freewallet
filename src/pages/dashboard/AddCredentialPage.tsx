@@ -5,6 +5,7 @@ import Button from '@mui/material/Button'
 import Typography from '@mui/material/Typography'
 import Stack from '@mui/material/Stack'
 import { useNavigate } from 'react-router'
+import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { fetchFromURL } from '@/lib/fetchFromURL'
 import { credentialsFromJSON } from '@/lib/credentialsFromJSON'
@@ -12,6 +13,7 @@ import { dashboardStyles } from '@/styles/appStyles'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 
 export function AddCredentialPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -22,7 +24,7 @@ export function AddCredentialPage() {
 
     const trimmed = input.trimStart()
     if (!trimmed) {
-      setError('No credential entered.')
+      setError(t('addCredential.errors.empty'))
       return
     }
 
@@ -37,13 +39,13 @@ export function AddCredentialPage() {
       } else if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
         credentials = credentialsFromJSON(trimmed)
       } else {
-        setError('Input must be a URL or a JSON credential.')
+        setError(t('addCredential.errors.invalidInput'))
         setLoading(false)
         return
       }
 
       if (credentials.length === 0) {
-        setError('No credentials found in the provided input.')
+        setError(t('addCredential.errors.noneFound'))
         setLoading(false)
         return
       }
@@ -52,8 +54,8 @@ export function AddCredentialPage() {
     } catch (err: any) {
       const isUrl = trimmed.startsWith('https://') || trimmed.startsWith('http://')
       const prefix = isUrl
-        ? 'Could not retrieve credential from URL.'
-        : 'Could not parse credential JSON.'
+        ? t('addCredential.errors.urlFetch')
+        : t('addCredential.errors.jsonParse')
       console.error(prefix, err)
       setError(`${prefix} Error: ${err.message}`)
     } finally {
@@ -66,12 +68,12 @@ export function AddCredentialPage() {
   }
 
   return (
-    <DashboardLayout title="Add Credential">
+    <DashboardLayout title={t('addCredential.title')}>
       <Box sx={dashboardStyles.addCredentialForm}>
         <TextField
           multiline
           minRows={4}
-          placeholder="Paste a URL or full credential JSON."
+          placeholder={t('addCredential.placeholder')}
           value={input}
           onChange={e => setInput(e.target.value)}
           error={!!error}
@@ -89,14 +91,14 @@ export function AddCredentialPage() {
             disabled={loading}
             sx={dashboardStyles.addCredentialButton}
           >
-            {loading ? 'Loading…' : 'Add'}
+            {loading ? t('common.loading') : t('addCredential.add')}
           </Button>
           <Button
             variant="outlined"
             onClick={handleCancel}
             sx={dashboardStyles.addCredentialButton}
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
         </Stack>
       </Box>

@@ -9,8 +9,12 @@ import { useAuthStore } from '@/stores/authStore'
 import { dashboardStyles } from '@/styles/appStyles'
 import { DocContent } from '@/components/DocContent'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { LanguageSelector } from '@/components/LanguageSelector'
+import Stack from '@mui/material/Stack'
+import { useTranslation } from 'react-i18next'
 
 export function DocsPage() {
+  const { t } = useTranslation()
   const { fileName } = useParams()
   const session = useAuthStore(state => state.session)
 
@@ -30,22 +34,25 @@ export function DocsPage() {
             <Box
               component="img"
               src={walletIcon}
-              alt="Freewallet"
+              alt={t('common.brand')}
               sx={dashboardStyles.walletIcon}
             />
             <Typography variant="h6" sx={dashboardStyles.navBrandTitle}>
-              Freewallet
+              {t('common.brand')}
             </Typography>
           </Box>
-          {session ? (
-            <Button variant="outlined" component={RouterLink} to="/logout">
-              Log out
-            </Button>
-          ) : (
-            <Button variant="outlined" component={RouterLink} to="/login">
-              Log in
-            </Button>
-          )}
+          <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+            <LanguageSelector showLabel={false} />
+            {session ? (
+              <Button variant="outlined" component={RouterLink} to="/logout">
+                {t('common.logOut')}
+              </Button>
+            ) : (
+              <Button variant="outlined" component={RouterLink} to="/login">
+                {t('common.logIn')}
+              </Button>
+            )}
+          </Stack>
         </Toolbar>
       </AppBar>
       <Box sx={{ maxWidth: 780, mx: 'auto', px: { xs: 2, md: 4 }, pt: 4 }}>

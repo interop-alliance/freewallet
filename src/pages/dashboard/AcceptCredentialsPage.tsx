@@ -7,6 +7,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { BsAward } from 'react-icons/bs'
 import { useLocation, useNavigate } from 'react-router'
+import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import { useAuthStore } from '@/stores/authStore'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
@@ -14,6 +15,7 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { credentialCardStyles, dashboardStyles } from '@/styles/appStyles'
 
 export function AcceptCredentialsPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
   const session = useAuthStore(state => state.session)
@@ -49,13 +51,13 @@ export function AcceptCredentialsPage() {
   }
 
   return (
-    <DashboardLayout title="Accept Credentials">
+    <DashboardLayout title={t('acceptCredentials.title')}>
       <Stack sx={dashboardStyles.acceptCredentialsList}>
         {credentials.map((vc, i) => {
           const description =
             'description' in vc.credentialSubject
               ? vc.credentialSubject.description
-              : 'No Description'
+              : t('common.noDescription')
 
           return (
             <Card key={i} variant="outlined">
@@ -90,7 +92,7 @@ export function AcceptCredentialsPage() {
           disabled={saving}
           sx={dashboardStyles.addCredentialButton}
         >
-          {saving ? 'Saving…' : 'Accept All'}
+          {saving ? t('common.saving') : t('acceptCredentials.acceptAll')}
         </Button>
         <Button
           variant="outlined"
@@ -98,7 +100,7 @@ export function AcceptCredentialsPage() {
           disabled={saving}
           sx={dashboardStyles.addCredentialButton}
         >
-          Cancel
+          {t('common.cancel')}
         </Button>
       </Stack>
     </DashboardLayout>

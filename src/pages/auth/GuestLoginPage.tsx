@@ -3,7 +3,9 @@ import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
 import Typography from '@mui/material/Typography'
 import { FaGhost } from 'react-icons/fa'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
+import { LanguageSelector } from '@/components/LanguageSelector'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
@@ -14,6 +16,7 @@ import { welcomeCredential } from '@/fixtures/welcomeCredential'
 import { registerWallet } from '@/lib/registerWallet'
 
 export function GuestLoginPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const login = useAuthStore(state => state.login)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -55,22 +58,25 @@ export function GuestLoginPage() {
   return (
     <Box component="main" sx={authStyles.page}>
       <Box component="form" onSubmit={handleGuestLogin} sx={authStyles.content}>
+        <Box sx={authStyles.languageBar}>
+          <LanguageSelector />
+        </Box>
         <Typography variant="h2" component="h1" sx={authStyles.title}>
-          Freewallet
+          {t('landing.title')}
         </Typography>
         <Typography variant="h3" component="h2" sx={authStyles.title}>
           <Box component="span" sx={authStyles.guestIcon}>
             <FaGhost />
           </Box>
-          Guest Mode Login
+          {t('auth.guest.heading')}
         </Typography>
 
         <ul>
           <Typography variant="h5" component="li">
-            a random login will be created
+            {t('auth.guest.bulletRandom')}
           </Typography>
           <Typography variant="h5" component="li">
-            login and storage will be deleted at end of session
+            {t('auth.guest.bulletEphemeral')}
           </Typography>
         </ul>
 
@@ -87,7 +93,7 @@ export function GuestLoginPage() {
           }
           sx={authStyles.actionButton}
         >
-          Guest Mode Log In
+          {t('auth.guest.submit')}
         </Button>
       </Box>
     </Box>

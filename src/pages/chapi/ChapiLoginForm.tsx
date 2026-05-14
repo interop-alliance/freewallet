@@ -3,6 +3,7 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
+import { useTranslation } from 'react-i18next'
 
 interface ChapiLoginFormProps {
   onSubmit: (passphrase: string) => Promise<void>
@@ -10,6 +11,7 @@ interface ChapiLoginFormProps {
 }
 
 export function ChapiLoginForm({ onSubmit, error }: ChapiLoginFormProps) {
+  const { t } = useTranslation()
   const [passphrase, setPassphrase] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -30,7 +32,7 @@ export function ChapiLoginForm({ onSubmit, error }: ChapiLoginFormProps) {
       sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}
     >
       <Typography variant="body2">
-        Enter your wallet passphrase to continue:
+        {t('chapi.loginPrompt')}
       </Typography>
 
       {error && (
@@ -41,7 +43,7 @@ export function ChapiLoginForm({ onSubmit, error }: ChapiLoginFormProps) {
 
       <TextField
         type="password"
-        placeholder="Passphrase"
+        placeholder={t('chapi.passphrasePlaceholder')}
         value={passphrase}
         onChange={e => setPassphrase(e.target.value)}
         autoComplete="current-password"
@@ -55,7 +57,7 @@ export function ChapiLoginForm({ onSubmit, error }: ChapiLoginFormProps) {
         disabled={loading || !passphrase}
         sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
       >
-        {loading ? 'Verifying…' : 'Continue'}
+        {loading ? t('common.verifying') : t('common.continue')}
       </Button>
     </Box>
   )

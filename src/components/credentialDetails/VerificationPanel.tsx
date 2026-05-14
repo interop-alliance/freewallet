@@ -5,6 +5,7 @@ import {
   Stack,
   Typography
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 import { MdCancel, MdCheckCircle, MdWarning } from 'react-icons/md'
 import type { UseVerificationReturn } from '@/hooks/useVerification'
 import { formatDateTime } from '@/lib/viewMappers/formatDate'
@@ -56,9 +57,10 @@ export function VerificationPanel({
 }: {
   verification: UseVerificationReturn
 }) {
+  const { t } = useTranslation()
   const { result, loading, error, lastCheckedAt } = verification
   const pending = loading || (!result && !error)
-  const narrative = getVerificationNarrative(result, error)
+  const narrative = getVerificationNarrative(result, error, t)
   const summaryOk =
     !error && result != null && isFullyVerified(result) && !pending
   const expiredOnly = !error && result != null && isExpiredOnly(result)
@@ -66,12 +68,11 @@ export function VerificationPanel({
   let summaryMessage = ''
   if (!pending) {
     if (summaryOk) {
-      summaryMessage = 'This credential was verified successfully.'
+      summaryMessage = t('verification.summaryOk')
     } else if (expiredOnly) {
-      summaryMessage =
-        'This credential has expired but its cryptographic proof is still valid.'
+      summaryMessage = t('verification.summaryExpired')
     } else {
-      summaryMessage = 'This credential was not verified successfully.'
+      summaryMessage = t('verification.summaryFail')
     }
   }
 
@@ -80,14 +81,14 @@ export function VerificationPanel({
       <Box sx={sx.vpCardColumns}>
         <Box sx={sx.vpGrayBox}>
           <Typography variant="caption" sx={sx.vpGrayTitle}>
-            Credential Verification and Validation
+            {t('verification.panelTitle')}
           </Typography>
 
           {pending && (
             <Box sx={sx.verificationLoadingRow}>
               <CircularProgress size={18} sx={sx.verificationSpinner} />
               <Typography variant="body2" color="text.secondary">
-                Verifying credential…
+                {t('verification.verifyingCredential')}
               </Typography>
             </Box>
           )}
@@ -123,7 +124,9 @@ export function VerificationPanel({
                   color="text.secondary"
                   sx={sx.vpLastChecked}
                 >
-                  Last Checked: {formatDateTime(lastCheckedAt)}
+                  {t('verification.lastChecked', {
+                    datetime: formatDateTime(lastCheckedAt)
+                  })}
                 </Typography>
               )}
             </>
@@ -155,6 +158,7 @@ export function VerificationStatusBadge({
   result,
   error
 }: Pick<UseVerificationReturn, 'loading' | 'result' | 'error'>) {
+  const { t } = useTranslation()
   const verified = !error && result != null && isFullyVerified(result)
   const expiredOnly = !error && result != null && isExpiredOnly(result)
 
@@ -163,7 +167,7 @@ export function VerificationStatusBadge({
       <Box sx={sx.vpStatusBadge} aria-live="polite">
         <CircularProgress size={10} sx={sx.vpStatusSpinner} />
         <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
-          Verifying…
+          {t('verification.badgeVerifying')}
         </Typography>
       </Box>
     )
@@ -179,7 +183,7 @@ export function VerificationStatusBadge({
           <MdWarning size={11} />
         </Box>
         <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
-          Warning
+          {t('verification.badgeWarning')}
         </Typography>
       </Box>
     )
@@ -195,7 +199,7 @@ export function VerificationStatusBadge({
           <MdCancel size={11} />
         </Box>
         <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
-          Not Verified
+          {t('verification.badgeNotVerified')}
         </Typography>
       </Box>
     )
@@ -211,7 +215,7 @@ export function VerificationStatusBadge({
           <MdCheckCircle size={11} />
         </Box>
         <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
-          Verified
+          {t('verification.badgeVerified')}
         </Typography>
       </Box>
     )
@@ -224,7 +228,7 @@ export function VerificationStatusBadge({
         sx={sx.vpStatusBadgeLabel}
         color="text.secondary"
       >
-        Pending verification
+        {t('verification.badgePending')}
       </Typography>
     </Box>
   )

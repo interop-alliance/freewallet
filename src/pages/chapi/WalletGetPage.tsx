@@ -13,6 +13,7 @@ import { issuerName } from '@/lib/viewMappers/issuerName'
 import { chapiStyles } from '@/styles/appStyles'
 import type { StoredCredential } from '@/types/credential'
 import { ChapiLoginForm } from './ChapiLoginForm'
+import { useTranslation } from 'react-i18next'
 
 type PageState = 'initializing' | 'awaiting-login' | 'selecting' | 'done'
 
@@ -33,6 +34,7 @@ interface ChapiGetEvent {
 }
 
 export function WalletGetPage() {
+  const { t } = useTranslation()
   const [pageState, setPageState] = useState<PageState>('initializing')
   const [chapiEvent, setChapiEvent] = useState<ChapiGetEvent | null>(null)
   const [requestOrigin, setRequestOrigin] = useState('')
@@ -75,9 +77,7 @@ export function WalletGetPage() {
       secret: passphrase
     })
     if (!userExists) {
-      setLoginError(
-        'Account not found. Please create your wallet from the main app first.'
-      )
+      setLoginError(t('chapi.accountNotFound'))
       return
     }
     await session.storage.ensureUserCollections({ user: session.user })
@@ -113,12 +113,12 @@ export function WalletGetPage() {
     <Box sx={chapiStyles.page}>
       <Box sx={chapiStyles.card}>
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          Share a Credential
+          {t('chapi.get.title')}
         </Typography>
 
         <Box>
           <Typography variant="body2" color="text.secondary">
-            Requested by
+            {t('chapi.get.requestedBy')}
           </Typography>
           <Typography sx={chapiStyles.originChip}>{requestOrigin}</Typography>
         </Box>
@@ -134,11 +134,11 @@ export function WalletGetPage() {
         {pageState === 'selecting' && (
           <>
             <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-              Select a credential to share:
+              {t('chapi.get.selectPrompt')}
             </Typography>
             {credentials.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
-                Your wallet is empty.
+                {t('chapi.get.walletEmpty')}
               </Typography>
             ) : (
               <Box sx={chapiStyles.credentialList}>
@@ -157,7 +157,7 @@ export function WalletGetPage() {
                       size="small"
                       onClick={() => handleShare(vc)}
                     >
-                      Share
+                      {t('common.share')}
                     </Button>
                   </Box>
                 ))}
@@ -169,7 +169,7 @@ export function WalletGetPage() {
         {pageState === 'done' && (
           <Box sx={chapiStyles.doneMessage}>
             <CircularProgress size={20} />
-            <Typography variant="body2">Sharing credential…</Typography>
+            <Typography variant="body2">{t('chapi.get.sharing')}</Typography>
           </Box>
         )}
       </Box>

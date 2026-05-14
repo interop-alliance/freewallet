@@ -7,12 +7,14 @@ import { getIssuerDetails } from '@/lib/viewMappers/issuerName'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import { initials } from '@/lib/viewMappers/initials'
 import { issuerInfoStyles as sx } from '@/styles/credentialStyles'
+import { useTranslation } from 'react-i18next'
 
 interface IssuerInfoProps {
   issuer: IVerifiableCredential['issuer']
 }
 
 export function IssuerInfo({ issuer }: IssuerInfoProps) {
+  const { t } = useTranslation()
   const details = getIssuerDetails(issuer)
   const imgRef = useRef<HTMLImageElement>(null)
   const hasName = !!details.name
@@ -21,7 +23,7 @@ export function IssuerInfo({ issuer }: IssuerInfoProps) {
   return (
     <Box>
       <Typography variant="overline" sx={sx.header}>
-        Issuer
+        {t('common.issuer')}
       </Typography>
       <Box sx={sx.row}>
         {details.image ? (

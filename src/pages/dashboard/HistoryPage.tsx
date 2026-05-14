@@ -18,8 +18,10 @@ import { MdClose } from 'react-icons/md'
 import { formatRelativeTime } from '@/lib/formatRelativeTime'
 import { historyStyles, infoBoxStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
+import { useTranslation } from 'react-i18next'
 
 export function HistoryPage() {
+  const { t, i18n } = useTranslation()
   const session = useAuthStore(state => state.session)
   const [historyItems, setHistoryItems] = useState<
     Array<{ id: string; doc: any }>
@@ -72,11 +74,11 @@ export function HistoryPage() {
   }, [session])
 
   return (
-    <DashboardLayout title="History">
+    <DashboardLayout title={t('history.title')}>
       {loading ? (
         <LoadingSpinner />
       ) : historyItems.length === 0 ? (
-        <Typography color="text.secondary">No history items found.</Typography>
+        <Typography color="text.secondary">{t('history.empty')}</Typography>
       ) : (
         <Timeline sx={{ p: 0, m: 0, mt: 3 }}>
           {historyItems.map(({ id, doc }, index) => (
@@ -87,12 +89,12 @@ export function HistoryPage() {
               </TimelineSeparator>
               <TimelineContent>
                 <Typography variant="body1">
-                  {doc?.summary ?? doc?.type?.join(', ') ?? 'Activity'}
+                  {doc?.summary ?? doc?.type?.join(', ') ?? t('common.activity')}
                 </Typography>
                 {doc?.created && (
                   <Box sx={historyStyles.timestampRow}>
                     <Typography variant="caption" color="text.secondary">
-                      {formatRelativeTime(doc.created)}
+                      {formatRelativeTime(doc.created, i18n.language)}
                     </Typography>
                     <Button
                       size="small"
@@ -104,7 +106,7 @@ export function HistoryPage() {
                         setSourceOpen(true)
                       }}
                     >
-                      View Source
+                      {t('history.viewSource')}
                     </Button>
                   </Box>
                 )}
@@ -124,12 +126,12 @@ export function HistoryPage() {
       >
         <Box sx={infoBoxStyles.header}>
           <Typography variant="h6" sx={infoBoxStyles.title}>
-            History Source
+            {t('history.dialogTitle')}
           </Typography>
           <IconButton
             onClick={() => setSourceOpen(false)}
             size="small"
-            aria-label="Close"
+            aria-label={t('common.close')}
           >
             <MdClose />
           </IconButton>

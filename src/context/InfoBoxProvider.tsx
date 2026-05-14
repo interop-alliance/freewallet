@@ -8,8 +8,10 @@ import { MdClose } from 'react-icons/md'
 import { DocContent } from '@/components/DocContent'
 import { infoBoxStyles } from '@/styles/appStyles'
 import { InfoBox, type InfoBoxOptions } from '@/context/infoBoxStore'
+import { useTranslation } from 'react-i18next'
 
 export function InfoBoxProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [options, setOptions] = useState<InfoBoxOptions | null>(null)
 
@@ -40,7 +42,7 @@ export function InfoBoxProvider({ children }: { children: ReactNode }) {
           ) : (
             <Box sx={infoBoxStyles.spacer} />
           )}
-          <IconButton onClick={handleClose} size="small" aria-label="Close" autoFocus>
+          <IconButton onClick={handleClose} size="small" aria-label={t('common.close')} autoFocus>
             <MdClose />
           </IconButton>
         </Box>

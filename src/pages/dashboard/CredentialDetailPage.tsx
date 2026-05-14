@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import { useParams, useNavigate } from 'react-router'
+import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialDetail } from '@/components/credentialDetails/CredentialDetail'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -11,6 +12,7 @@ import type { StoredCredential } from '@/types/credential'
 import { isResumeCredential } from '@/lib/isResumeCredential'
 
 export function CredentialDetailPage() {
+  const { t } = useTranslation()
   const session = useAuthStore(state => state.session)
   const navigate = useNavigate()
   const { cid } = useParams()
@@ -44,12 +46,12 @@ export function CredentialDetailPage() {
     return <NotFoundPage />
   }
 
-  let title = 'Credential'
+  let title = t('credential.title')
   if (credential?.vc) {
     if (isResumeCredential(credential.vc)) {
-      title = 'Resume'
+      title = t('credential.resumeTitle')
     } else {
-      title = 'Credential'
+      title = t('credential.title')
     }
   }
   return (
@@ -61,7 +63,7 @@ export function CredentialDetailPage() {
           </>
         ) : (
           <Typography variant="h5" color="text.secondary">
-            Loading credential...
+            {t('credential.loading')}
           </Typography>
         )}
       </Box>

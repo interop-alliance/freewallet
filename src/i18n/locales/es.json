@@ -1,9 +1,40 @@
 {
   "common": {
-    "language": "Idioma"
+    "language": "Idioma",
+    "logOut": "Cerrar sesión",
+    "logIn": "Iniciar sesión",
+    "cancel": "Cancelar",
+    "back": "Atrás",
+    "next": "Siguiente",
+    "add": "Añadir",
+    "close": "Cerrar",
+    "loading": "Cargando…",
+    "saving": "Guardando…",
+    "verifying": "Verificando…",
+    "continue": "Continuar",
+    "done": "Listo",
+    "store": "Guardar",
+    "share": "Compartir",
+    "edit": "Editar",
+    "message": "Mensaje",
+    "sync": "Sincronizar",
+    "activity": "Actividad",
+    "na": "N/D",
+    "type": "Tipo",
+    "issuer": "Emisor",
+    "noDescription": "Sin descripción",
+    "brand": "Freewallet"
   },
   "settings": {
-    "language": "Idioma de la interfaz"
+    "language": "Idioma de la interfaz",
+    "title": "Ajustes",
+    "vcSection": "Credenciales verificables",
+    "moreInfo": "Más información",
+    "deleteAccount": "Eliminar cuenta",
+    "deleteAccountHint": "Se eliminarán su acceso, claves y todos los datos.",
+    "deleteConfirm": "¿Seguro que desea eliminar su cuenta? Esta acción no se puede deshacer.",
+    "about": "Acerca de",
+    "version": "Freewallet versión {{version}}"
   },
   "landing": {
     "title": "Freewallet",
@@ -11,5 +42,211 @@
     "logIn": "Iniciar sesión",
     "signUp": "Registrarse",
     "guestMode": "Modo invitado"
+  },
+  "auth": {
+    "errors": {
+      "profileNotFound": "Este perfil no existe; regístrese.",
+      "profileExists": "Este perfil ya existe; inicie sesión."
+    },
+    "login": {
+      "heading": "Iniciar sesión",
+      "passphraseLabel": "Frase de contraseña:",
+      "submit": "Iniciar sesión",
+      "passkey": "Iniciar sesión con llave de acceso",
+      "comingSoon": "(Próximamente.)",
+      "noWallet": "¿No tiene una billetera?",
+      "signUpLink": "Registrarse"
+    },
+    "signup": {
+      "heading": "Registrarse",
+      "steps": {
+        "passphrase": "Frase de contraseña",
+        "email": "Correo",
+        "storage": "Almacenamiento"
+      },
+      "loginSecurity": "Seguridad de acceso",
+      "passphraseLabel": "Frase de contraseña:",
+      "passwordScores": ["Débil", "Débil", "Regular", "Fuerte", "Muy fuerte"],
+      "passwordTooShort": "Muy corta",
+      "minChars": "Al menos {{count}} caracteres",
+      "passkey": "Registrarse con llave de acceso",
+      "comingSoon": "(Próximamente.)",
+      "next": "Siguiente",
+      "back": "Atrás",
+      "hasWallet": "¿Ya tiene una billetera?",
+      "logInLink": "Iniciar sesión",
+      "emailHeading": "Correo electrónico",
+      "emailLabel": "Correo:",
+      "storageHeading": "Elección de almacenamiento",
+      "connectDropbox": "Conectar con Dropbox",
+      "connectDrive": "Conectar con Google Drive",
+      "courtesyStorage": "10 MB de cortesía (gratis)",
+      "createWallet": "Crear billetera"
+    },
+    "guest": {
+      "heading": "Modo invitado",
+      "bulletRandom": "se creará un inicio de sesión aleatorio",
+      "bulletEphemeral": "el inicio de sesión y el almacenamiento se eliminarán al terminar la sesión",
+      "submit": "Entrar como invitado"
+    }
+  },
+  "nav": {
+    "dashboard": "Panel",
+    "contacts": "Contactos",
+    "settings": "Ajustes",
+    "storage": "Almacenamiento",
+    "history": "Historial"
+  },
+  "dashboard": {
+    "title": "Panel de Freewallet",
+    "addCredential": "Añadir credencial",
+    "credentialsHeading": "Credenciales"
+  },
+  "contacts": {
+    "title": "Contactos",
+    "addContacts": "Añadir contactos"
+  },
+  "contactDetail": {
+    "title": "Detalle del contacto"
+  },
+  "history": {
+    "title": "Historial",
+    "empty": "No hay elementos en el historial.",
+    "viewSource": "Ver origen",
+    "dialogTitle": "Origen del historial"
+  },
+  "storage": {
+    "title": "Almacenamiento",
+    "spaceConnected": "Espacio (conectado):",
+    "viewDetails": "Ver detalles",
+    "exportSpace": "Exportar espacio",
+    "exporting": "Exportando…",
+    "backends": "Proveedores",
+    "connectBackend": "(+) Conectar proveedor",
+    "collections": "Colecciones",
+    "loadingCollections": "Cargando colecciones…",
+    "collectionsLoadError": "No se pudieron cargar las colecciones.",
+    "exportError": "No se pudo exportar el espacio. Inténtelo de nuevo.",
+    "collectionBackend": "Proveedor: predeterminado (WAS)",
+    "backend": {
+      "default": {
+        "name": "Proveedor predeterminado",
+        "description": "Almacenamiento adjunto a la billetera"
+      },
+      "google-drive": {
+        "name": "Google Drive",
+        "description": "Próximamente"
+      }
+    }
+  },
+  "credential": {
+    "title": "Credencial",
+    "resumeTitle": "Currículum",
+    "loading": "Cargando credencial…",
+    "deleteAria": "Eliminar credencial",
+    "achievementType": "Tipo de logro:",
+    "createdDate": "Fecha de creación",
+    "expirationDate": "Fecha de vencimiento",
+    "issuedTo": "Emitida a",
+    "description": "Descripción",
+    "criteria": "Criterios",
+    "alignments": "Alineaciones",
+    "evidence": "Evidencia",
+    "viewSource": "Ver origen",
+    "hideJson": "Ocultar JSON"
+  },
+  "resumeCard": {
+    "issuer": "Emisor:",
+    "selfIssued": "(autopublicada)",
+    "signed": "Firmada:",
+    "signature": "Firma",
+    "notExpired": "No vencida",
+    "notRevoked": "No revocada"
+  },
+  "addCredential": {
+    "title": "Añadir credencial",
+    "placeholder": "Pegue una URL o el JSON completo de la credencial.",
+    "add": "Añadir",
+    "errors": {
+      "empty": "No introdujo ninguna credencial.",
+      "invalidInput": "La entrada debe ser una URL o un JSON de credencial.",
+      "noneFound": "No se encontraron credenciales en la entrada.",
+      "urlFetch": "No se pudo obtener la credencial desde la URL.",
+      "jsonParse": "No se pudo analizar el JSON de la credencial."
+    }
+  },
+  "acceptCredentials": {
+    "title": "Aceptar credenciales",
+    "acceptAll": "Aceptar todas"
+  },
+  "notFound": {
+    "title": "Página no encontrada",
+    "goHome": "Ir al inicio"
+  },
+  "docs": {
+    "documentNotFound": "Documento no encontrado."
+  },
+  "resumePreview": {
+    "professionalSummary": "Resumen profesional",
+    "workExperience": "Experiencia laboral",
+    "education": "Educación",
+    "skills": "Habilidades",
+    "professionalAffiliations": "Afiliaciones profesionales"
+  },
+  "logout": {
+    "message": "Cerrando sesión…"
+  },
+  "chapi": {
+    "accountNotFound": "Cuenta no encontrada. Cree su billetera en la aplicación principal primero.",
+    "loginPrompt": "Introduzca la frase de contraseña de su billetera para continuar:",
+    "passphrasePlaceholder": "Frase de contraseña",
+    "get": {
+      "title": "Compartir una credencial",
+      "requestedBy": "Solicitado por",
+      "selectPrompt": "Seleccione una credencial para compartir:",
+      "walletEmpty": "Su billetera está vacía.",
+      "sharing": "Compartiendo credencial…"
+    },
+    "store": {
+      "title": "Guardar credencial",
+      "storedSuccess": "Credencial guardada correctamente."
+    }
+  },
+  "verification": {
+    "panelTitle": "Verificación y validación de la credencial",
+    "verifyingCredential": "Verificando credencial…",
+    "lastChecked": "Última comprobación: {{datetime}}",
+    "summaryOk": "Esta credencial se verificó correctamente.",
+    "summaryExpired": "Esta credencial ha vencido, pero su prueba criptográfica sigue siendo válida.",
+    "summaryFail": "Esta credencial no se verificó correctamente.",
+    "badgeVerifying": "Verificando…",
+    "badgeWarning": "Aviso",
+    "badgeNotVerified": "No verificada",
+    "badgeVerified": "Verificada",
+    "badgePending": "Verificación pendiente",
+    "narrative": {
+      "hookErrorHeadline": "Se produjo un error al verificar esta credencial.",
+      "verifiedHeadline": "Esta credencial se verificó correctamente.",
+      "verifiedBody": "Se comprobaron correctamente la prueba criptográfica, el periodo de validez y el estado de revocación (si existe).",
+      "expiredHeadline": "Esta credencial:",
+      "failedHeadline": "Se produjo un error al verificar esta credencial.",
+      "failedBodyFallback": "No se pudo verificar por completo la credencial. Contacte al emisor si el problema continúa.",
+      "pendingHeadline": "La verificación aún no ha terminado."
+    },
+    "checklist": {
+      "signatureOk": "Prueba criptográfica verificada",
+      "signatureFail": "No se pudo verificar la prueba criptográfica",
+      "issuerRegistryFail": "No superó la comprobación criptográfica o de registro del emisor",
+      "issuerNotListed": "El emisor no figura en los registros de confianza configurados",
+      "expiryOk": "La credencial está dentro de su periodo de validez",
+      "expiryFail": "No superó la comprobación del periodo de validez",
+      "noExpiration": "La credencial no tiene fecha de vencimiento",
+      "expiredOn": "Credencial vencida el {{date}}",
+      "validUntil": "Válida hasta {{date}}",
+      "revocationOk": "Estado de revocación comprobado; la credencial no está revocada",
+      "revocationFail": "No superó la comprobación del estado de revocación",
+      "noRevocation": "La credencial no tiene estado de revocación",
+      "missingStep": "Falta un paso de verificación"
+    }
   }
 }

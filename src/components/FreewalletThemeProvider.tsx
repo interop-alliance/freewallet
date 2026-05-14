@@ -24,7 +24,17 @@ export function FreewalletThemeProvider({ children }: { children: ReactNode }) {
               }
         },
         typography: {
-          fontFamily: '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+          fontFamily:
+            '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+        },
+        components: {
+          MuiButton: {
+            styleOverrides: {
+              root: {
+                whiteSpace: 'nowrap'
+              }
+            }
+          }
         }
       }),
     [prefersDarkMode]

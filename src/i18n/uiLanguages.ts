@@ -4,7 +4,7 @@
  */
 export const UI_LANGUAGES = [
   { code: 'es', name: 'Español' },
-  { code: 'en', name: 'English' },
+  { code: 'en', name: 'English' }
 ] as const
 
 export type UiLanguageCode = (typeof UI_LANGUAGES)[number]['code']

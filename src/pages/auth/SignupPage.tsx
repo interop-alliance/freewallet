@@ -23,6 +23,8 @@ import {
   useNavigate,
   useSearchParams
 } from 'react-router'
+import { useTranslation } from 'react-i18next'
+import { LanguageSelector } from '@/components/LanguageSelector'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
@@ -40,16 +42,26 @@ const PasswordStrengthBar =
     }
   ).default ?? PasswordStrengthBarModule
 
-const STEPS = ['Passphrase', 'Email', 'Storage Selection'] as const
+const STEP_I18N_KEYS = [
+  'auth.signup.steps.passphrase',
+  'auth.signup.steps.email',
+  'auth.signup.steps.storage'
+] as const
+
+type AuthLocationState = { authMessageKey?: string; userMessage?: string }
 
 export function SignupPage() {
+  const { t } = useTranslation()
   const theme = useTheme()
   const isCompactStepper = useMediaQuery(theme.breakpoints.down('sm'))
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const login = useAuthStore(state => state.login)
   const location = useLocation()
-  const { userMessage } = location.state || {}
+  const state = location.state as AuthLocationState | null | undefined
+  const bannerText = state?.authMessageKey
+    ? t(state.authMessageKey)
+    : state?.userMessage
 
   useEffect(() => {
     void registerWallet()
@@ -68,7 +80,7 @@ export function SignupPage() {
     if (isSubmitting) {
       return
     }
-    if (activeStep !== STEPS.length - 1 || !canSubmit) {
+    if (activeStep !== STEP_I18N_KEYS.length - 1 || !canSubmit) {
       return
     }
     setIsSubmitting(true)
@@ -81,9 +93,10 @@ export function SignupPage() {
         await StorageManager.initStorageClients(session)
       session.storage = storage
       if (userExists) {
-        const userMessage = 'This profile already exists, please log in.'
         console.log('User already exists, redirecting to login page.')
-        return navigate('/login', { state: { userMessage } })
+        return navigate('/login', {
+          state: { authMessageKey: 'auth.errors.profileExists' }
+        })
       }
       // This is a new user
       // Create Space and init collections
@@ -128,16 +141,19 @@ export function SignupPage() {
   return (
     <Box component="main" sx={authStyles.page}>
       <Box component="form" onSubmit={handleSignup} sx={authStyles.wideContent}>
+        <Box sx={authStyles.languageBar}>
+          <LanguageSelector />
+        </Box>
         <Typography variant="h2" component="h1" sx={authStyles.title}>
-          Freewallet
+          {t('landing.title')}
         </Typography>
         <Typography variant="h3" component="h2" sx={authStyles.title}>
-          Sign up
+          {t('auth.signup.heading')}
         </Typography>
 
-        {userMessage && (
+        {bannerText && (
           <Typography variant="body1" color="error" sx={authStyles.userMessage}>
-            {userMessage}
+            {bannerText}
           </Typography>
         )}
         <Box sx={authStyles.signupStepperWrap}>
@@ -147,9 +163,9 @@ export function SignupPage() {
             alternativeLabel={!isCompactStepper}
             sx={authStyles.signupStepper}
           >
-            {STEPS.map(label => (
-              <Step key={label}>
-                <StepLabel>{label}</StepLabel>
+            {STEP_I18N_KEYS.map(key => (
+              <Step key={key}>
+                <StepLabel>{t(key)}</StepLabel>
               </Step>
             ))}
           </Stepper>
@@ -158,7 +174,7 @@ export function SignupPage() {
         {activeStep === 0 && (
           <>
             <Typography variant="h4" component="h2" sx={authStyles.title}>
-              Login Security
+              {t('auth.signup.loginSecurity')}
             </Typography>
             <Box sx={authStyles.cardsRow}>
               {/* Passphrase card */}
@@ -170,7 +186,7 @@ export function SignupPage() {
                     htmlFor="signup-passphrase"
                     sx={authStyles.label}
                   >
-                    Passphrase:
+                    {t('auth.signup.passphraseLabel')}
                   </Typography>
                   <TextField
                     id="signup-passphrase"
@@ -185,20 +201,26 @@ export function SignupPage() {
                     <PasswordStrengthBar
                       password={passphrase}
                       onChangeScore={setScore}
-                      scoreWords={[
-                        'Weak',
-                        'Weak',
-                        'Fair',
-                        'Strong',
-                        'Very strong'
-                      ]}
-                      shortScoreWord="Too short"
+                      scoreWords={
+                        (t('auth.signup.passwordScores', {
+                          returnObjects: true
+                        }) as string[]) ?? [
+                          'Weak',
+                          'Weak',
+                          'Fair',
+                          'Strong',
+                          'Very strong'
+                        ]
+                      }
+                      shortScoreWord={t('auth.signup.passwordTooShort')}
                     />
                   </Box>
                   <Stack spacing={0.5} sx={authStyles.input}>
                     <RuleIndicator
                       passed={lengthPassed}
-                      label={`At least ${PASSWORD_RULES.minlength} characters`}
+                      label={t('auth.signup.minChars', {
+                        count: PASSWORD_RULES.minlength
+                      })}
                     />
                   </Stack>
                 </CardContent>
@@ -213,10 +235,10 @@ export function SignupPage() {
                     startIcon={<FiKey />}
                     sx={authStyles.passkeyButton}
                   >
-                    Sign up with a Passkey
+                    {t('auth.signup.passkey')}
                   </Button>
                   <Typography variant="body2" color="text.secondary">
-                    (Coming soon.)
+                    {t('auth.signup.comingSoon')}
                   </Typography>
                 </CardContent>
               </Card>
@@ -229,7 +251,7 @@ export function SignupPage() {
               disabled={!passphraseStepComplete}
               sx={authStyles.actionButton}
             >
-              Next
+              {t('auth.signup.next')}
             </Button>
 
             <Typography
@@ -237,9 +259,9 @@ export function SignupPage() {
               component="p"
               sx={authStyles.authFooterText}
             >
-              Already have a wallet?{' '}
+              {t('auth.signup.hasWallet')}{' '}
               <Link component={RouterLink} to="/login" underline="always">
-                Log in
+                {t('auth.signup.logInLink')}
               </Link>
               .
             </Typography>
@@ -249,7 +271,7 @@ export function SignupPage() {
         {activeStep === 1 && (
           <>
             <Typography variant="h4" component="h2" sx={authStyles.title}>
-              Email
+              {t('auth.signup.emailHeading')}
             </Typography>
             <Typography
               variant="h5"
@@ -257,7 +279,7 @@ export function SignupPage() {
               htmlFor="signup-email"
               sx={authStyles.label}
             >
-              Email:
+              {t('auth.signup.emailLabel')}
             </Typography>
             <TextField
               id="signup-email"
@@ -278,7 +300,7 @@ export function SignupPage() {
                 onClick={goBack}
                 sx={authStyles.signupBackButton}
               >
-                Back
+                {t('auth.signup.back')}
               </Button>
               <Button
                 variant="contained"
@@ -287,7 +309,7 @@ export function SignupPage() {
                 disabled={!emailValid}
                 sx={authStyles.actionButton}
               >
-                Next
+                {t('auth.signup.next')}
               </Button>
             </Stack>
           </>
@@ -296,7 +318,7 @@ export function SignupPage() {
         {activeStep === 2 && (
           <>
             <Typography variant="h4" component="h2" sx={authStyles.title}>
-              Storage Selection
+              {t('auth.signup.storageHeading')}
             </Typography>
 
             <Stack spacing={2}>
@@ -315,7 +337,7 @@ export function SignupPage() {
                     }
                     sx={authStyles.passkeyButton}
                   >
-                    Connect to Dropbox
+                    {t('auth.signup.connectDropbox')}
                   </Button>
                 </CardContent>
               </Card>
@@ -329,7 +351,7 @@ export function SignupPage() {
                     startIcon={<SiGoogledrive />}
                     sx={authStyles.passkeyButton}
                   >
-                    Connect to Google Drive
+                    {t('auth.signup.connectDrive')}
                   </Button>
                 </CardContent>
               </Card>
@@ -339,7 +361,7 @@ export function SignupPage() {
                 <CardContent sx={authStyles.passkeyCardContent}>
                   <FiCheckCircle size={32} color="green" />
                   <Typography variant="h6" component="h3">
-                    Courtesy 10 Mb storage (free)
+                    {t('auth.signup.courtesyStorage')}
                   </Typography>
                 </CardContent>
               </Card>
@@ -352,7 +374,7 @@ export function SignupPage() {
                 onClick={goBack}
                 sx={authStyles.signupBackButton}
               >
-                Back
+                {t('auth.signup.back')}
               </Button>
               <Button
                 variant="contained"
@@ -365,7 +387,7 @@ export function SignupPage() {
                 }
                 sx={authStyles.actionButton}
               >
-                Create Wallet
+                {t('auth.signup.createWallet')}
               </Button>
             </Stack>
           </>

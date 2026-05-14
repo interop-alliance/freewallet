@@ -6,12 +6,15 @@ import Typography from '@mui/material/Typography'
 import { docsStyles } from '@/styles/appStyles'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { SERVER_URL } from '@/app.config'
+import { useTranslation } from 'react-i18next'
+
 interface DocContentProps {
   fileName: string
   onError?: () => void
 }
 
 export function DocContent({ fileName, onError }: DocContentProps) {
+  const { t } = useTranslation()
   const [content, setContent] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
 
@@ -44,7 +47,7 @@ export function DocContent({ fileName, onError }: DocContentProps) {
   if (notFound) {
     return (
       <Typography color="error" sx={{ py: 4 }}>
-        Document not found.
+        {t('docs.documentNotFound')}
       </Typography>
     )
   }

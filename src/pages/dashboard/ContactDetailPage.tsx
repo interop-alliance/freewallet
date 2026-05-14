@@ -6,12 +6,14 @@ import CardContent from '@mui/material/CardContent'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useParams } from 'react-router'
+import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { getContacts } from '@/lib/getContacts'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { contactDetailStyles } from '@/styles/appStyles'
 
 export function ContactDetailPage() {
+  const { t } = useTranslation()
   const { contactId } = useParams()
   const contact = getContacts().find(item => item.id === contactId)
 
@@ -20,7 +22,7 @@ export function ContactDetailPage() {
   }
 
   return (
-    <DashboardLayout title="Contact Details">
+    <DashboardLayout title={t('contactDetail.title')}>
       <Card sx={contactDetailStyles.card}>
         <CardContent sx={contactDetailStyles.cardContent}>
           <Stack direction="row" spacing={2} sx={contactDetailStyles.headerRow}>
@@ -43,14 +45,14 @@ export function ContactDetailPage() {
               disabled
               sx={contactDetailStyles.actionButton}
             >
-              Edit
+              {t('common.edit')}
             </Button>
             <Button
               variant="outlined"
               disabled
               sx={contactDetailStyles.actionButton}
             >
-              Message
+              {t('common.message')}
             </Button>
           </Stack>
         </CardContent>

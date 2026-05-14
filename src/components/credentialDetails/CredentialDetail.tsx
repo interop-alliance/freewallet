@@ -36,6 +36,7 @@ import {
   credentialDetailCardStyles as sx
 } from '@/styles/credentialStyles'
 import type { IAlignment, IVerifiableCredential } from '@digitalcredentials/ssi'
+import { useTranslation } from 'react-i18next'
 
 export function CredentialDetail({
   vc,
@@ -44,6 +45,7 @@ export function CredentialDetail({
   vc: IVerifiableCredential
   onDelete?: () => void
 }) {
+  const { t } = useTranslation()
   const fields = useMemo(() => getDisplayFields(vc), [vc])
   const createdDate = useMemo(() => getProofCreatedIso(vc), [vc])
   const verification = useVerification(vc)
@@ -76,7 +78,7 @@ export function CredentialDetail({
             <IconButton
               size="small"
               onClick={onDelete}
-              aria-label="Delete credential"
+              aria-label={t('credential.deleteAria')}
               sx={{ position: 'absolute', top: 0, right: 0 }}
             >
               <MdDeleteOutline size={24} />
@@ -115,7 +117,7 @@ export function CredentialDetail({
           <IconButton
             size="small"
             onClick={onDelete}
-            aria-label="Delete credential"
+            aria-label={t('credential.deleteAria')}
             sx={sx.cardDeleteIcon}
           >
             <MdDeleteOutline size={24} />
@@ -154,7 +156,7 @@ export function CredentialDetail({
                   color="text.secondary"
                   sx={sx.achievementType}
                 >
-                  Achievement Type: {fields.achievementType}
+                  {t('credential.achievementType')} {fields.achievementType}
                 </Typography>
               )}
             </Box>
@@ -167,18 +169,18 @@ export function CredentialDetail({
               <IssuerInfo issuer={vc.issuer} />
 
               <InfoBlock
-                header="Created date"
+                header={t('credential.createdDate')}
                 value={
-                  createdDate ? formatDate({ isoDate: createdDate }) : 'N/A'
+                  createdDate ? formatDate({ isoDate: createdDate }) : t('common.na')
                 }
               />
               <Box sx={{ mt: 0 }}>
                 <InfoBlock
-                  header="Expiration Date"
+                  header={t('credential.expirationDate')}
                   value={
                     fields.expirationDate
                       ? formatDate({ isoDate: fields.expirationDate })
-                      : 'N/A'
+                      : t('common.na')
                   }
                 />
               </Box>
@@ -190,19 +192,19 @@ export function CredentialDetail({
 
           <Box sx={sx.primaryColumn}>
             {fields.issuedTo && (
-              <InfoBlock header="Issued To" value={fields.issuedTo} />
+              <InfoBlock header={t('credential.issuedTo')} value={fields.issuedTo} />
             )}
 
             {fields.credentialDescription && (
               <InfoBlock
-                header="Description"
+                header={t('credential.description')}
                 value={fields.credentialDescription}
               />
             )}
 
             {fields.criteria && (
               <Box>
-                <SectionHeader>Criteria</SectionHeader>
+                <SectionHeader>{t('credential.criteria')}</SectionHeader>
                 <Box sx={sx.markdownBody}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {fields.criteria}
@@ -213,7 +215,7 @@ export function CredentialDetail({
 
             {fields.alignments.length > 0 && (
               <Box>
-                <SectionHeader>Alignments</SectionHeader>
+                <SectionHeader>{t('credential.alignments')}</SectionHeader>
                 <Stack spacing={1}>
                   {fields.alignments.map((field: IAlignment, i: number) => (
                     <Box key={i}>
@@ -243,7 +245,7 @@ export function CredentialDetail({
 
             {evidenceList.length > 0 && (
               <Box>
-                <SectionHeader>Evidence</SectionHeader>
+                <SectionHeader>{t('credential.evidence')}</SectionHeader>
                 <Stack spacing={1}>
                   {evidenceList.map((ev, i) => (
                     <Box key={i}>
@@ -286,7 +288,7 @@ export function CredentialDetail({
             }}
             sx={sx.rawToggle}
           >
-            {showRaw ? 'Hide JSON' : 'View Source'}
+            {showRaw ? t('credential.hideJson') : t('credential.viewSource')}
           </Button>
           <Collapse in={showRaw} unmountOnExit>
             <Box

@@ -1,17 +1,20 @@
 import AppBar from '@mui/material/AppBar'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Stack from '@mui/material/Stack'
 import Drawer from '@mui/material/Drawer'
 import List from '@mui/material/List'
 import ListItemButton from '@mui/material/ListItemButton'
 import ListItemText from '@mui/material/ListItemText'
 import Toolbar from '@mui/material/Toolbar'
 import Typography from '@mui/material/Typography'
+import { LanguageSelector } from '@/components/LanguageSelector'
 import { dashboardStyles } from '@/styles/appStyles'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
 import { useAuthStore } from '@/stores/authStore'
 import walletIcon from '@/assets/wallet.svg'
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 interface DashboardLayoutProps {
   title: string
@@ -19,16 +22,17 @@ interface DashboardLayoutProps {
 }
 
 const primaryNavItems = [
-  { label: 'Dashboard', to: '/dashboard' },
-  { label: 'Contacts', to: '/contacts' }
-]
+  { labelKey: 'nav.dashboard', to: '/dashboard' },
+  { labelKey: 'nav.contacts', to: '/contacts' }
+] as const
 
 const settingsNavItems = [
-  { label: 'Storage', to: '/storage' },
-  { label: 'History', to: '/history' }
-]
+  { labelKey: 'nav.storage', to: '/storage' },
+  { labelKey: 'nav.history', to: '/history' }
+] as const
 
 export function DashboardLayout({ title, children }: DashboardLayoutProps) {
+  const { t } = useTranslation()
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const session = useAuthStore(state => state.session)
@@ -49,24 +53,27 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
           <Box
             component="img"
             src={walletIcon}
-            alt="Freewallet"
+            alt={t('common.brand')}
             sx={dashboardStyles.walletIcon}
           />
           <Typography
             variant="h6"
             sx={{ flexGrow: 1, ...dashboardStyles.navBrandTitle }}
           >
-            Freewallet
+            {t('common.brand')}
           </Typography>
-          {session ? (
-            <Button variant="outlined" onClick={handleLogout}>
-              Log out
-            </Button>
-          ) : (
-            <Button variant="outlined" component={RouterLink} to="/login">
-              Log in
-            </Button>
-          )}
+          <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+            <LanguageSelector showLabel={false} />
+            {session ? (
+              <Button variant="outlined" onClick={handleLogout}>
+                {t('common.logOut')}
+              </Button>
+            ) : (
+              <Button variant="outlined" component={RouterLink} to="/login">
+                {t('common.logIn')}
+              </Button>
+            )}
+          </Stack>
         </Toolbar>
       </AppBar>
 
@@ -82,7 +89,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
               sx={dashboardStyles.navItem}
             >
               <ListItemText
-                primary={item.label}
+                primary={t(item.labelKey)}
                 sx={dashboardStyles.navItemText}
               />
             </ListItemButton>
@@ -94,7 +101,10 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
             selected={pathname === '/settings'}
             sx={dashboardStyles.navSectionTitleButton}
           >
-            <ListItemText primary="Settings" sx={dashboardStyles.navSectionTitle} />
+            <ListItemText
+              primary={t('nav.settings')}
+              sx={dashboardStyles.navSectionTitle}
+            />
           </ListItemButton>
 
           <List sx={dashboardStyles.navSubList}>
@@ -107,7 +117,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
                 sx={dashboardStyles.navSubItem}
               >
                 <ListItemText
-                  primary={item.label}
+                  primary={t(item.labelKey)}
                   sx={dashboardStyles.navItemText}
                 />
               </ListItemButton>

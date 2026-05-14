@@ -6,6 +6,7 @@ import { storageStyles } from '@/styles/appStyles'
 import { MdStorage } from 'react-icons/md'
 import { FcGoogle } from 'react-icons/fc'
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 type SaveFilePicker = (options?: {
   suggestedName?: string
@@ -18,6 +19,7 @@ type SaveFilePicker = (options?: {
 }>
 
 export const StoragePage = () => {
+  const { t } = useTranslation()
   const session = useAuthStore(state => state.session)
   const backends = getBackends()
   const [collections, setCollections] = useState<Array<StorageCollection>>([])
@@ -39,7 +41,7 @@ export const StoragePage = () => {
         setCollections(remoteCollections)
       } catch (error) {
         console.error('Failed to list storage collections:', error)
-        setCollectionsError('Could not load storage collections.')
+        setCollectionsError(t('storage.collectionsLoadError'))
         setCollections([])
       } finally {
         setIsLoadingCollections(false)
@@ -47,7 +49,7 @@ export const StoragePage = () => {
     }
 
     loadCollections()
-  }, [session])
+  }, [session, t])
 
   const handleExportSpace = async () => {
     if (!session?.storage) {
@@ -87,21 +89,21 @@ export const StoragePage = () => {
         return
       } // user cancelled picker
       console.error('Failed to export space:', error)
-      window.alert('Could not export space. Please try again.')
+      window.alert(t('storage.exportError'))
     } finally {
       setIsExporting(false)
     }
   }
 
   return (
-    <DashboardLayout title="Storage">
+    <DashboardLayout title={t('storage.title')}>
       <Stack
         direction={{ xs: 'column', md: 'row' }}
         spacing={2}
         sx={storageStyles.connectedRow}
       >
         <Typography variant="h6" sx={storageStyles.connectedLabel}>
-          Space(connected):
+          {t('storage.spaceConnected')}
         </Typography>
         <Typography variant="body1" sx={storageStyles.connectedLink}>
           {session?.storage.remoteStore?.spaceUrl}
@@ -114,7 +116,7 @@ export const StoragePage = () => {
             storageStyles.buttonSize.topAction
           ]}
         >
-          View Details
+          {t('storage.viewDetails')}
         </Button>
         <Button
           variant="contained"
@@ -125,12 +127,12 @@ export const StoragePage = () => {
             storageStyles.buttonSize.topAction
           ]}
         >
-          {isExporting ? 'Exporting...' : 'Export Space'}
+          {isExporting ? t('storage.exporting') : t('storage.exportSpace')}
         </Button>
       </Stack>
 
       <Typography variant="h4" sx={storageStyles.sectionHeading}>
-        Backends
+        {t('storage.backends')}
       </Typography>
       <Stack
         direction={{ xs: 'column', lg: 'row' }}
@@ -152,7 +154,7 @@ export const StoragePage = () => {
                 </Box>
               )}
               <Typography variant="h5" sx={storageStyles.backendTitle}>
-                {backend.displayName}
+                {t(`storage.backend.${backend.id}.name` as const)}
               </Typography>
             </Box>
             <Typography
@@ -163,7 +165,7 @@ export const StoragePage = () => {
                 backend.enabled === false
               )}
             >
-              {backend.description}
+              {t(`storage.backend.${backend.id}.description` as const)}
             </Typography>
           </Paper>
         ))}
@@ -176,18 +178,18 @@ export const StoragePage = () => {
               storageStyles.buttonSize.connectBackend
             ]}
           >
-            (+) Connect Backend
+            {t('storage.connectBackend')}
           </Button>
         </Box>
       </Stack>
 
       <Typography variant="h4" sx={storageStyles.sectionHeading}>
-        Collections
+        {t('storage.collections')}
       </Typography>
       <Stack spacing={3} sx={storageStyles.collectionsWrap}>
         {isLoadingCollections && (
           <Typography variant="body1" color="text.secondary">
-            Loading collections...
+            {t('storage.loadingCollections')}
           </Typography>
         )}
         {collectionsError && (
@@ -216,12 +218,12 @@ export const StoragePage = () => {
                       storageStyles.buttonSize.collectionDetails
                     ]}
                   >
-                    View Details
+                    {t('storage.viewDetails')}
                   </Button>
                 </Box>
 
                 <Typography variant="h6" color="text.secondary">
-                  Backend: Default (WAS)
+                  {t('storage.collectionBackend')}
                 </Typography>
               </Stack>
             </Stack>

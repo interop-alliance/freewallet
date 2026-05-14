@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ResumePreviewModel } from '@/types/resume'
 import { resumeStyles as rpStyles } from '@/styles/resumeStyles'
+import { useTranslation } from 'react-i18next'
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
@@ -16,6 +17,7 @@ function SectionTitle({ children }: { children: ReactNode }) {
 }
 
 export function ResumePreview({ data }: { data: ResumePreviewModel }) {
+  const { t } = useTranslation()
   const {
     fullName,
     city,
@@ -68,7 +70,7 @@ export function ResumePreview({ data }: { data: ResumePreviewModel }) {
       <Box sx={rpStyles.body}>
         {summary ? (
           <Box sx={rpStyles.sectionBlock}>
-            <SectionTitle>Professional Summary</SectionTitle>
+            <SectionTitle>{t('resumePreview.professionalSummary')}</SectionTitle>
             <Box sx={rpStyles.summaryMarkdown}>
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {summary}
@@ -79,7 +81,7 @@ export function ResumePreview({ data }: { data: ResumePreviewModel }) {
 
         {experience.length > 0 && (
           <Box sx={rpStyles.sectionBlock}>
-            <SectionTitle>Work Experience</SectionTitle>
+            <SectionTitle>{t('resumePreview.workExperience')}</SectionTitle>
             {experience.map(row => (
               <Box key={row.id} sx={rpStyles.itemBlock}>
                 <Typography sx={rpStyles.experienceTitle}>
@@ -109,7 +111,7 @@ export function ResumePreview({ data }: { data: ResumePreviewModel }) {
 
         {education.length > 0 && (
           <Box sx={rpStyles.sectionBlock}>
-            <SectionTitle>Education</SectionTitle>
+            <SectionTitle>{t('resumePreview.education')}</SectionTitle>
             {education.map(row => (
               <Box key={row.id} sx={rpStyles.itemBlock}>
                 <Typography sx={rpStyles.educationTitle}>
@@ -134,7 +136,7 @@ export function ResumePreview({ data }: { data: ResumePreviewModel }) {
 
         {skills.length > 0 && (
           <Box sx={rpStyles.sectionBlock}>
-            <SectionTitle>Skills</SectionTitle>
+            <SectionTitle>{t('resumePreview.skills')}</SectionTitle>
             <Box component="ul" sx={rpStyles.skillsList}>
               {skills.map((skill, skillIndex) => (
                 <Typography
@@ -151,7 +153,7 @@ export function ResumePreview({ data }: { data: ResumePreviewModel }) {
 
         {affiliations.length > 0 && (
           <Box sx={rpStyles.affiliationsSection}>
-            <SectionTitle>Professional Affiliations</SectionTitle>
+            <SectionTitle>{t('resumePreview.professionalAffiliations')}</SectionTitle>
             {affiliations.map(row => (
               <Box key={row.id} sx={rpStyles.itemBlock}>
                 <Typography sx={rpStyles.affiliationTitle}>

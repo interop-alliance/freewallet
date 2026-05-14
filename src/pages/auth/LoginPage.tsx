@@ -7,7 +7,9 @@ import Link from '@mui/material/Link'
 import { FiKey } from 'react-icons/fi'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
+import { useTranslation } from 'react-i18next'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
+import { LanguageSelector } from '@/components/LanguageSelector'
 import { authStyles } from '@/styles/appStyles'
 import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
@@ -15,11 +17,17 @@ import { useEffect, useState } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
 import { registerWallet } from '@/lib/registerWallet'
 
+type AuthLocationState = { authMessageKey?: string; userMessage?: string }
+
 export function LoginPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const login = useAuthStore(state => state.login)
   const location = useLocation()
-  const { userMessage } = location.state || {}
+  const state = location.state as AuthLocationState | null | undefined
+  const bannerText = state?.authMessageKey
+    ? t(state.authMessageKey)
+    : state?.userMessage
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
@@ -46,9 +54,10 @@ export function LoginPage() {
         secret: passphrase
       })
       if (!userExists) {
-        const userMessage = 'This profile does not exist, please sign up.'
         console.log('User does not exist, redirecting to signup page.')
-        return navigate('/signup', { state: { userMessage } })
+        return navigate('/signup', {
+          state: { authMessageKey: 'auth.errors.profileNotFound' }
+        })
       }
       await session.storage.ensureUserCollections({ user: session.user })
       login(session)
@@ -61,12 +70,15 @@ export function LoginPage() {
   return (
     <Box component="main" sx={authStyles.page}>
       <Box sx={authStyles.pageColumn}>
+        <Box sx={authStyles.languageBar}>
+          <LanguageSelector />
+        </Box>
         <Typography variant="h2" component="h1" sx={authStyles.title}>
-          Freewallet
+          {t('landing.title')}
         </Typography>
 
         <Typography variant="h4" component="h2" sx={authStyles.title}>
-          Log in
+          {t('auth.login.heading')}
         </Typography>
 
         <Box sx={authStyles.cardsRow}>
@@ -78,13 +90,13 @@ export function LoginPage() {
                 onSubmit={handleLogin}
                 sx={authStyles.authCardForm}
               >
-                {userMessage && (
+                {bannerText && (
                   <Typography
                     variant="body1"
                     color="error"
                     sx={authStyles.userMessage}
                   >
-                    {userMessage}
+                    {bannerText}
                   </Typography>
                 )}
 
@@ -93,7 +105,7 @@ export function LoginPage() {
                   component="label"
                   htmlFor="login-passphrase"
                 >
-                  Passphrase:
+                  {t('auth.login.passphraseLabel')}
                 </Typography>
                 <TextField
                   name="login-passphrase"
@@ -113,7 +125,7 @@ export function LoginPage() {
                   }
                   sx={authStyles.actionButton}
                 >
-                  Log in
+                  {t('auth.login.submit')}
                 </Button>
 
                 <Typography
@@ -121,9 +133,9 @@ export function LoginPage() {
                   component="p"
                   sx={authStyles.authFooterText}
                 >
-                  Don&apos;t have an existing wallet?{' '}
+                  {t('auth.login.noWallet')}{' '}
                   <Link component={RouterLink} to="/signup" underline="always">
-                    Sign up
+                    {t('auth.login.signUpLink')}
                   </Link>
                   .
                 </Typography>
@@ -140,10 +152,10 @@ export function LoginPage() {
                 startIcon={<FiKey />}
                 sx={authStyles.passkeyButton}
               >
-                Log in with a Passkey
+                {t('auth.login.passkey')}
               </Button>
               <Typography variant="body2" color="text.secondary">
-                (Coming soon.)
+                {t('auth.login.comingSoon')}
               </Typography>
             </CardContent>
           </Card>

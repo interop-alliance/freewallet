@@ -15,6 +15,13 @@ export const authStyles = {
     gap: 4,
     width: '100%'
   },
+  /** Top of auth column; language switcher aligned end (right in LTR). */
+  languageBar: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    width: '100%',
+    mb: 1
+  },
   content: {
     width: '100%',
     maxWidth: 480,

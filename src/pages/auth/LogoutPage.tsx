@@ -2,8 +2,10 @@ import { useEffect } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 import { Typography, Box } from '@mui/material'
 import { useNavigate } from 'react-router'
+import { useTranslation } from 'react-i18next'
 
 export function LogoutPage() {
+  const { t } = useTranslation()
   const session = useAuthStore(state => state.session)
   const logout = useAuthStore(state => state.logout)
   const navigate = useNavigate()
@@ -32,7 +34,7 @@ export function LogoutPage() {
         height: '100vh'
       }}
     >
-      <Typography variant="h5">Logging out...</Typography>
+      <Typography variant="h5">{t('logout.message')}</Typography>
     </Box>
   )
 }

@@ -4,7 +4,6 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
-import { LanguageSelector } from '@/components/LanguageSelector'
 import { useInfoBox } from '@/hooks/useInfoBox'
 import { dashboardStyles } from '@/styles/appStyles'
 import { useEffect } from 'react'
@@ -23,9 +22,7 @@ export function SettingsPage() {
     if (!session) {
       return
     }
-    const confirmed = window.confirm(
-      'Are you sure you want to delete your account? This action cannot be undone.'
-    )
+    const confirmed = window.confirm(t('settings.deleteConfirm'))
     if (!confirmed) {
       return
     }
@@ -40,27 +37,10 @@ export function SettingsPage() {
   }
 
   return (
-    <DashboardLayout title="Settings">
+    <DashboardLayout title={t('settings.title')}>
       <Stack sx={{ mt: 4, gap: 4, maxWidth: 640 }}>
-        <Stack
-          sx={{
-            flexDirection: 'row',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 2,
-          }}
-        >
-          <Typography variant="h6">{t('settings.language')}</Typography>
-          <LanguageSelector showLabel={false} />
-        </Stack>
-
-        <Divider />
-
         <Stack direction="row" sx={{ alignItems: 'center', gap: 3 }}>
-          <Typography variant="h6">
-            Verifiable Credentials
-          </Typography>
+          <Typography variant="h6">{t('settings.vcSection')}</Typography>
           <Button
             variant="outlined"
             size="small"
@@ -70,10 +50,13 @@ export function SettingsPage() {
               whiteSpace: 'nowrap'
             }}
             onClick={() =>
-              displayInfoBox({ docUrl: 'vcs', title: 'Verifiable Credentials' })
+              displayInfoBox({
+                docUrl: 'vcs',
+                title: t('settings.vcSection')
+              })
             }
           >
-            More Info
+            {t('settings.moreInfo')}
           </Button>
         </Stack>
 
@@ -86,25 +69,23 @@ export function SettingsPage() {
             sx={dashboardStyles.deleteAccountButton}
             onClick={handleDeleteAccount}
           >
-            Delete Account
+            {t('settings.deleteAccount')}
           </Button>
           <Typography
             variant="h5"
             component="p"
             sx={dashboardStyles.deleteAccountDescription}
           >
-            Your login, keys, and all data will be deleted.
+            {t('settings.deleteAccountHint')}
           </Typography>
         </Stack>
 
         <Divider />
 
         <Stack sx={{ gap: 1 }}>
-          <Typography variant="h6">
-            About
-          </Typography>
+          <Typography variant="h6">{t('settings.about')}</Typography>
           <Typography variant="body2" color="text.secondary">
-            Freewallet version {__APP_VERSION__}
+            {t('settings.version', { version: __APP_VERSION__ })}
           </Typography>
         </Stack>
       </Stack>

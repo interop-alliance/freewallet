@@ -5,6 +5,7 @@ import Typography from '@mui/material/Typography'
 import Button from '@mui/material/Button'
 import { MdAddCircleOutline, MdSync } from 'react-icons/md'
 import { Link as RouterLink } from 'react-router'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { dashboardStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
@@ -13,6 +14,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import type { StoredCredential } from '@/types/credential'
 
 export function DashboardPage() {
+  const { t } = useTranslation()
   const session = useAuthStore(state => state.session)
   const [credentials, setCredentials] = useState<StoredCredential[]>([])
   const [loading, setLoading] = useState(true)
@@ -56,7 +58,7 @@ export function DashboardPage() {
   }
 
   return (
-    <DashboardLayout title="Freewallet Dashboard">
+    <DashboardLayout title={t('dashboard.title')}>
       <Button
         variant="outlined"
         component={RouterLink}
@@ -64,13 +66,13 @@ export function DashboardPage() {
         startIcon={<MdAddCircleOutline size={20} />}
         sx={dashboardStyles.addCredentialLink}
       >
-        Add Credential
+        {t('dashboard.addCredential')}
       </Button>
 
       <Box sx={dashboardStyles.credentialsSection}>
         <Stack sx={dashboardStyles.credentialsHeadingRow}>
           <Typography variant="h5" sx={dashboardStyles.credentialsHeading}>
-            Credentials
+            {t('dashboard.credentialsHeading')}
           </Typography>
           <Button
             variant="outlined"
@@ -82,7 +84,7 @@ export function DashboardPage() {
             }
             sx={dashboardStyles.syncButton}
           >
-            Sync
+            {t('common.sync')}
           </Button>
         </Stack>
         {loading ? (
