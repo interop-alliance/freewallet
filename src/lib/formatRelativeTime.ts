@@ -1,5 +1,3 @@
-const rtf = new Intl.RelativeTimeFormat()
-
 const UNITS = [
   { max: 60, value: 1_000, unit: 'second' },
   { max: 60, value: 60_000, unit: 'minute' },
@@ -10,12 +8,16 @@ const UNITS = [
   { max: Infinity, value: 31_536_000_000, unit: 'year' }
 ] as const
 
-export function formatRelativeTime(input: string): string {
+export function formatRelativeTime(
+  input: string,
+  locale?: string | string[]
+): string {
   const date = new Date(input)
   if (Number.isNaN(date.getTime())) {
     return ''
   }
 
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
   const diff = date.getTime() - Date.now()
 
   for (const unit of UNITS) {
