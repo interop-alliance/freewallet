@@ -1,12 +1,15 @@
+import { useEffect, useState } from 'react'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Paper from '@mui/material/Paper'
+import Stack from '@mui/material/Stack'
+import Typography from '@mui/material/Typography'
+import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
-import { getBackends, type StorageCollection } from '@/lib/storage'
-import { Box, Button, Paper, Stack, Typography } from '@mui/material'
+import { CollectionsOverview } from '@/components/storage/StorageBrowser'
 import { useAuthStore } from '@/stores/authStore'
 import { storageStyles } from '@/styles/appStyles'
-import { MdStorage } from 'react-icons/md'
-import { FcGoogle } from 'react-icons/fc'
-import { useEffect, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import type { StorageCollection } from '@/lib/storage'
 
 type SaveFilePicker = (options?: {
   suggestedName?: string
@@ -21,13 +24,14 @@ type SaveFilePicker = (options?: {
 export const StoragePage = () => {
   const { t } = useTranslation()
   const session = useAuthStore(state => state.session)
-  const backends = getBackends()
   const [collections, setCollections] = useState<Array<StorageCollection>>([])
   const [collectionsError, setCollectionsError] = useState<string | null>(null)
   const [isLoadingCollections, setIsLoadingCollections] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
+
     async function loadCollections() {
       if (!session?.storage?.remoteStore) {
         setCollections([])
@@ -38,17 +42,49 @@ export const StoragePage = () => {
       setCollectionsError(null)
       try {
         const remoteCollections = await session.storage.listCollections()
+        if (cancelled) {
+          return
+        }
+
         setCollections(remoteCollections)
+
+        const withCounts = await Promise.all(
+          remoteCollections.map(async collection => {
+            try {
+              const items = await session.storage.listCollectionResources({
+                collectionUrl: collection.url
+              })
+              return { ...collection, totalItems: items.length }
+            } catch (err) {
+              console.warn(
+                `Failed to count resources for collection "${collection.id}":`,
+                err
+              )
+              return collection
+            }
+          })
+        )
+        if (cancelled) {
+          return
+        }
+        setCollections(withCounts)
       } catch (error) {
         console.error('Failed to list storage collections:', error)
-        setCollectionsError(t('storage.collectionsLoadError'))
-        setCollections([])
+        if (!cancelled) {
+          setCollectionsError(t('storage.collectionsLoadError'))
+          setCollections([])
+        }
       } finally {
-        setIsLoadingCollections(false)
+        if (!cancelled) {
+          setIsLoadingCollections(false)
+        }
       }
     }
 
     loadCollections()
+    return () => {
+      cancelled = true
+    }
   }, [session, t])
 
   const handleExportSpace = async () => {
@@ -71,7 +107,6 @@ export const StoragePage = () => {
         throw new Error('Streaming export is not supported in this browser.')
       }
 
-      // Ask user where to save — streams directly, no buffering
       const fileHandle = await windowWithPicker.showSaveFilePicker({
         suggestedName: `space-${spaceId}.tar`,
         types: [
@@ -83,11 +118,11 @@ export const StoragePage = () => {
       })
 
       const writable = await fileHandle.createWritable()
-      await stream.pipeTo(writable) // chunks go disk
+      await stream.pipeTo(writable)
     } catch (error) {
       if ((error as DOMException).name === 'AbortError') {
         return
-      } // user cancelled picker
+      }
       console.error('Failed to export space:', error)
       window.alert(t('storage.exportError'))
     } finally {
@@ -97,139 +132,56 @@ export const StoragePage = () => {
 
   return (
     <DashboardLayout title={t('storage.title')}>
-      <Stack
-        direction={{ xs: 'column', md: 'row' }}
-        spacing={2}
-        sx={storageStyles.connectedRow}
-      >
-        <Typography variant="h6" sx={storageStyles.connectedLabel}>
-          {t('storage.spaceConnected')}
-        </Typography>
-        <Typography variant="body1" sx={storageStyles.connectedLink}>
-          {session?.storage.remoteStore?.spaceUrl}
-        </Typography>
-
-        <Button
-          variant="outlined"
-          sx={[
-            storageStyles.buttonTextLeft,
-            storageStyles.buttonSize.topAction
-          ]}
+      <Paper variant="outlined" sx={storageStyles.storageToolbar}>
+        <Stack
+          direction={{ xs: 'column', md: 'row' }}
+          spacing={2}
+          sx={storageStyles.connectedRow}
         >
-          {t('storage.viewDetails')}
-        </Button>
-        <Button
-          variant="contained"
-          onClick={handleExportSpace}
-          disabled={isExporting || !session?.storage?.remoteStore}
-          sx={[
-            storageStyles.buttonTextLeft,
-            storageStyles.buttonSize.topAction
-          ]}
-        >
-          {isExporting ? t('storage.exporting') : t('storage.exportSpace')}
-        </Button>
-      </Stack>
-
-      <Typography variant="h4" sx={storageStyles.sectionHeading}>
-        {t('storage.backends')}
-      </Typography>
-      <Stack
-        direction={{ xs: 'column', lg: 'row' }}
-        spacing={2}
-        sx={storageStyles.backendRow}
-      >
-        {backends.map(backend => (
-          <Paper
-            key={backend.id}
-            variant="outlined"
-            sx={storageStyles.backendCard(backend.enabled === false)}
-          >
-            <Box sx={storageStyles.backendHeaderRow}>
-              {backend.id === 'google-drive' ? (
-                <Box component={FcGoogle} sx={storageStyles.backendIcon} />
-              ) : (
-                <Box component="span" sx={storageStyles.backendIcon}>
-                  <MdStorage />
-                </Box>
-              )}
-              <Typography variant="h5" sx={storageStyles.backendTitle}>
-                {t(`storage.backend.${backend.id}.name` as const)}
-              </Typography>
-            </Box>
-            <Typography
-              variant="h6"
-              color="text.secondary"
-              sx={storageStyles.backendDescription(
-                backend.comingSoon === true,
-                backend.enabled === false
-              )}
-            >
-              {t(`storage.backend.${backend.id}.description` as const)}
+          <Stack spacing={0.5} sx={{ minWidth: 0, flexGrow: 1 }}>
+            <Typography variant="h6" sx={storageStyles.connectedLabel}>
+              {t('storage.spaceConnected')}
             </Typography>
-          </Paper>
-        ))}
-
-        <Box sx={storageStyles.connectBackendWrap}>
+            <Typography variant="body2" sx={storageStyles.connectedLink}>
+              {session?.storage.remoteStore?.spaceUrl ||
+                t('storage.noRemoteSpace')}
+            </Typography>
+          </Stack>
           <Button
-            variant="outlined"
+            variant="contained"
+            onClick={handleExportSpace}
+            disabled={isExporting || !session?.storage?.remoteStore}
             sx={[
               storageStyles.buttonTextLeft,
-              storageStyles.buttonSize.connectBackend
+              storageStyles.buttonSize.topAction
             ]}
           >
-            {t('storage.connectBackend')}
+            {isExporting ? t('storage.exporting') : t('storage.exportSpace')}
           </Button>
-        </Box>
-      </Stack>
+        </Stack>
+      </Paper>
 
-      <Typography variant="h4" sx={storageStyles.sectionHeading}>
-        {t('storage.collections')}
-      </Typography>
-      <Stack spacing={3} sx={storageStyles.collectionsWrap}>
+      <Box sx={storageStyles.sectionHeader}>
+        <Typography variant="h4" sx={storageStyles.sectionHeading}>
+          {t('storage.collections')}
+        </Typography>
+      </Box>
+
+      <Box sx={storageStyles.collectionsWrap}>
         {isLoadingCollections && (
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="body1" sx={storageStyles.statusText}>
             {t('storage.loadingCollections')}
           </Typography>
         )}
         {collectionsError && (
-          <Typography variant="body1" color="error">
+          <Typography variant="body1" sx={storageStyles.errorText}>
             {collectionsError}
           </Typography>
         )}
-        {collections.map(collection => {
-          return (
-            <Stack key={collection.id} spacing={1.25}>
-              <Typography variant="body1" sx={storageStyles.collectionItem}>
-                {collection.id}
-              </Typography>
-
-              <Stack
-                direction="row"
-                spacing={2}
-                sx={storageStyles.collectionMetaRow}
-              >
-                <Box sx={storageStyles.collectionDetailsSlot}>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    sx={[
-                      storageStyles.buttonTextLeft,
-                      storageStyles.buttonSize.collectionDetails
-                    ]}
-                  >
-                    {t('storage.viewDetails')}
-                  </Button>
-                </Box>
-
-                <Typography variant="h6" color="text.secondary">
-                  {t('storage.collectionBackend')}
-                </Typography>
-              </Stack>
-            </Stack>
-          )
-        })}
-      </Stack>
+        {!isLoadingCollections && !collectionsError && (
+          <CollectionsOverview collections={collections} />
+        )}
+      </Box>
     </DashboardLayout>
   )
 }

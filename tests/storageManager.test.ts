@@ -94,6 +94,52 @@ describe('WASRemoteStore.listCollections', () => {
   })
 })
 
+describe('WASRemoteStore.listCollectionResources', () => {
+  it('loads resource metadata without fetching resource bodies', async () => {
+    const items = [
+      {
+        id: 'credential.json',
+        url: '/space/space-id/private-credentials/credential.json',
+        contentType: 'application/json',
+        modified: '2026-05-01T00:00:00.000Z'
+      }
+    ]
+    const zcapClient = {
+      request: vi.fn().mockResolvedValue({
+        data: {
+          id: 'private-credentials',
+          url: '/space/space-id/private-credentials',
+          name: 'Verifiable Credentials',
+          type: ['Collection'],
+          totalItems: 1,
+          items
+        }
+      })
+    }
+    const store = new WASRemoteStore({
+      storageServerUrl: 'https://example.test',
+      zcapClient: zcapClient as any,
+      spaceId: 'space-id',
+      controller: 'did:key:test'
+    })
+    const fetchAllSpy = vi.spyOn(store, 'fetchAll')
+
+    await expect(
+      store.listCollectionResources({
+        collectionUrl: '/space/space-id/private-credentials'
+      })
+    ).resolves.toEqual(items)
+    expect(fetchAllSpy).not.toHaveBeenCalled()
+    expect(zcapClient.request).toHaveBeenCalledWith({
+      url: 'https://example.test/space/space-id/private-credentials/',
+      method: 'GET',
+      headers: {
+        accept: 'application/json'
+      }
+    })
+  })
+})
+
 describe('WASRemoteStore.initClient', () => {
   it('uses signer DID as controller and space-id seed', async () => {
     const controller = 'did:key:z6MktestControllerDid'
@@ -115,7 +161,9 @@ describe('WASRemoteStore.initClient', () => {
 describe('WASRemoteStore.ensureUserCollections', () => {
   it('throws if space creation fails', async () => {
     const zcapClient = {
-      request: vi.fn().mockRejectedValue({ data: { errors: [{ detail: 'boom' }] } })
+      request: vi
+        .fn()
+        .mockRejectedValue({ data: { errors: [{ detail: 'boom' }] } })
     }
     const store = new WASRemoteStore({
       storageServerUrl: 'https://example.test',

@@ -5,7 +5,12 @@ import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
 import type { ControllerProfile, User } from '@/types/auth'
 import { bufferToBase64Url, cidFrom, digestHash } from '@/lib/cidFrom'
 import { WAS_SERVER_URL } from '@/app.config'
-import type { StorageCollection, StorageCollectionList } from '@/lib/storage'
+import type {
+  StorageCollection,
+  StorageCollectionList,
+  StorageResource,
+  StorageResourceList
+} from '@/lib/storage'
 import {
   type StoredCredential,
   StoredCredentialSchema
@@ -24,6 +29,11 @@ export interface IWalletStore {
   listCredentials: () => Promise<Array<StoredCredential>>
   wipeStorage: ({ profile }: { profile: ControllerProfile }) => Promise<void>
   listCollections?: () => Promise<Array<StorageCollection>>
+  listCollectionResources?: ({
+    collectionUrl
+  }: {
+    collectionUrl: string
+  }) => Promise<Array<StorageResource>>
   exportSpace?: () => Promise<ReadableStream<Uint8Array>>
 }
 
@@ -112,6 +122,17 @@ export class StorageManager {
       return []
     }
     return await this.remoteStore.listCollections()
+  }
+
+  async listCollectionResources({
+    collectionUrl
+  }: {
+    collectionUrl: string
+  }): Promise<Array<StorageResource>> {
+    if (!this.remoteStore) {
+      return []
+    }
+    return await this.remoteStore.listCollectionResources({ collectionUrl })
   }
 
   async ensureUserCollections({ user }: { user: User }) {
@@ -418,7 +439,7 @@ export class WASRemoteStore implements IWalletStore {
     let response
     try {
       response = await this.zcapClient.request({
-        url: url,
+        url: new URL(url, this.storageServerUrl).toString(),
         method: 'GET'
       })
     } catch (err: any) {
@@ -433,6 +454,37 @@ export class WASRemoteStore implements IWalletStore {
     // data looks like:
     // { id, url, name, type, totalItems, items: [{ id, url, contentType }] }
     return await this.fetchAll({ rows: data.items })
+  }
+
+  async listCollectionResources({
+    collectionUrl
+  }: {
+    collectionUrl: string
+  }): Promise<Array<StorageResource>> {
+    const collectionListUrl = collectionUrl.endsWith('/')
+      ? collectionUrl
+      : `${collectionUrl}/`
+    const url = new URL(collectionListUrl, this.storageServerUrl).toString()
+    let response
+    try {
+      response = await this.zcapClient.request({
+        url,
+        method: 'GET',
+        headers: {
+          accept: 'application/json'
+        }
+      })
+    } catch (err: any) {
+      console.log('Attempted to list collection resources from:', url)
+      console.error(
+        'Error listing collection resources:',
+        JSON.stringify(err.data, null, 2)
+      )
+      throw new Error('Failed to list remote storage collection resources.')
+    }
+
+    const { data } = response as { data?: StorageResourceList }
+    return data?.items ?? []
   }
 
   async listCollections(): Promise<Array<StorageCollection>> {

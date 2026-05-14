@@ -483,8 +483,13 @@ export const historyStyles = {
 } as const
 
 export const storageStyles = {
-  connectedRow: {
+  /** Top toolbar showing the connected remote space and export action. */
+  storageToolbar: {
     mt: 3,
+    p: 2.5,
+    borderRadius: 3
+  },
+  connectedRow: {
     alignItems: { md: 'center' }
   },
   connectedLabel: {
@@ -492,127 +497,211 @@ export const storageStyles = {
   },
   connectedLink: {
     fontSize: 16,
-    wordBreak: 'break-all'
-  },
-  sectionHeading: {
-    mt: 6,
-    fontWeight: 600
-  },
-  backendRow: {
-    mt: 2,
-    alignItems: { lg: 'stretch' }
-  },
-  backendCard: (disabled: boolean) =>
-    ({
-      minWidth: 270,
-      borderRadius: 2.5,
-      px: 3,
-      py: 2.5,
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'center',
-      gap: 1,
-      opacity: disabled ? 0.8 : 1
-    }) as const,
-  backendHeaderRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 1.5
-  },
-  backendIcon: {
-    fontSize: 34,
+    wordBreak: 'break-all',
     color: 'text.secondary'
   },
-  googleDriveIcon: {
-    fontSize: 32
+
+  /** Section header (e.g. "Collections") + secondary description line. */
+  sectionHeader: {
+    mt: 6
   },
-  backendTitle: {
+  sectionHeading: {
     fontWeight: 600
   },
-  backendDescription: (comingSoon: boolean, disabled: boolean) =>
-    ({
-      fontStyle: comingSoon ? 'italic' : 'normal',
-      color: disabled ? 'text.disabled' : 'text.secondary'
-    }) as const,
-  connectBackendWrap: {
-    display: 'flex',
-    alignItems: 'center'
+  sectionDescription: {
+    mt: 0.5,
+    color: 'text.secondary'
   },
-  collectionsWrap: {
-    mt: 2,
-    maxWidth: 780
-  },
-  collectionItem: {
-    alignSelf: 'flex-start',
-    minWidth: 180,
-    height: 48,
-    px: 2,
-    border: '1px solid',
-    borderColor: 'text.primary',
-    borderRadius: 1,
-    display: 'flex',
-    alignItems: 'center'
-  },
-  collectionMetaRow: {
-    alignItems: 'center',
-    flexWrap: 'wrap'
-  },
-  collectionDetailsSlot: {
-    minWidth: 180,
-    display: 'flex',
-    justifyContent: 'flex-end'
-  },
-  topActionButton: {
-    textTransform: 'none',
-    justifyContent: 'flex-start',
-    textAlign: 'left',
-    minWidth: 132,
-    height: 42,
-    px: 2
-  },
-  connectBackendButton: {
-    textTransform: 'none',
-    justifyContent: 'flex-start',
-    textAlign: 'left',
-    minWidth: 208,
-    height: 50,
-    px: 2.5
-  },
-  collectionLabel: {
-    alignSelf: 'flex-start',
-    minWidth: 180,
-    height: 48,
-    px: 2,
-    border: '1px solid',
-    borderColor: 'text.primary',
-    borderRadius: 1,
-    display: 'flex',
-    alignItems: 'center'
-  },
-  collectionDetailsButton: {
-    textTransform: 'none',
-    justifyContent: 'flex-start',
-    textAlign: 'left',
-    minWidth: 106,
-    height: 34,
-    px: 1.25,
-    fontSize: '0.9rem'
-  },
+
+  /** Reusable button sizing tokens, kept here to standardize toolbar actions. */
   buttonTextLeft: {
     textTransform: 'none',
     justifyContent: 'flex-start',
     textAlign: 'left'
   },
   buttonSize: {
-    topAction: { minWidth: 132, height: 42, px: 2 },
-    connectBackend: { minWidth: 208, height: 50, px: 2.5 },
-    collectionLabel: { minWidth: 180, height: 48, px: 2 },
-    collectionDetails: {
-      minWidth: 106,
-      height: 34,
-      px: 1.25,
-      fontSize: '0.9rem'
+    topAction: { minWidth: 132, height: 42, px: 2 }
+  },
+
+  /** Collections overview — vertical list of folder rows (Finder-like). */
+  collectionsWrap: {
+    mt: 3,
+    maxWidth: 1200
+  },
+  collectionsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1,
+    width: '100%'
+  },
+  folderCard: {
+    borderRadius: 2,
+    transition: 'border-color 120ms ease, box-shadow 120ms ease',
+    '&:hover': {
+      borderColor: 'text.primary'
     }
+  },
+  folderCardAction: {
+    px: 2,
+    py: 1.5,
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    width: '100%',
+    justifyContent: 'flex-start'
+  },
+  folderCardHeader: {
+    alignItems: 'center',
+    flex: 1,
+    minWidth: 0
+  },
+  folderCardBody: {
+    minWidth: 0,
+    flexGrow: 1
+  },
+  folderIcon: {
+    fontSize: 28,
+    color: '#f4b400',
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0
+  },
+  folderName: {
+    fontWeight: 600,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
+  },
+  folderMeta: {
+    color: 'text.secondary'
+  },
+  folderCount: {
+    color: 'text.secondary',
+    flexShrink: 0,
+    ml: 'auto'
+  },
+
+  /** Collection contents page — header + file table. */
+  contentsWrap: {
+    mt: 3,
+    maxWidth: 1200,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2
+  },
+  backToStorageButton: {
+    alignSelf: 'flex-start',
+    textTransform: 'none',
+    px: 0,
+    minHeight: 0
+  },
+  contentsTitleRow: {
+    alignItems: 'center'
+  },
+  contentsTitleIcon: {
+    fontSize: 32,
+    color: '#f4b400',
+    display: 'flex',
+    alignItems: 'center'
+  },
+  contentsTitle: {
+    fontWeight: 600,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
+  },
+  contentsSubtitle: {
+    color: 'text.secondary'
+  },
+  contentsBody: {
+    mt: 1
+  },
+
+  /** File/resource table. */
+  resourceTableContainer: {
+    border: 1,
+    borderColor: 'divider',
+    borderRadius: 2,
+    overflow: 'hidden'
+  },
+  resourceTable: {
+    minWidth: 540
+  },
+  resourceHeaderCell: {
+    fontWeight: 600,
+    color: 'text.secondary',
+    bgcolor: 'action.hover'
+  },
+  resourceRow: {
+    cursor: 'default'
+  },
+  resourceNameCell: {
+    maxWidth: 480
+  },
+  resourceNameInner: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 1.25,
+    minWidth: 0
+  },
+  resourceFileIcon: {
+    fontSize: 22,
+    color: 'text.secondary',
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0
+  },
+  resourceNameText: {
+    fontWeight: 500,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0
+  },
+  resourceTypeCell: {
+    whiteSpace: 'nowrap'
+  },
+  resourceTypeChip: {
+    fontWeight: 500
+  },
+  resourceModifiedCell: {
+    whiteSpace: 'nowrap'
+  },
+
+  /** Reusable empty state surface. */
+  emptyState: {
+    py: 5,
+    px: 3,
+    textAlign: 'center',
+    border: '1px dashed',
+    borderColor: 'divider',
+    borderRadius: 2,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 0.5
+  },
+  emptyStateIcon: {
+    fontSize: 48,
+    color: 'text.disabled',
+    display: 'flex',
+    alignItems: 'center'
+  },
+  emptyStateTitle: {
+    fontWeight: 600
+  },
+  emptyStateDescription: {
+    color: 'text.secondary',
+    maxWidth: 420
+  },
+
+  /** Inline loading/error text. */
+  statusText: {
+    color: 'text.secondary'
+  },
+  errorText: {
+    color: 'error.main'
   }
 } as const
 

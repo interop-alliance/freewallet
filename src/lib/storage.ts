@@ -9,6 +9,9 @@ export type StorageBackend = {
 export type StorageCollection = {
   id: string
   url: string
+  name?: string
+  type?: string[]
+  totalItems?: number
 }
 
 export type StorageCollectionList = {
@@ -17,16 +20,37 @@ export type StorageCollectionList = {
   items: StorageCollection[]
 }
 
+export type StorageResource = {
+  id: string
+  url: string
+  name?: string
+  contentType?: string
+  type?: string[]
+  created?: string
+  modified?: string
+  updated?: string
+  size?: number
+}
+
+export type StorageResourceList = {
+  id?: string
+  url: string
+  name?: string
+  type?: string[]
+  totalItems: number
+  items: StorageResource[]
+}
+
 export const getBackends = (): StorageBackend[] => {
   return [
     {
-      id: '0',
+      id: 'default',
       displayName: 'Default Backend',
       description: 'Wallet Attached Storage',
       enabled: true
     },
     {
-      id: '1',
+      id: 'google-drive',
       displayName: 'Google Drive',
       description: 'Coming soon',
       enabled: false,

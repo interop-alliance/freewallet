@@ -18,6 +18,7 @@ import { NotFoundPage } from '@/pages/NotFoundPage'
 import { WalletGetPage } from '@/pages/chapi/WalletGetPage'
 import { WalletStorePage } from '@/pages/chapi/WalletStorePage'
 import { StoragePage } from './pages/dashboard/StoragePage'
+import { CollectionContentsPage } from '@/pages/dashboard/CollectionContentsPage'
 
 function App() {
   return (
@@ -36,6 +37,10 @@ function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/storage" element={<StoragePage />} />
+        <Route
+          path="/storage/collections/:collectionId"
+          element={<CollectionContentsPage />}
+        />
         <Route path="/contacts/:contactId" element={<ContactDetailPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
