@@ -1,5 +1,12 @@
 # History
 
+## 0.4.0 - 2026-05-14
+
+### Added
+
+- Add Internationalization/Translation (i18n) support.
+- Add support for English and Spanish.
+
 ## 0.3.0 - 2026-05-13
 
 ### Added
