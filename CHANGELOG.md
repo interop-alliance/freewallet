@@ -1,5 +1,12 @@
 # History
 
+## 0.5.0 - 2026-05-14
+
+### Added
+
+- Add storage browser UI (refactor Collections view, add resource listing
+  view).
+
 ## 0.4.0/0.4.2 - 2026-05-14
 
 ### Added
