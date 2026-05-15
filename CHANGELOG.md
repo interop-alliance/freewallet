@@ -1,5 +1,11 @@
 # History
 
+## 0.6.0 - 2026-05-16
+
+### Added
+
+- Add routing to VC viewer for resource browser.
+
 ## 0.5.0 - 2026-05-14
 
 ### Added
