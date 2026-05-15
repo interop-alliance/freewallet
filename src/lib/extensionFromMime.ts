@@ -10,5 +10,5 @@ export function extensionFromMime(contentType: string): string {
     'application/zip': 'zip',
     'text/plain': 'txt'
   }
-  return map[base] ?? 'bin'
+  return map[base] ?? ''
 }

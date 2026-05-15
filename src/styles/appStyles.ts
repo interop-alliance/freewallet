@@ -702,6 +702,51 @@ export const storageStyles = {
   },
   errorText: {
     color: 'error.main'
+  },
+
+  /** Verifiable Credential resource detail (collection file view). */
+  resourceDetailWrap: {
+    mt: 3,
+    maxWidth: 1200,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2
+  },
+  resourceDetailId: {
+    fontWeight: 600,
+    fontFamily: 'monospace',
+    fontSize: { xs: '0.95rem', sm: '1.1rem' },
+    wordBreak: 'break-all',
+    lineHeight: 1.35
+  },
+  vcPreviewCard: {
+    borderRadius: 2,
+    overflow: 'hidden'
+  },
+  vcPreviewCardInner: {
+    p: { xs: 2, sm: 2.5 },
+    alignItems: { sm: 'flex-start' }
+  },
+  vcPreviewMain: {
+    flex: 1,
+    minWidth: 0
+  },
+  vcPreviewTitle: {
+    fontWeight: 600,
+    mb: 0.5
+  },
+  vcPreviewDescription: {
+    whiteSpace: 'pre-wrap',
+    lineHeight: 1.5
+  },
+  vcPreviewActions: {
+    flexShrink: 0,
+    flexWrap: 'wrap',
+    justifyContent: { xs: 'flex-start', sm: 'flex-end' }
+  },
+  vcPreviewActionButton: {
+    textTransform: 'none',
+    whiteSpace: 'nowrap'
   }
 } as const
 

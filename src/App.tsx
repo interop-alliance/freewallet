@@ -19,6 +19,7 @@ import { WalletGetPage } from '@/pages/chapi/WalletGetPage'
 import { WalletStorePage } from '@/pages/chapi/WalletStorePage'
 import { StoragePage } from './pages/dashboard/StoragePage'
 import { CollectionContentsPage } from '@/pages/dashboard/CollectionContentsPage'
+import { CollectionResourcePage } from '@/pages/dashboard/CollectionResourcePage'
 
 function App() {
   return (
@@ -40,6 +41,10 @@ function App() {
         <Route
           path="/storage/collections/:collectionId"
           element={<CollectionContentsPage />}
+        />
+        <Route
+          path="/storage/collections/:collectionId/resources/:resourceId"
+          element={<CollectionResourcePage />}
         />
         <Route path="/contacts/:contactId" element={<ContactDetailPage />} />
         <Route path="/history" element={<HistoryPage />} />

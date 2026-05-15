@@ -8,7 +8,7 @@ import IconButton from '@mui/material/IconButton'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { Link as RouterLink, useParams } from 'react-router'
+import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import {
   MdArrowBack,
@@ -24,7 +24,10 @@ import { useAuthStore } from '@/stores/authStore'
 import { storageStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
-import type { FetchedCollectionResource } from '@/lib/storageResource'
+import {
+  isVerifiableCredentialData,
+  type FetchedCollectionResource
+} from '@/lib/storageResource'
 import { extensionFromMime } from '@/lib/extensionFromMime'
 import { ResourceTable } from '@/components/storage/ResourceTable'
 import { StorageEmptyState } from '@/components/storage/EmptyState'
@@ -35,6 +38,7 @@ import {
 
 export function CollectionContentsPage() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const { collectionId: rawCollectionId } = useParams<{
     collectionId: string
   }>()
@@ -148,6 +152,16 @@ export function CollectionContentsPage() {
       setSnippetCopied(false)
       try {
         const body = await storage.fetchCollectionResource(resource)
+        if (
+          body.kind === 'json' &&
+          isVerifiableCredentialData(body.data) &&
+          collectionId
+        ) {
+          navigate(
+            `/storage/collections/${encodeURIComponent(collectionId)}/resources/${encodeURIComponent(resource.id)}`
+          )
+          return
+        }
         setResourcePayload(body)
       } catch (e) {
         console.error('Failed to load resource:', e)
@@ -157,7 +171,7 @@ export function CollectionContentsPage() {
         setResourceLoading(false)
       }
     },
-    [storage, t]
+    [collectionId, navigate, storage, t]
   )
 
   const snippetText = useMemo(() => {

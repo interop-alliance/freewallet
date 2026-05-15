@@ -3,7 +3,9 @@ export type FetchedCollectionResource =
   | { kind: 'text'; text: string }
   | { kind: 'binary'; blob: Blob; contentType: string }
 
-export function isJsonLikeContentType(contentType: string | undefined): boolean {
+export function isJsonLikeContentType(
+  contentType: string | undefined
+): boolean {
   if (!contentType) {
     return false
   }
@@ -11,9 +13,26 @@ export function isJsonLikeContentType(contentType: string | undefined): boolean 
   return ct.includes('json') || ct.includes('ld+json')
 }
 
-export function isTextLikeContentType(contentType: string | undefined): boolean {
+export function isTextLikeContentType(
+  contentType: string | undefined
+): boolean {
   if (!contentType) {
     return false
   }
   return contentType.toLowerCase().startsWith('text/')
+}
+
+/** True when parsed JSON is a W3C Verifiable Credential document. */
+export function isVerifiableCredentialData(data: unknown): boolean {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return false
+  }
+  const type = (data as Record<string, unknown>).type
+  if (typeof type === 'string') {
+    return type === 'VerifiableCredential'
+  }
+  if (Array.isArray(type)) {
+    return type.some(entry => entry === 'VerifiableCredential')
+  }
+  return false
 }
