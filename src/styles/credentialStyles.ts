@@ -204,7 +204,8 @@ export const credentialDetailCardStyles = {
     minWidth: 0,
     p: 2,
     borderRadius: 2,
-    backgroundColor: 'grey.100',
+    // Uses theme-aware surface (grey.100 is always light; breaks contrast in dark mode)
+    backgroundColor: 'action.hover',
     border: 1,
     borderColor: 'divider'
   },

@@ -12,6 +12,11 @@ import type {
   StorageResourceList
 } from '@/lib/storage'
 import {
+  type FetchedCollectionResource,
+  isJsonLikeContentType,
+  isTextLikeContentType
+} from '@/lib/storageResource'
+import {
   type StoredCredential,
   StoredCredentialSchema
 } from '@/types/credential'
@@ -133,6 +138,24 @@ export class StorageManager {
       return []
     }
     return await this.remoteStore.listCollectionResources({ collectionUrl })
+  }
+
+  async fetchCollectionResource(
+    resource: StorageResource
+  ): Promise<FetchedCollectionResource> {
+    if (!this.remoteStore) {
+      throw new Error('Remote storage is not configured for this session.')
+    }
+    return await this.remoteStore.fetchCollectionResource(resource)
+  }
+
+  async deleteCollectionResource(resource: StorageResource): Promise<void> {
+    if (!this.remoteStore) {
+      throw new Error('Remote storage is not configured for this session.')
+    }
+    await this.remoteStore.deleteCollectionResource({
+      relativeUrl: resource.url
+    })
   }
 
   async ensureUserCollections({ user }: { user: User }) {
@@ -485,6 +508,127 @@ export class WASRemoteStore implements IWalletStore {
 
     const { data } = response as { data?: StorageResourceList }
     return data?.items ?? []
+  }
+
+  async fetchResourceBlob({
+    relativeUrl,
+    accept = '*/*'
+  }: {
+    relativeUrl: string
+    accept?: string
+  }): Promise<{ blob: Blob; contentType: string }> {
+    const objectUrl = new URL(relativeUrl, this.storageServerUrl).toString()
+    let response: unknown
+    try {
+      response = await (this.zcapClient.request as any)({
+        url: objectUrl,
+        method: 'GET',
+        parseBody: false,
+        headers: { accept }
+      })
+    } catch (e: any) {
+      console.error(
+        'Error fetching resource as blob:',
+        objectUrl,
+        JSON.stringify(e.data, null, 2)
+      )
+      throw new Error('Failed to fetch storage resource.')
+    }
+    if (!response || !(response instanceof Response)) {
+      throw new Error('Unexpected response when fetching storage resource.')
+    }
+    if (!response.ok) {
+      throw new Error(`Failed to fetch storage resource (${response.status}).`)
+    }
+    const blob = await response.blob()
+    const contentType =
+      response.headers.get('content-type')?.split(';')[0]?.trim() ||
+      blob.type ||
+      'application/octet-stream'
+    return { blob, contentType }
+  }
+
+  async deleteCollectionResource({
+    relativeUrl
+  }: {
+    relativeUrl: string
+  }): Promise<void> {
+    const objectUrl = new URL(relativeUrl, this.storageServerUrl).toString()
+    await this.zcapClient.request({
+      url: objectUrl,
+      method: 'DELETE'
+    })
+  }
+
+  async fetchCollectionResource(
+    resource: StorageResource
+  ): Promise<FetchedCollectionResource> {
+    const { url: relativeUrl, contentType: ctRaw } = resource
+    const ct = ctRaw?.trim()
+
+    if (isJsonLikeContentType(ct) || !ct) {
+      for (const acceptCt of ct ? [ct] : ['application/json', 'application/ld+json']) {
+        const data = await this.fetchDocument({
+          relativeUrl,
+          contentType: acceptCt
+        })
+        if (data !== undefined && typeof data === 'object') {
+          return { kind: 'json', data }
+        }
+      }
+
+      if (!ct) {
+        const { blob } = await this.fetchResourceBlob({ relativeUrl })
+        const text = await blob.text()
+        try {
+          const parsed = JSON.parse(text) as unknown
+          if (parsed !== null && typeof parsed === 'object') {
+            return { kind: 'json', data: parsed }
+          }
+        } catch {
+          /* not JSON text */
+        }
+        const sniff = blob.type || 'application/octet-stream'
+        if (sniff.toLowerCase().startsWith('text/')) {
+          return { kind: 'text', text }
+        }
+        return { kind: 'binary', blob, contentType: sniff }
+      }
+    }
+
+    if (isTextLikeContentType(ct)) {
+      const { blob } = await this.fetchResourceBlob({
+        relativeUrl,
+        accept: ct
+      })
+      return { kind: 'text', text: await blob.text() }
+    }
+
+    if (isJsonLikeContentType(ct)) {
+      const { blob, contentType } = await this.fetchResourceBlob({
+        relativeUrl,
+        accept: ct
+      })
+      const text = await blob.text()
+      try {
+        const parsed = JSON.parse(text) as unknown
+        if (parsed !== null && typeof parsed === 'object') {
+          return { kind: 'json', data: parsed }
+        }
+      } catch {
+        /* fall through */
+      }
+      if (contentType.toLowerCase().startsWith('text/')) {
+        return { kind: 'text', text }
+      }
+      return { kind: 'binary', blob, contentType }
+    }
+
+    const { blob, contentType } = await this.fetchResourceBlob({
+      relativeUrl,
+      accept: ct || '*/*'
+    })
+    return { kind: 'binary', blob, contentType }
   }
 
   async listCollections(): Promise<Array<StorageCollection>> {

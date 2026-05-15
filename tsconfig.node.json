@@ -23,5 +23,5 @@
     "noUncheckedSideEffectImports": true
   },
   "include": ["vite.config.ts", "playwright.config.ts", "tests/**/*.ts"],
-  "exclude": ["tests/storageManager.test.ts"]
+  "exclude": ["tests/storageManager.test.ts", "tests/storageResource.test.ts"]
 }

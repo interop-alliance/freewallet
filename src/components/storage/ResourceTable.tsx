@@ -11,6 +11,7 @@ import {
 } from '@mui/material'
 import { MdInsertDriveFile } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
+import type { KeyboardEvent } from 'react'
 import type { StorageResource } from '@/lib/storage'
 import { storageStyles } from '@/styles/appStyles'
 import { formatRelativeTime } from '@/lib/formatRelativeTime'
@@ -22,10 +23,17 @@ import {
 
 interface ResourceTableProps {
   resources: StorageResource[]
+  onResourceOpen: (resource: StorageResource) => void
+  selectedResourceId?: string | null
   ariaLabel?: string
 }
 
-export function ResourceTable({ resources, ariaLabel }: ResourceTableProps) {
+export function ResourceTable({
+  resources,
+  onResourceOpen,
+  selectedResourceId,
+  ariaLabel
+}: ResourceTableProps) {
   const { t, i18n } = useTranslation()
 
   return (
@@ -54,6 +62,10 @@ export function ResourceTable({ resources, ariaLabel }: ResourceTableProps) {
               key={resource.id}
               resource={resource}
               locale={i18n.language}
+              selected={selectedResourceId === resource.id}
+              onOpen={() => {
+                onResourceOpen(resource)
+              }}
             />
           ))}
         </TableBody>
@@ -65,9 +77,11 @@ export function ResourceTable({ resources, ariaLabel }: ResourceTableProps) {
 interface ResourceRowProps {
   resource: StorageResource
   locale: string
+  selected: boolean
+  onOpen: () => void
 }
 
-function ResourceRow({ resource, locale }: ResourceRowProps) {
+function ResourceRow({ resource, locale, selected, onOpen }: ResourceRowProps) {
   const { t } = useTranslation()
   const displayName = getResourceDisplayName(resource)
   const typeLabel = getResourceTypeLabel(resource, t)
@@ -75,7 +89,25 @@ function ResourceRow({ resource, locale }: ResourceRowProps) {
   const modified = modifiedIso ? formatRelativeTime(modifiedIso, locale) : ''
 
   return (
-    <TableRow hover sx={storageStyles.resourceRow}>
+    <TableRow
+      hover
+      selected={selected}
+      sx={{
+        ...storageStyles.resourceRow,
+        cursor: 'pointer'
+      }}
+      onClick={() => {
+        onOpen()
+      }}
+      tabIndex={0}
+      role="button"
+      onKeyDown={(e: KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+    >
       <TableCell sx={storageStyles.resourceNameCell}>
         <Box sx={storageStyles.resourceNameInner}>
           <Box sx={storageStyles.resourceFileIcon} aria-hidden>
