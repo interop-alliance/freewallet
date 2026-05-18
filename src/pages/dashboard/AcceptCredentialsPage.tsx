@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import { useAuthStore } from '@/stores/authStore'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
+import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { credentialCardStyles, dashboardStyles } from '@/styles/appStyles'
 
@@ -54,9 +55,10 @@ export function AcceptCredentialsPage() {
     <DashboardLayout title={t('acceptCredentials.title')}>
       <Stack sx={dashboardStyles.acceptCredentialsList}>
         {credentials.map((vc, i) => {
+          const { credentialDescription } = getDisplayFields(vc)
           const description =
-            'description' in vc.credentialSubject
-              ? vc.credentialSubject.description
+            credentialDescription.trim() !== ''
+              ? credentialDescription
               : t('common.noDescription')
 
           return (
