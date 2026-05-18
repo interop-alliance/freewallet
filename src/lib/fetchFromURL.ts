@@ -3,7 +3,7 @@ import { CORS_PROXY_URL } from '@/app.config'
 
 export async function fetchFromURL(url: string): Promise<string> {
   const target = CORS_PROXY_URL
-    ? `${CORS_PROXY_URL}${encodeURIComponent(url)}`
+    ? `${CORS_PROXY_URL}/?url=${encodeURIComponent(url)}`
     : url
 
   console.log('Fetching credential from URL:', url)

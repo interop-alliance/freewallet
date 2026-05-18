@@ -100,7 +100,15 @@
   "dashboard": {
     "title": "Freewallet Dashboard",
     "addCredential": "Add Credential",
-    "credentialsHeading": "Credentials"
+    "credentialsHeading": "Credentials",
+    "scanQr": {
+      "button": "Scan QR",
+      "title": "Scan credential QR",
+      "hint": "Point your camera at a credential URL, JSON QR code, or VP1-encoded credential QR.",
+      "cameraError": "Could not access the camera.",
+      "cameraPermissionHint": "Camera is blocked or not available. Allow camera access in your browser settings for this site, then close and open Scan QR again.",
+      "scanEngineError": "The QR scanner stopped after an unexpected error. Close this dialog and try again."
+    }
   },
   "contacts": {
     "title": "Contacts",
@@ -197,11 +205,11 @@
   },
   "addCredential": {
     "title": "Add credential",
-    "placeholder": "Paste a URL or full credential JSON.",
+    "placeholder": "Paste a URL, full credential JSON, or VP1 QR text.",
     "add": "Add",
     "errors": {
       "empty": "No credential entered.",
-      "invalidInput": "Input must be a URL or a JSON credential.",
+      "invalidInput": "Input must be a URL, credential JSON, or a VP1 QR payload.",
       "noneFound": "No credentials found in the provided input.",
       "urlFetch": "Could not retrieve credential from URL.",
       "jsonParse": "Could not parse credential JSON."

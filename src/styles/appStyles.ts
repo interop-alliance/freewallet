@@ -288,8 +288,11 @@ export const dashboardStyles = {
     justifyContent: 'space-between',
     alignItems: 'center'
   },
-  addCredentialLink: {
+  dashboardCredentialActions: {
     mt: 3,
+    flexWrap: 'wrap'
+  },
+  addCredentialLink: {
     textTransform: 'none',
     borderRadius: 2,
     px: 2.5,

@@ -2,6 +2,8 @@ declare const __APP_VERSION__: string
 
 declare module '@digitalbazaar/webkms-client'
 
+declare module '@digitalcredentials/vpqr'
+
 declare module '@digitalcredentials/ed25519-signature-2020'
 declare module '@digitalcredentials/http-client' {
   interface HttpClientResponse extends Response {
@@ -9,9 +11,15 @@ declare module '@digitalcredentials/http-client' {
   }
   interface HttpClient {
     get(url: string, options?: Record<string, any>): Promise<HttpClientResponse>
-    post(url: string, options?: Record<string, any>): Promise<HttpClientResponse>
+    post(
+      url: string,
+      options?: Record<string, any>
+    ): Promise<HttpClientResponse>
     put(url: string, options?: Record<string, any>): Promise<HttpClientResponse>
-    delete(url: string, options?: Record<string, any>): Promise<HttpClientResponse>
+    delete(
+      url: string,
+      options?: Record<string, any>
+    ): Promise<HttpClientResponse>
   }
   export const httpClient: HttpClient
 }

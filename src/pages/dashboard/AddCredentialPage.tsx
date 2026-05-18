@@ -7,10 +7,11 @@ import Stack from '@mui/material/Stack'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
-import { fetchFromURL } from '@/lib/fetchFromURL'
-import { credentialsFromJSON } from '@/lib/credentialsFromJSON'
+import {
+  ResolveCredentialsInputError,
+  resolveCredentialsInput
+} from '@/lib/resolveCredentialsInput'
 import { dashboardStyles } from '@/styles/appStyles'
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 
 export function AddCredentialPage() {
   const { t } = useTranslation()
@@ -31,33 +32,26 @@ export function AddCredentialPage() {
     setLoading(true)
 
     try {
-      let credentials: IVerifiableCredential[]
-
-      if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
-        const text = await fetchFromURL(trimmed)
-        credentials = credentialsFromJSON(text)
-      } else if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        credentials = credentialsFromJSON(trimmed)
-      } else {
-        setError(t('addCredential.errors.invalidInput'))
-        setLoading(false)
-        return
-      }
-
-      if (credentials.length === 0) {
-        setError(t('addCredential.errors.noneFound'))
-        setLoading(false)
-        return
-      }
-
+      const credentials = await resolveCredentialsInput(trimmed)
       navigate('/accept-credentials', { state: { credentials } })
-    } catch (err: any) {
-      const isUrl = trimmed.startsWith('https://') || trimmed.startsWith('http://')
+    } catch (err: unknown) {
+      if (err instanceof ResolveCredentialsInputError) {
+        const keys = {
+          empty: 'addCredential.errors.empty',
+          invalid_input: 'addCredential.errors.invalidInput',
+          none_found: 'addCredential.errors.noneFound'
+        } as const
+        setError(t(keys[err.code]))
+        return
+      }
+      const isUrl =
+        trimmed.startsWith('https://') || trimmed.startsWith('http://')
       const prefix = isUrl
         ? t('addCredential.errors.urlFetch')
         : t('addCredential.errors.jsonParse')
       console.error(prefix, err)
-      setError(`${prefix} Error: ${err.message}`)
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(`${prefix} Error: ${msg}`)
     } finally {
       setLoading(false)
     }

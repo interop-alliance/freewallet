@@ -100,7 +100,15 @@
   "dashboard": {
     "title": "Panel de Freewallet",
     "addCredential": "Añadir credencial",
-    "credentialsHeading": "Credenciales"
+    "credentialsHeading": "Credenciales",
+    "scanQr": {
+      "button": "Escanear QR",
+      "title": "Escanear QR de credencial",
+      "hint": "Apunte la cámara a una URL de credencial, un código QR JSON o un QR VP1.",
+      "cameraError": "No se pudo acceder a la cámara.",
+      "cameraPermissionHint": "La cámara está bloqueada o no está disponible. Permita el acceso a la cámara en la configuración del navegador para este sitio; luego cierre y vuelva a abrir Escanear QR.",
+      "scanEngineError": "El escáner QR se detuvo por un error inesperado. Cierre este cuadro e inténtelo de nuevo."
+    }
   },
   "contacts": {
     "title": "Contactos",
@@ -197,11 +205,11 @@
   },
   "addCredential": {
     "title": "Añadir credencial",
-    "placeholder": "Pegue una URL o el JSON completo de la credencial.",
+    "placeholder": "Pegue una URL, el JSON completo de la credencial o texto VP1 del QR.",
     "add": "Añadir",
     "errors": {
       "empty": "No introdujo ninguna credencial.",
-      "invalidInput": "La entrada debe ser una URL o un JSON de credencial.",
+      "invalidInput": "La entrada debe ser una URL, JSON de credencial o un código VP1 QR.",
       "noneFound": "No se encontraron credenciales en la entrada.",
       "urlFetch": "No se pudo obtener la credencial desde la URL.",
       "jsonParse": "No se pudo analizar el JSON de la credencial."
