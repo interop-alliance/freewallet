@@ -8,7 +8,7 @@ import { notFoundStyles } from '@/styles/appStyles'
 export function NotFoundPage() {
   const { t } = useTranslation()
   return (
-    <Box component="main" sx={notFoundStyles.page}>
+    <Box component="main" className="fw-page" sx={notFoundStyles.page}>
       <Typography variant="h1" component="h1" sx={{ fontWeight: 600 }}>
         404
       </Typography>

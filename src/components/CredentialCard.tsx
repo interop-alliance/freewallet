@@ -25,7 +25,20 @@ export function CredentialCard({ cid, credential }: CredentialCardProps) {
   const { result, loading, error } = useVerification(credential)
 
   return (
-    <Card variant="outlined">
+    <Card
+      variant="outlined"
+      sx={{
+        position: 'relative',
+        overflow: 'hidden',
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          top: 0, left: 0, right: 0,
+          height: '3px',
+          background: 'linear-gradient(90deg, var(--fw-orange), var(--fw-pink))',
+        },
+      }}
+    >
       <CardActionArea
         sx={credentialCardStyles.card}
         component={RouterLink}

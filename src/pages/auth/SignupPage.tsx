@@ -139,7 +139,7 @@ export function SignupPage() {
   }
 
   return (
-    <Box component="main" sx={authStyles.page}>
+    <Box component="main" className="fw-page" sx={authStyles.page}>
       <Box component="form" onSubmit={handleSignup} sx={authStyles.wideContent}>
         <Box sx={authStyles.languageBar}>
           <LanguageSelector />

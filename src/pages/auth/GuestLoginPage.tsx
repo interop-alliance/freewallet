@@ -56,7 +56,7 @@ export function GuestLoginPage() {
   }
 
   return (
-    <Box component="main" sx={authStyles.page}>
+    <Box component="main" className="fw-page" sx={authStyles.page}>
       <Box component="form" onSubmit={handleGuestLogin} sx={authStyles.content}>
         <Box sx={authStyles.languageBar}>
           <LanguageSelector />

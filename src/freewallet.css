@@ -1,0 +1,714 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * Freewallet — design tokens & component styles
+ * Extracted from the CCPW light-mode prototype. Drop into your React app
+ * and reference the tokens / classes from your existing components.
+ *
+ * Two layers:
+ *   1. :root tokens — colors, type, radii, shadows. Reference these from
+ *      your existing styling layer (Tailwind config, CSS modules, MUI
+ *      theme, styled-components ThemeProvider, etc).
+ *   2. .fw-* component classes — opinionated styles for the screens you
+ *      see in Freewallet.html. Use them directly or copy values out.
+ *
+ * Dark mode: add `data-theme="dark"` to <html> or a wrapper element.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Surfaces */
+  --fw-bg:           #FAF6EF;
+  --fw-surface:      #FFFFFF;
+  --fw-surface-alt:  #F4F0E8;
+
+  /* Ink (text) */
+  --fw-ink:          #0A0A0A;
+  --fw-ink-dim:      rgba(10, 10, 10, 0.62);
+  --fw-ink-soft:     rgba(10, 10, 10, 0.42);
+
+  /* Hairlines / dividers */
+  --fw-hairline:      rgba(10, 10, 10, 0.08);
+  --fw-hairline-soft: rgba(10, 10, 10, 0.05);
+
+  /* Brand palette — sunrise */
+  --fw-orange:       #F25C2A;   /* primary accent */
+  --fw-orange-soft:  #FBE6DC;
+  --fw-pink:         #ED4E7A;
+  --fw-yellow:       #F5A524;
+  --fw-amber:        #FFB400;
+
+  /* Semantic */
+  --fw-green:        #2E8F66;
+  --fw-blue:         #1F6FEB;
+  --fw-red:          #C0392B;
+  --fw-navy:         #0A4D8C;
+  --fw-teal:         #2D7D6E;
+  --fw-violet:       #7C3AED;
+  --fw-gray:         #8E8E93;
+
+  /* Accent gradient — used on hero text and brand mark */
+  --fw-grad-sunrise:
+    linear-gradient(90deg, #F5A524 0%, #F25C2A 55%, #ED4E7A 100%);
+  --fw-grad-sunrise-soft:
+    radial-gradient(60% 80% at 50% 0%,
+      rgba(245, 165, 36, 0.35),
+      rgba(242, 92, 42, 0.18) 35%,
+      rgba(237, 78, 122, 0.10) 60%,
+      transparent 80%);
+  --fw-grad-sunrise-bottom:
+    radial-gradient(70% 80% at 50% 100%,
+      rgba(245, 165, 36, 0.32),
+      rgba(242, 92, 42, 0.18) 40%,
+      rgba(237, 78, 122, 0.10) 65%,
+      transparent 85%);
+
+  /* Typography */
+  --fw-font:         "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+  --fw-fs-xs:        11px;
+  --fw-fs-sm:        12px;
+  --fw-fs-md:        14px;
+  --fw-fs-lg:        18px;
+  --fw-fs-xl:        22px;
+  --fw-fs-2xl:       28px;
+  --fw-fs-3xl:       44px;
+  --fw-fs-display:   64px;
+
+  /* Radii */
+  --fw-radius-sm:    8px;
+  --fw-radius-md:    12px;
+  --fw-radius-lg:    14px;
+  --fw-radius-xl:    18px;
+  --fw-radius-2xl:   22px;
+  --fw-radius-3xl:   28px;
+  --fw-radius-pill:  9999px;
+
+  /* Shadows */
+  --fw-shadow-card:
+    0 0 0 1px rgba(10, 10, 10, 0.05),
+    0 8px 18px rgba(10, 10, 10, 0.05);
+  --fw-shadow-card-lift:
+    0 0 0 1px rgba(10, 10, 10, 0.05),
+    0 1px 0 rgba(10, 10, 10, 0.03),
+    0 8px 18px rgba(10, 10, 10, 0.04);
+  --fw-shadow-modal:
+    0 0 0 1px rgba(10, 10, 10, 0.08),
+    0 24px 60px rgba(10, 10, 10, 0.25);
+  --fw-shadow-frame:
+    0 0 0 1px rgba(10, 10, 10, 0.05),
+    0 24px 60px rgba(10, 10, 10, 0.06);
+  --fw-shadow-primary:
+    0 6px 18px rgba(242, 92, 42, 0.33);
+
+  /* Spacing scale */
+  --fw-space-1:      4px;
+  --fw-space-2:      8px;
+  --fw-space-3:      12px;
+  --fw-space-4:      16px;
+  --fw-space-5:      20px;
+  --fw-space-6:      24px;
+  --fw-space-8:      32px;
+  --fw-space-10:     40px;
+  --fw-space-14:     56px;
+}
+
+/* Dark-mode token overrides — media query for system preference */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fw-bg:           #0E0D11;
+    --fw-surface:      #1B1A22;
+    --fw-surface-alt:  #26242E;
+
+    --fw-ink:          #F5F1E8;
+    --fw-ink-dim:      rgba(245, 241, 232, 0.65);
+    --fw-ink-soft:     rgba(245, 241, 232, 0.42);
+
+    --fw-hairline:      rgba(245, 241, 232, 0.10);
+    --fw-hairline-soft: rgba(245, 241, 232, 0.06);
+
+    --fw-shadow-card:
+      0 0 0 1px rgba(245, 241, 232, 0.07),
+      0 8px 18px rgba(0, 0, 0, 0.45);
+    --fw-shadow-card-lift:
+      0 0 0 1px rgba(245, 241, 232, 0.06),
+      0 1px 0 rgba(255, 255, 255, 0.04),
+      0 8px 18px rgba(0, 0, 0, 0.45);
+    --fw-shadow-frame:
+      0 0 0 1px rgba(245, 241, 232, 0.08),
+      0 20px 50px rgba(0, 0, 0, 0.40);
+  }
+}
+
+/* Dark-mode token overrides — apply to <html data-theme="dark"> or a wrapper */
+[data-theme="dark"] {
+  --fw-bg:           #0E0D11;
+  --fw-surface:      #1B1A22;
+  --fw-surface-alt:  #26242E;
+
+  --fw-ink:          #F5F1E8;
+  --fw-ink-dim:      rgba(245, 241, 232, 0.65);
+  --fw-ink-soft:     rgba(245, 241, 232, 0.42);
+
+  --fw-hairline:      rgba(245, 241, 232, 0.10);
+  --fw-hairline-soft: rgba(245, 241, 232, 0.06);
+
+  --fw-shadow-card:
+    0 0 0 1px rgba(245, 241, 232, 0.07),
+    0 8px 18px rgba(0, 0, 0, 0.45);
+  --fw-shadow-card-lift:
+    0 0 0 1px rgba(245, 241, 232, 0.06),
+    0 1px 0 rgba(255, 255, 255, 0.04),
+    0 8px 18px rgba(0, 0, 0, 0.45);
+  --fw-shadow-frame:
+    0 0 0 1px rgba(245, 241, 232, 0.08),
+    0 20px 50px rgba(0, 0, 0, 0.40);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Page chrome
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.fw-page {
+  background: var(--fw-bg);
+  color: var(--fw-ink);
+  font-family: var(--fw-font);
+  min-height: 100vh;
+  position: relative;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Sunrise glow — drop into any container as ::before */
+.fw-glow-top,
+.fw-glow-bottom {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.fw-glow-top    { background: var(--fw-grad-sunrise-soft); }
+.fw-glow-bottom { background: var(--fw-grad-sunrise-bottom); }
+
+/* Centered content frame used by every sign-up screen */
+.fw-frame {
+  position: relative;
+  z-index: 2;
+  padding: 60px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.fw-frame-inner { width: 100%; max-width: 880px; }
+.fw-frame-narrow { max-width: 620px; }
+.fw-frame-wide   { max-width: 900px; }
+
+/* The big white-card surface used by the Welcome screen */
+.fw-hero-card {
+  background: var(--fw-surface);
+  border-radius: var(--fw-radius-3xl);
+  padding: 64px 56px;
+  text-align: center;
+  box-shadow: var(--fw-shadow-frame);
+  position: relative;
+  overflow: hidden;
+}
+.fw-hero-card::before {
+  /* gradient bloom behind the lockup */
+  content: '';
+  position: absolute;
+  top: -160px; left: 50%; transform: translateX(-50%);
+  width: 600px; height: 320px;
+  pointer-events: none;
+  background: radial-gradient(50% 50% at 50% 50%,
+    rgba(242, 92, 42, 0.18),
+    rgba(237, 78, 122, 0.10) 50%,
+    transparent 80%);
+}
+.fw-hero-card > * { position: relative; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Typography
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.fw-eyebrow {
+  font-size: var(--fw-fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--fw-ink-dim);
+}
+
+.fw-title {
+  font-size: var(--fw-fs-3xl);
+  font-weight: 600;
+  letter-spacing: -1.4px;
+  color: var(--fw-ink);
+  line-height: 1.05;
+}
+
+.fw-h2 {
+  font-size: var(--fw-fs-2xl);
+  font-weight: 700;
+  letter-spacing: -0.6px;
+}
+
+.fw-body {
+  font-size: var(--fw-fs-lg);
+  line-height: 1.55;
+  color: var(--fw-ink-dim);
+}
+
+.fw-body-sm {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fw-ink-dim);
+}
+
+/* Sunrise gradient text — apply to a <span> for "Credential Wallet" / "Freewallet" headlines */
+.fw-grad-text {
+  background: var(--fw-grad-sunrise);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+          color: transparent;
+}
+
+/* Inline link-ish underline used on Welcome ("Verifiable Credentials", "DIDs", "keys") */
+.fw-inline-link {
+  color: var(--fw-ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Brand lockup (mark + "Freewallet")
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.fw-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+}
+.fw-lockup-mark {
+  width: 58px;
+  height: 45px;
+  border-radius: 11px;
+  background: var(--fw-grad-sunrise);
+  position: relative;
+  box-shadow: 0 6px 18px rgba(242, 92, 42, 0.25);
+}
+.fw-lockup-mark > svg {
+  position: absolute;
+  inset: 24% 14%;
+  width: 72%;
+  height: 52%;
+}
+.fw-lockup-word {
+  font-size: var(--fw-fs-display);
+  font-weight: 700;
+  letter-spacing: -2.5px;
+  color: var(--fw-ink);
+  line-height: 1;
+}
+.fw-lockup--sm .fw-lockup-mark { width: 26px; height: 20px; border-radius: 5px; }
+.fw-lockup--sm .fw-lockup-word { font-size: 22px; letter-spacing: -1px; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Buttons
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.fw-btn {
+  height: 50px;
+  min-width: 140px;
+  padding: 0 22px;
+  border-radius: var(--fw-radius-md);
+  border: 1.5px solid transparent;
+  background: transparent;
+  font-family: var(--fw-font);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.fw-btn:active { transform: translateY(1px); }
+
+.fw-btn--primary {
+  background: var(--fw-orange);
+  color: #fff;
+  box-shadow: var(--fw-shadow-primary);
+}
+.fw-btn--primary:hover { background: #e44d1d; }
+
+.fw-btn--outline {
+  background: var(--fw-surface);
+  color: var(--fw-orange);
+  border-color: var(--fw-orange);
+}
+.fw-btn--outline:hover { background: var(--fw-orange-soft); }
+
+.fw-btn--accent {
+  background: var(--fw-violet);
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(124, 58, 237, 0.30);
+}
+
+.fw-btn--ink {
+  background: var(--fw-ink);
+  color: var(--fw-surface);
+}
+
+.fw-btn--ghost {
+  background: transparent;
+  color: var(--fw-ink-dim);
+  border-color: rgba(10, 10, 10, 0.12);
+}
+
+.fw-btn--disabled {
+  background: rgba(10, 10, 10, 0.06);
+  color: rgba(10, 10, 10, 0.35);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.fw-btn--sm  { height: 38px; min-width: 0; padding: 0 18px; font-size: 12px; }
+.fw-btn--xs  { height: 32px; min-width: 0; padding: 0 12px; font-size: 11px; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Pills
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.fw-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: var(--fw-radius-pill);
+  font-size: var(--fw-fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  background: rgba(10, 10, 10, 0.06);
+  color: var(--fw-ink);
+}
+.fw-pill::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 3px;
+  background: currentColor;
+  display: none;
+}
+.fw-pill[data-dot]::before { display: inline-block; }
+
+.fw-pill--green  { background: rgba(46, 143, 102, 0.12); color: var(--fw-green); }
+.fw-pill--orange { background: rgba(242, 92, 42, 0.12); color: var(--fw-orange); }
+.fw-pill--yellow { background: rgba(245, 165, 36, 0.16); color: #8a5a00; }
+.fw-pill--gray   { background: rgba(10, 10, 10, 0.06); color: var(--fw-ink-dim); }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Inputs
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.fw-input {
+  height: 46px;
+  width: 100%;
+  border-radius: var(--fw-radius-md);
+  padding: 0 14px;
+  font-family: var(--fw-font);
+  font-size: var(--fw-fs-md);
+  background: var(--fw-surface);
+  color: var(--fw-ink);
+  border: 1.5px solid var(--fw-hairline);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  outline: none;
+}
+.fw-input:focus,
+.fw-input--focused {
+  border-color: var(--fw-orange);
+  background: rgba(242, 92, 42, 0.06);
+  box-shadow: 0 0 0 4px rgba(242, 92, 42, 0.10);
+}
+
+.fw-input-label {
+  font-size: var(--fw-fs-md);
+  font-weight: 600;
+  color: var(--fw-ink);
+  margin-bottom: 10px;
+  display: block;
+}
+
+/* Password strength bar */
+.fw-strength {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.fw-strength-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(10, 10, 10, 0.10);
+}
+.fw-strength-bar[data-active] { background: var(--fw-orange); }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Cards
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.fw-card {
+  background: var(--fw-surface);
+  border-radius: var(--fw-radius-lg);
+  padding: 22px;
+  box-shadow: var(--fw-shadow-card);
+  text-align: left;
+}
+
+.fw-card--padded { padding: 24px 22px; }
+
+.fw-card--credential {
+  border-radius: var(--fw-radius-xl);
+  padding: 18px 20px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--fw-shadow-card-lift);
+}
+.fw-card--credential::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--fw-orange), var(--fw-pink));
+}
+
+.fw-card--selected {
+  box-shadow:
+    0 0 0 2px var(--fw-green),
+    0 8px 18px rgba(46, 143, 102, 0.20);
+}
+
+/* Empty / "add another" slot */
+.fw-empty-slot {
+  border-radius: var(--fw-radius-xl);
+  padding: 18px 20px;
+  min-height: 130px;
+  border: 1.5px dashed var(--fw-hairline);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--fw-ink-soft);
+  background: transparent;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Step indicator (sign-up)
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.fw-steps {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.fw-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 80px;
+}
+.fw-step-dot {
+  width: 32px; height: 32px;
+  border-radius: 16px;
+  background: rgba(10, 10, 10, 0.12);
+  color: rgba(10, 10, 10, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+}
+.fw-step[data-state="active"] .fw-step-dot,
+.fw-step[data-state="done"]   .fw-step-dot {
+  background: var(--fw-orange);
+  color: #fff;
+}
+.fw-step[data-state="active"] .fw-step-dot {
+  box-shadow: 0 4px 12px rgba(242, 92, 42, 0.55);
+}
+.fw-step-label {
+  font-size: var(--fw-fs-sm);
+  font-weight: 600;
+  color: var(--fw-ink-dim);
+  text-align: center;
+  line-height: 1.2;
+}
+.fw-step[data-state="active"] .fw-step-label { color: var(--fw-ink); }
+.fw-step-connector {
+  flex: 0 0 80px;
+  height: 2px;
+  background: rgba(10, 10, 10, 0.10);
+  margin-top: 15px;
+  align-self: flex-start;
+  border-radius: 1px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Modal / dialog (CHAPI permission prompt)
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.fw-dialog {
+  width: 440px;
+  background: var(--fw-surface);
+  border-radius: var(--fw-radius-lg);
+  box-shadow: var(--fw-shadow-modal);
+  text-align: left;
+}
+.fw-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--fw-hairline-soft);
+  font-size: var(--fw-fs-md);
+  font-weight: 700;
+}
+.fw-dialog-close {
+  color: var(--fw-ink-soft);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  border: none;
+  background: transparent;
+}
+.fw-dialog-body { padding: 18px; }
+.fw-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+/* Origin chip inside the CHAPI dialog */
+.fw-origin {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--fw-surface-alt);
+  border-radius: 10px;
+}
+.fw-origin-favicon {
+  width: 36px; height: 30px;
+  border-radius: 6px;
+  background: var(--fw-surface);
+  border: 1px solid var(--fw-hairline);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Dashboard shell
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.fw-app {
+  width: 100%;
+  height: 100%;
+  background: var(--fw-bg);
+  color: var(--fw-ink);
+  font-family: var(--fw-font);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fw-topbar {
+  height: 60px;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--fw-surface);
+  border-bottom: 1px solid var(--fw-hairline);
+}
+
+.fw-shell {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.fw-sidebar {
+  width: 220px;
+  background: var(--fw-surface);
+  border-right: 1px solid var(--fw-hairline);
+  padding: 24px 0;
+  display: flex;
+  flex-direction: column;
+}
+.fw-nav-item {
+  padding: 10px 24px;
+  font-size: var(--fw-fs-md);
+  font-weight: 500;
+  color: var(--fw-ink-dim);
+  background: transparent;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+}
+.fw-nav-item[data-active] {
+  color: var(--fw-ink);
+  background: var(--fw-surface-alt);
+  border-left-color: var(--fw-orange);
+}
+.fw-nav-item[data-heading]  { font-weight: 700; }
+.fw-nav-item[data-indent]   { padding-left: 40px; }
+
+.fw-main {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+.fw-main-content {
+  position: relative;
+  z-index: 2;
+  padding: 36px 40px;
+}
+
+.fw-dashboard-title {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -1.2px;
+}
+
+.fw-section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 28px;
+}
+.fw-section-head h2 {
+  font-size: var(--fw-fs-xl);
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  margin: 0;
+}
+
+/* Credentials grid */
+.fw-grid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  max-width: 920px;
+}
+
+@media (max-width: 900px) {
+  .fw-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .fw-grid { grid-template-columns: 1fr; }
+}

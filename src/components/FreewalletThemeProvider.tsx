@@ -13,29 +13,69 @@ export function FreewalletThemeProvider({ children }: { children: ReactNode }) {
       createTheme({
         palette: {
           mode: prefersDarkMode ? 'dark' : 'light',
+          primary: {
+            main:  '#F25C2A',
+            light: '#FBE6DC',
+            dark:  '#e44d1d'
+          },
           background: prefersDarkMode
-            ? {
-                default: '#101418',
-                paper: '#171c21'
-              }
-            : {
-                default: '#f7f7f7',
-                paper: '#ffffff'
-              }
+            ? { default: '#0E0D11', paper: '#1B1A22' }
+            : { default: '#FAF6EF', paper: '#FFFFFF' }
         },
         typography: {
           fontFamily:
-            '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+            '"Helvetica Neue", Helvetica, Inter, system-ui, sans-serif'
         },
         components: {
           MuiButton: {
             styleOverrides: {
               root: {
-                whiteSpace: 'nowrap'
-              }
-            }
-          }
-        }
+                whiteSpace: 'nowrap',
+                borderRadius: 'var(--fw-radius-md)',
+                fontWeight: 700,
+                letterSpacing: '0.4px',
+              },
+              sizeLarge: {
+                height: 50,
+                minWidth: 160,
+                padding: '0 22px',
+                fontSize: 13,
+              },
+              contained: {
+                '&:not(:disabled)': {
+                  boxShadow: 'var(--fw-shadow-primary)',
+                },
+                '&:hover': {
+                  boxShadow: 'var(--fw-shadow-primary)',
+                },
+              },
+            },
+          },
+          MuiCard: {
+            styleOverrides: {
+              root: {
+                borderRadius: 'var(--fw-radius-lg)',
+              },
+            },
+          },
+          MuiOutlinedInput: {
+            styleOverrides: {
+              root: {
+                borderRadius: 'var(--fw-radius-md)',
+                '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                  borderColor: 'var(--fw-orange)',
+                },
+              },
+            },
+          },
+          MuiDrawer: {
+            styleOverrides: {
+              paper: {
+                borderRight: '1px solid var(--fw-hairline)',
+              },
+            },
+          },
+        },
       }),
     [prefersDarkMode]
   )

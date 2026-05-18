@@ -166,14 +166,16 @@ export const dashboardStyles = {
     gap: 0.5
   },
   navItem: {
-    borderRadius: 2,
+    borderRadius: 0,
+    borderLeft: '3px solid transparent',
     color: 'text.primary',
     '&.Mui-selected': {
-      bgcolor: 'action.selected',
+      bgcolor: 'var(--fw-surface-alt)',
+      borderLeftColor: 'var(--fw-orange)',
       fontWeight: 600
     },
     '&.Mui-selected:hover': {
-      bgcolor: 'action.selected'
+      bgcolor: 'var(--fw-surface-alt)'
     }
   },
   navItemText: {
@@ -188,28 +190,32 @@ export const dashboardStyles = {
   },
   navSectionTitleButton: {
     mt: 1.5,
-    borderRadius: 2,
+    borderRadius: 0,
+    borderLeft: '3px solid transparent',
     color: 'text.primary',
     '&.Mui-selected': {
-      bgcolor: 'action.selected'
+      bgcolor: 'var(--fw-surface-alt)',
+      borderLeftColor: 'var(--fw-orange)'
     },
     '&.Mui-selected:hover': {
-      bgcolor: 'action.selected'
+      bgcolor: 'var(--fw-surface-alt)'
     }
   },
   navSubList: {
     px: 0
   },
   navSubItem: {
-    borderRadius: 2,
+    borderRadius: 0,
+    borderLeft: '3px solid transparent',
     color: 'text.primary',
     pl: 4,
     '&.Mui-selected': {
-      bgcolor: 'action.selected',
+      bgcolor: 'var(--fw-surface-alt)',
+      borderLeftColor: 'var(--fw-orange)',
       fontWeight: 600
     },
     '&.Mui-selected:hover': {
-      bgcolor: 'action.selected'
+      bgcolor: 'var(--fw-surface-alt)'
     }
   },
   walletIcon: {
