@@ -1,5 +1,11 @@
 # History
 
+## 0.7.0 - 2026-05-18
+
+### Added
+
+- Add QR code scanner.
+
 ## 0.6.1 - 2026-05-16
 
 ### Added
