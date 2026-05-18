@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react'
+
 export const scanCredentialQrStyles = {
   previewContainer: {
     position: 'relative',
@@ -10,3 +12,10 @@ export const scanCredentialQrStyles = {
     justifyContent: 'center'
   }
 } as const
+
+export const scanCredentialQrVideoStyle: CSSProperties = {
+  width: '100%',
+  maxHeight: 320,
+  objectFit: 'cover',
+  display: 'block'
+}

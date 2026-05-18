@@ -17,7 +17,10 @@ import {
   ResolveCredentialsInputError,
   resolveCredentialsInput
 } from '@/lib/resolveCredentialsInput'
-import { scanCredentialQrStyles } from '@/styles/scanCredentialQrStyles'
+import {
+  scanCredentialQrStyles,
+  scanCredentialQrVideoStyle
+} from '@/styles/scanCredentialQrStyles'
 
 type QrDecodedPayload = {
   data: string
@@ -26,7 +29,6 @@ type QrDecodedPayload = {
 type ScanCredentialQrDialogProps = {
   open: boolean
   onClose: () => void
-  /** Same acceptance flow as Add Credential (review screen before storing). */
   onCredentialsReady: (credentials: IVerifiableCredential[]) => void
 }
 
@@ -180,12 +182,7 @@ export function ScanCredentialQrDialog({
               ref={attachVideoRef}
               muted
               playsInline
-              style={{
-                width: '100%',
-                maxHeight: 320,
-                objectFit: 'cover',
-                display: 'block'
-              }}
+              style={scanCredentialQrVideoStyle}
             />
             {startingCamera ? (
               <CircularProgress
