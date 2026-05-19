@@ -10,7 +10,31 @@ env:
   NODE_VERSION: 24
 
 jobs:
-  install:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - run: npm install --legacy-peer-deps
+      - run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - run: npm install --legacy-peer-deps
+      - run: npm test
+
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,61 +47,4 @@ jobs:
 
       - run: npm install --legacy-peer-deps
       - run: npm run prepare
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: workspace
-          retention-days: 1
-          path: |
-            node_modules
-            public/js
-
-  build:
-    needs: install
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: workspace
-
       - run: npm run build
-
-  lint:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: workspace
-
-      - run: npm run lint
-
-  test:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: workspace
-
-      - run: npm test
