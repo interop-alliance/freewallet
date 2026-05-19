@@ -6,7 +6,7 @@ const env = import.meta.env
 export const SERVER_URL = env.VITE_SERVER_URL || 'http://localhost:5173'
 export const DEPLOY_URL = env.VITE_DEPLOY_URL
 export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
-
+export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
 export const CORS_PROXY_URL = env.VITE_CORS_PROXY_URL || 'https://corsproxy.io'
 
 export const PASSWORD_RULES = {

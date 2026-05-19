@@ -207,12 +207,21 @@
     "title": "Add credential",
     "placeholder": "Paste a URL, full credential JSON, or VP1 QR text.",
     "add": "Add",
+    "upload": {
+      "title": "Upload credential JSON",
+      "subtitle": "Drag and drop one or more .json files here, or choose files to browse.",
+      "browse": "Choose files",
+      "orUpload": "or upload",
+      "dropHint": "Upload JSON credential files"
+    },
     "errors": {
       "empty": "No credential entered.",
       "invalidInput": "Input must be a URL, credential JSON, or a VP1 QR payload.",
       "noneFound": "No credentials found in the provided input.",
       "urlFetch": "Could not retrieve credential from URL.",
-      "jsonParse": "Could not parse credential JSON."
+      "jsonParse": "Could not parse credential JSON.",
+      "fileParse": "Could not parse {{fileName}}:",
+      "fileTooLarge": "{{fileName}} is too large (max {{limitMb}} MB)."
     }
   },
   "acceptCredentials": {

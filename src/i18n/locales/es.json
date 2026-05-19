@@ -207,12 +207,21 @@
     "title": "Añadir credencial",
     "placeholder": "Pegue una URL, el JSON completo de la credencial o texto VP1 del QR.",
     "add": "Añadir",
+    "upload": {
+      "title": "Subir JSON de credencial",
+      "subtitle": "Arrastre y suelte uno o más archivos .json aquí, o elija archivos para explorar.",
+      "browse": "Elegir archivos",
+      "orUpload": "o suba",
+      "dropHint": "Subir archivos JSON de credenciales"
+    },
     "errors": {
       "empty": "No introdujo ninguna credencial.",
       "invalidInput": "La entrada debe ser una URL, JSON de credencial o un código VP1 QR.",
       "noneFound": "No se encontraron credenciales en la entrada.",
       "urlFetch": "No se pudo obtener la credencial desde la URL.",
-      "jsonParse": "No se pudo analizar el JSON de la credencial."
+      "jsonParse": "No se pudo analizar el JSON de la credencial.",
+      "fileParse": "No se pudo analizar {{fileName}}:",
+      "fileTooLarge": "{{fileName}} es demasiado grande (máx. {{limitMb}} MB)."
     }
   },
   "acceptCredentials": {
