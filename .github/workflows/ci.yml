@@ -6,6 +6,9 @@ on:
   push:
     branches: [main]
 
+env:
+  NODE_VERSION: 24
+
 jobs:
   install:
     runs-on: ubuntu-latest
@@ -16,7 +19,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - run: npm install --legacy-peer-deps
       - run: npm run prepare
@@ -39,7 +42,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - uses: actions/download-artifact@v4
         with:
@@ -55,7 +58,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - uses: actions/download-artifact@v4
         with:
@@ -71,7 +74,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - uses: actions/download-artifact@v4
         with:

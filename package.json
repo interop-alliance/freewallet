@@ -17,7 +17,7 @@
     "test:e2e": "playwright test"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "dependencies": {
     "@digitalbazaar/webkms-client": "^14.3.0",
