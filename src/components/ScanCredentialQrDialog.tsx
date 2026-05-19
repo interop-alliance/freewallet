@@ -13,10 +13,8 @@ import {
 import QrScanner from 'qr-scanner'
 import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
-import {
-  ResolveCredentialsInputError,
-  resolveCredentialsInput
-} from '@/lib/resolveCredentialsInput'
+import { resolveCredentialsInput } from '@/lib/resolveCredentialsInput'
+import { resolveCredentialsInputErrorMessage } from '@/lib/resolveCredentialsInputErrorMessage'
 import {
   scanCredentialQrStyles,
   scanCredentialQrVideoStyle
@@ -30,31 +28,6 @@ type ScanCredentialQrDialogProps = {
   open: boolean
   onClose: () => void
   onCredentialsReady: (credentials: IVerifiableCredential[]) => void
-}
-
-function resolveErrorMessage(
-  err: unknown,
-  scannedText: string,
-  t: (key: string) => string
-): string {
-  if (err instanceof ResolveCredentialsInputError) {
-    const map = {
-      empty: 'addCredential.errors.empty',
-      invalid_input: 'addCredential.errors.invalidInput',
-      none_found: 'addCredential.errors.noneFound'
-    } as const
-    return t(map[err.code])
-  }
-
-  const trimmed = scannedText.trimStart()
-  const isUrl = trimmed.startsWith('http://') || trimmed.startsWith('https://')
-  const prefix = isUrl
-    ? t('addCredential.errors.urlFetch')
-    : t('addCredential.errors.jsonParse')
-  if (err instanceof Error && err.message) {
-    return `${prefix}: ${err.message}`
-  }
-  return `${prefix}.`
 }
 
 export function ScanCredentialQrDialog({
@@ -91,16 +64,14 @@ export function ScanCredentialQrDialog({
         return
       }
       const data = typeof result === 'string' ? result : result.data
-      console.log(
-        '[Scan QR] raw decoded payload (URL / deeplink / VP text / JSON):',
-        data
-      )
       try {
         sc.stop()
         const credentials = await resolveCredentialsInput(data)
         onCredentialsReady(credentials)
       } catch (err) {
-        setDecodeError(resolveErrorMessage(err, data, t))
+        setDecodeError(
+          resolveCredentialsInputErrorMessage(err, t, { trimmed: data })
+        )
         sc.start().catch(() => {})
       }
     },
