@@ -6,7 +6,7 @@
     "prepare": "mkdir -p public/js && cp node_modules/credential-handler-polyfill/dist/* public/js/ && cp node_modules/web-credential-handler/dist/* public/js/",
     "start": "npx serve dist/ --cors",
     "dev": "vite --cors",
-    "build": "tsc -p tsconfig.app.json && vite build",
+    "build": "tsc -p tsconfig.app.json && npx vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
