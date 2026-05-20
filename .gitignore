@@ -26,7 +26,6 @@ dist-ssr
 *.sw?
 
 .pnpm-store
-pnpm-lock.yaml
 
 # Playwright
 /test-results/
