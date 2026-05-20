@@ -27,6 +27,26 @@ export const MEDIATOR_BASE = 'https://authn.io/mediator?origin='
 export const KNOWN_REGISTRIES_URL =
   'https://digitalcredentials.github.io/dcc-known-registries/known-did-registries.json'
 
+/** Legacy DID registry URLs */
+export const KnownDidRegistries = [
+  {
+    name: 'DCC Pilot Registry',
+    url: 'https://digitalcredentials.github.io/issuer-registry/registry.json'
+  },
+  {
+    name: 'DCC Sandbox Registry',
+    url: 'https://digitalcredentials.github.io/sandbox-registry/registry.json'
+  },
+  {
+    name: 'DCC Community Registry',
+    url: 'https://digitalcredentials.github.io/community-registry/registry.json'
+  },
+  {
+    name: 'DCC Registry',
+    url: 'https://digitalcredentials.github.io/dcc-registry/registry.json'
+  }
+] as const
+
 export const KNOWN_EXTENSIONS =
   /\.(json|jsonld|ldjson|txt|md|pdf|png|jpg|jpeg|webp|svg|csv|xml|yaml|yml)$/i
 

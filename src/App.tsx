@@ -20,6 +20,7 @@ import { WalletStorePage } from '@/pages/chapi/WalletStorePage'
 import { StoragePage } from './pages/dashboard/StoragePage'
 import { CollectionContentsPage } from '@/pages/dashboard/CollectionContentsPage'
 import { CollectionResourcePage } from '@/pages/dashboard/CollectionResourcePage'
+import { IssuerDetailPage } from '@/pages/dashboard/IssuerDetailPage'
 
 function App() {
   return (
@@ -50,6 +51,7 @@ function App() {
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/credential/:cid" element={<CredentialDetailPage />} />
+        <Route path="/credential/:cid/issuer" element={<IssuerDetailPage />} />
         <Route path="/add-credential" element={<AddCredentialPage />} />
         <Route path="/accept-credentials" element={<AcceptCredentialsPage />} />
       </Route>

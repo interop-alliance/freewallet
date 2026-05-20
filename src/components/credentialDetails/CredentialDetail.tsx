@@ -40,9 +40,11 @@ import { useTranslation } from 'react-i18next'
 
 export function CredentialDetail({
   vc,
+  cid,
   onDelete
 }: {
   vc: IVerifiableCredential
+  cid?: string
   onDelete?: () => void
 }) {
   const { t } = useTranslation()
@@ -166,7 +168,12 @@ export function CredentialDetail({
         <Box sx={sx.mainCard}>
           <Box sx={sx.secondaryColumn}>
             <Stack spacing={3}>
-              <IssuerInfo issuer={vc.issuer} />
+              <IssuerInfo
+                issuer={vc.issuer}
+                cid={cid}
+                registryLoading={verification.loading}
+                issuerRegistry={verification.issuerRegistry}
+              />
 
               <InfoBlock
                 header={t('credential.createdDate')}

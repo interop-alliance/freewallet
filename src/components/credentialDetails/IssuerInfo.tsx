@@ -1,24 +1,39 @@
-import { useRef } from 'react'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
-import Avatar from '@mui/material/Avatar'
 import Link from '@mui/material/Link'
+import Button from '@mui/material/Button'
+import { Link as RouterLink } from 'react-router'
+import { IssuerAvatar } from '@/components/credentialDetails/IssuerAvatar'
 import { getIssuerDetails } from '@/lib/viewMappers/issuerName'
+import {
+  getRegistryNames,
+  isRecognizedIssuer,
+  type IssuerRegistryInfo
+} from '@/lib/viewMappers/issuerRegistryInfo'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
-import { initials } from '@/lib/viewMappers/initials'
 import { issuerInfoStyles as sx } from '@/styles/credentialStyles'
 import { useTranslation } from 'react-i18next'
 
 interface IssuerInfoProps {
   issuer: IVerifiableCredential['issuer']
+  cid?: string
+  issuerRegistry?: IssuerRegistryInfo | null
+  registryLoading?: boolean
+  urlsDisabled?: boolean
 }
 
-export function IssuerInfo({ issuer }: IssuerInfoProps) {
+export function IssuerInfo({
+  issuer,
+  cid,
+  issuerRegistry = null,
+  registryLoading = false,
+  urlsDisabled = false
+}: IssuerInfoProps) {
   const { t } = useTranslation()
   const details = getIssuerDetails(issuer)
-  const imgRef = useRef<HTMLImageElement>(null)
   const hasName = !!details.name
-  const avatarInitials = initials(details.name)
+  const recognized = isRecognizedIssuer(issuerRegistry)
+  const registryCount = getRegistryNames(issuerRegistry?.matchingIssuers ?? []).length
 
   return (
     <Box>
@@ -26,27 +41,11 @@ export function IssuerInfo({ issuer }: IssuerInfoProps) {
         {t('common.issuer')}
       </Typography>
       <Box sx={sx.row}>
-        {details.image ? (
-          <Avatar
-            ref={imgRef}
-            src={details.image}
-            alt={details.name}
-            sx={sx.avatar}
-            slotProps={{
-              img: {
-                onError: () => {
-                  if (imgRef.current) {
-                    imgRef.current.style.display = 'none'
-                  }
-                }
-              }
-            }}
-          >
-            {avatarInitials}
-          </Avatar>
-        ) : (
-          <Avatar sx={sx.avatar}>{avatarInitials}</Avatar>
-        )}
+        <IssuerAvatar
+          src={details.image || undefined}
+          alt={details.name || t('issuer.unknown')}
+          sx={sx.avatar}
+        />
 
         <Box sx={sx.infoWrapper}>
           {hasName && (
@@ -55,16 +54,42 @@ export function IssuerInfo({ issuer }: IssuerInfoProps) {
             </Typography>
           )}
 
-          {details.url && (
-            <Link
-              href={details.url}
-              target="_blank"
-              rel="noopener"
-              variant="caption"
-              sx={sx.urlLink}
+          {details.url &&
+            (urlsDisabled ? (
+              <Typography variant="caption" color="text.disabled" sx={sx.urlLink}>
+                {details.url}
+              </Typography>
+            ) : (
+              <Link
+                href={details.url}
+                target="_blank"
+                rel="noopener"
+                variant="caption"
+                sx={sx.urlLink}
+              >
+                {details.url}
+              </Link>
+            ))}
+
+          <Typography variant="caption" color="text.secondary" sx={sx.registryStatus}>
+            {registryLoading
+              ? t('common.verifying')
+              : recognized
+                ? t('issuer.foundInRegistries', { count: registryCount })
+                : t('issuer.unrecognized')}
+          </Typography>
+
+          {cid && details.id && (
+            <Button
+              component={RouterLink}
+              to={`/credential/${cid}/issuer`}
+              state={{ issuerRegistry }}
+              size="small"
+              variant="outlined"
+              sx={sx.detailButton}
             >
-              {details.url}
-            </Link>
+              {t('issuer.viewDetail')}
+            </Button>
           )}
         </Box>
       </Box>

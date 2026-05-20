@@ -195,6 +195,23 @@
     "viewSource": "View source",
     "hideJson": "Hide JSON"
   },
+  "issuer": {
+    "unknown": "Unknown issuer",
+    "foundInRegistries": "Found in {{count}} registries",
+    "foundInRegistries_one": "Found in {{count}} registry",
+    "unrecognized": "Unrecognized issuer",
+    "viewDetail": "View Issuer Detail",
+    "detailTitle": "Issuer Detail",
+    "linksDisabledWarning": "Links disabled — unrecognized issuer",
+    "fromCredential": "Issuer (from Credential)",
+    "unknownRegistry": "Unknown Registry",
+    "governanceInfo": "More info on governance",
+    "name": "Issuer Name",
+    "legalName": "Legal Name",
+    "url": "Issuer URL",
+    "ctidUrl": "CTID URL",
+    "none": "None"
+  },
   "resumeCard": {
     "issuer": "Issuer:",
     "selfIssued": "(self-issued)",

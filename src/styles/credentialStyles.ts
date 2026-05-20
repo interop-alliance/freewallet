@@ -310,5 +310,44 @@ export const issuerInfoStyles = {
   },
   urlLink: {
     display: 'block'
+  },
+  registryStatus: {
+    display: 'block',
+    mt: 0.5
+  },
+  detailButton: {
+    mt: 1,
+    textTransform: 'none'
+  }
+} as const
+
+export const issuerDetailStyles = {
+  wrapper: {
+    maxWidth: 720
+  },
+  sectionHeader: {
+    fontWeight: 700,
+    fontSize: '0.7rem',
+    display: 'block'
+  },
+  registryBlock: {
+    border: 1,
+    borderColor: 'divider',
+    borderRadius: 2,
+    p: 2.5
+  },
+  registryTitle: {
+    fontWeight: 600,
+    mb: 2
+  },
+  registryAvatar: {
+    width: 56,
+    height: 56,
+    mb: 2
+  },
+  fieldLabel: {
+    display: 'block',
+    fontWeight: 600,
+    mb: 0.25
   }
 } as const
