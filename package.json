@@ -50,7 +50,6 @@
     "react-password-strength-bar": "^0.4.1",
     "react-router": "^7.13.1",
     "remark-gfm": "^4.0.1",
-    "rxjs": "^7.8.2",
     "rxdb": "^16.21.1",
     "uuidv7": "^1.2.1",
     "web-credential-handler": "^3.0.0",
