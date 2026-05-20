@@ -1,5 +1,15 @@
 # History
 
+## 0.8.0 - 2026-05-20
+
+### Added
+
+- Add issuer detail functionality and enhance credential verification
+- Add credential JSON upload functionality, including error handling and
+  localization updates for English and Spanish. Introduce a maximum file size
+  limit for uploads and refactor error messaging in the AddCredentialPage and
+  ScanCredentialQrDialog components.
+
 ## 0.7.0 - 2026-05-18
 
 ### Added
