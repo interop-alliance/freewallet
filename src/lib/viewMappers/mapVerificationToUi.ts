@@ -1,6 +1,7 @@
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import type { VerificationResult, VerificationStep } from '@/types/credential'
 import { getExpirationInstant } from '@/lib/viewMappers/formatDate'
+import { getVerifyLogFromPayload } from '@/lib/viewMappers/verifyLog'
 
 const STEP_ID = {
   validSignature: 'valid_signature',
@@ -13,20 +14,10 @@ type LogLine = {
   id: string
   valid?: boolean
   error?: { message?: string; name?: string }
-  foundInRegistries?: string[]
 }
 
 function getVerifyLogLines(raw: Record<string, unknown>): LogLine[] {
-  const results = raw.results as Array<{ log?: LogLine[] }> | undefined
-  const logFromFirstResult = results?.[0]?.log
-  if (logFromFirstResult && Array.isArray(logFromFirstResult)) {
-    return logFromFirstResult
-  }
-  const topLevelLog = raw.log
-  if (Array.isArray(topLevelLog)) {
-    return topLevelLog as LogLine[]
-  }
-  return []
+  return getVerifyLogFromPayload(raw) as LogLine[]
 }
 
 function stepFromLogEntry(

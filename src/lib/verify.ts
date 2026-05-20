@@ -1,6 +1,9 @@
 import * as verifierCore from '@digitalcredentials/verifier-core'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
-import { KNOWN_REGISTRIES_URL } from '@/app.config'
+import {
+  KNOWN_REGISTRIES_URL,
+  KnownDidRegistries
+} from '@/app.config'
 import type { VerifyCredentialPayload } from '@/types/credential'
 
 const CredentialErrorTypes = {
@@ -9,12 +12,24 @@ const CredentialErrorTypes = {
   DidNotInRegistry: 'Could not find issuer in registry with given DID.'
 } as const
 
+async function loadKnownDIDRegistries() {
+  try {
+    const regRes = await fetch(KNOWN_REGISTRIES_URL)
+    if (!regRes.ok) {
+      throw new Error(`Registry fetch failed: ${regRes.status}`)
+    }
+    return await regRes.json()
+  } catch (err) {
+    console.warn('Using fallback KnownDidRegistries:', err)
+    return KnownDidRegistries
+  }
+}
+
 export async function verifyCredential(
   credential: IVerifiableCredential
 ): Promise<VerifyCredentialPayload> {
   try {
-    const regRes = await fetch(KNOWN_REGISTRIES_URL)
-    const knownDIDRegistries = await regRes.json()
+    const knownDIDRegistries = await loadKnownDIDRegistries()
 
     const result = (await verifierCore.verifyCredential({
       credential: credential as never,
@@ -68,12 +83,7 @@ export async function verifyCredential(
       }
     }
 
-    if (result.log) {
-      const registryNames =
-        result.log.find(c => c.id === 'registered_issuer')?.foundInRegistries ||
-        []
-      result.registryName = registryNames
-    } else {
+    if (!result.log) {
       result.verified = false
       ;(result.results[0].log ??= []).push({
         id: 'registered_issuer',

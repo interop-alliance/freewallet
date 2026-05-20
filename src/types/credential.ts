@@ -15,7 +15,7 @@ export interface VerifyCredentialPayload {
   log?: Array<{
     id: string
     valid?: boolean
-    foundInRegistries?: string[]
+    matchingIssuers?: Array<Record<string, unknown>>
     error?: { name?: string; message?: string }
   }>
   errors?: Array<{ message?: string; name?: string }>
@@ -26,7 +26,6 @@ export interface VerifyCredentialPayload {
     log?: Array<{ id: string; valid?: boolean }>
     credential?: object
   }>
-  registryName?: string[]
   hasStatusError?: boolean
 }
 

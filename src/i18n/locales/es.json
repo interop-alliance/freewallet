@@ -195,6 +195,23 @@
     "viewSource": "Ver origen",
     "hideJson": "Ocultar JSON"
   },
+  "issuer": {
+    "unknown": "Emisor desconocido",
+    "foundInRegistries": "Encontrado en {{count}} registros",
+    "foundInRegistries_one": "Encontrado en {{count}} registro",
+    "unrecognized": "Emisor no reconocido",
+    "viewDetail": "Ver detalle del emisor",
+    "detailTitle": "Detalle del emisor",
+    "linksDisabledWarning": "Enlaces deshabilitados — emisor no reconocido",
+    "fromCredential": "Emisor (de la credencial)",
+    "unknownRegistry": "Registro desconocido",
+    "governanceInfo": "Más información sobre gobernanza",
+    "name": "Nombre del emisor",
+    "legalName": "Nombre legal",
+    "url": "URL del emisor",
+    "ctidUrl": "URL CTID",
+    "none": "Ninguno"
+  },
   "resumeCard": {
     "issuer": "Emisor:",
     "selfIssued": "(autopublicada)",
