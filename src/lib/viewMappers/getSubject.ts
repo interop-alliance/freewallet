@@ -1,6 +1,8 @@
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 
-/** First `credentialSubject` entry when the property is an array. */
+/**
+ * First `credentialSubject` entry when the property is an array.
+ */
 export function getSubject(vc: IVerifiableCredential) {
   const sbj = vc.credentialSubject
   return Array.isArray(sbj) ? sbj[0] : sbj

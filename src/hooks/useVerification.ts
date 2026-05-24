@@ -14,7 +14,9 @@ export interface UseVerificationReturn {
   loading: boolean
   error: Error | null
   verify: () => Promise<void>
-  /** Set when a verification attempt completes (success or structured failure). */
+  /**
+   * Set when a verification attempt completes (success or structured failure).
+   */
   lastCheckedAt: Date | null
   issuerRegistry: IssuerRegistryInfo | null
 }

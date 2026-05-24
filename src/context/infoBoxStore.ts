@@ -1,9 +1,13 @@
 import { createContext } from 'react'
 
 export interface InfoBoxOptions {
-  /** Doc slug matching a file under public/docs/, e.g. 'vcs', 'dids', 'keys' */
+  /**
+   * Doc slug matching a file under public/docs/, e.g. 'vcs', 'dids', 'keys'
+   */
   docUrl: string
-  /** Optional heading shown at the top of the lightbox */
+  /**
+   * Optional heading shown at the top of the lightbox
+   */
   title?: string
 }
 

@@ -1,3 +1,9 @@
+/**
+ * Session bootstrap. Derives a did:key identity from the user's passphrase
+ * via CapabilityAgent, instantiates a ZcapClient for signing storage requests,
+ * and initializes the StorageManager (local or remote depending on env vars).
+ * The resulting Session object is stored in authStore.
+ */
 import { CapabilityAgent } from '@digitalbazaar/webkms-client'
 import { Ed25519Signature2020 } from '@digitalcredentials/ed25519-signature-2020'
 import { ZcapClient } from '@digitalcredentials/ezcap'

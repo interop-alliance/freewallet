@@ -1,3 +1,11 @@
+/**
+ * Credential verification against the DCC Known Registries. Wraps
+ * @digitalcredentials/verifier-core and normalizes its output into a
+ * VerifyCredentialPayload. Notable special case: if the verifier returns a
+ * `status_list_not_found` error for the revocation check, that row is dropped
+ * and the credential is not treated as revoked (the status list simply isn't
+ * published).
+ */
 import * as verifierCore from '@digitalcredentials/verifier-core'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import {

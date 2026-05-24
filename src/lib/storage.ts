@@ -1,3 +1,8 @@
+/**
+ * WAS storage type definitions and backend catalogue used by the Settings UI.
+ * StorageCollection and StorageResource mirror the JSON shapes returned by the
+ * WAS server's list endpoints; see the WAS spec for the authoritative schema.
+ */
 export type StorageBackend = {
   id: string
   displayName: string

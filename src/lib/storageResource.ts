@@ -1,3 +1,9 @@
+/**
+ * Types and content-type helpers for WAS collection resources fetched by
+ * WASRemoteStore. The FetchedCollectionResource discriminated union lets
+ * callers branch on how to render or save content without inspecting raw
+ * Content-Type strings themselves.
+ */
 export type FetchedCollectionResource =
   | { kind: 'json'; data: unknown }
   | { kind: 'text'; text: string }
@@ -22,7 +28,9 @@ export function isTextLikeContentType(
   return contentType.toLowerCase().startsWith('text/')
 }
 
-/** True when parsed JSON is a W3C Verifiable Credential document. */
+/**
+ * True when parsed JSON is a W3C Verifiable Credential document.
+ */
 export function isVerifiableCredentialData(data: unknown): boolean {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     return false

@@ -15,7 +15,9 @@ export const authStyles = {
     gap: 4,
     width: '100%'
   },
-  /** Top of auth column; language switcher aligned end (right in LTR). */
+  /**
+   * Top of auth column; language switcher aligned end (right in LTR).
+   */
   languageBar: {
     display: 'flex',
     justifyContent: 'flex-end',
@@ -244,7 +246,9 @@ export const dashboardStyles = {
   deleteAccountDescription: {
     color: 'text.primary'
   },
-  /** Dashboard page — Credentials block */
+  /**
+   * Dashboard page — Credentials block
+   */
   credentialsSection: {
     mt: 4
   },
@@ -273,7 +277,9 @@ export const dashboardStyles = {
     gap: 2,
     mt: 2
   },
-  /** Sidebar brand row (icon + title) */
+  /**
+   * Sidebar brand row (icon + title)
+   */
   navHeaderStack: {
     flexDirection: 'row',
     gap: 1.5
@@ -282,7 +288,9 @@ export const dashboardStyles = {
     fontWeight: 600,
     ml: 1
   },
-  /** Main area: page title + actions */
+  /**
+   * Main area: page title + actions
+   */
   mainToolbarStack: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -486,7 +494,9 @@ export const historyStyles = {
 } as const
 
 export const storageStyles = {
-  /** Top toolbar showing the connected remote space and export action. */
+  /**
+   * Top toolbar showing the connected remote space and export action.
+   */
   storageToolbar: {
     mt: 3,
     p: 2.5,
@@ -504,7 +514,9 @@ export const storageStyles = {
     color: 'text.secondary'
   },
 
-  /** Section header (e.g. "Collections") + secondary description line. */
+  /**
+   * Section header (e.g. "Collections") + secondary description line.
+   */
   sectionHeader: {
     mt: 6
   },
@@ -516,7 +528,9 @@ export const storageStyles = {
     color: 'text.secondary'
   },
 
-  /** Reusable button sizing tokens, kept here to standardize toolbar actions. */
+  /**
+   * Reusable button sizing tokens, kept here to standardize toolbar actions.
+   */
   buttonTextLeft: {
     textTransform: 'none',
     justifyContent: 'flex-start',
@@ -526,7 +540,9 @@ export const storageStyles = {
     topAction: { minWidth: 132, height: 42, px: 2 }
   },
 
-  /** Collections overview — vertical list of folder rows (Finder-like). */
+  /**
+   * Collections overview — vertical list of folder rows (Finder-like).
+   */
   collectionsWrap: {
     mt: 3,
     maxWidth: 1200
@@ -585,7 +601,9 @@ export const storageStyles = {
     ml: 'auto'
   },
 
-  /** Collection contents page — header + file table. */
+  /**
+   * Collection contents page — header + file table.
+   */
   contentsWrap: {
     mt: 3,
     maxWidth: 1200,
@@ -621,7 +639,9 @@ export const storageStyles = {
     mt: 1
   },
 
-  /** File/resource table. */
+  /**
+   * File/resource table.
+   */
   resourceTableContainer: {
     border: 1,
     borderColor: 'divider',
@@ -672,7 +692,9 @@ export const storageStyles = {
     whiteSpace: 'nowrap'
   },
 
-  /** Reusable empty state surface. */
+  /**
+   * Reusable empty state surface.
+   */
   emptyState: {
     py: 5,
     px: 3,
@@ -699,7 +721,9 @@ export const storageStyles = {
     maxWidth: 420
   },
 
-  /** Inline loading/error text. */
+  /**
+   * Inline loading/error text.
+   */
   statusText: {
     color: 'text.secondary'
   },
@@ -707,7 +731,9 @@ export const storageStyles = {
     color: 'error.main'
   },
 
-  /** Verifiable Credential resource detail (collection file view). */
+  /**
+   * Verifiable Credential resource detail (collection file view).
+   */
   resourceDetailWrap: {
     mt: 3,
     maxWidth: 1200,

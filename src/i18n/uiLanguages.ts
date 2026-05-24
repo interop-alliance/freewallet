@@ -18,7 +18,9 @@ export function supportedUiLanguageCodes(): UiLanguageCode[] {
   return UI_LANGUAGES.map(l => l.code)
 }
 
-/** Maps `i18n.language` (e.g. es-MX) to a supported UI code. */
+/**
+ * Maps `i18n.language` (e.g. es-MX) to a supported UI code.
+ */
 export function normalizeToUiLanguageCode(lng: string): UiLanguageCode {
   const base = lng.split('-')[0]?.toLowerCase() ?? ''
   const match = UI_LANGUAGES.find(l => l.code === base)

@@ -6,7 +6,9 @@ export const landingStyles = {
     justifyContent: 'center',
     px: 2,
   },
-  /** Sits at the top of the hero column, above headings (aligned end = right in LTR). */
+  /**
+   * Sits at the top of the hero column, above headings (aligned end = right in LTR).
+   */
   languageBar: {
     display: 'flex',
     justifyContent: 'flex-end',
@@ -45,7 +47,9 @@ export const landingStyles = {
     minWidth: 180,
     py: 1.25
   },
-  /** Guest Mode CTA: base button sizing + guest emphasis */
+  /**
+   * Guest Mode CTA: base button sizing + guest emphasis
+   */
   guestModeButton: {
     minWidth: 230,
     py: 1.25,

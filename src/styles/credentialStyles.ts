@@ -151,7 +151,9 @@ export const credentialDetailCardStyles = {
   verificationLabel: {
     fontWeight: 600
   },
-  /** VerifierPlus-style status pill (card 1) */
+  /**
+   * VerifierPlus-style status pill (card 1)
+   */
   vpStatusBadge: {
     display: 'inline-flex',
     flexDirection: 'row',
@@ -188,7 +190,9 @@ export const credentialDetailCardStyles = {
     fontWeight: 700,
     fontSize: '0.625rem'
   },
-  /** VerifierPlus verification card (card 2) */
+  /**
+   * VerifierPlus verification card (card 2)
+   */
   vpCard: {
     px: { xs: 2, md: 3 },
     py: { xs: 2, md: 2.5 }

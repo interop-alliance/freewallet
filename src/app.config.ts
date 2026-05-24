@@ -1,12 +1,18 @@
 /**
- * General app config
+ * Application configuration — environment variable exports and app-wide
+ * constants. All VITE_* variables are optional; see the Environment Variables
+ * section of CLAUDE.md for their defaults and effects.
  */
 const env = import.meta.env
 
+// This app's own origin, used for CHAPI wallet registration.
 export const SERVER_URL = env.VITE_SERVER_URL || 'http://localhost:5173'
+// Public deploy URL registered with the CHAPI mediator (authn.io).
 export const DEPLOY_URL = env.VITE_DEPLOY_URL
+// Remote WAS server URL. When set, switches storage to remote-only mode.
 export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
 export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
+// CORS proxy for fetching remote credential URLs from AddCredentialPage.
 export const CORS_PROXY_URL = env.VITE_CORS_PROXY_URL || 'https://corsproxy.io'
 
 export const PASSWORD_RULES = {
