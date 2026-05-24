@@ -73,7 +73,10 @@ function combineSignatureAndIssuer(
   }
 }
 
-/** Maps the return value of `verifyCredential` in `@/lib/verify` to Signature / Expiry / Revocation checklist rows. */
+/**
+ * Maps the return value of `verifyCredential` in `@/lib/verify` to
+ * Signature / Expiry / Revocation checklist rows.
+ */
 export function verifyResultToChecklist(
   raw: Record<string, unknown>,
   credential: IVerifiableCredential

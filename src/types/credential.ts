@@ -1,5 +1,13 @@
+/**
+ * VC-related types for the wallet UI: display projection, verification
+ * results, and the StoredCredential wrapper used by both BrowserStore and
+ * WASRemoteStore.
+ */
 import type { IVerifiableCredential, IAlignment } from '@digitalcredentials/ssi'
 
+/**
+ * Projected display fields extracted from a raw VC for the credential card and detail view.
+ */
 export interface CredentialDisplayFields {
   credentialName: string
   issuedTo: string
@@ -11,6 +19,9 @@ export interface CredentialDisplayFields {
   alignments: IAlignment[]
 }
 
+/**
+ * Raw response shape from @digitalcredentials/verifier-core, augmented with wallet-specific fields.
+ */
 export interface VerifyCredentialPayload {
   log?: Array<{
     id: string
@@ -29,14 +40,18 @@ export interface VerifyCredentialPayload {
   hasStatusError?: boolean
 }
 
-/** Wallet verification checklist (Signature / Expiry / Revocation rows). */
+/**
+ * Wallet verification checklist (Signature / Expiry / Revocation rows).
+ */
 export interface VerificationChecklist {
   signature: VerificationStep
   expiry: VerificationStep
   status: VerificationStep
 }
 
-/** Alias for mapped checklist used by UI hooks and panels. */
+/**
+ * Alias for mapped checklist used by UI hooks and panels.
+ */
 export type VerificationResult = VerificationChecklist
 
 export interface VerificationStep {
@@ -45,6 +60,9 @@ export interface VerificationStep {
   error?: string
 }
 
+/**
+ * A VC as persisted in BrowserStore or WASRemoteStore, keyed by its CID.
+ */
 export interface StoredCredential {
   cid: string
   vc: IVerifiableCredential

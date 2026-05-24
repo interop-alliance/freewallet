@@ -1,3 +1,10 @@
+/**
+ * Storage layer for the wallet. StorageManager is the single facade used by
+ * all pages; it delegates to BrowserStore (local RxDB/IndexedDB, credentials
+ * only) or WASRemoteStore (remote WAS server via ZCap-signed HTTP, full
+ * Space/Collection/Resource support) depending on whether VITE_WAS_SERVER_URL
+ * is set. The two backends are mutually exclusive.
+ */
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'
 import type { ZcapClient } from '@digitalcredentials/ezcap'
 import { createRxDatabase, type RxDatabase } from 'rxdb/plugins/core'
@@ -268,6 +275,10 @@ export class StorageManager {
   }
 }
 
+/**
+ * Map from logical collection name to its WAS base URL.
+ * Expected keys: 'privateCredentials' | 'publicCredentials' | 'walletActivity'
+ */
 export type ICollectionsSet = Map<string, { url: string }>
 
 /**

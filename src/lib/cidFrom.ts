@@ -1,3 +1,9 @@
+/**
+ * Content-addressed identifier helpers. A CID is a base64url-encoded SHA-256
+ * hash of a JCS-canonicalized JSON document. CIDs serve as the primary key
+ * for stored credentials (see StoredCredential in types/credential.ts) and as
+ * the basis for the WAS spaceId.
+ */
 import { canonicalize as jcsCanonicalize } from 'json-canonicalize'
 
 /**

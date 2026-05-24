@@ -1,3 +1,9 @@
+/**
+ * Normalizes raw user or QR input into an array of IVerifiableCredential
+ * objects. Accepts a URL (fetched via CORS proxy), raw JSON/JSON-LD, or a
+ * VP1- prefix string (VPQR, decoded via @digitalcredentials/vpqr). Used by
+ * AddCredentialPage and AcceptCredentialsPage.
+ */
 import { fromQrCode } from '@digitalcredentials/vpqr'
 import { securityLoader } from '@digitalcredentials/security-document-loader'
 import type { IVerifiableCredential } from '@digitalcredentials/ssi'

@@ -1,6 +1,8 @@
 import type { SxProps, Theme } from '@mui/material/styles'
 
-/** Extra-dense select (smaller than MUI `size="small"` alone). */
+/**
+ * Extra-dense select (smaller than MUI `size="small"` alone).
+ */
 const compactForm: SxProps<Theme> = {
   minWidth: 132,
   maxWidth: 200,

@@ -8,7 +8,9 @@ import { UI_LANGUAGES, languageOptionLabel, normalizeToUiLanguageCode, type UiLa
 import { languageSelectorStyles } from '@/styles/languageSelectorStyles'
 
 type LanguageSelectorProps = {
-  /** Use a section heading in the parent instead of the floating label. */
+  /**
+   * Use a section heading in the parent instead of the floating label.
+   */
   showLabel?: boolean
 }
 

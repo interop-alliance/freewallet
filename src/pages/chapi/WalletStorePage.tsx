@@ -1,3 +1,9 @@
+/**
+ * CHAPI credential-store popup. Runs inside a CHAPI-managed popup iframe (not
+ * the main app shell) when a third-party site calls navigator.credentials.store().
+ * Intercepts the CHAPI event, prompts the user to log in with their passphrase,
+ * then stores the incoming VC to their wallet on confirmation.
+ */
 import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'

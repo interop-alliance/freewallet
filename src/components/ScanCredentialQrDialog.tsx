@@ -27,6 +27,9 @@ type QrDecodedPayload = {
 type ScanCredentialQrDialogProps = {
   open: boolean
   onClose: () => void
+  /**
+   * Same acceptance flow as Add Credential (review screen before storing).
+   */
   onCredentialsReady: (credentials: IVerifiableCredential[]) => void
 }
 

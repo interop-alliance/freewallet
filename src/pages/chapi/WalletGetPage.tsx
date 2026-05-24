@@ -1,3 +1,10 @@
+/**
+ * CHAPI credential-get popup. Runs inside a CHAPI-managed popup iframe (not
+ * the main app shell) when a third-party site calls navigator.credentials.get().
+ * Intercepts the CHAPI event, prompts the user to log in with their passphrase,
+ * lists their stored VCs, and responds with the selected credential wrapped in
+ * a VerifiablePresentation.
+ */
 import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'

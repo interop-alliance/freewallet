@@ -15,7 +15,9 @@ export function isExpiredOnly(result: VerificationResult | null): boolean {
   return result.signature.valid && !result.expiry.valid && result.status.valid
 }
 
-/** User-facing headline + body for the verification panel (not crypto data). */
+/**
+ * User-facing headline + body for the verification panel (not crypto data).
+ */
 export function getVerificationNarrative(
   result: VerificationResult | null,
   hookError: Error | null,
