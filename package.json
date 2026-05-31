@@ -35,7 +35,7 @@
     "@emotion/styled": "^11.14.1",
     "@mui/lab": "9.0.0-beta.2",
     "@mui/material": "^9.0.0",
-    "@playwright/test": "^1.58.2",
+    "@playwright/test": "^1.60.0",
     "credential-handler-polyfill": "^4.0.1",
     "i18next": "^26.3.0",
     "json-canonicalize": "^2.0.0",

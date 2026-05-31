@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest'
-import { cidFrom, bufferToBase64Url } from '../src/lib/cidFrom'
+import { cidFrom, bufferToBase64Url } from '../../src/lib/cidFrom'
 
 describe('bufferToBase64Url', () => {
   it('converts a known buffer to the correct base64url string', () => {
