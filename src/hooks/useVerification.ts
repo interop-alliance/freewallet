@@ -35,10 +35,11 @@ export function useVerification(
     null
   )
 
-  useEffect(() => {
+  const [previousCredential, setPreviousCredential] = useState(credential)
+  if (previousCredential !== credential) {
+    setPreviousCredential(credential)
     setLastCheckedAt(null)
-    setIssuerRegistry(null)
-  }, [credential])
+  }
 
   const verify = useCallback(async () => {
     if (!credential) {
@@ -76,8 +77,41 @@ export function useVerification(
     if (!runOnMount || !credential) {
       return
     }
-    void verify()
-  }, [runOnMount, credential, verify, i18n.language])
+    let cancelled = false
+    async function run() {
+      setLoading(true)
+      setError(null)
+      try {
+        const verifyPayload = await verifyCredential(credential!)
+        if (cancelled) {
+          return
+        }
+        setResult(
+          verifyResultToChecklist(
+            verifyPayload as Record<string, unknown>,
+            credential!
+          )
+        )
+        setLastCheckedAt(new Date())
+      } catch (e) {
+        if (cancelled) {
+          return
+        }
+        const err = e instanceof Error ? e : new Error(String(e))
+        setError(err)
+        setResult(null)
+        setLastCheckedAt(new Date())
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [runOnMount, credential, i18n.language])
 
   return { result, loading, error, verify, lastCheckedAt, issuerRegistry }
 }

@@ -84,9 +84,15 @@ export function CollectionContentsPage() {
     }
   }, [])
 
-  useEffect(() => {
-    clearResourcePreview()
-  }, [collectionId, clearResourcePreview])
+  const [previousCollectionId, setPreviousCollectionId] = useState(collectionId)
+  if (previousCollectionId !== collectionId) {
+    setPreviousCollectionId(collectionId)
+    setSelectedResource(null)
+    setResourcePayload(null)
+    setResourceError(null)
+    setResourceLoading(false)
+    setSnippetCopied(false)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -201,16 +207,6 @@ export function CollectionContentsPage() {
       microlightReset()
     })
   }, [snippetDialogOpen, snippetText])
-
-  useEffect(() => {
-    if (!snippetDialogOpen) {
-      setSnippetCopied(false)
-      if (copyResetTimerRef.current) {
-        clearTimeout(copyResetTimerRef.current)
-        copyResetTimerRef.current = null
-      }
-    }
-  }, [snippetDialogOpen])
 
   const handleCopySnippet = useCallback(async () => {
     if (!snippetText) {

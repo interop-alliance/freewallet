@@ -130,9 +130,14 @@ export function CollectionResourcePage() {
     return payload.data as IVerifiableCredential
   }, [payload])
 
+  const [previousVc, setPreviousVc] = useState(vc)
+  if (previousVc !== vc) {
+    setPreviousVc(vc)
+    setCredentialCid(null)
+  }
+
   useEffect(() => {
     if (!vc) {
-      setCredentialCid(null)
       return
     }
     let cancelled = false
