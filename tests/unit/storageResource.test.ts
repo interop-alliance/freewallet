@@ -3,7 +3,7 @@ import {
   isJsonLikeContentType,
   isTextLikeContentType,
   isVerifiableCredentialData
-} from '../src/lib/storageResource'
+} from '../../src/lib/storageResource'
 
 describe('storageResource', () => {
   it('isJsonLikeContentType detects JSON media types', () => {

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest'
-import { WASRemoteStore } from '../src/stores/storageManager'
-import { bufferToBase64Url, digestHash } from '../src/lib/cidFrom'
+import { WASRemoteStore } from '../../src/stores/storageManager'
+import { bufferToBase64Url, digestHash } from '../../src/lib/cidFrom'
 
 describe('WASRemoteStore.listCollectionItems', () => {
   it('uses `items` from the list response format', async () => {

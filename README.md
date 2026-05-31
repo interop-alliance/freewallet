@@ -1,5 +1,7 @@
 # Freewallet
 
+[![Node.js CI](https://github.com/interop-alliance/freewallet/workflows/CI/badge.svg)](https://github.com/interop-alliance/freewallet/actions?query=workflow%3A%22CI%22)
+
 > An open source, open standards web application for managing Verifiable
 > Credentials, DIDs, and cryptographic keys.
 

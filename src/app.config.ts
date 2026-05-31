@@ -1,7 +1,6 @@
 /**
  * Application configuration — environment variable exports and app-wide
- * constants. All VITE_* variables are optional; see the Environment Variables
- * section of CLAUDE.md for their defaults and effects.
+ * constants.
  */
 const env = import.meta.env
 
