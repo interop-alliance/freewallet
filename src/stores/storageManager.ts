@@ -47,6 +47,18 @@ export interface IWalletStore {
     collectionUrl: string
   }) => Promise<Array<StorageResource>>
   exportSpace?: () => Promise<ReadableStream<Uint8Array>>
+  importSpace?: ({
+    tarFile
+  }: {
+    tarFile: File
+  }) => Promise<ImportSpaceSummary>
+}
+
+export type ImportSpaceSummary = {
+  collectionsCreated: number
+  collectionsSkipped: number
+  resourcesCreated: number
+  resourcesSkipped: number
 }
 
 /**
@@ -127,6 +139,17 @@ export class StorageManager {
       throw new Error('Remote storage is not configured for this session.')
     }
     return await this.remoteStore.exportSpace()
+  }
+
+  async importSpace({
+    tarFile
+  }: {
+    tarFile: File
+  }): Promise<ImportSpaceSummary> {
+    if (!this.remoteStore) {
+      throw new Error('Remote storage is not configured for this session.')
+    }
+    return await this.remoteStore.importSpace({ tarFile })
   }
 
   async listCollections(): Promise<Array<StorageCollection>> {
@@ -803,6 +826,42 @@ export class WASRemoteStore implements IWalletStore {
     }
 
     return response.body
+  }
+
+  async importSpace({
+    tarFile
+  }: {
+    tarFile: File
+  }): Promise<ImportSpaceSummary> {
+    const importUrl = new URL(
+      `/space/${this.spaceId}/import`,
+      this.storageServerUrl
+    ).toString()
+
+    const body = new Uint8Array(await tarFile.arrayBuffer())
+
+    let response
+    try {
+      response = await this.zcapClient.request({
+        url: importUrl,
+        method: 'POST',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/x-tar'
+        },
+        body
+      })
+    } catch (e: any) {
+      console.error('Error importing space:', JSON.stringify(e.data, null, 2))
+      throw new Error('Failed to import remote space.')
+    }
+
+    const { data } = response as { data?: ImportSpaceSummary }
+    if (!data) {
+      throw new Error('Unexpected import response format from storage server.')
+    }
+
+    return data
   }
 }
 

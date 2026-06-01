@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Paper from '@mui/material/Paper'
@@ -28,6 +28,9 @@ export const StoragePage = () => {
   const [collectionsError, setCollectionsError] = useState<string | null>(null)
   const [isLoadingCollections, setIsLoadingCollections] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
+  const [collectionsRefreshKey, setCollectionsRefreshKey] = useState(0)
+  const importInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -85,7 +88,7 @@ export const StoragePage = () => {
     return () => {
       cancelled = true
     }
-  }, [session, t])
+  }, [session, t, collectionsRefreshKey])
 
   const handleExportSpace = async () => {
     if (!session?.storage) {
@@ -130,6 +133,41 @@ export const StoragePage = () => {
     }
   }
 
+  const handleImportClick = () => {
+    if (!isImporting && session?.storage?.remoteStore) {
+      importInputRef.current?.click()
+    }
+  }
+
+  const handleImportFile = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !session?.storage) {
+      return
+    }
+
+    setIsImporting(true)
+    try {
+      const summary = await session.storage.importSpace({ tarFile: file })
+      setCollectionsRefreshKey(key => key + 1)
+      window.alert(
+        t('storage.importSuccess', {
+          collectionsCreated: summary.collectionsCreated,
+          collectionsSkipped: summary.collectionsSkipped,
+          resourcesCreated: summary.resourcesCreated,
+          resourcesSkipped: summary.resourcesSkipped
+        })
+      )
+    } catch (error) {
+      console.error('Failed to import space:', error)
+      window.alert(t('storage.importError'))
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   return (
     <DashboardLayout title={t('storage.title')}>
       <Paper variant="outlined" sx={storageStyles.storageToolbar}>
@@ -147,17 +185,37 @@ export const StoragePage = () => {
                 t('storage.noRemoteSpace')}
             </Typography>
           </Stack>
-          <Button
-            variant="contained"
-            onClick={handleExportSpace}
-            disabled={isExporting || !session?.storage?.remoteStore}
-            sx={[
-              storageStyles.buttonTextLeft,
-              storageStyles.buttonSize.topAction
-            ]}
-          >
-            {isExporting ? t('storage.exporting') : t('storage.exportSpace')}
-          </Button>
+          <Stack direction="row" spacing={1.5}>
+            <Button
+              variant="outlined"
+              onClick={handleImportClick}
+              disabled={isImporting || !session?.storage?.remoteStore}
+              sx={[
+                storageStyles.buttonTextLeft,
+                storageStyles.buttonSize.topAction
+              ]}
+            >
+              {isImporting ? t('storage.importing') : t('storage.importSpace')}
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleExportSpace}
+              disabled={isExporting || !session?.storage?.remoteStore}
+              sx={[
+                storageStyles.buttonTextLeft,
+                storageStyles.buttonSize.topAction
+              ]}
+            >
+              {isExporting ? t('storage.exporting') : t('storage.exportSpace')}
+            </Button>
+          </Stack>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept={'.tar,application/x-tar'}
+            hidden
+            onChange={handleImportFile}
+          />
         </Stack>
       </Paper>
 
