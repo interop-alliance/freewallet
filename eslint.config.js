@@ -29,7 +29,10 @@ export default defineConfig([
       }
     },
     settings: {
-      react: { version: 'detect' } // added
+      // Pin the React version explicitly. `'detect'` triggers
+      // eslint-plugin-react's version auto-detection, which calls the
+      // `context.getFilename()` API removed in eslint 10 and crashes the lint.
+      react: { version: '19' }
     },
     rules: {
       // From @typescript-eslint recommended — already included, but be explicit:

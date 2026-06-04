@@ -1,4 +1,4 @@
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type { VerificationResult, VerificationStep } from '@/types/credential'
 import { getExpirationInstant } from '@/lib/viewMappers/formatDate'
 import { getVerifyLogFromPayload } from '@/lib/viewMappers/verifyLog'

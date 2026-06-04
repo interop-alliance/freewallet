@@ -7,7 +7,7 @@
  * published).
  */
 import * as verifierCore from '@digitalcredentials/verifier-core'
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import {
   KNOWN_REGISTRIES_URL,
   KnownDidRegistries

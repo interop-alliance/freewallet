@@ -3,7 +3,7 @@
  * results, and the StoredCredential wrapper used by both BrowserStore and
  * WASRemoteStore.
  */
-import type { IVerifiableCredential, IAlignment } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential, IAlignment } from '@interop/data-integrity-core'
 
 /**
  * Projected display fields extracted from a raw VC for the credential card and detail view.

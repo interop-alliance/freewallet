@@ -7,7 +7,7 @@ import {
 } from '@/lib/viewMappers/issuerRegistryInfo'
 import { verifyCredential } from '@/lib/verify'
 import type { VerificationResult } from '@/types/credential'
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 
 export interface UseVerificationReturn {
   result: VerificationResult | null

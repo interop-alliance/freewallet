@@ -12,7 +12,7 @@ import {
 } from '@mui/material'
 import QrScanner from 'qr-scanner'
 import { useTranslation } from 'react-i18next'
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { resolveCredentialsInput } from '@/lib/resolveCredentialsInput'
 import { resolveCredentialsInputErrorMessage } from '@/lib/resolveCredentialsInputErrorMessage'
 import {

@@ -35,7 +35,7 @@ import {
   credentialDetailStyles,
   credentialDetailCardStyles as sx
 } from '@/styles/credentialStyles'
-import type { IAlignment, IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IAlignment, IVerifiableCredential } from '@interop/data-integrity-core'
 import { useTranslation } from 'react-i18next'
 
 export function CredentialDetail({

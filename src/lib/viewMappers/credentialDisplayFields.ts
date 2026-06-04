@@ -1,7 +1,7 @@
 import type {
   IAchievement,
   IVerifiableCredential
-} from '@digitalcredentials/ssi'
+} from '@interop/data-integrity-core'
 import type { CredentialDisplayFields } from '@/types/credential'
 import { getExpirationDateIso } from '@/lib/viewMappers/formatDate'
 import { getSubject } from '@/lib/viewMappers/getSubject'

@@ -1,4 +1,4 @@
-import { httpClient } from '@digitalcredentials/http-client'
+import { httpClient } from '@interop/http-client'
 import { CORS_PROXY_URL } from '@/app.config'
 
 export async function fetchFromURL(url: string): Promise<string> {

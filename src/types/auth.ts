@@ -6,8 +6,8 @@
  * Shape is broadly compatible with Auth.js / next-auth for future portability.
  */
 import type { StorageManager } from '@/stores/storageManager'
-import type { ISigner } from '@digitalcredentials/ssi'
-import type { ZcapClient } from '@digitalcredentials/ezcap'
+import type { ISigner } from '@interop/data-integrity-core'
+import type { ZcapClient } from '@interop/ezcap'
 
 /**
  * Minimal interface over @digitalbazaar/webkms-client's CapabilityAgent.

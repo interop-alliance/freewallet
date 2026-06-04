@@ -18,7 +18,7 @@ import {
 } from '@/lib/viewMappers/issuerRegistryInfo'
 import { issuerDetailStyles as sx } from '@/styles/credentialStyles'
 import { NotFoundPage } from '@/pages/NotFoundPage'
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 
 type IssuerDetailLocationState = {
   issuerRegistry?: IssuerRegistryInfo | null

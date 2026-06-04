@@ -18,7 +18,7 @@ import {
   resolvePersonFullName
 } from '@/lib/viewMappers/displayFieldsHelpers'
 import type { UseVerificationReturn } from '@/hooks/useVerification'
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { useTranslation } from 'react-i18next'
 
 function CheckRow({
@@ -30,7 +30,7 @@ function CheckRow({
   valid?: boolean
   loading: boolean
 }) {
-  let checkColor = 'text.disabled'
+  let checkColor: string
   if (loading) {
     checkColor = 'text.disabled'
   } else if (valid) {
