@@ -47,11 +47,7 @@ export interface IWalletStore {
     collectionUrl: string
   }) => Promise<Array<StorageResource>>
   exportSpace?: () => Promise<ReadableStream<Uint8Array>>
-  importSpace?: ({
-    tarFile
-  }: {
-    tarFile: File
-  }) => Promise<ImportSpaceSummary>
+  importSpace?: ({ tarFile }: { tarFile: File }) => Promise<ImportSpaceSummary>
 }
 
 export type ImportSpaceSummary = {
@@ -605,7 +601,9 @@ export class WASRemoteStore implements IWalletStore {
     const ct = ctRaw?.trim()
 
     if (isJsonLikeContentType(ct) || !ct) {
-      for (const acceptCt of ct ? [ct] : ['application/json', 'application/ld+json']) {
+      for (const acceptCt of ct
+        ? [ct]
+        : ['application/json', 'application/ld+json']) {
         const data = await this.fetchDocument({
           relativeUrl,
           contentType: acceptCt

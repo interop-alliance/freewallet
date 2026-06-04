@@ -70,7 +70,9 @@ export function ResumePreview({ data }: { data: ResumePreviewModel }) {
       <Box sx={rpStyles.body}>
         {summary ? (
           <Box sx={rpStyles.sectionBlock}>
-            <SectionTitle>{t('resumePreview.professionalSummary')}</SectionTitle>
+            <SectionTitle>
+              {t('resumePreview.professionalSummary')}
+            </SectionTitle>
             <Box sx={rpStyles.summaryMarkdown}>
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {summary}
@@ -153,7 +155,9 @@ export function ResumePreview({ data }: { data: ResumePreviewModel }) {
 
         {affiliations.length > 0 && (
           <Box sx={rpStyles.affiliationsSection}>
-            <SectionTitle>{t('resumePreview.professionalAffiliations')}</SectionTitle>
+            <SectionTitle>
+              {t('resumePreview.professionalAffiliations')}
+            </SectionTitle>
             {affiliations.map(row => (
               <Box key={row.id} sx={rpStyles.itemBlock}>
                 <Typography sx={rpStyles.affiliationTitle}>

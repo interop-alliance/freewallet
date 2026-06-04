@@ -43,7 +43,9 @@ describe('issuerRegistryInfo', () => {
             },
             {
               registry: {
-                federation_entity: { organization_name: 'DCC Community Registry' }
+                federation_entity: {
+                  organization_name: 'DCC Community Registry'
+                }
               }
             }
           ]

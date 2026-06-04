@@ -26,9 +26,7 @@ export function ContactDetailPage() {
       <Card sx={contactDetailStyles.card}>
         <CardContent sx={contactDetailStyles.cardContent}>
           <Stack direction="row" spacing={2} sx={contactDetailStyles.headerRow}>
-            <Avatar sx={contactDetailStyles.avatar}>
-              {contact.logo}
-            </Avatar>
+            <Avatar sx={contactDetailStyles.avatar}>{contact.logo}</Avatar>
             <Box>
               <Typography variant="h4" sx={contactDetailStyles.name}>
                 {contact.displayName}

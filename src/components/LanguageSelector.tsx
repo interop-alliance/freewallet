@@ -4,7 +4,12 @@ import MenuItem from '@mui/material/MenuItem'
 import Select from '@mui/material/Select'
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
-import { UI_LANGUAGES, languageOptionLabel, normalizeToUiLanguageCode, type UiLanguageCode } from '@/i18n/uiLanguages'
+import {
+  UI_LANGUAGES,
+  languageOptionLabel,
+  normalizeToUiLanguageCode,
+  type UiLanguageCode
+} from '@/i18n/uiLanguages'
 import { languageSelectorStyles } from '@/styles/languageSelectorStyles'
 
 type LanguageSelectorProps = {
@@ -35,8 +40,8 @@ export function LanguageSelector({ showLabel = true }: LanguageSelectorProps) {
         MenuProps={{
           slotProps: {
             paper: { sx: languageSelectorStyles.compactMenuPaper },
-            list: { dense: true },
-          },
+            list: { dense: true }
+          }
         }}
       >
         {UI_LANGUAGES.map(({ code }) => (

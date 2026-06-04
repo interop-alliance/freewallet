@@ -30,7 +30,9 @@ test.describe('Login page', () => {
     await expect(page).toHaveURL(/#\/signup/)
   })
 
-  test('successful login navigates to dashboard', async ({ page }, testInfo) => {
+  test('successful login navigates to dashboard', async ({
+    page
+  }, testInfo) => {
     const token = `${Date.now()}-w${testInfo.workerIndex}`
     const passphrase = `Str0ngpass-${token}-Aa1!`
     const email = `e2e-${token}@example.com`

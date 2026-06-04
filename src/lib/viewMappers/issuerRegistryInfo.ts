@@ -26,10 +26,13 @@ export interface IssuerRegistryInfo {
   matchingIssuers: MatchingIssuerEntry[]
 }
 
-export function getRegistryNames(matchingIssuers: MatchingIssuerEntry[]): string[] {
+export function getRegistryNames(
+  matchingIssuers: MatchingIssuerEntry[]
+): string[] {
   const names = matchingIssuers
     .map(
-      entry => entry.registry?.federation_entity?.organization_name?.trim() ?? ''
+      entry =>
+        entry.registry?.federation_entity?.organization_name?.trim() ?? ''
     )
     .filter(Boolean)
 

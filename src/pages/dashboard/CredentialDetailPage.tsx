@@ -59,7 +59,11 @@ export function CredentialDetailPage() {
       <Box sx={credentialDetailStyles.wrapper}>
         {credential ? (
           <>
-            <CredentialDetail vc={credential.vc} cid={cid} onDelete={handleDelete} />
+            <CredentialDetail
+              vc={credential.vc}
+              cid={cid}
+              onDelete={handleDelete}
+            />
           </>
         ) : (
           <Typography variant="h5" color="text.secondary">

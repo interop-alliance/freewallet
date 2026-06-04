@@ -10,10 +10,11 @@
     "preview": "vite preview",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"  \"tests/**/*.ts\" \"*.md\"",
     "check": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
     "fix": "pnpm run lint:fix && pnpm run format",
-    "test": "vitest run",
+    "test": "pnpm run fix && pnpm run test:unit && pnpm run test:e2e",
+    "test:unit": "vitest run",
     "test:e2e": "playwright test"
   },
   "packageManager": "pnpm@11.5.0",

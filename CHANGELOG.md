@@ -1,6 +1,6 @@
 # History
 
-## 0.8.1 - TBD
+## 0.9.0 - TBD
 
 ### Changed
 
@@ -9,6 +9,10 @@
 - Replace `@digitalcredentials/ezcap`, `@digitalcredentials/http-client`, and
   `@digitalcredentials/security-document-loader` with their TypeScript
   `@interop/` forks.
+
+### Removed
+
+- Remove support for VPQR decoding.
 
 ## 0.8.0 - 2026-05-20
 
