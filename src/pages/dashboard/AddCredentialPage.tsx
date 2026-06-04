@@ -57,6 +57,12 @@ export function AddCredentialPage() {
   return (
     <DashboardLayout title={t('addCredential.title')}>
       <Box sx={dashboardStyles.addCredentialForm}>
+        {error ? (
+          <Typography variant="body2" color="error">
+            {error}
+          </Typography>
+        ) : null}
+
         <TextField
           multiline
           minRows={4}
@@ -82,12 +88,6 @@ export function AddCredentialPage() {
         </Typography>
 
         <CredentialJsonUploadPanel onFiles={handleFiles} disabled={loading} />
-
-        {error ? (
-          <Typography variant="body2" color="error">
-            {error}
-          </Typography>
-        ) : null}
 
         <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap' }}>
           <Button
