@@ -31,9 +31,8 @@ export function useVerification(
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null)
-  const [issuerRegistry, setIssuerRegistry] = useState<IssuerRegistryInfo | null>(
-    null
-  )
+  const [issuerRegistry, setIssuerRegistry] =
+    useState<IssuerRegistryInfo | null>(null)
 
   const [previousCredential, setPreviousCredential] = useState(credential)
   if (previousCredential !== credential) {
@@ -59,7 +58,9 @@ export function useVerification(
         )
       )
       setIssuerRegistry(
-        issuerRegistryInfoFromVerifyPayload(verifyPayload as Record<string, unknown>)
+        issuerRegistryInfoFromVerifyPayload(
+          verifyPayload as Record<string, unknown>
+        )
       )
       setLastCheckedAt(new Date())
     } catch (e) {

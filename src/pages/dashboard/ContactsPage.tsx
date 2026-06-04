@@ -55,10 +55,18 @@ export function ContactsPage() {
             </CardActionArea>
 
             <Stack direction="row" spacing={1} sx={{ px: 2, pb: 2 }}>
-              <Button variant="outlined" disabled sx={{ textTransform: 'none' }}>
+              <Button
+                variant="outlined"
+                disabled
+                sx={{ textTransform: 'none' }}
+              >
                 {t('common.edit')}
               </Button>
-              <Button variant="outlined" disabled sx={{ textTransform: 'none' }}>
+              <Button
+                variant="outlined"
+                disabled
+                sx={{ textTransform: 'none' }}
+              >
                 {t('common.message')}
               </Button>
             </Stack>

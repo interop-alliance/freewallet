@@ -35,7 +35,10 @@ import {
   credentialDetailStyles,
   credentialDetailCardStyles as sx
 } from '@/styles/credentialStyles'
-import type { IAlignment, IVerifiableCredential } from '@interop/data-integrity-core'
+import type {
+  IAlignment,
+  IVerifiableCredential
+} from '@interop/data-integrity-core'
 import { useTranslation } from 'react-i18next'
 
 export function CredentialDetail({
@@ -178,7 +181,9 @@ export function CredentialDetail({
               <InfoBlock
                 header={t('credential.createdDate')}
                 value={
-                  createdDate ? formatDate({ isoDate: createdDate }) : t('common.na')
+                  createdDate
+                    ? formatDate({ isoDate: createdDate })
+                    : t('common.na')
                 }
               />
               <Box sx={{ mt: 0 }}>
@@ -199,7 +204,10 @@ export function CredentialDetail({
 
           <Box sx={sx.primaryColumn}>
             {fields.issuedTo && (
-              <InfoBlock header={t('credential.issuedTo')} value={fields.issuedTo} />
+              <InfoBlock
+                header={t('credential.issuedTo')}
+                value={fields.issuedTo}
+              />
             )}
 
             {fields.credentialDescription && (

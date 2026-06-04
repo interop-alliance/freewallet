@@ -8,10 +8,7 @@
  */
 import * as verifierCore from '@digitalcredentials/verifier-core'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import {
-  KNOWN_REGISTRIES_URL,
-  KnownDidRegistries
-} from '@/app.config'
+import { KNOWN_REGISTRIES_URL, KnownDidRegistries } from '@/app.config'
 import type { VerifyCredentialPayload } from '@/types/credential'
 
 const CredentialErrorTypes = {

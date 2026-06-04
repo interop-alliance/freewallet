@@ -191,7 +191,9 @@ export function IssuerDetailPage() {
   const [vc, setVc] = useState<IVerifiableCredential | null>(null)
   const [isNotFound, setIsNotFound] = useState(false)
   const verification = useVerification(vc, { runOnMount: !skipVerify })
-  const issuerRegistry = skipVerify ? cachedRegistry : verification.issuerRegistry
+  const issuerRegistry = skipVerify
+    ? cachedRegistry
+    : verification.issuerRegistry
   const registryLoading = skipVerify ? false : verification.loading
   const urlsDisabled = !isRecognizedIssuer(issuerRegistry)
   const matchingIssuers = issuerRegistry?.matchingIssuers ?? []

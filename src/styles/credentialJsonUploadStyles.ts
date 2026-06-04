@@ -14,9 +14,12 @@ export const credentialJsonUploadStyles = {
     cursor: disabled ? 'not-allowed' : 'pointer',
     opacity: disabled ? 0.6 : 1,
     transition: (theme: Theme) =>
-      theme.transitions.create(['border-color', 'background-color', 'box-shadow'], {
-        duration: theme.transitions.duration.short
-      }),
+      theme.transitions.create(
+        ['border-color', 'background-color', 'box-shadow'],
+        {
+          duration: theme.transitions.duration.short
+        }
+      ),
     boxShadow: dragOver ? 2 : 0,
     '&:focus-visible': {
       outline: '2px solid',

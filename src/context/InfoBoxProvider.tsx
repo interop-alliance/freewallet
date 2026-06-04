@@ -42,7 +42,12 @@ export function InfoBoxProvider({ children }: { children: ReactNode }) {
           ) : (
             <Box sx={infoBoxStyles.spacer} />
           )}
-          <IconButton onClick={handleClose} size="small" aria-label={t('common.close')} autoFocus>
+          <IconButton
+            onClick={handleClose}
+            size="small"
+            aria-label={t('common.close')}
+            autoFocus
+          >
             <MdClose />
           </IconButton>
         </Box>

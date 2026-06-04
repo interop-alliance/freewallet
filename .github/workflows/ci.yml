@@ -28,7 +28,7 @@ jobs:
         run: pnpm run build
 
       - name: Test (Unit)
-        run: pnpm run test
+        run: pnpm run test:unit
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium

@@ -31,9 +31,7 @@ export function ChapiLoginForm({ onSubmit, error }: ChapiLoginFormProps) {
       onSubmit={handleSubmit}
       sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}
     >
-      <Typography variant="body2">
-        {t('chapi.loginPrompt')}
-      </Typography>
+      <Typography variant="body2">{t('chapi.loginPrompt')}</Typography>
 
       {error && (
         <Typography variant="body2" color="error">

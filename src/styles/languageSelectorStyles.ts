@@ -13,31 +13,31 @@ const compactForm: SxProps<Theme> = {
     '& .MuiOutlinedInput-input': {
       py: '3px',
       px: 0.75,
-      minHeight: 0,
+      minHeight: 0
     },
     '& .MuiOutlinedInput-notchedOutline': {
-      '& legend': { fontSize: '0.6em' },
-    },
+      '& legend': { fontSize: '0.6em' }
+    }
   },
   '& .MuiInputLabel-root': {
     fontSize: '0.6875rem',
-    lineHeight: 1.2,
+    lineHeight: 1.2
   },
   '& .MuiSelect-icon': {
     fontSize: '0.95rem',
-    right: 2,
-  },
+    right: 2
+  }
 }
 
 const compactMenuPaper: SxProps<Theme> = {
   '& .MuiMenuItem-root': {
     fontSize: '0.6875rem',
     minHeight: 28,
-    py: 0.25,
-  },
+    py: 0.25
+  }
 }
 
 export const languageSelectorStyles = {
   compactForm,
-  compactMenuPaper,
+  compactMenuPaper
 }

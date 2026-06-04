@@ -120,7 +120,9 @@ export function ResumeCredentialCard({
               {t('resumeCard.signed')}{' '}
             </Typography>
             <Typography variant="body2" sx={{ display: 'inline' }}>
-              {createdDate ? formatDate({ isoDate: createdDate }) : t('common.na')}
+              {createdDate
+                ? formatDate({ isoDate: createdDate })
+                : t('common.na')}
             </Typography>
           </Box>
         </Stack>

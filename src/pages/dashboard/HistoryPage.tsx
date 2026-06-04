@@ -89,7 +89,9 @@ export function HistoryPage() {
               </TimelineSeparator>
               <TimelineContent>
                 <Typography variant="body1">
-                  {doc?.summary ?? doc?.type?.join(', ') ?? t('common.activity')}
+                  {doc?.summary ??
+                    doc?.type?.join(', ') ??
+                    t('common.activity')}
                 </Typography>
                 {doc?.created && (
                   <Box sx={historyStyles.timestampRow}>

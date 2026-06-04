@@ -33,7 +33,9 @@ export function IssuerInfo({
   const details = getIssuerDetails(issuer)
   const hasName = !!details.name
   const recognized = isRecognizedIssuer(issuerRegistry)
-  const registryCount = getRegistryNames(issuerRegistry?.matchingIssuers ?? []).length
+  const registryCount = getRegistryNames(
+    issuerRegistry?.matchingIssuers ?? []
+  ).length
 
   return (
     <Box>
@@ -56,7 +58,11 @@ export function IssuerInfo({
 
           {details.url &&
             (urlsDisabled ? (
-              <Typography variant="caption" color="text.disabled" sx={sx.urlLink}>
+              <Typography
+                variant="caption"
+                color="text.disabled"
+                sx={sx.urlLink}
+              >
                 {details.url}
               </Typography>
             ) : (
@@ -71,7 +77,11 @@ export function IssuerInfo({
               </Link>
             ))}
 
-          <Typography variant="caption" color="text.secondary" sx={sx.registryStatus}>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={sx.registryStatus}
+          >
             {registryLoading
               ? t('common.verifying')
               : recognized
