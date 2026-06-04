@@ -1,20 +1,18 @@
 /**
  * Normalizes raw user or QR input into an array of IVerifiableCredential
- * objects. Accepts a URL (fetched via CORS proxy), raw JSON/JSON-LD, or a
- * VP1- prefix string (VPQR, decoded via @digitalcredentials/vpqr). Used by
+ * objects. Accepts a URL (fetched via CORS proxy) or raw JSON/JSON-LD. A
+ * VP1- prefix string (VPQR) is detected but no longer supported. Used by
  * AddCredentialPage and AcceptCredentialsPage.
  */
-import { fromQrCode } from '@digitalcredentials/vpqr'
-import { securityLoader } from '@interop/security-document-loader'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { fetchFromURL } from '@/lib/fetchFromURL'
 import { credentialsFromJSON } from '@/lib/credentialsFromJSON'
 
-const documentLoader = securityLoader().build()
-
 export class ResolveCredentialsInputError extends Error {
-  readonly code: 'empty' | 'invalid_input' | 'none_found'
-  constructor(code: 'empty' | 'invalid_input' | 'none_found') {
+  readonly code: 'empty' | 'invalid_input' | 'none_found' | 'vpqr_unsupported'
+  constructor(
+    code: 'empty' | 'invalid_input' | 'none_found' | 'vpqr_unsupported'
+  ) {
     super(code)
     this.name = 'ResolveCredentialsInputError'
     this.code = code
@@ -37,8 +35,7 @@ export async function resolveCredentialsInput(
   } else if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     credentials = credentialsFromJSON(trimmed)
   } else if (trimmed.startsWith('VP1-')) {
-    const { vp } = await fromQrCode({ text: trimmed, documentLoader })
-    credentials = credentialsFromJSON(JSON.stringify(vp))
+    throw new ResolveCredentialsInputError('vpqr_unsupported')
   } else {
     throw new ResolveCredentialsInputError('invalid_input')
   }

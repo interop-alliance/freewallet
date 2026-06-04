@@ -226,7 +226,7 @@
   },
   "addCredential": {
     "title": "Add credential",
-    "placeholder": "Paste a URL, full credential JSON, or VP1 QR text.",
+    "placeholder": "Paste a URL or full credential JSON.",
     "add": "Add",
     "upload": {
       "title": "Upload credential JSON",
@@ -237,8 +237,9 @@
     },
     "errors": {
       "empty": "No credential entered.",
-      "invalidInput": "Input must be a URL, credential JSON, or a VP1 QR payload.",
+      "invalidInput": "Input must be a URL or credential JSON.",
       "noneFound": "No credentials found in the provided input.",
+      "vpqrUnsupported": "VPQR format not supported.",
       "urlFetch": "Could not retrieve credential from URL.",
       "jsonParse": "Could not parse credential JSON.",
       "fileParse": "Could not parse {{fileName}}:",
