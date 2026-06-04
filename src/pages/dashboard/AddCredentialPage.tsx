@@ -79,16 +79,6 @@ export function AddCredentialPage() {
           disabled={loading}
         />
 
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          sx={credentialJsonUploadStyles.orUploadDivider}
-        >
-          {t('addCredential.upload.orUpload')}
-        </Typography>
-
-        <CredentialJsonUploadPanel onFiles={handleFiles} disabled={loading} />
-
         <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap' }}>
           <Button
             variant="outlined"
@@ -107,6 +97,16 @@ export function AddCredentialPage() {
             {t('common.cancel')}
           </Button>
         </Stack>
+
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={credentialJsonUploadStyles.orUploadDivider}
+        >
+          {t('addCredential.upload.orUpload')}
+        </Typography>
+
+        <CredentialJsonUploadPanel onFiles={handleFiles} disabled={loading} />
       </Box>
     </DashboardLayout>
   )
