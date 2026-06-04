@@ -14,7 +14,8 @@ export function resolveCredentialsInputErrorMessage(
     const keys = {
       empty: 'addCredential.errors.empty',
       invalid_input: 'addCredential.errors.invalidInput',
-      none_found: 'addCredential.errors.noneFound'
+      none_found: 'addCredential.errors.noneFound',
+      vpqr_unsupported: 'addCredential.errors.vpqrUnsupported'
     } as const
     return translate(keys[err.code])
   }

@@ -2,8 +2,6 @@ declare const __APP_VERSION__: string
 
 declare module '@digitalbazaar/webkms-client'
 
-declare module '@digitalcredentials/vpqr'
-
 declare module 'credential-handler-polyfill' {
   export function load(mediator: string): Promise<void>
   export function loadOnce(mediator: string): Promise<void>

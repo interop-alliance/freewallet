@@ -23,12 +23,10 @@
   "dependencies": {
     "@digitalbazaar/webkms-client": "^14.3.0",
     "@digitalcredentials/verifier-core": "^1.0.0-beta.11",
-    "@digitalcredentials/vpqr": "^2.2.1",
     "@interop/data-integrity-core": "^6.1.2",
     "@interop/ed25519-signature": "^7.0.1",
     "@interop/ezcap": "^7.1.1",
     "@interop/http-client": "^1.0.3",
-    "@interop/security-document-loader": "^9.2.1",
     "@emotion/cache": "^11.14.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",

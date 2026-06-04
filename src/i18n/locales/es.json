@@ -226,7 +226,7 @@
   },
   "addCredential": {
     "title": "Añadir credencial",
-    "placeholder": "Pegue una URL, el JSON completo de la credencial o texto VP1 del QR.",
+    "placeholder": "Pegue una URL o el JSON completo de la credencial.",
     "add": "Añadir",
     "upload": {
       "title": "Subir JSON de credencial",
@@ -237,8 +237,9 @@
     },
     "errors": {
       "empty": "No introdujo ninguna credencial.",
-      "invalidInput": "La entrada debe ser una URL, JSON de credencial o un código VP1 QR.",
+      "invalidInput": "La entrada debe ser una URL o JSON de credencial.",
       "noneFound": "No se encontraron credenciales en la entrada.",
+      "vpqrUnsupported": "Formato VPQR no compatible.",
       "urlFetch": "No se pudo obtener la credencial desde la URL.",
       "jsonParse": "No se pudo analizar el JSON de la credencial.",
       "fileParse": "No se pudo analizar {{fileName}}:",
