@@ -1,4 +1,4 @@
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { getSubject } from '@/lib/viewMappers/getSubject'
 
 export function isResumeCredential(vc: IVerifiableCredential): boolean {

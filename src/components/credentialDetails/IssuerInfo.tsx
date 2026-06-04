@@ -10,7 +10,7 @@ import {
   isRecognizedIssuer,
   type IssuerRegistryInfo
 } from '@/lib/viewMappers/issuerRegistryInfo'
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { issuerInfoStyles as sx } from '@/styles/credentialStyles'
 import { useTranslation } from 'react-i18next'
 

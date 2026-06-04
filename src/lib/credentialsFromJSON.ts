@@ -1,4 +1,4 @@
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 
 function hasType(data: any, typeName: string): boolean {
   return Array.isArray(data?.type) && data.type.includes(typeName)

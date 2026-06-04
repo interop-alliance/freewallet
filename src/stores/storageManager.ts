@@ -5,8 +5,8 @@
  * Space/Collection/Resource support) depending on whether VITE_WAS_SERVER_URL
  * is set. The two backends are mutually exclusive.
  */
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
-import type { ZcapClient } from '@digitalcredentials/ezcap'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
+import type { ZcapClient } from '@interop/ezcap'
 import { createRxDatabase, type RxDatabase } from 'rxdb/plugins/core'
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
 import type { ControllerProfile, User } from '@/types/auth'
@@ -363,10 +363,11 @@ export class WASRemoteStore implements IWalletStore {
         method: 'PUT',
         json: spaceDescription
       })
-    } catch (e: any) {
-      console.error('Error creating space:', JSON.stringify(e.data, null, 2))
+    } catch (err: any) {
+      console.error('Error creating space:', JSON.stringify(err.data, null, 2))
       throw new Error(
-        `Error creating space for user "${user.id}" at "${spaceUrl}": ${JSON.stringify(e.data)}`
+        `Error creating space for user "${user.id}" at "${spaceUrl}": ${JSON.stringify(err.data)}`,
+        { cause: err }
       )
     }
 
@@ -421,13 +422,14 @@ export class WASRemoteStore implements IWalletStore {
         method: 'PUT',
         json: collectionDescription
       })
-    } catch (e: any) {
+    } catch (err: any) {
       console.error(
         `Error creating collection "${collectionId}":`,
-        JSON.stringify(e.data, null, 2)
+        JSON.stringify(err.data, null, 2)
       )
       throw new Error(
-        `Error creating collection "${collectionId}" at "${collectionUrl}": ${JSON.stringify(e.data)}`
+        `Error creating collection "${collectionId}" at "${collectionUrl}": ${JSON.stringify(err.data)}`,
+        { cause: err }
       )
     }
     const collectionBaseUrl = `${collectionUrl}/` // ensure trailing slash
@@ -472,9 +474,9 @@ export class WASRemoteStore implements IWalletStore {
         method: 'PUT',
         json: resourceBody
       })
-    } catch (e: any) {
+    } catch (err: any) {
       console.log('Attempted to add resource to:', resourceUrl)
-      console.error('Error adding resource:', JSON.stringify(e.data, null, 2))
+      console.error('Error adding resource:', JSON.stringify(err.data, null, 2))
     }
   }
 
@@ -506,8 +508,8 @@ export class WASRemoteStore implements IWalletStore {
         JSON.stringify(err.data, null, 2)
       )
     }
-    // @ts-expect-error TODO add a type to the response
-    const { data } = response!
+    // TODO add a type to the response
+    const { data } = response! as { data: any }
     // data looks like:
     // { id, url, name, type, totalItems, items: [{ id, url, contentType }] }
     return await this.fetchAll({ rows: data.items })
@@ -537,7 +539,9 @@ export class WASRemoteStore implements IWalletStore {
         'Error listing collection resources:',
         JSON.stringify(err.data, null, 2)
       )
-      throw new Error('Failed to list remote storage collection resources.')
+      throw new Error('Failed to list remote storage collection resources.', {
+        cause: err
+      })
     }
 
     const { data } = response as { data?: StorageResourceList }
@@ -560,13 +564,13 @@ export class WASRemoteStore implements IWalletStore {
         parseBody: false,
         headers: { accept }
       })
-    } catch (e: any) {
+    } catch (err: any) {
       console.error(
         'Error fetching resource as blob:',
         objectUrl,
-        JSON.stringify(e.data, null, 2)
+        JSON.stringify(err.data, null, 2)
       )
-      throw new Error('Failed to fetch storage resource.')
+      throw new Error('Failed to fetch storage resource.', { cause: err })
     }
     if (!response || !(response instanceof Response)) {
       throw new Error('Unexpected response when fetching storage resource.')
@@ -684,7 +688,9 @@ export class WASRemoteStore implements IWalletStore {
         'Error listing collections:',
         JSON.stringify(err.data, null, 2)
       )
-      throw new Error('Failed to list remote storage collections.')
+      throw new Error('Failed to list remote storage collections.', {
+        cause: err
+      })
     }
 
     const { data } = response as { data?: StorageCollectionList }
@@ -721,11 +727,11 @@ export class WASRemoteStore implements IWalletStore {
         url: vcUrl,
         method: 'DELETE'
       })
-    } catch (e: any) {
+    } catch (err: any) {
       console.log('Attempted to delete credential:', vcUrl)
       console.error(
         'Error deleting credential:',
-        JSON.stringify(e.data, null, 2)
+        JSON.stringify(err.data, null, 2)
       )
     }
   }
@@ -780,12 +786,12 @@ export class WASRemoteStore implements IWalletStore {
         method: 'GET',
         headers
       })
-    } catch (e: any) {
+    } catch (err: any) {
       console.log('Attempted to fetch document:', objectUrl)
-      console.error('Error fetching:', JSON.stringify(e.data, null, 2))
+      console.error('Error fetching:', JSON.stringify(err.data, null, 2))
       return
     }
-    // @ts-expect-error TODO add a type to the response
+    // TODO add a type to the response
     return result!.data
   }
 
@@ -795,8 +801,8 @@ export class WASRemoteStore implements IWalletStore {
         url: this.spaceUrl,
         method: 'DELETE'
       })
-    } catch (e: any) {
-      console.error('Error deleting space:', JSON.stringify(e.data, null, 2))
+    } catch (err: any) {
+      console.error('Error deleting space:', JSON.stringify(err.data, null, 2))
     }
     console.log('Remote space deleted.')
   }
@@ -816,9 +822,9 @@ export class WASRemoteStore implements IWalletStore {
         parseBody: false,
         headers: { accept: 'application/x-tar' }
       })
-    } catch (e: any) {
-      console.error('Error exporting space:', JSON.stringify(e.data, null, 2))
-      throw new Error('Failed to export remote space.')
+    } catch (err: any) {
+      console.error('Error exporting space:', JSON.stringify(err.data, null, 2))
+      throw new Error('Failed to export remote space.', { cause: err })
     }
 
     if (!response || !(response instanceof Response) || !response.body) {
@@ -851,9 +857,9 @@ export class WASRemoteStore implements IWalletStore {
         },
         body
       })
-    } catch (e: any) {
-      console.error('Error importing space:', JSON.stringify(e.data, null, 2))
-      throw new Error('Failed to import remote space.')
+    } catch (err: any) {
+      console.error('Error importing space:', JSON.stringify(err.data, null, 2))
+      throw new Error('Failed to import remote space.', { cause: err })
     }
 
     const { data } = response as { data?: ImportSpaceSummary }

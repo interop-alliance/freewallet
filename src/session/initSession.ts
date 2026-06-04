@@ -5,8 +5,8 @@
  * The resulting Session object is stored in authStore.
  */
 import { CapabilityAgent } from '@digitalbazaar/webkms-client'
-import { Ed25519Signature2020 } from '@digitalcredentials/ed25519-signature-2020'
-import { ZcapClient } from '@digitalcredentials/ezcap'
+import { Ed25519Signature2020 } from '@interop/ed25519-signature'
+import { ZcapClient } from '@interop/ezcap'
 import type { ControllerProfile, Session, User } from '@/types/auth'
 import { StorageManager } from '@/stores/storageManager'
 

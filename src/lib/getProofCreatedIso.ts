@@ -1,4 +1,4 @@
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 
 export function getProofCreatedIso(vc: IVerifiableCredential): string {
   const p = vc.proof

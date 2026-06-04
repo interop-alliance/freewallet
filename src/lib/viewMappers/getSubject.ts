@@ -1,4 +1,4 @@
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 
 /**
  * First `credentialSubject` entry when the property is an array.

@@ -2,7 +2,7 @@ import type {
   IVerifiableCredential,
   IAlignment,
   IAchievement
-} from '@digitalcredentials/ssi'
+} from '@interop/data-integrity-core'
 import { getSubject } from '@/lib/viewMappers/getSubject'
 
 export type SubjectRecord = Record<string, unknown>
@@ -297,12 +297,9 @@ export function normalizeAlignments(rawAlignments: unknown): IAlignment[] {
     return []
   }
 
-  let alignmentArray: unknown[] = []
-  if (Array.isArray(rawAlignments)) {
-    alignmentArray = rawAlignments
-  } else {
-    alignmentArray = [rawAlignments]
-  }
+  const alignmentArray: unknown[] = Array.isArray(rawAlignments)
+    ? rawAlignments
+    : [rawAlignments]
 
   return alignmentArray
     .map((alignmentField: unknown) => {

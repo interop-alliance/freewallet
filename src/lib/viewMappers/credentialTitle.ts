@@ -1,4 +1,4 @@
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
 
 export function credentialTitle(credential: IVerifiableCredential): string {

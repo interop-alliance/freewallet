@@ -16,20 +16,19 @@
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@11.5.0",
   "engines": {
-    "node": ">=24",
-    "pnpm": ">=11.5.0"
+    "node": ">=24"
   },
   "dependencies": {
     "@digitalbazaar/webkms-client": "^14.3.0",
-    "@digitalcredentials/ed25519-signature-2020": "^7.0.0",
-    "@digitalcredentials/ezcap": "^6.1.0",
-    "@digitalcredentials/http-client": "^5.0.4",
-    "@digitalcredentials/security-document-loader": "^9.0.0",
-    "@digitalcredentials/ssi": "^5.4.2",
     "@digitalcredentials/verifier-core": "^1.0.0-beta.11",
     "@digitalcredentials/vpqr": "^2.2.1",
+    "@interop/data-integrity-core": "^6.1.2",
+    "@interop/ed25519-signature": "^7.0.1",
+    "@interop/ezcap": "^7.1.1",
+    "@interop/http-client": "^1.0.3",
+    "@interop/security-document-loader": "^9.2.1",
     "@emotion/cache": "^11.14.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",

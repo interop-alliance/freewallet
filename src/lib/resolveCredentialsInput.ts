@@ -5,8 +5,8 @@
  * AddCredentialPage and AcceptCredentialsPage.
  */
 import { fromQrCode } from '@digitalcredentials/vpqr'
-import { securityLoader } from '@digitalcredentials/security-document-loader'
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import { securityLoader } from '@interop/security-document-loader'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { fetchFromURL } from '@/lib/fetchFromURL'
 import { credentialsFromJSON } from '@/lib/credentialsFromJSON'
 

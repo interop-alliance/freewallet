@@ -6,7 +6,7 @@ import {
   resolvePersonFullName,
   type SubjectRecord
 } from '@/lib/viewMappers/displayFieldsHelpers'
-import type { IVerifiableCredential } from '@digitalcredentials/ssi'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type {
   ResumeAffiliationRow,
   ResumeEducationRow,
@@ -90,7 +90,7 @@ function mapExperience(raw: unknown, index: number): ResumeExperienceRow {
 function mapEducation(raw: unknown, index: number): ResumeEducationRow {
   const type = pickStr(raw, ['type', 'degree', 'level'])
   const program = pickStr(raw, ['programName', 'program', 'fieldOfStudy'])
-  let title = ''
+  let title: string
   if (type && program) {
     title = `${type} in ${program}`
   } else {

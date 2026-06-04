@@ -1,5 +1,15 @@
 # History
 
+## 0.8.1 - TBD
+
+### Changed
+
+- Replace `@digitalcredentials/ssi` with `@interop/data-integrity-core` and
+  `@digitalcredentials/ed25519-signature-2020` with `@interop/ed25519-signature`.
+- Replace `@digitalcredentials/ezcap`, `@digitalcredentials/http-client`, and
+  `@digitalcredentials/security-document-loader` with their TypeScript
+  `@interop/` forks.
+
 ## 0.8.0 - 2026-05-20
 
 ### Added
