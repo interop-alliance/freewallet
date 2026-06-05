@@ -86,7 +86,7 @@ export function SignupPage() {
     setIsSubmitting(true)
     try {
       const { session } = await initSessionFromSecret({
-        email,
+        email: email || undefined,
         secret: passphrase
       })
       const { storage, userExists } =
@@ -114,7 +114,9 @@ export function SignupPage() {
     }
   }
 
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  // Email is optional. An empty email is allowed; a non-empty one must be
+  // well-formed.
+  const emailValid = email === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
   const lengthPassed = passphrase.length >= PASSWORD_RULES.minlength
   const scorePassed = score >= PASSWORD_RULES.minscore
   const passphraseStepComplete = lengthPassed && scorePassed
@@ -286,10 +288,15 @@ export function SignupPage() {
               name="signup-email"
               placeholder="alice@example.com"
               type="email"
-              required
               value={email}
               onChange={e => setEmail(e.target.value)}
               autoComplete="email"
+              error={!emailValid}
+              helperText={
+                emailValid
+                  ? t('auth.signup.emailOptionalHint')
+                  : t('auth.signup.emailInvalid')
+              }
               sx={authStyles.input}
             />
 
