@@ -2,6 +2,22 @@
 
 ## Unreleased - TBD
 
+### Fixed
+
+- Stop silently swallowing remote-storage failures in `WASRemoteStore`. The
+  catch blocks in `addCollectionResource`, `listCollectionItems`,
+  `deleteCredential`, and `wipeStorage` now rethrow after logging instead of
+  masking the error (or, in `listCollectionItems`, crashing on an `undefined`
+  response). `fetchDocument` still treats a `404` as "not found" (returns
+  `undefined`) but rethrows network/auth/server errors so they are no longer
+  mistaken for a missing document. Removed the unconditional
+  `"Remote space deleted."` success log on wipe failure.
+- Surface those failures in the UI: `AcceptCredentialsPage`, `SettingsPage`,
+  `CredentialDetailPage`, `IssuerDetailPage`, `SignupPage`, and `GuestLoginPage`
+  now show an error message instead of leaving the user hanging. In particular,
+  `SettingsPage` no longer logs the user out as if the wipe succeeded when the
+  remote deletion failed.
+
 ### Changed
 
 - Replace `@digitalcredentials/verifier-core` with the TypeScript fork

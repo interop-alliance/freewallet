@@ -33,6 +33,7 @@
     "deleteAccount": "Eliminar cuenta",
     "deleteAccountHint": "Se eliminarán su acceso, claves y todos los datos.",
     "deleteConfirm": "¿Seguro que desea eliminar su cuenta? Esta acción no se puede deshacer.",
+    "deleteError": "No se pudieron eliminar los datos de su cuenta. Inténtelo de nuevo.",
     "about": "Acerca de",
     "version": "Freewallet versión {{version}}"
   },
@@ -46,7 +47,8 @@
   "auth": {
     "errors": {
       "profileNotFound": "Este perfil no existe; regístrese.",
-      "profileExists": "Este perfil ya existe; inicie sesión."
+      "profileExists": "Este perfil ya existe; inicie sesión.",
+      "setupFailed": "No se pudo terminar de configurar su billetera. Inténtelo de nuevo."
     },
     "login": {
       "heading": "Iniciar sesión",
@@ -189,6 +191,8 @@
     "title": "Credencial",
     "resumeTitle": "Currículum",
     "loading": "Cargando credencial…",
+    "loadError": "No se pudo cargar esta credencial. Inténtelo de nuevo.",
+    "deleteError": "No se pudo eliminar esta credencial. Inténtelo de nuevo.",
     "deleteAria": "Eliminar credencial",
     "achievementType": "Tipo de logro:",
     "createdDate": "Fecha de creación",
@@ -250,7 +254,8 @@
   },
   "acceptCredentials": {
     "title": "Aceptar credenciales",
-    "acceptAll": "Aceptar todas"
+    "acceptAll": "Aceptar todas",
+    "storeError": "No se pudieron guardar las credenciales. Inténtelo de nuevo."
   },
   "notFound": {
     "title": "Página no encontrada",

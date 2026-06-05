@@ -71,6 +71,9 @@ export function SignupPage() {
   const [passphrase, setPassphrase] = useState('')
   const [score, setScore] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [setupError, setSetupError] = useState(false)
+
+  const displayMessage = setupError ? t('auth.errors.setupFailed') : bannerText
 
   const stepParam = searchParams.get('step')
   const activeStep = stepParam === 'storage' ? 2 : stepParam === 'email' ? 1 : 0
@@ -84,6 +87,7 @@ export function SignupPage() {
       return
     }
     setIsSubmitting(true)
+    setSetupError(false)
     try {
       const { session } = await initSessionFromSecret({
         email: email || undefined,
@@ -109,6 +113,9 @@ export function SignupPage() {
       await session.storage!.addCredential({ credential: welcomeCredential })
       login(session)
       navigate('/dashboard')
+    } catch (err: any) {
+      console.error('Error completing signup:', err)
+      setSetupError(true)
     } finally {
       setIsSubmitting(false)
     }
@@ -153,9 +160,9 @@ export function SignupPage() {
           {t('auth.signup.heading')}
         </Typography>
 
-        {bannerText && (
+        {displayMessage && (
           <Typography variant="body1" color="error" sx={authStyles.userMessage}>
-            {bannerText}
+            {displayMessage}
           </Typography>
         )}
         <Box sx={authStyles.signupStepperWrap}>

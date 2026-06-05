@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import { useParams, useNavigate } from 'react-router'
@@ -18,27 +19,43 @@ export function CredentialDetailPage() {
   const { cid } = useParams()
   const [credential, setCredential] = useState<StoredCredential | null>(null)
   const [isNotFound, setIsNotFound] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+  const [deleteError, setDeleteError] = useState(false)
 
   useEffect(() => {
     if (!session || !cid) {
       return
     }
-    session.storage?.loadCredential({ cid }).then(vc => {
-      if (!vc) {
-        setIsNotFound(true)
-        setCredential(null)
-        return
-      }
-      setIsNotFound(false)
-      setCredential({ cid, vc })
-    })
+    session.storage
+      ?.loadCredential({ cid })
+      .then(vc => {
+        if (!vc) {
+          setIsNotFound(true)
+          setCredential(null)
+          return
+        }
+        setIsNotFound(false)
+        setLoadError(false)
+        setCredential({ cid, vc })
+      })
+      .catch((err: unknown) => {
+        console.error('Error loading credential:', err)
+        setLoadError(true)
+      })
   }, [cid, session])
 
   async function handleDelete() {
     if (!session) {
       return
     }
-    await session.storage.deleteCredential({ cid: cid! })
+    setDeleteError(false)
+    try {
+      await session.storage.deleteCredential({ cid: cid! })
+    } catch (err: any) {
+      console.error('Error deleting credential:', err)
+      setDeleteError(true)
+      return
+    }
     navigate('/dashboard')
   }
 
@@ -57,6 +74,11 @@ export function CredentialDetailPage() {
   return (
     <DashboardLayout title={title}>
       <Box sx={credentialDetailStyles.wrapper}>
+        {deleteError && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {t('credential.deleteError')}
+          </Alert>
+        )}
         {credential ? (
           <>
             <CredentialDetail
@@ -65,6 +87,8 @@ export function CredentialDetailPage() {
               onDelete={handleDelete}
             />
           </>
+        ) : loadError ? (
+          <Alert severity="error">{t('credential.loadError')}</Alert>
         ) : (
           <Typography variant="h5" color="text.secondary">
             {t('credential.loading')}

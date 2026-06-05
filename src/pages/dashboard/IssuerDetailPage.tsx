@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Link from '@mui/material/Link'
 import Stack from '@mui/material/Stack'
@@ -190,6 +191,7 @@ export function IssuerDetailPage() {
   const skipVerify = cachedRegistry !== undefined
   const [vc, setVc] = useState<IVerifiableCredential | null>(null)
   const [isNotFound, setIsNotFound] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const verification = useVerification(vc, { runOnMount: !skipVerify })
   const issuerRegistry = skipVerify
     ? cachedRegistry
@@ -209,15 +211,22 @@ export function IssuerDetailPage() {
     if (!session || !cid) {
       return
     }
-    session.storage?.loadCredential({ cid }).then(credential => {
-      if (!credential) {
-        setIsNotFound(true)
-        setVc(null)
-        return
-      }
-      setIsNotFound(false)
-      setVc(credential)
-    })
+    session.storage
+      ?.loadCredential({ cid })
+      .then(credential => {
+        if (!credential) {
+          setIsNotFound(true)
+          setVc(null)
+          return
+        }
+        setIsNotFound(false)
+        setLoadError(false)
+        setVc(credential)
+      })
+      .catch((err: unknown) => {
+        console.error('Error loading credential:', err)
+        setLoadError(true)
+      })
   }, [cid, session])
 
   if (!cid || isNotFound) {
@@ -227,7 +236,9 @@ export function IssuerDetailPage() {
   return (
     <DashboardLayout title={issuerName}>
       <Box sx={sx.wrapper}>
-        {!vc ? (
+        {loadError ? (
+          <Alert severity="error">{t('credential.loadError')}</Alert>
+        ) : !vc ? (
           <Typography variant="body1" color="text.secondary">
             {t('credential.loading')}
           </Typography>

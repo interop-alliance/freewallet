@@ -20,6 +20,7 @@ export function GuestLoginPage() {
   const navigate = useNavigate()
   const login = useAuthStore(state => state.login)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [setupError, setSetupError] = useState(false)
 
   useEffect(() => {
     void registerWallet()
@@ -34,6 +35,7 @@ export function GuestLoginPage() {
       return
     }
     setIsSubmitting(true)
+    setSetupError(false)
     try {
       const { session } = await initGuestSession()
 
@@ -50,6 +52,9 @@ export function GuestLoginPage() {
       await session.storage!.addCredential({ credential: welcomeCredential })
       login(session)
       navigate('/dashboard')
+    } catch (err: any) {
+      console.error('Error starting guest session:', err)
+      setSetupError(true)
     } finally {
       setIsSubmitting(false)
     }
@@ -79,6 +84,12 @@ export function GuestLoginPage() {
             {t('auth.guest.bulletEphemeral')}
           </Typography>
         </ul>
+
+        {setupError && (
+          <Typography variant="body1" color="error" sx={authStyles.userMessage}>
+            {t('auth.errors.setupFailed')}
+          </Typography>
+        )}
 
         <Button
           variant="contained"

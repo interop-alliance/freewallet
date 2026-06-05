@@ -33,6 +33,7 @@
     "deleteAccount": "Delete Account",
     "deleteAccountHint": "Your login, keys, and all data will be deleted.",
     "deleteConfirm": "Are you sure you want to delete your account? This action cannot be undone.",
+    "deleteError": "Could not delete your account data. Please try again.",
     "about": "About",
     "version": "Freewallet version {{version}}"
   },
@@ -46,7 +47,8 @@
   "auth": {
     "errors": {
       "profileNotFound": "This profile does not exist, please sign up.",
-      "profileExists": "This profile already exists, please log in."
+      "profileExists": "This profile already exists, please log in.",
+      "setupFailed": "Could not finish setting up your wallet. Please try again."
     },
     "login": {
       "heading": "Log in",
@@ -189,6 +191,8 @@
     "title": "Credential",
     "resumeTitle": "Resume",
     "loading": "Loading credential…",
+    "loadError": "Could not load this credential. Please try again.",
+    "deleteError": "Could not delete this credential. Please try again.",
     "deleteAria": "Delete credential",
     "achievementType": "Achievement type:",
     "createdDate": "Created date",
@@ -250,7 +254,8 @@
   },
   "acceptCredentials": {
     "title": "Accept credentials",
-    "acceptAll": "Accept all"
+    "acceptAll": "Accept all",
+    "storeError": "Could not save the credentials. Please try again."
   },
   "notFound": {
     "title": "Page not found",

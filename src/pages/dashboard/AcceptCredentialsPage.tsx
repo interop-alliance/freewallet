@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -21,6 +22,7 @@ export function AcceptCredentialsPage() {
   const location = useLocation()
   const session = useAuthStore(state => state.session)
   const [saving, setSaving] = useState(false)
+  const [storeError, setStoreError] = useState(false)
 
   const credentials = (location.state?.credentials ??
     []) as IVerifiableCredential[]
@@ -35,6 +37,7 @@ export function AcceptCredentialsPage() {
       return
     }
     setSaving(true)
+    setStoreError(false)
     try {
       for (const credential of credentials) {
         console.log('Storing credential:', credentialTitle(credential))
@@ -43,6 +46,7 @@ export function AcceptCredentialsPage() {
       navigate('/dashboard')
     } catch (err: any) {
       console.error('Error storing credentials:', err)
+      setStoreError(true)
       setSaving(false)
     }
   }
@@ -53,6 +57,11 @@ export function AcceptCredentialsPage() {
 
   return (
     <DashboardLayout title={t('acceptCredentials.title')}>
+      {storeError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {t('acceptCredentials.storeError')}
+        </Alert>
+      )}
       <Stack sx={dashboardStyles.acceptCredentialsList}>
         {credentials.map((vc, i) => {
           const { credentialDescription } = getDisplayFields(vc)
