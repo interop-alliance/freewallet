@@ -22,6 +22,11 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["vite.config.ts", "playwright.config.ts", "tests/**/*.ts"],
+  "include": [
+    "vite.config.ts",
+    "playwright.config.ts",
+    "playwright.was.config.ts",
+    "tests/**/*.ts"
+  ],
   "exclude": ["tests/storageManager.test.ts", "tests/storageResource.test.ts"]
 }

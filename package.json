@@ -15,7 +15,8 @@
     "fix": "pnpm run lint:fix && pnpm run format",
     "test": "pnpm run fix && pnpm run test:unit && pnpm run test:e2e",
     "test:unit": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:was": "playwright test --config playwright.was.config.ts"
   },
   "packageManager": "pnpm@11.5.0",
   "engines": {
