@@ -63,6 +63,29 @@ test.describe('Sign up page', () => {
     ).toBeVisible()
   })
 
+  test('email is optional: can advance past email step while empty', async ({
+    page
+  }) => {
+    await page.locator('input[type="password"]').fill('Str0ng-passphrase!')
+    await page.getByRole('button', { name: 'Next' }).click()
+    await expect(page.locator('input[type="email"]')).toBeVisible()
+    // Leave the email field empty and advance.
+    await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Next' }).click()
+    await expect(page).toHaveURL(/#\/signup\?.*step=storage/)
+  })
+
+  test('rejects a malformed email but keeps Next enabled when cleared', async ({
+    page
+  }) => {
+    await page.locator('input[type="password"]').fill('Str0ng-passphrase!')
+    await page.getByRole('button', { name: 'Next' }).click()
+    await page.locator('input[type="email"]').fill('not-an-email')
+    await expect(page.getByRole('button', { name: 'Next' })).toBeDisabled()
+    await page.locator('input[type="email"]').fill('')
+    await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled()
+  })
+
   test('successful sign up navigates to dashboard', async ({
     page
   }, testInfo) => {
