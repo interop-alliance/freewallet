@@ -141,11 +141,15 @@ export function CollectionResourcePage() {
       return
     }
     let cancelled = false
-    void cidFrom({ doc: vc as object }).then(cid => {
-      if (!cancelled) {
-        setCredentialCid(cid)
-      }
-    })
+    void cidFrom({ doc: vc as object })
+      .then(cid => {
+        if (!cancelled) {
+          setCredentialCid(cid)
+        }
+      })
+      .catch((err: unknown) => {
+        console.error('Error computing credential CID:', err)
+      })
     return () => {
       cancelled = true
     }

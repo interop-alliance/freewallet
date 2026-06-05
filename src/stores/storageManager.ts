@@ -473,6 +473,9 @@ export class WASRemoteStore implements IWalletStore {
     } catch (err: any) {
       console.log('Attempted to add resource to:', resourceUrl)
       console.error('Error adding resource:', JSON.stringify(err.data, null, 2))
+      throw new Error(`Failed to add resource to "${resourceUrl}".`, {
+        cause: err
+      })
     }
   }
 
@@ -503,9 +506,12 @@ export class WASRemoteStore implements IWalletStore {
         'Error listing collection items:',
         JSON.stringify(err.data, null, 2)
       )
+      throw new Error('Failed to list remote storage collection items.', {
+        cause: err
+      })
     }
     // TODO add a type to the response
-    const { data } = response! as { data: any }
+    const { data } = response as { data: any }
     // data looks like:
     // { id, url, name, type, totalItems, items: [{ id, url, contentType }] }
     return await this.fetchAll({ rows: data.items })
@@ -731,6 +737,7 @@ export class WASRemoteStore implements IWalletStore {
         'Error deleting credential:',
         JSON.stringify(err.data, null, 2)
       )
+      throw new Error('Failed to delete remote credential.', { cause: err })
     }
   }
 
@@ -785,9 +792,18 @@ export class WASRemoteStore implements IWalletStore {
         headers
       })
     } catch (err: any) {
+      // A 404 legitimately means "not found" -- honour the documented contract
+      // and return undefined. Any other error (network, auth, server) is a real
+      // failure and must propagate, so callers don't mistake it for a missing
+      // document.
+      if (err.status === 404) {
+        return
+      }
       console.log('Attempted to fetch document:', objectUrl)
       console.error('Error fetching:', JSON.stringify(err.data, null, 2))
-      return
+      throw new Error('Failed to fetch remote storage document.', {
+        cause: err
+      })
     }
     // TODO add a type to the response
     return result!.data
@@ -801,6 +817,7 @@ export class WASRemoteStore implements IWalletStore {
       })
     } catch (err: any) {
       console.error('Error deleting space:', JSON.stringify(err.data, null, 2))
+      throw new Error('Failed to delete remote space.', { cause: err })
     }
     console.log('Remote space deleted.')
   }
