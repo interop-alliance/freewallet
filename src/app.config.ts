@@ -2,6 +2,8 @@
  * Application configuration — environment variable exports and app-wide
  * constants.
  */
+import type { EntityIdentityRegistry } from '@interop/verifier-core'
+
 const env = import.meta.env
 
 // This app's own origin, used for CHAPI wallet registration.
@@ -32,25 +34,34 @@ export const MEDIATOR_BASE = 'https://authn.io/mediator?origin='
 export const KNOWN_REGISTRIES_URL =
   'https://digitalcredentials.github.io/dcc-known-registries/known-did-registries.json'
 
-/** Legacy DID registry URLs */
-export const KnownDidRegistries = [
+/**
+ * Legacy DID registry URLs, used as a fallback when the remote
+ * KNOWN_REGISTRIES_URL cannot be fetched. Each entry is tagged
+ * `type: 'dcc-legacy'` so it satisfies the EntityIdentityRegistry contract
+ * consumed by @interop/verifier-core and @digitalcredentials/issuer-registry-client.
+ */
+export const KnownDidRegistries: EntityIdentityRegistry[] = [
   {
+    type: 'dcc-legacy',
     name: 'DCC Pilot Registry',
     url: 'https://digitalcredentials.github.io/issuer-registry/registry.json'
   },
   {
+    type: 'dcc-legacy',
     name: 'DCC Sandbox Registry',
     url: 'https://digitalcredentials.github.io/sandbox-registry/registry.json'
   },
   {
+    type: 'dcc-legacy',
     name: 'DCC Community Registry',
     url: 'https://digitalcredentials.github.io/community-registry/registry.json'
   },
   {
+    type: 'dcc-legacy',
     name: 'DCC Registry',
     url: 'https://digitalcredentials.github.io/dcc-registry/registry.json'
   }
-] as const
+]
 
 export const KNOWN_EXTENSIONS =
   /\.(json|jsonld|ldjson|txt|md|pdf|png|jpg|jpeg|webp|svg|csv|xml|yaml|yml)$/i

@@ -23,7 +23,11 @@ export interface CredentialDisplayFields {
 }
 
 /**
- * Raw response shape from @digitalcredentials/verifier-core, augmented with wallet-specific fields.
+ * Internal verification payload consumed by the wallet view layer. No longer
+ * returned raw by a verifier library: it is synthesized by the `verify.ts`
+ * adapter from the @interop/verifier-core `CredentialVerificationResult`
+ * (translated back into this flat `log[]` shape, augmented with
+ * wallet-specific fields).
  */
 export interface VerifyCredentialPayload {
   log?: Array<{

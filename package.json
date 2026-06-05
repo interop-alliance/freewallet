@@ -24,8 +24,9 @@
   },
   "dependencies": {
     "@digitalbazaar/webkms-client": "^14.3.0",
-    "@digitalcredentials/verifier-core": "^1.0.0-beta.11",
+    "@digitalcredentials/issuer-registry-client": "^4.0.0",
     "@interop/data-integrity-core": "^6.1.2",
+    "@interop/verifier-core": "^3.0.1",
     "@interop/ed25519-signature": "^7.0.1",
     "@interop/ezcap": "^7.1.1",
     "@interop/http-client": "^1.0.3",

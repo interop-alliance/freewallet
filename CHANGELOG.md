@@ -1,5 +1,18 @@
 # History
 
+## Unreleased - TBD
+
+### Changed
+
+- Replace `@digitalcredentials/verifier-core` with the TypeScript fork
+  `@interop/verifier-core`. The fork un-bundled the convenience checks into a
+  composable suite pipeline, so the removed expiration check and the rich
+  issuer-registry lookup are re-added as custom suites
+  (`src/lib/verifierSuites/`); `verify.ts` now adapts the fork's
+  `CredentialVerificationResult` back into the wallet's internal verification
+  payload so the view layer is unchanged. Rich issuer metadata is sourced from
+  `@digitalcredentials/issuer-registry-client`.
+
 ## 0.9.0 - 2026-06-04
 
 ### Added
