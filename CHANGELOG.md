@@ -2,6 +2,11 @@
 
 ## 0.9.0 - TBD
 
+### Added
+
+- Add a separate WAS-integration e2e project (`pnpm run test:e2e:was`) that boots
+  a local `was-teaching-server` and exercises the remote (WAS) storage path.
+
 ### Changed
 
 - Replace `@digitalcredentials/ssi` with `@interop/data-integrity-core` and
@@ -9,6 +14,18 @@
 - Replace `@digitalcredentials/ezcap`, `@digitalcredentials/http-client`, and
   `@digitalcredentials/security-document-loader` with their TypeScript
   `@interop/` forks.
+- Run the local-mode e2e suite on a dedicated port with a fresh server and
+  local (IndexedDB) storage pinned, so a separately-running dev server can no
+  longer be reused and cause failures.
+
+### Fixed
+
+- Fix the logout page firing redundant, deferred redirects (from a React
+  StrictMode double-invoke and an effect re-run when the session cleared), where
+  a late redirect could navigate away from a page the user had already moved to.
+  Logout now runs once and redirects once.
+- Fix a flaky login e2e test where the freshly-navigated login form could
+  remount and clear the typed passphrase before submit.
 
 ### Removed
 

@@ -48,10 +48,19 @@ test.describe('Login page', () => {
     await page.getByRole('button', { name: 'Create Wallet' }).click()
     await expect(page).toHaveURL(/#\/dashboard/)
 
-    // Log out, then log in
+    // Log out, then log in. Wait for the logout redirect to land on the
+    // landing page first.
     await page.getByRole('button', { name: 'Log out' }).click()
+    await expect(page).toHaveURL(/#\/$/)
+    // Load /login as a fresh document (reload, not an in-app hash nav) so the
+    // form fully mounts and settles before we type — reaching /login via an
+    // in-app navigation can let StrictMode's mount/remount clear the just-typed
+    // passphrase (the uncontrolled field loses its value), submitting it empty.
     await page.goto('/#/login')
-    await page.locator('input[type="password"]').fill(passphrase)
+    await page.reload()
+    const passphraseInput = page.locator('input[type="password"]')
+    await passphraseInput.fill(passphrase)
+    await expect(passphraseInput).toHaveValue(passphrase)
     await page.getByRole('button', { name: 'Log in', exact: true }).click()
     await expect(page).toHaveURL(/#\/dashboard/)
   })
