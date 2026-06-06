@@ -45,14 +45,6 @@ export function HistoryPage() {
     return selectedItem?.doc?.summary ?? ''
   }, [selectedItem])
 
-  // const loadHistory = useCallback(async () => {
-  //   if (!session?.storage) {
-  //     throw new Error('Storage not initialized')
-  //   }
-  //   const items = await session.storage.remoteStore!.listHistoryItems()
-  //   setHistoryItems(items)
-  // }, [session])
-
   useEffect(() => {
     let cancelled = false
 
@@ -60,7 +52,7 @@ export function HistoryPage() {
       if (!session?.storage) {
         return
       }
-      const items = await session.storage.remoteStore!.listHistoryItems()
+      const items = await session.storage.listHistoryItems()
       if (!cancelled) {
         setHistoryItems(items)
         setLoading(false)

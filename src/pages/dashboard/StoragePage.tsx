@@ -36,7 +36,7 @@ export const StoragePage = () => {
     let cancelled = false
 
     async function loadCollections() {
-      if (!session?.storage?.remoteStore) {
+      if (!session?.storage?.hasRemoteStorage) {
         setCollections([])
         return
       }
@@ -96,7 +96,7 @@ export const StoragePage = () => {
     }
     setIsExporting(true)
     try {
-      const spaceId = session.storage.remoteStore?.spaceId
+      const spaceId = session.storage.spaceId
       if (!spaceId) {
         throw new Error('Remote space ID is unavailable.')
       }
@@ -134,7 +134,7 @@ export const StoragePage = () => {
   }
 
   const handleImportClick = () => {
-    if (!isImporting && session?.storage?.remoteStore) {
+    if (!isImporting && session?.storage?.hasRemoteStorage) {
       importInputRef.current?.click()
     }
   }
@@ -181,15 +181,14 @@ export const StoragePage = () => {
               {t('storage.spaceConnected')}
             </Typography>
             <Typography variant="body2" sx={storageStyles.connectedLink}>
-              {session?.storage.remoteStore?.spaceUrl ||
-                t('storage.noRemoteSpace')}
+              {session?.storage.spaceUrl || t('storage.noRemoteSpace')}
             </Typography>
           </Stack>
           <Stack direction="row" spacing={1.5}>
             <Button
               variant="outlined"
               onClick={handleImportClick}
-              disabled={isImporting || !session?.storage?.remoteStore}
+              disabled={isImporting || !session?.storage?.hasRemoteStorage}
               sx={[
                 storageStyles.buttonTextLeft,
                 storageStyles.buttonSize.topAction
@@ -200,7 +199,7 @@ export const StoragePage = () => {
             <Button
               variant="contained"
               onClick={handleExportSpace}
-              disabled={isExporting || !session?.storage?.remoteStore}
+              disabled={isExporting || !session?.storage?.hasRemoteStorage}
               sx={[
                 storageStyles.buttonTextLeft,
                 storageStyles.buttonSize.topAction

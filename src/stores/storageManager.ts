@@ -62,8 +62,8 @@ export type ImportSpaceSummary = {
  * user profile.
  */
 export class StorageManager {
-  public localStore?: BrowserStore
-  public remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
+  private _localStore?: BrowserStore
+  private _remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
   public remoteOnly: boolean
 
   constructor({
@@ -75,9 +75,31 @@ export class StorageManager {
     remoteStore?: WASRemoteStore
     remoteOnly: boolean
   }) {
-    this.localStore = localStore
-    this.remoteStore = remoteStore
+    this._localStore = localStore
+    this._remoteStore = remoteStore
     this.remoteOnly = remoteOnly
+  }
+
+  /**
+   * Whether a remote WAS backend is configured for this session. Pages use this
+   * instead of reaching into the backend directly.
+   */
+  get hasRemoteStorage(): boolean {
+    return !!this._remoteStore
+  }
+
+  /**
+   * The remote Space id, or undefined when there is no remote backend.
+   */
+  get spaceId(): string | undefined {
+    return this._remoteStore?.spaceId
+  }
+
+  /**
+   * The remote Space URL, or undefined when there is no remote backend.
+   */
+  get spaceUrl(): string | undefined {
+    return this._remoteStore?.spaceUrl
   }
 
   static async initStorageClients({
@@ -114,27 +136,27 @@ export class StorageManager {
   async addCredential({ credential }: { credential: IVerifiableCredential }) {
     const cid = await cidFrom({ doc: credential })
     if (!this.remoteOnly) {
-      await this.localStore!.addCredential({ cid, credential })
+      await this._localStore!.addCredential({ cid, credential })
     }
-    if (this.remoteStore) {
-      await this.remoteStore.addCredential({ cid, credential })
+    if (this._remoteStore) {
+      await this._remoteStore.addCredential({ cid, credential })
     }
   }
 
   async wipeStorage({ profile }: { profile: ControllerProfile }) {
     if (!this.remoteOnly) {
-      await this.localStore!.wipeStorage()
+      await this._localStore!.wipeStorage()
     }
-    if (this.remoteStore) {
-      await this.remoteStore.wipeStorage({ profile })
+    if (this._remoteStore) {
+      await this._remoteStore.wipeStorage({ profile })
     }
   }
 
   async exportSpace(): Promise<ReadableStream<Uint8Array>> {
-    if (!this.remoteStore) {
+    if (!this._remoteStore) {
       throw new Error('Remote storage is not configured for this session.')
     }
-    return await this.remoteStore.exportSpace()
+    return await this._remoteStore.exportSpace()
   }
 
   async importSpace({
@@ -142,17 +164,17 @@ export class StorageManager {
   }: {
     tarFile: File
   }): Promise<ImportSpaceSummary> {
-    if (!this.remoteStore) {
+    if (!this._remoteStore) {
       throw new Error('Remote storage is not configured for this session.')
     }
-    return await this.remoteStore.importSpace({ tarFile })
+    return await this._remoteStore.importSpace({ tarFile })
   }
 
   async listCollections(): Promise<Array<StorageCollection>> {
-    if (!this.remoteStore) {
+    if (!this._remoteStore) {
       return []
     }
-    return await this.remoteStore.listCollections()
+    return await this._remoteStore.listCollections()
   }
 
   async listCollectionResources({
@@ -160,36 +182,36 @@ export class StorageManager {
   }: {
     collectionUrl: string
   }): Promise<Array<StorageResource>> {
-    if (!this.remoteStore) {
+    if (!this._remoteStore) {
       return []
     }
-    return await this.remoteStore.listCollectionResources({ collectionUrl })
+    return await this._remoteStore.listCollectionResources({ collectionUrl })
   }
 
   async fetchCollectionResource(
     resource: StorageResource
   ): Promise<FetchedCollectionResource> {
-    if (!this.remoteStore) {
+    if (!this._remoteStore) {
       throw new Error('Remote storage is not configured for this session.')
     }
-    return await this.remoteStore.fetchCollectionResource(resource)
+    return await this._remoteStore.fetchCollectionResource(resource)
   }
 
   async deleteCollectionResource(resource: StorageResource): Promise<void> {
-    if (!this.remoteStore) {
+    if (!this._remoteStore) {
       throw new Error('Remote storage is not configured for this session.')
     }
-    await this.remoteStore.deleteCollectionResource({
+    await this._remoteStore.deleteCollectionResource({
       relativeUrl: resource.url
     })
   }
 
   async ensureUserCollections({ user }: { user: User }) {
     if (!this.remoteOnly) {
-      await this.localStore!.ensureUserCollections({ user })
+      await this._localStore!.ensureUserCollections({ user })
     }
-    if (this.remoteStore) {
-      await this.remoteStore.ensureUserCollections({ user })
+    if (this._remoteStore) {
+      await this._remoteStore.ensureUserCollections({ user })
     }
   }
 
@@ -199,11 +221,11 @@ export class StorageManager {
    */
   async addHistoryNewAccount({ user }: { user: User }) {
     // Skip recording history item for local storage for now
-    if (!this.remoteStore) {
+    if (!this._remoteStore) {
       return
     }
     const resourceId = uuidv7()
-    await this.remoteStore.addCollectionResource({
+    await this._remoteStore.addCollectionResource({
       resourceId,
       collectionId: 'walletActivity',
       resourceBody: {
@@ -222,11 +244,11 @@ export class StorageManager {
    * the space and various collections created.
    */
   async addHistorySpaceCreated({ user }: { user: User }) {
-    if (!this.remoteStore) {
+    if (!this._remoteStore) {
       return
     }
     const resourceId = uuidv7()
-    await this.remoteStore.addCollectionResource({
+    await this._remoteStore.addCollectionResource({
       resourceId,
       collectionId: 'walletActivity',
       resourceBody: {
@@ -238,19 +260,19 @@ export class StorageManager {
         object: [
           {
             type: ['Space'],
-            id: this.remoteStore.spaceUrl
+            id: this._remoteStore.spaceUrl
           },
           {
             type: ['Collection'],
-            id: this.remoteStore.collections!.get('privateCredentials')!.url
+            id: this._remoteStore.collections!.get('privateCredentials')!.url
           },
           {
             type: ['Collection'],
-            id: this.remoteStore.collections!.get('publicCredentials')!.url
+            id: this._remoteStore.collections!.get('publicCredentials')!.url
           },
           {
             type: ['Collection'],
-            id: this.remoteStore.collections!.get('walletActivity')!.url
+            id: this._remoteStore.collections!.get('walletActivity')!.url
           }
         ],
         created: new Date().toISOString()
@@ -261,10 +283,10 @@ export class StorageManager {
   async listCredentials(): Promise<Array<StoredCredential>> {
     let vcs: Array<StoredCredential> = []
     if (!this.remoteOnly) {
-      vcs = await this.localStore!.listCredentials()
+      vcs = await this._localStore!.listCredentials()
     }
-    if (this.remoteStore) {
-      vcs = await this.remoteStore.listCredentials()
+    if (this._remoteStore) {
+      vcs = await this._remoteStore.listCredentials()
     }
     return vcs.map(vc => vc as StoredCredential)
   }
@@ -276,21 +298,32 @@ export class StorageManager {
   }): Promise<IVerifiableCredential | undefined> {
     let vc: IVerifiableCredential | undefined
     if (!this.remoteOnly) {
-      vc = await this.localStore!.loadCredential({ cid })
+      vc = await this._localStore!.loadCredential({ cid })
     }
-    if (this.remoteStore) {
-      vc = await this.remoteStore.loadCredential({ cid })
+    if (this._remoteStore) {
+      vc = await this._remoteStore.loadCredential({ cid })
     }
     return vc
   }
 
   async deleteCredential({ cid }: { cid: string }) {
     if (!this.remoteOnly) {
-      await this.localStore!.deleteCredential({ cid })
+      await this._localStore!.deleteCredential({ cid })
     }
-    if (this.remoteStore) {
-      await this.remoteStore.deleteCredential({ cid })
+    if (this._remoteStore) {
+      await this._remoteStore.deleteCredential({ cid })
     }
+  }
+
+  /**
+   * Lists the items in the `wallet-activity` history collection. Returns an
+   * empty array when there is no remote backend.
+   */
+  async listHistoryItems(): Promise<Array<{ id: string; doc: any }>> {
+    if (!this._remoteStore) {
+      return []
+    }
+    return await this._remoteStore.listHistoryItems()
   }
 }
 
