@@ -1,6 +1,6 @@
 # History
 
-## Unreleased - TBD
+## 0.10.0 - 2026-06-06
 
 ### Fixed
 
