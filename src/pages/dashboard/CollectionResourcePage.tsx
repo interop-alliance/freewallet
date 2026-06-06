@@ -55,7 +55,7 @@ export function CollectionResourcePage() {
     let cancelled = false
 
     async function load() {
-      if (!storage?.remoteStore || !collectionId || !resourceId) {
+      if (!storage?.hasRemoteStorage || !collectionId || !resourceId) {
         setErrorKey('storage.resourceNotFound')
         setIsLoading(false)
         return

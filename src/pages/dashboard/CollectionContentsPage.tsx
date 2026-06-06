@@ -98,7 +98,7 @@ export function CollectionContentsPage() {
     let cancelled = false
 
     async function load() {
-      if (!storage?.remoteStore || !collectionId) {
+      if (!storage?.hasRemoteStorage || !collectionId) {
         setCollection(null)
         setResources([])
         return
@@ -148,7 +148,7 @@ export function CollectionContentsPage() {
 
   const handleResourceOpen = useCallback(
     async (resource: StorageResource) => {
-      if (!storage?.remoteStore) {
+      if (!storage?.hasRemoteStorage) {
         return
       }
       setSelectedResource(resource)
