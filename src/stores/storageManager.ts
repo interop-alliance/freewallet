@@ -29,6 +29,48 @@ import {
 } from '@/types/credential'
 import { uuidv7 } from 'uuidv7'
 
+/**
+ * A single row in a WAS collection listing, as returned by the server's
+ * collection index endpoint.
+ */
+interface CollectionItemRow {
+  id: string
+  url: string
+  contentType?: string
+}
+
+/**
+ * A wallet-activity log entry stored in the `wallet-activity` collection.
+ * Modelled on ActivityStreams: a typed action carrying a human-readable
+ * summary and a creation timestamp. All fields are optional because the
+ * payload originates from the storage server and isn't schema-validated here.
+ */
+export interface WalletActivity {
+  id?: string
+  type?: string[]
+  summary?: string
+  actor?: unknown
+  object?: unknown
+  created?: string
+}
+
+/**
+ * The ezcap `RequestOptions` typing doesn't expose `parseBody`, which we need
+ * to keep the raw `Response` for streaming and blob reads. This is the same
+ * `ZcapClient.request` function, typed to accept those extra options and return
+ * the raw (unparsed) value.
+ */
+type RawZcapRequest = (options: Record<string, unknown>) => Promise<unknown>
+
+/**
+ * Extracts the server response payload (`data`) carried by an error thrown by
+ * `ZcapClient.request`, for logging. Returns undefined when the error carries
+ * no such payload.
+ */
+function requestErrorData(err: unknown): unknown {
+  return (err as { data?: unknown }).data
+}
+
 export interface IWalletStore {
   userExists: () => Promise<boolean>
   addCredential: ({
@@ -319,7 +361,9 @@ export class StorageManager {
    * Lists the items in the `wallet-activity` history collection. Returns an
    * empty array when there is no remote backend.
    */
-  async listHistoryItems(): Promise<Array<{ id: string; doc: any }>> {
+  async listHistoryItems(): Promise<
+    Array<{ id: string; doc: WalletActivity }>
+  > {
     if (!this._remoteStore) {
       return []
     }
@@ -370,7 +414,7 @@ export class WASRemoteStore implements IWalletStore {
         url: this.spaceUrl,
         method: 'GET'
       })
-    } catch (_: any) {
+    } catch (_) {
       return false
     }
     return true
@@ -392,10 +436,13 @@ export class WASRemoteStore implements IWalletStore {
         method: 'PUT',
         json: spaceDescription
       })
-    } catch (err: any) {
-      console.error('Error creating space:', JSON.stringify(err.data, null, 2))
+    } catch (err) {
+      console.error(
+        'Error creating space:',
+        JSON.stringify(requestErrorData(err), null, 2)
+      )
       throw new Error(
-        `Error creating space for user "${user.id}" at "${spaceUrl}": ${JSON.stringify(err.data)}`,
+        `Error creating space for user "${user.id}" at "${spaceUrl}": ${JSON.stringify(requestErrorData(err))}`,
         { cause: err }
       )
     }
@@ -451,13 +498,13 @@ export class WASRemoteStore implements IWalletStore {
         method: 'PUT',
         json: collectionDescription
       })
-    } catch (err: any) {
+    } catch (err) {
       console.error(
         `Error creating collection "${collectionId}":`,
-        JSON.stringify(err.data, null, 2)
+        JSON.stringify(requestErrorData(err), null, 2)
       )
       throw new Error(
-        `Error creating collection "${collectionId}" at "${collectionUrl}": ${JSON.stringify(err.data)}`,
+        `Error creating collection "${collectionId}" at "${collectionUrl}": ${JSON.stringify(requestErrorData(err))}`,
         { cause: err }
       )
     }
@@ -493,7 +540,7 @@ export class WASRemoteStore implements IWalletStore {
   }: {
     resourceId: string
     collectionId: string
-    resourceBody: any
+    resourceBody: object
   }) {
     const collectionBaseUrl = this.collections!.get(collectionId)!.url
     const resourceUrl = new URL(resourceId, collectionBaseUrl).toString()
@@ -503,9 +550,12 @@ export class WASRemoteStore implements IWalletStore {
         method: 'PUT',
         json: resourceBody
       })
-    } catch (err: any) {
+    } catch (err) {
       console.log('Attempted to add resource to:', resourceUrl)
-      console.error('Error adding resource:', JSON.stringify(err.data, null, 2))
+      console.error(
+        'Error adding resource:',
+        JSON.stringify(requestErrorData(err), null, 2)
+      )
       throw new Error(`Failed to add resource to "${resourceUrl}".`, {
         cause: err
       })
@@ -533,20 +583,19 @@ export class WASRemoteStore implements IWalletStore {
         url: new URL(url, this.storageServerUrl).toString(),
         method: 'GET'
       })
-    } catch (err: any) {
+    } catch (err) {
       console.log('Attempted to list collection items from:', url)
       console.error(
         'Error listing collection items:',
-        JSON.stringify(err.data, null, 2)
+        JSON.stringify(requestErrorData(err), null, 2)
       )
       throw new Error('Failed to list remote storage collection items.', {
         cause: err
       })
     }
-    // TODO add a type to the response
-    const { data } = response as { data: any }
     // data looks like:
     // { id, url, name, type, totalItems, items: [{ id, url, contentType }] }
+    const { data } = response as { data: { items: CollectionItemRow[] } }
     return await this.fetchAll({ rows: data.items })
   }
 
@@ -568,11 +617,11 @@ export class WASRemoteStore implements IWalletStore {
           accept: 'application/json'
         }
       })
-    } catch (err: any) {
+    } catch (err) {
       console.log('Attempted to list collection resources from:', url)
       console.error(
         'Error listing collection resources:',
-        JSON.stringify(err.data, null, 2)
+        JSON.stringify(requestErrorData(err), null, 2)
       )
       throw new Error('Failed to list remote storage collection resources.', {
         cause: err
@@ -593,17 +642,17 @@ export class WASRemoteStore implements IWalletStore {
     const objectUrl = new URL(relativeUrl, this.storageServerUrl).toString()
     let response: unknown
     try {
-      response = await (this.zcapClient.request as any)({
+      response = await (this.zcapClient.request as RawZcapRequest)({
         url: objectUrl,
         method: 'GET',
         parseBody: false,
         headers: { accept }
       })
-    } catch (err: any) {
+    } catch (err) {
       console.error(
         'Error fetching resource as blob:',
         objectUrl,
-        JSON.stringify(err.data, null, 2)
+        JSON.stringify(requestErrorData(err), null, 2)
       )
       throw new Error('Failed to fetch storage resource.', { cause: err })
     }
@@ -720,10 +769,10 @@ export class WASRemoteStore implements IWalletStore {
           accept: 'application/json'
         }
       })
-    } catch (err: any) {
+    } catch (err) {
       console.error(
         'Error listing collections:',
-        JSON.stringify(err.data, null, 2)
+        JSON.stringify(requestErrorData(err), null, 2)
       )
       throw new Error('Failed to list remote storage collections.', {
         cause: err
@@ -734,23 +783,26 @@ export class WASRemoteStore implements IWalletStore {
     return data?.items ?? []
   }
 
-  async listHistoryItems(): Promise<Array<{ id: string; doc: any }>> {
+  async listHistoryItems(): Promise<
+    Array<{ id: string; doc: WalletActivity }>
+  > {
     const walletActivityUrl = this.collections!.get('walletActivity')!.url
-    return await this.listCollectionItems({ url: walletActivityUrl })
+    const items = await this.listCollectionItems({ url: walletActivityUrl })
+    return items.map(({ id, doc }) => ({ id, doc: doc as WalletActivity }))
   }
 
   async listCredentials() {
     const vcCollectionBaseUrl = this.collections!.get('privateCredentials')!.url
     const docs = await this.listCollectionItems({ url: vcCollectionBaseUrl })
     return docs.map(({ id, doc }) => {
-      return { cid: id, vc: doc }
+      return { cid: id, vc: doc as unknown as IVerifiableCredential }
     })
   }
 
   async loadCredential({ cid }: { cid: string }) {
     const vcCollectionBaseUrl = this.collections!.get('privateCredentials')!.url
     const vcUrl = new URL(cid, vcCollectionBaseUrl).toString()
-    const doc: IVerifiableCredential | undefined = await this.fetchDocument({
+    const doc = await this.fetchDocument<IVerifiableCredential>({
       objectUrl: vcUrl
     })
     return doc
@@ -764,11 +816,11 @@ export class WASRemoteStore implements IWalletStore {
         url: vcUrl,
         method: 'DELETE'
       })
-    } catch (err: any) {
+    } catch (err) {
       console.log('Attempted to delete credential:', vcUrl)
       console.error(
         'Error deleting credential:',
-        JSON.stringify(err.data, null, 2)
+        JSON.stringify(requestErrorData(err), null, 2)
       )
       throw new Error('Failed to delete remote credential.', { cause: err })
     }
@@ -780,19 +832,19 @@ export class WASRemoteStore implements IWalletStore {
   async fetchAll({
     rows
   }: {
-    rows: any[]
-  }): Promise<Array<{ id: string; doc: any }>> {
+    rows: CollectionItemRow[]
+  }): Promise<Array<{ id: string; doc: Record<string, unknown> }>> {
     return await Promise.all(
       rows.map(collectionRow => this.fetchRow({ collectionRow }))
     )
   }
 
-  async fetchRow({ collectionRow }: { collectionRow: any }) {
+  async fetchRow({ collectionRow }: { collectionRow: CollectionItemRow }) {
     const { id, url: relativeUrl, contentType } = collectionRow
-    const doc: any | undefined = await this.fetchDocument({
+    const doc = (await this.fetchDocument({
       relativeUrl,
       contentType
-    })
+    })) as Record<string, unknown>
     return { id, doc }
   }
 
@@ -800,7 +852,7 @@ export class WASRemoteStore implements IWalletStore {
    * Fetches a document from the remote storage server, returns undefined if
    * not found.
    */
-  async fetchDocument({
+  async fetchDocument<ResultType = unknown>({
     objectUrl,
     relativeUrl,
     contentType = 'application/json'
@@ -808,7 +860,7 @@ export class WASRemoteStore implements IWalletStore {
     objectUrl?: string
     relativeUrl?: string
     contentType?: string
-  }): Promise<any | undefined> {
+  }): Promise<ResultType | undefined> {
     const { storageServerUrl } = this
     if (relativeUrl && !objectUrl) {
       objectUrl = new URL(relativeUrl, storageServerUrl).toString()
@@ -824,22 +876,24 @@ export class WASRemoteStore implements IWalletStore {
         method: 'GET',
         headers
       })
-    } catch (err: any) {
+    } catch (err) {
       // A 404 legitimately means "not found" -- honour the documented contract
       // and return undefined. Any other error (network, auth, server) is a real
       // failure and must propagate, so callers don't mistake it for a missing
       // document.
-      if (err.status === 404) {
+      if ((err as { status?: number }).status === 404) {
         return
       }
       console.log('Attempted to fetch document:', objectUrl)
-      console.error('Error fetching:', JSON.stringify(err.data, null, 2))
+      console.error(
+        'Error fetching:',
+        JSON.stringify(requestErrorData(err), null, 2)
+      )
       throw new Error('Failed to fetch remote storage document.', {
         cause: err
       })
     }
-    // TODO add a type to the response
-    return result!.data
+    return result!.data as ResultType
   }
 
   async wipeStorage({ profile }: { profile: ControllerProfile }) {
@@ -848,8 +902,11 @@ export class WASRemoteStore implements IWalletStore {
         url: this.spaceUrl,
         method: 'DELETE'
       })
-    } catch (err: any) {
-      console.error('Error deleting space:', JSON.stringify(err.data, null, 2))
+    } catch (err) {
+      console.error(
+        'Error deleting space:',
+        JSON.stringify(requestErrorData(err), null, 2)
+      )
       throw new Error('Failed to delete remote space.', { cause: err })
     }
     console.log('Remote space deleted.')
@@ -864,14 +921,17 @@ export class WASRemoteStore implements IWalletStore {
     let response
     try {
       // `parseBody: false` preserves the raw Response so we can stream bytes.
-      response = await (this.zcapClient.request as any)({
+      response = await (this.zcapClient.request as RawZcapRequest)({
         url: exportUrl,
         method: 'POST',
         parseBody: false,
         headers: { accept: 'application/x-tar' }
       })
-    } catch (err: any) {
-      console.error('Error exporting space:', JSON.stringify(err.data, null, 2))
+    } catch (err) {
+      console.error(
+        'Error exporting space:',
+        JSON.stringify(requestErrorData(err), null, 2)
+      )
       throw new Error('Failed to export remote space.', { cause: err })
     }
 
@@ -905,8 +965,11 @@ export class WASRemoteStore implements IWalletStore {
         },
         body
       })
-    } catch (err: any) {
-      console.error('Error importing space:', JSON.stringify(err.data, null, 2))
+    } catch (err) {
+      console.error(
+        'Error importing space:',
+        JSON.stringify(requestErrorData(err), null, 2)
+      )
       throw new Error('Failed to import remote space.', { cause: err })
     }
 

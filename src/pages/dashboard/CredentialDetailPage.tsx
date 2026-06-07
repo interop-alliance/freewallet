@@ -51,7 +51,7 @@ export function CredentialDetailPage() {
     setDeleteError(false)
     try {
       await session.storage.deleteCredential({ cid: cid! })
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error deleting credential:', err)
       setDeleteError(true)
       return

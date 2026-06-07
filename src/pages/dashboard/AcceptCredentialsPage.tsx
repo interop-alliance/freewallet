@@ -44,7 +44,7 @@ export function AcceptCredentialsPage() {
         await session.storage.addCredential({ credential })
       }
       navigate('/dashboard')
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error storing credentials:', err)
       setStoreError(true)
       setSaving(false)

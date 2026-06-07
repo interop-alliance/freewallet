@@ -11,6 +11,7 @@ import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import IconButton from '@mui/material/IconButton'
 import { useAuthStore } from '@/stores/authStore'
+import type { WalletActivity } from '@/stores/storageManager'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import Button from '@mui/material/Button'
@@ -24,14 +25,14 @@ export function HistoryPage() {
   const { t, i18n } = useTranslation()
   const session = useAuthStore(state => state.session)
   const [historyItems, setHistoryItems] = useState<
-    Array<{ id: string; doc: any }>
+    Array<{ id: string; doc: WalletActivity }>
   >([])
   const [loading, setLoading] = useState(true)
 
   const [sourceOpen, setSourceOpen] = useState(false)
   const [selectedItem, setSelectedItem] = useState<{
     id: string
-    doc: Record<string, unknown>
+    doc: WalletActivity
   } | null>(null)
 
   const sourceJson = useMemo(() => {
