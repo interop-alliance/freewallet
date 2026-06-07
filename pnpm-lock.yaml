@@ -38,6 +38,9 @@ importers:
       '@interop/verifier-core':
         specifier: ^3.0.1
         version: 3.0.1(react-native@0.85.3(@babel/core@7.29.7)(@types/react@19.2.16)(react@19.2.7))
+      '@interop/was-client':
+        specifier: ^0.2.0
+        version: 0.2.0(@interop/jsonld-signatures@11.6.7)
       '@mui/lab':
         specifier: 9.0.0-beta.2
         version: 9.0.0-beta.2(@emotion/react@11.14.0(@types/react@19.2.16)(react@19.2.7))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.16)(react@19.2.7))(@types/react@19.2.16)(react@19.2.7))(@mui/material@9.0.1(@emotion/react@11.14.0(@types/react@19.2.16)(react@19.2.7))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.16)(react@19.2.7))(@types/react@19.2.16)(react@19.2.7))(@types/react@19.2.16)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@types/react@19.2.16)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -596,6 +599,10 @@ packages:
 
   '@interop/verifier-core@3.0.1':
     resolution: {integrity: sha512-HzfmmoXrngNjnwNIJMX7ZnjTSvLuC9/1QrjTepDHstBBjLf9nbeLj7DMOyQDzp14Hdyl0J0tufkgRfJLWZM7LQ==}
+    engines: {node: '>=24.0'}
+
+  '@interop/was-client@0.2.0':
+    resolution: {integrity: sha512-xawHpIgv2v6VkJcpnGdku7zMaEU2VEm0iW7/rFQDoUaLWTIOS37hSvYmLfw+Qscc9HBY48/K9y9JS8OgqKRq2Q==}
     engines: {node: '>=24.0'}
 
   '@interop/zcap@11.0.1':
@@ -4471,6 +4478,16 @@ snapshots:
       zod: 3.25.76
     transitivePeerDependencies:
       - react-native
+
+  '@interop/was-client@0.2.0(@interop/jsonld-signatures@11.6.7)':
+    dependencies:
+      '@interop/data-integrity-core': 6.1.2
+      '@interop/ed25519-signature': 7.0.1(@interop/jsonld-signatures@11.6.7)
+      '@interop/ezcap': 7.1.1
+      '@interop/http-client': 1.0.3
+    transitivePeerDependencies:
+      - '@interop/jsonld-signatures'
+      - expo-crypto
 
   '@interop/zcap@11.0.1':
     dependencies:

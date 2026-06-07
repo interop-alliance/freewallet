@@ -1,5 +1,24 @@
 # History
 
+## 0.11.0 - TBD
+
+### Changed
+
+- Refactor `WASRemoteStore` to perform all remote Wallet Attached Storage
+  operations through `@interop/was-client`'s `WasClient` and its lazy
+  navigational handles (`space` / `collection` / `resource`) instead of
+  hand-built `@interop/ezcap` `ZcapClient.request` calls. The store now wraps
+  the user's `ZcapClient` in a `WasClient` and addresses spaces, collections,
+  and resources via the handle model (`describe`/`configure`/`list`/`get`/
+  `put`/`delete`), relying on the client's built-in 404-to-`null` read
+  semantics and typed errors. Space and collection creation use the idempotent
+  `configure()` upsert.
+- `wipeStorage()` no longer takes a `profile` argument -- the signer is carried
+  by the wrapped client. Space export keeps streaming the tar archive straight
+  to disk: rather than `space.export()` (which buffers the whole archive into
+  memory), `exportSpace()` uses the WAS client's raw-request escape hatch and
+  returns the response `body` `ReadableStream`, preserving the prior behavior.
+
 ## 0.10.0 - 2026-06-06
 
 ### Fixed

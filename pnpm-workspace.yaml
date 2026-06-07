@@ -6,3 +6,4 @@ allowedDeprecatedVersions:
 minimumReleaseAgeExclude:
   - '@digitalcredentials/issuer-registry-client@4.0.0'
   - '@interop/verifier-core@3.0.1'
+  - '@interop/was-client@0.2.0'
