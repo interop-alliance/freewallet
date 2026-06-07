@@ -4,6 +4,5 @@ allowedDeprecatedVersions:
   get-graphql-from-jsonschema: '8.1.0'
   defekt: '9.3.0'
 minimumReleaseAgeExclude:
-  - '@digitalcredentials/issuer-registry-client@4.0.0'
-  - '@interop/verifier-core@3.0.1'
+  - '@interop/verifier-core@3.1.0'
   - '@interop/was-client@0.2.0'
