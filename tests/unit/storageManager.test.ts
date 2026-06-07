@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest'
+import type { ZcapClient } from '@interop/ezcap'
 import { WASRemoteStore } from '../../src/stores/storageManager'
 import { bufferToBase64Url, digestHash } from '../../src/lib/cidFrom'
+import type { ControllerProfile, User } from '../../src/types/auth'
 
 describe('WASRemoteStore.listCollectionItems', () => {
   it('uses `items` from the list response format', async () => {
@@ -20,7 +22,7 @@ describe('WASRemoteStore.listCollectionItems', () => {
     }
     const store = new WASRemoteStore({
       storageServerUrl: 'https://example.test',
-      zcapClient: zcapClient as any,
+      zcapClient: zcapClient as unknown as ZcapClient,
       spaceId: 'space-id',
       controller: 'did:key:test'
     })
@@ -32,7 +34,7 @@ describe('WASRemoteStore.listCollectionItems', () => {
   })
 
   it('passes an empty `items` list through correctly', async () => {
-    const items: any[] = []
+    const items: unknown[] = []
     const zcapClient = {
       request: vi.fn().mockResolvedValue({
         data: {
@@ -47,7 +49,7 @@ describe('WASRemoteStore.listCollectionItems', () => {
     }
     const store = new WASRemoteStore({
       storageServerUrl: 'https://example.test',
-      zcapClient: zcapClient as any,
+      zcapClient: zcapClient as unknown as ZcapClient,
       spaceId: 'space-id',
       controller: 'did:key:test'
     })
@@ -78,7 +80,7 @@ describe('WASRemoteStore.listCollections', () => {
     }
     const store = new WASRemoteStore({
       storageServerUrl: 'https://example.test',
-      zcapClient: zcapClient as any,
+      zcapClient: zcapClient as unknown as ZcapClient,
       spaceId: 'space-id',
       controller: 'did:key:test'
     })
@@ -118,7 +120,7 @@ describe('WASRemoteStore.listCollectionResources', () => {
     }
     const store = new WASRemoteStore({
       storageServerUrl: 'https://example.test',
-      zcapClient: zcapClient as any,
+      zcapClient: zcapClient as unknown as ZcapClient,
       spaceId: 'space-id',
       controller: 'did:key:test'
     })
@@ -145,11 +147,11 @@ describe('WASRemoteStore.initClient', () => {
     const controller = 'did:key:z6MktestControllerDid'
     const { remoteStore } = await WASRemoteStore.initClient({
       storageServerUrl: 'https://example.test',
-      user: { id: 'user-id-that-is-not-controller' } as any,
+      user: { id: 'user-id-that-is-not-controller' } as unknown as User,
       profile: {
         keyAgent: { id: controller },
         zcapClient: { request: vi.fn() }
-      } as any
+      } as unknown as ControllerProfile
     })
 
     const expectedSpaceId = bufferToBase64Url(await digestHash(controller))
@@ -167,14 +169,14 @@ describe('WASRemoteStore.ensureUserCollections', () => {
     }
     const store = new WASRemoteStore({
       storageServerUrl: 'https://example.test',
-      zcapClient: zcapClient as any,
+      zcapClient: zcapClient as unknown as ZcapClient,
       spaceId: 'space-id',
       controller: 'did:key:test'
     })
 
     await expect(
       store.ensureUserCollections({
-        user: { id: 'user-id', email: 'user@example.test' } as any
+        user: { id: 'user-id', email: 'user@example.test' } as unknown as User
       })
     ).rejects.toThrow(/Error creating space/)
   })

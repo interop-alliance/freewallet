@@ -9,7 +9,7 @@ declare module 'credential-handler-polyfill' {
 
 declare module 'web-credential-handler' {
   export function installHandler(): Promise<void>
-  export function receiveCredentialEvent(): Promise<any>
+  export function receiveCredentialEvent(): Promise<unknown>
   export function activateHandler(options: {
     mediatorOrigin?: string
     get?(event: unknown): Promise<{ type: string; url: string }>

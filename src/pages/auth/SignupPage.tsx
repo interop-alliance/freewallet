@@ -113,7 +113,7 @@ export function SignupPage() {
       await session.storage!.addCredential({ credential: welcomeCredential })
       login(session)
       navigate('/dashboard')
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error completing signup:', err)
       setSetupError(true)
     } finally {

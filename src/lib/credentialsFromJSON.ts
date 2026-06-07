@@ -1,14 +1,18 @@
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 
-function hasType(data: any, typeName: string): boolean {
-  return Array.isArray(data?.type) && data.type.includes(typeName)
+function hasType(data: unknown, typeName: string): boolean {
+  const type = (data as { type?: unknown } | null | undefined)?.type
+  return Array.isArray(type) && type.includes(typeName)
 }
 
-function hasWrappedCredentials(data: any): data is {
+function hasWrappedCredentials(data: unknown): data is {
   verifiableCredential: IVerifiableCredential | IVerifiableCredential[]
 } {
   return (
-    hasType(data, 'VerifiablePresentation') && 'verifiableCredential' in data
+    hasType(data, 'VerifiablePresentation') &&
+    typeof data === 'object' &&
+    data !== null &&
+    'verifiableCredential' in data
   )
 }
 
@@ -16,9 +20,7 @@ export function credentialsFromJSON(text: string): IVerifiableCredential[] {
   const data = JSON.parse(text)
 
   if (Array.isArray(data)) {
-    const vcs = data.filter((item: any) =>
-      hasType(item, 'VerifiableCredential')
-    )
+    const vcs = data.filter(item => hasType(item, 'VerifiableCredential'))
     if (vcs.length > 0) {
       return vcs
     }

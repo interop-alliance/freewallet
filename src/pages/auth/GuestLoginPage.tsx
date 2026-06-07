@@ -52,7 +52,7 @@ export function GuestLoginPage() {
       await session.storage!.addCredential({ credential: welcomeCredential })
       login(session)
       navigate('/dashboard')
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error starting guest session:', err)
       setSetupError(true)
     } finally {

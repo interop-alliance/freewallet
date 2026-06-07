@@ -46,7 +46,6 @@ export default defineConfig([
           destructuredArrayIgnorePattern: '^_'
         }
       ],
-      '@typescript-eslint/no-explicit-any': 'off',
       // Always require curly braces
       curly: ['error', 'all'],
 

@@ -35,7 +35,7 @@ export function DocContent({ fileName, onError }: DocContentProps) {
           return
         }
         setContent(await res.text())
-      } catch (err: any) {
+      } catch (err) {
         console.error(err)
         setNotFound(true)
         onError?.()
