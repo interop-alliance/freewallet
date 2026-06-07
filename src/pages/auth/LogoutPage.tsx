@@ -24,7 +24,7 @@ export function LogoutPage() {
     async function performLogout() {
       if (session?.isGuest) {
         console.log('Wiping user data...')
-        await session.storage?.wipeStorage({ profile: session.profile })
+        await session.storage?.wipeStorage()
         console.log('User data cleared.')
         await logout()
         window.location.href = '/'

@@ -27,7 +27,7 @@ export function SettingsPage() {
     setDeleteError(false)
     try {
       console.log('Wiping user data...')
-      await session.storage?.wipeStorage({ profile: session.profile })
+      await session.storage?.wipeStorage()
     } catch (err) {
       // Do not log the user out if the wipe failed -- surface the error so
       // they know their remote data is still present.
