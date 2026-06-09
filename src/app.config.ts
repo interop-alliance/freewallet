@@ -12,6 +12,25 @@ export const SERVER_URL = env.VITE_SERVER_URL || 'http://localhost:5173'
 export const DEPLOY_URL = env.VITE_DEPLOY_URL
 // Remote WAS server URL. When set, switches storage to remote-only mode.
 export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
+
+export const WALLET_STANDARD_COLLECTIONS = [
+  {
+    key: 'privateCredentials',
+    id: 'private-credentials',
+    name: 'Verifiable Credentials'
+  },
+  {
+    key: 'publicCredentials',
+    id: 'public-credentials',
+    name: 'Publicly Shared Verifiable Credentials',
+    isPublic: true
+  },
+  {
+    key: 'walletActivity',
+    id: 'wallet-activity',
+    name: 'Wallet Activity Log'
+  }
+]
 export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
 // CORS proxy for fetching remote credential URLs from AddCredentialPage.
 export const CORS_PROXY_URL = env.VITE_CORS_PROXY_URL || 'https://corsproxy.io'

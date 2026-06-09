@@ -7,10 +7,8 @@ import {
   Divider,
   Link,
   Collapse,
-  Button,
-  IconButton
+  Button
 } from '@mui/material'
-import { MdDeleteOutline } from 'react-icons/md'
 import { reset as microlightReset } from 'microlight'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -27,6 +25,10 @@ import {
   InfoBlock,
   SectionHeader
 } from '@/components/credentialDetails/InfoBlock'
+import {
+  CredentialActions,
+  PublicLinkDisplay
+} from '@/components/credentialDetails/CredentialActions'
 import { ResumePreview } from '@/components/resume/ResumePreview'
 import { ResumeCredentialCard } from '@/components/credentialDetails/ResumeCredentialCard'
 import { isResumeCredential } from '@/lib/isResumeCredential'
@@ -39,18 +41,21 @@ import type {
   IAlignment,
   IVerifiableCredential
 } from '@interop/data-integrity-core'
+import type { CredentialDetailActions } from '@/types/credentialActions'
 import { useTranslation } from 'react-i18next'
 
 export function CredentialDetail({
   vc,
   cid,
-  onDelete
+  actions
 }: {
   vc: IVerifiableCredential
   cid?: string
-  onDelete?: () => void
+  actions?: CredentialDetailActions
 }) {
   const { t } = useTranslation()
+  const hasActions = !!(actions?.onDelete || actions?.share)
+  const publicLink = actions?.share?.publicLink
   const fields = useMemo(() => getDisplayFields(vc), [vc])
   const createdDate = useMemo(() => getProofCreatedIso(vc), [vc])
   const verification = useVerification(vc)
@@ -73,25 +78,14 @@ export function CredentialDetail({
   if (showResumePreview && resumePreviewData) {
     return (
       <Stack spacing={2} sx={sx.credentialStack}>
-        <Box
-          sx={{
-            position: 'relative',
-            ...(onDelete ? { pr: { xs: 5, md: 6 } } : {})
-          }}
-        >
-          {onDelete && (
-            <IconButton
-              size="small"
-              onClick={onDelete}
-              aria-label={t('credential.deleteAria')}
-              sx={{ position: 'absolute', top: 0, right: 0 }}
-            >
-              <MdDeleteOutline size={24} />
-            </IconButton>
+        <Box>
+          {hasActions && actions && (
+            <CredentialActions actions={actions} containerSx={sx.actionsRow} />
           )}
           <Typography variant="h5" component="h2" sx={sx.credentialName}>
             {fields.credentialName}
           </Typography>
+          {publicLink && <PublicLinkDisplay url={publicLink} />}
         </Box>
 
         <ResumeCredentialCard
@@ -118,29 +112,16 @@ export function CredentialDetail({
   return (
     <Stack spacing={2} sx={sx.credentialStack}>
       <Paper variant="outlined" sx={sx.card}>
-        {onDelete && (
-          <IconButton
-            size="small"
-            onClick={onDelete}
-            aria-label={t('credential.deleteAria')}
-            sx={sx.cardDeleteIcon}
-          >
-            <MdDeleteOutline size={24} />
-          </IconButton>
-        )}
-
-        <Box
-          sx={{
-            ...sx.topCard,
-            ...(onDelete ? { pr: { xs: 5, md: 6 } } : {})
-          }}
-        >
+        <Box sx={sx.topCard}>
           <Box sx={sx.badgeRow}>
             <VerificationStatusBadge
               loading={verification.loading}
               result={verification.result}
               error={verification.error}
             />
+            {hasActions && actions && (
+              <CredentialActions actions={actions} containerSx={sx.cardActions} />
+            )}
           </Box>
           <Box sx={sx.achievementRow}>
             {fields.achievementImage && (
@@ -166,6 +147,7 @@ export function CredentialDetail({
               )}
             </Box>
           </Box>
+          {publicLink && <PublicLinkDisplay url={publicLink} />}
         </Box>
 
         <Box sx={sx.mainCard}>

@@ -27,17 +27,72 @@ export const credentialDetailCardStyles = {
     boxShadow: '0px 15px 30px rgba(6,16,36,0.13)',
     overflow: 'hidden'
   },
-  cardDeleteIcon: {
-    position: 'absolute',
-    top: 25,
-    right: 25,
-    zIndex: 1,
-    padding: 0.5,
+  cardActions: {
+    flexShrink: 0
+  },
+  actionsRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    mb: 1
+  },
+  shareButton: {
+    textTransform: 'none' as const,
+    whiteSpace: 'nowrap' as const,
     color: 'text.secondary',
+    borderColor: 'divider',
     '&:hover': {
-      color: 'error.main',
+      color: 'primary.main',
+      borderColor: 'primary.main',
       backgroundColor: 'action.hover'
     }
+  },
+  shareActiveButton: {
+    textTransform: 'none' as const,
+    whiteSpace: 'nowrap' as const,
+    color: 'primary.main',
+    borderColor: 'primary.main',
+    '&:hover': {
+      color: 'warning.main',
+      borderColor: 'warning.main',
+      backgroundColor: 'action.hover'
+    }
+  },
+  deleteButton: {
+    textTransform: 'none' as const,
+    whiteSpace: 'nowrap' as const,
+    color: 'text.secondary',
+    borderColor: 'divider',
+    '&:hover': {
+      color: 'error.main',
+      borderColor: 'error.main',
+      backgroundColor: 'action.hover'
+    }
+  },
+  publicLinkBox: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 1,
+    mt: 2,
+    px: 1.5,
+    py: 0.75,
+    borderRadius: 2,
+    backgroundColor: 'action.hover',
+    border: 1,
+    borderColor: 'divider'
+  },
+  publicLinkIcon: {
+    color: 'success.main',
+    display: 'flex',
+    flexShrink: 0
+  },
+  publicLinkUrl: {
+    flex: 1,
+    minWidth: 0,
+    wordBreak: 'break-all' as const,
+    color: 'primary.main'
   },
   topCard: {
     px: { xs: 2, md: 3 },
@@ -264,7 +319,9 @@ export const credentialDetailCardStyles = {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 1,
     mb: 2
   }
 } as const

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Paper from '@mui/material/Paper'
@@ -10,6 +11,8 @@ import { MdArrowBack, MdDeleteOutline, MdDownload } from 'react-icons/md'
 import { reset as microlightReset } from 'microlight'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
+import { DeleteCredentialDialog } from '@/components/credentialDetails/DeleteCredentialDialog'
+import { useCredentialDelete } from '@/hooks/useCredentialDelete'
 import { useAuthStore } from '@/stores/authStore'
 import { storageStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
@@ -50,6 +53,19 @@ export function CollectionResourcePage() {
   const collectionPath = collectionId
     ? `/storage/collections/${encodeURIComponent(collectionId)}`
     : '/storage'
+
+  const {
+    deleteError,
+    deleteDialogOpen,
+    deleting,
+    requestDelete,
+    runDelete,
+    cancelDelete
+  } = useCredentialDelete({
+    session: session ?? null,
+    cid: credentialCid ?? undefined,
+    onSuccess: () => navigate(collectionPath)
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -204,17 +220,11 @@ export function CollectionResourcePage() {
   }, [jsonText, resourceId])
 
   const handleDelete = useCallback(async () => {
-    if (!storage || !resource) {
+    if (!credentialCid) {
       return
     }
-    try {
-      await storage.deleteCollectionResource(resource)
-      navigate(collectionPath)
-    } catch (e) {
-      console.error('Failed to delete resource:', e)
-      window.alert(t('storage.deleteResourceError'))
-    }
-  }, [collectionPath, navigate, resource, storage, t])
+    await requestDelete()
+  }, [credentialCid, requestDelete])
 
   const credentialDetailHref = credentialCid
     ? `/credential/${encodeURIComponent(credentialCid)}`
@@ -247,6 +257,12 @@ export function CollectionResourcePage() {
 
         {!isLoading && !errorKey && resource && vc && (
           <>
+            {deleteError && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {t('credential.deleteError')}
+              </Alert>
+            )}
+
             <Typography
               variant="h5"
               component="h2"
@@ -324,6 +340,14 @@ export function CollectionResourcePage() {
           </>
         )}
       </Box>
+
+      <DeleteCredentialDialog
+        open={deleteDialogOpen}
+        busy={deleting}
+        onKeepPublic={() => void runDelete({ alsoRemovePublic: false })}
+        onDeleteAll={() => void runDelete({ alsoRemovePublic: true })}
+        onCancel={cancelDelete}
+      />
     </DashboardLayout>
   )
 }
