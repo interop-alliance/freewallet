@@ -39,10 +39,19 @@ export function AcceptCredentialsPage() {
     setSaving(true)
     setStoreError(false)
     try {
-      for (const credential of credentials) {
-        console.log('Storing credential:', credentialTitle(credential))
-        await session.storage.addCredential({ credential })
-      }
+      await Promise.all(
+        credentials.map(async credential => {
+          if (!credential.id) {
+            throw new Error('Credential ID is required')
+          }
+          console.log('Storing credential:', credentialTitle(credential))
+          await session.storage.addCredential({ credential })
+          await session.storage.addHistoryCredentialCreated({
+            cid: credential.id,
+            user: session.user
+          })
+        })
+      )
       navigate('/dashboard')
     } catch (err) {
       console.error('Error storing credentials:', err)

@@ -31,6 +31,10 @@ export function useCredentialDelete({
         if (alsoRemovePublic) {
           await session.storage.removePublicLink({ cid })
         }
+        await session.storage.addHistoryCredentialDeleted({
+          cid,
+          user: session.user
+        })
       } catch (err) {
         console.error('Error deleting credential:', err)
         setDeleteError(true)
@@ -44,20 +48,17 @@ export function useCredentialDelete({
     [session, cid, onSuccess]
   )
 
-  const requestDelete = useCallback(
-    async () => {
-      if (!session || !cid) {
-        return
-      }
-      const shared = await session.storage.isShared({ cid })
-      if (shared) {
-        setDeleteDialogOpen(true)
-      } else {
-        await runDelete({ alsoRemovePublic: false })
-      }
-    },
-    [session, cid, runDelete]
-  )
+  const requestDelete = useCallback(async () => {
+    if (!session || !cid) {
+      return
+    }
+    const shared = await session.storage.isShared({ cid })
+    if (shared) {
+      setDeleteDialogOpen(true)
+    } else {
+      await runDelete({ alsoRemovePublic: false })
+    }
+  }, [session, cid, runDelete])
 
   const cancelDelete = useCallback(() => {
     setDeleteDialogOpen(false)

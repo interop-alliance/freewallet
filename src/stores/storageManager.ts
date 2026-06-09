@@ -286,6 +286,63 @@ export class StorageManager {
     })
   }
 
+  /**
+   * Records (in the `wallet-activity` collection) the Create activity for
+   * a credential.
+   */
+  async addHistoryCredentialCreated({
+    cid,
+    user
+  }: {
+    cid: string
+    user: User
+  }) {
+    if (!this._remoteStore) {
+      return
+    }
+    const resourceId = uuidv7()
+    await this._remoteStore.addCollectionResource({
+      resourceId,
+      collectionId: 'walletActivity',
+      resourceBody: {
+        id: resourceId,
+        type: ['Create'],
+        summary: 'Credential created: ' + cid,
+        actor: { email: user.email },
+        object: cid,
+        created: new Date().toISOString()
+      }
+    })
+  }
+  /**
+   * Records (in the `wallet-activity` collection) the Delete activity for
+   * a credential.
+   */
+  async addHistoryCredentialDeleted({
+    cid,
+    user
+  }: {
+    cid: string
+    user: User
+  }) {
+    if (!this._remoteStore) {
+      return
+    }
+    const resourceId = uuidv7()
+    await this._remoteStore.addCollectionResource({
+      resourceId,
+      collectionId: 'walletActivity',
+      resourceBody: {
+        id: resourceId,
+        type: ['Delete'],
+        summary: 'Credential deleted: ' + cid,
+        actor: { email: user.email },
+        object: cid,
+        created: new Date().toISOString()
+      }
+    })
+  }
+
   async listCredentials(): Promise<Array<StoredCredential>> {
     let vcs: Array<StoredCredential> = []
     if (!this.remoteOnly) {
