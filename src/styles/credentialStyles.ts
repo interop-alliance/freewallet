@@ -28,14 +28,38 @@ export const credentialDetailCardStyles = {
     overflow: 'hidden'
   },
   cardActions: {
-    flexShrink: 0
+    justifyContent: 'flex-end',
+    flexGrow: 1,
+    width: { xs: '100%', md: 'auto' },
+    minWidth: 0,
+    maxWidth: '100%'
   },
   actionsRow: {
+    width: '100%',
+    minWidth: 0,
+    mb: 1
+  },
+  actionsCluster: {
+    display: 'flex',
+    flexDirection: { xs: 'column', md: 'row' },
+    alignItems: { xs: 'stretch', md: 'center' },
+    justifyContent: 'flex-end',
+    gap: 1,
+    width: { xs: '100%', md: 'auto' },
+    minWidth: 0,
+    maxWidth: '100%'
+  },
+  actionButtonsRow: {
     display: 'flex',
     flexDirection: 'row',
-    justifyContent: 'flex-end',
     flexWrap: 'wrap',
-    mb: 1
+    justifyContent: 'flex-end',
+    gap: 1,
+    flexShrink: 0,
+    order: { md: 2 }
+  },
+  publicLinkOrder: {
+    order: { md: 1 }
   },
   shareButton: {
     textTransform: 'none' as const,
@@ -74,11 +98,14 @@ export const credentialDetailCardStyles = {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 1,
-    mt: 2,
-    px: 1.5,
-    py: 0.75,
-    borderRadius: 2,
+    gap: 0.75,
+    width: { xs: '100%', sm: 'auto' },
+    maxWidth: '100%',
+    minWidth: 0,
+    flexShrink: 1,
+    px: { xs: 1, sm: 1.25 },
+    py: 0.5,
+    borderRadius: 1.5,
     backgroundColor: 'action.hover',
     border: 1,
     borderColor: 'divider'
@@ -86,12 +113,22 @@ export const credentialDetailCardStyles = {
   publicLinkIcon: {
     color: 'success.main',
     display: 'flex',
-    flexShrink: 0
+    flexShrink: 0,
+    lineHeight: 0
+  },
+  publicLinkLabel: {
+    flexShrink: 0,
+    fontSize: '0.75rem',
+    color: 'text.secondary',
+    whiteSpace: 'nowrap' as const
   },
   publicLinkUrl: {
     flex: 1,
     minWidth: 0,
-    wordBreak: 'break-all' as const,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+    fontSize: '0.75rem',
     color: 'primary.main'
   },
   topCard: {
@@ -318,10 +355,10 @@ export const credentialDetailCardStyles = {
   badgeRow: {
     display: 'flex',
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: { xs: 'flex-start', sm: 'center' },
     justifyContent: 'space-between',
     flexWrap: 'wrap',
-    gap: 1,
+    gap: { xs: 1.5, sm: 1 },
     mb: 2
   }
 } as const

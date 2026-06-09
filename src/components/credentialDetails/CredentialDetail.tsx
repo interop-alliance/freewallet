@@ -26,8 +26,7 @@ import {
   SectionHeader
 } from '@/components/credentialDetails/InfoBlock'
 import {
-  CredentialActions,
-  PublicLinkDisplay
+  CredentialActions
 } from '@/components/credentialDetails/CredentialActions'
 import { ResumePreview } from '@/components/resume/ResumePreview'
 import { ResumeCredentialCard } from '@/components/credentialDetails/ResumeCredentialCard'
@@ -55,7 +54,6 @@ export function CredentialDetail({
 }) {
   const { t } = useTranslation()
   const hasActions = !!(actions?.onDelete || actions?.share)
-  const publicLink = actions?.share?.publicLink
   const fields = useMemo(() => getDisplayFields(vc), [vc])
   const createdDate = useMemo(() => getProofCreatedIso(vc), [vc])
   const verification = useVerification(vc)
@@ -85,7 +83,6 @@ export function CredentialDetail({
           <Typography variant="h5" component="h2" sx={sx.credentialName}>
             {fields.credentialName}
           </Typography>
-          {publicLink && <PublicLinkDisplay url={publicLink} />}
         </Box>
 
         <ResumeCredentialCard
@@ -147,7 +144,6 @@ export function CredentialDetail({
               )}
             </Box>
           </Box>
-          {publicLink && <PublicLinkDisplay url={publicLink} />}
         </Box>
 
         <Box sx={sx.mainCard}>
