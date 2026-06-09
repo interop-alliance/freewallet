@@ -7,6 +7,9 @@ import {
   Link,
   Stack,
   Tooltip,
+  Typography,
+  useMediaQuery,
+  useTheme,
   type SxProps
 } from '@mui/material'
 import {
@@ -25,10 +28,13 @@ import type {
 
 /**
  * The public-link toggle button: "Create public link" when the credential is
- * private, "Remove public link" when it is shared.
+ * private, "Remove public link" when it is shared. On small screens only the
+ * icon is shown; the label appears from `sm` up.
  */
 function ShareButton({ share }: { share: CredentialShareActions }) {
   const { t } = useTranslation()
+  const theme = useTheme()
+  const compact = useMediaQuery(theme.breakpoints.down('sm'))
 
   let icon = <MdAddLink size={18} />
   if (share.busy) {
@@ -45,61 +51,111 @@ function ShareButton({ share }: { share: CredentialShareActions }) {
   }
 
   return (
-    <Button
-      size="small"
-      variant="outlined"
-      disabled={share.busy}
-      onClick={share.toggle}
-      startIcon={icon}
-      sx={buttonSx}
-    >
-      {label}
-    </Button>
+    <Tooltip title={compact ? label : ''}>
+      <Button
+        size="small"
+        variant="outlined"
+        disabled={share.busy}
+        onClick={share.toggle}
+        startIcon={icon}
+        aria-label={label}
+        sx={{
+          ...buttonSx,
+          minWidth: { xs: 36, sm: 'auto' },
+          px: { xs: 1, sm: 1.5 },
+          '& .MuiButton-startIcon': { mr: { xs: 0, sm: 1 }, ml: { xs: 0, sm: -0.5 } }
+        }}
+      >
+        <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+          {label}
+        </Box>
+      </Button>
+    </Tooltip>
   )
 }
 
 /**
- * Action cluster for a credential: the public-link toggle (when sharing is
- * available) followed by the delete button.
+ * Action cluster for a credential: on desktop the shared link sits to the
+ * left of the buttons; on mobile the buttons are on top and the link below.
  */
 export function CredentialActions({
   actions,
   containerSx
 }: {
   actions: CredentialDetailActions
-  containerSx: object
+  containerSx?: object
 }) {
   const { t } = useTranslation()
+  const theme = useTheme()
+  const compact = useMediaQuery(theme.breakpoints.down('sm'))
   const { onDelete, share } = actions
+  const publicLink = share?.publicLink
+  const deleteLabel = t('credential.delete')
 
-  if (!share && !onDelete) {
+  if (!share && !onDelete && !publicLink) {
     return null
   }
 
   return (
-    <Stack direction="row" spacing={1} sx={containerSx}>
-      {share && <ShareButton share={share} />}
-      {onDelete && (
-        <Button
-          size="small"
-          variant="outlined"
-          onClick={onDelete}
-          startIcon={<MdDeleteOutline size={18} />}
-          sx={sx.deleteButton}
-        >
-          {t('credential.delete')}
-        </Button>
+    <Stack sx={{ ...sx.actionsCluster, ...containerSx }}>
+      {(share || onDelete) && (
+        <Stack direction="row" spacing={1} sx={sx.actionButtonsRow}>
+          {share && <ShareButton share={share} />}
+          {onDelete && (
+            <Tooltip title={compact ? deleteLabel : ''}>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={onDelete}
+                startIcon={<MdDeleteOutline size={18} />}
+                aria-label={deleteLabel}
+                sx={{
+                  ...sx.deleteButton,
+                  minWidth: { xs: 36, sm: 'auto' },
+                  px: { xs: 1, sm: 1.5 },
+                  '& .MuiButton-startIcon': {
+                    mr: { xs: 0, sm: 1 },
+                    ml: { xs: 0, sm: -0.5 }
+                  }
+                }}
+              >
+                <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+                  {deleteLabel}
+                </Box>
+              </Button>
+            </Tooltip>
+          )}
+        </Stack>
       )}
+      {publicLink && <PublicLinkDisplay url={publicLink} />}
     </Stack>
   )
 }
 
+function truncateUrl(url: string, maxLength: number): string {
+  if (url.length <= maxLength) {
+    return url
+  }
+  return `${url.slice(0, maxLength)}...`
+}
+
 /**
- * Inline display of a credential's active public link, with a copy button.
+ * Compact display of a credential's active public link, with a copy button.
  */
 export function PublicLinkDisplay({ url }: { url: string }) {
   const { t } = useTranslation()
+  const theme = useTheme()
+  const isSmall = useMediaQuery(theme.breakpoints.down('sm'))
+  const isMedium = useMediaQuery(theme.breakpoints.down('md'))
   const [copied, setCopied] = useState(false)
+
+  let maxLength = 32
+  if (isSmall) {
+    maxLength = 16
+  } else if (isMedium) {
+    maxLength = 24
+  }
+  const displayUrl = truncateUrl(url, maxLength)
 
   async function handleCopy() {
     try {
@@ -111,27 +167,38 @@ export function PublicLinkDisplay({ url }: { url: string }) {
     }
   }
 
+  const copyTooltip = copied ? t('credential.linkCopied') : t('common.copy')
+
   return (
-    <Box sx={sx.publicLinkBox}>
+    <Box sx={{ ...sx.publicLinkBox, ...sx.publicLinkOrder }}>
       <Box component="span" sx={sx.publicLinkIcon}>
-        <MdPublic size={18} />
+        <MdPublic size={16} />
       </Box>
-      <Link
-        href={url}
-        target="_blank"
-        rel="noopener"
-        variant="caption"
-        sx={sx.publicLinkUrl}
+      <Typography
+        component="span"
+        sx={{ ...sx.publicLinkLabel, display: { xs: 'none', sm: 'inline' } }}
       >
-        {url}
-      </Link>
-      <Tooltip title={copied ? t('credential.linkCopied') : t('common.copy')}>
+        {t('credential.sharedTo')}
+      </Typography>
+      <Tooltip title={url}>
+        <Link
+          href={url}
+          target="_blank"
+          rel="noopener"
+          underline="hover"
+          sx={sx.publicLinkUrl}
+        >
+          {displayUrl}
+        </Link>
+      </Tooltip>
+      <Tooltip title={copyTooltip}>
         <IconButton
           size="small"
           onClick={handleCopy}
           aria-label={t('common.copy')}
+          sx={{ p: 0.25, flexShrink: 0 }}
         >
-          <MdContentCopy size={16} />
+          <MdContentCopy size={15} />
         </IconButton>
       </Tooltip>
     </Box>

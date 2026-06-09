@@ -205,6 +205,7 @@
     "createPublicLink": "Crear enlace público",
     "removePublicLink": "Eliminar enlace público",
     "linkCopied": "¡Enlace copiado!",
+    "sharedTo": "Compartido en:",
     "shareError": "No se pudo actualizar el enlace público. Inténtelo de nuevo.",
     "achievementType": "Tipo de logro:",
     "createdDate": "Fecha de creación",
