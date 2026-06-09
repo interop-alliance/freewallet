@@ -501,7 +501,6 @@ export class WASRemoteStore implements IWalletStore {
    */
   async isShared({ cid }: { cid: string }): Promise<boolean> {
     try {
-      // TODO use isPublic instead of get
       const doc = await this._collection('publicCredentials').get(cid)
       return doc !== null
     } catch (err) {

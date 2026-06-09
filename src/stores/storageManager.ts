@@ -362,7 +362,6 @@ export class StorageManager {
     await this._remoteStore.removePublicLink({ cid })
   }
 
-  //todo: use isPublic instead of get
   async isShared({ cid }: { cid: string }): Promise<boolean> {
     if (!this._remoteStore) {
       return false
