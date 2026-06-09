@@ -31,6 +31,10 @@ export function useCredentialDelete({
         if (alsoRemovePublic) {
           await session.storage.removePublicLink({ cid })
         }
+        await session.storage.addHistoryCredentialDeleted({
+          cid,
+          user: session.user
+        })
       } catch (err) {
         console.error('Error deleting credential:', err)
         setDeleteError(true)
