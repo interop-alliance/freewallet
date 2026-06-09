@@ -18,6 +18,7 @@ import {
   type Resource
 } from '@interop/was-client'
 import type { ControllerProfile, User } from '@/types/auth'
+import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import {
@@ -35,32 +36,6 @@ import type {
  * Expected keys: 'privateCredentials' | 'publicCredentials' | 'walletActivity'
  */
 export type ICollectionsSet = Map<string, { url: string }>
-
-/**
- * The wallet's standard collections, mapping each logical key (used throughout
- * the app) to the actual WAS collection id and its display name.
- */
-const STANDARD_COLLECTIONS: ReadonlyArray<{
-  key: string
-  id: string
-  name: string
-}> = [
-  {
-    key: 'privateCredentials',
-    id: 'private-credentials',
-    name: 'Verifiable Credentials'
-  },
-  {
-    key: 'publicCredentials',
-    id: 'public-credentials',
-    name: 'Publicly Shared Verifiable Credentials'
-  },
-  {
-    key: 'walletActivity',
-    id: 'wallet-activity',
-    name: 'Wallet Activity Log'
-  }
-]
 
 /**
  * The parsed components of a WAS resource/collection URL
@@ -111,7 +86,9 @@ export class WASRemoteStore implements IWalletStore {
    * @returns {string}
    */
   private _collectionId(logicalKey: string): string {
-    const def = STANDARD_COLLECTIONS.find(entry => entry.key === logicalKey)
+    const def = WALLET_STANDARD_COLLECTIONS.find(
+      entry => entry.key === logicalKey
+    )
     if (!def) {
       throw new Error(`Unknown logical collection "${logicalKey}".`)
     }
@@ -133,7 +110,9 @@ export class WASRemoteStore implements IWalletStore {
           'Call ensureUserCollections() first.'
       )
     }
-    return this.was.space(this.spaceId).collection(this._collectionId(logicalKey))
+    return this.was
+      .space(this.spaceId)
+      .collection(this._collectionId(logicalKey))
   }
 
   /**
@@ -227,9 +206,13 @@ export class WASRemoteStore implements IWalletStore {
 
     // Space created, now create the standard collections.
     const collections: ICollectionsSet = new Map()
-    for (const { key, id, name } of STANDARD_COLLECTIONS) {
+    for (const { key, id, name, isPublic } of WALLET_STANDARD_COLLECTIONS) {
       try {
-        await space.collection(id).configure({ name })
+        const collection = space.collection(id)
+        await collection.configure({ name })
+        if (isPublic) {
+          await collection.setPublic()
+        }
       } catch (err) {
         console.error(`Error creating collection "${id}":`, err)
         throw new Error(
@@ -446,6 +429,84 @@ export class WASRemoteStore implements IWalletStore {
     } catch (err) {
       console.error('Error deleting credential:', err)
       throw new Error('Failed to delete remote credential.', { cause: err })
+    }
+  }
+
+  /**
+   * The absolute, world-readable URL of a credential's shared copy in the
+   * `public-credentials` collection. A plain GET resolves it once a public
+   * link has been created.
+   *
+   * @param cid {string}
+   * @returns {string}
+   */
+  publicCredentialUrl(cid: string): string {
+    const collectionId = this._collectionId('publicCredentials')
+    return new URL(
+      `/space/${this.spaceId}/${collectionId}/${cid}`,
+      this.storageServerUrl
+    ).toString()
+  }
+
+  /**
+   * Publishes a credential by writing a copy into the
+   * `public-credentials` collection.
+   *
+   * @param cid {string}
+   * @param credential {IVerifiableCredential}
+   * @returns {Promise<string>} the public URL anyone can GET.
+   */
+  async createPublicLink({
+    cid,
+    credential
+  }: {
+    cid: string
+    credential: IVerifiableCredential
+  }): Promise<string> {
+    try {
+      await this.addCollectionResource({
+        resourceId: cid,
+        collectionId: 'publicCredentials',
+        resourceBody: credential
+      })
+    } catch (err) {
+      console.error('Error creating public link:', err)
+      throw new Error('Failed to create public link.', { cause: err })
+    }
+    return this.publicCredentialUrl(cid)
+  }
+
+  /**
+   * Revokes a credential's public link by removing its copy from
+   * `public-credentials`.
+   *
+   * @param cid {string}
+   * @returns {Promise<void>}
+   */
+  async removePublicLink({ cid }: { cid: string }): Promise<void> {
+    try {
+      await this._collection('publicCredentials').resource(cid).delete()
+    } catch (err) {
+      console.error('Error removing public link:', err)
+      throw new Error('Failed to remove public link.', { cause: err })
+    }
+  }
+
+  /**
+   * Whether a credential currently has a public link (a copy in the
+   * `public-credentials` collection). Returns `false` when the status can't be determined.
+   *
+   * @param cid {string}
+   * @returns {Promise<boolean>}
+   */
+  async isShared({ cid }: { cid: string }): Promise<boolean> {
+    try {
+      // TODO use isPublic instead of get
+      const doc = await this._collection('publicCredentials').get(cid)
+      return doc !== null
+    } catch (err) {
+      console.error('Error checking public link status:', err)
+      return false
     }
   }
 

@@ -6,7 +6,10 @@ import { useParams, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialDetail } from '@/components/credentialDetails/CredentialDetail'
+import { DeleteCredentialDialog } from '@/components/credentialDetails/DeleteCredentialDialog'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { useCredentialPublicLink } from '@/hooks/useCredentialPublicLink'
+import { useCredentialDelete } from '@/hooks/useCredentialDelete'
 import { useAuthStore } from '@/stores/authStore'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
 import type { StoredCredential } from '@/types/credential'
@@ -20,7 +23,20 @@ export function CredentialDetailPage() {
   const [credential, setCredential] = useState<StoredCredential | null>(null)
   const [isNotFound, setIsNotFound] = useState(false)
   const [loadError, setLoadError] = useState(false)
-  const [deleteError, setDeleteError] = useState(false)
+
+  const { share, error: shareError } = useCredentialPublicLink({ cid, session })
+  const {
+    deleteError,
+    deleteDialogOpen,
+    deleting,
+    requestDelete,
+    runDelete,
+    cancelDelete
+  } = useCredentialDelete({
+    session,
+    cid,
+    onSuccess: () => navigate('/dashboard')
+  })
 
   useEffect(() => {
     if (!session || !cid) {
@@ -44,33 +60,19 @@ export function CredentialDetailPage() {
       })
   }, [cid, session])
 
-  async function handleDelete() {
-    if (!session) {
-      return
-    }
-    setDeleteError(false)
-    try {
-      await session.storage.deleteCredential({ cid: cid! })
-    } catch (err) {
-      console.error('Error deleting credential:', err)
-      setDeleteError(true)
-      return
-    }
-    navigate('/dashboard')
+  function handleDelete() {
+    void requestDelete()
   }
 
   if (!cid || isNotFound) {
     return <NotFoundPage />
   }
 
-  let title = t('credential.title')
-  if (credential?.vc) {
-    if (isResumeCredential(credential.vc)) {
-      title = t('credential.resumeTitle')
-    } else {
-      title = t('credential.title')
-    }
-  }
+  const title =
+    credential?.vc && isResumeCredential(credential.vc)
+      ? t('credential.resumeTitle')
+      : t('credential.title')
+
   return (
     <DashboardLayout title={title}>
       <Box sx={credentialDetailStyles.wrapper}>
@@ -79,14 +81,17 @@ export function CredentialDetailPage() {
             {t('credential.deleteError')}
           </Alert>
         )}
+        {shareError && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {t('credential.shareError')}
+          </Alert>
+        )}
         {credential ? (
-          <>
-            <CredentialDetail
-              vc={credential.vc}
-              cid={cid}
-              onDelete={handleDelete}
-            />
-          </>
+          <CredentialDetail
+            vc={credential.vc}
+            cid={cid}
+            actions={{ onDelete: handleDelete, share }}
+          />
         ) : loadError ? (
           <Alert severity="error">{t('credential.loadError')}</Alert>
         ) : (
@@ -95,6 +100,14 @@ export function CredentialDetailPage() {
           </Typography>
         )}
       </Box>
+
+      <DeleteCredentialDialog
+        open={deleteDialogOpen}
+        busy={deleting}
+        onKeepPublic={() => void runDelete({ alsoRemovePublic: false })}
+        onDeleteAll={() => void runDelete({ alsoRemovePublic: true })}
+        onCancel={cancelDelete}
+      />
     </DashboardLayout>
   )
 }

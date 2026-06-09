@@ -322,6 +322,55 @@ export class StorageManager {
   }
 
   /**
+   * Whether public links (sharing) are available this session. Sharing relies
+   * on the remote WAS server's access-control policies, so it's only possible
+   * with a remote backend.
+   */
+  get canShare(): boolean {
+    return !!this._remoteStore
+  }
+
+  /**
+   * The public URL a credential would resolve to once shared, or `undefined`
+   * when there is no remote backend.
+   */
+  publicLinkUrl({ cid }: { cid: string }): string | undefined {
+    return this._remoteStore?.publicCredentialUrl(cid)
+  }
+
+  /**
+   * Creates a world-readable public link for a credential and returns its URL.
+   *
+   * @param cid {string}
+   * @returns {Promise<string>}
+   */
+  async createPublicLink({ cid }: { cid: string }): Promise<string> {
+    if (!this._remoteStore) {
+      throw new Error('Public links require remote storage.')
+    }
+    const credential = await this._remoteStore.loadCredential({ cid })
+    if (!credential) {
+      throw new Error(`Credential "${cid}" not found.`)
+    }
+    return await this._remoteStore.createPublicLink({ cid, credential })
+  }
+
+  async removePublicLink({ cid }: { cid: string }): Promise<void> {
+    if (!this._remoteStore) {
+      throw new Error('Public links require remote storage.')
+    }
+    await this._remoteStore.removePublicLink({ cid })
+  }
+
+  //todo: use isPublic instead of get
+  async isShared({ cid }: { cid: string }): Promise<boolean> {
+    if (!this._remoteStore) {
+      return false
+    }
+    return await this._remoteStore.isShared({ cid })
+  }
+
+  /**
    * Lists the items in the `wallet-activity` history collection. Returns an
    * empty array when there is no remote backend.
    */
