@@ -18,8 +18,8 @@ import {
   MdFolder,
   MdFolderOpen
 } from 'react-icons/md'
-import { reset as microlightReset } from 'microlight'
 import { DashboardLayout } from '@/components/DashboardLayout'
+import { JsonHighlight } from '@/components/JsonHighlight'
 import { useAuthStore } from '@/stores/authStore'
 import { storageStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
@@ -198,15 +198,6 @@ export function CollectionContentsPage() {
     !resourceLoading &&
     !resourceError &&
     Boolean(snippetText)
-
-  useEffect(() => {
-    if (!snippetDialogOpen || !snippetText) {
-      return
-    }
-    requestAnimationFrame(() => {
-      microlightReset()
-    })
-  }, [snippetDialogOpen, snippetText])
 
   const handleCopySnippet = useCallback(async () => {
     if (!snippetText) {
@@ -448,13 +439,10 @@ export function CollectionContentsPage() {
             </IconButton>
           </DialogTitle>
           <DialogContent dividers sx={{ bgcolor: '#0b0f14' }}>
-            <Box
-              component="pre"
+            <JsonHighlight
+              code={snippetText}
               sx={credentialDetailStyles.codeBlock}
-              className="microlight"
-            >
-              {snippetText}
-            </Box>
+            />
           </DialogContent>
         </Dialog>
       </Box>

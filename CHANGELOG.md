@@ -39,6 +39,12 @@
   to disk: rather than `space.export()` (which buffers the whole archive into
   memory), `exportSpace()` uses the WAS client's raw-request escape hatch and
   returns the response `body` `ReadableStream`, preserving the prior behavior.
+- Replace the unmaintained `microlight` dependency (last published at `0.0.7`)
+  with `prism-react-renderer` via a new shared `JsonHighlight` component. The
+  raw-JSON source views (`CredentialDetail`, `ResumeCredentialCard`,
+  `CollectionResourcePage`, `CollectionContentsPage`) now render highlighted
+  tokens as React nodes, removing the imperative `microlightReset()` /
+  `requestAnimationFrame` DOM-scanning pattern.
 
 ## 0.10.0 - 2026-06-06
 
