@@ -25,9 +25,7 @@ import {
   InfoBlock,
   SectionHeader
 } from '@/components/credentialDetails/InfoBlock'
-import {
-  CredentialActions
-} from '@/components/credentialDetails/CredentialActions'
+import { CredentialActions } from '@/components/credentialDetails/CredentialActions'
 import { ResumePreview } from '@/components/resume/ResumePreview'
 import { ResumeCredentialCard } from '@/components/credentialDetails/ResumeCredentialCard'
 import { isResumeCredential } from '@/lib/isResumeCredential'
@@ -117,7 +115,10 @@ export function CredentialDetail({
               error={verification.error}
             />
             {hasActions && actions && (
-              <CredentialActions actions={actions} containerSx={sx.cardActions} />
+              <CredentialActions
+                actions={actions}
+                containerSx={sx.cardActions}
+              />
             )}
           </Box>
           <Box sx={sx.achievementRow}>
