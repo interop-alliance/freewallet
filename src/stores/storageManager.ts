@@ -343,6 +343,56 @@ export class StorageManager {
     })
   }
 
+  /**
+   * Records (in the `wallet-activity` collection) the Share activity for a credential.
+   */
+  async addHistoryCredentialShared({ cid, user }: { cid: string; user: User }) {
+    if (!this._remoteStore) {
+      return
+    }
+    const resourceId = uuidv7()
+    await this._remoteStore.addCollectionResource({
+      resourceId,
+      collectionId: 'walletActivity',
+      resourceBody: {
+        id: resourceId,
+        type: ['Share'],
+        summary: 'Credential shared: ' + cid,
+        actor: { email: user.email },
+        object: cid,
+        created: new Date().toISOString()
+      }
+    })
+  }
+
+  /**
+   * Records (in the `wallet-activity` collection) the Unshare activity for a credential.
+   */
+  async addHistoryCredentialUnshared({
+    cid,
+    user
+  }: {
+    cid: string
+    user: User
+  }) {
+    if (!this._remoteStore) {
+      return
+    }
+    const resourceId = uuidv7()
+    await this._remoteStore.addCollectionResource({
+      resourceId,
+      collectionId: 'walletActivity',
+      resourceBody: {
+        id: resourceId,
+        type: ['Unshare'],
+        summary: 'Credential unshared: ' + cid,
+        actor: { email: user.email },
+        object: cid,
+        created: new Date().toISOString()
+      }
+    })
+  }
+
   async listCredentials(): Promise<Array<StoredCredential>> {
     let vcs: Array<StoredCredential> = []
     if (!this.remoteOnly) {

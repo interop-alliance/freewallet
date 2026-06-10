@@ -43,6 +43,10 @@ export function useCredentialPublicLink({
       const url = await session.storage.createPublicLink({ cid })
       setPublicLink(url)
       setIsShared(true)
+      await session.storage.addHistoryCredentialShared({
+        cid,
+        user: session.user
+      })
     } catch (err) {
       console.error('Error creating public link:', err)
       setError(true)
@@ -61,6 +65,10 @@ export function useCredentialPublicLink({
       await session.storage.removePublicLink({ cid })
       setPublicLink(null)
       setIsShared(false)
+      await session.storage.addHistoryCredentialUnshared({
+        cid,
+        user: session.user
+      })
     } catch (err) {
       console.error('Error removing public link:', err)
       setError(true)
