@@ -63,7 +63,10 @@ function ShareButton({ share }: { share: CredentialShareActions }) {
           ...buttonSx,
           minWidth: { xs: 36, sm: 'auto' },
           px: { xs: 1, sm: 1.5 },
-          '& .MuiButton-startIcon': { mr: { xs: 0, sm: 1 }, ml: { xs: 0, sm: -0.5 } }
+          '& .MuiButton-startIcon': {
+            mr: { xs: 0, sm: 1 },
+            ml: { xs: 0, sm: -0.5 }
+          }
         }}
       >
         <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
@@ -119,7 +122,10 @@ export function CredentialActions({
                   }
                 }}
               >
-                <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+                <Box
+                  component="span"
+                  sx={{ display: { xs: 'none', sm: 'inline' } }}
+                >
                   {deleteLabel}
                 </Box>
               </Button>

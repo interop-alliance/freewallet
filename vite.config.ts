@@ -11,7 +11,27 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(appVersion),
   },
   build: {
-    sourcemap: true
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('node_modules')) {
+            // Keep react, react-dom, scheduler and the router together — they
+            // share internals and must not be split across chunks.
+            if (
+              /[\\/]node_modules[\\/](react|react-dom|react-router|scheduler)[\\/]/.test(
+                id
+              )
+            ) {
+              return 'react-vendor'
+            }
+            if (id.includes('@mui') || id.includes('@emotion')) {
+              return 'mui-vendor'
+            }
+          }
+        }
+      }
+    }
   },
   plugins: [react()],
   resolve: {

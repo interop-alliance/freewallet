@@ -18,3 +18,6 @@ createRoot(document.getElementById('root')!).render(
     </FreewalletThemeProvider>
   </StrictMode>
 )
+
+// Remove the static loading shell now that React has mounted.
+document.getElementById('initial-loader')?.remove()
