@@ -143,8 +143,12 @@ export function SignupPage() {
     setSearchParams({ ['step']: 'storage' })
   }
 
+  // Navigate to the explicit previous step rather than popping browser
+  // history. This keeps Back inside the wizard even when the user deep-linked
+  // or reloaded directly into a later step (where history(-1) would escape the
+  // signup flow entirely).
   const goBack = () => {
-    navigate(-1)
+    setSearchParams(activeStep === 2 ? { ['step']: 'email' } : {})
   }
 
   return (
