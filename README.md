@@ -86,6 +86,31 @@ To run the e2e Playwright tests:
 npm run test:e2e
 ```
 
+## Deployment
+
+`npm run build` produces a static SPA in `dist/` that can be served by any
+static file host (Nginx, Dokku buildpack, etc.).
+
+The build is code-split: some chunks (for example the password-strength
+dictionaries used on the signup page) are loaded on demand via dynamic
+`import()` rather than in the initial bundle. When serving behind Nginx, scope
+the SPA history fallback so that requests for hashed asset files return a real
+404 instead of `index.html`. Otherwise, after a redeploy, a still-open tab that
+requests an old (now-removed) chunk hash will receive `index.html` with a `200`
+and fail with a "Failed to fetch dynamically imported module" error:
+
+```nginx
+# Hashed build assets: serve the file or 404 -- never fall back to index.html.
+location /assets/ {
+    try_files $uri =404;
+}
+
+# Client-side routes: fall back to the SPA entry point.
+location / {
+    try_files $uri $uri/ /index.html;
+}
+```
+
 ## Security
 
 ## License
