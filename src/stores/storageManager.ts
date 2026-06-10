@@ -289,6 +289,10 @@ export class StorageManager {
   /**
    * Records (in the `wallet-activity` collection) the Create activity for
    * a credential.
+   *
+   * @param cid {string}
+   * @param user {User}
+   * @returns {Promise<void>}
    */
   async addHistoryCredentialCreated({
     cid,
@@ -317,6 +321,10 @@ export class StorageManager {
   /**
    * Records (in the `wallet-activity` collection) the Delete activity for
    * a credential.
+   *
+   * @param cid {string}
+   * @param user {User}
+   * @returns {Promise<void>}
    */
   async addHistoryCredentialDeleted({
     cid,
@@ -345,6 +353,10 @@ export class StorageManager {
 
   /**
    * Records (in the `wallet-activity` collection) the Share activity for a credential.
+   *
+   * @param cid {string}
+   * @param user {User}
+   * @returns {Promise<void>}
    */
   async addHistoryCredentialShared({ cid, user }: { cid: string; user: User }) {
     if (!this._remoteStore) {
@@ -367,6 +379,10 @@ export class StorageManager {
 
   /**
    * Records (in the `wallet-activity` collection) the Unshare activity for a credential.
+   *
+   * @param cid {string}
+   * @param user {User}
+   * @returns {Promise<void>}
    */
   async addHistoryCredentialUnshared({
     cid,
