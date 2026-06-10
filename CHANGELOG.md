@@ -2,6 +2,20 @@
 
 ## 0.11.0 - TBD
 
+### Performance
+
+- Speed up initial page load and eliminate the blank-screen wait. `index.html`
+  now renders a lightweight, theme-aware CSS spinner shell that paints instantly
+  before any application JavaScript parses (`main.tsx` removes it once React has
+  mounted). All routes except the lightweight `LandingPage` are now
+  `React.lazy()` code-split (wrapped in a single `<Suspense>` with a new
+  `RouteFallback` spinner), so heavy dependencies (`rxdb`, `jsonld`,
+  `verifier-core`, `qr-scanner`) no longer load on first paint. `vite.config.ts`
+  adds `manualChunks` to split `react`/`react-dom`/`react-router` and
+  `@mui`/`@emotion` into stable, separately-cacheable vendor chunks. The
+  critical-path bundle for `/` drops from a single ~1.8 MB chunk to ~250 KB
+  gzipped.
+
 ### Changed
 
 - Replace the unmaintained `react-password-strength-bar` dependency with a
