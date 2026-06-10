@@ -322,8 +322,8 @@ export class StorageManager {
    * Records (in the `wallet-activity` collection) the Delete activity for
    * a credential.
    *
-   * @param cid {string}
-   * @param user {User}
+   * @param cid {string} - CID of the credential (used as history object id).
+   * @param user {User} - Session user object (used to record history object actor).
    * @returns {Promise<void>}
    */
   async addHistoryCredentialDeleted({
@@ -354,8 +354,8 @@ export class StorageManager {
   /**
    * Records (in the `wallet-activity` collection) the Share activity for a credential.
    *
-   * @param cid {string}
-   * @param user {User}
+   * @param cid {string} - CID of the credential (used as history object id).
+   * @param user {User} - Session user object (used to record history object actor).
    * @returns {Promise<void>}
    */
   async addHistoryCredentialShared({ cid, user }: { cid: string; user: User }) {
@@ -380,8 +380,8 @@ export class StorageManager {
   /**
    * Records (in the `wallet-activity` collection) the Unshare activity for a credential.
    *
-   * @param cid {string}
-   * @param user {User}
+   * @param cid {string} - CID of the credential (used as history object id).
+   * @param user {User} - Session user object (used to record history object actor).
    * @returns {Promise<void>}
    */
   async addHistoryCredentialUnshared({
