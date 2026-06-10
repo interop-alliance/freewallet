@@ -377,6 +377,27 @@ export const loadingSpinnerStyles = {
   py: 6
 } as const
 
+export const passwordStrengthStyles = {
+  wrap: {
+    width: '100%'
+  },
+  segments: {
+    gap: 0.5,
+    width: '100%'
+  },
+  segment: {
+    flex: 1,
+    height: 4,
+    borderRadius: 1,
+    transition: 'background-color 0.2s ease'
+  },
+  label: {
+    mt: 0.5,
+    textAlign: 'right',
+    minHeight: '1.25rem'
+  }
+} as const
+
 export const chapiStyles = {
   page: {
     minHeight: '100dvh',

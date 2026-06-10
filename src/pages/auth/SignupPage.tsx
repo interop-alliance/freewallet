@@ -29,18 +29,11 @@ import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
 import { useAuthStore } from '@/stores/authStore'
-import PasswordStrengthBarModule from 'react-password-strength-bar'
+import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
 import { PASSWORD_RULES } from '@/app.config'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
 import { StorageManager } from '@/stores/storageManager'
 import { registerWallet } from '@/lib/registerWallet'
-
-const PasswordStrengthBar =
-  (
-    PasswordStrengthBarModule as unknown as {
-      default: typeof PasswordStrengthBarModule
-    }
-  ).default ?? PasswordStrengthBarModule
 
 const STEP_I18N_KEYS = [
   'auth.signup.steps.passphrase',
@@ -211,7 +204,7 @@ export function SignupPage() {
                     sx={authStyles.input}
                   />
                   <Box sx={authStyles.input}>
-                    <PasswordStrengthBar
+                    <PasswordStrengthMeter
                       password={passphrase}
                       onChangeScore={setScore}
                       scoreWords={

@@ -4,6 +4,13 @@
 
 ### Changed
 
+- Replace the unmaintained `react-password-strength-bar` dependency with a
+  `PasswordStrengthMeter` component backed by the maintained `@zxcvbn-ts`
+  packages. The zxcvbn dictionaries are loaded on demand via dynamic `import()`
+  so they are code-split out of the initial bundle and only fetched when the
+  signup page's meter mounts; the matching Spanish dictionary is loaded when the
+  active locale is Spanish. See the README Deployment section for the Nginx
+  `try_files` configuration recommended for code-split chunks.
 - Refactor `WASRemoteStore` to perform all remote Wallet Attached Storage
   operations through `@interop/was-client`'s `WasClient` and its lazy
   navigational handles (`space` / `collection` / `resource`) instead of
