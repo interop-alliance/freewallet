@@ -8,9 +8,9 @@ import Typography from '@mui/material/Typography'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { MdArrowBack, MdDeleteOutline, MdDownload } from 'react-icons/md'
-import { reset as microlightReset } from 'microlight'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
+import { JsonHighlight } from '@/components/JsonHighlight'
 import { DeleteCredentialDialog } from '@/components/credentialDetails/DeleteCredentialDialog'
 import { useCredentialDelete } from '@/hooks/useCredentialDelete'
 import { useAuthStore } from '@/stores/authStore'
@@ -178,15 +178,6 @@ export function CollectionResourcePage() {
     return JSON.stringify(payload.data, null, 2)
   }, [payload])
 
-  useEffect(() => {
-    if (!jsonText) {
-      return
-    }
-    requestAnimationFrame(() => {
-      microlightReset()
-    })
-  }, [jsonText])
-
   const displayTitle = useMemo(() => {
     if (vc) {
       return credentialTitle(vc)
@@ -330,13 +321,10 @@ export function CollectionResourcePage() {
               </Stack>
             </Paper>
 
-            <Box
-              component="pre"
-              className="microlight"
+            <JsonHighlight
+              code={jsonText}
               sx={credentialDetailStyles.codeBlock}
-            >
-              {jsonText}
-            </Box>
+            />
           </>
         )}
       </Box>

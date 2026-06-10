@@ -9,6 +9,7 @@ import {
   Typography
 } from '@mui/material'
 import { MdCheckCircle, MdCancel } from 'react-icons/md'
+import { JsonHighlight } from '@/components/JsonHighlight'
 import { getIssuerDetails } from '@/lib/viewMappers/issuerName'
 import { getSubject } from '@/lib/viewMappers/getSubject'
 
@@ -164,9 +165,8 @@ export function ResumeCredentialCard({
           {showRaw ? t('credential.hideJson') : t('credential.viewSource')}
         </Button>
         <Collapse in={showRaw} unmountOnExit>
-          <Box
-            component="pre"
-            className="microlight"
+          <JsonHighlight
+            code={rawJson}
             sx={{
               mt: 1,
               p: { xs: 1.5, sm: 2 },
@@ -183,9 +183,7 @@ export function ResumeCredentialCard({
               m: 0,
               mb: 1
             }}
-          >
-            {rawJson}
-          </Box>
+          />
         </Collapse>
       </Box>
     </Paper>

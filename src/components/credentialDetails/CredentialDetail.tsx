@@ -9,7 +9,6 @@ import {
   Collapse,
   Button
 } from '@mui/material'
-import { reset as microlightReset } from 'microlight'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
@@ -28,6 +27,7 @@ import {
 import { CredentialActions } from '@/components/credentialDetails/CredentialActions'
 import { ResumePreview } from '@/components/resume/ResumePreview'
 import { ResumeCredentialCard } from '@/components/credentialDetails/ResumeCredentialCard'
+import { JsonHighlight } from '@/components/JsonHighlight'
 import { isResumeCredential } from '@/lib/isResumeCredential'
 import { resumeSubjectToPreviewData } from '@/lib/viewMappers/resumeSubjectToPreviewData'
 import {
@@ -89,12 +89,7 @@ export function CredentialDetail({
           verification={verification}
           showRaw={showRaw}
           rawJson={rawJson}
-          onToggleRaw={() => {
-            setShowRaw(prev => !prev)
-            if (!showRaw) {
-              requestAnimationFrame(() => microlightReset())
-            }
-          }}
+          onToggleRaw={() => setShowRaw(prev => !prev)}
         />
 
         <Divider />
@@ -274,24 +269,16 @@ export function CredentialDetail({
           <Button
             size="small"
             variant="text"
-            onClick={() => {
-              setShowRaw(prev => !prev)
-              if (!showRaw) {
-                requestAnimationFrame(() => microlightReset())
-              }
-            }}
+            onClick={() => setShowRaw(prev => !prev)}
             sx={sx.rawToggle}
           >
             {showRaw ? t('credential.hideJson') : t('credential.viewSource')}
           </Button>
           <Collapse in={showRaw} unmountOnExit>
-            <Box
-              component="pre"
-              className="microlight"
+            <JsonHighlight
+              code={rawJson}
               sx={credentialDetailStyles.codeBlock}
-            >
-              {rawJson}
-            </Box>
+            />
           </Collapse>
         </Box>
       </Paper>
