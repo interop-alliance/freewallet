@@ -50,6 +50,26 @@ test.describe('Sign up page', () => {
     await expect(page.locator('input[type="password"]')).not.toBeVisible()
   })
 
+  test('in-page Back stays in the wizard when deep-linked into a later step', async ({
+    page
+  }) => {
+    // Deep-link straight into the storage step (no walked history). Back must
+    // return to the email step, then the passphrase step, not escape /signup.
+    await page.goto('/#/signup?step=storage')
+    await expect(
+      page.getByRole('button', { name: 'Create Wallet' })
+    ).toBeVisible()
+
+    await page.getByRole('button', { name: 'Back' }).click()
+    await expect(page).toHaveURL(/#\/signup\?.*step=email/)
+    await expect(page.locator('input[type="email"]')).toBeVisible()
+
+    await page.getByRole('button', { name: 'Back' }).click()
+    await expect(page).toHaveURL(/#\/signup/)
+    await expect(page).not.toHaveURL(/step=/)
+    await expect(page.locator('input[type="password"]')).toBeVisible()
+  })
+
   test('shows "Create Wallet" submit button', async ({ page }) => {
     await page.locator('input[type="password"]').fill('Str0ng-passphrase!')
     await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled()
