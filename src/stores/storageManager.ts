@@ -290,8 +290,8 @@ export class StorageManager {
    * Records (in the `wallet-activity` collection) the Create activity for
    * a credential.
    *
-   * @param cid {string}
-   * @param user {User}
+   * @param cid {string} - CID of the credential (used as history object id).
+   * @param user {User} - Session user object (used to record history object actor).
    * @returns {Promise<void>}
    */
   async addHistoryCredentialCreated({
