@@ -15,6 +15,7 @@ import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { credentialCardStyles, dashboardStyles } from '@/styles/appStyles'
+import { cidFrom } from '@/lib/cidFrom'
 
 export function AcceptCredentialsPage() {
   const { t } = useTranslation()
@@ -41,13 +42,11 @@ export function AcceptCredentialsPage() {
     try {
       await Promise.all(
         credentials.map(async credential => {
-          if (!credential.id) {
-            throw new Error('Credential ID is required')
-          }
           console.log('Storing credential:', credentialTitle(credential))
           await session.storage.addCredential({ credential })
+          const cid = await cidFrom({ doc: credential })
           await session.storage.addHistoryCredentialCreated({
-            cid: credential.id,
+            cid,
             user: session.user
           })
         })
