@@ -44,20 +44,17 @@ export function useCredentialDelete({
     [session, cid, onSuccess]
   )
 
-  const requestDelete = useCallback(
-    async () => {
-      if (!session || !cid) {
-        return
-      }
-      const shared = await session.storage.isShared({ cid })
-      if (shared) {
-        setDeleteDialogOpen(true)
-      } else {
-        await runDelete({ alsoRemovePublic: false })
-      }
-    },
-    [session, cid, runDelete]
-  )
+  const requestDelete = useCallback(async () => {
+    if (!session || !cid) {
+      return
+    }
+    const shared = await session.storage.isShared({ cid })
+    if (shared) {
+      setDeleteDialogOpen(true)
+    } else {
+      await runDelete({ alsoRemovePublic: false })
+    }
+  }, [session, cid, runDelete])
 
   const cancelDelete = useCallback(() => {
     setDeleteDialogOpen(false)

@@ -102,7 +102,10 @@ export function PasswordStrengthMeter({
   shortScoreWord
 }: PasswordStrengthMeterProps) {
   const { i18n } = useTranslation()
-  const [scorer, setScorer] = useState<Scorer | null>(cachedScorer)
+  // Lazy initializer: a bare `useState(cachedScorer)` would treat the cached
+  // scorer function as an initializer and call it with no arguments (scoring
+  // `undefined`), so wrap it to return the function itself as the state value.
+  const [scorer, setScorer] = useState<Scorer | null>(() => cachedScorer)
 
   useEffect(() => {
     let cancelled = false
