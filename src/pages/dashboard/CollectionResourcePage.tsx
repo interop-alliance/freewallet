@@ -22,6 +22,7 @@ import {
   type FetchedCollectionResource
 } from '@/lib/storageResource'
 import { getResourceDisplayName } from '@/components/storage/displayUtils'
+import { PublicAccessIcon } from '@/components/storage/PublicAccessIcon'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
 import { cidFrom } from '@/lib/cidFrom'
@@ -272,6 +273,11 @@ export function CollectionResourcePage() {
                   <Typography variant="h6" sx={storageStyles.vcPreviewTitle}>
                     {displayTitle}
                   </Typography>
+                  {resource.isPublic && (
+                    <Box sx={storageStyles.vcPreviewPublicMeta}>
+                      <PublicAccessIcon />
+                    </Box>
+                  )}
                   {description ? (
                     <Typography
                       variant="body2"

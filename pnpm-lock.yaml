@@ -39,8 +39,8 @@ importers:
         specifier: ^3.1.0
         version: 3.1.0
       '@interop/was-client':
-        specifier: ^0.2.0
-        version: 0.2.0(@interop/jsonld-signatures@11.7.1)
+        specifier: ^0.3.0
+        version: 0.3.0(@interop/jsonld-signatures@11.7.1)
       '@mui/lab':
         specifier: 9.0.0-beta.2
         version: 9.0.0-beta.2(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@types/react@19.2.17)(react@19.2.7))(@mui/material@9.1.0(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@types/react@19.2.17)(react@19.2.7))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -630,8 +630,8 @@ packages:
     resolution: {integrity: sha512-FBZU9fH9523JX/MxE8BBFYEsOTGsNOp1n7dtHic1n5Ku1fQWri1ypxSHbKYhzeyKKbxpLP9KMOxT3x5tkOnSag==}
     engines: {node: '>=24.0'}
 
-  '@interop/was-client@0.2.0':
-    resolution: {integrity: sha512-xawHpIgv2v6VkJcpnGdku7zMaEU2VEm0iW7/rFQDoUaLWTIOS37hSvYmLfw+Qscc9HBY48/K9y9JS8OgqKRq2Q==}
+  '@interop/was-client@0.3.0':
+    resolution: {integrity: sha512-UBNyXbA61mh3bZnyYOOYVmtv4DWNx+/P8PPyYuw+yZtzqTwOziidU6T8zzg+FJhN9YF4LVJzuEUuB0J68shxcw==}
     engines: {node: '>=24.0'}
 
   '@interop/zcap@11.0.1':
@@ -3949,7 +3949,7 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/was-client@0.2.0(@interop/jsonld-signatures@11.7.1)':
+  '@interop/was-client@0.3.0(@interop/jsonld-signatures@11.7.1)':
     dependencies:
       '@interop/data-integrity-core': 6.4.0
       '@interop/ed25519-signature': 7.1.0(@interop/jsonld-signatures@11.7.1)

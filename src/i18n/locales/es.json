@@ -150,6 +150,7 @@
     "collectionNotFound": "Colección no encontrada.",
     "exportError": "No se pudo exportar el espacio. Inténtelo de nuevo.",
     "collectionBackend": "Predeterminado (WAS)",
+    "publicAccess": "Lectura pública",
     "resourceCount": "{{count}} recursos",
     "emptyCollectionsTitle": "Aún no hay colecciones",
     "emptyCollectionsDescription": "Las colecciones aparecerán aquí cuando su billetera cree carpetas de almacenamiento.",

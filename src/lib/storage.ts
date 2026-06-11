@@ -17,6 +17,7 @@ export type StorageCollection = {
   name?: string
   type?: string[]
   totalItems?: number
+  isPublic?: boolean
 }
 
 export type StorageCollectionList = {
@@ -35,6 +36,7 @@ export type StorageResource = {
   modified?: string
   updated?: string
   size?: number
+  isPublic?: boolean
 }
 
 export type StorageResourceList = {
