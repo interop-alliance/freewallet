@@ -5,6 +5,7 @@ import { MdFolder, MdFolderOpen } from 'react-icons/md'
 import type { StorageCollection } from '@/lib/storage'
 import { storageStyles } from '@/styles/appStyles'
 import { getCollectionDisplayName } from './displayUtils'
+import { PublicAccessIcon } from './PublicAccessIcon'
 import { StorageEmptyState } from './EmptyState'
 
 interface CollectionsOverviewProps {
@@ -81,8 +82,14 @@ function CollectionFolderCard({
             <Typography variant="subtitle1" sx={storageStyles.folderName}>
               {displayName}
             </Typography>
-            <Typography variant="caption" sx={storageStyles.folderMeta}>
+            <Typography variant="caption" sx={storageStyles.folderMeta} component="div">
               {backendName}
+              {collection.isPublic && (
+                <Box component="span" sx={storageStyles.folderMetaPublic}>
+                  {' · '}
+                  <PublicAccessIcon />
+                </Box>
+              )}
             </Typography>
           </Stack>
         </Stack>

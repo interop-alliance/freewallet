@@ -331,16 +331,24 @@ export class WASRemoteStore implements IWalletStore {
   }: {
     collectionUrl: string
   }): Promise<Array<StorageResource>> {
+    let collection
     let listing
     try {
-      listing = await this._collectionFromUrl(collectionUrl).list()
+      collection = this._collectionFromUrl(collectionUrl)
+      listing = await collection.list()
     } catch (err) {
       console.error('Error listing collection resources:', err)
       throw new Error('Failed to list remote storage collection resources.', {
         cause: err
       })
     }
-    return (listing?.items ?? []) as Array<StorageResource>
+
+    const items = (listing?.items ?? []) as Array<StorageResource>
+    const collectionIsPublic = await collection.isPublic()
+    if (collectionIsPublic) {
+      return items.map(item => ({ ...item, isPublic: true }))
+    }
+    return items
   }
 
   async deleteCollectionResource({
@@ -399,7 +407,13 @@ export class WASRemoteStore implements IWalletStore {
         cause: err
       })
     }
-    return (listing?.items ?? []) as Array<StorageCollection>
+    const items = (listing?.items ?? []) as Array<StorageCollection>
+    return await Promise.all(
+      items.map(async item => {
+        const isPublic = await this._collectionFromUrl(item.url).isPublic()
+        return { ...item, isPublic }
+      })
+    )
   }
 
   async listHistoryItems(): Promise<

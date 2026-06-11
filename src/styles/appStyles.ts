@@ -607,6 +607,27 @@ export const storageStyles = {
     alignItems: 'center',
     flexShrink: 0
   },
+  publicAccessMeta: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 0.25,
+    color: 'success.main',
+    verticalAlign: 'middle'
+  },
+  publicAccessMetaIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    lineHeight: 0
+  },
+  publicAccessMetaLabel: {
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    color: 'inherit'
+  },
+  folderMetaPublic: {
+    display: 'inline',
+    whiteSpace: 'nowrap'
+  },
   folderName: {
     fontWeight: 600,
     overflow: 'hidden',
@@ -685,8 +706,14 @@ export const storageStyles = {
   },
   resourceNameInner: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 1.25,
+    minWidth: 0
+  },
+  resourceNameBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 0.25,
     minWidth: 0
   },
   resourceFileIcon: {
@@ -783,6 +810,9 @@ export const storageStyles = {
   },
   vcPreviewTitle: {
     fontWeight: 600,
+    mb: 0.5
+  },
+  vcPreviewPublicMeta: {
     mb: 0.5
   },
   vcPreviewDescription: {

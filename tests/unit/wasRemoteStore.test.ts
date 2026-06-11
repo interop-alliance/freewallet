@@ -22,7 +22,7 @@ function storeWithStubbedClient(was: unknown): WASRemoteStore {
 }
 
 describe('WASRemoteStore.listCollections', () => {
-  it('returns the items from the space collections listing', async () => {
+  it('returns collections with isPublic from collection.isPublic()', async () => {
     const items = [
       { id: 'private-credentials', url: '/space/space-id/private-credentials' }
     ]
@@ -31,12 +31,18 @@ describe('WASRemoteStore.listCollections', () => {
       totalItems: 1,
       items
     })
+    const isPublic = vi.fn().mockResolvedValue(false)
+    const collection = vi.fn().mockReturnValue({ isPublic })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collections })
+      space: vi.fn().mockReturnValue({ collections, collection })
     })
 
-    await expect(store.listCollections()).resolves.toEqual(items)
+    await expect(store.listCollections()).resolves.toEqual([
+      { ...items[0], isPublic: false }
+    ])
     expect(collections).toHaveBeenCalledOnce()
+    expect(collection).toHaveBeenCalledWith('private-credentials')
+    expect(isPublic).toHaveBeenCalledOnce()
   })
 
   it('returns an empty array when the space is missing', async () => {
@@ -51,7 +57,7 @@ describe('WASRemoteStore.listCollections', () => {
 })
 
 describe('WASRemoteStore.listCollectionResources', () => {
-  it('lists resource metadata addressed by the collection URL', async () => {
+  it('returns listed resources without isPublic for private collections', async () => {
     const items = [
       {
         id: 'credential.json',
@@ -66,7 +72,8 @@ describe('WASRemoteStore.listCollectionResources', () => {
       totalItems: 1,
       items
     })
-    const collection = vi.fn().mockReturnValue({ list })
+    const collectionIsPublic = vi.fn().mockResolvedValue(false)
+    const collection = vi.fn().mockReturnValue({ list, isPublic: collectionIsPublic })
     const space = vi.fn().mockReturnValue({ collection })
     const store = storeWithStubbedClient({ space })
 
@@ -75,9 +82,30 @@ describe('WASRemoteStore.listCollectionResources', () => {
         collectionUrl: '/space/space-id/private-credentials'
       })
     ).resolves.toEqual(items)
-    // The URL is parsed into space + collection ids before navigating.
     expect(space).toHaveBeenCalledWith('space-id')
     expect(collection).toHaveBeenCalledWith('private-credentials')
+    expect(collectionIsPublic).toHaveBeenCalledOnce()
+  })
+
+  it('marks all resources public when the collection is public', async () => {
+    const items = [
+      {
+        id: 'shared.json',
+        url: '/space/space-id/public-credentials/shared.json'
+      }
+    ]
+    const list = vi.fn().mockResolvedValue({ totalItems: 1, items })
+    const collectionIsPublic = vi.fn().mockResolvedValue(true)
+    const collection = vi.fn().mockReturnValue({ list, isPublic: collectionIsPublic })
+    const space = vi.fn().mockReturnValue({ collection })
+    const store = storeWithStubbedClient({ space })
+
+    await expect(
+      store.listCollectionResources({
+        collectionUrl: '/space/space-id/public-credentials'
+      })
+    ).resolves.toEqual([{ ...items[0], isPublic: true }])
+    expect(collectionIsPublic).toHaveBeenCalledOnce()
   })
 })
 

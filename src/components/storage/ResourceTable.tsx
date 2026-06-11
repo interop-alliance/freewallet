@@ -20,6 +20,7 @@ import {
   getResourceModifiedIso,
   getResourceTypeLabel
 } from './displayUtils'
+import { PublicAccessIcon } from './PublicAccessIcon'
 
 interface ResourceTableProps {
   resources: StorageResource[]
@@ -113,9 +114,12 @@ function ResourceRow({ resource, locale, selected, onOpen }: ResourceRowProps) {
           <Box sx={storageStyles.resourceFileIcon} aria-hidden>
             <MdInsertDriveFile />
           </Box>
-          <Typography variant="body2" sx={storageStyles.resourceNameText}>
-            {displayName}
-          </Typography>
+          <Box sx={storageStyles.resourceNameBlock}>
+            <Typography variant="body2" sx={storageStyles.resourceNameText}>
+              {displayName}
+            </Typography>
+            {resource.isPublic && <PublicAccessIcon />}
+          </Box>
         </Box>
       </TableCell>
       <TableCell sx={storageStyles.resourceTypeCell}>

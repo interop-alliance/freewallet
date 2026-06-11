@@ -30,6 +30,7 @@ import {
 } from '@/lib/storageResource'
 import { extensionFromMime } from '@/lib/extensionFromMime'
 import { ResourceTable } from '@/components/storage/ResourceTable'
+import { PublicAccessIcon } from '@/components/storage/PublicAccessIcon'
 import { StorageEmptyState } from '@/components/storage/EmptyState'
 import {
   getCollectionDisplayName,
@@ -305,8 +306,14 @@ export function CollectionContentsPage() {
               {folderDisplayName}
             </Typography>
             {subtitle && (
-              <Typography variant="body2" sx={storageStyles.contentsSubtitle}>
+              <Typography variant="body2" sx={storageStyles.contentsSubtitle} component="div">
                 {subtitle}
+                {collection?.isPublic && (
+                  <Box component="span" sx={storageStyles.folderMetaPublic}>
+                    {' · '}
+                    <PublicAccessIcon />
+                  </Box>
+                )}
               </Typography>
             )}
           </Stack>
