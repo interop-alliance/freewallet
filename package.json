@@ -44,6 +44,7 @@
     "credential-handler-polyfill": "^4.0.1",
     "i18next": "^26.3.0",
     "json-canonicalize": "^2.0.0",
+    "nanotar": "^0.3.0",
     "prism-react-renderer": "^2.4.1",
     "qr-scanner": "^1.4.2",
     "query-string": "^9.3.1",
