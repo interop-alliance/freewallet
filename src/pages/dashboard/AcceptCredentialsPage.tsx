@@ -27,6 +27,14 @@ export function AcceptCredentialsPage() {
 
   const credentials = (location.state?.credentials ??
     []) as IVerifiableCredential[]
+  const importSummary = location.state?.importSummary as
+    | {
+        collectionsCreated: number
+        collectionsSkipped: number
+        resourcesCreated: number
+        resourcesSkipped: number
+      }
+    | undefined
 
   if (credentials.length === 0) {
     navigate('/dashboard')
@@ -51,6 +59,16 @@ export function AcceptCredentialsPage() {
           })
         })
       )
+      if (importSummary) {
+        window.alert(
+          t('storage.importSuccess', {
+            ...importSummary,
+            credentialsNote: t('storage.importCredentialsNote', {
+              count: credentials.length
+            })
+          })
+        )
+      }
       navigate('/dashboard')
     } catch (err) {
       console.error('Error storing credentials:', err)

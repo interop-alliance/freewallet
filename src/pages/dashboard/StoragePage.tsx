@@ -5,11 +5,14 @@ import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { CollectionsOverview } from '@/components/storage/StorageBrowser'
 import { useAuthStore } from '@/stores/authStore'
 import { storageStyles } from '@/styles/appStyles'
 import type { StorageCollection } from '@/lib/storage'
+import type { ImportSpaceSummary } from '@/stores/storageManager'
+import { parseImportTarFile } from '@/lib/import'
 
 type SaveFilePicker = (options?: {
   suggestedName?: string
@@ -23,6 +26,7 @@ type SaveFilePicker = (options?: {
 
 export const StoragePage = () => {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const session = useAuthStore(state => state.session)
   const [collections, setCollections] = useState<Array<StorageCollection>>([])
   const [collectionsError, setCollectionsError] = useState<string | null>(null)
@@ -134,7 +138,7 @@ export const StoragePage = () => {
   }
 
   const handleImportClick = () => {
-    if (!isImporting && session?.storage?.hasRemoteStorage) {
+    if (!isImporting) {
       importInputRef.current?.click()
     }
   }
@@ -150,16 +154,45 @@ export const StoragePage = () => {
 
     setIsImporting(true)
     try {
-      const summary = await session.storage.importSpace({ tarFile: file })
-      setCollectionsRefreshKey(key => key + 1)
-      window.alert(
-        t('storage.importSuccess', {
-          collectionsCreated: summary.collectionsCreated,
-          collectionsSkipped: summary.collectionsSkipped,
-          resourcesCreated: summary.resourcesCreated,
-          resourcesSkipped: summary.resourcesSkipped
+      const { hasSpace, hasCredentials, credentials } =
+        await parseImportTarFile(file)
+
+      if (!hasSpace && !hasCredentials) {
+        throw new Error('Unrecognized archive.')
+      }
+
+      let spaceSummary: ImportSpaceSummary | undefined
+      if (hasSpace) {
+        if (!session.storage.hasRemoteStorage) {
+          throw new Error(t('storage.importSpaceRequiresRemote'))
+        }
+        spaceSummary = await session.storage.importSpace({ tarFile: file })
+        setCollectionsRefreshKey(key => key + 1)
+      }
+
+      if (credentials.length > 0) {
+        navigate('/accept-credentials', {
+          state: { credentials, importSummary: spaceSummary }
         })
-      )
+        return
+      }
+
+      const credentialsNote = hasCredentials
+        ? t('storage.importCredentialsNote', { count: credentials.length })
+        : ''
+
+      if (spaceSummary) {
+        window.alert(
+          t('storage.importSuccess', { ...spaceSummary, credentialsNote })
+        )
+        return
+      }
+
+      if (hasCredentials) {
+        window.alert(
+          t('storage.importCredentialsOnly', { count: credentials.length })
+        )
+      }
     } catch (error) {
       console.error('Failed to import space:', error)
       window.alert(t('storage.importError'))
@@ -188,7 +221,7 @@ export const StoragePage = () => {
             <Button
               variant="outlined"
               onClick={handleImportClick}
-              disabled={isImporting || !session?.storage?.hasRemoteStorage}
+              disabled={isImporting}
               sx={[
                 storageStyles.buttonTextLeft,
                 storageStyles.buttonSize.topAction
