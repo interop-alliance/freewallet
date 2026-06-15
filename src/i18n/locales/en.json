@@ -49,7 +49,8 @@
     "errors": {
       "profileNotFound": "This profile does not exist, please sign up.",
       "profileExists": "This profile already exists, please log in.",
-      "setupFailed": "Could not finish setting up your wallet. Please try again."
+      "setupFailed": "Could not finish setting up your wallet. Please try again.",
+      "storageUnreachable": "Could not reach the storage server. While we're fixing it, try <guest>guest mode</guest>."
     },
     "login": {
       "heading": "Log in",
@@ -290,6 +291,8 @@
   },
   "chapi": {
     "accountNotFound": "Account not found. Please create your wallet from the main app first.",
+    "storageUnreachable": "Could not reach the storage server. Please try again in a moment.",
+    "loginFailed": "Could not log in. Please try again.",
     "loginPrompt": "Enter your wallet passphrase to continue:",
     "passphrasePlaceholder": "Passphrase",
     "get": {

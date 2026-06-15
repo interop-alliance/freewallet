@@ -15,6 +15,7 @@ import { receiveCredentialEvent } from 'web-credential-handler'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { MEDIATOR_BASE } from '@/app.config'
 import { initSessionFromSecret } from '@/session/initSession'
+import { isStorageUnreachable } from '@/lib/storageErrors'
 import type { Session } from '@/types/auth'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
@@ -71,16 +72,25 @@ export function WalletStorePage() {
 
   async function handleLogin(passphrase: string) {
     setLoginError(null)
-    const { session: s, userExists } = await initSessionFromSecret({
-      secret: passphrase
-    })
-    if (!userExists) {
-      setLoginError(t('chapi.accountNotFound'))
-      return
+    try {
+      const { session: s, userExists } = await initSessionFromSecret({
+        secret: passphrase
+      })
+      if (!userExists) {
+        setLoginError(t('chapi.accountNotFound'))
+        return
+      }
+      await s.storage.ensureUserCollections({ user: s.user })
+      setSession(s)
+      setPageState('confirming')
+    } catch (err) {
+      if (isStorageUnreachable(err)) {
+        setLoginError(t('chapi.storageUnreachable'))
+      } else {
+        console.error('CHAPI login failed:', err)
+        setLoginError(t('chapi.loginFailed'))
+      }
     }
-    await s.storage.ensureUserCollections({ user: s.user })
-    setSession(s)
-    setPageState('confirming')
   }
 
   async function handleConfirm() {

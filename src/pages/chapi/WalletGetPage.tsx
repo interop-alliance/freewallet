@@ -15,6 +15,7 @@ import { receiveCredentialEvent } from 'web-credential-handler'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { MEDIATOR_BASE } from '@/app.config'
 import { initSessionFromSecret } from '@/session/initSession'
+import { isStorageUnreachable } from '@/lib/storageErrors'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
 import { chapiStyles } from '@/styles/appStyles'
@@ -80,17 +81,26 @@ export function WalletGetPage() {
 
   async function handleLogin(passphrase: string) {
     setLoginError(null)
-    const { session, userExists } = await initSessionFromSecret({
-      secret: passphrase
-    })
-    if (!userExists) {
-      setLoginError(t('chapi.accountNotFound'))
-      return
+    try {
+      const { session, userExists } = await initSessionFromSecret({
+        secret: passphrase
+      })
+      if (!userExists) {
+        setLoginError(t('chapi.accountNotFound'))
+        return
+      }
+      await session.storage.ensureUserCollections({ user: session.user })
+      const vcs = await session.storage.listCredentials()
+      setCredentials(vcs)
+      setPageState('selecting')
+    } catch (err) {
+      if (isStorageUnreachable(err)) {
+        setLoginError(t('chapi.storageUnreachable'))
+      } else {
+        console.error('CHAPI login failed:', err)
+        setLoginError(t('chapi.loginFailed'))
+      }
     }
-    await session.storage.ensureUserCollections({ user: session.user })
-    const vcs = await session.storage.listCredentials()
-    setCredentials(vcs)
-    setPageState('selecting')
   }
 
   function handleShare(vc: IVerifiableCredential) {
