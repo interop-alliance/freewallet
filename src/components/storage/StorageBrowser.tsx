@@ -82,7 +82,11 @@ function CollectionFolderCard({
             <Typography variant="subtitle1" sx={storageStyles.folderName}>
               {displayName}
             </Typography>
-            <Typography variant="caption" sx={storageStyles.folderMeta} component="div">
+            <Typography
+              variant="caption"
+              sx={storageStyles.folderMeta}
+              component="div"
+            >
               {backendName}
               {collection.isPublic && (
                 <Box component="span" sx={storageStyles.folderMetaPublic}>

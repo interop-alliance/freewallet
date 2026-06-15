@@ -73,7 +73,9 @@ describe('WASRemoteStore.listCollectionResources', () => {
       items
     })
     const collectionIsPublic = vi.fn().mockResolvedValue(false)
-    const collection = vi.fn().mockReturnValue({ list, isPublic: collectionIsPublic })
+    const collection = vi
+      .fn()
+      .mockReturnValue({ list, isPublic: collectionIsPublic })
     const space = vi.fn().mockReturnValue({ collection })
     const store = storeWithStubbedClient({ space })
 
@@ -96,7 +98,9 @@ describe('WASRemoteStore.listCollectionResources', () => {
     ]
     const list = vi.fn().mockResolvedValue({ totalItems: 1, items })
     const collectionIsPublic = vi.fn().mockResolvedValue(true)
-    const collection = vi.fn().mockReturnValue({ list, isPublic: collectionIsPublic })
+    const collection = vi
+      .fn()
+      .mockReturnValue({ list, isPublic: collectionIsPublic })
     const space = vi.fn().mockReturnValue({ collection })
     const store = storeWithStubbedClient({ space })
 

@@ -306,7 +306,11 @@ export function CollectionContentsPage() {
               {folderDisplayName}
             </Typography>
             {subtitle && (
-              <Typography variant="body2" sx={storageStyles.contentsSubtitle} component="div">
+              <Typography
+                variant="body2"
+                sx={storageStyles.contentsSubtitle}
+                component="div"
+              >
                 {subtitle}
                 {collection?.isPublic && (
                   <Box component="span" sx={storageStyles.folderMetaPublic}>

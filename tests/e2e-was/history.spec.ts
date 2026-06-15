@@ -17,10 +17,7 @@ test.describe('Wallet activity history', () => {
     await signupViaWizard(page, testInfo)
     await goToHistory(page)
 
-    await expectHistoryEntry(
-      page,
-      'Account Sign Up. did:key DID generated.'
-    )
+    await expectHistoryEntry(page, 'Account Sign Up. did:key DID generated.')
     await expectHistoryEntry(
       page,
       'Account space created on remote storage server, collections initialized.'
@@ -33,15 +30,9 @@ test.describe('Wallet activity history', () => {
   }, testInfo) => {
     await signupViaWizard(page, testInfo)
     await goToHistory(page)
-    await expectHistoryEntry(
-      page,
-      'Account Sign Up. did:key DID generated.'
-    )
+    await expectHistoryEntry(page, 'Account Sign Up. did:key DID generated.')
 
-    await page
-      .getByRole('button', { name: 'View source' })
-      .first()
-      .click()
+    await page.getByRole('button', { name: 'View source' }).first().click()
     await expect(
       page.getByRole('heading', { name: 'History source', level: 6 })
     ).toBeVisible()
