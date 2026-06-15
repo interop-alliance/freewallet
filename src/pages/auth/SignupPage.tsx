@@ -23,11 +23,12 @@ import {
   useNavigate,
   useSearchParams
 } from 'react-router'
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import { LanguageSelector } from '@/components/LanguageSelector'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
+import { isStorageUnreachable } from '@/lib/storageErrors'
 import { useAuthStore } from '@/stores/authStore'
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
 import { PASSWORD_RULES } from '@/app.config'
@@ -64,9 +65,7 @@ export function SignupPage() {
   const [passphrase, setPassphrase] = useState('')
   const [score, setScore] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [setupError, setSetupError] = useState(false)
-
-  const displayMessage = setupError ? t('auth.errors.setupFailed') : bannerText
+  const [errorKey, setErrorKey] = useState<string | null>(null)
 
   const stepParam = searchParams.get('step')
   const activeStep = stepParam === 'storage' ? 2 : stepParam === 'email' ? 1 : 0
@@ -80,7 +79,7 @@ export function SignupPage() {
       return
     }
     setIsSubmitting(true)
-    setSetupError(false)
+    setErrorKey(null)
     try {
       const { session } = await initSessionFromSecret({
         email: email || undefined,
@@ -107,8 +106,13 @@ export function SignupPage() {
       login(session)
       navigate('/dashboard')
     } catch (err) {
-      console.error('Error completing signup:', err)
-      setSetupError(true)
+      // The WAS storage server is unreachable -- offer a guest-mode fallback.
+      if (isStorageUnreachable(err)) {
+        setErrorKey('auth.errors.storageUnreachable')
+      } else {
+        console.error('Error completing signup:', err)
+        setErrorKey('auth.errors.setupFailed')
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -157,10 +161,35 @@ export function SignupPage() {
           {t('auth.signup.heading')}
         </Typography>
 
-        {displayMessage && (
+        {errorKey === 'auth.errors.storageUnreachable' ? (
           <Typography variant="body1" color="error" sx={authStyles.userMessage}>
-            {displayMessage}
+            <Trans
+              i18nKey="auth.errors.storageUnreachable"
+              components={{
+                guest: (
+                  <Link
+                    component={RouterLink}
+                    to="/guest-login"
+                    underline="always"
+                  />
+                )
+              }}
+            />
           </Typography>
+        ) : errorKey ? (
+          <Typography variant="body1" color="error" sx={authStyles.userMessage}>
+            {t(errorKey)}
+          </Typography>
+        ) : (
+          bannerText && (
+            <Typography
+              variant="body1"
+              color="error"
+              sx={authStyles.userMessage}
+            >
+              {bannerText}
+            </Typography>
+          )
         )}
         <Box sx={authStyles.signupStepperWrap}>
           <Stepper

@@ -110,12 +110,17 @@ export class StorageManager {
 
   static async initStorageClients({
     user,
-    profile
+    profile,
+    isGuest = false
   }: {
     user: User
     profile: ControllerProfile
+    isGuest?: boolean
   }) {
-    const storageServerUrl = WAS_SERVER_URL
+    // Guest sessions never touch the remote WAS server -- they always use the
+    // local BrowserStore. This keeps guest mode usable as a fallback even when
+    // the configured WAS server is unreachable.
+    const storageServerUrl = isGuest ? undefined : WAS_SERVER_URL
     console.log('Initializing remote storage clients:', { storageServerUrl })
     const remoteOnly = !!storageServerUrl
     let remoteStore, localStore

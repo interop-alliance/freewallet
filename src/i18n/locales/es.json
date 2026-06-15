@@ -49,7 +49,8 @@
     "errors": {
       "profileNotFound": "Este perfil no existe; regístrese.",
       "profileExists": "Este perfil ya existe; inicie sesión.",
-      "setupFailed": "No se pudo terminar de configurar su billetera. Inténtelo de nuevo."
+      "setupFailed": "No se pudo terminar de configurar su billetera. Inténtelo de nuevo.",
+      "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Mientras lo solucionamos, pruebe el <guest>modo invitado</guest>."
     },
     "login": {
       "heading": "Iniciar sesión",
@@ -290,6 +291,8 @@
   },
   "chapi": {
     "accountNotFound": "Cuenta no encontrada. Cree su billetera en la aplicación principal primero.",
+    "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Inténtelo de nuevo en un momento.",
+    "loginFailed": "No se pudo iniciar sesión. Inténtelo de nuevo.",
     "loginPrompt": "Introduzca la frase de contraseña de su billetera para continuar:",
     "passphrasePlaceholder": "Frase de contraseña",
     "get": {

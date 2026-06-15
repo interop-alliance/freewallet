@@ -79,7 +79,8 @@ export async function initSessionFromSecret({
 
   const { storage, userExists } = await StorageManager.initStorageClients({
     user,
-    profile
+    profile,
+    isGuest
   })
 
   const session = { user, profile, storage, isGuest } as Session

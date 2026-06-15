@@ -7,7 +7,7 @@ import Link from '@mui/material/Link'
 import { FiKey } from 'react-icons/fi'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
 import { LanguageSelector } from '@/components/LanguageSelector'
 import { authStyles } from '@/styles/appStyles'
@@ -15,6 +15,7 @@ import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
+import { isStorageUnreachable } from '@/lib/storageErrors'
 import { registerWallet } from '@/lib/registerWallet'
 
 type AuthLocationState = { authMessageKey?: string; userMessage?: string }
@@ -29,6 +30,7 @@ export function LoginPage() {
     ? t(state.authMessageKey)
     : state?.userMessage
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [errorKey, setErrorKey] = useState<string | null>(null)
 
   useEffect(() => {
     void registerWallet()
@@ -43,6 +45,7 @@ export function LoginPage() {
       return
     }
     setIsSubmitting(true)
+    setErrorKey(null)
     try {
       const data = new FormData(event.currentTarget)
       const passphrase = data.get('login-passphrase') as string
@@ -62,6 +65,14 @@ export function LoginPage() {
       await session.storage.ensureUserCollections({ user: session.user })
       login(session)
       navigate('/dashboard', { replace: true })
+    } catch (err) {
+      // The WAS storage server is unreachable -- offer a guest-mode fallback.
+      if (isStorageUnreachable(err)) {
+        setErrorKey('auth.errors.storageUnreachable')
+      } else {
+        console.error('Login failed:', err)
+        setErrorKey('auth.errors.setupFailed')
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -90,14 +101,43 @@ export function LoginPage() {
                 onSubmit={handleLogin}
                 sx={authStyles.authCardForm}
               >
-                {bannerText && (
+                {errorKey === 'auth.errors.storageUnreachable' ? (
                   <Typography
                     variant="body1"
                     color="error"
                     sx={authStyles.userMessage}
                   >
-                    {bannerText}
+                    <Trans
+                      i18nKey="auth.errors.storageUnreachable"
+                      components={{
+                        guest: (
+                          <Link
+                            component={RouterLink}
+                            to="/guest-login"
+                            underline="always"
+                          />
+                        )
+                      }}
+                    />
                   </Typography>
+                ) : errorKey ? (
+                  <Typography
+                    variant="body1"
+                    color="error"
+                    sx={authStyles.userMessage}
+                  >
+                    {t(errorKey)}
+                  </Typography>
+                ) : (
+                  bannerText && (
+                    <Typography
+                      variant="body1"
+                      color="error"
+                      sx={authStyles.userMessage}
+                    >
+                      {bannerText}
+                    </Typography>
+                  )
                 )}
 
                 <Typography

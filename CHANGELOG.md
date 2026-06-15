@@ -1,5 +1,29 @@
 # History
 
+## Unreleased - TBD
+
+### Added
+
+- Show an on-screen error on the login page when the remote WAS storage server
+  is unreachable, instead of silently failing (the login spinner used to just
+  stop). The message offers a link to guest mode as a fallback
+  (`auth.errors.storageUnreachable`, detected via the new
+  `isStorageUnreachable()` helper in `src/lib/storageErrors.ts`). Other login
+  failures now surface the generic `auth.errors.setupFailed` message rather than
+  throwing uncaught.
+- Extend the same unreachable-storage handling to the signup page (offers the
+  guest-mode fallback) and to the CHAPI `wallet/get` and `wallet/store` popups
+  (which now show `chapi.storageUnreachable` / `chapi.loginFailed` instead of
+  hanging on a stuck spinner).
+
+### Fixed
+
+- Guest mode now always uses local browser storage and never contacts the remote
+  WAS server, matching its documented design. Previously, when
+  `VITE_WAS_SERVER_URL` was set, guest login would also fail if that server was
+  unreachable -- making it useless as a fallback. `StorageManager.initStorageClients`
+  now skips the remote backend for guest sessions.
+
 ## 0.11.0 - 2026-06-15
 
 ### Performance
