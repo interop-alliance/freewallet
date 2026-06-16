@@ -8,6 +8,15 @@
  * page, so the cost is deferred until someone actually starts creating a
  * wallet. The matching Spanish dictionary is additionally loaded when the
  * active locale is Spanish, improving score accuracy for Spanish passphrases.
+ *
+ * Note: @zxcvbn-ts 4.x ships its dictionaries compressed and decompresses them
+ * at load time via the transitive @zxcvbn-ts/dictionary-compression package,
+ * whose CJS build has a broken default-export interop ("decompress is not a
+ * function" when loaded through Node/CJS, including vitest under jsdom). This
+ * does not affect the app, which is browser-only and resolves the working .mjs
+ * build through Vite. The consequence: do NOT unit-test this component in a way
+ * that triggers loadScorer() under vitest -- exercise the meter via the
+ * Playwright (browser) signup tests instead.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
@@ -62,8 +71,8 @@ async function loadScorer({ language }: { language: string }): Promise<Scorer> {
       import('@zxcvbn-ts/language-en'),
       useSpanish ? import('@zxcvbn-ts/language-es-es') : Promise.resolve(null)
     ])
-    const { zxcvbn, zxcvbnOptions } = core
-    zxcvbnOptions.setOptions({
+    const { ZxcvbnFactory } = core
+    const zxcvbn = new ZxcvbnFactory({
       dictionary: {
         ...common.dictionary,
         ...en.dictionary,
@@ -72,7 +81,7 @@ async function loadScorer({ language }: { language: string }): Promise<Scorer> {
       graphs: common.adjacencyGraphs,
       translations: en.translations
     })
-    cachedScorer = (password: string) => zxcvbn(password).score
+    cachedScorer = (password: string) => zxcvbn.check(password).score
     return cachedScorer
   })()
   return pendingLoad

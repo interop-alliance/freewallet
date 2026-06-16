@@ -1,6 +1,6 @@
 # History
 
-## Unreleased - TBD
+## 0.12.0 - TBD
 
 ### Added
 
@@ -23,6 +23,18 @@
   `VITE_WAS_SERVER_URL` was set, guest login would also fail if that server was
   unreachable -- making it useless as a fallback. `StorageManager.initStorageClients`
   now skips the remote backend for guest sessions.
+
+### Changed
+
+- Upgrade the `@interop/*` forks to their latest published versions:
+  `data-integrity-core` `^6.1.2` -> `^8.1.0`, `ed25519-signature` `^7.0.1` ->
+  `^7.1.2`, `ezcap` `^7.1.1` -> `^7.2.1`, `verifier-core` `^3.1.0` -> `^3.2.1`,
+  and `was-client` `^0.3.0` -> `^0.7.1`. The app's import contract is unchanged.
+- Upgrade `@zxcvbn-ts/*` to 4.x (`core` `^3.0.4` -> `^4.1.1`, `language-common`
+  `^3.0.4` -> `^4.1.1`, `language-en` and `language-es-es` `^3.0.2` ->
+  `^4.1.0`). 4.x replaces the `zxcvbn()` / `zxcvbnOptions.setOptions()` singleton
+  API with a `ZxcvbnFactory` class, so `PasswordStrengthMeter` is rewired to
+  construct a factory and call `.check(password).score`.
 
 ## 0.11.0 - 2026-06-15
 
