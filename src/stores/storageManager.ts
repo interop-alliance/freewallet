@@ -10,6 +10,7 @@ import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@/lib/cidFrom'
 import { WAS_SERVER_URL } from '@/app.config'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
+import type { SpaceQuotaReport } from '@/types/storageQuota'
 import type { FetchedCollectionResource } from '@/lib/storageResource'
 import type { StoredCredential } from '@/types/credential'
 import { BrowserStore } from '@/stores/browserStore'
@@ -54,6 +55,7 @@ export interface IWalletStore {
   }) => Promise<Array<StorageResource>>
   exportSpace?: () => Promise<ReadableStream<Uint8Array>>
   importSpace?: ({ tarFile }: { tarFile: File }) => Promise<ImportSpaceSummary>
+  getSpaceQuotas?: () => Promise<SpaceQuotaReport | null>
 }
 
 export type ImportSpaceSummary = {
@@ -161,6 +163,13 @@ export class StorageManager {
     if (this._remoteStore) {
       await this._remoteStore.wipeStorage()
     }
+  }
+
+  async getSpaceQuotas(): Promise<SpaceQuotaReport | null> {
+    if (!this._remoteStore) {
+      return null
+    }
+    return await this._remoteStore.getSpaceQuotas()
   }
 
   async exportSpace(): Promise<ReadableStream<Uint8Array>> {
