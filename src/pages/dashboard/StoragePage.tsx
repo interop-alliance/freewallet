@@ -41,14 +41,13 @@ export const StoragePage = () => {
     kind: 'loading'
   })
   const importInputRef = useRef<HTMLInputElement>(null)
+  const hasRemoteStorage = Boolean(session?.storage?.hasRemoteStorage)
 
   const loadQuota = useCallback(async () => {
-    if (!session?.storage?.hasRemoteStorage) {
-      setQuotaStatus({ kind: 'unavailable' })
+    if (!hasRemoteStorage || !session?.storage) {
       return
     }
 
-    setQuotaStatus({ kind: 'loading' })
     try {
       const report = await session.storage.getSpaceQuotas()
       if (!report?.backends.length) {
@@ -67,21 +66,24 @@ export const StoragePage = () => {
         message: 'Could not load storage usage.'
       })
     }
-  }, [session])
+  }, [hasRemoteStorage, session])
+
+  const handleRetryQuota = useCallback(() => {
+    setQuotaStatus({ kind: 'loading' })
+    void loadQuota()
+  }, [loadQuota])
 
   useEffect(() => {
+    if (!hasRemoteStorage || !session?.storage) {
+      return
+    }
+
     let cancelled = false
+    const storage = session.storage
 
     async function loadCollections() {
-      if (!session?.storage?.hasRemoteStorage) {
-        setCollections([])
-        return
-      }
-
-      setIsLoadingCollections(true)
-      setCollectionsError(null)
       try {
-        const remoteCollections = await session.storage.listCollections()
+        const remoteCollections = await storage.listCollections()
         if (cancelled) {
           return
         }
@@ -91,7 +93,7 @@ export const StoragePage = () => {
         const withCounts = await Promise.all(
           remoteCollections.map(async collection => {
             try {
-              const items = await session.storage.listCollectionResources({
+              const items = await storage.listCollectionResources({
                 collectionUrl: collection.url
               })
               return { ...collection, totalItems: items.length }
@@ -121,19 +123,23 @@ export const StoragePage = () => {
       }
     }
 
-    if (!session?.storage?.hasRemoteStorage) {
-      setCollections([])
-      setQuotaStatus({ kind: 'unavailable' })
-      return () => {
-        cancelled = true
+    void (async () => {
+      await Promise.resolve()
+      if (cancelled) {
+        return
       }
-    }
 
-    void Promise.all([loadQuota(), loadCollections()])
+      setIsLoadingCollections(true)
+      setCollectionsError(null)
+      await Promise.all([loadQuota(), loadCollections()])
+    })()
+
     return () => {
       cancelled = true
     }
-  }, [session, t, collectionsRefreshKey, loadQuota])
+  }, [hasRemoteStorage, session, t, collectionsRefreshKey, loadQuota])
+
+  const visibleCollections = hasRemoteStorage ? collections : []
 
   const handleExportSpace = async () => {
     if (!session?.storage) {
@@ -276,7 +282,7 @@ export const StoragePage = () => {
             <Button
               variant="contained"
               onClick={handleExportSpace}
-              disabled={isExporting || !session?.storage?.hasRemoteStorage}
+              disabled={isExporting || !hasRemoteStorage}
               sx={[
                 storageStyles.buttonTextLeft,
                 storageStyles.buttonSize.topAction
@@ -295,11 +301,11 @@ export const StoragePage = () => {
         </Stack>
       </Paper>
 
-      {session?.storage?.hasRemoteStorage && (
+      {hasRemoteStorage && (
         <StorageQuotaCard
           status={quotaStatus}
-          collections={collections}
-          onRetry={loadQuota}
+          collections={visibleCollections}
+          onRetry={handleRetryQuota}
         />
       )}
 
@@ -310,7 +316,7 @@ export const StoragePage = () => {
       </Box>
 
       <Box sx={storageStyles.collectionsWrap}>
-        {isLoadingCollections && (
+        {hasRemoteStorage && isLoadingCollections && (
           <Typography variant="body1" sx={storageStyles.statusText}>
             {t('storage.loadingCollections')}
           </Typography>
@@ -320,8 +326,8 @@ export const StoragePage = () => {
             {collectionsError}
           </Typography>
         )}
-        {!isLoadingCollections && !collectionsError && (
-          <CollectionsOverview collections={collections} />
+        {hasRemoteStorage && !isLoadingCollections && !collectionsError && (
+          <CollectionsOverview collections={visibleCollections} />
         )}
       </Box>
     </DashboardLayout>
