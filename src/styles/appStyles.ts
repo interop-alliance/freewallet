@@ -535,6 +535,161 @@ export const storageStyles = {
     color: 'text.secondary'
   },
 
+  quotaCard: {
+    mt: 3,
+    p: 2.5,
+    borderRadius: 3
+  },
+  quotaCardHeader: {
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 2
+  },
+  quotaTitleIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    lineHeight: 0,
+    color: 'text.secondary'
+  },
+  quotaDivider: {
+    my: 2,
+    borderColor: 'divider'
+  },
+  quotaBackendLabel: {
+    display: 'block',
+    color: 'text.secondary',
+    fontWeight: 600,
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+    fontSize: '0.6875rem'
+  },
+  quotaHeroAmountRow: {
+    alignItems: 'baseline',
+    gap: 1,
+    mt: 0.5
+  },
+  quotaHeroAmount: {
+    fontSize: '2.25rem',
+    fontWeight: 700,
+    lineHeight: 1,
+    letterSpacing: '-0.03em',
+    fontVariantNumeric: 'tabular-nums'
+  },
+  quotaHeroMeta: {
+    color: 'text.secondary',
+    fontSize: '0.9375rem',
+    fontWeight: 400
+  },
+  quotaLimitedSummary: {
+    fontVariantNumeric: 'tabular-nums'
+  },
+  quotaStatusBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 0.5,
+    px: 1.25,
+    py: 0.375,
+    borderRadius: 999,
+    border: '1px solid',
+    flexShrink: 0
+  },
+  quotaStatusBadgeLabel: {
+    fontWeight: 700,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
+    lineHeight: 1.2
+  },
+  quotaBadgeOk: {
+    color: 'success.main',
+    borderColor: 'success.main'
+  },
+  quotaBadgeWarning: {
+    color: 'warning.main',
+    borderColor: 'warning.main'
+  },
+  quotaBadgeError: {
+    color: 'error.main',
+    borderColor: 'error.main'
+  },
+  quotaBadgeUnlimited: {
+    color: 'success.main',
+    borderColor: 'success.main'
+  },
+  quotaUnlimitedSymbol: {
+    fontWeight: 700,
+    fontSize: '0.875rem',
+    lineHeight: 1
+  },
+  quotaBar: {
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: 'action.hover'
+  },
+  quotaCollectionList: {
+    pt: 0.25
+  },
+  quotaCollectionRow: {
+    alignItems: 'center',
+    gap: 1.25,
+    minHeight: 28
+  },
+  quotaCollectionIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    lineHeight: 0,
+    color: 'text.secondary',
+    flexShrink: 0
+  },
+  quotaCollectionName: {
+    color: 'text.secondary',
+    flex: '0 1 auto',
+    minWidth: 0,
+    fontSize: '0.8125rem',
+    maxWidth: '46%'
+  },
+  quotaCollectionValueWrap: {
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'flex-end',
+    gap: 0.375,
+    fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap'
+  },
+  quotaCollectionValueAmount: {
+    fontWeight: 700,
+    fontSize: '1.125rem',
+    lineHeight: 1,
+    letterSpacing: '-0.02em',
+    color: 'text.primary'
+  },
+  quotaCollectionValueUnit: {
+    fontWeight: 600,
+    fontSize: '0.875rem',
+    color: 'text.secondary'
+  },
+  quotaCollectionValueOf: {
+    mx: 0.25,
+    fontSize: '0.8125rem',
+    color: 'text.disabled'
+  },
+  quotaCollectionValueCapacity: {
+    fontWeight: 500,
+    fontSize: '0.875rem',
+    color: 'text.secondary'
+  },
+  quotaMeasuredRow: {
+    alignItems: 'center',
+    pt: 0.5
+  },
+  quotaMeasuredIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    lineHeight: 0,
+    color: 'text.disabled'
+  },
+
   /**
    * Section header (e.g. "Collections") + secondary description line.
    */

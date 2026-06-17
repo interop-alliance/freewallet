@@ -21,6 +21,7 @@ import type { ControllerProfile, User } from '@/types/auth'
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
+import type { SpaceQuotaReport } from '@/types/storageQuota'
 import {
   type FetchedCollectionResource,
   isTextLikeContentType
@@ -531,6 +532,32 @@ export class WASRemoteStore implements IWalletStore {
       throw new Error('Failed to delete remote space.', { cause: err })
     }
     console.log('Remote space deleted.')
+  }
+
+  async getSpaceQuotas(): Promise<SpaceQuotaReport | null> {
+    try {
+      const response = await this.was.request({
+        path: `/space/${this.spaceId}/quotas?include=collections`,
+        method: 'GET'
+      })
+
+      if (response.status === 404 || response.status === 501) {
+        return null
+      }
+
+      return response.data as SpaceQuotaReport
+    } catch (err) {
+      const status =
+        (err as { status?: number }).status ??
+        (err as { response?: { status?: number } }).response?.status
+
+      if (status === 404 || status === 501) {
+        return null
+      }
+
+      console.error('Error fetching space quotas:', err)
+      throw new Error('Failed to fetch storage quotas.', { cause: err })
+    }
   }
 
   async exportSpace(): Promise<ReadableStream<Uint8Array>> {
