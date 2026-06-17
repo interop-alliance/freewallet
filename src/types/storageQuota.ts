@@ -40,7 +40,7 @@ export type StorageQuotaView = {
 export type StorageQuotaStatus =
   | { kind: 'loading' }
   | { kind: 'unavailable' }
-  | { kind: 'error'; message: string }
+  | { kind: 'error' }
   | { kind: 'ready'; quota: StorageQuotaView }
 
 export type CollectionQuotaRow = {

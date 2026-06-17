@@ -61,10 +61,7 @@ export const StoragePage = () => {
       )
     } catch (error) {
       console.error('Failed to load storage quota:', error)
-      setQuotaStatus({
-        kind: 'error',
-        message: 'Could not load storage usage.'
-      })
+      setQuotaStatus({ kind: 'error' })
     }
   }, [hasRemoteStorage, session])
 

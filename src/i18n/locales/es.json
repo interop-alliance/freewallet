@@ -191,6 +191,25 @@
         "name": "Google Drive",
         "description": "Próximamente"
       }
+    },
+    "quota": {
+      "title": "Uso de almacenamiento",
+      "stateOk": "Correcto",
+      "stateNearLimit": "Casi lleno",
+      "stateOverQuota": "Lleno",
+      "overQuotaAlert": "El almacenamiento está lleno. Las subidas e importaciones pueden bloquearse hasta que libere espacio.",
+      "nearLimitAlert": "El almacenamiento está casi lleno. Considere exportar o eliminar contenido antiguo.",
+      "bytesUsed": "bytes usados",
+      "unitUsed": "{{unit}} usados",
+      "unlimited": "Ilimitado",
+      "of": "de",
+      "limitedSummary": "{{used}} de {{capacity}}",
+      "limitedSummaryWithFree": "{{used}} de {{capacity}} · {{free}} libres",
+      "measuredRecently": "Medido recientemente",
+      "measuredAt": "Medido {{date}}",
+      "maxUploadSize": "Tamaño máximo de subida: {{size}} por archivo",
+      "loadError": "No se pudo cargar el uso de almacenamiento.",
+      "retry": "Reintentar"
     }
   },
   "credential": {

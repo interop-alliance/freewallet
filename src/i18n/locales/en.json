@@ -191,6 +191,25 @@
         "name": "Google Drive",
         "description": "Coming soon"
       }
+    },
+    "quota": {
+      "title": "Storage usage",
+      "stateOk": "OK",
+      "stateNearLimit": "Almost full",
+      "stateOverQuota": "Full",
+      "overQuotaAlert": "Storage is full. New uploads and imports may be blocked until you free space.",
+      "nearLimitAlert": "Storage is almost full. Consider exporting or removing old content.",
+      "bytesUsed": "bytes used",
+      "unitUsed": "{{unit}} used",
+      "unlimited": "Unlimited",
+      "of": "of",
+      "limitedSummary": "{{used}} of {{capacity}}",
+      "limitedSummaryWithFree": "{{used}} of {{capacity}} · {{free}} free",
+      "measuredRecently": "Measured recently",
+      "measuredAt": "Measured {{date}}",
+      "maxUploadSize": "Max upload size: {{size}} per file",
+      "loadError": "Could not load storage usage.",
+      "retry": "Retry"
     }
   },
   "credential": {
