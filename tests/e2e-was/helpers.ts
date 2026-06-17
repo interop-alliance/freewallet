@@ -44,6 +44,17 @@ export async function expectQuotaCard(page: Page) {
   ).toBeVisible({ timeout: 15_000 })
 }
 
+export async function expectCollectionUsage(
+  page: Page,
+  collectionName: string,
+  usagePattern: RegExp
+) {
+  const row = page.locator('div').filter({
+    has: page.getByText(collectionName, { exact: true })
+  })
+  await expect(row).toContainText(usagePattern)
+}
+
 export async function expectHistoryEntry(page: Page, summary: string | RegExp) {
   await expect(page.getByText(summary)).toBeVisible({ timeout: 15_000 })
 }
@@ -65,5 +76,15 @@ export async function addCredentialViaPaste(page: Page) {
   await page.getByRole('button', { name: 'Add' }).click()
   await expect(page).toHaveURL(/#\/accept-credentials/)
   await page.getByRole('button', { name: 'Accept all' }).click()
+  await expect(page).toHaveURL(/#\/dashboard/)
+}
+
+export async function deleteCredential(page: Page) {
+  await page.getByRole('link', { name: 'E2E Test Credential' }).click()
+  await expect(page).toHaveURL(/#\/credential\//)
+  await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible({
+    timeout: 15_000
+  })
+  await page.getByRole('button', { name: 'Delete' }).click()
   await expect(page).toHaveURL(/#\/dashboard/)
 }

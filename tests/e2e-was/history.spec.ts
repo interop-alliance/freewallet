@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import {
   addCredentialViaPaste,
+  deleteCredential,
   expectHistoryEntry,
   goToHistory,
   signupViaWizard
@@ -55,14 +56,7 @@ test.describe('Wallet activity history', () => {
   }, testInfo) => {
     await signupViaWizard(page, testInfo)
     await addCredentialViaPaste(page)
-
-    await page.getByRole('link', { name: 'E2E Test Credential' }).click()
-    await expect(page).toHaveURL(/#\/credential\//)
-    await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible({
-      timeout: 15_000
-    })
-    await page.getByRole('button', { name: 'Delete' }).click()
-    await expect(page).toHaveURL(/#\/dashboard/)
+    await deleteCredential(page)
 
     await goToHistory(page)
     await expectHistoryEntry(page, /^Credential deleted: /)
