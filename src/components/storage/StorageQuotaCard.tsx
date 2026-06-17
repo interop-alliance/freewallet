@@ -9,6 +9,8 @@ import {
   Stack,
   Typography
 } from '@mui/material'
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
 import type { IconType } from 'react-icons'
 import {
   MdAccessTime,
@@ -41,13 +43,16 @@ const COLLECTION_ICONS: Record<string, IconType> = {
   'public-credentials': MdShare
 }
 
-const STATE_BADGE: Record<
-  BackendState,
-  { label: string; tone: (typeof sx)[keyof typeof sx] }
-> = {
-  ok: { label: 'OK', tone: sx.quotaBadgeOk },
-  'near-limit': { label: 'Almost full', tone: sx.quotaBadgeWarning },
-  'over-quota': { label: 'Full', tone: sx.quotaBadgeError }
+const STATE_BADGE_TONE: Record<BackendState, (typeof sx)[keyof typeof sx]> = {
+  ok: sx.quotaBadgeOk,
+  'near-limit': sx.quotaBadgeWarning,
+  'over-quota': sx.quotaBadgeError
+}
+
+const STATE_BADGE_KEY: Record<BackendState, string> = {
+  ok: 'storage.quota.stateOk',
+  'near-limit': 'storage.quota.stateNearLimit',
+  'over-quota': 'storage.quota.stateOverQuota'
 }
 
 const PROGRESS_COLOR: Record<
@@ -59,27 +64,38 @@ const PROGRESS_COLOR: Record<
   'over-quota': 'error'
 }
 
-function usageHeroMeta(unit: string): string {
+function usageHeroMeta(t: TFunction, unit: string): string {
   if (unit === 'B') {
-    return 'bytes used'
+    return t('storage.quota.bytesUsed')
   }
-  return `${unit.toLowerCase()} used`
+  return t('storage.quota.unitUsed', { unit })
 }
 
-function formatMeasuredLabel(measuredAt: string): string {
+function formatMeasuredLabel(
+  t: TFunction,
+  locale: string,
+  measuredAt: string
+): string {
   const date = new Date(measuredAt)
   if (Number.isNaN(date.getTime())) {
-    return 'Measured recently'
+    return t('storage.quota.measuredRecently')
   }
-  return `Measured ${date.toLocaleString()}`
+  return t('storage.quota.measuredAt', {
+    date: date.toLocaleString(locale)
+  })
 }
 
-function formatLimitedSummary(quota: StorageQuotaView): string {
-  let summary = `${formatBytes(quota.usageBytes)} of ${formatBytes(quota.capacityBytes ?? 0)}`
+function formatLimitedSummary(t: TFunction, quota: StorageQuotaView): string {
+  const used = formatBytes(quota.usageBytes)
+  const capacity = formatBytes(quota.capacityBytes ?? 0)
   if (quota.freeBytes != null) {
-    summary += ` · ${formatBytes(quota.freeBytes)} free`
+    return t('storage.quota.limitedSummaryWithFree', {
+      used,
+      capacity,
+      free: formatBytes(quota.freeBytes)
+    })
   }
-  return summary
+  return t('storage.quota.limitedSummary', { used, capacity })
 }
 
 function QuotaReadyContent({
@@ -89,23 +105,19 @@ function QuotaReadyContent({
   quota: StorageQuotaView
   collections: StorageCollection[]
 }) {
+  const { t, i18n } = useTranslation()
   const collectionRows = buildCollectionQuotaRows(quota, collections)
   const { amount, unit } = formatBytesParts(quota.usageBytes)
-  const heroMeta = usageHeroMeta(unit)
-  const measuredLabel = formatMeasuredLabel(quota.measuredAt)
+  const heroMeta = usageHeroMeta(t, unit)
+  const measuredLabel = formatMeasuredLabel(t, i18n.language, quota.measuredAt)
 
   return (
     <Stack spacing={2}>
       {quota.state === 'over-quota' && (
-        <Alert severity="error">
-          Storage is full. New uploads and imports may be blocked until you free
-          space.
-        </Alert>
+        <Alert severity="error">{t('storage.quota.overQuotaAlert')}</Alert>
       )}
       {quota.state === 'near-limit' && (
-        <Alert severity="warning">
-          Storage is almost full. Consider exporting or removing old content.
-        </Alert>
+        <Alert severity="warning">{t('storage.quota.nearLimitAlert')}</Alert>
       )}
 
       <Stack
@@ -132,7 +144,7 @@ function QuotaReadyContent({
           {!quota.isUnlimited && (
             <Stack spacing={0.75} sx={{ mt: 0.5 }}>
               <Typography variant="body2" sx={sx.quotaLimitedSummary}>
-                {formatLimitedSummary(quota)}
+                {formatLimitedSummary(t, quota)}
               </Typography>
               {quota.percentUsed != null && (
                 <LinearProgress
@@ -151,7 +163,7 @@ function QuotaReadyContent({
               ∞
             </Typography>
             <Typography component="span" variant="caption" sx={sx.quotaStatusBadgeLabel}>
-              Unlimited
+              {t('storage.quota.unlimited')}
             </Typography>
           </Box>
         )}
@@ -185,7 +197,7 @@ function QuotaReadyContent({
                   {!quota.isUnlimited && row.capacityBytes != null && (
                     <>
                       <Typography component="span" sx={sx.quotaCollectionValueOf}>
-                        of
+                        {t('storage.quota.of')}
                       </Typography>
                       <Typography
                         component="span"
@@ -213,7 +225,9 @@ function QuotaReadyContent({
 
       {quota.maxUploadBytes != null && (
         <Typography variant="caption" color="text.secondary">
-          Max upload size: {formatBytes(quota.maxUploadBytes)} per file
+          {t('storage.quota.maxUploadSize', {
+            size: formatBytes(quota.maxUploadBytes)
+          })}
         </Typography>
       )}
     </Stack>
@@ -225,13 +239,15 @@ export function StorageQuotaCard({
   collections = [],
   onRetry
 }: StorageQuotaCardProps) {
+  const { t } = useTranslation()
+
   if (status.kind === 'unavailable') {
     return null
   }
 
-  let headerBadge: (typeof STATE_BADGE)[BackendState] | null = null
+  let headerState: BackendState | null = null
   if (status.kind === 'ready') {
-    headerBadge = STATE_BADGE[status.quota.state]
+    headerState = status.quota.state
   }
 
   return (
@@ -242,16 +258,16 @@ export function StorageQuotaCard({
             <MdStorage size={22} />
           </Box>
           <Typography variant="h6" sx={sx.connectedLabel}>
-            Storage usage
+            {t('storage.quota.title')}
           </Typography>
         </Stack>
-        {headerBadge && (
-          <Box sx={[sx.quotaStatusBadge, headerBadge.tone]}>
+        {headerState && (
+          <Box sx={[sx.quotaStatusBadge, STATE_BADGE_TONE[headerState]]}>
             {status.kind === 'ready' && status.quota.state === 'ok' && (
               <MdCheckCircle size={14} />
             )}
             <Typography component="span" variant="caption" sx={sx.quotaStatusBadgeLabel}>
-              {headerBadge.label}
+              {t(STATE_BADGE_KEY[headerState])}
             </Typography>
           </Box>
         )}
@@ -272,11 +288,11 @@ export function StorageQuotaCard({
       {status.kind === 'error' && (
         <Stack spacing={1.5}>
           <Typography variant="body2" color="error">
-            {status.message}
+            {t('storage.quota.loadError')}
           </Typography>
           {onRetry && (
             <Button size="small" variant="outlined" onClick={onRetry}>
-              Retry
+              {t('storage.quota.retry')}
             </Button>
           )}
         </Stack>
