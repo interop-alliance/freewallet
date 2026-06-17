@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { expectQuotaCard, goToStorage, signupViaWizard } from './helpers'
+import {
+  addCredentialViaPaste,
+  deleteCredential,
+  expectCollectionUsage,
+  expectQuotaCard,
+  goToStorage,
+  signupViaWizard
+} from './helpers'
 
 /**
  * Storage quota UI — requires remote (WAS) mode; see playwright.was.config.ts.
@@ -31,5 +38,39 @@ test.describe('Storage quota', () => {
     await expect(
       page.getByText('Publicly Shared Verifiable Credentials')
     ).toBeVisible()
+  })
+
+  test('keeps import enabled when storage is healthy', async ({
+    page
+  }, testInfo) => {
+    await signupViaWizard(page, testInfo)
+    await goToStorage(page)
+    await expectQuotaCard(page)
+
+    await expect(
+      page.getByRole('button', { name: 'Import space' })
+    ).toBeEnabled()
+  })
+
+  test('updates verifiable credentials usage after storing a credential', async ({
+    page
+  }, testInfo) => {
+    await signupViaWizard(page, testInfo)
+    await addCredentialViaPaste(page)
+    await goToStorage(page)
+    await expectQuotaCard(page)
+
+    await expectCollectionUsage(page, 'Verifiable Credentials', /[1-9]\d* B/)
+  })
+
+  test('updates wallet activity usage after deleting a credential', async ({
+    page
+  }, testInfo) => {
+    await signupViaWizard(page, testInfo)
+    await deleteCredential(page)
+    await goToStorage(page)
+    await expectQuotaCard(page)
+
+    await expectCollectionUsage(page, 'Wallet Activity Log', /[1-9]\d* B/)
   })
 })
