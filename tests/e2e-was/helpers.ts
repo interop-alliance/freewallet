@@ -33,6 +33,17 @@ export async function goToHistory(page: Page) {
   ).toBeVisible()
 }
 
+export async function goToStorage(page: Page) {
+  await page.goto('/#/storage')
+  await expect(page.getByText('Space (connected):')).toBeVisible()
+}
+
+export async function expectQuotaCard(page: Page) {
+  await expect(
+    page.getByRole('heading', { name: 'Storage usage', level: 6 })
+  ).toBeVisible({ timeout: 15_000 })
+}
+
 export async function expectHistoryEntry(page: Page, summary: string | RegExp) {
   await expect(page.getByText(summary)).toBeVisible({ timeout: 15_000 })
 }
