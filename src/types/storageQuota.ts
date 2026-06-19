@@ -1,27 +1,11 @@
-export type BackendState = 'ok' | 'near-limit' | 'over-quota'
+import type { BackendState } from '@interop/storage-core'
 
-export type CollectionUsage = {
-  id: string
-  usageBytes: number
-}
-
-export type BackendUsage = {
-  id: string
-  name: string
-  managedBy: string
-  usageBytes: number
-  state: BackendState
-  limit: { isUnlimited: boolean; capacityBytes?: number }
-  restrictedActions: string[]
-  measuredAt: string
-  constraints?: { maxUploadBytes?: number }
-  usageByCollection?: CollectionUsage[]
-}
-
-export type SpaceQuotaReport = {
-  respondedAt: string
-  backends: BackendUsage[]
-}
+export type {
+  BackendState,
+  BackendUsage,
+  CollectionUsage,
+  SpaceQuotaReport
+} from '@interop/storage-core'
 
 export type StorageQuotaView = {
   backendName: string

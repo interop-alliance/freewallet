@@ -46,13 +46,15 @@ const COLLECTION_ICONS: Record<string, IconType> = {
 const STATE_BADGE_TONE: Record<BackendState, (typeof sx)[keyof typeof sx]> = {
   ok: sx.quotaBadgeOk,
   'near-limit': sx.quotaBadgeWarning,
-  'over-quota': sx.quotaBadgeError
+  'over-quota': sx.quotaBadgeError,
+  unreachable: sx.quotaBadgeError
 }
 
 const STATE_BADGE_KEY: Record<BackendState, string> = {
   ok: 'storage.quota.stateOk',
   'near-limit': 'storage.quota.stateNearLimit',
-  'over-quota': 'storage.quota.stateOverQuota'
+  'over-quota': 'storage.quota.stateOverQuota',
+  unreachable: 'storage.quota.stateOverQuota'
 }
 
 const PROGRESS_COLOR: Record<
@@ -61,7 +63,8 @@ const PROGRESS_COLOR: Record<
 > = {
   ok: 'primary',
   'near-limit': 'warning',
-  'over-quota': 'error'
+  'over-quota': 'error',
+  unreachable: 'error'
 }
 
 function usageHeroMeta(t: TFunction, unit: string): string {

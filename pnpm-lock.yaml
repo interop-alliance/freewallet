@@ -35,6 +35,9 @@ importers:
       '@interop/http-client':
         specifier: ^1.0.3
         version: 1.0.3
+      '@interop/storage-core':
+        specifier: ^0.2.2
+        version: 0.2.2
       '@interop/verifier-core':
         specifier: ^3.2.1
         version: 3.2.1
