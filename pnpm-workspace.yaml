@@ -1,5 +1,6 @@
 allowBuilds:
   core-js: false
+  rxdb: set this to true or false
 allowedDeprecatedVersions:
   get-graphql-from-jsonschema: '8.1.0'
   defekt: '9.3.0'

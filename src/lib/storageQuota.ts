@@ -31,7 +31,7 @@ export function quotaViewFromReport(
   }
 
   return {
-    backendName: backend.name,
+    backendName: backend.name ?? backend.id,
     usageBytes: backend.usageBytes,
     capacityBytes,
     isUnlimited,
