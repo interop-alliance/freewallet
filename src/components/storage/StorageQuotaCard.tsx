@@ -57,10 +57,7 @@ const STATE_BADGE_KEY: Record<BackendState, string> = {
   unreachable: 'storage.quota.stateOverQuota'
 }
 
-const PROGRESS_COLOR: Record<
-  BackendState,
-  'primary' | 'warning' | 'error'
-> = {
+const PROGRESS_COLOR: Record<BackendState, 'primary' | 'warning' | 'error'> = {
   ok: 'primary',
   'near-limit': 'warning',
   'over-quota': 'error',
@@ -162,10 +159,18 @@ function QuotaReadyContent({
         </Box>
         {quota.isUnlimited && (
           <Box sx={[sx.quotaStatusBadge, sx.quotaBadgeUnlimited]}>
-            <Typography component="span" variant="caption" sx={sx.quotaUnlimitedSymbol}>
+            <Typography
+              component="span"
+              variant="caption"
+              sx={sx.quotaUnlimitedSymbol}
+            >
               ∞
             </Typography>
-            <Typography component="span" variant="caption" sx={sx.quotaStatusBadgeLabel}>
+            <Typography
+              component="span"
+              variant="caption"
+              sx={sx.quotaStatusBadgeLabel}
+            >
               {t('storage.quota.unlimited')}
             </Typography>
           </Box>
@@ -189,17 +194,26 @@ function QuotaReadyContent({
                   {row.name}
                 </Typography>
                 <Box sx={sx.quotaCollectionValueWrap}>
-                  <Typography component="span" sx={sx.quotaCollectionValueAmount}>
+                  <Typography
+                    component="span"
+                    sx={sx.quotaCollectionValueAmount}
+                  >
                     {rowAmount}
                   </Typography>
                   {rowUnit && (
-                    <Typography component="span" sx={sx.quotaCollectionValueUnit}>
+                    <Typography
+                      component="span"
+                      sx={sx.quotaCollectionValueUnit}
+                    >
                       {rowUnit}
                     </Typography>
                   )}
                   {!quota.isUnlimited && row.capacityBytes != null && (
                     <>
-                      <Typography component="span" sx={sx.quotaCollectionValueOf}>
+                      <Typography
+                        component="span"
+                        sx={sx.quotaCollectionValueOf}
+                      >
                         {t('storage.quota.of')}
                       </Typography>
                       <Typography
@@ -269,7 +283,11 @@ export function StorageQuotaCard({
             {status.kind === 'ready' && status.quota.state === 'ok' && (
               <MdCheckCircle size={14} />
             )}
-            <Typography component="span" variant="caption" sx={sx.quotaStatusBadgeLabel}>
+            <Typography
+              component="span"
+              variant="caption"
+              sx={sx.quotaStatusBadgeLabel}
+            >
               {t(STATE_BADGE_KEY[headerState])}
             </Typography>
           </Box>

@@ -56,9 +56,7 @@ export const StoragePage = () => {
       }
 
       const quota = quotaViewFromReport(report)
-      setQuotaStatus(
-        quota ? { kind: 'ready', quota } : { kind: 'unavailable' }
-      )
+      setQuotaStatus(quota ? { kind: 'ready', quota } : { kind: 'unavailable' })
     } catch (error) {
       console.error('Failed to load storage quota:', error)
       setQuotaStatus({ kind: 'error' })
