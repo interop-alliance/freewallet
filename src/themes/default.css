@@ -1,0 +1,8 @@
+/*
+ * Default theme skin.
+ * Layout lives in JSX / sx objects. Add visual overrides here only:
+ *
+ *   html[data-theme='default'] { ... }
+ *
+ * Shared tokens (--fw-*) are defined in src/index.css.
+ */

@@ -16,11 +16,13 @@ export const authStyles = {
     width: '100%'
   },
   /**
-   * Top of auth column; language switcher aligned end (right in LTR).
+   * Top of auth column; language + theme switchers aligned end (right in LTR).
    */
   languageBar: {
     display: 'flex',
     justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 1.5,
     width: '100%',
     mb: 1
   },

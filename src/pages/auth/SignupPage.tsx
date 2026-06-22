@@ -25,6 +25,7 @@ import {
 } from 'react-router'
 import { Trans, useTranslation } from 'react-i18next'
 import { LanguageSelector } from '@/components/LanguageSelector'
+import { ThemePicker } from '@/components/ThemePicker'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
@@ -153,6 +154,7 @@ export function SignupPage() {
       <Box component="form" onSubmit={handleSignup} sx={authStyles.wideContent}>
         <Box sx={authStyles.languageBar}>
           <LanguageSelector />
+          <ThemePicker />
         </Box>
         <Typography variant="h2" component="h1" sx={authStyles.title}>
           {t('landing.title')}

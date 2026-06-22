@@ -10,6 +10,7 @@ import { dashboardStyles } from '@/styles/appStyles'
 import { DocContent } from '@/components/DocContent'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { LanguageSelector } from '@/components/LanguageSelector'
+import { ThemePicker } from '@/components/ThemePicker'
 import Stack from '@mui/material/Stack'
 import { useTranslation } from 'react-i18next'
 
@@ -43,6 +44,7 @@ export function DocsPage() {
           </Box>
           <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
             <LanguageSelector showLabel={false} />
+            <ThemePicker showLabel={false} />
             {session ? (
               <Button variant="outlined" component={RouterLink} to="/logout">
                 {t('common.logOut')}

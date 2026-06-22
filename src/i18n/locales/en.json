@@ -1,6 +1,11 @@
 {
   "common": {
     "language": "Language",
+    "theme": "Theme",
+    "themes": {
+      "default": "Default",
+      "redish": "Redish"
+    },
     "logOut": "Log out",
     "logIn": "Log in",
     "cancel": "Cancel",

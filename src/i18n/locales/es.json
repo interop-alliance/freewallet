@@ -1,6 +1,11 @@
 {
   "common": {
     "language": "Idioma",
+    "theme": "Tema",
+    "themes": {
+      "default": "Predeterminado",
+      "redish": "Rojizo"
+    },
     "logOut": "Cerrar sesión",
     "logIn": "Iniciar sesión",
     "cancel": "Cancelar",

@@ -9,6 +9,7 @@ import ListItemText from '@mui/material/ListItemText'
 import Toolbar from '@mui/material/Toolbar'
 import Typography from '@mui/material/Typography'
 import { LanguageSelector } from '@/components/LanguageSelector'
+import { ThemePicker } from '@/components/ThemePicker'
 import { dashboardStyles } from '@/styles/appStyles'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
 import { useAuthStore } from '@/stores/authStore'
@@ -64,6 +65,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
           </Typography>
           <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
             <LanguageSelector showLabel={false} />
+            <ThemePicker showLabel={false} />
             {session ? (
               <Button variant="outlined" onClick={handleLogout}>
                 {t('common.logOut')}

@@ -1,49 +1,69 @@
-import { useMemo, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   CssBaseline,
   ThemeProvider,
   createTheme,
   useMediaQuery
 } from '@mui/material'
+import { AppThemeContext } from '@/context/appThemeContext'
+import {
+  applyAppThemeToDocument,
+  persistAppTheme,
+  readStoredAppTheme,
+  type AppThemeId
+} from '@/themes/appTheme'
+import { getThemePalette } from '@/themes/themePalettes'
 
 export function FreewalletThemeProvider({ children }: { children: ReactNode }) {
+  const [themeId, setThemeIdState] = useState<AppThemeId>(readStoredAppTheme)
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)')
-  const theme = useMemo(
-    () =>
-      createTheme({
-        palette: {
-          mode: prefersDarkMode ? 'dark' : 'light',
-          background: prefersDarkMode
-            ? {
-                default: '#101418',
-                paper: '#171c21'
-              }
-            : {
-                default: '#f7f7f7',
-                paper: '#ffffff'
-              }
-        },
-        typography: {
-          fontFamily:
-            '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
-        },
-        components: {
-          MuiButton: {
-            styleOverrides: {
-              root: {
-                whiteSpace: 'nowrap'
-              }
+  const mode = prefersDarkMode ? 'dark' : 'light'
+
+  useEffect(() => {
+    applyAppThemeToDocument(themeId)
+  }, [themeId])
+
+  const setThemeId = useCallback((nextThemeId: AppThemeId) => {
+    persistAppTheme(nextThemeId)
+    setThemeIdState(nextThemeId)
+  }, [])
+
+  const muiTheme = useMemo(() => {
+    const palette = getThemePalette(themeId, mode)
+
+    return createTheme({
+      palette: {
+        mode,
+        background: palette.background,
+        primary: palette.primary
+      },
+      typography: {
+        fontFamily:
+          '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+      },
+      components: {
+        MuiButton: {
+          styleOverrides: {
+            root: {
+              whiteSpace: 'nowrap'
             }
           }
         }
-      }),
-    [prefersDarkMode]
+      }
+    })
+  }, [themeId, mode])
+
+  const appThemeContextValue = useMemo(
+    () => ({ themeId, setThemeId }),
+    [themeId, setThemeId]
   )
 
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      {children}
-    </ThemeProvider>
+    <AppThemeContext.Provider value={appThemeContextValue}>
+      <ThemeProvider theme={muiTheme}>
+        <CssBaseline />
+        {children}
+      </ThemeProvider>
+    </AppThemeContext.Provider>
   )
 }

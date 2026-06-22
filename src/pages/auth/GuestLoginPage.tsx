@@ -6,6 +6,7 @@ import { FaGhost } from 'react-icons/fa'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { LanguageSelector } from '@/components/LanguageSelector'
+import { ThemePicker } from '@/components/ThemePicker'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
@@ -65,6 +66,7 @@ export function GuestLoginPage() {
       <Box component="form" onSubmit={handleGuestLogin} sx={authStyles.content}>
         <Box sx={authStyles.languageBar}>
           <LanguageSelector />
+          <ThemePicker />
         </Box>
         <Typography variant="h2" component="h1" sx={authStyles.title}>
           {t('landing.title')}

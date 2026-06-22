@@ -5,6 +5,7 @@ import '@/i18n'
 import { InfoBoxProvider } from '@/context/InfoBoxProvider'
 import { FreewalletThemeProvider } from '@/components/FreewalletThemeProvider'
 import './index.css'
+import '@/themes'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(
