@@ -7,6 +7,7 @@ import { FaGhost } from 'react-icons/fa'
 import { Trans, useTranslation } from 'react-i18next'
 import { Link as RouterLink } from 'react-router'
 import { LanguageSelector } from '@/components/LanguageSelector'
+import { ThemePicker } from '@/components/ThemePicker'
 import { landingStyles } from '@/styles/landingStyles'
 import { useEffect } from 'react'
 import { useAuthStore } from '@/stores/authStore'
@@ -25,6 +26,7 @@ export function LandingPage() {
       <Box sx={landingStyles.content}>
         <Box sx={landingStyles.languageBar}>
           <LanguageSelector />
+          <ThemePicker />
         </Box>
         <Typography variant="h2" component="h1" sx={landingStyles.title}>
           {t('landing.title')}

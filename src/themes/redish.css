@@ -1,0 +1,19 @@
+/*
+ * Redish theme — tokens + optional CSS-only tweaks.
+ * MUI components (buttons, cards, app bar) pick up colors from themePalettes.ts.
+ * Use this file for things outside MUI, or extras MUI can't cover.
+ */
+html[data-theme='redish'] {
+  --fw-bg: #fff0f0;
+  --fw-surface: #fff8f8;
+
+  & body {
+    background: var(--fw-bg);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-theme='redish'] {
+    --fw-bg: #761f1f;
+  }
+}

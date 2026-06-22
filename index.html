@@ -6,6 +6,15 @@
   <link rel="manifest" href="/manifest.json">
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Freewallet</title>
+  <script>
+    /* Keep in sync with APP_THEME_IDS / APP_THEME_STORAGE_KEY in src/themes/appTheme.ts */
+    (function () {
+      var themeIds = ['default', 'redish']
+      var stored = localStorage.getItem('fw-theme')
+      document.documentElement.dataset.theme =
+        themeIds.indexOf(stored) !== -1 ? stored : 'default'
+    })()
+  </script>
   <style>
     /* Initial loading shell — painted instantly, before the app JS parses.
        main.tsx removes #initial-loader once React has mounted. */

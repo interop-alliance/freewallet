@@ -12,6 +12,8 @@ export const landingStyles = {
   languageBar: {
     display: 'flex',
     justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 1.5,
     width: '100%',
     mb: 2
   },

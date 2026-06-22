@@ -1,6 +1,9 @@
 /*
  * Light mode is the default. Dark mode follows the user's browser preference.
  * These variables set the initial page colors before React/MUI renders.
+ *
+ * Theme-specific overrides belong in src/themes/<theme-id>.css under
+ * html[data-theme='<theme-id>'].
  */
 :root {
   color-scheme: light;
