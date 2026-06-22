@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode
+} from 'react'
 import {
   CssBaseline,
   ThemeProvider,
@@ -38,8 +44,7 @@ export function FreewalletThemeProvider({ children }: { children: ReactNode }) {
         primary: palette.primary
       },
       typography: {
-        fontFamily:
-          '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+        fontFamily: '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
       },
       components: {
         MuiButton: {

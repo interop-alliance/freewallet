@@ -5,7 +5,9 @@ export const APP_THEME_IDS = ['default', 'redish'] as const
 
 export type AppThemeId = (typeof APP_THEME_IDS)[number]
 
-export function isAppThemeId(value: string | null | undefined): value is AppThemeId {
+export function isAppThemeId(
+  value: string | null | undefined
+): value is AppThemeId {
   return APP_THEME_IDS.includes(value as AppThemeId)
 }
 
