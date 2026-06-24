@@ -1,24 +1,23 @@
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 
-// TODO fix the signature
 export const welcomeCredential: IVerifiableCredential = {
-  '@context': [
-    'https://www.w3.org/ns/credentials/v2',
-    'https://w3id.org/security/suites/ed25519-2020/v1'
+  "@context": [
+    "https://www.w3.org/ns/credentials/v2"
   ],
-  type: ['VerifiableCredential'],
-  issuer: 'did:key:z6MkhVTX9BF3NGYX6cc7jWpbNnR7cAjH8LUffabZP8Qu4ysC',
-  name: 'Your First Credential',
-  credentialSubject: {
-    description: 'You have successfully set up your credentials wallet!'
+  "type": [
+    "VerifiableCredential"
+  ],
+  "name": "Your First Credential",
+  "credentialSubject": {
+    "description": "You have successfully set up your credentials wallet!"
   },
-  proof: {
-    type: 'Ed25519Signature2020',
-    created: '2025-08-19T06:55:17Z',
-    verificationMethod:
-      'did:key:z6MkhVTX9BF3NGYX6cc7jWpbNnR7cAjH8LUffabZP8Qu4ysC#z6MkhVTX9BF3NGYX6cc7jWpbNnR7cAjH8LUffabZP8Qu4ysC',
-    proofPurpose: 'assertionMethod',
-    proofValue:
-      'z4EiTbmC79r4dRaqLQZr2yxQASoMKneHVNHVaWh1xcDoPG2eTwYjKoYaku1Canb7a6Xp5fSogKJyEhkZCaqQ6Y5nw'
+  "issuer": "did:web:interopalliance.org",
+  "proof": {
+    "type": "DataIntegrityProof",
+    "created": "2026-06-24T21:50:04Z",
+    "verificationMethod": "did:web:interopalliance.org#z6Mkk1sCE6ve9wFJzaYeWZhhmW5Mke37N8ahhbovdkofUuEs",
+    "cryptosuite": "eddsa-rdfc-2022",
+    "proofPurpose": "assertionMethod",
+    "proofValue": "z2QRmiw7gnqV6JPSYfPVLan7eHAjL7eC4fALF4sGzd9uJJiBoUdNs43xHfw9J5RTPDAE2zk9Ao3GsB7bjbuzFcuN4"
   }
 }
