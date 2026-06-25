@@ -138,7 +138,9 @@ export function buildMuiThemeOptions(
           ...themeButtonOverrides,
           root: {
             whiteSpace: 'nowrap',
-            ...(themeButtonOverrides?.root ?? {})
+            ...(typeof themeButtonOverrides?.root === 'object'
+              ? themeButtonOverrides.root
+              : {})
           }
         }
       }
