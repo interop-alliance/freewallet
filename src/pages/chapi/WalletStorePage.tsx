@@ -116,14 +116,14 @@ export function WalletStorePage() {
 
   if (pageState === 'initializing') {
     return (
-      <Box sx={{ ...chapiStyles.page, alignItems: 'center' }}>
+      <Box className="fw-page" sx={{ ...chapiStyles.page, alignItems: 'center' }}>
         <CircularProgress />
       </Box>
     )
   }
 
   return (
-    <Box sx={chapiStyles.page}>
+    <Box className="fw-page" sx={chapiStyles.page}>
       <Box sx={chapiStyles.card}>
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
           {t('chapi.store.title')}

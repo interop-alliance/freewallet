@@ -1,8 +1,56 @@
 /*
- * Default theme skin.
- * Layout lives in JSX / sx objects. Add visual overrides here only:
- *
- *   html[data-theme='default'] { ... }
- *
- * Shared tokens (--fw-*) are defined in src/index.css.
+ * Default theme — neutralizes shared .fw-* layout hooks used in JSX.
+ * Janet-specific visuals live in janet.css; pages share one markup structure.
  */
+html[data-theme='default'] {
+  & .fw-page {
+    background: inherit;
+    color: inherit;
+    font-family: inherit;
+    position: static;
+    overflow: visible;
+    -webkit-font-smoothing: auto;
+  }
+
+  & .fw-glow-top,
+  & .fw-glow-bottom {
+    display: none;
+  }
+
+  & .fw-frame {
+    padding: 0;
+    position: static;
+    z-index: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  & .fw-frame-inner,
+  & .fw-frame-narrow {
+    max-width: 760px;
+    width: 100%;
+  }
+
+  & .fw-hero-card {
+    background: transparent;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+    position: static;
+    overflow: visible;
+    text-align: center;
+  }
+
+  & .fw-hero-card::before {
+    display: none;
+  }
+
+  & .fw-grad-text {
+    background: none;
+    -webkit-background-clip: unset;
+    background-clip: unset;
+    -webkit-text-fill-color: inherit;
+    color: inherit;
+  }
+}

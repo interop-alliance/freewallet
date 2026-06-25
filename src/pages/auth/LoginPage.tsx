@@ -80,7 +80,7 @@ export function LoginPage() {
   }
 
   return (
-    <Box component="main" sx={authStyles.page}>
+    <Box component="main" className="fw-page" sx={authStyles.page}>
       <Box sx={authStyles.pageColumn}>
         <Box sx={authStyles.languageBar}>
           <LanguageSelector />

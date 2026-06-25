@@ -1,2 +1,2 @@
 import './default.css'
-import './redish.css'
+import './janet.css'
