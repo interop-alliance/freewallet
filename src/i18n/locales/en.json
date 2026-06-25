@@ -4,7 +4,7 @@
     "theme": "Theme",
     "themes": {
       "default": "Default",
-      "redish": "Redish"
+      "janet": "Janet"
     },
     "logOut": "Log out",
     "logIn": "Log in",

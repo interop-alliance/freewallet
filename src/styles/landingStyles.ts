@@ -22,6 +22,17 @@ export const landingStyles = {
     maxWidth: 760,
     width: '100%'
   },
+  /** Janet hero card inner inset — padding on a child so it isn't clipped/overridden. */
+  janetHeroCardInner: {
+    boxSizing: 'border-box',
+    width: '100%',
+    px: { xs: 3.5, sm: 7 },
+    pt: { xs: 5, sm: 8 },
+    pb: { xs: 6, sm: 10 }
+  },
+  janetHeroFrame: {
+    maxWidth: { xs: '100%', sm: 960 }
+  },
   title: {
     fontWeight: 500,
     mb: 2,
@@ -32,15 +43,17 @@ export const landingStyles = {
     fontWeight: 400,
     lineHeight: 1.45,
     mb: 6,
-    maxWidth: 620,
     mx: 'auto',
-    fontSize: { xs: '1.125rem', sm: '1.45rem' }
+    width: '100%',
+    fontSize: { xs: '1rem', sm: '1.0625rem' },
+    whiteSpace: { xs: 'normal', sm: 'nowrap' }
   },
   link: {
     color: 'inherit'
   },
   actions: {
     flexDirection: { xs: 'column', sm: 'row' },
+    flexWrap: 'wrap',
     justifyContent: 'center',
     alignItems: 'stretch',
     gap: 2

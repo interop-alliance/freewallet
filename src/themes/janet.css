@@ -1,0 +1,156 @@
+/*
+ * Janet theme — design tokens + styles for .fw-* hooks used in JSX.
+ * Typography/buttons stay in MUI (themeConfig.ts) and landingStyles.ts.
+ */
+html[data-theme='janet'] {
+  /* Surfaces */
+  --fw-bg: #faf6ef;
+  --fw-surface: #ffffff;
+  --fw-surface-alt: #f4f0e8;
+
+  /* Ink */
+  --fw-ink: #0a0a0a;
+  --fw-ink-dim: rgba(10, 10, 10, 0.62);
+  --fw-ink-soft: rgba(10, 10, 10, 0.42);
+
+  /* Hairlines */
+  --fw-hairline: rgba(10, 10, 10, 0.08);
+  --fw-hairline-soft: rgba(10, 10, 10, 0.05);
+
+  /* Brand */
+  --fw-orange: #f25c2a;
+  --fw-orange-soft: #fbe6dc;
+  --fw-pink: #ed4e7a;
+
+  /* Gradients */
+  --fw-grad-sunrise: linear-gradient(90deg,
+      #f5a524 0%,
+      #f25c2a 55%,
+      #ed4e7a 100%);
+  --fw-grad-sunrise-soft: radial-gradient(60% 80% at 50% 0%,
+      rgba(245, 165, 36, 0.35),
+      rgba(242, 92, 42, 0.18) 35%,
+      rgba(237, 78, 122, 0.1) 60%,
+      transparent 80%);
+
+  /* Typography (referenced by MUI overrides) */
+  --fw-font: 'Helvetica Neue', Helvetica, Inter, system-ui, sans-serif;
+
+  /* Radii & shadows (referenced by MUI overrides) */
+  --fw-radius-md: 12px;
+  --fw-radius-lg: 14px;
+  --fw-radius-3xl: 28px;
+  --fw-shadow-frame:
+    0 0 0 1px rgba(10, 10, 10, 0.05),
+    0 24px 60px rgba(10, 10, 10, 0.06);
+  --fw-shadow-primary: 0 6px 18px rgba(242, 92, 42, 0.33);
+
+  & body {
+    background: var(--fw-bg);
+    color: var(--fw-ink);
+  }
+
+  & .fw-page {
+    background: var(--fw-bg);
+    color: var(--fw-ink);
+    font-family: var(--fw-font);
+    min-height: 100vh;
+    position: relative;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  & .fw-glow-top {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background: var(--fw-grad-sunrise-soft);
+  }
+
+  & .fw-frame {
+    position: relative;
+    z-index: 2;
+    padding: 60px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  & .fw-frame-inner {
+    width: 100%;
+    max-width: 880px;
+  }
+
+  & .fw-frame-narrow {
+    max-width: 960px;
+  }
+
+  & .fw-hero-card {
+    background: var(--fw-surface);
+    border-radius: var(--fw-radius-3xl);
+    text-align: center;
+    box-shadow: var(--fw-shadow-frame);
+    position: relative;
+    overflow: hidden;
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: -160px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 400px;
+      height: 320px;
+      pointer-events: none;
+      background: radial-gradient(50% 50% at 50% 50%,
+          rgba(242, 92, 42, 0.18),
+          rgba(237, 78, 122, 0.1) 50%,
+          transparent 80%);
+    }
+
+    &>* {
+      position: relative;
+    }
+  }
+
+  & .fw-grad-text {
+    background: var(--fw-grad-sunrise);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  & .MuiListItemButton-root.Mui-selected {
+    border-radius: 0;
+    border-left: 3px solid var(--fw-orange);
+    background-color: var(--fw-surface-alt);
+    font-weight: 600;
+
+    &:hover {
+      background-color: var(--fw-surface-alt);
+    }
+  }
+
+  & .MuiListItemButton-root:not(.Mui-selected) {
+    border-radius: 0;
+    border-left: 3px solid transparent;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-theme='janet'] {
+    --fw-bg: #0e0d11;
+    --fw-surface: #1b1a22;
+    --fw-surface-alt: #26242e;
+    --fw-ink: #f5f1e8;
+    --fw-ink-dim: rgba(245, 241, 232, 0.65);
+    --fw-ink-soft: rgba(245, 241, 232, 0.42);
+    --fw-hairline: rgba(245, 241, 232, 0.1);
+    --fw-hairline-soft: rgba(245, 241, 232, 0.06);
+    --fw-shadow-frame:
+      0 0 0 1px rgba(245, 241, 232, 0.08),
+      0 20px 50px rgba(0, 0, 0, 0.4);
+  }
+}

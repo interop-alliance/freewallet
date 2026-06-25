@@ -18,7 +18,7 @@ import {
   readStoredAppTheme,
   type AppThemeId
 } from '@/themes/appTheme'
-import { getThemePalette } from '@/themes/themePalettes'
+import { buildMuiThemeOptions } from '@/themes/themeConfig'
 
 export function FreewalletThemeProvider({ children }: { children: ReactNode }) {
   const [themeId, setThemeIdState] = useState<AppThemeId>(readStoredAppTheme)
@@ -34,29 +34,10 @@ export function FreewalletThemeProvider({ children }: { children: ReactNode }) {
     setThemeIdState(nextThemeId)
   }, [])
 
-  const muiTheme = useMemo(() => {
-    const palette = getThemePalette(themeId, mode)
-
-    return createTheme({
-      palette: {
-        mode,
-        background: palette.background,
-        primary: palette.primary
-      },
-      typography: {
-        fontFamily: '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
-      },
-      components: {
-        MuiButton: {
-          styleOverrides: {
-            root: {
-              whiteSpace: 'nowrap'
-            }
-          }
-        }
-      }
-    })
-  }, [themeId, mode])
+  const muiTheme = useMemo(
+    () => createTheme(buildMuiThemeOptions(themeId, mode)),
+    [themeId, mode]
+  )
 
   const appThemeContextValue = useMemo(
     () => ({ themeId, setThemeId }),
