@@ -1,2 +1,2 @@
 import './default.css'
-import './janet.css'
+import './west-coast.css'

@@ -1,6 +1,6 @@
 /*
  * Default theme — neutralizes shared .fw-* layout hooks used in JSX.
- * Janet-specific visuals live in janet.css; pages share one markup structure.
+ * West Coast-specific visuals live in west-coast.css; pages share one markup structure.
  */
 html[data-theme='default'] {
   & .fw-page {

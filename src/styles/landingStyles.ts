@@ -22,15 +22,15 @@ export const landingStyles = {
     maxWidth: 760,
     width: '100%'
   },
-  /** Janet hero card inner inset — padding on a child so it isn't clipped/overridden. */
-  janetHeroCardInner: {
+  /** West Coast hero card inner inset — padding on a child so it isn't clipped/overridden. */
+  westCoastHeroCardInner: {
     boxSizing: 'border-box',
     width: '100%',
     px: { xs: 3.5, sm: 7 },
     pt: { xs: 5, sm: 8 },
     pb: { xs: 6, sm: 10 }
   },
-  janetHeroFrame: {
+  westCoastHeroFrame: {
     maxWidth: { xs: '100%', sm: 960 }
   },
   title: {

@@ -36,13 +36,13 @@ export function LandingPage() {
           className="fw-frame-inner fw-frame-narrow"
           sx={{
             ...landingStyles.content,
-            ...(themeId === 'janet' ? landingStyles.janetHeroFrame : {})
+            ...(themeId === 'west-coast' ? landingStyles.westCoastHeroFrame : {})
           }}
         >
           <Box className="fw-hero-card" sx={{ width: '100%' }}>
             <Box
               sx={
-                themeId === 'janet' ? landingStyles.janetHeroCardInner : undefined
+                themeId === 'west-coast' ? landingStyles.westCoastHeroCardInner : undefined
               }
             >
             <Box sx={landingStyles.languageBar}>

@@ -1,8 +1,8 @@
 /*
- * Janet theme — design tokens + styles for .fw-* hooks used in JSX.
+ * West Coast theme — design tokens + styles for .fw-* hooks used in JSX.
  * Typography/buttons stay in MUI (themeConfig.ts) and landingStyles.ts.
  */
-html[data-theme='janet'] {
+html[data-theme='west-coast'] {
   /* Surfaces */
   --fw-bg: #faf6ef;
   --fw-surface: #ffffff;
@@ -140,7 +140,7 @@ html[data-theme='janet'] {
 }
 
 @media (prefers-color-scheme: dark) {
-  html[data-theme='janet'] {
+  html[data-theme='west-coast'] {
     --fw-bg: #0e0d11;
     --fw-surface: #1b1a22;
     --fw-surface-alt: #26242e;
