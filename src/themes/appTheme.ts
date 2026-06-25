@@ -1,7 +1,7 @@
 export const APP_THEME_STORAGE_KEY = 'fw-theme'
 
 /** Register new themes here and add a matching src/themes/<id>.css file. */
-export const APP_THEME_IDS = ['default', 'janet'] as const
+export const APP_THEME_IDS = ['default', 'west-coast'] as const
 
 export type AppThemeId = (typeof APP_THEME_IDS)[number]
 

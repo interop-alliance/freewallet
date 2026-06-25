@@ -4,7 +4,7 @@
     "theme": "Theme",
     "themes": {
       "default": "Default",
-      "janet": "Janet"
+      "west-coast": "West Coast"
     },
     "logOut": "Log out",
     "logIn": "Log in",

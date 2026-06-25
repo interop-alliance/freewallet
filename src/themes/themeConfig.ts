@@ -23,7 +23,7 @@ export type ThemeDefinition = {
   muiComponents?: ThemeOptions['components']
 }
 
-const JANET_FONT =
+const WEST_COAST_FONT =
   '"Helvetica Neue", Helvetica, Inter, system-ui, sans-serif'
 
 const DEFAULT_FONT =
@@ -43,8 +43,8 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
       }
     }
   },
-  janet: {
-    fontFamily: JANET_FONT,
+  'west-coast': {
+    fontFamily: WEST_COAST_FONT,
     palette: {
       light: {
         background: { default: '#FAF6EF', paper: '#FFFFFF' },
@@ -138,9 +138,7 @@ export function buildMuiThemeOptions(
           ...themeButtonOverrides,
           root: {
             whiteSpace: 'nowrap',
-            ...(typeof themeButtonOverrides?.root === 'object'
-              ? themeButtonOverrides.root
-              : {})
+            ...(themeButtonOverrides?.root ?? {})
           }
         }
       }
