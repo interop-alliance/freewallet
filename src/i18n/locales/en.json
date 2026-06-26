@@ -340,35 +340,26 @@
     "lastChecked": "Last checked: {{datetime}}",
     "summaryOk": "This credential was verified successfully.",
     "summaryExpired": "This credential has expired but its cryptographic proof is still valid.",
+    "summaryWarning": "This credential has verification warnings.",
     "summaryFail": "This credential was not verified successfully.",
+    "checklistSubtitle": "This credential:",
     "badgeVerifying": "Verifying…",
     "badgeWarning": "Warning",
     "badgeNotVerified": "Not verified",
     "badgeVerified": "Verified",
     "badgePending": "Pending verification",
-    "narrative": {
-      "hookErrorHeadline": "There was an error verifying this credential.",
-      "verifiedHeadline": "This credential was verified successfully.",
-      "verifiedBody": "Cryptographic proof, validity period, and revocation status (if present) were checked successfully.",
-      "expiredHeadline": "This credential:",
-      "failedHeadline": "There was an error verifying this credential.",
-      "failedBodyFallback": "The credential could not be fully verified. Contact the issuer if this problem continues.",
-      "pendingHeadline": "Verification has not completed yet."
-    },
     "checklist": {
-      "signatureOk": "Cryptographic proof verified",
-      "signatureFail": "Cryptographic proof could not be verified",
-      "issuerRegistryFail": "Cryptographic or issuer registry check did not pass",
-      "issuerNotListed": "Issuer not listed in configured trusted registries",
-      "expiryOk": "Credential is within its validity period",
-      "expiryFail": "Validity period check did not pass",
-      "noExpiration": "No expiration date on credential",
-      "expiredOn": "Credential expired on {{date}}",
-      "validUntil": "Valid until {{date}}",
-      "revocationOk": "Revocation status checked; credential is not revoked",
-      "revocationFail": "Revocation status check did not pass",
-      "noRevocation": "No revocation status on credential",
-      "missingStep": "Missing verification step"
+      "supportedFormatOk": "is in a supported credential format",
+      "supportedFormatFail": "is not a recognized credential type",
+      "signatureOk": "has a valid signature",
+      "signatureFail": "has an invalid signature",
+      "issuerOk": "has been issued by a known issuer",
+      "issuerFail": "isn't in a known issuer registry",
+      "revocationOk": "has not been revoked",
+      "revocationFail": "has been revoked",
+      "expirationOk": "has not expired",
+      "expirationFail": "has expired",
+      "noExpiration": "has no expiration date set"
     }
   }
 }

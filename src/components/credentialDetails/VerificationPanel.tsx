@@ -2,54 +2,100 @@ import {
   Box,
   CircularProgress,
   Divider,
-  Stack,
   Typography
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
-import { MdCancel, MdCheckCircle, MdWarning } from 'react-icons/md'
+import { MdCancel, MdCheckCircle } from 'react-icons/md'
 import type { UseVerificationReturn } from '@/hooks/useVerification'
 import { formatDateTime } from '@/lib/viewMappers/formatDate'
 import {
-  isFullyVerified,
+  getVerificationAggregateStatus,
+  hasVerificationWarning,
   isExpiredOnly,
-  getVerificationNarrative
+  isFullyVerified
 } from '@/lib/viewMappers/verificationMessages'
 import { credentialDetailCardStyles as sx } from '@/styles/credentialStyles'
-import type { VerificationStep } from '@/types/credential'
+import type {
+  VerificationStep,
+  VerificationStepStatus
+} from '@/types/credential'
 
-function ChecklistRow({
-  step,
-  warn = false
-}: {
-  step: VerificationStep
-  warn?: boolean
-}) {
-  const ok = step.valid
+const CHECKLIST_STEP_KEYS = [
+  'supportedFormat',
+  'signature',
+  'issuer',
+  'revocation',
+  'expiration'
+] as const
 
-  let iconSx
-  let icon
-  if (ok) {
-    iconSx = sx.verificationIconSuccess
-    icon = <MdCheckCircle size={16} />
-  } else if (warn) {
-    iconSx = sx.verificationIconWarning
-    icon = <MdWarning size={16} />
-  } else {
-    iconSx = sx.verificationIconError
-    icon = <MdCancel size={16} />
+function checklistSteps(result: NonNullable<UseVerificationReturn['result']>) {
+  return CHECKLIST_STEP_KEYS.map(key => ({ key, step: result[key] }))
+}
+
+function StepIcon({ status }: { status: VerificationStepStatus }) {
+  if (status === 'positive') {
+    return (
+      <Box sx={sx.verificationIconSuccess} aria-hidden>
+        <MdCheckCircle size={20} />
+      </Box>
+    )
+  }
+
+  if (status === 'negative') {
+    return (
+      <Box sx={sx.verificationIconError} aria-hidden>
+        <MdCancel size={20} />
+      </Box>
+    )
   }
 
   return (
-    <Box sx={sx.vpChecklistRow}>
-      <Box sx={iconSx} aria-hidden>
-        {icon}
-      </Box>
-      <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
-        {step.message}
-        {step.error ? ` — ${step.error}` : ''}
+    <Box sx={sx.verificationWarningCircle} aria-hidden>
+      <Typography component="span" sx={sx.verificationWarningMark}>
+        !
       </Typography>
     </Box>
   )
+}
+
+function ChecklistRow({ step }: { step: VerificationStep }) {
+  return (
+    <Box sx={sx.vpChecklistRow}>
+      <StepIcon status={step.status} />
+      <Typography component="span" sx={sx.vpChecklistText}>
+        {step.message}
+      </Typography>
+    </Box>
+  )
+}
+
+function summaryMessageFor(
+  error: Error | null,
+  pending: boolean,
+  result: UseVerificationReturn['result'],
+  t: ReturnType<typeof useTranslation>['t']
+): string {
+  if (pending) {
+    return ''
+  }
+  if (error) {
+    return t('verification.summaryFail')
+  }
+
+  const aggregate = getVerificationAggregateStatus(result)
+  if (aggregate === 'verified') {
+    return t('verification.summaryOk')
+  }
+  if (aggregate === 'warning') {
+    if (result && isExpiredOnly(result)) {
+      return t('verification.summaryExpired')
+    }
+    return t('verification.summaryWarning')
+  }
+  if (aggregate === 'not_verified') {
+    return t('verification.summaryFail')
+  }
+  return ''
 }
 
 export function VerificationPanel({
@@ -60,27 +106,13 @@ export function VerificationPanel({
   const { t } = useTranslation()
   const { result, loading, error, lastCheckedAt } = verification
   const pending = loading || (!result && !error)
-  const narrative = getVerificationNarrative(result, error, t)
-  const summaryOk =
-    !error && result != null && isFullyVerified(result) && !pending
-  const expiredOnly = !error && result != null && isExpiredOnly(result)
-
-  let summaryMessage = ''
-  if (!pending) {
-    if (summaryOk) {
-      summaryMessage = t('verification.summaryOk')
-    } else if (expiredOnly) {
-      summaryMessage = t('verification.summaryExpired')
-    } else {
-      summaryMessage = t('verification.summaryFail')
-    }
-  }
+  const summaryMessage = summaryMessageFor(error, pending, result, t)
 
   return (
     <Box sx={sx.vpCard}>
       <Box sx={sx.vpCardColumns}>
         <Box sx={sx.vpGrayBox}>
-          <Typography variant="caption" sx={sx.vpGrayTitle}>
+          <Typography component="h3" variant="subtitle2" sx={sx.vpGrayTitle}>
             {t('verification.panelTitle')}
           </Typography>
 
@@ -93,37 +125,22 @@ export function VerificationPanel({
             </Box>
           )}
 
-          {!pending && (
+          {!pending && error && (
+            <Typography variant="body2" color="error.main" sx={sx.vpBody}>
+              {error.message}
+            </Typography>
+          )}
+
+          {!pending && !error && result && (
             <>
-              <Typography
-                variant="subtitle1"
-                sx={sx.vpHeadline}
-                color="text.primary"
-              >
-                {narrative.headline}
+              <Typography component="p" sx={sx.vpSubTitle}>
+                {t('verification.checklistSubtitle')}
               </Typography>
-              {narrative.body && (
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={sx.vpBody}
-                >
-                  {narrative.body}
-                </Typography>
-              )}
-              {result && (
-                <Stack spacing={0.75} sx={{ mt: 2 }}>
-                  <ChecklistRow step={result.signature} />
-                  <ChecklistRow step={result.expiry} warn={expiredOnly} />
-                  <ChecklistRow step={result.status} />
-                </Stack>
-              )}
+              {checklistSteps(result).map(({ key, step }) => (
+                <ChecklistRow key={key} step={step} />
+              ))}
               {lastCheckedAt && (
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={sx.vpLastChecked}
-                >
+                <Typography sx={sx.vpLastCheckedInline}>
                   {t('verification.lastChecked', {
                     datetime: formatDateTime(lastCheckedAt)
                   })}
@@ -160,7 +177,10 @@ export function VerificationStatusBadge({
 }: Pick<UseVerificationReturn, 'loading' | 'result' | 'error'>) {
   const { t } = useTranslation()
   const verified = !error && result != null && isFullyVerified(result)
-  const expiredOnly = !error && result != null && isExpiredOnly(result)
+  const warning = !error && result != null && hasVerificationWarning(result)
+  const notVerified =
+    !!error ||
+    (result != null && getVerificationAggregateStatus(result) === 'not_verified')
 
   if (loading) {
     return (
@@ -173,23 +193,7 @@ export function VerificationStatusBadge({
     )
   }
 
-  if (expiredOnly) {
-    return (
-      <Box
-        sx={{ ...sx.vpStatusBadge, ...sx.vpStatusBadgeWarning }}
-        aria-live="polite"
-      >
-        <Box sx={sx.vpStatusIconWrap} aria-hidden>
-          <MdWarning size={11} />
-        </Box>
-        <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
-          {t('verification.badgeWarning')}
-        </Typography>
-      </Box>
-    )
-  }
-
-  if (error || (result && !verified)) {
+  if (notVerified) {
     return (
       <Box
         sx={{ ...sx.vpStatusBadge, ...sx.vpStatusBadgeError }}
@@ -200,6 +204,24 @@ export function VerificationStatusBadge({
         </Box>
         <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
           {t('verification.badgeNotVerified')}
+        </Typography>
+      </Box>
+    )
+  }
+
+  if (warning) {
+    return (
+      <Box
+        sx={{ ...sx.vpStatusBadge, ...sx.vpStatusBadgeWarning }}
+        aria-live="polite"
+      >
+        <Box sx={sx.vpStatusWarningCircle} aria-hidden>
+          <Typography component="span" sx={sx.vpStatusWarningMark}>
+            !
+          </Typography>
+        </Box>
+        <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
+          {t('verification.badgeWarning')}
         </Typography>
       </Box>
     )

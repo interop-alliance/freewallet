@@ -1,35 +1,55 @@
 /**
- * Shared issuer registry client. Holds a module-level singleton
- * `RegistryClient` (from @digitalcredentials/issuer-registry-client) loaded
- * once with the configured registries, so the issuer-details verification
- * suite can look up rich issuer metadata without re-parsing the registry
- * config on every credential. Keeps registry fetch/caching out of the hot
- * path. Used by `issuerDetailsSuite`.
+ * Singleton issuer-registry client for `issuerDetailsSuite`. Loads the known
+ * registries list once per session, then reuses the same RegistryClient.
  */
-import { RegistryClient } from '@digitalcredentials/issuer-registry-client'
+import {
+  RegistryClient,
+  type LookupResult
+} from '@digitalcredentials/issuer-registry-client'
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
+import { KNOWN_REGISTRIES_URL, KnownDidRegistries } from '@/app.config'
+
+const EMPTY_RESULT: LookupResult = {
+  matchingIssuers: [],
+  uncheckedRegistries: []
+}
 
 let cachedClient: RegistryClient | undefined
+let registriesLoadPromise: Promise<EntityIdentityRegistry[]> | undefined
 
-/**
- * Returns a process-wide singleton RegistryClient, loading it with the given
- * registries on first call. Subsequent calls return the same instance and
- * ignore their `registries` argument (the first caller wins) -- the registry
- * config is app-wide and stable for the lifetime of the session.
- *
- * @param options {object}
- * @param options.registries {EntityIdentityRegistry[]}   Registries to load on
- *   first initialization.
- * @returns {RegistryClient}
- */
-export function getCachedRegistryClient({
-  registries
-}: {
-  registries: EntityIdentityRegistry[]
-}): RegistryClient {
+async function loadRegistries(): Promise<EntityIdentityRegistry[]> {
+  if (!registriesLoadPromise) {
+    registriesLoadPromise = (async () => {
+      try {
+        const regRes = await fetch(KNOWN_REGISTRIES_URL)
+        if (!regRes.ok) {
+          throw new Error(`Registry fetch failed: ${regRes.status}`)
+        }
+        return (await regRes.json()) as EntityIdentityRegistry[]
+      } catch (err) {
+        console.warn('Using fallback KnownDidRegistries:', err)
+        return KnownDidRegistries
+      }
+    })()
+  }
+  return registriesLoadPromise
+}
+
+async function ensureClient(): Promise<RegistryClient> {
   if (!cachedClient) {
+    const registries = await loadRegistries()
     cachedClient = new RegistryClient()
     cachedClient.use({ registries })
   }
   return cachedClient
+}
+
+export const registryManager = {
+  async lookupDid(did: string): Promise<LookupResult> {
+    if (!did) {
+      return EMPTY_RESULT
+    }
+    const client = await ensureClient()
+    return client.lookupIssuersFor(did)
+  }
 }

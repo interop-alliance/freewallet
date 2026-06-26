@@ -23,11 +23,7 @@ export interface CredentialDisplayFields {
 }
 
 /**
- * Internal verification payload consumed by the wallet view layer. No longer
- * returned raw by a verifier library: it is synthesized by the `verify.ts`
- * adapter from the @interop/verifier-core `CredentialVerificationResult`
- * (translated back into this flat `log[]` shape, augmented with
- * wallet-specific fields).
+ * Legacy verify payload synthesized by `@/lib/verify` for the UI layer.
  */
 export interface VerifyCredentialPayload {
   log?: Array<{
@@ -47,25 +43,31 @@ export interface VerifyCredentialPayload {
   hasStatusError?: boolean
 }
 
-/**
- * Wallet verification checklist (Signature / Expiry / Revocation rows).
- */
+/** DCW five-step checklist; `expiry` / `status` alias ResumeCredentialCard fields. */
 export interface VerificationChecklist {
+  supportedFormat: VerificationStep
   signature: VerificationStep
+  issuer: VerificationStep
+  revocation: VerificationStep
+  expiration: VerificationStep
+  /** @deprecated Use `expiration`. */
   expiry: VerificationStep
+  /** @deprecated Use `revocation`. */
   status: VerificationStep
 }
 
-/**
- * Alias for mapped checklist used by UI hooks and panels.
- */
 export type VerificationResult = VerificationChecklist
+
+export type VerificationStepStatus = 'positive' | 'warning' | 'negative'
 
 export interface VerificationStep {
   valid: boolean
   message: string
+  status: VerificationStepStatus
   error?: string
 }
+
+export type VerificationAggregateStatus = 'verified' | 'warning' | 'not_verified'
 
 /**
  * A VC as persisted in BrowserStore or WASRemoteStore, keyed by its CID.

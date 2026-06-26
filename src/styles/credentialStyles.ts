@@ -200,9 +200,6 @@ export const credentialDetailCardStyles = {
   alignmentName: {
     fontWeight: 600
   },
-  verificationPanel: {
-    mt: 0
-  },
   verificationLoadingRow: {
     display: 'flex',
     alignItems: 'center',
@@ -211,12 +208,6 @@ export const credentialDetailCardStyles = {
   },
   verificationSpinner: {
     flexShrink: 0
-  },
-  verificationRow: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 1.25
   },
   verificationIconSuccess: {
     color: 'success.main',
@@ -230,22 +221,22 @@ export const credentialDetailCardStyles = {
     flexShrink: 0,
     pt: 0.125
   },
-  verificationIconWarning: {
-    color: 'warning.main',
-    lineHeight: 0,
-    flexShrink: 0,
-    pt: 0.125
+  verificationWarningCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: '50%',
+    bgcolor: 'warning.main',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0
   },
-  verificationText: {
-    minWidth: 0,
-    flex: 1
+  verificationWarningMark: {
+    color: 'common.black',
+    fontWeight: 700,
+    fontSize: '0.875rem',
+    lineHeight: 1
   },
-  verificationLabel: {
-    fontWeight: 600
-  },
-  /**
-   * VerifierPlus-style status pill (card 1)
-   */
   vpStatusBadge: {
     display: 'inline-flex',
     flexDirection: 'row',
@@ -278,13 +269,26 @@ export const credentialDetailCardStyles = {
     display: 'flex',
     lineHeight: 0
   },
+  vpStatusWarningCircle: {
+    width: 14,
+    height: 14,
+    borderRadius: '50%',
+    bgcolor: 'warning.main',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0
+  },
+  vpStatusWarningMark: {
+    color: 'common.black',
+    fontWeight: 700,
+    fontSize: '0.625rem',
+    lineHeight: 1
+  },
   vpStatusBadgeLabel: {
     fontWeight: 700,
     fontSize: '0.625rem'
   },
-  /**
-   * VerifierPlus verification card (card 2)
-   */
   vpCard: {
     px: { xs: 2, md: 3 },
     py: { xs: 2, md: 2.5 }
@@ -307,34 +311,40 @@ export const credentialDetailCardStyles = {
   },
   vpGrayTitle: {
     fontWeight: 700,
-    fontSize: '0.7rem',
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase',
-    color: 'text.secondary',
+    fontSize: '0.875rem',
+    color: 'text.primary',
     display: 'block',
-    mb: 1.5
-  },
-  vpHeadline: {
-    fontWeight: 700,
-    fontSize: '1rem',
-    lineHeight: 1.4,
     mb: 1
+  },
+  vpSubTitle: {
+    fontWeight: 600,
+    fontSize: '0.8125rem',
+    color: 'text.primary',
+    display: 'block',
+    mb: 1.25
   },
   vpBody: {
     lineHeight: 1.5
   },
-  vpLastChecked: {
-    display: 'block',
-    mt: 2,
-    pt: 1.5,
-    borderTop: 1,
-    borderColor: 'divider'
-  },
   vpChecklistRow: {
     display: 'flex',
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 0.75
+    alignItems: 'center',
+    gap: 1,
+    mb: 1.25
+  },
+  vpChecklistText: {
+    fontSize: '0.8125rem',
+    color: 'text.primary',
+    flex: 1,
+    lineHeight: 1.4
+  },
+  vpLastCheckedInline: {
+    display: 'block',
+    mt: 0.5,
+    ml: 3.5,
+    fontSize: '0.8125rem',
+    color: 'text.secondary'
   },
   vpSummaryColumn: {
     flex: { md: '1 1 40%' },
