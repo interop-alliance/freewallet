@@ -26,8 +26,7 @@ export type ThemeDefinition = {
 const WEST_COAST_FONT =
   '"Helvetica Neue", Helvetica, Inter, system-ui, sans-serif'
 
-const DEFAULT_FONT =
-  '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+const DEFAULT_FONT = '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
 
 export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   default: {
@@ -120,7 +119,8 @@ export function buildMuiThemeOptions(
 ): ThemeOptions {
   const definition = THEME_DEFINITIONS[themeId]
   const palette = definition.palette[mode]
-  const themeButtonOverrides = definition.muiComponents?.MuiButton?.styleOverrides
+  const themeButtonOverrides =
+    definition.muiComponents?.MuiButton?.styleOverrides
 
   return {
     palette: {

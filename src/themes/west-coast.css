@@ -23,15 +23,19 @@ html[data-theme='west-coast'] {
   --fw-pink: #ed4e7a;
 
   /* Gradients */
-  --fw-grad-sunrise: linear-gradient(90deg,
-      #f5a524 0%,
-      #f25c2a 55%,
-      #ed4e7a 100%);
-  --fw-grad-sunrise-soft: radial-gradient(60% 80% at 50% 0%,
-      rgba(245, 165, 36, 0.35),
-      rgba(242, 92, 42, 0.18) 35%,
-      rgba(237, 78, 122, 0.1) 60%,
-      transparent 80%);
+  --fw-grad-sunrise: linear-gradient(
+    90deg,
+    #f5a524 0%,
+    #f25c2a 55%,
+    #ed4e7a 100%
+  );
+  --fw-grad-sunrise-soft: radial-gradient(
+    60% 80% at 50% 0%,
+    rgba(245, 165, 36, 0.35),
+    rgba(242, 92, 42, 0.18) 35%,
+    rgba(237, 78, 122, 0.1) 60%,
+    transparent 80%
+  );
 
   /* Typography (referenced by MUI overrides) */
   --fw-font: 'Helvetica Neue', Helvetica, Inter, system-ui, sans-serif;
@@ -41,8 +45,7 @@ html[data-theme='west-coast'] {
   --fw-radius-lg: 14px;
   --fw-radius-3xl: 28px;
   --fw-shadow-frame:
-    0 0 0 1px rgba(10, 10, 10, 0.05),
-    0 24px 60px rgba(10, 10, 10, 0.06);
+    0 0 0 1px rgba(10, 10, 10, 0.05), 0 24px 60px rgba(10, 10, 10, 0.06);
   --fw-shadow-primary: 0 6px 18px rgba(242, 92, 42, 0.33);
 
   & body {
@@ -103,13 +106,15 @@ html[data-theme='west-coast'] {
       width: 400px;
       height: 320px;
       pointer-events: none;
-      background: radial-gradient(50% 50% at 50% 50%,
-          rgba(242, 92, 42, 0.18),
-          rgba(237, 78, 122, 0.1) 50%,
-          transparent 80%);
+      background: radial-gradient(
+        50% 50% at 50% 50%,
+        rgba(242, 92, 42, 0.18),
+        rgba(237, 78, 122, 0.1) 50%,
+        transparent 80%
+      );
     }
 
-    &>* {
+    & > * {
       position: relative;
     }
   }
@@ -150,7 +155,6 @@ html[data-theme='west-coast'] {
     --fw-hairline: rgba(245, 241, 232, 0.1);
     --fw-hairline-soft: rgba(245, 241, 232, 0.06);
     --fw-shadow-frame:
-      0 0 0 1px rgba(245, 241, 232, 0.08),
-      0 20px 50px rgba(0, 0, 0, 0.4);
+      0 0 0 1px rgba(245, 241, 232, 0.08), 0 20px 50px rgba(0, 0, 0, 0.4);
   }
 }
