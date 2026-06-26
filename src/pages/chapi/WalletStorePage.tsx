@@ -116,7 +116,10 @@ export function WalletStorePage() {
 
   if (pageState === 'initializing') {
     return (
-      <Box className="fw-page" sx={{ ...chapiStyles.page, alignItems: 'center' }}>
+      <Box
+        className="fw-page"
+        sx={{ ...chapiStyles.page, alignItems: 'center' }}
+      >
         <CircularProgress />
       </Box>
     )
