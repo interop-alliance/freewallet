@@ -103,7 +103,7 @@ export function SignupPage() {
       await session.storage.addHistorySpaceCreated({ user: session.user })
 
       // Add a "welcome" credential to storage
-      await session.storage!.addCredential({ credential: welcomeCredential })
+      await session.storage.addCredential({ credential: welcomeCredential })
       login(session)
       navigate('/dashboard')
     } catch (err) {

@@ -340,35 +340,26 @@
     "lastChecked": "Última comprobación: {{datetime}}",
     "summaryOk": "Esta credencial se verificó correctamente.",
     "summaryExpired": "Esta credencial ha vencido, pero su prueba criptográfica sigue siendo válida.",
+    "summaryWarning": "Esta credencial tiene avisos de verificación.",
     "summaryFail": "Esta credencial no se verificó correctamente.",
+    "checklistSubtitle": "Esta credencial:",
     "badgeVerifying": "Verificando…",
     "badgeWarning": "Aviso",
     "badgeNotVerified": "No verificada",
     "badgeVerified": "Verificada",
     "badgePending": "Verificación pendiente",
-    "narrative": {
-      "hookErrorHeadline": "Se produjo un error al verificar esta credencial.",
-      "verifiedHeadline": "Esta credencial se verificó correctamente.",
-      "verifiedBody": "Se comprobaron correctamente la prueba criptográfica, el periodo de validez y el estado de revocación (si existe).",
-      "expiredHeadline": "Esta credencial:",
-      "failedHeadline": "Se produjo un error al verificar esta credencial.",
-      "failedBodyFallback": "No se pudo verificar por completo la credencial. Contacte al emisor si el problema continúa.",
-      "pendingHeadline": "La verificación aún no ha terminado."
-    },
     "checklist": {
-      "signatureOk": "Prueba criptográfica verificada",
-      "signatureFail": "No se pudo verificar la prueba criptográfica",
-      "issuerRegistryFail": "No superó la comprobación criptográfica o de registro del emisor",
-      "issuerNotListed": "El emisor no figura en los registros de confianza configurados",
-      "expiryOk": "La credencial está dentro de su periodo de validez",
-      "expiryFail": "No superó la comprobación del periodo de validez",
-      "noExpiration": "La credencial no tiene fecha de vencimiento",
-      "expiredOn": "Credencial vencida el {{date}}",
-      "validUntil": "Válida hasta {{date}}",
-      "revocationOk": "Estado de revocación comprobado; la credencial no está revocada",
-      "revocationFail": "No superó la comprobación del estado de revocación",
-      "noRevocation": "La credencial no tiene estado de revocación",
-      "missingStep": "Falta un paso de verificación"
+      "supportedFormatOk": "está en un formato de credencial admitido",
+      "supportedFormatFail": "no es un tipo de credencial reconocido",
+      "signatureOk": "tiene una firma válida",
+      "signatureFail": "tiene una firma no válida",
+      "issuerOk": "ha sido emitida por un emisor conocido",
+      "issuerFail": "no figura en un registro de emisores conocido",
+      "revocationOk": "no ha sido revocada",
+      "revocationFail": "ha sido revocada",
+      "expirationOk": "no ha vencido",
+      "expirationFail": "ha vencido",
+      "noExpiration": "no tiene fecha de vencimiento"
     }
   }
 }

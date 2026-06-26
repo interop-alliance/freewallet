@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { verifyResultToChecklist } from '@/lib/viewMappers/mapVerificationToUi'
 import {
@@ -14,11 +15,20 @@ export interface UseVerificationReturn {
   loading: boolean
   error: Error | null
   verify: () => Promise<void>
-  /**
-   * Set when a verification attempt completes (success or structured failure).
-   */
   lastCheckedAt: Date | null
   issuerRegistry: IssuerRegistryInfo | null
+}
+
+async function verifyAndMap(
+  credential: IVerifiableCredential,
+  t: TFunction
+): Promise<{ result: VerificationResult; issuerRegistry: IssuerRegistryInfo | null }> {
+  const verifyPayload = await verifyCredential(credential)
+  const raw = verifyPayload as Record<string, unknown>
+  return {
+    result: verifyResultToChecklist(raw, credential, t),
+    issuerRegistry: issuerRegistryInfoFromVerifyPayload(raw)
+  }
 }
 
 export function useVerification(
@@ -26,7 +36,7 @@ export function useVerification(
   options: { runOnMount?: boolean } = { runOnMount: true }
 ): UseVerificationReturn {
   const { runOnMount = true } = options
-  const { i18n } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [result, setResult] = useState<VerificationResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
@@ -50,18 +60,9 @@ export function useVerification(
     setLoading(true)
     setError(null)
     try {
-      const verifyPayload = await verifyCredential(credential)
-      setResult(
-        verifyResultToChecklist(
-          verifyPayload as Record<string, unknown>,
-          credential
-        )
-      )
-      setIssuerRegistry(
-        issuerRegistryInfoFromVerifyPayload(
-          verifyPayload as Record<string, unknown>
-        )
-      )
+      const mapped = await verifyAndMap(credential, t)
+      setResult(mapped.result)
+      setIssuerRegistry(mapped.issuerRegistry)
       setLastCheckedAt(new Date())
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e))
@@ -72,7 +73,7 @@ export function useVerification(
     } finally {
       setLoading(false)
     }
-  }, [credential])
+  }, [credential, t])
 
   useEffect(() => {
     if (!runOnMount || !credential) {
@@ -83,16 +84,12 @@ export function useVerification(
       setLoading(true)
       setError(null)
       try {
-        const verifyPayload = await verifyCredential(credential!)
+        const mapped = await verifyAndMap(credential!, t)
         if (cancelled) {
           return
         }
-        setResult(
-          verifyResultToChecklist(
-            verifyPayload as Record<string, unknown>,
-            credential!
-          )
-        )
+        setResult(mapped.result)
+        setIssuerRegistry(mapped.issuerRegistry)
         setLastCheckedAt(new Date())
       } catch (e) {
         if (cancelled) {
@@ -101,6 +98,7 @@ export function useVerification(
         const err = e instanceof Error ? e : new Error(String(e))
         setError(err)
         setResult(null)
+        setIssuerRegistry(null)
         setLastCheckedAt(new Date())
       } finally {
         if (!cancelled) {
@@ -112,7 +110,7 @@ export function useVerification(
     return () => {
       cancelled = true
     }
-  }, [runOnMount, credential, i18n.language])
+  }, [runOnMount, credential, i18n.language, t])
 
   return { result, loading, error, verify, lastCheckedAt, issuerRegistry }
 }

@@ -1,17 +1,6 @@
 /**
- * Custom verification suite that surfaces rich issuer registry metadata.
- *
- * The un-bundled @interop/verifier-core gutted the registry check down to a
- * boolean `{ found, matchingRegistries }` and discards the rich issuer
- * payload (logo, legal name, homepage, registry org). This suite restores it:
- * it calls @digitalcredentials/issuer-registry-client's `lookupIssuersFor`
- * via the shared singleton client and returns the full `matchingIssuers`
- * entries on the check `outcome.payload` -- the same channel the verifier's
- * own `recognition.profile` uses. `verify.ts` reads this payload back into the
- * legacy `registered_issuer` log entry the view layer consumes.
- *
- * Severity: non-fatal (a warning) -- an unrecognized issuer is informational,
- * not a hard cryptographic failure.
+ * Rich issuer registry lookup for verification UI. Uses `registryManager`
+ * instead of verifier-core's boolean registry suite (non-fatal when unknown).
  */
 import type {
   CheckOutcome,
@@ -20,15 +9,8 @@ import type {
   VerificationSubject,
   VerificationSuite
 } from '@interop/verifier-core'
-import { getCachedRegistryClient } from '@/lib/registryManager'
+import { registryManager } from '@/lib/registryManager'
 
-/**
- * Extracts the issuer DID from a credential, handling both the string and
- * `{ id }` object forms of the `issuer` property.
- *
- * @param credential {Record<string, unknown>}
- * @returns {string | undefined}
- */
 function getIssuerDid(credential: Record<string, unknown>): string | undefined {
   const issuer = credential.issuer as string | { id?: string } | undefined
   if (typeof issuer === 'string') {
@@ -49,7 +31,7 @@ const issuerDetailsCheck: VerificationCheck = {
   appliesTo: ['verifiableCredential'],
   execute: async (
     subject: VerificationSubject,
-    context: VerificationContext
+    _context: VerificationContext
   ): Promise<CheckOutcome> => {
     const credential = subject.verifiableCredential as
       | Record<string, unknown>
@@ -62,13 +44,6 @@ const issuerDetailsCheck: VerificationCheck = {
       }
     }
 
-    if (!context.registries || context.registries.length === 0) {
-      return {
-        status: 'skipped',
-        reason: 'No registries configured in verification context.'
-      }
-    }
-
     const issuerDid = getIssuerDid(credential)
     if (!issuerDid) {
       return {
@@ -77,9 +52,7 @@ const issuerDetailsCheck: VerificationCheck = {
       }
     }
 
-    const client = getCachedRegistryClient({ registries: context.registries })
-    const { matchingIssuers } = await client.lookupIssuersFor(issuerDid)
-
+    const { matchingIssuers } = await registryManager.lookupDid(issuerDid)
     const count = matchingIssuers.length
     return {
       status: 'success',
@@ -92,11 +65,6 @@ const issuerDetailsCheck: VerificationCheck = {
   }
 }
 
-/**
- * The issuer-details suite, appended to the verifier pipeline via
- * `additionalSuites`. This is the authoritative source of rich issuer data
- * for freewallet's issuer detail screen.
- */
 export const issuerDetailsSuite: VerificationSuite = {
   id: 'trust',
   name: 'Issuer Trust',

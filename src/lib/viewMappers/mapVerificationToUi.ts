@@ -1,5 +1,10 @@
+import type { TFunction } from 'i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import type { VerificationResult, VerificationStep } from '@/types/credential'
+import type {
+  VerificationResult,
+  VerificationStep,
+  VerificationStepStatus
+} from '@/types/credential'
 import { getExpirationInstant } from '@/lib/viewMappers/formatDate'
 import { getVerifyLogFromPayload } from '@/lib/viewMappers/verifyLog'
 
@@ -10,76 +15,174 @@ const STEP_ID = {
   registeredIssuer: 'registered_issuer'
 } as const
 
+const SUPPORTED_CREDENTIAL_TYPES = ['VerifiableCredential', 'OpenBadgeCredential']
+
+const CHECKLIST_MSG = {
+  supportedFormatOk: 'is in a supported credential format',
+  supportedFormatFail: 'is not a recognized credential type',
+  signatureOk: 'has a valid signature',
+  signatureFail: 'has an invalid signature',
+  issuerOk: 'has been issued by a known issuer',
+  issuerFail: "isn't in a known issuer registry",
+  revocationOk: 'has not been revoked',
+  revocationFail: 'has been revoked',
+  expirationOk: 'has not expired',
+  expirationFail: 'has expired',
+  noExpiration: 'has no expiration date set'
+} as const
+
+type ChecklistMsgKey = keyof typeof CHECKLIST_MSG
+
 type LogLine = {
   id: string
   valid?: boolean
   error?: { message?: string; name?: string }
 }
 
+function checklistText(t: TFunction | undefined, key: ChecklistMsgKey): string {
+  if (!t) {
+    return CHECKLIST_MSG[key]
+  }
+  return t(`verification.checklist.${key}`)
+}
+
 function getVerifyLogLines(raw: Record<string, unknown>): LogLine[] {
   return getVerifyLogFromPayload(raw) as LogLine[]
 }
 
-function stepFromLogEntry(
-  entry: LogLine | undefined,
-  okMessage: string,
-  failMessage: string
+function step(
+  valid: boolean,
+  message: string,
+  severity: VerificationStepStatus,
+  error?: string
 ): VerificationStep {
-  if (!entry) {
-    return {
-      valid: false,
-      message: failMessage,
-      error: 'Missing verification step'
-    }
-  }
-  const errMsg = entry.error?.message
-  const ok = entry.valid === true && !entry.error
-  if (ok) {
-    return { valid: true, message: okMessage }
-  }
   return {
-    valid: false,
-    message: failMessage,
-    ...(errMsg ? { error: errMsg } : {})
+    valid,
+    message,
+    status: severity,
+    ...(error ? { error } : {})
   }
 }
 
-function combineSignatureAndIssuer(
-  sig: VerificationStep,
-  issuer: LogLine | undefined
+function logValid(entry: LogLine | undefined): boolean | undefined {
+  if (!entry) {
+    return undefined
+  }
+  return entry.valid === true && !entry.error
+}
+
+function supportedFormatStep(
+  credential: IVerifiableCredential,
+  t?: TFunction
 ): VerificationStep {
-  if (!issuer) {
-    return sig
+  const hasKnownType =
+    Array.isArray(credential.type) &&
+    credential.type.some(type => SUPPORTED_CREDENTIAL_TYPES.includes(type))
+
+  return step(
+    hasKnownType,
+    hasKnownType
+      ? checklistText(t, 'supportedFormatOk')
+      : checklistText(t, 'supportedFormatFail'),
+    hasKnownType ? 'positive' : 'negative'
+  )
+}
+
+function signatureStep(entry: LogLine | undefined, t?: TFunction): VerificationStep {
+  const valid = logValid(entry) ?? false
+  return step(
+    valid,
+    valid ? checklistText(t, 'signatureOk') : checklistText(t, 'signatureFail'),
+    valid ? 'positive' : 'negative',
+    entry?.error?.message
+  )
+}
+
+function issuerStep(entry: LogLine | undefined, t?: TFunction): VerificationStep {
+  const valid = logValid(entry) ?? false
+  return step(
+    valid,
+    valid ? checklistText(t, 'issuerOk') : checklistText(t, 'issuerFail'),
+    valid ? 'positive' : 'warning',
+    entry?.error?.message
+  )
+}
+
+function revocationStep(
+  entry: LogLine | undefined,
+  credential: IVerifiableCredential,
+  t?: TFunction
+): VerificationStep {
+  if (!credential.credentialStatus && !entry) {
+    return step(true, checklistText(t, 'revocationOk'), 'positive')
   }
-  const issuerOk = issuer.valid === true && !issuer.error
-  const issuerErr = issuer.error?.message
-  if (issuerOk && sig.valid) {
-    return sig
+
+  const valid = logValid(entry) ?? true
+  return step(
+    valid,
+    valid ? checklistText(t, 'revocationOk') : checklistText(t, 'revocationFail'),
+    valid ? 'positive' : 'negative',
+    entry?.error?.message
+  )
+}
+
+function expirationStep(
+  entry: LogLine | undefined,
+  credential: IVerifiableCredential,
+  t?: TFunction
+): VerificationStep {
+  const exp = getExpirationInstant(credential)
+  const hasExpirationDate = exp != null
+
+  if (!hasExpirationDate && !entry) {
+    return step(true, checklistText(t, 'noExpiration'), 'positive')
   }
-  if (!issuerOk && issuerErr) {
-    return {
-      valid: false,
-      message: 'Cryptographic or issuer registry check did not pass',
-      error: sig.error ? `${sig.error} — Issuer: ${issuerErr}` : issuerErr
-    }
+
+  if (entry) {
+    const valid = logValid(entry) ?? false
+    return step(
+      valid,
+      valid ? checklistText(t, 'expirationOk') : checklistText(t, 'expirationFail'),
+      valid ? 'positive' : 'warning',
+      entry.error?.message
+    )
   }
-  if (!sig.valid) {
-    return sig
+
+  const expired = exp!.getTime() < Date.now()
+  return step(
+    !expired,
+    expired
+      ? checklistText(t, 'expirationFail')
+      : checklistText(t, 'expirationOk'),
+    expired ? 'warning' : 'positive'
+  )
+}
+
+function withGlobalErr(stepValue: VerificationStep, globalErr?: string): VerificationStep {
+  if (stepValue.valid || !globalErr) {
+    return stepValue
   }
+  return { ...stepValue, error: stepValue.error ?? globalErr }
+}
+
+function attachLegacyAliases(checklist: Omit<
+  VerificationResult,
+  'expiry' | 'status'
+>): VerificationResult {
   return {
-    valid: false,
-    message: 'Issuer not listed in configured trusted registries',
-    error: issuerErr
+    ...checklist,
+    expiry: checklist.expiration,
+    status: checklist.revocation
   }
 }
 
 /**
- * Maps the return value of `verifyCredential` in `@/lib/verify` to
- * Signature / Expiry / Revocation checklist rows.
+ * Maps `verifyCredential` output to the five-step DCW checklist.
  */
 export function verifyResultToChecklist(
   raw: Record<string, unknown>,
-  credential: IVerifiableCredential
+  credential: IVerifiableCredential,
+  t?: TFunction
 ): VerificationResult {
   const log = getVerifyLogLines(raw)
   const byId = (id: string) => log.find(line => line.id === id)
@@ -87,74 +190,28 @@ export function verifyResultToChecklist(
   const resultsWithError = raw.results as
     | Array<{ error?: { message?: string } }>
     | undefined
-  const firstResult = resultsWithError?.[0]
   const globalErr =
-    typeof firstResult?.error?.message === 'string'
-      ? firstResult.error.message
+    typeof resultsWithError?.[0]?.error?.message === 'string'
+      ? resultsWithError[0].error.message
       : undefined
 
-  const withGlobalErr = (step: VerificationStep) =>
-    !step.valid && !step.error && globalErr
-      ? { ...step, error: globalErr }
-      : step
-
-  const signature = combineSignatureAndIssuer(
-    stepFromLogEntry(
-      byId(STEP_ID.validSignature),
-      'Cryptographic proof verified',
-      'Cryptographic proof could not be verified'
-    ),
-    byId(STEP_ID.registeredIssuer)
-  )
-
-  let expiry = stepFromLogEntry(
-    byId(STEP_ID.expiration),
-    'Credential is within its validity period',
-    'Validity period check did not pass'
-  )
-
-  if (!byId(STEP_ID.expiration)) {
-    const exp = getExpirationInstant(credential)
-    if (!exp) {
-      expiry = {
-        valid: true,
-        message: 'No expiration date on credential'
-      }
-    } else {
-      const expired = exp.getTime() < Date.now()
-      expiry = expired
-        ? {
-            valid: false,
-            message: `Credential expired on ${exp.toISOString()}`
-          }
-        : {
-            valid: true,
-            message: `Valid until ${exp.toISOString()}`
-          }
-    }
+  const checklist = {
+    supportedFormat: supportedFormatStep(credential, t),
+    signature: signatureStep(byId(STEP_ID.validSignature), t),
+    issuer: issuerStep(byId(STEP_ID.registeredIssuer), t),
+    revocation: revocationStep(byId(STEP_ID.revocation), credential, t),
+    expiration: expirationStep(byId(STEP_ID.expiration), credential, t)
   }
 
-  let status: VerificationStep
-  if (!credential.credentialStatus) {
-    status = {
-      valid: true,
-      message: 'No revocation status on credential'
-    }
-  } else {
-    status = stepFromLogEntry(
-      byId(STEP_ID.revocation),
-      'Revocation status checked; credential is not revoked',
-      'Revocation status check did not pass'
-    )
+  if (!globalErr) {
+    return attachLegacyAliases(checklist)
   }
 
-  if (globalErr) {
-    return {
-      signature: withGlobalErr(signature),
-      expiry: withGlobalErr(expiry),
-      status: withGlobalErr(status)
-    }
-  }
-
-  return { signature, expiry, status }
+  return attachLegacyAliases({
+    supportedFormat: withGlobalErr(checklist.supportedFormat, globalErr),
+    signature: withGlobalErr(checklist.signature, globalErr),
+    issuer: withGlobalErr(checklist.issuer, globalErr),
+    revocation: withGlobalErr(checklist.revocation, globalErr),
+    expiration: withGlobalErr(checklist.expiration, globalErr)
+  })
 }
