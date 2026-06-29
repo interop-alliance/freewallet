@@ -237,19 +237,25 @@ export function CollectionContentsPage() {
     }
   }, [snippetText])
 
-  const handleDownloadBinary = useCallback(() => {
-    if (
-      !resourcePayload ||
-      resourcePayload.kind !== 'binary' ||
-      !collectionId
-    ) {
+  const handleDownloadResource = useCallback(() => {
+    if (!resourcePayload || !collectionId) {
       return
     }
     const base = `${collectionId}-${selectedResource?.id ?? 'file'}`
-    const fname = /\.[a-z0-9]{1,12}$/i.test(base)
-      ? base
-      : `${base}.${extensionFromMime(resourcePayload.contentType)}`
-    const blobUrl = URL.createObjectURL(resourcePayload.blob)
+    let blob: Blob
+    let fname: string
+    if (resourcePayload.kind === 'binary') {
+      blob = resourcePayload.blob
+      fname = /\.[a-z0-9]{1,12}$/i.test(base)
+        ? base
+        : `${base}.${extensionFromMime(resourcePayload.contentType)}`
+    } else if (resourcePayload.kind === 'json') {
+      blob = new Blob([snippetText], { type: 'application/json' })
+      fname = /\.json$/i.test(base) ? base : `${base}.json`
+    } else {
+      return
+    }
+    const blobUrl = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = blobUrl
     a.download = fname
@@ -257,7 +263,7 @@ export function CollectionContentsPage() {
     a.click()
     a.remove()
     URL.revokeObjectURL(blobUrl)
-  }, [collectionId, resourcePayload, selectedResource?.id])
+  }, [collectionId, resourcePayload, selectedResource?.id, snippetText])
 
   const resourcePreviewTitle = selectedResource
     ? getResourceDisplayName(selectedResource)
@@ -385,7 +391,7 @@ export function CollectionContentsPage() {
                     <Button
                       variant="contained"
                       startIcon={<MdDownload />}
-                      onClick={handleDownloadBinary}
+                      onClick={handleDownloadResource}
                     >
                       {t('storage.download')}
                     </Button>
@@ -428,6 +434,18 @@ export function CollectionContentsPage() {
             >
               {resourcePreviewTitle || t('storage.resourceTitle')}
             </Typography>
+            {resourcePayload?.kind === 'json' && (
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<MdDownload />}
+                onClick={handleDownloadResource}
+                sx={{ flexShrink: 0, textTransform: 'none' }}
+                aria-label={t('storage.download')}
+              >
+                {t('storage.download')}
+              </Button>
+            )}
             <Button
               size="small"
               variant="outlined"
