@@ -1,9 +1,4 @@
-import {
-  Box,
-  CircularProgress,
-  Divider,
-  Typography
-} from '@mui/material'
+import { Box, CircularProgress, Divider, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 import { MdCancel, MdCheckCircle } from 'react-icons/md'
 import type { UseVerificationReturn } from '@/hooks/useVerification'
@@ -180,7 +175,8 @@ export function VerificationStatusBadge({
   const warning = !error && result != null && hasVerificationWarning(result)
   const notVerified =
     !!error ||
-    (result != null && getVerificationAggregateStatus(result) === 'not_verified')
+    (result != null &&
+      getVerificationAggregateStatus(result) === 'not_verified')
 
   if (loading) {
     return (

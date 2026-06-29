@@ -22,7 +22,10 @@ export interface UseVerificationReturn {
 async function verifyAndMap(
   credential: IVerifiableCredential,
   t: TFunction
-): Promise<{ result: VerificationResult; issuerRegistry: IssuerRegistryInfo | null }> {
+): Promise<{
+  result: VerificationResult
+  issuerRegistry: IssuerRegistryInfo | null
+}> {
   const verifyPayload = await verifyCredential(credential)
   const raw = verifyPayload as Record<string, unknown>
   return {

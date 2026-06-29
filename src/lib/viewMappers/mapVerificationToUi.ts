@@ -15,7 +15,10 @@ const STEP_ID = {
   registeredIssuer: 'registered_issuer'
 } as const
 
-const SUPPORTED_CREDENTIAL_TYPES = ['VerifiableCredential', 'OpenBadgeCredential']
+const SUPPORTED_CREDENTIAL_TYPES = [
+  'VerifiableCredential',
+  'OpenBadgeCredential'
+]
 
 const CHECKLIST_MSG = {
   supportedFormatOk: 'is in a supported credential format',
@@ -88,7 +91,10 @@ function supportedFormatStep(
   )
 }
 
-function signatureStep(entry: LogLine | undefined, t?: TFunction): VerificationStep {
+function signatureStep(
+  entry: LogLine | undefined,
+  t?: TFunction
+): VerificationStep {
   const valid = logValid(entry) ?? false
   return step(
     valid,
@@ -98,7 +104,10 @@ function signatureStep(entry: LogLine | undefined, t?: TFunction): VerificationS
   )
 }
 
-function issuerStep(entry: LogLine | undefined, t?: TFunction): VerificationStep {
+function issuerStep(
+  entry: LogLine | undefined,
+  t?: TFunction
+): VerificationStep {
   const valid = logValid(entry) ?? false
   return step(
     valid,
@@ -120,7 +129,9 @@ function revocationStep(
   const valid = logValid(entry) ?? true
   return step(
     valid,
-    valid ? checklistText(t, 'revocationOk') : checklistText(t, 'revocationFail'),
+    valid
+      ? checklistText(t, 'revocationOk')
+      : checklistText(t, 'revocationFail'),
     valid ? 'positive' : 'negative',
     entry?.error?.message
   )
@@ -142,7 +153,9 @@ function expirationStep(
     const valid = logValid(entry) ?? false
     return step(
       valid,
-      valid ? checklistText(t, 'expirationOk') : checklistText(t, 'expirationFail'),
+      valid
+        ? checklistText(t, 'expirationOk')
+        : checklistText(t, 'expirationFail'),
       valid ? 'positive' : 'warning',
       entry.error?.message
     )
@@ -158,17 +171,19 @@ function expirationStep(
   )
 }
 
-function withGlobalErr(stepValue: VerificationStep, globalErr?: string): VerificationStep {
+function withGlobalErr(
+  stepValue: VerificationStep,
+  globalErr?: string
+): VerificationStep {
   if (stepValue.valid || !globalErr) {
     return stepValue
   }
   return { ...stepValue, error: stepValue.error ?? globalErr }
 }
 
-function attachLegacyAliases(checklist: Omit<
-  VerificationResult,
-  'expiry' | 'status'
->): VerificationResult {
+function attachLegacyAliases(
+  checklist: Omit<VerificationResult, 'expiry' | 'status'>
+): VerificationResult {
   return {
     ...checklist,
     expiry: checklist.expiration,
