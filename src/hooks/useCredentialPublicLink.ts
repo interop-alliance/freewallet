@@ -1,20 +1,48 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
+import { cidFrom } from '@/lib/cidFrom'
 import type { Session } from '@/types/auth'
 import type { CredentialShareActions } from '@/types/credentialActions'
 
+/**
+ * Drives a credential's public-link (sharing) state. Sharing is
+ * content-addressed: the public copy is keyed by the credential's cid (a hash
+ * of its content), computed here from the decrypted VC -- not by the opaque EDV
+ * id the encrypted `private-credentials` collection uses for routing.
+ */
 export function useCredentialPublicLink({
-  cid,
+  credential,
   session
 }: {
-  cid?: string
+  credential?: IVerifiableCredential
   session: Session | null
 }) {
+  const [cid, setCid] = useState<string | null>(null)
   const [isShared, setIsShared] = useState(false)
   const [publicLink, setPublicLink] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(false)
 
   const canShare = !!session?.storage.canShare
+
+  useEffect(() => {
+    if (!credential) {
+      return
+    }
+    let cancelled = false
+    cidFrom({ doc: credential })
+      .then(contentCid => {
+        if (!cancelled) {
+          setCid(contentCid)
+        }
+      })
+      .catch((err: unknown) => {
+        console.error('Error computing credential cid:', err)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [credential])
 
   useEffect(() => {
     if (!session || !cid || !canShare) {
@@ -34,13 +62,13 @@ export function useCredentialPublicLink({
   }, [canShare, cid, session])
 
   const create = useCallback(async () => {
-    if (!session || !cid) {
+    if (!session || !cid || !credential) {
       return
     }
     setBusy(true)
     setError(false)
     try {
-      const url = await session.storage.createPublicLink({ cid })
+      const url = await session.storage.createPublicLink({ credential })
       setPublicLink(url)
       setIsShared(true)
       await session.storage.addHistoryCredentialShared({
@@ -53,7 +81,7 @@ export function useCredentialPublicLink({
     } finally {
       setBusy(false)
     }
-  }, [cid, session])
+  }, [cid, credential, session])
 
   const remove = useCallback(async () => {
     if (!session || !cid) {

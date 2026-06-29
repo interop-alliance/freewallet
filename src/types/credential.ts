@@ -73,7 +73,11 @@ export type VerificationAggregateStatus =
   | 'not_verified'
 
 /**
- * A VC as persisted in BrowserStore or WASRemoteStore, keyed by its CID.
+ * A VC as persisted in BrowserStore or WASRemoteStore. The `cid` field is an
+ * opaque storage/route id: in local BrowserStore mode it is the content cid
+ * (a hash of the VC); in remote mode the encrypted `private-credentials`
+ * collection mints an EDV id and that is carried here instead. Treat it as an
+ * opaque key -- do not re-hash or validate it as a content cid.
  */
 export interface StoredCredential {
   cid: string

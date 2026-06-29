@@ -6,7 +6,11 @@
  * Shape is broadly compatible with Auth.js / next-auth for future portability.
  */
 import type { StorageManager } from '@/stores/storageManager'
-import type { ISigner } from '@interop/data-integrity-core'
+import type {
+  ISigner,
+  IKeyAgreementKey,
+  IKeyResolver
+} from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 
 /**
@@ -17,6 +21,14 @@ export interface ICapabilityAgent {
   keyName: string
   handle: string
   getSigner: () => ISigner
+  // The underlying Ed25519VerificationKey2020 key pair used for invocation
+  // signing. Underscore-private on CapabilityAgent, but read directly to derive
+  // the X25519 key agreement key (the Montgomery form of this same key).
+  _keyPair: {
+    publicKeyMultibase?: string
+    privateKeyMultibase?: string
+    controller?: string
+  }
 }
 
 /**
@@ -37,6 +49,12 @@ export interface User {
 export interface ControllerProfile {
   keyAgent: ICapabilityAgent
   zcapClient: ZcapClient
+  // X25519 key agreement key, derived deterministically from the passphrase
+  // (the Montgomery form of the Ed25519 signing key). Used to encrypt/decrypt
+  // the EDV-over-WAS `private-credentials` collection.
+  keyAgreementKey: IKeyAgreementKey
+  // Resolves `keyAgreementKey.id` to its public form during encrypt.
+  keyResolver: IKeyResolver
 }
 
 /**

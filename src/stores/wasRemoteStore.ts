@@ -9,7 +9,11 @@
  * hand-built ezcap requests. The `WasClient` wraps the ezcap `ZcapClient` that
  * carries the user's invocation signer.
  */
-import type { IVerifiableCredential } from '@interop/data-integrity-core'
+import type {
+  IKeyAgreementKey,
+  IKeyResolver,
+  IVerifiableCredential
+} from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import {
   WasClient,
@@ -17,6 +21,7 @@ import {
   type Json,
   type Resource
 } from '@interop/was-client'
+import { createEdvEncryption } from '@interop/was-client/edv'
 import type { ControllerProfile, User } from '@/types/auth'
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
@@ -61,19 +66,35 @@ export class WASRemoteStore implements IWalletStore {
   public spaceUrl: string
   public collections?: ICollectionsSet
 
+  private _keyAgreementKey: IKeyAgreementKey
+  private _keyResolver: IKeyResolver
+
   constructor({
     storageServerUrl,
     zcapClient,
     spaceId,
-    controller
+    controller,
+    keyAgreementKey,
+    keyResolver
   }: {
     storageServerUrl: string
     zcapClient: ZcapClient
     spaceId: string
     controller: string
+    keyAgreementKey: IKeyAgreementKey
+    keyResolver: IKeyResolver
   }) {
     this.storageServerUrl = storageServerUrl
-    this.was = new WasClient({ serverUrl: storageServerUrl, zcapClient })
+    this._keyAgreementKey = keyAgreementKey
+    this._keyResolver = keyResolver
+    this.was = new WasClient({
+      serverUrl: storageServerUrl,
+      zcapClient,
+      // Keys are supplied per-handle via the override in `_collection()`, so the
+      // keystore is a no-op; the provider's only job is to build the EDV codec
+      // from the handle's scheme + keys.
+      encryption: createEdvEncryption({ resolveKeys: async () => null })
+    })
     this.spaceId = spaceId
     this.controller = controller
     this.spaceUrl = new URL(`/space/${spaceId}`, storageServerUrl).toString()
@@ -111,9 +132,30 @@ export class WASRemoteStore implements IWalletStore {
           'Call ensureUserCollections() first.'
       )
     }
-    return this.was
-      .space(this.spaceId)
-      .collection(this._collectionId(logicalKey))
+    const def = WALLET_STANDARD_COLLECTIONS.find(
+      entry => entry.key === logicalKey
+    )
+    if (!def) {
+      throw new Error(`Unknown logical collection "${logicalKey}".`)
+    }
+    // Collections declared with an `encryption` marker in
+    // WALLET_STANDARD_COLLECTIONS (e.g. `private-credentials`) are end-to-end
+    // encrypted: hand the codec its keys right at the handle. The override
+    // forces the encryption decision (no marker-discovery round-trip) and fails
+    // closed if keys are missing. Other collections carry no override and stay
+    // plaintext.
+    const encryption = def.encryption
+      ? {
+          encryption: {
+            scheme: def.encryption.scheme,
+            keys: {
+              keyAgreementKey: this._keyAgreementKey,
+              keyResolver: this._keyResolver
+            }
+          }
+        }
+      : undefined
+    return this.was.space(this.spaceId).collection(def.id, encryption)
   }
 
   /**
@@ -207,10 +249,19 @@ export class WASRemoteStore implements IWalletStore {
 
     // Space created, now create the standard collections.
     const collections: ICollectionsSet = new Map()
-    for (const { key, id, name, isPublic } of WALLET_STANDARD_COLLECTIONS) {
+    for (const {
+      key,
+      id,
+      name,
+      isPublic,
+      encryption
+    } of WALLET_STANDARD_COLLECTIONS) {
       try {
         const collection = space.collection(id)
-        await collection.configure({ name })
+        // Declare the encryption marker only for collections that opt in
+        // (private-credentials); the others stay plaintext. The marker is
+        // set-once on the server and pairs with the per-handle override.
+        await collection.configure(encryption ? { name, encryption } : { name })
         if (isPublic) {
           await collection.setPublic()
         }
@@ -255,7 +306,9 @@ export class WASRemoteStore implements IWalletStore {
       storageServerUrl,
       zcapClient: profile.zcapClient,
       spaceId,
-      controller
+      controller,
+      keyAgreementKey: profile.keyAgreementKey,
+      keyResolver: profile.keyResolver
     })
 
     return { remoteStore }
@@ -284,18 +337,25 @@ export class WASRemoteStore implements IWalletStore {
     }
   }
 
-  async addCredential({
-    cid,
-    credential
-  }: {
-    cid: string
-    credential: IVerifiableCredential
-  }) {
-    return await this.addCollectionResource({
-      resourceId: cid,
-      collectionId: 'privateCredentials',
-      resourceBody: credential
-    })
+  /**
+   * Adds a credential to the encrypted `private-credentials` collection. The
+   * EDV codec encrypts the body and mints an opaque EDV id (an explicit,
+   * human-readable id is rejected on an encrypted collection -- it would leak
+   * onto the URL); that EDV id becomes the credential's storage/route id,
+   * discovered later via `listCredentials()`.
+   *
+   * @param credential {IVerifiableCredential}
+   * @returns {Promise<void>}
+   */
+  async addCredential({ credential }: { credential: IVerifiableCredential }) {
+    try {
+      await this._collection('privateCredentials').add(
+        credential as unknown as Json
+      )
+    } catch (err) {
+      console.error('Error adding credential:', err)
+      throw new Error('Failed to add remote credential.', { cause: err })
+    }
   }
 
   /**

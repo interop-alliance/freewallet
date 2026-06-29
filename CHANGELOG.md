@@ -4,6 +4,23 @@
 
 ### Added
 
+- End-to-end encrypt the remote `private-credentials` collection using the new
+  EDV-over-WAS capability in `@interop/was-client` (`0.9.x`, opt-in `/edv`
+  subpath). The WAS server now only ever stores opaque JWE envelopes for private
+  credentials, while the Dashboard transparently decrypts and lists them. A
+  deterministic X25519 key agreement key (added dependency
+  `@interop/x25519-key-agreement-key`) is derived from the passphrase -- the
+  Montgomery form of the existing Ed25519 signing key -- and threaded onto
+  `Session.profile`, so a returning user re-derives the same key and can decrypt
+  their vault. Encryption is supplied via a per-handle override at the one site
+  that opens the private collection (`WASRemoteStore._collection()`), and the
+  collection is also declared with a server-side `encryption` marker at creation
+  so it is self-describing (a future client/delegate can discover it is
+  encrypted and supply its own keys); other collections stay plaintext.
+  Credentials in encrypted mode are now keyed by the
+  EDV-minted (opaque) id rather than the content cid; public sharing remains
+  plaintext and content-addressed (keyed by the cid computed from the decrypted
+  VC).
 - Show an on-screen error on the login page when the remote WAS storage server
   is unreachable, instead of silently failing (the login spinner used to just
   stop). The message offers a link to guest mode as a fallback

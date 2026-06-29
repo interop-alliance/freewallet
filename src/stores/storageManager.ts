@@ -147,12 +147,15 @@ export class StorageManager {
   }
 
   async addCredential({ credential }: { credential: IVerifiableCredential }) {
-    const cid = await cidFrom({ doc: credential })
     if (!this.remoteOnly) {
+      // Local BrowserStore is content-addressed and unencrypted: key by cid.
+      const cid = await cidFrom({ doc: credential })
       await this._localStore!.addCredential({ cid, credential })
     }
     if (this._remoteStore) {
-      await this._remoteStore.addCredential({ cid, credential })
+      // Remote `private-credentials` is encrypted: the EDV codec mints the
+      // (opaque) storage id, so no cid is supplied here.
+      await this._remoteStore.addCredential({ credential })
     }
   }
 
@@ -477,18 +480,22 @@ export class StorageManager {
 
   /**
    * Creates a world-readable public link for a credential and returns its URL.
+   * The public copy is plaintext and content-addressed: it is keyed by the
+   * credential's cid (a hash of its content), independent of the opaque EDV id
+   * the encrypted `private-credentials` collection uses internally.
    *
-   * @param cid {string}
+   * @param credential {IVerifiableCredential}
    * @returns {Promise<string>}
    */
-  async createPublicLink({ cid }: { cid: string }): Promise<string> {
+  async createPublicLink({
+    credential
+  }: {
+    credential: IVerifiableCredential
+  }): Promise<string> {
     if (!this._remoteStore) {
       throw new Error('Public links require remote storage.')
     }
-    const credential = await this._remoteStore.loadCredential({ cid })
-    if (!credential) {
-      throw new Error(`Credential "${cid}" not found.`)
-    }
+    const cid = await cidFrom({ doc: credential })
     return await this._remoteStore.createPublicLink({ cid, credential })
   }
 

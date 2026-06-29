@@ -1,4 +1,9 @@
-import { expect, type Page, type TestInfo } from '@playwright/test'
+import {
+  expect,
+  type Locator,
+  type Page,
+  type TestInfo
+} from '@playwright/test'
 
 export function testUser(testInfo: TestInfo) {
   const token = `${Date.now()}-w${testInfo.workerIndex}`
@@ -44,14 +49,29 @@ export async function expectQuotaCard(page: Page) {
   ).toBeVisible({ timeout: 15_000 })
 }
 
+/**
+ * The storage-quota card, scoped by its unique "Storage usage" heading. The
+ * collection display names also appear in the collections browser further down
+ * the page, so quota assertions must be scoped to this card to stay
+ * unambiguous.
+ */
+export function quotaCard(page: Page): Locator {
+  return page
+    .locator('.MuiPaper-root')
+    .filter({ has: page.getByRole('heading', { name: 'Storage usage' }) })
+}
+
 export async function expectCollectionUsage(
   page: Page,
   collectionName: string,
   usagePattern: RegExp
 ) {
-  const row = page.locator('div').filter({
-    has: page.getByText(collectionName, { exact: true })
-  })
+  // Walk from the (unique, within the card) exact collection-name label up to
+  // its row, which also carries the usage amount. The amount and unit render as
+  // adjacent spans with no separating space (e.g. "24.0KB").
+  const row = quotaCard(page)
+    .getByText(collectionName, { exact: true })
+    .locator('xpath=..')
   await expect(row).toContainText(usagePattern)
 }
 
@@ -72,7 +92,11 @@ export const E2E_TEST_CREDENTIAL_JSON = JSON.stringify(E2E_TEST_CREDENTIAL)
 export async function addCredentialViaPaste(page: Page) {
   await page.getByRole('link', { name: 'Add Credential' }).click()
   await expect(page).toHaveURL(/#\/add-credential/)
-  await page.locator('textarea').fill(E2E_TEST_CREDENTIAL_JSON)
+  // MUI's multiline TextField renders a hidden shadow <textarea> alongside the
+  // real one, so match by role/placeholder rather than the bare `textarea` tag.
+  await page
+    .getByRole('textbox', { name: /Paste a URL/ })
+    .fill(E2E_TEST_CREDENTIAL_JSON)
   await page.getByRole('button', { name: 'Add' }).click()
   await expect(page).toHaveURL(/#\/accept-credentials/)
   await page.getByRole('button', { name: 'Accept all' }).click()
