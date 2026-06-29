@@ -37,8 +37,15 @@ function coreResult(results: CheckResult[]): CredentialVerificationResult {
   }
 }
 
+type LogEntry = {
+  id: string
+  valid?: boolean
+  matchingIssuers?: unknown[]
+  error?: { message?: string; name?: string }
+}
+
 function logById(payload: Awaited<ReturnType<typeof verifyCredential>>) {
-  const log = payload.results?.[0]?.log ?? payload.log ?? []
+  const log = (payload.results?.[0]?.log ?? payload.log ?? []) as LogEntry[]
   return (id: string) => log.find(entry => entry.id === id)
 }
 
@@ -56,10 +63,15 @@ const MATCHING_ISSUERS = [
 describe('verify.ts adapter', () => {
   beforeEach(() => {
     coreVerifyMock.mockReset()
-    // Force the fallback registries path (avoids a real network fetch).
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({ ok: false, status: 500 })
+  })
+
+  it('disables the default registry suite (registries: [])', async () => {
+    coreVerifyMock.mockResolvedValue(coreResult([]))
+
+    await verifyCredential(CREDENTIAL)
+
+    expect(coreVerifyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ registries: [] })
     )
   })
 
