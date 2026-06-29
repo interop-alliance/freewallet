@@ -44,6 +44,8 @@ export function isExpiredOnly(result: VerificationResult | null): boolean {
   )
 }
 
-export function hasVerificationWarning(result: VerificationResult | null): boolean {
+export function hasVerificationWarning(
+  result: VerificationResult | null
+): boolean {
   return getVerificationAggregateStatus(result) === 'warning'
 }

@@ -67,7 +67,10 @@ export interface VerificationStep {
   error?: string
 }
 
-export type VerificationAggregateStatus = 'verified' | 'warning' | 'not_verified'
+export type VerificationAggregateStatus =
+  | 'verified'
+  | 'warning'
+  | 'not_verified'
 
 /**
  * A VC as persisted in BrowserStore or WASRemoteStore, keyed by its CID.
