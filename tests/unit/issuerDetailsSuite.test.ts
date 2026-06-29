@@ -1,14 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type {
-  EntityIdentityRegistry,
   VerificationContext,
   VerificationSubject
 } from '@interop/verifier-core'
 
-const lookupIssuersFor = vi.fn()
+const lookupDid = vi.fn()
 
 vi.mock('@/lib/registryManager', () => ({
-  getCachedRegistryClient: () => ({ lookupIssuersFor })
+  registryManager: { lookupDid: (...args: unknown[]) => lookupDid(...args) }
 }))
 
 const { issuerDetailsSuite } =
@@ -16,19 +15,7 @@ const { issuerDetailsSuite } =
 
 const issuerDetailsCheck = issuerDetailsSuite.checks[0]
 
-const REGISTRIES: EntityIdentityRegistry[] = [
-  {
-    type: 'dcc-legacy',
-    name: 'DCC Pilot Registry',
-    url: 'https://example.com/registry.json'
-  }
-]
-
-function contextWith(
-  registries: EntityIdentityRegistry[] | undefined
-): VerificationContext {
-  return { registries } as unknown as VerificationContext
-}
+const EMPTY_CONTEXT = {} as VerificationContext
 
 function subjectWith(credential: Record<string, unknown>): VerificationSubject {
   return { verifiableCredential: credential }
@@ -36,7 +23,7 @@ function subjectWith(credential: Record<string, unknown>): VerificationSubject {
 
 describe('issuerDetailsSuite', () => {
   beforeEach(() => {
-    lookupIssuersFor.mockReset()
+    lookupDid.mockReset()
   })
 
   it('returns matchingIssuers on the payload for a registered issuer', async () => {
@@ -53,17 +40,17 @@ describe('issuerDetailsSuite', () => {
         }
       }
     ]
-    lookupIssuersFor.mockResolvedValue({
+    lookupDid.mockResolvedValue({
       matchingIssuers,
       uncheckedRegistries: []
     })
 
     const outcome = await issuerDetailsCheck.execute(
       subjectWith({ issuer: 'did:key:zABC' }),
-      contextWith(REGISTRIES)
+      EMPTY_CONTEXT
     )
 
-    expect(lookupIssuersFor).toHaveBeenCalledWith('did:key:zABC')
+    expect(lookupDid).toHaveBeenCalledWith('did:key:zABC')
     expect(outcome.status).toBe('success')
     if (outcome.status === 'success') {
       expect(outcome.payload).toEqual({ matchingIssuers })
@@ -71,28 +58,28 @@ describe('issuerDetailsSuite', () => {
   })
 
   it('handles the object form of issuer (issuer.id)', async () => {
-    lookupIssuersFor.mockResolvedValue({
+    lookupDid.mockResolvedValue({
       matchingIssuers: [],
       uncheckedRegistries: []
     })
 
     await issuerDetailsCheck.execute(
       subjectWith({ issuer: { id: 'did:key:zDEF' } }),
-      contextWith(REGISTRIES)
+      EMPTY_CONTEXT
     )
 
-    expect(lookupIssuersFor).toHaveBeenCalledWith('did:key:zDEF')
+    expect(lookupDid).toHaveBeenCalledWith('did:key:zDEF')
   })
 
   it('succeeds with empty matchingIssuers for an unregistered issuer', async () => {
-    lookupIssuersFor.mockResolvedValue({
+    lookupDid.mockResolvedValue({
       matchingIssuers: [],
       uncheckedRegistries: []
     })
 
     const outcome = await issuerDetailsCheck.execute(
       subjectWith({ issuer: 'did:key:zXYZ' }),
-      contextWith(REGISTRIES)
+      EMPTY_CONTEXT
     )
 
     expect(outcome.status).toBe('success')
@@ -101,21 +88,12 @@ describe('issuerDetailsSuite', () => {
     }
   })
 
-  it('skips when no registries are configured', async () => {
-    const outcome = await issuerDetailsCheck.execute(
-      subjectWith({ issuer: 'did:key:zXYZ' }),
-      contextWith(undefined)
-    )
-    expect(outcome.status).toBe('skipped')
-    expect(lookupIssuersFor).not.toHaveBeenCalled()
-  })
-
   it('skips when the credential has no issuer DID', async () => {
     const outcome = await issuerDetailsCheck.execute(
       subjectWith({ id: 'urn:example:1' }),
-      contextWith(REGISTRIES)
+      EMPTY_CONTEXT
     )
     expect(outcome.status).toBe('skipped')
-    expect(lookupIssuersFor).not.toHaveBeenCalled()
+    expect(lookupDid).not.toHaveBeenCalled()
   })
 })
