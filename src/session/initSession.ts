@@ -7,13 +7,15 @@
 import { CapabilityAgent } from '@digitalbazaar/webkms-client'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import { ZcapClient } from '@interop/ezcap'
+import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
+import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import type { ControllerProfile, Session, User } from '@/types/auth'
 import { StorageManager } from '@/stores/storageManager'
 
 /**
  * Creates bootstrap CapabilityAgent and ZcapClient instances from a secret
- * passphrase. These will be used to manage DIDs, sign zCaps, interface with
- * storage, etc.
+ * passphrase, plus the X25519 key agreement key used for encrypted storage.
+ * These will be used to manage DIDs, sign zCaps, interface with storage, etc.
  */
 export async function agentsFromSecret({
   secret
@@ -30,7 +32,30 @@ export async function agentsFromSecret({
     SuiteClass: Ed25519Signature2020,
     invocationSigner: signer
   })
-  return { keyAgent, zcapClient }
+
+  // Derive an X25519 key agreement key (KAK) from the same Ed25519 key pair the
+  // CapabilityAgent already holds -- exactly what did:key's encryption key
+  // derivation does (the KAK is the Montgomery form of the signing key). This
+  // is deterministic: the same passphrase always yields the same KAK, so a
+  // returning user can decrypt their vault. The KAK lives under the same
+  // did:key DID as the user identity, making keyResolver / controller wiring
+  // trivial.
+  const keyAgreementKey =
+    X25519KeyAgreementKey2020.fromEd25519VerificationKey2020({
+      keyPair: { ...keyAgent._keyPair, controller: keyAgent.id }
+    })
+  const keyResolver = async ({ id }: { id?: string }) => {
+    if (id !== keyAgreementKey.id) {
+      throw new Error(`Unknown key id "${id}".`)
+    }
+    return {
+      id: keyAgreementKey.id,
+      type: keyAgreementKey.type,
+      publicKeyMultibase: keyAgreementKey.publicKeyMultibase
+    }
+  }
+
+  return { keyAgent, zcapClient, keyAgreementKey, keyResolver }
 }
 
 /**
@@ -64,9 +89,10 @@ export async function initSessionFromSecret({
   secret: string | Uint8Array
   isGuest?: boolean
 }) {
-  const { keyAgent, zcapClient } = await agentsFromSecret({
-    secret: secret
-  })
+  const { keyAgent, zcapClient, keyAgreementKey, keyResolver } =
+    await agentsFromSecret({
+      secret: secret
+    })
 
   const user: User = {
     id: keyAgent.id, // a did:key DID
@@ -74,7 +100,11 @@ export async function initSessionFromSecret({
   }
   const profile: ControllerProfile = {
     keyAgent,
-    zcapClient
+    zcapClient,
+    // `id` is always set on the KAK here (a controller was supplied at
+    // derivation), so it satisfies IKeyAgreementKey's required `id`.
+    keyAgreementKey: keyAgreementKey as IKeyAgreementKey,
+    keyResolver
   }
 
   const { storage, userExists } = await StorageManager.initStorageClients({

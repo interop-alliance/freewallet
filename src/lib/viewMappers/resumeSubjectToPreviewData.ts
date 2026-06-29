@@ -40,8 +40,7 @@ function summaryFromProfessionalSummary(professionalSummary: unknown): string {
   }
   const record = professionalSummary as Record<string, unknown>
   const credentialSubject = record.credentialSubject as
-    | Record<string, unknown>
-    | undefined
+    Record<string, unknown> | undefined
   if (typeof credentialSubject?.narrative === 'string') {
     return htmlToPlainText(credentialSubject.narrative)
   }

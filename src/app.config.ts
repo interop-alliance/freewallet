@@ -13,11 +13,21 @@ export const DEPLOY_URL = env.VITE_DEPLOY_URL
 // Remote WAS server URL. When set, switches storage to remote-only mode.
 export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
 
-export const WALLET_STANDARD_COLLECTIONS = [
+export const WALLET_STANDARD_COLLECTIONS: Array<{
+  key: string
+  id: string
+  name: string
+  isPublic?: boolean
+  // Declares the collection's client-side encryption marker on the server,
+  // making it self-describing (a future client/delegate can discover that it is
+  // encrypted and supply its own keys). Set-once / immutable on the server.
+  encryption?: { scheme: 'edv' }
+}> = [
   {
     key: 'privateCredentials',
     id: 'private-credentials',
-    name: 'Verifiable Credentials'
+    name: 'Verifiable Credentials',
+    encryption: { scheme: 'edv' }
   },
   {
     key: 'publicCredentials',

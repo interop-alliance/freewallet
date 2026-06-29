@@ -27,23 +27,26 @@ importers:
         specifier: ^8.1.0
         version: 8.1.0
       '@interop/ed25519-signature':
-        specifier: ^7.1.2
-        version: 7.1.2(@interop/jsonld-signatures@11.8.1)
+        specifier: ^7.1.3
+        version: 7.1.3(@interop/jsonld-signatures@11.8.1)
       '@interop/ezcap':
-        specifier: ^7.2.1
-        version: 7.2.1
+        specifier: ^7.3.2
+        version: 7.3.2
       '@interop/http-client':
-        specifier: ^1.0.3
-        version: 1.0.3
+        specifier: ^1.0.4
+        version: 1.0.4
       '@interop/storage-core':
-        specifier: ^0.2.3
-        version: 0.2.3
+        specifier: ^0.3.0
+        version: 0.3.0
       '@interop/verifier-core':
-        specifier: ^3.2.1
-        version: 3.2.1
+        specifier: ^3.3.1
+        version: 3.3.1
       '@interop/was-client':
-        specifier: ^0.7.1
-        version: 0.7.1(@interop/jsonld-signatures@11.8.1)
+        specifier: ^0.9.2
+        version: 0.9.2(@interop/jsonld-signatures@11.8.1)
+      '@interop/x25519-key-agreement-key':
+        specifier: ^5.1.1
+        version: 5.1.1
       '@mui/lab':
         specifier: 9.0.0-beta.2
         version: 9.0.0-beta.2(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@types/react@19.2.17)(react@19.2.7))(@mui/material@9.1.2(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@types/react@19.2.17)(react@19.2.7))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -67,10 +70,10 @@ importers:
         version: 4.1.1
       credential-handler-polyfill:
         specifier: ^4.0.1
-        version: 4.0.3
+        version: 4.1.0
       i18next:
         specifier: ^26.3.0
-        version: 26.3.2(typescript@5.9.3)
+        version: 26.3.3(typescript@5.9.3)
       json-canonicalize:
         specifier: ^2.0.0
         version: 2.0.0
@@ -94,7 +97,7 @@ importers:
         version: 19.2.7(react@19.2.7)
       react-i18next:
         specifier: ^17.0.7
-        version: 17.0.8(i18next@26.3.2(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.9.3)
+        version: 17.0.8(i18next@26.3.3(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.9.3)
       react-icons:
         specifier: ^5.6.0
         version: 5.6.0(react@19.2.7)
@@ -122,7 +125,7 @@ importers:
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
-        version: 10.0.1(eslint@10.5.0)
+        version: 10.0.1(eslint@10.6.0)
       '@types/node':
         specifier: ^25.9.1
         version: 25.9.4
@@ -134,31 +137,31 @@ importers:
         version: 19.2.3(@types/react@19.2.17)
       '@typescript-eslint/eslint-plugin':
         specifier: ^8.57.1
-        version: 8.62.0(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@5.9.3))(eslint@10.5.0)(typescript@5.9.3)
+        version: 8.62.0(@typescript-eslint/parser@8.62.0(eslint@10.6.0)(typescript@5.9.3))(eslint@10.6.0)(typescript@5.9.3)
       '@typescript-eslint/parser':
         specifier: ^8.57.1
-        version: 8.62.0(eslint@10.5.0)(typescript@5.9.3)
+        version: 8.62.0(eslint@10.6.0)(typescript@5.9.3)
       '@vitejs/plugin-react':
         specifier: ^6.0.0
         version: 6.0.3(vite@8.1.0(@types/node@25.9.4))
       eslint:
         specifier: ^10.4.1
-        version: 10.5.0
+        version: 10.6.0
       eslint-config-prettier:
         specifier: ^10.1.8
-        version: 10.1.8(eslint@10.5.0)
+        version: 10.1.8(eslint@10.6.0)
       eslint-plugin-jsx-a11y:
         specifier: ^6.10.2
-        version: 6.10.2(eslint@10.5.0)
+        version: 6.10.2(eslint@10.6.0)
       eslint-plugin-react:
         specifier: ^7.37.5
-        version: 7.37.5(eslint@10.5.0)
+        version: 7.37.5(eslint@10.6.0)
       eslint-plugin-react-hooks:
         specifier: ^7.0.1
-        version: 7.1.1(eslint@10.5.0)
+        version: 7.1.1(eslint@10.6.0)
       eslint-plugin-react-refresh:
         specifier: ^0.5.2
-        version: 0.5.3(eslint@10.5.0)
+        version: 0.5.3(eslint@10.6.0)
       globals:
         specifier: ^17.4.0
         version: 17.7.0
@@ -167,7 +170,7 @@ importers:
         version: 29.1.1(@noble/hashes@2.2.0)
       prettier:
         specifier: ^3.8.1
-        version: 3.8.4
+        version: 3.9.1
       serve:
         specifier: ^14.2.6
         version: 14.2.6
@@ -176,7 +179,7 @@ importers:
         version: 5.9.3
       typescript-eslint:
         specifier: ^8.56.1
-        version: 8.62.0(eslint@10.5.0)(typescript@5.9.3)
+        version: 8.62.0(eslint@10.6.0)(typescript@5.9.3)
       vite:
         specifier: ^8.0.14
         version: 8.1.0(@types/node@25.9.4)
@@ -284,8 +287,8 @@ packages:
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
 
-  '@csstools/color-helpers@6.0.2':
-    resolution: {integrity: sha512-LMGQLS9EuADloEFkcTBR3BwV/CGHV7zyDxVRtVDTwdI2Ca4it0CCVTT9wCkxSgokjE5Ho41hEPgb8OEUwoXr6Q==}
+  '@csstools/color-helpers@6.1.0':
+    resolution: {integrity: sha512-064IFJdjTfUqnjpCVpMOdbr8FLQBhinbZj6yRv2An2E41O/pLEXqfFRWqGq/SxlE5PEUYTlvWsG2r8MswAVvkg==}
     engines: {node: '>=20.19.0'}
 
   '@csstools/css-calc@3.2.1':
@@ -295,8 +298,8 @@ packages:
       '@csstools/css-parser-algorithms': ^4.0.0
       '@csstools/css-tokenizer': ^4.0.0
 
-  '@csstools/css-color-parser@4.1.8':
-    resolution: {integrity: sha512-3chWb7PRLijpJpPIKkDxdu6IBeO5MrFACND57On0j8OPpc0wZibcGc3xAHrSEbOx/KDRyMHoIxGn0w1PhXMYHw==}
+  '@csstools/css-color-parser@4.1.9':
+    resolution: {integrity: sha512-paQcIaOO53Rk5+YrBaBjm/SgrV4INImjo2BT1DtQRYr+XeTRbeAYlS+jxXp9drqvKmtFnWRJKIalDLhZZDu42A==}
     engines: {node: '>=20.19.0'}
     peerDependencies:
       '@csstools/css-parser-algorithms': ^4.0.0
@@ -523,8 +526,8 @@ packages:
     resolution: {integrity: sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ==}
     engines: {node: '>=18.18'}
 
-  '@interop/bnid@6.0.1':
-    resolution: {integrity: sha512-LZmDLOZ1TS0zSF1iuk4C7NJz/jaa3YRdHKiX7yh7dT+bFkmpDXpAa5dudIUXDW9uXo95x9a6a/CL6enL+lTEXg==}
+  '@interop/bnid@6.0.2':
+    resolution: {integrity: sha512-yQ5Xkj5ccFMdQc+pIGvbg9tpIgxM8oLvjxImqKplg2twosi9/L5Q4q0ZiCOy3jUo3LgV5H9M99nOutOE70DJjg==}
     engines: {node: '>=24.0'}
     peerDependencies:
       react-native-get-random-values: '>=1.8.0'
@@ -540,20 +543,28 @@ packages:
     resolution: {integrity: sha512-zAKvLtTXymx0/SgwM4t4PX7qSM2+4kzCGmv+o8l+YXjLaw3PFwOoI/FW0DvObI6z49eptwQaze7fJGPUaEDllQ==}
     engines: {node: '>=24.0'}
 
-  '@interop/did-io@4.0.5':
-    resolution: {integrity: sha512-J3EUJsU1RtqVe1TEFQ2pyg4W5ZoCZ1UD4Z/4piLrKkuKQynLFsPga+EI/0niFPp7JmEjOvAsxu0h2eqOTVmkAw==}
+  '@interop/data-integrity-proof@3.4.1':
+    resolution: {integrity: sha512-ARxpVgZFnLdBCFlONv0go0yMBSJkKNN1GnRJ0Zpjb0QsK2lk83FznB2HSNkFEZVgfliUOif7WaDI2sayufnqiA==}
     engines: {node: '>=24.0'}
 
-  '@interop/did-method-key@7.3.2':
-    resolution: {integrity: sha512-JE0KPMCWhCSLM5l07BD2MvYfyyY56kjJUtanObCJBurwxqKykpHh3YjWs9QD9DkxqkaG6qrKo6JYPK5DXzImlw==}
+  '@interop/did-io@4.0.6':
+    resolution: {integrity: sha512-WFvnnyGHq9odQla5cpI5t/SY55zsa+WH0ugr+TnWQC8eFZUt4jTZjwoZ4PoVWIcw+2UgU9x8Vq8wImM1lXx4Hg==}
     engines: {node: '>=24.0'}
 
-  '@interop/did-web-resolver@6.2.2':
-    resolution: {integrity: sha512-ViVu+hy2yz4zd+e7WY/tiibT0D+8bvaTiiVWpP+5xyUX8ACQLoVJEtEoPQOBdIp7ZPP7QiXlS7mjvGLH7/BKdw==}
+  '@interop/did-method-key@7.3.3':
+    resolution: {integrity: sha512-fu35GXb2rvQtcDgvMsmj8sls87LqvOWvKcX/AouEeigRcLIZWKd2jB+IM6L7lYdJf30PJElB8Jp2PtVzIkWH5g==}
+    engines: {node: '>=24.0'}
+
+  '@interop/did-web-resolver@6.2.3':
+    resolution: {integrity: sha512-cOOXp9XXQg6tAJeaFoujvvavS6NwCP+TPc5w4/uFRfHxLaQrR3eB6jCIdqjlRs0EqvN9PsSAgpaTXqQ5upXH7g==}
     engines: {node: '>=24.0'}
 
   '@interop/ecdsa-multikey@2.3.1':
     resolution: {integrity: sha512-OJ1WWuL2+c00hmNb7RRmtlcAsuvQVTUSLadEr9rxbVXzSejwffYyqpLApbhykoHEJn4cANlmkWKa7PfAWhO1vg==}
+    engines: {node: '>=24.0'}
+
+  '@interop/ecdsa-multikey@2.3.2':
+    resolution: {integrity: sha512-trEcq2E3zSqIC7uubFyn29+oJV3fD7gxwJ2G6lfJKMYOQ5kSSelqC9SNvCYyp8I0hRI7GKM3dhEQDtuW0JVGTw==}
     engines: {node: '>=24.0'}
 
   '@interop/ecdsa-signature@2.0.3':
@@ -565,8 +576,26 @@ packages:
       '@interop/jsonld-signatures':
         optional: true
 
+  '@interop/ecdsa-signature@2.0.4':
+    resolution: {integrity: sha512-+cJKqF5B18owC2tImSzIN6Biz5T7ufln73t+KifpgvgFPGQQPIIRLSsWtWfk7Yu9Tqu1P4tpOCcF5ZBr/ER1vA==}
+    engines: {node: '>=24.0'}
+    peerDependencies:
+      '@interop/jsonld-signatures': ^11.6.7
+    peerDependenciesMeta:
+      '@interop/jsonld-signatures':
+        optional: true
+
   '@interop/ed25519-signature@7.1.2':
     resolution: {integrity: sha512-TtYWtl7o63nyRu+jC2VgnkMP2S8eSF6gL92rpWbeVdz0OzDP+Nb0RS3zijHB3E/Y+PlqcPYi+Em9pV4qTIFixQ==}
+    engines: {node: '>=24.0'}
+    peerDependencies:
+      '@interop/jsonld-signatures': ^11.7.1
+    peerDependenciesMeta:
+      '@interop/jsonld-signatures':
+        optional: true
+
+  '@interop/ed25519-signature@7.1.3':
+    resolution: {integrity: sha512-EVkZ9srwa0o7woZY5TqePjw4jM2P0Q6DYGMRNmuv3X0/oWhUW4wIqKL93bsHeURpY4yVKbxRQy3FJTwxMInznw==}
     engines: {node: '>=24.0'}
     peerDependencies:
       '@interop/jsonld-signatures': ^11.7.1
@@ -592,12 +621,20 @@ packages:
       react-native-get-random-values:
         optional: true
 
-  '@interop/ezcap@7.2.1':
-    resolution: {integrity: sha512-FK2cTY30pdJvt40feIYVfXaKvoTNPLECEBKFTASb2pc7RlFgnFiRo7x7ODqBI+J8ujtOyh3OyWNup8lcfLbYVQ==}
+  '@interop/ezcap@7.3.0':
+    resolution: {integrity: sha512-u8mDVttjwQHePSTyQvzZHWNHsWSt+4/KFFg849L16g4erDQgHuQdHE2M51le28rGTbLiElmWPWD1N7XEc5novg==}
+    engines: {node: '>=20.0'}
+
+  '@interop/ezcap@7.3.2':
+    resolution: {integrity: sha512-g6206oQZV+jpBAkVA9O4XyyXwYToOiDkuNiIpZA82s07Te+kZC73uEYSCfj7ysQhW6GsMUpr20+4R20GtJ0jiA==}
     engines: {node: '>=20.0'}
 
   '@interop/http-client@1.0.3':
     resolution: {integrity: sha512-KxWiQ87iRreDfrhzrrcEJL/sDrnonhnOSyQKDlnxJywfJnB211rWOtcLlEz3kwrqw3Tt0L3H+5zVvgfG6V/xhw==}
+    engines: {node: '>=22.12'}
+
+  '@interop/http-client@1.0.4':
+    resolution: {integrity: sha512-ceCNf8f7ktcMIyPILINzqrleejdzpIaFGoQKZYTWthIC0i1fxSBt5VHC7Sy8MmSomc3tPk2OMI7KqjnF3Ng/XQ==}
     engines: {node: '>=22.12'}
 
   '@interop/http-digest-header@3.0.0':
@@ -621,8 +658,16 @@ packages:
     resolution: {integrity: sha512-/TTN1Kkby31cv8lm9Lzwsx/Vd72cFYjLnQ8jz0+Sq1/We4yLkJhyKJJIJXXCMx3mhvTRI7ePwJqLMBftL/YUiw==}
     engines: {node: '>=18'}
 
+  '@interop/jsonld-signatures@11.8.2':
+    resolution: {integrity: sha512-go/hnGUPTItT6DHZfj3tL2wmsBgiBbkxbM8ZoUhorifbniAC2+fkAaEWRF8IYX6l+qsaW0nFGu3Zf4QhVaEzTg==}
+    engines: {node: '>=18'}
+
   '@interop/jsonld@9.0.2':
     resolution: {integrity: sha512-gH9Jlwexv4QBdw5mPPrHtrC6ojP/FIfazsy55ScNhnwPbmhWl592erBGmQoo8WGT8wRSOwiGRG30b96lEPTT/w==}
+    engines: {node: '>=18'}
+
+  '@interop/jsonld@9.0.3':
+    resolution: {integrity: sha512-i25LeKC9a9GBdwVGopwGlzvTQPuq5Ssgvt/Vh3XdNhJ2yIySCZmp+XApKlL14PxnjewFUfRnBO+bpm1qiAZW/A==}
     engines: {node: '>=18'}
 
   '@interop/lru-memoize@4.0.3':
@@ -633,32 +678,40 @@ packages:
     resolution: {integrity: sha512-v4KWTjVf8hzsJLB8XcpLrt9fEQpqZwabp6C4I/RGe2ga4mapA22gv7A+Mm9XPO0qIgFDfACbnrPjs/+dQ3GApw==}
     engines: {node: '>=24.0'}
 
-  '@interop/security-document-loader@9.4.0':
-    resolution: {integrity: sha512-nNlVztf1CBjs3RtXZMy1GlHvpbzEpaRVLCGqSnfNRCvk8TxSC4KvAAaWZptJss21AqSd5ZYxe5kjnyV1obOTpg==}
+  '@interop/security-document-loader@9.4.1':
+    resolution: {integrity: sha512-AilGgeLYER/6SP9jxKp5wCT2SLP1YYhahsRFkCJT8gxf8WiaI53Vz8BpfKuIvwaYa+rIicT9wn/+nWUhc+jWMA==}
     engines: {node: '>=24.0'}
 
-  '@interop/storage-core@0.2.3':
-    resolution: {integrity: sha512-bDvel8oGHZ6xXccLKEwtJZJQc/Y+MsQ48T9h1X16Y+Y2DnSwa5fv2WRd2yZ8J8vhBg2Dni7ogyf1uGIu0db4gA==}
+  '@interop/storage-core@0.3.0':
+    resolution: {integrity: sha512-XTsLMRRPXoMDIbwwJM/Vx5m1iGn7RG0CJ3N6hX7xUR4bCuy+QcNfrQgsFQaPP3GYgb1vNdE/YI5lH7yp1KTT3w==}
     engines: {node: '>=22.0'}
 
-  '@interop/vc-bitstring-status-list@3.0.3':
-    resolution: {integrity: sha512-8HQSOHa/xvCTQ6qcp2q+764lYzBINNlMMqEpBbOlJrVoS54X7urZFL5RPn2rE8XqmVPL1V7KFJ161FkYzBjejA==}
+  '@interop/vc-bitstring-status-list@3.0.4':
+    resolution: {integrity: sha512-45lBxtjF+Jn/eQb/8WIEa+047Hv0lKjIlaUH9GPW5sdJqXwHR1OY+VzWCbtwlE3N1nUQ4/LrM6EaVAsUCNNuDQ==}
     engines: {node: '>=24.0'}
 
-  '@interop/vc@11.0.4':
-    resolution: {integrity: sha512-CTQDSEbwg+RiZQ+BSy1/Th8kfZH43tVRvvAcsJ9KslNX6/W5JarmwdKcGrrX4dO7Ms2uip/ua1i0i8o7Cthluw==}
+  '@interop/vc@11.0.5':
+    resolution: {integrity: sha512-x9FN3VB6T1gG/HvXSRFx2435DAOlUI1O2vodcjKFm7ZZooCACe60Jw2gcLFGk3/752Y7eD6tsAXyHvemB1ydYQ==}
     engines: {node: '>=24.0'}
 
-  '@interop/verifier-core@3.2.1':
-    resolution: {integrity: sha512-GdHESW76R+6uzpmO+rR5H9hfBWkVIlCiKOmm2QNoVTmG6w+uTgrhW/+8AEnqdmadftNSxLt0g7Xi1CPup3lYmg==}
+  '@interop/verifier-core@3.3.1':
+    resolution: {integrity: sha512-QvRM/VTVTG+9VpOnEd15Eklt/IwFc+XJHu7e0xJI4jKVwr43qxBwblWPeTvvM5AdfCkmIxzlvIXdnf62vO0ZUg==}
     engines: {node: '>=24.0'}
 
-  '@interop/was-client@0.7.1':
-    resolution: {integrity: sha512-QMQs6wmCRiHDl++5qraJXbFwwDom3q0u0xZtRmWukhsU9qRQnmq4zE1b/5AGTIs1k+7c7x+0vO+Us6cy1+6ryw==}
+  '@interop/was-client@0.9.2':
+    resolution: {integrity: sha512-gqY0FwXhiZ5z+c0ULRXtTl5fPzE2JyBNFxXN4PjLSwtvArcc1ohHCEqNx6m9PbsFy+Qd8nad9J8Y/qYaug5r5Q==}
+    engines: {node: '>=24.0'}
+
+  '@interop/x25519-key-agreement-key@5.1.1':
+    resolution: {integrity: sha512-OfrYufUk1J6VWDZk6HWad8378Xa9VJq8rmkhiarzleti2StnQ+zfudTVXkAiI/dFmgkRscR/93BZdKrAnPTNKA==}
     engines: {node: '>=24.0'}
 
   '@interop/zcap@11.0.3':
     resolution: {integrity: sha512-/hyFjrxrcFgGiQPxR4EtyHIIf2j8j/HEruCSPSodCgiGthuoqNZzRdAbAyV+E1WLX8xYiDwdZmIGoYqTfk/D6Q==}
+    engines: {node: '>=24.0'}
+
+  '@interop/zcap@11.0.4':
+    resolution: {integrity: sha512-EoAwDFUhm+KwhtjMfVE6g/BNCEj7p9dXjRBD8ey47ne4FO6YKd67OVFBqxxL7yNeLRKrKM5AzmIjmakgEKbAMw==}
     engines: {node: '>=24.0'}
 
   '@jridgewell/gen-mapping@0.3.13':
@@ -1287,8 +1340,8 @@ packages:
     resolution: {integrity: sha512-ir1UPr3dkwexU7FdV8qBBbNDRUhMmIekYMFZfi+C/sLNnRESKPl23nB9b2pltqfOQNnGzsDdId90AEtG5tCx4A==}
     engines: {node: '>=6.0.0'}
 
-  baseline-browser-mapping@2.10.38:
-    resolution: {integrity: sha512-31/02mVB4yuQU6adKk5SlY6m+mxDwUq5KZkyYgnLrrKl7TEm1+3PyDtDBz2kOv/wxZz41GHsvV1A/u6RmiyBvw==}
+  baseline-browser-mapping@2.10.40:
+    resolution: {integrity: sha512-BSSLZ9/Cjjv7Gtj5B68ZzXcXUg8iOf3fme+FCuh8rC/Go+Kmh8cox7M3A8dolou16s64QjLPOSdngh7GxXvkSw==}
     engines: {node: '>=6.0.0'}
     hasBin: true
 
@@ -1454,8 +1507,8 @@ packages:
     resolution: {integrity: sha512-AdmX6xUzdNASswsFtmwSt7Vj8po9IuqXm0UXz7QKPuEUmPB4XyjGfaAr2PSuELMwkRMVH1EpIkX5bTZGRB3eCA==}
     engines: {node: '>=10'}
 
-  credential-handler-polyfill@4.0.3:
-    resolution: {integrity: sha512-Qp0AdIjNTSgOcVGbpItanUvicyBaWFbN+vvOp4pEKSZrbxyNfocc6wQunuNM84svDG1yMM5nNmSLhP8A6VHYLw==}
+  credential-handler-polyfill@4.1.0:
+    resolution: {integrity: sha512-MOhdGKI/8KQDPnuDibtWlv0AbxjELFyNUk6AT9/1q5KpnCtYSqbvkmWlPpdrHQwxdETu39Pe97ASdbT/LlIZWg==}
 
   credentials-context@2.0.0:
     resolution: {integrity: sha512-/mFKax6FK26KjgV2KW2D4YqKgoJ5DVJpNt87X2Jc9IxT2HBMy7nEIlc+n7pEi+YFFe721XqrvZPd+jbyyBjsvQ==}
@@ -1580,8 +1633,8 @@ packages:
   ed25519-signature-2020-context@1.1.0:
     resolution: {integrity: sha512-dBGSmoUIK6h2vadDctrDnhhTO01PR2hJk0mRNEfrRDPCjaIwrfy4J+eziEQ9Q1m8By4f/CSRgKM1h53ydKfdNg==}
 
-  electron-to-chromium@1.5.378:
-    resolution: {integrity: sha512-VinvOAuuPmdD1guEgGv5f2Qp7/vlfqOrUOMYNnOD4wj3pit8kRsQHzfIf6teyUGWo15Tg5+bOJaRunvyltpVWQ==}
+  electron-to-chromium@1.5.380:
+    resolution: {integrity: sha512-W6d5AbuEoRayO447cqrg6lKJIlscgRnnxOZl/08kfV71BQDoEBC7Wwis68z87LjyK6f4kWyTaubuDbhHKrZkbA==}
 
   emoji-regex@8.0.0:
     resolution: {integrity: sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A==}
@@ -1634,8 +1687,8 @@ packages:
     resolution: {integrity: sha512-d9T8ucsEhh8Bi1woXCf+TIKDIROLG5WCkxg8geBCbvk22kzwC5G2OnXVMO6FUsvQlgUUXQ2itephWDLqDzbeCw==}
     engines: {node: '>= 0.4'}
 
-  es-to-primitive@1.3.1:
-    resolution: {integrity: sha512-CxN9N56HYfd2m/acc/NOFrZQsN9kU4eh+2kk6A707Kz1krH8tKmfrs5RnftB8WNX80T0NS7vSQsDOlg23diR2g==}
+  es-to-primitive@1.3.4:
+    resolution: {integrity: sha512-yPDz7wqpg1/mmHLmS3tcfTfbw5f1eryXvyghYBffGdERwe+mV7ZcWzTR8LR17Kvqt3qfPurjlonmnq3MKXIOXw==}
     engines: {node: '>= 0.4'}
 
   escalade@3.2.0:
@@ -1691,8 +1744,8 @@ packages:
     resolution: {integrity: sha512-tD40eHxA35h0PEIZNeIjkHoDR4YjjJp34biM0mDvplBe//mB+IHCqHDGV7pxF+7MklTvighcCPPZC7ynWyjdTA==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  eslint@10.5.0:
-    resolution: {integrity: sha512-1y+7C+vi12bUK1IpZeaV3gsH9fHLBmPvYmPx42pvT/E9yG0IC8g3PUZZgp0+JLJl7ZDK0flc2gc+Aw9dpCvIsQ==}
+  eslint@10.6.0:
+    resolution: {integrity: sha512-6lVbcqSodALYo+4ELD0heG6lFiFxnLMuLkiMi2qV8LMp54N8tE8FT1GMH+ev4Ti00nFjNze2+Su6DsV5OQW3Dg==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
     hasBin: true
     peerDependencies:
@@ -1738,8 +1791,8 @@ packages:
     resolution: {integrity: sha512-8uSpZZocAZRBAPIEINJj3Lo9HyGitllczc27Eh5YYojjMFMn8yHMDMaUHE2Jqfq05D/wucwI4JGURyXt1vchyg==}
     engines: {node: '>=10'}
 
-  expect-type@1.3.0:
-    resolution: {integrity: sha512-knvyeauYhqjOYvQ66MznSMs83wmHrCycNEN6Ao+2AeYEfxUIkuiVxdEa1qlGEPK+We3n0THiDciYSsCcgW/DoA==}
+  expect-type@1.4.0:
+    resolution: {integrity: sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==}
     engines: {node: '>=12.0.0'}
 
   extend@3.0.2:
@@ -1941,8 +1994,8 @@ packages:
     resolution: {integrity: sha512-B4FFZ6q/T2jhhksgkbEW3HBvWIfDW85snkQgawt07S7J5QXTk6BkNV+0yAeZrM5QpMAdYlocGoljn0sJ/WQkFw==}
     engines: {node: '>=10.17.0'}
 
-  i18next@26.3.2:
-    resolution: {integrity: sha512-QQkXAM1sPDHqhxMQuBeHVMUn6mJchF+wdpOoQerciLAFqO3ZYdxO0EUbeEhruyutnNwpUQIITDVzLjwnNL0T1w==}
+  i18next@26.3.3:
+    resolution: {integrity: sha512-aYVegyBdXSO93CMMihvr47jI7GHSOcIahMpJX+qzUXDzW4xDJf2uenIA+45vDU+YhiVdcfsql70AC9RVdMNrHg==}
     peerDependencies:
       typescript: ^5 || ^6
     peerDependenciesMeta:
@@ -2525,8 +2578,8 @@ packages:
     resolution: {integrity: sha512-kXs9Go0cah0qHVV2v389IXQLdLCeE1xfFtjOAF+iobu0OIoG1pje8At2vMHyaPMiPMnG/LWP50twML21eMcAag==}
     engines: {node: '>= 0.4'}
 
-  node-releases@2.0.49:
-    resolution: {integrity: sha512-f06bl1D+8ZDkn2oOQQKAh5/otFWqVnM1Q5oerA8Pex7UfT66Tx4IPHIqVVFKqFT3FUtaDstdgkM7yT7JWhqxfw==}
+  node-releases@2.0.50:
+    resolution: {integrity: sha512-J6l92tKHX6w8Jy5nO1Vuc01NoIiRGi/d6qBKVxh+IQ8Cr3b6HbVNfKiF8ZpFKufTwpwxMmce2W3iQZ861ZRyTg==}
     engines: {node: '>=18'}
 
   npm-run-path@4.0.1:
@@ -2675,8 +2728,8 @@ packages:
     resolution: {integrity: sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g==}
     engines: {node: '>= 0.8.0'}
 
-  prettier@3.8.4:
-    resolution: {integrity: sha512-N2MylSdi48+5N/6S5j+maeHbUSIzzZ5uOcX5Hm4QpV8Dkb1HFjfAKTKX6yNPJQD9AhcT3ifHNB66tWTTJDi11Q==}
+  prettier@3.9.1:
+    resolution: {integrity: sha512-ppiDo2CSwexck1eyZUwJHg/N3nf1+6IRCv7W/VJ5vaLnVCmB7+3CdRfMwoCHBBX6xTrREDTksZ4OZl5SSf4zXA==}
     engines: {node: '>=14'}
     hasBin: true
 
@@ -3217,10 +3270,6 @@ packages:
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
 
-  uuid@14.0.1:
-    resolution: {integrity: sha512-6ZxzVpzDXDa3bJWaHilVayA+BH/1zmxCJoVgvmqJnid/gPoKHxUrS/aC/T6LGQtNHT+XHG9fXPJB4d+IrU30Ew==}
-    hasBin: true
-
   uuidv7@1.2.1:
     resolution: {integrity: sha512-4kPkK3/XTQW9Hbm4CaqfICn+kY9LJtDVEOfgsRRra/+n2Ofg4NqzRFceAkxvQ/Ud/6BpHOPzj8cirqM7TzTN5Q==}
     hasBin: true
@@ -3471,7 +3520,7 @@ snapshots:
     dependencies:
       '@asamuzakjp/generational-cache': 1.0.1
       '@csstools/css-calc': 3.2.1(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
-      '@csstools/css-color-parser': 4.1.8(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
+      '@csstools/css-color-parser': 4.1.9(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-parser-algorithms': 4.0.0(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-tokenizer': 4.0.0
 
@@ -3597,16 +3646,16 @@ snapshots:
     dependencies:
       css-tree: 3.2.1
 
-  '@csstools/color-helpers@6.0.2': {}
+  '@csstools/color-helpers@6.1.0': {}
 
   '@csstools/css-calc@3.2.1(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)':
     dependencies:
       '@csstools/css-parser-algorithms': 4.0.0(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-tokenizer': 4.0.0
 
-  '@csstools/css-color-parser@4.1.8(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)':
+  '@csstools/css-color-parser@4.1.9(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)':
     dependencies:
-      '@csstools/color-helpers': 6.0.2
+      '@csstools/color-helpers': 6.1.0
       '@csstools/css-calc': 3.2.1(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-parser-algorithms': 4.0.0(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-tokenizer': 4.0.0
@@ -3791,9 +3840,9 @@ snapshots:
 
   '@emotion/weak-memoize@0.4.0': {}
 
-  '@eslint-community/eslint-utils@4.9.1(eslint@10.5.0)':
+  '@eslint-community/eslint-utils@4.9.1(eslint@10.6.0)':
     dependencies:
-      eslint: 10.5.0
+      eslint: 10.6.0
       eslint-visitor-keys: 3.4.3
 
   '@eslint-community/regexpp@4.12.2': {}
@@ -3814,9 +3863,9 @@ snapshots:
     dependencies:
       '@types/json-schema': 7.0.15
 
-  '@eslint/js@10.0.1(eslint@10.5.0)':
+  '@eslint/js@10.0.1(eslint@10.6.0)':
     optionalDependencies:
-      eslint: 10.5.0
+      eslint: 10.6.0
 
   '@eslint/object-schema@3.0.5': {}
 
@@ -3845,7 +3894,7 @@ snapshots:
 
   '@humanwhocodes/retry@0.4.3': {}
 
-  '@interop/bnid@6.0.1':
+  '@interop/bnid@6.0.2':
     dependencies:
       '@scure/base': 2.2.0
 
@@ -3858,31 +3907,43 @@ snapshots:
       '@noble/hashes': 2.2.0
       '@scure/base': 2.2.0
 
-  '@interop/did-io@4.0.5':
+  '@interop/data-integrity-proof@3.4.1':
+    dependencies:
+      '@interop/data-integrity-core': 8.1.0
+      '@interop/jsonld-signatures': 11.8.2
+      '@noble/hashes': 2.2.0
+      '@scure/base': 2.2.0
+
+  '@interop/did-io@4.0.6':
     dependencies:
       '@interop/data-integrity-core': 8.1.0
       '@interop/lru-memoize': 4.0.3
 
-  '@interop/did-method-key@7.3.2':
+  '@interop/did-method-key@7.3.3':
     dependencies:
       '@digitalbazaar/x25519-key-agreement-key-2020': 3.0.1
       '@interop/data-integrity-core': 8.1.0
-      '@interop/did-io': 4.0.5
+      '@interop/did-io': 4.0.6
       '@interop/ed25519-verification-key': 8.0.2
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/did-web-resolver@6.2.2':
+  '@interop/did-web-resolver@6.2.3':
     dependencies:
-      '@interop/bnid': 6.0.1
+      '@interop/bnid': 6.0.2
       '@interop/data-integrity-core': 8.1.0
-      '@interop/did-io': 4.0.5
-      '@interop/http-client': 1.0.3
+      '@interop/did-io': 4.0.6
+      '@interop/http-client': 1.0.4
       did-context: 3.1.1
     transitivePeerDependencies:
       - react-native-get-random-values
 
   '@interop/ecdsa-multikey@2.3.1':
+    dependencies:
+      '@interop/data-integrity-core': 8.1.0
+      '@scure/base': 2.2.0
+
+  '@interop/ecdsa-multikey@2.3.2':
     dependencies:
       '@interop/data-integrity-core': 8.1.0
       '@scure/base': 2.2.0
@@ -3896,6 +3957,24 @@ snapshots:
     optionalDependencies:
       '@interop/jsonld-signatures': 11.8.1
 
+  '@interop/ecdsa-signature@2.0.3(@interop/jsonld-signatures@11.8.2)':
+    dependencies:
+      '@interop/ecdsa-multikey': 2.3.1
+      '@interop/jsonld': 9.0.2
+      canonicalize: 3.0.0
+      rdf-canonize: 5.0.0
+    optionalDependencies:
+      '@interop/jsonld-signatures': 11.8.2
+
+  '@interop/ecdsa-signature@2.0.4(@interop/jsonld-signatures@11.8.2)':
+    dependencies:
+      '@interop/ecdsa-multikey': 2.3.2
+      '@interop/jsonld': 9.0.3
+      canonicalize: 3.0.0
+      rdf-canonize: 5.0.0
+    optionalDependencies:
+      '@interop/jsonld-signatures': 11.8.2
+
   '@interop/ed25519-signature@7.1.2(@interop/jsonld-signatures@11.8.1)':
     dependencies:
       '@interop/data-integrity-core': 8.1.0
@@ -3907,6 +3986,34 @@ snapshots:
       rdf-canonize: 5.0.0
     optionalDependencies:
       '@interop/jsonld-signatures': 11.8.1
+    transitivePeerDependencies:
+      - react-native-get-random-values
+
+  '@interop/ed25519-signature@7.1.3(@interop/jsonld-signatures@11.8.1)':
+    dependencies:
+      '@interop/data-integrity-core': 8.1.0
+      '@interop/data-integrity-proof': 3.4.1
+      '@interop/ed25519-verification-key': 8.0.2
+      '@interop/jsonld': 9.0.3
+      canonicalize: 3.0.0
+      ed25519-signature-2020-context: 1.1.0
+      rdf-canonize: 5.0.0
+    optionalDependencies:
+      '@interop/jsonld-signatures': 11.8.1
+    transitivePeerDependencies:
+      - react-native-get-random-values
+
+  '@interop/ed25519-signature@7.1.3(@interop/jsonld-signatures@11.8.2)':
+    dependencies:
+      '@interop/data-integrity-core': 8.1.0
+      '@interop/data-integrity-proof': 3.4.1
+      '@interop/ed25519-verification-key': 8.0.2
+      '@interop/jsonld': 9.0.3
+      canonicalize: 3.0.0
+      ed25519-signature-2020-context: 1.1.0
+      rdf-canonize: 5.0.0
+    optionalDependencies:
+      '@interop/jsonld-signatures': 11.8.2
     transitivePeerDependencies:
       - react-native-get-random-values
 
@@ -3931,7 +4038,7 @@ snapshots:
     transitivePeerDependencies:
       - expo-crypto
 
-  '@interop/ezcap@7.2.1':
+  '@interop/ezcap@7.3.0':
     dependencies:
       '@interop/data-integrity-core': 8.1.0
       '@interop/data-integrity-proof': 3.4.0
@@ -3940,11 +4047,27 @@ snapshots:
       '@interop/http-signature-zcap-invoke': 6.2.3
       '@interop/jsonld-signatures': 11.8.1
       '@interop/zcap': 11.0.3
-      uuid: 14.0.1
+    transitivePeerDependencies:
+      - expo-crypto
+
+  '@interop/ezcap@7.3.2':
+    dependencies:
+      '@interop/data-integrity-core': 8.1.0
+      '@interop/data-integrity-proof': 3.4.1
+      '@interop/ecdsa-signature': 2.0.3(@interop/jsonld-signatures@11.8.2)
+      '@interop/http-client': 1.0.4
+      '@interop/http-signature-zcap-invoke': 6.2.3
+      '@interop/jsonld-signatures': 11.8.2
+      '@interop/zcap': 11.0.4
     transitivePeerDependencies:
       - expo-crypto
 
   '@interop/http-client@1.0.3':
+    dependencies:
+      ky: 1.14.3
+      undici: 7.28.0
+
+  '@interop/http-client@1.0.4':
     dependencies:
       ky: 1.14.3
       undici: 7.28.0
@@ -3971,9 +4094,25 @@ snapshots:
       rdf-canonize: 5.0.0
       serialize-error: 8.1.0
 
+  '@interop/jsonld-signatures@11.8.2':
+    dependencies:
+      '@digitalbazaar/security-context': 1.0.1
+      '@interop/data-integrity-core': 8.1.0
+      '@interop/jsonld': 9.0.3
+      fast-text-encoding: 1.0.6
+      rdf-canonize: 5.0.0
+      serialize-error: 8.1.0
+
   '@interop/jsonld@9.0.2':
     dependencies:
       '@interop/http-client': 1.0.3
+      canonicalize: 2.1.0
+      lru-cache: 6.0.0
+      rdf-canonize: 5.0.0
+
+  '@interop/jsonld@9.0.3':
+    dependencies:
+      '@interop/http-client': 1.0.4
       canonicalize: 2.1.0
       lru-cache: 6.0.0
       rdf-canonize: 5.0.0
@@ -3991,7 +4130,7 @@ snapshots:
       '@stablelib/chacha': 2.0.1
       '@stablelib/chacha20poly1305': 2.0.1
 
-  '@interop/security-document-loader@9.4.0':
+  '@interop/security-document-loader@9.4.1':
     dependencies:
       '@digitalbazaar/data-integrity-context': 2.0.1
       '@digitalbazaar/multikey-context': 2.0.1
@@ -4001,12 +4140,12 @@ snapshots:
       '@digitalcredentials/credentials-v2-context': 1.0.0
       '@digitalcredentials/open-badges-context': 3.0.0
       '@interop/data-integrity-core': 8.1.0
-      '@interop/did-io': 4.0.5
-      '@interop/did-method-key': 7.3.2
-      '@interop/did-web-resolver': 6.2.2
+      '@interop/did-io': 4.0.6
+      '@interop/did-method-key': 7.3.3
+      '@interop/did-web-resolver': 6.2.3
       '@interop/ecdsa-multikey': 2.3.1
       '@interop/ed25519-verification-key': 8.0.2
-      '@interop/http-client': 1.0.3
+      '@interop/http-client': 1.0.4
       aes-key-wrapping-2019-context: 1.0.3
       credentials-context: 2.0.0
       did-context: 3.1.1
@@ -4018,39 +4157,39 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/storage-core@0.2.3':
+  '@interop/storage-core@0.3.0':
     dependencies:
       '@interop/data-integrity-core': 8.1.0
 
-  '@interop/vc-bitstring-status-list@3.0.3':
+  '@interop/vc-bitstring-status-list@3.0.4':
     dependencies:
       '@digitalbazaar/bitstring': 3.1.0
       '@digitalbazaar/credentials-context': 3.2.0
       '@digitalbazaar/vc-bitstring-status-list-context': 1.1.0
-      '@interop/vc': 11.0.4
+      '@interop/vc': 11.0.5
 
-  '@interop/vc@11.0.4':
+  '@interop/vc@11.0.5':
     dependencies:
       '@digitalcredentials/credentials-v2-context': 1.0.0
       '@interop/data-integrity-core': 8.1.0
-      '@interop/jsonld': 9.0.2
-      '@interop/jsonld-signatures': 11.8.1
+      '@interop/jsonld': 9.0.3
+      '@interop/jsonld-signatures': 11.8.2
       credentials-context: 2.0.0
 
-  '@interop/verifier-core@3.2.1':
+  '@interop/verifier-core@3.3.1':
     dependencies:
       '@interop/data-integrity-core': 8.1.0
-      '@interop/data-integrity-proof': 3.4.0
-      '@interop/did-io': 4.0.5
-      '@interop/did-method-key': 7.3.2
-      '@interop/did-web-resolver': 6.2.2
-      '@interop/ecdsa-signature': 2.0.3(@interop/jsonld-signatures@11.8.1)
-      '@interop/ed25519-signature': 7.1.2(@interop/jsonld-signatures@11.8.1)
+      '@interop/data-integrity-proof': 3.4.1
+      '@interop/did-io': 4.0.6
+      '@interop/did-method-key': 7.3.3
+      '@interop/did-web-resolver': 6.2.3
+      '@interop/ecdsa-signature': 2.0.4(@interop/jsonld-signatures@11.8.2)
+      '@interop/ed25519-signature': 7.1.3(@interop/jsonld-signatures@11.8.2)
       '@interop/ed25519-verification-key': 8.0.2
-      '@interop/jsonld-signatures': 11.8.1
-      '@interop/security-document-loader': 9.4.0
-      '@interop/vc': 11.0.4
-      '@interop/vc-bitstring-status-list': 3.0.3
+      '@interop/jsonld-signatures': 11.8.2
+      '@interop/security-document-loader': 9.4.1
+      '@interop/vc': 11.0.5
+      '@interop/vc-bitstring-status-list': 3.0.4
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       klona: 2.0.6
@@ -4058,24 +4197,36 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/was-client@0.7.1(@interop/jsonld-signatures@11.8.1)':
+  '@interop/was-client@0.9.2(@interop/jsonld-signatures@11.8.1)':
     dependencies:
       '@interop/data-integrity-core': 8.1.0
       '@interop/ed25519-signature': 7.1.2(@interop/jsonld-signatures@11.8.1)
       '@interop/edv-client': 17.2.0
-      '@interop/ezcap': 7.2.1
-      '@interop/http-client': 1.0.3
-      '@interop/storage-core': 0.2.3
+      '@interop/ezcap': 7.3.0
+      '@interop/http-client': 1.0.4
+      '@interop/storage-core': 0.3.0
     transitivePeerDependencies:
       - '@interop/jsonld-signatures'
       - expo-crypto
       - react-native-get-random-values
+
+  '@interop/x25519-key-agreement-key@5.1.1':
+    dependencies:
+      '@interop/data-integrity-core': 8.1.0
+      '@noble/curves': 2.2.0
+      '@scure/base': 2.2.0
 
   '@interop/zcap@11.0.3':
     dependencies:
       '@digitalbazaar/zcap-context': 2.0.1
       '@interop/data-integrity-core': 8.1.0
       '@interop/jsonld-signatures': 11.8.1
+
+  '@interop/zcap@11.0.4':
+    dependencies:
+      '@digitalbazaar/zcap-context': 2.0.1
+      '@interop/data-integrity-core': 8.1.0
+      '@interop/jsonld-signatures': 11.8.2
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -4378,15 +4529,15 @@ snapshots:
     dependencies:
       '@types/node': 25.9.4
 
-  '@typescript-eslint/eslint-plugin@8.62.0(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@5.9.3))(eslint@10.5.0)(typescript@5.9.3)':
+  '@typescript-eslint/eslint-plugin@8.62.0(@typescript-eslint/parser@8.62.0(eslint@10.6.0)(typescript@5.9.3))(eslint@10.6.0)(typescript@5.9.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
-      '@typescript-eslint/parser': 8.62.0(eslint@10.5.0)(typescript@5.9.3)
+      '@typescript-eslint/parser': 8.62.0(eslint@10.6.0)(typescript@5.9.3)
       '@typescript-eslint/scope-manager': 8.62.0
-      '@typescript-eslint/type-utils': 8.62.0(eslint@10.5.0)(typescript@5.9.3)
-      '@typescript-eslint/utils': 8.62.0(eslint@10.5.0)(typescript@5.9.3)
+      '@typescript-eslint/type-utils': 8.62.0(eslint@10.6.0)(typescript@5.9.3)
+      '@typescript-eslint/utils': 8.62.0(eslint@10.6.0)(typescript@5.9.3)
       '@typescript-eslint/visitor-keys': 8.62.0
-      eslint: 10.5.0
+      eslint: 10.6.0
       ignore: 7.0.5
       natural-compare: 1.4.0
       ts-api-utils: 2.5.0(typescript@5.9.3)
@@ -4394,14 +4545,14 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@5.9.3)':
+  '@typescript-eslint/parser@8.62.0(eslint@10.6.0)(typescript@5.9.3)':
     dependencies:
       '@typescript-eslint/scope-manager': 8.62.0
       '@typescript-eslint/types': 8.62.0
       '@typescript-eslint/typescript-estree': 8.62.0(typescript@5.9.3)
       '@typescript-eslint/visitor-keys': 8.62.0
       debug: 4.4.3
-      eslint: 10.5.0
+      eslint: 10.6.0
       typescript: 5.9.3
     transitivePeerDependencies:
       - supports-color
@@ -4424,13 +4575,13 @@ snapshots:
     dependencies:
       typescript: 5.9.3
 
-  '@typescript-eslint/type-utils@8.62.0(eslint@10.5.0)(typescript@5.9.3)':
+  '@typescript-eslint/type-utils@8.62.0(eslint@10.6.0)(typescript@5.9.3)':
     dependencies:
       '@typescript-eslint/types': 8.62.0
       '@typescript-eslint/typescript-estree': 8.62.0(typescript@5.9.3)
-      '@typescript-eslint/utils': 8.62.0(eslint@10.5.0)(typescript@5.9.3)
+      '@typescript-eslint/utils': 8.62.0(eslint@10.6.0)(typescript@5.9.3)
       debug: 4.4.3
-      eslint: 10.5.0
+      eslint: 10.6.0
       ts-api-utils: 2.5.0(typescript@5.9.3)
       typescript: 5.9.3
     transitivePeerDependencies:
@@ -4453,13 +4604,13 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/utils@8.62.0(eslint@10.5.0)(typescript@5.9.3)':
+  '@typescript-eslint/utils@8.62.0(eslint@10.6.0)(typescript@5.9.3)':
     dependencies:
-      '@eslint-community/eslint-utils': 4.9.1(eslint@10.5.0)
+      '@eslint-community/eslint-utils': 4.9.1(eslint@10.6.0)
       '@typescript-eslint/scope-manager': 8.62.0
       '@typescript-eslint/types': 8.62.0
       '@typescript-eslint/typescript-estree': 8.62.0(typescript@5.9.3)
-      eslint: 10.5.0
+      eslint: 10.6.0
       typescript: 5.9.3
     transitivePeerDependencies:
       - supports-color
@@ -4689,7 +4840,7 @@ snapshots:
 
   base64url@3.0.1: {}
 
-  baseline-browser-mapping@2.10.38: {}
+  baseline-browser-mapping@2.10.40: {}
 
   bidi-js@1.0.3:
     dependencies:
@@ -4726,10 +4877,10 @@ snapshots:
 
   browserslist@4.28.4:
     dependencies:
-      baseline-browser-mapping: 2.10.38
+      baseline-browser-mapping: 2.10.40
       caniuse-lite: 1.0.30001799
-      electron-to-chromium: 1.5.378
-      node-releases: 2.0.49
+      electron-to-chromium: 1.5.380
+      node-releases: 2.0.50
       update-browserslist-db: 1.2.3(browserslist@4.28.4)
 
   buffer@6.0.3:
@@ -4850,7 +5001,7 @@ snapshots:
       path-type: 4.0.0
       yaml: 1.10.3
 
-  credential-handler-polyfill@4.0.3:
+  credential-handler-polyfill@4.1.0:
     dependencies:
       web-request-rpc: 3.0.1
 
@@ -4967,7 +5118,7 @@ snapshots:
 
   ed25519-signature-2020-context@1.1.0: {}
 
-  electron-to-chromium@1.5.378: {}
+  electron-to-chromium@1.5.380: {}
 
   emoji-regex@8.0.0: {}
 
@@ -5002,7 +5153,7 @@ snapshots:
       es-errors: 1.3.0
       es-object-atoms: 1.1.2
       es-set-tostringtag: 2.1.0
-      es-to-primitive: 1.3.1
+      es-to-primitive: 1.3.4
       function.prototype.name: 1.2.0
       get-intrinsic: 1.3.0
       get-proto: 1.0.1
@@ -5085,9 +5236,10 @@ snapshots:
     dependencies:
       hasown: 2.0.4
 
-  es-to-primitive@1.3.1:
+  es-to-primitive@1.3.4:
     dependencies:
       es-abstract-get: 1.0.0
+      es-define-property: 1.0.1
       es-errors: 1.3.0
       is-callable: 1.2.7
       is-date-object: 1.1.0
@@ -5099,11 +5251,11 @@ snapshots:
 
   escape-string-regexp@5.0.0: {}
 
-  eslint-config-prettier@10.1.8(eslint@10.5.0):
+  eslint-config-prettier@10.1.8(eslint@10.6.0):
     dependencies:
-      eslint: 10.5.0
+      eslint: 10.6.0
 
-  eslint-plugin-jsx-a11y@6.10.2(eslint@10.5.0):
+  eslint-plugin-jsx-a11y@6.10.2(eslint@10.6.0):
     dependencies:
       aria-query: 5.3.2
       array-includes: 3.1.9
@@ -5113,7 +5265,7 @@ snapshots:
       axobject-query: 4.1.0
       damerau-levenshtein: 1.0.8
       emoji-regex: 9.2.2
-      eslint: 10.5.0
+      eslint: 10.6.0
       hasown: 2.0.4
       jsx-ast-utils: 3.3.5
       language-tags: 1.0.9
@@ -5122,22 +5274,22 @@ snapshots:
       safe-regex-test: 1.1.0
       string.prototype.includes: 2.0.1
 
-  eslint-plugin-react-hooks@7.1.1(eslint@10.5.0):
+  eslint-plugin-react-hooks@7.1.1(eslint@10.6.0):
     dependencies:
       '@babel/core': 7.29.7
       '@babel/parser': 7.29.7
-      eslint: 10.5.0
+      eslint: 10.6.0
       hermes-parser: 0.25.1
       zod: 4.4.3
       zod-validation-error: 4.0.2(zod@4.4.3)
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-react-refresh@0.5.3(eslint@10.5.0):
+  eslint-plugin-react-refresh@0.5.3(eslint@10.6.0):
     dependencies:
-      eslint: 10.5.0
+      eslint: 10.6.0
 
-  eslint-plugin-react@7.37.5(eslint@10.5.0):
+  eslint-plugin-react@7.37.5(eslint@10.6.0):
     dependencies:
       array-includes: 3.1.9
       array.prototype.findlast: 1.2.5
@@ -5145,7 +5297,7 @@ snapshots:
       array.prototype.tosorted: 1.1.4
       doctrine: 2.1.0
       es-iterator-helpers: 1.3.3
-      eslint: 10.5.0
+      eslint: 10.6.0
       estraverse: 5.3.0
       hasown: 2.0.4
       jsx-ast-utils: 3.3.5
@@ -5170,9 +5322,9 @@ snapshots:
 
   eslint-visitor-keys@5.0.1: {}
 
-  eslint@10.5.0:
+  eslint@10.6.0:
     dependencies:
-      '@eslint-community/eslint-utils': 4.9.1(eslint@10.5.0)
+      '@eslint-community/eslint-utils': 4.9.1(eslint@10.6.0)
       '@eslint-community/regexpp': 4.12.2
       '@eslint/config-array': 0.23.5
       '@eslint/config-helpers': 0.6.0
@@ -5248,7 +5400,7 @@ snapshots:
       signal-exit: 3.0.7
       strip-final-newline: 2.0.0
 
-  expect-type@1.3.0: {}
+  expect-type@1.4.0: {}
 
   extend@3.0.2: {}
 
@@ -5452,7 +5604,7 @@ snapshots:
 
   human-signals@2.1.0: {}
 
-  i18next@26.3.2(typescript@5.9.3):
+  i18next@26.3.3(typescript@5.9.3):
     optionalDependencies:
       typescript: 5.9.3
 
@@ -6193,7 +6345,7 @@ snapshots:
       object.entries: 1.1.9
       semver: 6.3.1
 
-  node-releases@2.0.49: {}
+  node-releases@2.0.50: {}
 
   npm-run-path@4.0.1:
     dependencies:
@@ -6342,7 +6494,7 @@ snapshots:
 
   prelude-ls@1.2.1: {}
 
-  prettier@3.8.4: {}
+  prettier@3.9.1: {}
 
   prism-react-renderer@2.4.1(react@19.2.7):
     dependencies:
@@ -6394,11 +6546,11 @@ snapshots:
       react: 19.2.7
       scheduler: 0.27.0
 
-  react-i18next@17.0.8(i18next@26.3.2(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.9.3):
+  react-i18next@17.0.8(i18next@26.3.3(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.9.3):
     dependencies:
       '@babel/runtime': 7.29.7
       html-parse-stringify: 3.0.1
-      i18next: 26.3.2(typescript@5.9.3)
+      i18next: 26.3.3(typescript@5.9.3)
       react: 19.2.7
       use-sync-external-store: 1.6.0(react@19.2.7)
     optionalDependencies:
@@ -6944,13 +7096,13 @@ snapshots:
       possible-typed-array-names: 1.1.0
       reflect.getprototypeof: 1.0.10
 
-  typescript-eslint@8.62.0(eslint@10.5.0)(typescript@5.9.3):
+  typescript-eslint@8.62.0(eslint@10.6.0)(typescript@5.9.3):
     dependencies:
-      '@typescript-eslint/eslint-plugin': 8.62.0(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@5.9.3))(eslint@10.5.0)(typescript@5.9.3)
-      '@typescript-eslint/parser': 8.62.0(eslint@10.5.0)(typescript@5.9.3)
+      '@typescript-eslint/eslint-plugin': 8.62.0(@typescript-eslint/parser@8.62.0(eslint@10.6.0)(typescript@5.9.3))(eslint@10.6.0)(typescript@5.9.3)
+      '@typescript-eslint/parser': 8.62.0(eslint@10.6.0)(typescript@5.9.3)
       '@typescript-eslint/typescript-estree': 8.62.0(typescript@5.9.3)
-      '@typescript-eslint/utils': 8.62.0(eslint@10.5.0)(typescript@5.9.3)
-      eslint: 10.5.0
+      '@typescript-eslint/utils': 8.62.0(eslint@10.6.0)(typescript@5.9.3)
+      eslint: 10.6.0
       typescript: 5.9.3
     transitivePeerDependencies:
       - supports-color
@@ -7026,8 +7178,6 @@ snapshots:
 
   util-deprecate@1.0.2: {}
 
-  uuid@14.0.1: {}
-
   uuidv7@1.2.1: {}
 
   validator@13.15.35: {}
@@ -7065,7 +7215,7 @@ snapshots:
       '@vitest/spy': 4.1.9
       '@vitest/utils': 4.1.9
       es-module-lexer: 2.1.0
-      expect-type: 1.3.0
+      expect-type: 1.4.0
       magic-string: 0.30.21
       obug: 2.1.3
       pathe: 2.0.3
@@ -7091,7 +7241,7 @@ snapshots:
 
   web-credential-handler@3.0.0:
     dependencies:
-      credential-handler-polyfill: 4.0.3
+      credential-handler-polyfill: 4.1.0
       web-request-rpc: 3.0.1
 
   web-request-rpc@3.0.1: {}

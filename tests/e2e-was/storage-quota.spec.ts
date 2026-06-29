@@ -5,8 +5,13 @@ import {
   expectCollectionUsage,
   expectQuotaCard,
   goToStorage,
+  quotaCard,
   signupViaWizard
 } from './helpers'
+
+// Rendered usage is an amount immediately followed by its unit, no separating
+// space (e.g. "24.0KB", "200B"); match a non-zero value in any unit.
+const NONZERO_USAGE = /[1-9][\d.]*\s*[KMGT]?B/
 
 /**
  * Storage quota UI — requires remote (WAS) mode; see playwright.was.config.ts.
@@ -33,10 +38,18 @@ test.describe('Storage quota', () => {
     await goToStorage(page)
     await expectQuotaCard(page)
 
-    await expect(page.getByText('Verifiable Credentials')).toBeVisible()
-    await expect(page.getByText('Wallet Activity Log')).toBeVisible()
+    // Scope to the quota card: these names also appear in the collections
+    // browser, and "Verifiable Credentials" is a substring of "Publicly Shared
+    // Verifiable Credentials", so match exactly within the card.
+    const card = quotaCard(page)
     await expect(
-      page.getByText('Publicly Shared Verifiable Credentials')
+      card.getByText('Verifiable Credentials', { exact: true })
+    ).toBeVisible()
+    await expect(
+      card.getByText('Wallet Activity Log', { exact: true })
+    ).toBeVisible()
+    await expect(
+      card.getByText('Publicly Shared Verifiable Credentials', { exact: true })
     ).toBeVisible()
   })
 
@@ -60,17 +73,18 @@ test.describe('Storage quota', () => {
     await goToStorage(page)
     await expectQuotaCard(page)
 
-    await expectCollectionUsage(page, 'Verifiable Credentials', /[1-9]\d* B/)
+    await expectCollectionUsage(page, 'Verifiable Credentials', NONZERO_USAGE)
   })
 
   test('updates wallet activity usage after deleting a credential', async ({
     page
   }, testInfo) => {
     await signupViaWizard(page, testInfo)
+    await addCredentialViaPaste(page)
     await deleteCredential(page)
     await goToStorage(page)
     await expectQuotaCard(page)
 
-    await expectCollectionUsage(page, 'Wallet Activity Log', /[1-9]\d* B/)
+    await expectCollectionUsage(page, 'Wallet Activity Log', NONZERO_USAGE)
   })
 })

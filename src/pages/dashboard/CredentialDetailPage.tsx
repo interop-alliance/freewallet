@@ -24,7 +24,10 @@ export function CredentialDetailPage() {
   const [isNotFound, setIsNotFound] = useState(false)
   const [loadError, setLoadError] = useState(false)
 
-  const { share, error: shareError } = useCredentialPublicLink({ cid, session })
+  const { share, error: shareError } = useCredentialPublicLink({
+    credential: credential?.vc,
+    session
+  })
   const {
     deleteError,
     deleteDialogOpen,

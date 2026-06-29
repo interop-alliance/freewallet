@@ -1,10 +1,20 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest'
+import type {
+  IKeyAgreementKey,
+  IKeyResolver
+} from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { WasClient } from '@interop/was-client'
 import { WASRemoteStore } from '../../src/stores/wasRemoteStore'
 import { bufferToBase64Url, digestHash } from '../../src/lib/cidFrom'
 import type { ControllerProfile, User } from '../../src/types/auth'
+
+// Stub key material for the encrypted `private-credentials` handle override.
+const keyAgreementKey = {
+  id: 'did:key:test#kak'
+} as unknown as IKeyAgreementKey
+const keyResolver = (async () => null) as unknown as IKeyResolver
 
 /**
  * Builds a WASRemoteStore whose `was` client has been replaced with a stub, so
@@ -15,7 +25,9 @@ function storeWithStubbedClient(was: unknown): WASRemoteStore {
     storageServerUrl: 'https://example.test',
     zcapClient: { request: vi.fn() } as unknown as ZcapClient,
     spaceId: 'space-id',
-    controller: 'did:key:test'
+    controller: 'did:key:test',
+    keyAgreementKey,
+    keyResolver
   })
   store.was = was as WasClient
   return store
@@ -131,7 +143,10 @@ describe('WASRemoteStore.listCredentials', () => {
     await expect(store.listCredentials()).resolves.toEqual([
       { cid: 'cid-1', vc: { type: ['VerifiableCredential'], name: 'Diploma' } }
     ])
-    expect(collection).toHaveBeenCalledWith('private-credentials')
+    // The private-credentials handle is opened with the EDV encryption override.
+    expect(collection).toHaveBeenCalledWith('private-credentials', {
+      encryption: { scheme: 'edv', keys: { keyAgreementKey, keyResolver } }
+    })
     expect(get).toHaveBeenCalledWith('cid-1')
   })
 
