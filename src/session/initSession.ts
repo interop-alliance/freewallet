@@ -4,7 +4,7 @@
  * and initializes the StorageManager (local or remote depending on env vars).
  * The resulting Session object is stored in authStore.
  */
-import { CapabilityAgent } from '@digitalbazaar/webkms-client'
+import { CapabilityAgent } from '@interop/webkms-client'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import { ZcapClient } from '@interop/ezcap'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'

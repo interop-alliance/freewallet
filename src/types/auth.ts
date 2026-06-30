@@ -14,11 +14,10 @@ import type {
 import type { ZcapClient } from '@interop/ezcap'
 
 /**
- * Minimal interface over @digitalbazaar/webkms-client's CapabilityAgent.
+ * Minimal interface over @interop/webkms-client's CapabilityAgent.
  */
 export interface ICapabilityAgent {
   id: string
-  keyName: string
   handle: string
   getSigner: () => ISigner
   // The underlying Ed25519VerificationKey2020 key pair used for invocation

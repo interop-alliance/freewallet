@@ -68,9 +68,7 @@ export interface VerificationStep {
 }
 
 export type VerificationAggregateStatus =
-  | 'verified'
-  | 'warning'
-  | 'not_verified'
+  'verified' | 'warning' | 'not_verified'
 
 /**
  * A VC as persisted in BrowserStore or WASRemoteStore. The `cid` field is an
