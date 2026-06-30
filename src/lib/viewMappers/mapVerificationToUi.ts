@@ -203,8 +203,7 @@ export function verifyResultToChecklist(
   const byId = (id: string) => log.find(line => line.id === id)
 
   const resultsWithError = raw.results as
-    | Array<{ error?: { message?: string } }>
-    | undefined
+    Array<{ error?: { message?: string } }> | undefined
   const globalErr =
     typeof resultsWithError?.[0]?.error?.message === 'string'
       ? resultsWithError[0].error.message
