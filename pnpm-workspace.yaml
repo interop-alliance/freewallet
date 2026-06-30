@@ -23,3 +23,4 @@ minimumReleaseAgeExclude:
   - '@interop/x25519-key-agreement-key@5.1.1'
   - '@interop/zcap@11.0.4'
   - '@interop/webkms-client@14.4.2'
+  - react-router@8.1.0
