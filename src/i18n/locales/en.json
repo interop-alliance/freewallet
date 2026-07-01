@@ -327,7 +327,13 @@
       "requestedBy": "Requested by",
       "selectPrompt": "Select a credential to share:",
       "walletEmpty": "Your wallet is empty.",
-      "sharing": "Sharing credential…"
+      "sharing": "Sharing credential…",
+      "didAuthTitle": "DID Authentication request",
+      "didAuthPrompt": "{{origin}} is requesting DID Authentication.",
+      "didAuthAlso": "{{origin}} is also requesting DID Authentication.",
+      "didAuthUnsupported": "This request asks for a DID method this wallet doesn't support.",
+      "domainMismatch": "This request's domain doesn't match where it came from, so it can't be safely authenticated.",
+      "processFailed": "Something went wrong preparing the response. Please try again."
     },
     "store": {
       "title": "Store credential",

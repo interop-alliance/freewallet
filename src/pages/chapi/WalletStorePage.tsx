@@ -12,7 +12,10 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { loadOnce } from 'credential-handler-polyfill'
 import { receiveCredentialEvent } from 'web-credential-handler'
-import type { IVerifiableCredential } from '@interop/data-integrity-core'
+import type {
+  IVerifiableCredential,
+  IVerifiablePresentation
+} from '@interop/data-integrity-core'
 import { MEDIATOR_BASE } from '@/app.config'
 import { initSessionFromSecret } from '@/session/initSession'
 import { isStorageUnreachable } from '@/lib/storageErrors'
@@ -20,30 +23,21 @@ import type { Session } from '@/types/auth'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
 import { chapiStyles } from '@/styles/appStyles'
-import { ChapiLoginForm } from './ChapiLoginForm'
+import {
+  classifyCHAPIStoreEvent,
+  type CHAPIStoreEvent
+} from '@/lib/walletRequest'
+import { CHAPILoginForm } from './CHAPILoginForm'
 import { useTranslation } from 'react-i18next'
 
 type PageState = 'initializing' | 'awaiting-login' | 'confirming' | 'stored'
 
-interface VerifiablePresentation {
-  '@context': string[]
-  type: string | string[]
-  verifiableCredential: IVerifiableCredential | IVerifiableCredential[]
-}
-
-interface ChapiStoreEvent {
-  credential: { data: VerifiablePresentation }
-  respondWith(
-    promise: Promise<{ dataType: string; data: unknown } | null>
-  ): void
-}
-
 export function WalletStorePage() {
   const { t } = useTranslation()
   const [pageState, setPageState] = useState<PageState>('initializing')
-  const [chapiEvent, setChapiEvent] = useState<ChapiStoreEvent | null>(null)
+  const [chapiEvent, setCHAPIEvent] = useState<CHAPIStoreEvent | null>(null)
   const [vc, setVc] = useState<IVerifiableCredential | null>(null)
-  const [vp, setVp] = useState<VerifiablePresentation | null>(null)
+  const [vp, setVp] = useState<IVerifiablePresentation | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
   const initialized = useRef(false)
@@ -56,14 +50,15 @@ export function WalletStorePage() {
 
     async function init() {
       await loadOnce(MEDIATOR_BASE + encodeURIComponent(window.location.origin))
-      const event = (await receiveCredentialEvent()) as ChapiStoreEvent
-      const incomingVp = event.credential.data
+      const event = (await receiveCredentialEvent()) as CHAPIStoreEvent
+      const offer = classifyCHAPIStoreEvent(event)
+      const incomingVp = offer.verifiablePresentation
       const incomingVc = Array.isArray(incomingVp.verifiableCredential)
         ? incomingVp.verifiableCredential[0]
         : incomingVp.verifiableCredential
-      setChapiEvent(event)
+      setCHAPIEvent(event)
       setVp(incomingVp)
-      setVc(incomingVc)
+      setVc(incomingVc ?? null)
       setPageState('awaiting-login')
     }
 
@@ -150,7 +145,7 @@ export function WalletStorePage() {
         )}
 
         {pageState === 'awaiting-login' && (
-          <ChapiLoginForm onSubmit={handleLogin} error={loginError} />
+          <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
         )}
 
         {pageState === 'confirming' && (

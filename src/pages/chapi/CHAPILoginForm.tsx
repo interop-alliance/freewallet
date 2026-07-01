@@ -5,12 +5,12 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
 
-interface ChapiLoginFormProps {
+interface CHAPILoginFormProps {
   onSubmit: (passphrase: string) => Promise<void>
   error: string | null
 }
 
-export function ChapiLoginForm({ onSubmit, error }: ChapiLoginFormProps) {
+export function CHAPILoginForm({ onSubmit, error }: CHAPILoginFormProps) {
   const { t } = useTranslation()
   const [passphrase, setPassphrase] = useState('')
   const [loading, setLoading] = useState(false)
