@@ -34,7 +34,6 @@ import { useAuthStore } from '@/stores/authStore'
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
 import { PASSWORD_RULES } from '@/app.config'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
-import { StorageManager } from '@/stores/storageManager'
 import { registerWallet } from '@/lib/registerWallet'
 
 const STEP_I18N_KEYS = [
@@ -82,13 +81,12 @@ export function SignupPage() {
     setIsSubmitting(true)
     setErrorKey(null)
     try {
-      const { session } = await initSessionFromSecret({
+      // initSessionFromSecret builds the session's StorageManager and reports
+      // whether this identity already has a wallet (locally or remote).
+      const { session, userExists } = await initSessionFromSecret({
         email: email || undefined,
         secret: passphrase
       })
-      const { storage, userExists } =
-        await StorageManager.initStorageClients(session)
-      session.storage = storage
       if (userExists) {
         console.log('User already exists, redirecting to login page.')
         return navigate('/login', {
@@ -97,7 +95,7 @@ export function SignupPage() {
       }
       // This is a new user
       // Create Space and init collections
-      await storage.ensureUserCollections({ user: session.user })
+      await session.storage.ensureUserCollections({ user: session.user })
       // Now that we have somewhere to write _to_, start the history
       await session.storage.addHistoryNewAccount({ user: session.user })
       await session.storage.addHistorySpaceCreated({ user: session.user })

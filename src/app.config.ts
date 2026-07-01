@@ -10,8 +10,31 @@ const env = import.meta.env
 export const SERVER_URL = env.VITE_SERVER_URL || 'http://localhost:5173'
 // Public deploy URL registered with the CHAPI mediator (authn.io).
 export const DEPLOY_URL = env.VITE_DEPLOY_URL
-// Remote WAS server URL. When set, switches storage to remote-only mode.
+// Remote WAS server URL. When set, a remote WAS Space is available as a sync
+// target: the sync controller replicates the local RxDB collections to it in
+// the background. (Guest sessions never sync.)
 export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
+
+// Background-replication tuning (both optional).
+// `VITE_WAS_SYNC_RETRY_MS` -- RxDB `retryTime` backoff between failed cycles.
+export const WAS_SYNC_RETRY_MS = env.VITE_WAS_SYNC_RETRY_MS
+  ? Number(env.VITE_WAS_SYNC_RETRY_MS)
+  : undefined
+// `VITE_WAS_SYNC_BATCH_SIZE` -- pull `limit` / push batch size.
+export const WAS_SYNC_BATCH_SIZE = env.VITE_WAS_SYNC_BATCH_SIZE
+  ? Number(env.VITE_WAS_SYNC_BATCH_SIZE)
+  : undefined
+
+// The WAS collections replicated by the sync controller: all three standard
+// collections, through the same collection-agnostic adapter. All are immutable
+// per item and content-addressed -- `public-credentials` plaintext (keyed by
+// credential cid), the other two as EDV envelopes (keyed by a hash of the JWE
+// ciphertext); the adapter ships the stored bodies verbatim either way.
+export const SYNCED_COLLECTIONS: Array<{ key: string; id: string }> = [
+  { key: 'privateCredentials', id: 'private-credentials' },
+  { key: 'publicCredentials', id: 'public-credentials' },
+  { key: 'walletActivity', id: 'wallet-activity' }
+]
 
 export const WALLET_STANDARD_COLLECTIONS: Array<{
   key: string
@@ -38,7 +61,8 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
   {
     key: 'walletActivity',
     id: 'wallet-activity',
-    name: 'Wallet Activity Log'
+    name: 'Wallet Activity Log',
+    encryption: { scheme: 'edv' }
   }
 ]
 export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024

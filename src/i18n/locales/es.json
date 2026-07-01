@@ -41,7 +41,15 @@
     "deleteConfirm": "¿Seguro que desea eliminar su cuenta? Esta acción no se puede deshacer.",
     "deleteError": "No se pudieron eliminar los datos de su cuenta. Inténtelo de nuevo.",
     "about": "Acerca de",
-    "version": "Freewallet versión {{version}}"
+    "version": "Freewallet versión {{version}}",
+    "syncSection": "Sincronización",
+    "syncNone": "No hay almacenamiento remoto configurado; sus datos permanecen en este dispositivo.",
+    "syncStatus": {
+      "idle": "Inactivo",
+      "syncing": "Sincronizando...",
+      "synced": "Sincronizado",
+      "error": "Error de sincronización (se reintentará)"
+    }
   },
   "landing": {
     "title": "Freewallet",

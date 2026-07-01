@@ -1,26 +1,19 @@
 /**
- * WASRemoteStore: remote storage backend speaking the Wallet Attached Storage
- * (WAS) protocol. Supports credentials plus arbitrary Spaces, Collections,
- * Resources, and the wallet-activity history log. Used by StorageManager when
- * VITE_WAS_SERVER_URL is set.
+ * WASRemoteStore: the remote WAS (Wallet Attached Storage) backend, attached
+ * when VITE_WAS_SERVER_URL is set. Since the local BrowserStore became the
+ * always-active replica, this class no longer serves credential / history /
+ * public-link reads and writes -- those replicate in the background through
+ * the sync controller. What remains here is the Space lifecycle (create /
+ * exists / wipe), the storage-browser read-through over arbitrary Collections
+ * and Resources, export / import, and quotas.
  *
  * All WAS operations go through `@interop/was-client`'s `WasClient` and its
  * lazy navigational handles (`space` / `collection` / `resource`) rather than
  * hand-built ezcap requests. The `WasClient` wraps the ezcap `ZcapClient` that
  * carries the user's invocation signer.
  */
-import type {
-  IKeyAgreementKey,
-  IKeyResolver,
-  IVerifiableCredential
-} from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
-import {
-  WasClient,
-  type Collection,
-  type ResourceData,
-  type Resource
-} from '@interop/was-client'
+import { WasClient, type Collection, type Resource } from '@interop/was-client'
 import { createEdvEncryption } from '@interop/was-client/edv'
 import type { ControllerProfile, User } from '@/types/auth'
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
@@ -31,11 +24,7 @@ import {
   type FetchedCollectionResource,
   isTextLikeContentType
 } from '@/lib/storageResource'
-import type {
-  ImportSpaceSummary,
-  IWalletStore,
-  WalletActivity
-} from '@/stores/storageManager'
+import type { ImportSpaceSummary } from '@/stores/storageManager'
 
 /**
  * Map from logical collection name to its WAS base URL.
@@ -57,7 +46,7 @@ interface ParsedWasPath {
  * @see https://digitalcredentials.github.io/wallet-attached-storage-spec/
  * @see https://github.com/interop-alliance/zcap-developer-guide
  */
-export class WASRemoteStore implements IWalletStore {
+export class WASRemoteStore {
   public storageServerUrl: string
   public was: WasClient
   public spaceId: string
@@ -66,33 +55,24 @@ export class WASRemoteStore implements IWalletStore {
   public spaceUrl: string
   public collections?: ICollectionsSet
 
-  private _keyAgreementKey: IKeyAgreementKey
-  private _keyResolver: IKeyResolver
-
   constructor({
     storageServerUrl,
     zcapClient,
     spaceId,
-    controller,
-    keyAgreementKey,
-    keyResolver
+    controller
   }: {
     storageServerUrl: string
     zcapClient: ZcapClient
     spaceId: string
     controller: string
-    keyAgreementKey: IKeyAgreementKey
-    keyResolver: IKeyResolver
   }) {
     this.storageServerUrl = storageServerUrl
-    this._keyAgreementKey = keyAgreementKey
-    this._keyResolver = keyResolver
     this.was = new WasClient({
       serverUrl: storageServerUrl,
       zcapClient,
-      // Keys are supplied per-handle via the override in `_collection()`, so the
-      // keystore is a no-op; the provider's only job is to build the EDV codec
-      // from the handle's scheme + keys.
+      // No decrypt path lives here anymore (replication moves opaque envelopes
+      // verbatim; read-time decrypt is a StorageManager concern), so the
+      // keystore is a no-op.
       encryption: createEdvEncryption({ resolveKeys: async () => null })
     })
     this.spaceId = spaceId
@@ -115,47 +95,6 @@ export class WASRemoteStore implements IWalletStore {
       throw new Error(`Unknown logical collection "${logicalKey}".`)
     }
     return def.id
-  }
-
-  /**
-   * Returns a `Collection` handle for one of the wallet's standard logical
-   * collections, throwing a clear error if collections haven't been initialized
-   * yet (i.e. `ensureUserCollections()` hasn't run for this session).
-   *
-   * @param logicalKey {string} e.g. 'privateCredentials' | 'walletActivity'.
-   * @returns {Collection}
-   */
-  private _collection(logicalKey: string): Collection {
-    if (!this.collections?.has(logicalKey)) {
-      throw new Error(
-        `Collection "${logicalKey}" is not initialized. ` +
-          'Call ensureUserCollections() first.'
-      )
-    }
-    const def = WALLET_STANDARD_COLLECTIONS.find(
-      entry => entry.key === logicalKey
-    )
-    if (!def) {
-      throw new Error(`Unknown logical collection "${logicalKey}".`)
-    }
-    // Collections declared with an `encryption` marker in
-    // WALLET_STANDARD_COLLECTIONS (e.g. `private-credentials`) are end-to-end
-    // encrypted: hand the codec its keys right at the handle. The override
-    // forces the encryption decision (no marker-discovery round-trip) and fails
-    // closed if keys are missing. Other collections carry no override and stay
-    // plaintext.
-    const encryption = def.encryption
-      ? {
-          encryption: {
-            scheme: def.encryption.scheme,
-            keys: {
-              keyAgreementKey: this._keyAgreementKey,
-              keyResolver: this._keyResolver
-            }
-          }
-        }
-      : undefined
-    return this.was.space(this.spaceId).collection(def.id, encryption)
   }
 
   /**
@@ -259,8 +198,10 @@ export class WASRemoteStore implements IWalletStore {
       try {
         const collection = space.collection(id)
         // Declare the encryption marker only for collections that opt in
-        // (private-credentials); the others stay plaintext. The marker is
-        // set-once on the server and pairs with the per-handle override.
+        // (private-credentials, wallet-activity); the others stay plaintext.
+        // The marker's scheme is set-once on the server, but a late
+        // declaration on a pre-marker collection is allowed, so re-running
+        // this against an existing Space upgrades it in place.
         await collection.configure(encryption ? { name, encryption } : { name })
         if (isPublic) {
           await collection.setPublic()
@@ -306,88 +247,10 @@ export class WASRemoteStore implements IWalletStore {
       storageServerUrl,
       zcapClient: profile.zcapClient,
       spaceId,
-      controller,
-      keyAgreementKey: profile.keyAgreementKey,
-      keyResolver: profile.keyResolver
+      controller
     })
 
     return { remoteStore }
-  }
-
-  async addCollectionResource({
-    resourceId,
-    collectionId,
-    resourceBody
-  }: {
-    resourceId: string
-    collectionId: string
-    resourceBody: object
-  }) {
-    try {
-      await this._collection(collectionId).put(
-        resourceId,
-        resourceBody as ResourceData
-      )
-    } catch (err) {
-      console.error(
-        `Error adding resource "${resourceId}" to "${collectionId}":`,
-        err
-      )
-      throw new Error(
-        `Failed to add resource "${resourceId}" to "${collectionId}".`,
-        { cause: err }
-      )
-    }
-  }
-
-  /**
-   * Adds a credential to the encrypted `private-credentials` collection. The
-   * EDV codec encrypts the body and mints an opaque EDV id (an explicit,
-   * human-readable id is rejected on an encrypted collection -- it would leak
-   * onto the URL); that EDV id becomes the credential's storage/route id,
-   * discovered later via `listCredentials()`.
-   *
-   * @param credential {IVerifiableCredential}
-   * @returns {Promise<void>}
-   */
-  async addCredential({ credential }: { credential: IVerifiableCredential }) {
-    try {
-      await this._collection('privateCredentials').add(
-        credential as unknown as ResourceData
-      )
-    } catch (err) {
-      console.error('Error adding credential:', err)
-      throw new Error('Failed to add remote credential.', { cause: err })
-    }
-  }
-
-  /**
-   * Lists the documents of one of the wallet's standard collections, fetching
-   * each resource body.
-   *
-   * @param logicalKey {string}
-   * @returns {Promise<Array<{ id: string; doc: Record<string, unknown> }>>}
-   */
-  private async _listCollectionDocs(
-    logicalKey: string
-  ): Promise<Array<{ id: string; doc: Record<string, unknown> }>> {
-    const collection = this._collection(logicalKey)
-    let listing
-    try {
-      listing = await collection.list()
-    } catch (err) {
-      console.error(`Error listing collection "${logicalKey}":`, err)
-      throw new Error('Failed to list remote storage collection items.', {
-        cause: err
-      })
-    }
-    const items = listing?.items ?? []
-    return await Promise.all(
-      items.map(async row => {
-        const doc = (await collection.get(row.id)) as Record<string, unknown>
-        return { id: row.id, doc }
-      })
-    )
   }
 
   async listCollectionResources({
@@ -480,40 +343,10 @@ export class WASRemoteStore implements IWalletStore {
     )
   }
 
-  async listHistoryItems(): Promise<
-    Array<{ id: string; doc: WalletActivity }>
-  > {
-    const docs = await this._listCollectionDocs('walletActivity')
-    return docs.map(({ id, doc }) => ({ id, doc: doc as WalletActivity }))
-  }
-
-  async listCredentials() {
-    const docs = await this._listCollectionDocs('privateCredentials')
-    return docs.map(({ id, doc }) => ({
-      cid: id,
-      vc: doc as unknown as IVerifiableCredential
-    }))
-  }
-
-  async loadCredential({ cid }: { cid: string }) {
-    const doc = await this._collection('privateCredentials').get(cid)
-    // get() returns null on a miss; honour the undefined contract.
-    return (doc ?? undefined) as IVerifiableCredential | undefined
-  }
-
-  async deleteCredential({ cid }: { cid: string }) {
-    try {
-      await this._collection('privateCredentials').resource(cid).delete()
-    } catch (err) {
-      console.error('Error deleting credential:', err)
-      throw new Error('Failed to delete remote credential.', { cause: err })
-    }
-  }
-
   /**
    * The absolute, world-readable URL of a credential's shared copy in the
    * `public-credentials` collection. A plain GET resolves it once a public
-   * link has been created.
+   * link has been created (locally) and replicated to this server.
    *
    * @param cid {string}
    * @returns {string}
@@ -524,67 +357,6 @@ export class WASRemoteStore implements IWalletStore {
       `/space/${this.spaceId}/${collectionId}/${cid}`,
       this.storageServerUrl
     ).toString()
-  }
-
-  /**
-   * Publishes a credential by writing a copy into the
-   * `public-credentials` collection.
-   *
-   * @param cid {string}
-   * @param credential {IVerifiableCredential}
-   * @returns {Promise<string>} the public URL anyone can GET.
-   */
-  async createPublicLink({
-    cid,
-    credential
-  }: {
-    cid: string
-    credential: IVerifiableCredential
-  }): Promise<string> {
-    try {
-      await this.addCollectionResource({
-        resourceId: cid,
-        collectionId: 'publicCredentials',
-        resourceBody: credential
-      })
-    } catch (err) {
-      console.error('Error creating public link:', err)
-      throw new Error('Failed to create public link.', { cause: err })
-    }
-    return this.publicCredentialUrl(cid)
-  }
-
-  /**
-   * Revokes a credential's public link by removing its copy from
-   * `public-credentials`.
-   *
-   * @param cid {string}
-   * @returns {Promise<void>}
-   */
-  async removePublicLink({ cid }: { cid: string }): Promise<void> {
-    try {
-      await this._collection('publicCredentials').resource(cid).delete()
-    } catch (err) {
-      console.error('Error removing public link:', err)
-      throw new Error('Failed to remove public link.', { cause: err })
-    }
-  }
-
-  /**
-   * Whether a credential currently has a public link (a copy in the
-   * `public-credentials` collection). Returns `false` when the status can't be determined.
-   *
-   * @param cid {string}
-   * @returns {Promise<boolean>}
-   */
-  async isShared({ cid }: { cid: string }): Promise<boolean> {
-    try {
-      const doc = await this._collection('publicCredentials').get(cid)
-      return doc !== null
-    } catch (err) {
-      console.error('Error checking public link status:', err)
-      return false
-    }
   }
 
   async wipeStorage() {

@@ -12,7 +12,6 @@ import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { initGuestSession } from '@/session/initSession'
 import { useAuthStore } from '@/stores/authStore'
-import { StorageManager } from '@/stores/storageManager'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
 import { registerWallet } from '@/lib/registerWallet'
 
@@ -38,12 +37,11 @@ export function GuestLoginPage() {
     setIsSubmitting(true)
     setSetupError(false)
     try {
+      // initGuestSession builds the session's StorageManager (guest sessions
+      // get no remote replica).
       const { session } = await initGuestSession()
 
-      const { storage } = await StorageManager.initStorageClients(session)
-      session.storage = storage
-
-      await storage.ensureUserCollections({ user: session.user })
+      await session.storage.ensureUserCollections({ user: session.user })
 
       // Now that we have somewhere to write _to_, start the history
       await session.storage.addHistoryNewAccount({ user: session.user })

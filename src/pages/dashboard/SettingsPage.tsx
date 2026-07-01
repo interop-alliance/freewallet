@@ -1,5 +1,6 @@
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
 import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
@@ -9,12 +10,26 @@ import { useInfoBox } from '@/hooks/useInfoBox'
 import { dashboardStyles } from '@/styles/appStyles'
 import { useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
+import { SYNCED_COLLECTIONS } from '@/app.config'
+import { useSyncStatusStore, type SyncStatus } from '@/stores/syncStatusStore'
+
+const SYNC_CHIP_COLOR: Record<
+  SyncStatus,
+  'default' | 'info' | 'success' | 'error'
+> = {
+  idle: 'default',
+  syncing: 'info',
+  synced: 'success',
+  error: 'error'
+}
 
 export function SettingsPage() {
   const { t } = useTranslation()
   const session = useAuthStore(state => state.session)
+  const syncStatuses = useSyncStatusStore(state => state.statuses)
   const { displayInfoBox } = useInfoBox()
   const [deleteError, setDeleteError] = useState(false)
+  const hasRemoteStorage = !!session?.storage?.hasRemoteStorage
 
   const handleDeleteAccount = async () => {
     if (!session) {
@@ -86,6 +101,37 @@ export function SettingsPage() {
         {deleteError && (
           <Alert severity="error">{t('settings.deleteError')}</Alert>
         )}
+
+        <Divider />
+
+        <Stack sx={{ gap: 1 }}>
+          <Typography variant="h6">{t('settings.syncSection')}</Typography>
+          {hasRemoteStorage ? (
+            SYNCED_COLLECTIONS.map(({ id }) => {
+              const status = syncStatuses[id] ?? 'idle'
+              return (
+                <Stack
+                  key={id}
+                  direction="row"
+                  sx={{ alignItems: 'center', gap: 2 }}
+                >
+                  <Typography variant="body2" sx={{ minWidth: 200 }}>
+                    {id}
+                  </Typography>
+                  <Chip
+                    size="small"
+                    color={SYNC_CHIP_COLOR[status]}
+                    label={t(`settings.syncStatus.${status}`)}
+                  />
+                </Stack>
+              )
+            })
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              {t('settings.syncNone')}
+            </Typography>
+          )}
+        </Stack>
 
         <Divider />
 

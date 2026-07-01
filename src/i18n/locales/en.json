@@ -41,7 +41,15 @@
     "deleteConfirm": "Are you sure you want to delete your account? This action cannot be undone.",
     "deleteError": "Could not delete your account data. Please try again.",
     "about": "About",
-    "version": "Freewallet version {{version}}"
+    "version": "Freewallet version {{version}}",
+    "syncSection": "Sync",
+    "syncNone": "No remote storage is configured; your data stays on this device.",
+    "syncStatus": {
+      "idle": "Idle",
+      "syncing": "Syncing...",
+      "synced": "Synced",
+      "error": "Sync error (will retry)"
+    }
   },
   "landing": {
     "title": "Freewallet",
