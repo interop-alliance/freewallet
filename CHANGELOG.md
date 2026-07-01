@@ -4,6 +4,20 @@
 
 ### Added
 
+- Support **DID Authentication** in the CHAPI `/wallet/get` popup. Incoming VC
+  API messages are now classified and dispatched by a new framework-agnostic
+  `src/lib/walletRequest/` module (message types, `classify`, `processRequest`,
+  `composeVp`, `presentationSuite`), so a request can be a plain VC share, a
+  DID-Auth-only proof, or a combined VC-share + DID-Auth. DID-Auth responses are
+  **signed** Verifiable Presentations proving control of the user's `did:key`
+  over the request's `challenge`/`domain`, honoring the verifier's
+  `acceptedCryptosuites` (`eddsa-rdfc-2022` / VC 2.0) and falling back to the
+  wallet default `Ed25519Signature2020` (VC 1.0). The wallet enforces the VCALM
+  domain-binding advisement (the request `domain` must match the channel origin)
+  and only satisfies requests whose `acceptedMethods` allow `key`. Adds
+  dependencies `@interop/vc`, `@interop/data-integrity-proof`, and
+  `@interop/security-document-loader`.
+
 - End-to-end encrypt the remote `private-credentials` collection using the new
   EDV-over-WAS capability in `@interop/was-client` (`0.9.x`, opt-in `/edv`
   subpath). The WAS server now only ever stores opaque JWE envelopes for private

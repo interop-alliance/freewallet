@@ -327,7 +327,13 @@
       "requestedBy": "Solicitado por",
       "selectPrompt": "Seleccione una credencial para compartir:",
       "walletEmpty": "Su billetera está vacía.",
-      "sharing": "Compartiendo credencial…"
+      "sharing": "Compartiendo credencial…",
+      "didAuthTitle": "Solicitud de autenticación DID",
+      "didAuthPrompt": "{{origin}} está solicitando autenticación DID.",
+      "didAuthAlso": "{{origin}} también está solicitando autenticación DID.",
+      "didAuthUnsupported": "Esta solicitud requiere un método DID que esta billetera no admite.",
+      "domainMismatch": "El dominio de esta solicitud no coincide con su procedencia, por lo que no se puede autenticar de forma segura.",
+      "processFailed": "Ocurrió un problema al preparar la respuesta. Inténtelo de nuevo."
     },
     "store": {
       "title": "Guardar credencial",
