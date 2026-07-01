@@ -7,7 +7,11 @@ import {
   type LookupResult
 } from '@digitalcredentials/issuer-registry-client'
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
-import { KNOWN_REGISTRIES_URL, KnownDidRegistries } from '@/app.config'
+import {
+  KNOWN_REGISTRIES_URL,
+  KnownDidRegistries,
+  WAS_SERVER_URL
+} from '@/app.config'
 
 const EMPTY_RESULT: LookupResult = {
   matchingIssuers: [],
@@ -17,17 +21,38 @@ const EMPTY_RESULT: LookupResult = {
 let cachedClient: RegistryClient | undefined
 let registriesLoadPromise: Promise<EntityIdentityRegistry[]> | undefined
 
+/**
+ * Fetches a registry list from the given URL and validates the HTTP response.
+ */
+async function fetchRegistries(url: string): Promise<EntityIdentityRegistry[]> {
+  const regRes = await fetch(url)
+  if (!regRes.ok) {
+    throw new Error(`Registry fetch failed: ${regRes.status}`)
+  }
+  return (await regRes.json()) as EntityIdentityRegistry[]
+}
+
+/**
+ * Loads issuer registries by trying the direct URL first, then the WAS proxy,
+ * and finally the local fallback list.
+ */
 async function loadRegistries(): Promise<EntityIdentityRegistry[]> {
   if (!registriesLoadPromise) {
     registriesLoadPromise = (async () => {
       try {
-        const regRes = await fetch(KNOWN_REGISTRIES_URL)
-        if (!regRes.ok) {
-          throw new Error(`Registry fetch failed: ${regRes.status}`)
+        return await fetchRegistries(KNOWN_REGISTRIES_URL)
+      } catch (directError) {
+        if (WAS_SERVER_URL) {
+          try {
+            return await fetchRegistries(
+              `${WAS_SERVER_URL}/api/cors?url=${encodeURIComponent(KNOWN_REGISTRIES_URL)}`
+            )
+          } catch (proxyError) {
+            console.warn('Using fallback KnownDidRegistries:', proxyError)
+            return KnownDidRegistries
+          }
         }
-        return (await regRes.json()) as EntityIdentityRegistry[]
-      } catch (err) {
-        console.warn('Using fallback KnownDidRegistries:', err)
+        console.warn('Using fallback KnownDidRegistries:', directError)
         return KnownDidRegistries
       }
     })()
@@ -35,6 +60,9 @@ async function loadRegistries(): Promise<EntityIdentityRegistry[]> {
   return registriesLoadPromise
 }
 
+/**
+ * Creates the singleton registry client after registries have been loaded.
+ */
 async function ensureClient(): Promise<RegistryClient> {
   if (!cachedClient) {
     const registries = await loadRegistries()
@@ -45,6 +73,9 @@ async function ensureClient(): Promise<RegistryClient> {
 }
 
 export const registryManager = {
+  /**
+   * Looks up issuer registries for a DID.
+   */
   async lookupDid(did: string): Promise<LookupResult> {
     if (!did) {
       return EMPTY_RESULT
