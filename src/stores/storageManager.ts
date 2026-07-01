@@ -1,15 +1,21 @@
 /**
  * Storage layer for the wallet. StorageManager is the single facade used by
- * all pages; it delegates to BrowserStore (local RxDB/IndexedDB, credentials
- * only) or WASRemoteStore (remote WAS server via ZCap-signed HTTP, full
- * Space/Collection/Resource support) depending on whether VITE_WAS_SERVER_URL
- * is set. The two backends are mutually exclusive.
+ * all pages. The local BrowserStore (RxDB/IndexedDB) is always the ACTIVE
+ * replica: every credential, public-link, and history read/write targets it
+ * unconditionally, online or offline, guest or not. When VITE_WAS_SERVER_URL
+ * is set (and the session is not a guest), a WASRemoteStore is also attached --
+ * not as a primary store, but as a remote replica: the sync controller
+ * replicates the local collections to it in the background, and the storage
+ * browser / export / import / quota pages read through it directly.
  */
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
+import type { RxCollection } from 'rxdb/plugins/core'
 import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@/lib/cidFrom'
-import { WAS_SERVER_URL } from '@/app.config'
+import { WALLET_STANDARD_COLLECTIONS, WAS_SERVER_URL } from '@/app.config'
+import { createEdvDocCipher } from '@/stores/edvDocCipher'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
+import type { SyncedDoc } from '@/lib/sync'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
 import type { FetchedCollectionResource } from '@/lib/storageResource'
 import type { StoredCredential } from '@/types/credential'
@@ -32,32 +38,6 @@ export interface WalletActivity {
   created?: string
 }
 
-/**
- * The shared contract implemented by both storage backends (BrowserStore and
- * WASRemoteStore). Optional members are only meaningful for the remote backend.
- */
-export interface IWalletStore {
-  userExists: () => Promise<boolean>
-  addCredential: ({
-    cid,
-    credential
-  }: {
-    cid: string
-    credential: IVerifiableCredential
-  }) => Promise<void>
-  listCredentials: () => Promise<Array<StoredCredential>>
-  wipeStorage: () => Promise<void>
-  listCollections?: () => Promise<Array<StorageCollection>>
-  listCollectionResources?: ({
-    collectionUrl
-  }: {
-    collectionUrl: string
-  }) => Promise<Array<StorageResource>>
-  exportSpace?: () => Promise<ReadableStream<Uint8Array>>
-  importSpace?: ({ tarFile }: { tarFile: File }) => Promise<ImportSpaceSummary>
-  getSpaceQuotas?: () => Promise<SpaceQuotaReport | null>
-}
-
 export type ImportSpaceSummary = {
   collectionsCreated: number
   collectionsSkipped: number
@@ -66,26 +46,23 @@ export type ImportSpaceSummary = {
 }
 
 /**
- * Manages local and remote storage operations for the wallet and a logged-in
- * user profile.
+ * Manages storage operations for the wallet and a logged-in user profile:
+ * routes all wallet reads/writes to the local active replica and exposes the
+ * optional remote WAS backend for replication and remote-only features.
  */
 export class StorageManager {
-  private _localStore?: BrowserStore
+  private _localStore: BrowserStore
   private _remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
-  public remoteOnly: boolean
 
   constructor({
     localStore,
-    remoteStore,
-    remoteOnly = false
+    remoteStore
   }: {
-    localStore?: BrowserStore
+    localStore: BrowserStore
     remoteStore?: WASRemoteStore
-    remoteOnly: boolean
   }) {
     this._localStore = localStore
     this._remoteStore = remoteStore
-    this.remoteOnly = remoteOnly
   }
 
   /**
@@ -104,10 +81,31 @@ export class StorageManager {
   }
 
   /**
+   * The remote WAS client, or undefined when there is no remote backend. Used by
+   * the sync controller to drive background replication against remote Collection
+   * replicas (it signs with the same session key).
+   */
+  get wasClient(): WASRemoteStore['was'] | undefined {
+    return this._remoteStore?.was
+  }
+
+  /**
    * The remote Space URL, or undefined when there is no remote backend.
    */
   get spaceUrl(): string | undefined {
     return this._remoteStore?.spaceUrl
+  }
+
+  /**
+   * The live local RxDB collection backing one of the wallet's standard
+   * logical collections. The sync controller uses this as the local end of
+   * replication.
+   *
+   * @param logicalKey {string} e.g. 'publicCredentials'.
+   * @returns {RxCollection<SyncedDoc>}
+   */
+  localCollection(logicalKey: string): RxCollection<SyncedDoc> {
+    return this._localStore.rxCollection(logicalKey)
   }
 
   static async initStorageClients({
@@ -119,53 +117,91 @@ export class StorageManager {
     profile: ControllerProfile
     isGuest?: boolean
   }) {
-    // Guest sessions never touch the remote WAS server -- they always use the
-    // local BrowserStore. This keeps guest mode usable as a fallback even when
-    // the configured WAS server is unreachable.
+    // Guest sessions never touch the remote WAS server -- they get no remote
+    // replica. This keeps guest mode usable as a fallback even when the
+    // configured WAS server is unreachable.
     const storageServerUrl = isGuest ? undefined : WAS_SERVER_URL
-    console.log('Initializing remote storage clients:', { storageServerUrl })
-    const remoteOnly = !!storageServerUrl
-    let remoteStore, localStore
-    let userExists = false
-    // For the moment, localStore and remoteStore are mutually exclusive
+    console.log('Initializing storage clients:', { storageServerUrl })
 
-    if (!remoteOnly) {
-      ;({ localStore } = await BrowserStore.initClient({ user }))
-      userExists = await localStore.userExists()
-    }
+    // One document cipher per encrypted collection, built from the session's
+    // passphrase-derived key material (guests included -- their random secret
+    // encrypts just as well; it is merely unrecoverable after logout, like the
+    // rest of a guest session). The local store holds EDV envelopes for these
+    // collections and replication ships them verbatim.
+    const cipherEntries = await Promise.all(
+      WALLET_STANDARD_COLLECTIONS.filter(({ encryption }) => encryption).map(
+        async ({ key, id }) => [
+          key,
+          await createEdvDocCipher({
+            keyAgreementKey: profile.keyAgreementKey,
+            keyResolver: profile.keyResolver,
+            collectionId: id
+          })
+        ]
+      )
+    )
+    const ciphers = Object.fromEntries(cipherEntries)
 
+    // The local store is always the active replica.
+    const { localStore } = await BrowserStore.initClient({ user, ciphers })
+    let userExists = await localStore.userExists()
+
+    let remoteStore
     if (storageServerUrl) {
       ;({ remoteStore } = await WASRemoteStore.initClient({
         storageServerUrl,
         user,
         profile
       }))
-      userExists = await remoteStore.userExists()
+      // A returning user may be on a fresh browser (no local db yet) but have
+      // an existing remote Space.
+      userExists = userExists || (await remoteStore.userExists())
     }
-    const storage = new StorageManager({ localStore, remoteStore, remoteOnly })
+    const storage = new StorageManager({ localStore, remoteStore })
     return { storage, userExists }
   }
 
   async addCredential({ credential }: { credential: IVerifiableCredential }) {
-    if (!this.remoteOnly) {
-      // Local BrowserStore is content-addressed and unencrypted: key by cid.
-      const cid = await cidFrom({ doc: credential })
-      await this._localStore!.addCredential({ cid, credential })
-    }
-    if (this._remoteStore) {
-      // Remote `private-credentials` is encrypted: the EDV codec mints the
-      // (opaque) storage id, so no cid is supplied here.
-      await this._remoteStore.addCredential({ credential })
-    }
+    // The credential's content cid is its page-facing identity (idempotence,
+    // routes, history); the local store encrypts the VC into an EDV envelope
+    // keyed by a content-derived envelope-hash id, and replication mirrors
+    // that envelope to the remote `private-credentials` collection.
+    const cid = await cidFrom({ doc: credential })
+    await this._localStore.addCredential({ cid, credential })
+  }
+
+  async listCredentials(): Promise<Array<StoredCredential>> {
+    return await this._localStore.listCredentials()
+  }
+
+  async loadCredential({
+    cid
+  }: {
+    cid: string
+  }): Promise<IVerifiableCredential | undefined> {
+    return await this._localStore.loadCredential({ cid })
+  }
+
+  async deleteCredential({ cid }: { cid: string }) {
+    await this._localStore.deleteCredential({ cid })
   }
 
   async wipeStorage() {
-    if (!this.remoteOnly) {
-      await this._localStore!.wipeStorage()
-    }
+    // Remote first: if the remote wipe fails, the error surfaces while the
+    // local data (and session) are still intact.
     if (this._remoteStore) {
       await this._remoteStore.wipeStorage()
     }
+    await this._localStore.wipeStorage()
+  }
+
+  /**
+   * Closes the local database without removing data. Called on logout.
+   *
+   * @returns {Promise<void>}
+   */
+  async close() {
+    await this._localStore.close()
   }
 
   async getSpaceQuotas(): Promise<SpaceQuotaReport | null> {
@@ -230,9 +266,12 @@ export class StorageManager {
   }
 
   async ensureUserCollections({ user }: { user: User }) {
-    if (!this.remoteOnly) {
-      await this._localStore!.ensureUserCollections({ user })
-    }
+    await this._localStore.ensureUserCollections({ user })
+    // Re-key any plaintext rows a pre-encryption version of the app left in
+    // the (now encrypted) local collections. Runs before login completes --
+    // and so before background replication starts -- because the remote
+    // collections reject plaintext pushes once their encryption marker is set.
+    await this._localStore.migrateLocalPlaintextDocs()
     if (this._remoteStore) {
       await this._remoteStore.ensureUserCollections({ user })
     }
@@ -243,15 +282,10 @@ export class StorageManager {
    * the bootstrap did:key DID.
    */
   async addHistoryNewAccount({ user }: { user: User }) {
-    // Skip recording history item for local storage for now
-    if (!this._remoteStore) {
-      return
-    }
     const resourceId = uuidv7()
-    await this._remoteStore.addCollectionResource({
+    await this._localStore.addHistoryItem({
       resourceId,
-      collectionId: 'walletActivity',
-      resourceBody: {
+      activity: {
         id: resourceId,
         type: ['Create'],
         summary: 'Account Sign Up. did:key DID generated.',
@@ -264,40 +298,34 @@ export class StorageManager {
 
   /**
    * Records (in the `wallet-activity` collection) the Create activity for
-   * the space and various collections created.
+   * the storage collections created (and, when a remote replica is
+   * configured, the remote Space).
    */
   async addHistorySpaceCreated({ user }: { user: User }) {
-    if (!this._remoteStore) {
-      return
-    }
     const resourceId = uuidv7()
-    await this._remoteStore.addCollectionResource({
+    const remote = this._remoteStore
+    const objects = remote
+      ? [
+          { type: ['Space'], id: remote.spaceUrl },
+          ...WALLET_STANDARD_COLLECTIONS.map(({ key }) => ({
+            type: ['Collection'],
+            id: remote.collectionUrl(key)
+          }))
+        ]
+      : WALLET_STANDARD_COLLECTIONS.map(({ id }) => ({
+          type: ['Collection'],
+          id
+        }))
+    await this._localStore.addHistoryItem({
       resourceId,
-      collectionId: 'walletActivity',
-      resourceBody: {
+      activity: {
         id: resourceId,
         type: ['Create'],
-        summary:
-          'Account space created on remote storage server, collections initialized.',
+        summary: remote
+          ? 'Account space created on remote storage server, collections initialized.'
+          : 'Wallet collections initialized in local storage.',
         actor: user.id,
-        object: [
-          {
-            type: ['Space'],
-            id: this._remoteStore.spaceUrl
-          },
-          {
-            type: ['Collection'],
-            id: this._remoteStore.collectionUrl('privateCredentials')
-          },
-          {
-            type: ['Collection'],
-            id: this._remoteStore.collectionUrl('publicCredentials')
-          },
-          {
-            type: ['Collection'],
-            id: this._remoteStore.collectionUrl('walletActivity')
-          }
-        ],
+        object: objects,
         created: new Date().toISOString()
       }
     })
@@ -318,14 +346,10 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    if (!this._remoteStore) {
-      return
-    }
     const resourceId = uuidv7()
-    await this._remoteStore.addCollectionResource({
+    await this._localStore.addHistoryItem({
       resourceId,
-      collectionId: 'walletActivity',
-      resourceBody: {
+      activity: {
         id: resourceId,
         type: ['Create'],
         summary: 'Credential created: ' + cid,
@@ -350,14 +374,10 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    if (!this._remoteStore) {
-      return
-    }
     const resourceId = uuidv7()
-    await this._remoteStore.addCollectionResource({
+    await this._localStore.addHistoryItem({
       resourceId,
-      collectionId: 'walletActivity',
-      resourceBody: {
+      activity: {
         id: resourceId,
         type: ['Delete'],
         summary: 'Credential deleted: ' + cid,
@@ -376,14 +396,10 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async addHistoryCredentialShared({ cid, user }: { cid: string; user: User }) {
-    if (!this._remoteStore) {
-      return
-    }
     const resourceId = uuidv7()
-    await this._remoteStore.addCollectionResource({
+    await this._localStore.addHistoryItem({
       resourceId,
-      collectionId: 'walletActivity',
-      resourceBody: {
+      activity: {
         id: resourceId,
         type: ['Share'],
         summary: 'Credential shared: ' + cid,
@@ -408,14 +424,10 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    if (!this._remoteStore) {
-      return
-    }
     const resourceId = uuidv7()
-    await this._remoteStore.addCollectionResource({
+    await this._localStore.addHistoryItem({
       resourceId,
-      collectionId: 'walletActivity',
-      resourceBody: {
+      activity: {
         id: resourceId,
         type: ['Unshare'],
         summary: 'Credential unshared: ' + cid,
@@ -426,45 +438,10 @@ export class StorageManager {
     })
   }
 
-  async listCredentials(): Promise<Array<StoredCredential>> {
-    let vcs: Array<StoredCredential> = []
-    if (!this.remoteOnly) {
-      vcs = await this._localStore!.listCredentials()
-    }
-    if (this._remoteStore) {
-      vcs = await this._remoteStore.listCredentials()
-    }
-    return vcs.map(vc => vc as StoredCredential)
-  }
-
-  async loadCredential({
-    cid
-  }: {
-    cid: string
-  }): Promise<IVerifiableCredential | undefined> {
-    let vc: IVerifiableCredential | undefined
-    if (!this.remoteOnly) {
-      vc = await this._localStore!.loadCredential({ cid })
-    }
-    if (this._remoteStore) {
-      vc = await this._remoteStore.loadCredential({ cid })
-    }
-    return vc
-  }
-
-  async deleteCredential({ cid }: { cid: string }) {
-    if (!this.remoteOnly) {
-      await this._localStore!.deleteCredential({ cid })
-    }
-    if (this._remoteStore) {
-      await this._remoteStore.deleteCredential({ cid })
-    }
-  }
-
   /**
-   * Whether public links (sharing) are available this session. Sharing relies
-   * on the remote WAS server's access-control policies, so it's only possible
-   * with a remote backend.
+   * Whether public links (sharing) are available this session. A public link
+   * only means something as a world-readable URL on the remote WAS server, so
+   * sharing requires a remote replica to be configured.
    */
   get canShare(): boolean {
     return !!this._remoteStore
@@ -480,9 +457,10 @@ export class StorageManager {
 
   /**
    * Creates a world-readable public link for a credential and returns its URL.
-   * The public copy is plaintext and content-addressed: it is keyed by the
-   * credential's cid (a hash of its content), independent of the opaque EDV id
-   * the encrypted `private-credentials` collection uses internally.
+   * The public copy is plaintext and content-addressed (keyed by the
+   * credential's cid, a hash of its content). It is written to the local
+   * `public-credentials` collection; background replication mirrors it to the
+   * remote WAS Collection, where the returned URL resolves.
    *
    * @param credential {IVerifiableCredential}
    * @returns {Promise<string>}
@@ -496,33 +474,32 @@ export class StorageManager {
       throw new Error('Public links require remote storage.')
     }
     const cid = await cidFrom({ doc: credential })
-    return await this._remoteStore.createPublicLink({ cid, credential })
-  }
-
-  async removePublicLink({ cid }: { cid: string }): Promise<void> {
-    if (!this._remoteStore) {
-      throw new Error('Public links require remote storage.')
-    }
-    await this._remoteStore.removePublicLink({ cid })
-  }
-
-  async isShared({ cid }: { cid: string }): Promise<boolean> {
-    if (!this._remoteStore) {
-      return false
-    }
-    return await this._remoteStore.isShared({ cid })
+    await this._localStore.addPublicCredential({ cid, credential })
+    return this._remoteStore.publicCredentialUrl(cid)
   }
 
   /**
-   * Lists the items in the `wallet-activity` history collection. Returns an
-   * empty array when there is no remote backend.
+   * Revokes a credential's public link by removing its copy from the local
+   * `public-credentials` collection (replication pushes the delete to the
+   * remote Collection).
+   *
+   * @param cid {string}
+   * @returns {Promise<void>}
+   */
+  async removePublicLink({ cid }: { cid: string }): Promise<void> {
+    await this._localStore.removePublicCredential({ cid })
+  }
+
+  async isShared({ cid }: { cid: string }): Promise<boolean> {
+    return await this._localStore.hasPublicCredential({ cid })
+  }
+
+  /**
+   * Lists the items in the `wallet-activity` history collection.
    */
   async listHistoryItems(): Promise<
     Array<{ id: string; doc: WalletActivity }>
   > {
-    if (!this._remoteStore) {
-      return []
-    }
-    return await this._remoteStore.listHistoryItems()
+    return await this._localStore.listHistoryItems()
   }
 }

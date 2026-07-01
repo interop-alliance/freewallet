@@ -1,7 +1,6 @@
 /**
  * VC-related types for the wallet UI: display projection, verification
- * results, and the StoredCredential wrapper used by both BrowserStore and
- * WASRemoteStore.
+ * results, and the StoredCredential wrapper returned by the storage layer.
  */
 import type {
   IVerifiableCredential,
@@ -71,25 +70,11 @@ export type VerificationAggregateStatus =
   'verified' | 'warning' | 'not_verified'
 
 /**
- * A VC as persisted in BrowserStore or WASRemoteStore. The `cid` field is an
- * opaque storage/route id: in local BrowserStore mode it is the content cid
- * (a hash of the VC); in remote mode the encrypted `private-credentials`
- * collection mints an EDV id and that is carried here instead. Treat it as an
- * opaque key -- do not re-hash or validate it as a content cid.
+ * A VC as returned by the storage layer. The `cid` is the credential's
+ * content cid (a hash of the canonicalized VC, see `src/lib/cidFrom.ts`),
+ * which keys the content-addressed local `private-credentials` collection.
  */
 export interface StoredCredential {
   cid: string
   vc: IVerifiableCredential
-}
-
-// JSON Schema, used for RxDb collections
-export const StoredCredentialSchema = {
-  version: 0,
-  primaryKey: 'cid',
-  type: 'object',
-  properties: {
-    cid: { type: 'string', maxLength: 128 },
-    vc: { type: 'object', additionalProperties: true }
-  },
-  required: ['cid']
 }

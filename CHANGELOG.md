@@ -1,5 +1,75 @@
 # History
 
+## Unreleased - TBD
+
+### Changed
+
+- **Local-first storage model.** The local
+  RxDB/Dexie `BrowserStore` is now the always-on ACTIVE replica: every
+  credential, public-link, and history read/write targets it unconditionally
+  (online or offline, guest or not), and the remote WAS Space is demoted from
+  a primary store to a background sync target. One local database per user
+  now holds all three standard collections (`private-credentials`,
+  `public-credentials`, `wallet-activity`) on the generic synced-doc schema,
+  and the sync controller replicates those same collections (no separate
+  sync db). Concretely:
+  - `StorageManager` loses the `remoteOnly` mutual-exclusion branch that
+    forked every method; `WASRemoteStore` keeps only the Space lifecycle,
+    the storage-browser read-through (`/storage/**` pages), export/import,
+    and quotas -- its direct credential/history/public-link methods are gone.
+  - Sharing writes the public copy to the local `public-credentials`
+    collection and background replication mirrors it to the remote
+    Collection, where the returned public URL resolves (sharing still
+    requires a configured remote).
+  - History (`wallet-activity`) is now recorded for all sessions, including
+    guest / local-only ones (the "skip history for local storage" caveats are
+    gone), and the History page reads it locally.
+
+### Added
+
+- **Encrypted-collection sync.** `private-credentials` and
+  `wallet-activity` now replicate through the same collection-agnostic
+  adapter as `public-credentials`, end-to-end encrypted. The local store
+  holds EDV envelopes for these collections (encrypted-at-rest in IndexedDB):
+  a new per-collection document cipher (`src/stores/edvDocCipher.ts`, built on
+  `@interop/was-client@0.12.0`'s content-derived EDV ids) encrypts at write
+  time -- minting the envelope-hash id that keys the row identically on every
+  replica -- and decrypts at read time; the sync layer ships the envelopes
+  verbatim and never touches keys. Because JWE encryption is
+  nondeterministic, write idempotence and read collapsing are keyed by the
+  document's content identity (credential `cid` / activity `id`) rather than
+  by row id, and deleting a credential removes every row carrying it.
+  `wallet-activity` is now encrypted like `private-credentials` (its
+  Collection declares the `edv` marker; the server permits the late
+  declaration on existing Spaces). A one-time local migration re-keys
+  never-synced plaintext rows into envelopes at login, before replication
+  starts (the server rejects plaintext pushes to a marked collection);
+  legacy plaintext rows replicated from pre-marker Spaces stay readable
+  through tolerant read paths. Guest sessions encrypt locally too.
+
+- **Background WAS replication.** A new
+  collection-agnostic replication adapter (`src/lib/sync/`) drives an RxDB
+  `replicateRxCollection` state machine against a remote WAS Collection's
+  `changes`-feed (`POST .../query`) + conditional-write (`PUT`/`DELETE`/`PUT
+.../meta`) endpoints. The core (`wasReplication`, `changesQuery`, `pushWrites`,
+  `syncedDocSchema`) has no React or `@interop/was-client` imports -- all WAS
+  access is injected through a small `WasSyncPort` seam (`src/stores/wasSyncPort.ts`),
+  so it can later be extracted to a standalone `was-rxdb-replication` library.
+  The port drives the raw signed `was.request()` escape hatch, moving stored
+  bodies **verbatim** (codec-bypassing). The generic synced-doc schema carries
+  both a content revision (`version`/`data`) and an independently-versioned metadata
+  sub-resource (`metaVersion`/`custom`), matching the server's V2
+  encrypted-metadata change-feed contract.
+- **SyncController + per-collection status.** `src/stores/syncController.ts`
+  starts replication on login (skipped for guests / when no remote replica is
+  configured), cancels on logout, and re-syncs on `window` `online`; a Zustand
+  `syncStatusStore` surfaces per-collection status
+  (`idle`/`syncing`/`synced`/`error`) driven off the replication `active$` /
+  `error$` streams, shown on the Settings page. Reachability is inferred from
+  replication itself (no health poll). Syncs `public-credentials`;
+  `VITE_WAS_SERVER_URL` is re-interpreted as "a remote replica is available."
+  New optional env knobs `VITE_WAS_SYNC_RETRY_MS` and `VITE_WAS_SYNC_BATCH_SIZE`.
+
 ## 0.12.0 - 2026-07-01
 
 ### Added
