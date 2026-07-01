@@ -18,7 +18,7 @@ import type { ZcapClient } from '@interop/ezcap'
 import {
   WasClient,
   type Collection,
-  type Json,
+  type ResourceData,
   type Resource
 } from '@interop/was-client'
 import { createEdvEncryption } from '@interop/was-client/edv'
@@ -324,7 +324,10 @@ export class WASRemoteStore implements IWalletStore {
     resourceBody: object
   }) {
     try {
-      await this._collection(collectionId).put(resourceId, resourceBody as Json)
+      await this._collection(collectionId).put(
+        resourceId,
+        resourceBody as ResourceData
+      )
     } catch (err) {
       console.error(
         `Error adding resource "${resourceId}" to "${collectionId}":`,
@@ -350,7 +353,7 @@ export class WASRemoteStore implements IWalletStore {
   async addCredential({ credential }: { credential: IVerifiableCredential }) {
     try {
       await this._collection('privateCredentials').add(
-        credential as unknown as Json
+        credential as unknown as ResourceData
       )
     } catch (err) {
       console.error('Error adding credential:', err)
