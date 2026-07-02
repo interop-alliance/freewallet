@@ -61,6 +61,11 @@ export async function composeVP({
     }) as IVerifiablePresentation
   }
 
+  // DIDAuth signs with the passphrase-derived root key, which a restored
+  // (delegated tier) session does not hold -- it requires a fresh login.
+  if (!session.profile.keyAgent) {
+    throw new Error('DID Auth requires a full (passphrase) session.')
+  }
   // Sign with the cryptosuite the verifier requested (via VCALM
   // `acceptedCryptosuites`), falling back to the wallet default. The suite
   // dictates the VC data model version: eddsa-rdfc-2022 proofs require VC 2.0,

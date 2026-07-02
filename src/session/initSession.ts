@@ -32,7 +32,10 @@ export async function agentsFromSecret({
   const signer = keyAgent.getSigner()
   const zcapClient = new ZcapClient({
     SuiteClass: Ed25519Signature2020,
-    invocationSigner: signer
+    invocationSigner: signer,
+    // The root key also signs delegations: the session zcaps minted at login
+    // (src/session/delegatedSession.ts) and any future sharing grants.
+    delegationSigner: signer
   })
 
   // Derive an X25519 key agreement key (KAK) from the same Ed25519 key pair the
@@ -134,7 +137,7 @@ export async function initSessionFromSecret({
     isGuest
   })
 
-  const session = { user, profile, storage, isGuest } as Session
+  const session = { user, profile, storage, isGuest, tier: 'full' } as Session
 
   return { session, userExists }
 }

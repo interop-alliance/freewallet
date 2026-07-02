@@ -1,3 +1,4 @@
+import Alert from '@mui/material/Alert'
 import AppBar from '@mui/material/AppBar'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -130,6 +131,26 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
 
       <Box component="main" sx={dashboardStyles.main}>
         <Toolbar />
+        {/* A restored (delegated) session has no passphrase-derived keys, so
+            the encrypted collections are locked until the user logs back in. */}
+        {session?.tier === 'delegated' && (
+          <Alert
+            severity="info"
+            sx={{ mb: 2 }}
+            action={
+              <Button
+                color="inherit"
+                size="small"
+                component={RouterLink}
+                to="/login"
+              >
+                {t('session.unlock')}
+              </Button>
+            }
+          >
+            {t('session.lockedVault')}
+          </Alert>
+        )}
         <Typography variant="h3" component="h3" sx={dashboardStyles.title}>
           {title}
         </Typography>

@@ -17,7 +17,7 @@ import type {
 
 /**
  * The union of VC API message types the wallet can classify. Zcap and exchange
- * invitation / issue request messages are deferred to a later phase.
+ * invitation / issue request messages are deferred to later work.
  */
 export type WalletAPIMessage = IVPRequest | IVPOffer
 
@@ -90,8 +90,8 @@ export type IDIDAuthenticationQuery = {
 
 /**
  * The wallet's response to a request, delivered by whichever transport received
- * it (CHAPI `respondWith`, a future exchange-URL POST, etc). Zcaps land in a
- * later phase.
+ * it (CHAPI `respondWith`, a future exchange-URL POST, etc). Zcaps land
+ * later.
  */
 export type WalletResponse = {
   verifiablePresentation?: IVerifiablePresentation

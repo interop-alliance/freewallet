@@ -124,7 +124,7 @@ describe('composeVp (DID Auth)', () => {
     expect(proof.domain).toBe(DOMAIN)
 
     const { suite } = presentationSuiteFor({
-      signer: session.profile.keyAgent.getSigner()
+      signer: session.profile.keyAgent!.getSigner()
     })
     const result = await vc.verify({
       presentation: vp as never,
@@ -151,7 +151,7 @@ describe('composeVp (DID Auth)', () => {
     expect(proof.proofPurpose).toBe('authentication')
 
     const { suite } = presentationSuiteFor({
-      signer: session.profile.keyAgent.getSigner(),
+      signer: session.profile.keyAgent!.getSigner(),
       cryptosuite: EDDSA_RDFC_2022
     })
     const result = await vc.verify({

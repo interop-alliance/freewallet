@@ -1,6 +1,6 @@
 /**
- * Classification of incoming VC API messages. Turns a raw CHAPI event (or, in a
- * later phase, a QR / pasted payload) into a typed `IVpRequest` / `IVpOffer`,
+ * Classification of incoming VC API messages. Turns a raw CHAPI event (or,
+ * later, a QR / pasted payload) into a typed `IVpRequest` / `IVpOffer`,
  * and provides the type guards used to dispatch on what was actually asked for
  * (VC sharing, DID Authentication, or both).
  */

@@ -8,7 +8,8 @@
  * replicates the local collections to it in the background, and the storage
  * browser / export / import / quota pages read through it directly.
  */
-import type { IVerifiableCredential } from '@interop/data-integrity-core'
+import type { IVerifiableCredential, IZcap } from '@interop/data-integrity-core'
+import type { ZcapClient } from '@interop/ezcap'
 import type { RxCollection } from 'rxdb/plugins/core'
 import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@/lib/cidFrom'
@@ -20,7 +21,10 @@ import type { SpaceQuotaReport } from '@/types/storageQuota'
 import type { FetchedCollectionResource } from '@/lib/storageResource'
 import type { StoredCredential } from '@/types/credential'
 import { BrowserStore } from '@/stores/browserStore'
-import { WASRemoteStore } from '@/stores/wasRemoteStore'
+import {
+  WASRemoteStore,
+  type SessionCapabilities
+} from '@/stores/wasRemoteStore'
 import { uuidv7 } from 'uuidv7'
 
 /**
@@ -53,16 +57,39 @@ export type ImportSpaceSummary = {
 export class StorageManager {
   private _localStore: BrowserStore
   private _remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
+  private _vaultLocked: boolean
 
   constructor({
     localStore,
-    remoteStore
+    remoteStore,
+    vaultLocked = false
   }: {
     localStore: BrowserStore
     remoteStore?: WASRemoteStore
+    vaultLocked?: boolean
   }) {
     this._localStore = localStore
     this._remoteStore = remoteStore
+    this._vaultLocked = vaultLocked
+  }
+
+  /**
+   * Whether the encrypted collections are locked: true in a restored
+   * (`delegated` tier) session, where the passphrase-derived KAK is absent.
+   * Locked reads return nothing rather than raw envelopes; locked writes
+   * throw rather than store plaintext into an encrypted collection.
+   */
+  get vaultLocked(): boolean {
+    return this._vaultLocked
+  }
+
+  private _requireUnlockedVault(): void {
+    if (this._vaultLocked) {
+      throw new Error(
+        'The vault is locked in a restored session; log in with the ' +
+          'passphrase to unlock it.'
+      )
+    }
   }
 
   /**
@@ -108,6 +135,21 @@ export class StorageManager {
     return this._localStore.rxCollection(logicalKey)
   }
 
+  /**
+   * The delegated session capability for writes to a WAS collection, or
+   * `undefined` in the full tier (root invocations). The sync controller
+   * attaches this to the sync port's requests.
+   *
+   * @param collectionId {string}   the WAS collection id (e.g. `wallet-activity`)
+   * @returns {IZcap | undefined}
+   */
+  collectionCapability(collectionId: string): IZcap | undefined {
+    return this._remoteStore?.sessionCapabilityFor({
+      collectionId,
+      write: true
+    })
+  }
+
   static async initStorageClients({
     user,
     profile,
@@ -127,14 +169,20 @@ export class StorageManager {
     // passphrase-derived key material (guests included -- their random secret
     // encrypts just as well; it is merely unrecoverable after logout, like the
     // rest of a guest session). The local store holds EDV envelopes for these
-    // collections and replication ships them verbatim.
+    // collections and replication ships them verbatim. (Restored delegated
+    // sessions, which have no KAK, initialize via
+    // `initDelegatedStorageClients` instead.)
+    const { keyAgreementKey, keyResolver } = profile
+    if (!keyAgreementKey || !keyResolver) {
+      throw new Error('A full session profile requires the key material.')
+    }
     const cipherEntries = await Promise.all(
       WALLET_STANDARD_COLLECTIONS.filter(({ encryption }) => encryption).map(
         async ({ key, id }) => [
           key,
           await createEdvDocCipher({
-            keyAgreementKey: profile.keyAgreementKey,
-            keyResolver: profile.keyResolver,
+            keyAgreementKey,
+            keyResolver,
             collectionId: id
           })
         ]
@@ -161,7 +209,53 @@ export class StorageManager {
     return { storage, userExists }
   }
 
+  /**
+   * Initializes storage for a restored (`delegated` tier) session: the local
+   * store opens without ciphers (the vault stays locked -- encrypted
+   * collections are unreadable and unwritable until re-login) and the remote
+   * store invokes the persisted delegated capabilities instead of root
+   * capabilities. Envelope replication still works: it moves opaque stored
+   * bodies verbatim and never needs keys.
+   *
+   * @param options {object}
+   * @param options.user {User}
+   * @param options.zcapClient {ZcapClient}   signs with the session key
+   * @param options.spaceId {string}
+   * @param options.sessionCapabilities {SessionCapabilities}
+   * @returns {Promise<{ storage: StorageManager }>}
+   */
+  static async initDelegatedStorageClients({
+    user,
+    zcapClient,
+    spaceId,
+    sessionCapabilities
+  }: {
+    user: User
+    zcapClient: ZcapClient
+    spaceId: string
+    sessionCapabilities: SessionCapabilities
+  }) {
+    if (!WAS_SERVER_URL) {
+      throw new Error('A delegated session requires a remote WAS server.')
+    }
+    const { localStore } = await BrowserStore.initClient({ user })
+    const remoteStore = new WASRemoteStore({
+      storageServerUrl: WAS_SERVER_URL,
+      zcapClient,
+      spaceId,
+      controller: user.id,
+      sessionCapabilities
+    })
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      vaultLocked: true
+    })
+    return { storage }
+  }
+
   async addCredential({ credential }: { credential: IVerifiableCredential }) {
+    this._requireUnlockedVault()
     // The credential's content cid is its page-facing identity (idempotence,
     // routes, history); the local store encrypts the VC into an EDV envelope
     // keyed by a content-derived envelope-hash id, and replication mirrors
@@ -171,6 +265,9 @@ export class StorageManager {
   }
 
   async listCredentials(): Promise<Array<StoredCredential>> {
+    if (this._vaultLocked) {
+      return []
+    }
     return await this._localStore.listCredentials()
   }
 
@@ -179,6 +276,9 @@ export class StorageManager {
   }: {
     cid: string
   }): Promise<IVerifiableCredential | undefined> {
+    if (this._vaultLocked) {
+      return undefined
+    }
     return await this._localStore.loadCredential({ cid })
   }
 
@@ -278,12 +378,38 @@ export class StorageManager {
   }
 
   /**
+   * Writes one activity to the local `wallet-activity` collection -- the
+   * shared tail of every `addHistory*` method. With the vault locked (a
+   * restored delegated session) the entry is skipped: the collection is
+   * encrypted and there is no cipher, and losing a log line beats failing
+   * the action that produced it.
+   *
+   * @param options {object}
+   * @param options.resourceId {string}
+   * @param options.activity {WalletActivity}
+   * @returns {Promise<void>}
+   */
+  private async _addHistoryItem({
+    resourceId,
+    activity
+  }: {
+    resourceId: string
+    activity: WalletActivity
+  }) {
+    if (this._vaultLocked) {
+      console.warn('Vault locked; skipping wallet-activity entry.')
+      return
+    }
+    await this._localStore.addHistoryItem({ resourceId, activity })
+  }
+
+  /**
    * Records (in the `wallet-activity` collection) the Create activity for
    * the bootstrap did:key DID.
    */
   async addHistoryNewAccount({ user }: { user: User }) {
     const resourceId = uuidv7()
-    await this._localStore.addHistoryItem({
+    await this._addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -316,7 +442,7 @@ export class StorageManager {
           type: ['Collection'],
           id
         }))
-    await this._localStore.addHistoryItem({
+    await this._addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -347,7 +473,7 @@ export class StorageManager {
     user: User
   }) {
     const resourceId = uuidv7()
-    await this._localStore.addHistoryItem({
+    await this._addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -375,7 +501,7 @@ export class StorageManager {
     user: User
   }) {
     const resourceId = uuidv7()
-    await this._localStore.addHistoryItem({
+    await this._addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -397,7 +523,7 @@ export class StorageManager {
    */
   async addHistoryCredentialShared({ cid, user }: { cid: string; user: User }) {
     const resourceId = uuidv7()
-    await this._localStore.addHistoryItem({
+    await this._addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -425,7 +551,7 @@ export class StorageManager {
     user: User
   }) {
     const resourceId = uuidv7()
-    await this._localStore.addHistoryItem({
+    await this._addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -500,6 +626,9 @@ export class StorageManager {
   async listHistoryItems(): Promise<
     Array<{ id: string; doc: WalletActivity }>
   > {
+    if (this._vaultLocked) {
+      return []
+    }
     return await this._localStore.listHistoryItems()
   }
 }

@@ -31,7 +31,7 @@ export interface DocCipher {
 /**
  * Whether a stored document body is an EDV encryption envelope (carries an
  * object `jwe`) as opposed to a plaintext document. Used by the read paths to
- * stay tolerant of legacy plaintext rows (pre-Track-D local writes before
+ * stay tolerant of legacy plaintext rows (local writes before
  * migration, or rows replicated from a collection written before its
  * encryption marker was declared) and by the one-time local migration to find
  * the rows it must re-key.

@@ -20,6 +20,7 @@ import { loadOnce } from 'credential-handler-polyfill'
 import { receiveCredentialEvent } from 'web-credential-handler'
 import { MEDIATOR_BASE } from '@/app.config'
 import { initSessionFromSecret } from '@/session/initSession'
+import { persistDelegatedSession } from '@/session/delegatedSession'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
@@ -40,6 +41,7 @@ import {
   type WalletRequestKind
 } from '@/lib/walletRequest'
 import { CHAPILoginForm } from './CHAPILoginForm'
+import { SavedSessionNotice } from './SavedSessionNotice'
 import { useTranslation } from 'react-i18next'
 
 type PageState =
@@ -102,6 +104,10 @@ export function WalletGetPage() {
   const [session, setSession] = useState<Session | null>(null)
   const [credentials, setCredentials] = useState<StoredCredential[]>([])
   const [loginError, setLoginError] = useState<string | null>(null)
+  // First-party storage factory from the Storage Access API flow (see
+  // SavedSessionNotice); a full login persists its delegated session
+  // through it so the next popup visit auto-recognizes the user.
+  const [firstPartyIdb, setFirstPartyIdb] = useState<IDBFactory | null>(null)
   const initialized = useRef(false)
 
   useEffect(() => {
@@ -171,6 +177,14 @@ export function WalletGetPage() {
       setSession(loggedIn)
       setCredentials(vcs)
       setPageState('selecting')
+      if (firstPartyIdb) {
+        void persistDelegatedSession({
+          session: loggedIn,
+          idb: firstPartyIdb
+        }).catch((err: unknown) => {
+          console.warn('Could not persist the delegated session:', err)
+        })
+      }
     } catch (err) {
       if (isStorageUnreachable(err)) {
         setLoginError(t('chapi.storageUnreachable'))
@@ -268,7 +282,10 @@ export function WalletGetPage() {
         )}
 
         {pageState === 'awaiting-login' && (
-          <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
+          <>
+            <SavedSessionNotice onFirstPartyStorage={setFirstPartyIdb} />
+            <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
+          </>
         )}
 
         {pageState === 'selecting' && requestKind === 'didauth' && (

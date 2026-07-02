@@ -33,7 +33,10 @@ export function SettingsPage() {
   // KMS keystore state: a keystore is provisioned at login whenever a KMS
   // server is configured for a non-guest session (see initSession.ts).
   const kmsConfigured = !!KMS_SERVER_URL && !session?.isGuest
-  const keystoreId = session?.profile?.keystoreAgent?.keystoreId
+  // A restored (delegated) session carries the keystore id from the
+  // persisted record rather than a keystore agent.
+  const keystoreId =
+    session?.profile?.keystoreAgent?.keystoreId ?? session?.profile?.keystoreId
 
   const handleDeleteAccount = async () => {
     if (!session) {

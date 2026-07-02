@@ -429,7 +429,7 @@ export class BrowserStore {
 
   /**
    * One-time local migration for the encrypted collections: re-keys plaintext
-   * rows written before encrypted sync landed (the Track C window, when
+   * rows written before encrypted sync landed (when
    * `private-credentials` / `wallet-activity` were local-active but not yet
    * replicating) into EDV envelopes under their content-derived ids. Runs at
    * login before replication starts -- required, not just tidy: once a remote

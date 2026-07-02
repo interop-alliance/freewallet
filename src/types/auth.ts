@@ -46,26 +46,37 @@ export interface User {
  * Cryptographic identity bundle for a logged-in user: the key agent that holds
  * the Ed25519 key pair and the ZCap client that signs HTTP requests with it.
  * In-memory only; never persisted.
+ *
+ * In the `delegated` session tier (a refresh-restored session,
+ * `src/session/delegatedSession.ts`) only `zcapClient` is present -- it signs
+ * with the browser session key and invokes the persisted delegated zcaps.
+ * The passphrase-derived fields (`keyAgent`, `keyAgreementKey`,
+ * `keyResolver`) require a fresh login.
  */
 export interface ControllerProfile {
-  keyAgent: ICapabilityAgent
+  keyAgent?: ICapabilityAgent
   zcapClient: ZcapClient
   // X25519 key agreement key, derived deterministically from the passphrase
   // (the Montgomery form of the Ed25519 signing key). Used to encrypt/decrypt
   // the EDV-over-WAS `private-credentials` collection.
-  keyAgreementKey: IKeyAgreementKey
+  keyAgreementKey?: IKeyAgreementKey
   // Resolves `keyAgreementKey.id` to its public form during encrypt.
-  keyResolver: IKeyResolver
+  keyResolver?: IKeyResolver
   // WebKMS keystore agent, bound to the user's keystore on the configured
   // KMS server (KMS_SERVER_URL). Absent for guests, when no KMS server is
   // configured, or when keystore provisioning failed at login.
   keystoreAgent?: KeystoreAgent
+  // The keystore id, when known without a keystore agent (the delegated tier
+  // restores it from the persisted session record for display).
+  keystoreId?: string
 }
 
 /**
  * Full in-memory session for a logged-in user. Holds identity (user),
  * cryptographic credentials (profile), and the active storage backend
- * (storage). Discarded on page refresh.
+ * (storage). Discarded on page refresh -- though a `full` session leaves
+ * behind delegated zcaps that let `restoreDelegatedSession()` reconstitute
+ * a restricted `delegated` session on the next load.
  */
 export interface Session {
   user: User
@@ -73,4 +84,8 @@ export interface Session {
   storage: StorageManager
   expires?: string // ISO date string, matches Auth.js convention
   isGuest: boolean
+  // `full`: passphrase-derived root key present (fresh login). `delegated`:
+  // restored from persisted zcaps + the browser session key; the vault KAK is
+  // absent, so encrypted collections stay locked until re-login.
+  tier: 'full' | 'delegated'
 }

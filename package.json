@@ -31,6 +31,7 @@
     "@interop/data-integrity-core": "^8.1.0",
     "@interop/data-integrity-proof": "^3.4.1",
     "@interop/ed25519-signature": "^7.1.3",
+    "@interop/ed25519-verification-key": "^8.0.2",
     "@interop/ezcap": "^7.3.2",
     "@interop/http-client": "^1.0.4",
     "@interop/security-document-loader": "^9.4.1",

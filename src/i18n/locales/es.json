@@ -329,6 +329,10 @@
   "logout": {
     "message": "Cerrando sesión…"
   },
+  "session": {
+    "lockedVault": "Se restauró su sesión, pero la bóveda de credenciales está bloqueada. Inicie sesión con su frase de contraseña para desbloquearla.",
+    "unlock": "Iniciar sesión"
+  },
   "chapi": {
     "accountNotFound": "Cuenta no encontrada. Cree su billetera en la aplicación principal primero.",
     "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Inténtelo de nuevo en un momento.",
@@ -351,6 +355,13 @@
     "store": {
       "title": "Guardar credencial",
       "storedSuccess": "Credencial guardada correctamente."
+    },
+    "savedSession": {
+      "button": "Usar sesión guardada",
+      "checking": "Buscando una sesión guardada...",
+      "restored": "Sesión iniciada como {{identity}}. Introduzca su frase de contraseña para desbloquear sus credenciales.",
+      "none": "No se encontró ninguna sesión guardada en este navegador.",
+      "unavailable": "La sesión guardada no está disponible en este navegador."
     }
   },
   "verification": {

@@ -20,6 +20,16 @@ export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
 export const KMS_SERVER_URL =
   env.VITE_KMS_SERVER_URL ||
   (WAS_SERVER_URL ? `${WAS_SERVER_URL}/kms` : undefined)
+// Lifetime of the delegated session zcaps minted at login (refresh-surviving
+// sessions, `src/session/delegatedSession.ts`). After this the restored
+// session's capabilities stop verifying and a fresh login is required.
+export const SESSION_ZCAP_TTL_MS =
+  (env.VITE_SESSION_ZCAP_TTL_HOURS
+    ? Number(env.VITE_SESSION_ZCAP_TTL_HOURS)
+    : 24) *
+  60 *
+  60 *
+  1000
 
 // Background-replication tuning (both optional).
 // `VITE_WAS_SYNC_RETRY_MS` -- RxDB `retryTime` backoff between failed cycles.
@@ -73,7 +83,7 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
 ]
 export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
 // CORS proxy for fetching remote credential URLs from AddCredentialPage.
-export const CORS_PROXY_URL = env.VITE_CORS_PROXY_URL || 'https://corsproxy.io'
+export const CORS_PROXY_URL = env.VITE_CORS_PROXY_URL || WAS_SERVER_URL || 'https://corsproxy.io'
 
 export const PASSWORD_RULES = {
   minlength: 16,

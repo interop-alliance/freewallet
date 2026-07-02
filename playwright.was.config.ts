@@ -38,7 +38,9 @@ export default defineConfig({
     },
     {
       // App in remote (WAS) mode, pointed at the local teaching server.
-      command: `pnpm exec vite --cors --port ${APP_PORT} --strictPort`,
+      // `--host` also answers on 127.0.0.1, the cross-site top level the
+      // saved-login popup spec embeds the wallet from.
+      command: `pnpm exec vite --cors --host --port ${APP_PORT} --strictPort`,
       url: APP_URL,
       reuseExistingServer: false,
       env: { VITE_WAS_SERVER_URL: WAS_URL }

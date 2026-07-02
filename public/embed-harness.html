@@ -1,0 +1,43 @@
+<!doctype html>
+<!--
+  Generic cross-site embedder (CHAPI popup half; see storage-probe.html
+  for the storage-partitioning background). Open this page from a DIFFERENT
+  site than the wallet origin and pass the full URL to embed:
+
+    http://127.0.0.1:5274/embed-harness.html?src=http://localhost:5274/#/wallet/get
+
+  The iframe then loads the wallet as a THIRD-PARTY frame -- the same shape
+  as the CHAPI pages inside the authn.io mediator popup -- for manually (or
+  in e2e tests) exercising flows that depend on that context, e.g. the
+  Storage Access API saved-login restore.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cross-site embed harness</title>
+    <style>
+      body {
+        font-family: monospace;
+        margin: 1em;
+      }
+      iframe {
+        width: 100%;
+        height: 40em;
+        border: 2px solid #888;
+      }
+    </style>
+  </head>
+  <body>
+    <h3>Cross-site embed harness (top-level: <span id="site"></span>)</h3>
+    <iframe id="embed" title="embedded wallet page"></iframe>
+    <script>
+      document.getElementById('site').textContent = location.origin
+      const src = new URLSearchParams(location.search).get('src')
+      if (src) {
+        document.getElementById('embed').src = src
+      } else {
+        document.body.append('Missing ?src=<url to embed>')
+      }
+    </script>
+  </body>
+</html>

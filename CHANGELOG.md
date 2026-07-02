@@ -27,8 +27,60 @@
 
 ### Added
 
-- **WebKMS keystore provisioning (Track D of
-  `_spec/webkms-integration-plan.md`).** Non-guest logins now ensure a
+- **Refresh-surviving sessions via delegated zcaps.** A full
+  (passphrase) login now mints a browser session key -- a non-extractable
+  WebCrypto Ed25519 key pair in its own IndexedDB database
+  (`src/lib/sessionKey.ts`) -- and the root key delegates session zcaps to
+  its did:key (`src/session/delegatedSession.ts`): a read-only capability on
+  the WAS Space, a read/write capability per standard collection (rooted at
+  the Space, target-attenuated at delegation time -- the session key can
+  sync and share but can never rewrite the Space Description), and a `sign`
+  capability on the WebKMS keystore (inert for now). Lifetime defaults
+  to 24h (`VITE_SESSION_ZCAP_TTL_HOURS`). On the next page load,
+  `ProtectedRoute` restores a restricted **delegated-tier** session
+  (`Session.tier: 'full' | 'delegated'`): the zcap client signs with the
+  session key, the storage browser and background envelope replication work
+  through the delegated capabilities, but the vault stays **locked** -- the
+  KAK is passphrase-derived and never persisted, so encrypted collections
+  are unreadable (and fail closed on writes) until the user logs back in;
+  a dashboard banner says so and links to login. Logout revokes the
+  keystore session zcap on the KMS (best-effort) and
+  always deletes the persisted records and session key. The CHAPI popup
+  half remains gated on the storage-partitioning experiment.
+- **CHAPI popup saved-login on Chrome (the popup half).** The
+  `/wallet/get` and `/wallet/store` popups -- third-party iframes whose
+  IndexedDB is a partitioned bucket -- can now reach the first-party
+  session persisted by the first-party login, via Chrome's Storage Access API
+  beyond-cookies handle: a new `SavedSessionNotice` above the popup login
+  form silently restores the delegated session when the `storage-access`
+  permission was granted before (zero clicks for returning users), or
+  offers a "Use saved login" button (the user gesture Chrome's first
+  prompt requires), then shows who is signed in. A successful passphrase
+  login in the popup also _persists through the handle_, so a popup-first
+  user gets main-app refresh-survival and next-popup auto-recognition too.
+  Plumbing: `src/lib/storageAccess.ts` (first-party storage acquisition),
+  `src/lib/sessionKey.ts` parametrized over an injectable `IDBFactory`,
+  threaded through restore/persist. Popup _operations_ stay
+  passphrase-gated for now (the vault KAK never leaves the
+  passphrase); Firefox/Safari grant cookies only, so they keep the
+  passphrase-login popup unchanged. E2e:
+  `tests/e2e-was/chapi-saved-session.spec.ts` drives the real flow inside
+  a cross-site iframe (`public/embed-harness.html`).
+- **The CHAPI storage-partitioning experiment (popup-half gate).**
+  `public/storage-probe.html` (wallet-origin probe reporting which
+  pre-seeded localStorage / IndexedDB / cookie markers a document can see,
+  plus Storage Access API attempts) + `public/partitioning-harness.html`
+  (cross-site embedder reproducing the authn.io mediator-popup shape),
+  automated across Chromium/Firefox/WebKit at both Playwright-permissive
+  and release-default protection levels by
+  `tests/experiments/storage-partitioning.spec.ts`
+  (`playwright.partitioning.config.ts`; not part of the regular suites).
+  Outcome: all engines
+  partition third-party-iframe IndexedDB at release defaults; Chrome's
+  `requestStorageAccess({ indexedDB, localStorage })` handle restores
+  first-party access (popup half buildable there), Firefox/Safari are
+  cookies-only (popup re-login until support improves).
+- **WebKMS keystore provisioning.** Non-guest logins now ensure a
   WebKMS keystore exists for the user's did:key controller on the configured
   KMS server (list-by-controller, create on first login) and bind a
   `KeystoreAgent` to it on the session profile
@@ -37,8 +89,7 @@
   `VITE_KMS_SERVER_URL` env var. Provisioning failure is non-fatal (no
   wallet feature depends on the keystore yet); the settings page's new
   "Key management" section reports the keystore state. No keys are
-  generated yet -- the first KMS-held keys arrive with the did:web work
-  (Track F).
+  generated yet -- the first KMS-held keys arrive with the did:web work.
 - **Encrypted-collection sync.** `private-credentials` and
   `wallet-activity` now replicate through the same collection-agnostic
   adapter as `public-credentials`, end-to-end encrypted. The local store

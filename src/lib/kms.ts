@@ -1,10 +1,9 @@
 /**
- * WebKMS keystore provisioning (Track D of the WebKMS integration plan,
- * `_spec/webkms-integration-plan.md`). Ensures the logged-in controller has
+ * WebKMS keystore provisioning. Ensures the logged-in controller has
  * a keystore on the configured KMS server and returns a KeystoreAgent bound
  * to it. The keystore controller is the passphrase-derived did:key -- the
  * root key stays strictly client-side; only operational keys generated
- * later (Track F) live server-side.
+ * later live server-side.
  */
 import type { CapabilityAgent } from '@interop/webkms-client'
 import { KeystoreAgent, KmsClient } from '@interop/webkms-client'
@@ -45,13 +44,17 @@ export async function ensureKeystore({
   })
   const { results } = response.data as { results: Array<{ id: string }> }
 
-  let config = results[0]
+  let config: { id: string } | undefined = results[0]
   if (!config) {
-    config = await KmsClient.createKeystore({
+    const created = await KmsClient.createKeystore({
       url: keystoresUrl,
       config: { sequence: 0, controller },
       invocationSigner: keyAgent.getSigner()
     })
+    if (!created.id) {
+      throw new Error('KMS keystore creation returned no keystore id.')
+    }
+    config = { id: created.id }
   }
 
   return new KeystoreAgent({

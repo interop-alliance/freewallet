@@ -84,7 +84,7 @@ describe('WASRemoteStore.listCollectionResources', () => {
         collectionUrl: '/space/space-id/private-credentials'
       })
     ).resolves.toEqual(items)
-    expect(space).toHaveBeenCalledWith('space-id')
+    expect(space).toHaveBeenCalledWith('space-id', {})
     expect(collection).toHaveBeenCalledWith('private-credentials')
     expect(collectionIsPublic).toHaveBeenCalledOnce()
   })

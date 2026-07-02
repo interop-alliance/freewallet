@@ -329,6 +329,10 @@
   "logout": {
     "message": "Logging out…"
   },
+  "session": {
+    "lockedVault": "Your session was restored, but your credentials vault is locked. Log in with your passphrase to unlock it.",
+    "unlock": "Log in"
+  },
   "chapi": {
     "accountNotFound": "Account not found. Please create your wallet from the main app first.",
     "storageUnreachable": "Could not reach the storage server. Please try again in a moment.",
@@ -351,6 +355,13 @@
     "store": {
       "title": "Store credential",
       "storedSuccess": "Credential stored successfully."
+    },
+    "savedSession": {
+      "button": "Use saved login",
+      "checking": "Checking for a saved login...",
+      "restored": "Signed in as {{identity}}. Enter your passphrase to unlock your credentials.",
+      "none": "No saved login found in this browser.",
+      "unavailable": "Saved login is not available in this browser."
     }
   },
   "verification": {

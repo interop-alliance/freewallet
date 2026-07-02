@@ -85,7 +85,15 @@ class SyncController {
         setStatus(id, 'idle')
         // The local end of replication IS the page-facing active replica.
         const rxCollection = session.storage.localCollection(key)
-        const wasPort = createWasSyncPort({ was, spaceId, collectionId: id })
+        // In the delegated tier the port invokes the collection's persisted
+        // session capability; in the full tier this is undefined and the
+        // port's requests invoke root capabilities as before.
+        const wasPort = createWasSyncPort({
+          was,
+          spaceId,
+          collectionId: id,
+          capability: session.storage.collectionCapability(id)
+        })
         const state = createWasReplication({
           rxCollection,
           wasPort,

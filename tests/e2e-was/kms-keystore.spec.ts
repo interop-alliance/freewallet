@@ -2,8 +2,7 @@ import { test, expect } from '@playwright/test'
 import { signupViaWizard } from './helpers'
 
 /**
- * WebKMS keystore provisioning e2e (Track D of
- * `_spec/webkms-integration-plan.md`). Runs against the app in remote mode
+ * WebKMS keystore provisioning e2e. Runs against the app in remote mode
  * backed by a local was-teaching-server, whose `/kms` facet is the default
  * KMS (KMS_SERVER_URL derives from VITE_WAS_SERVER_URL). Signing up must
  * provision a keystore for the new controller, reported on the settings

@@ -18,6 +18,7 @@ import type {
 } from '@interop/data-integrity-core'
 import { MEDIATOR_BASE } from '@/app.config'
 import { initSessionFromSecret } from '@/session/initSession'
+import { persistDelegatedSession } from '@/session/delegatedSession'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import type { Session } from '@/types/auth'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
@@ -28,6 +29,7 @@ import {
   type CHAPIStoreEvent
 } from '@/lib/walletRequest'
 import { CHAPILoginForm } from './CHAPILoginForm'
+import { SavedSessionNotice } from './SavedSessionNotice'
 import { useTranslation } from 'react-i18next'
 
 type PageState = 'initializing' | 'awaiting-login' | 'confirming' | 'stored'
@@ -40,6 +42,10 @@ export function WalletStorePage() {
   const [vp, setVp] = useState<IVerifiablePresentation | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
+  // First-party storage factory from the Storage Access API flow (see
+  // SavedSessionNotice); a full login persists its delegated session
+  // through it so the next popup visit auto-recognizes the user.
+  const [firstPartyIdb, setFirstPartyIdb] = useState<IDBFactory | null>(null)
   const initialized = useRef(false)
 
   useEffect(() => {
@@ -78,6 +84,13 @@ export function WalletStorePage() {
       await s.storage.ensureUserCollections({ user: s.user })
       setSession(s)
       setPageState('confirming')
+      if (firstPartyIdb) {
+        void persistDelegatedSession({ session: s, idb: firstPartyIdb }).catch(
+          (err: unknown) => {
+            console.warn('Could not persist the delegated session:', err)
+          }
+        )
+      }
     } catch (err) {
       if (isStorageUnreachable(err)) {
         setLoginError(t('chapi.storageUnreachable'))
@@ -145,7 +158,10 @@ export function WalletStorePage() {
         )}
 
         {pageState === 'awaiting-login' && (
-          <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
+          <>
+            <SavedSessionNotice onFirstPartyStorage={setFirstPartyIdb} />
+            <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
+          </>
         )}
 
         {pageState === 'confirming' && (

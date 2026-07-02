@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
- * Unit tests for WebKMS keystore provisioning (`src/lib/kms.ts`, Track D of
- * `_spec/webkms-integration-plan.md`): discovery via list-by-controller,
+ * Unit tests for WebKMS keystore provisioning (`src/lib/kms.ts`):
+ * discovery via list-by-controller,
  * creation on first login, and failure propagation. The zcap client is
  * stubbed per house pattern; keystore creation is spied on the real
  * `KmsClient` static.
