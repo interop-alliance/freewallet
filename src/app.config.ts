@@ -14,6 +14,12 @@ export const DEPLOY_URL = env.VITE_DEPLOY_URL
 // target: the sync controller replicates the local RxDB collections to it in
 // the background. (Guest sessions never sync.)
 export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
+// WebKMS server URL. Defaults to the WAS server's in-process `/kms` facet;
+// set VITE_KMS_SERVER_URL only when the KMS is hosted separately. When
+// neither is set, the session has no KMS (keys stay on this device).
+export const KMS_SERVER_URL =
+  env.VITE_KMS_SERVER_URL ||
+  (WAS_SERVER_URL ? `${WAS_SERVER_URL}/kms` : undefined)
 
 // Background-replication tuning (both optional).
 // `VITE_WAS_SYNC_RETRY_MS` -- RxDB `retryTime` backoff between failed cycles.

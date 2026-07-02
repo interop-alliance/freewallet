@@ -49,7 +49,12 @@
       "syncing": "Sincronizando...",
       "synced": "Sincronizado",
       "error": "Error de sincronización (se reintentará)"
-    }
+    },
+    "kmsSection": "Gestión de claves",
+    "kmsNone": "No hay un servidor de gestión de claves configurado; las claves permanecen en este dispositivo.",
+    "keystore": "Almacén de claves",
+    "keystoreProvisioned": "Aprovisionado",
+    "keystoreError": "No aprovisionado (falló el aprovisionamiento al iniciar sesión)"
   },
   "landing": {
     "title": "Freewallet",

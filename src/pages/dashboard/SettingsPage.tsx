@@ -10,7 +10,7 @@ import { useInfoBox } from '@/hooks/useInfoBox'
 import { dashboardStyles } from '@/styles/appStyles'
 import { useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
-import { SYNCED_COLLECTIONS } from '@/app.config'
+import { KMS_SERVER_URL, SYNCED_COLLECTIONS } from '@/app.config'
 import { useSyncStatusStore, type SyncStatus } from '@/stores/syncStatusStore'
 
 const SYNC_CHIP_COLOR: Record<
@@ -30,6 +30,10 @@ export function SettingsPage() {
   const { displayInfoBox } = useInfoBox()
   const [deleteError, setDeleteError] = useState(false)
   const hasRemoteStorage = !!session?.storage?.hasRemoteStorage
+  // KMS keystore state: a keystore is provisioned at login whenever a KMS
+  // server is configured for a non-guest session (see initSession.ts).
+  const kmsConfigured = !!KMS_SERVER_URL && !session?.isGuest
+  const keystoreId = session?.profile?.keystoreAgent?.keystoreId
 
   const handleDeleteAccount = async () => {
     if (!session) {
@@ -129,6 +133,41 @@ export function SettingsPage() {
           ) : (
             <Typography variant="body2" color="text.secondary">
               {t('settings.syncNone')}
+            </Typography>
+          )}
+        </Stack>
+
+        <Divider />
+
+        <Stack sx={{ gap: 1 }}>
+          <Typography variant="h6">{t('settings.kmsSection')}</Typography>
+          {kmsConfigured ? (
+            <Stack direction="row" sx={{ alignItems: 'center', gap: 2 }}>
+              <Typography variant="body2" sx={{ minWidth: 200 }}>
+                {t('settings.keystore')}
+              </Typography>
+              <Chip
+                size="small"
+                color={keystoreId ? 'success' : 'error'}
+                label={
+                  keystoreId
+                    ? t('settings.keystoreProvisioned')
+                    : t('settings.keystoreError')
+                }
+              />
+              {keystoreId && (
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ wordBreak: 'break-all' }}
+                >
+                  {keystoreId}
+                </Typography>
+              )}
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              {t('settings.kmsNone')}
             </Typography>
           )}
         </Stack>

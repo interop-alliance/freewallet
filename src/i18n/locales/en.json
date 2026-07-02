@@ -49,7 +49,12 @@
       "syncing": "Syncing...",
       "synced": "Synced",
       "error": "Sync error (will retry)"
-    }
+    },
+    "kmsSection": "Key management",
+    "kmsNone": "No key management server is configured; keys stay on this device.",
+    "keystore": "Keystore",
+    "keystoreProvisioned": "Provisioned",
+    "keystoreError": "Not provisioned (provisioning failed at login)"
   },
   "landing": {
     "title": "Freewallet",

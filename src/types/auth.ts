@@ -12,6 +12,7 @@ import type {
   IKeyResolver
 } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
+import type { KeystoreAgent } from '@interop/webkms-client'
 
 /**
  * Minimal interface over @interop/webkms-client's CapabilityAgent.
@@ -20,13 +21,14 @@ export interface ICapabilityAgent {
   id: string
   handle: string
   getSigner: () => ISigner
-  // The underlying Ed25519VerificationKey2020 key pair used for invocation
-  // signing. Underscore-private on CapabilityAgent, but read directly to derive
-  // the X25519 key agreement key (the Montgomery form of this same key).
-  _keyPair: {
-    publicKeyMultibase?: string
+  // Returns the underlying Ed25519 verification key descriptor (with
+  // `controller` set to the agent's did:key id), used to derive the X25519
+  // key agreement key for encrypted storage.
+  getVerificationKeyPair: () => {
+    type: string
+    controller: string
+    publicKeyMultibase: string
     privateKeyMultibase?: string
-    controller?: string
   }
 }
 
@@ -54,6 +56,10 @@ export interface ControllerProfile {
   keyAgreementKey: IKeyAgreementKey
   // Resolves `keyAgreementKey.id` to its public form during encrypt.
   keyResolver: IKeyResolver
+  // WebKMS keystore agent, bound to the user's keystore on the configured
+  // KMS server (KMS_SERVER_URL). Absent for guests, when no KMS server is
+  // configured, or when keystore provisioning failed at login.
+  keystoreAgent?: KeystoreAgent
 }
 
 /**

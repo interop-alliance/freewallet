@@ -10,6 +10,8 @@ import { ZcapClient } from '@interop/ezcap'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import type { ControllerProfile, Session, User } from '@/types/auth'
+import { KMS_SERVER_URL } from '@/app.config'
+import { ensureKeystore } from '@/lib/kms'
 import { StorageManager } from '@/stores/storageManager'
 
 /**
@@ -42,7 +44,7 @@ export async function agentsFromSecret({
   // trivial.
   const keyAgreementKey =
     X25519KeyAgreementKey2020.fromEd25519VerificationKey2020({
-      keyPair: { ...keyAgent._keyPair, controller: keyAgent.id }
+      keyPair: keyAgent.getVerificationKeyPair()
     })
   const keyResolver = async ({ id }: { id?: string }) => {
     if (id !== keyAgreementKey.id) {
@@ -94,6 +96,24 @@ export async function initSessionFromSecret({
       secret: secret
     })
 
+  // Ensure a KMS keystore exists for this controller (list-by-controller,
+  // create on first login) and bind a KeystoreAgent to it. Guests skip the
+  // KMS entirely, as they skip WAS. Failure is non-fatal for now: no wallet
+  // feature depends on the keystore yet, so a KMS outage must not lock
+  // users out -- the settings page surfaces the unprovisioned state.
+  let keystoreAgent
+  if (!isGuest && KMS_SERVER_URL) {
+    try {
+      keystoreAgent = await ensureKeystore({
+        kmsServerUrl: KMS_SERVER_URL,
+        keyAgent,
+        zcapClient
+      })
+    } catch (err) {
+      console.warn('KMS keystore provisioning failed:', err)
+    }
+  }
+
   const user: User = {
     id: keyAgent.id, // a did:key DID
     email
@@ -101,6 +121,7 @@ export async function initSessionFromSecret({
   const profile: ControllerProfile = {
     keyAgent,
     zcapClient,
+    keystoreAgent,
     // `id` is always set on the KAK here (a controller was supplied at
     // derivation), so it satisfies IKeyAgreementKey's required `id`.
     keyAgreementKey: keyAgreementKey as IKeyAgreementKey,

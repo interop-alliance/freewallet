@@ -27,6 +27,18 @@
 
 ### Added
 
+- **WebKMS keystore provisioning (Track D of
+  `_spec/webkms-integration-plan.md`).** Non-guest logins now ensure a
+  WebKMS keystore exists for the user's did:key controller on the configured
+  KMS server (list-by-controller, create on first login) and bind a
+  `KeystoreAgent` to it on the session profile
+  (`profile.keystoreAgent`). The KMS defaults to the WAS server's `/kms`
+  facet; a separately hosted KMS can be set via the new
+  `VITE_KMS_SERVER_URL` env var. Provisioning failure is non-fatal (no
+  wallet feature depends on the keystore yet); the settings page's new
+  "Key management" section reports the keystore state. No keys are
+  generated yet -- the first KMS-held keys arrive with the did:web work
+  (Track F).
 - **Encrypted-collection sync.** `private-credentials` and
   `wallet-activity` now replicate through the same collection-agnostic
   adapter as `public-credentials`, end-to-end encrypted. The local store
