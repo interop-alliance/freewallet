@@ -8,6 +8,7 @@ import { Link as RouterLink, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { useAuthStore } from '@/stores/authStore'
+import { syncController } from '@/stores/syncController'
 import { dashboardStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialCard } from '@/components/CredentialCard'
@@ -64,6 +65,9 @@ export function DashboardPage() {
 
   async function handleSync() {
     setSyncing(true)
+    // Kick an immediate replication cycle (no-op for guests / no remote);
+    // pulled changes land in the local replica in the background.
+    syncController.reSync()
     await loadCredentials()
     setSyncCount(c => c + 1)
     setSyncing(false)

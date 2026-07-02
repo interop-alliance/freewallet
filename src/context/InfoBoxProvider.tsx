@@ -1,14 +1,20 @@
-import { useCallback, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useState, type ReactNode } from 'react'
 import Box from '@mui/material/Box'
 import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import IconButton from '@mui/material/IconButton'
 import Typography from '@mui/material/Typography'
 import { MdClose } from 'react-icons/md'
-import { DocContent } from '@/components/DocContent'
+import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { infoBoxStyles } from '@/styles/appStyles'
 import { InfoBox, type InfoBoxOptions } from '@/context/infoBoxStore'
 import { useTranslation } from 'react-i18next'
+
+// Lazily loaded: DocContent pulls in the react-markdown/remark stack, which
+// would otherwise land in the eager entry chunk (this provider wraps the app).
+const DocContent = lazy(() =>
+  import('@/components/DocContent').then(m => ({ default: m.DocContent }))
+)
 
 export function InfoBoxProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation()
@@ -54,7 +60,9 @@ export function InfoBoxProvider({ children }: { children: ReactNode }) {
 
         <DialogContent sx={infoBoxStyles.content}>
           {options && (
-            <DocContent key={options.docUrl} fileName={options.docUrl} />
+            <Suspense fallback={<LoadingSpinner />}>
+              <DocContent key={options.docUrl} fileName={options.docUrl} />
+            </Suspense>
           )}
         </DialogContent>
       </Dialog>

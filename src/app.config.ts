@@ -83,7 +83,8 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
 ]
 export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
 // CORS proxy for fetching remote credential URLs from AddCredentialPage.
-export const CORS_PROXY_URL = env.VITE_CORS_PROXY_URL || WAS_SERVER_URL || 'https://corsproxy.io'
+export const CORS_PROXY_URL =
+  env.VITE_CORS_PROXY_URL || WAS_SERVER_URL || 'https://corsproxy.io'
 
 export const PASSWORD_RULES = {
   minlength: 16,

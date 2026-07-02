@@ -1,5 +1,20 @@
 # History
 
+## 0.13.1 - TBD
+
+### Changed
+
+- The dashboard Sync button now triggers an immediate replication cycle on
+  all synced collections (via a new public `SyncController.reSync()`) in
+  addition to reloading the credential list from the local replica.
+
+- **Slimmer entry bundle** (450 kB to 130 kB minified, 140 kB to 42 kB
+  gzipped). Two eager imports moved to on-demand loading: `InfoBoxProvider`
+  now lazy-loads `DocContent` (keeping the react-markdown/remark stack out of
+  the entry chunk), and the sync controller loads the RxDB replication
+  adapter dynamically when replication actually starts (keeping rxdb, rxjs,
+  and broadcast-channel out of the eager auth-store path).
+
 ## 0.13.0 - 2026-07-02
 
 ### Changed

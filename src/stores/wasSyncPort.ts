@@ -19,6 +19,9 @@
  */
 import type { WasClient } from '@interop/was-client'
 import type { IZcap } from '@interop/data-integrity-core'
+// Deep import (bypassing the `@/lib/sync` barrel) so this eagerly loaded
+// module does not drag the barrel's RxDB replication machinery into the
+// entry chunk; the heavy adapter is loaded on demand by the SyncController.
 import {
   WasSyncConflictError,
   type Json,
@@ -26,7 +29,7 @@ import {
   type SyncCheckpoint,
   type WasSyncPort,
   type WireDoc
-} from '@/lib/sync'
+} from '@/lib/sync/types.js'
 
 /**
  * Extracts an HTTP status from a raw ky/ezcap error. `was.request()` rejects on

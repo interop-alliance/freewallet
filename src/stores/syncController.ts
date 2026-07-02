@@ -27,11 +27,7 @@ import {
   WAS_SYNC_BATCH_SIZE,
   WAS_SYNC_RETRY_MS
 } from '@/app.config'
-import {
-  createWasReplication,
-  type SyncCheckpoint,
-  type SyncedDoc
-} from '@/lib/sync'
+import type { SyncCheckpoint, SyncedDoc } from '@/lib/sync'
 import { createWasSyncPort } from '@/stores/wasSyncPort'
 import { useSyncStatusStore } from '@/stores/syncStatusStore'
 import type { Session } from '@/types/auth'
@@ -81,6 +77,10 @@ class SyncController {
     const setStatus = useSyncStatusStore.getState().setStatus
 
     try {
+      // Dynamically imported: the replication adapter drags in RxDB's
+      // replication machinery (rxdb core, rxjs, broadcast-channel), which
+      // would otherwise land in the eager entry chunk via the auth store.
+      const { createWasReplication } = await import('@/lib/sync')
       for (const { key, id } of SYNCED_COLLECTIONS) {
         setStatus(id, 'idle')
         // The local end of replication IS the page-facing active replica.
@@ -122,16 +122,26 @@ class SyncController {
 
       // The one genuinely useful reachability signal: on reconnect, resync
       // immediately rather than waiting out RxDB's backoff tick.
-      this._onlineHandler = () => {
-        for (const { state } of this._replications) {
-          state.reSync()
-        }
-      }
+      this._onlineHandler = () => this.reSync()
       window.addEventListener('online', this._onlineHandler)
     } catch (err) {
       console.error('Failed to start sync controller:', err)
       // Leave any partial state for stop() to tear down cleanly.
       await this.stop()
+    }
+  }
+
+  /**
+   * Triggers an immediate replication cycle on every running collection
+   * replication, rather than waiting for RxDB's next scheduled tick.
+   * Fire-and-forget: progress surfaces through the syncStatusStore as usual.
+   * A no-op when replication is not running (guest, no remote, stopped).
+   *
+   * @returns {void}
+   */
+  reSync(): void {
+    for (const { state } of this._replications) {
+      state.reSync()
     }
   }
 

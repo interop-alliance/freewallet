@@ -11,7 +11,6 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(appVersion),
   },
   build: {
-    sourcemap: true,
     rollupOptions: {
       output: {
         manualChunks(id: string) {
