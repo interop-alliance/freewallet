@@ -31,6 +31,13 @@ export const SESSION_ZCAP_TTL_MS =
   60 *
   1000
 
+// Lifetime of the capabilities delegated to a relying party when a user
+// approves a "Login with Wallet" zcap request (`src/lib/walletRequest/
+// processZcaps.ts`). Default 30 days: the WAS server has no Space-side
+// revocation endpoint, so expiry is the sole limiter on RP grants.
+export const RP_ZCAP_TTL_MS =
+  (Number(env.VITE_RP_ZCAP_TTL_HOURS) || 720) * 60 * 60 * 1000
+
 // Background-replication tuning (both optional).
 // `VITE_WAS_SYNC_RETRY_MS` -- RxDB `retryTime` backoff between failed cycles.
 export const WAS_SYNC_RETRY_MS = env.VITE_WAS_SYNC_RETRY_MS

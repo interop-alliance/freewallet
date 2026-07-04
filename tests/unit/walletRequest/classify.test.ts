@@ -2,14 +2,16 @@ import { describe, it, expect } from 'vitest'
 import {
   classifyCHAPIGetEvent,
   classifyCHAPIStoreEvent,
+  classifyRequest,
   isVPOffer,
   isVPRequest,
   isDIDAuthRequested,
-  isDIDAuthOnlyRequest,
-  requestKindOf,
+  zcapQueriesOf,
   didAuthMethodSupported,
   type CHAPIGetEvent,
   type CHAPIStoreEvent,
+  type ICapabilityQueryDetail,
+  type IVPRDetails,
   type IVPRQuery
 } from '@/lib/walletRequest'
 
@@ -23,6 +25,26 @@ const queryByExample: IVPRQuery = {
 const didAuthQuery: IVPRQuery = {
   type: 'DIDAuthentication',
   acceptedMethods: [{ method: 'key' }]
+}
+
+const capabilityDetail: ICapabilityQueryDetail = {
+  referenceId: 'example-app-data',
+  reason: 'Example App stores your documents in your wallet storage.',
+  allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
+  controller: 'did:key:z6MkrRP',
+  invocationTarget: { type: 'urn:was:collection', name: 'example-app-data' }
+}
+
+// Canonical VCALM shape: an array-valued capabilityQuery.
+const authorizationCapabilityQuery: IVPRQuery = {
+  type: 'AuthorizationCapabilityQuery',
+  capabilityQuery: [capabilityDetail]
+}
+
+// Legacy demo shape: the ZcapQuery alias with a single-object capabilityQuery.
+const legacyZcapQuery: IVPRQuery = {
+  type: 'ZcapQuery',
+  capabilityQuery: capabilityDetail
 }
 
 function getEvent(query: unknown): CHAPIGetEvent {
@@ -39,6 +61,10 @@ function getEvent(query: unknown): CHAPIGetEvent {
     } as CHAPIGetEvent['credentialRequestOptions'],
     respondWith: noop
   }
+}
+
+function details(query: IVPRQuery | IVPRQuery[]): IVPRDetails {
+  return { query }
 }
 
 describe('classifyCHAPIGetEvent', () => {
@@ -109,63 +135,75 @@ describe('isDidAuthRequested', () => {
   })
 })
 
-describe('isDIDAuthOnlyRequest', () => {
-  it('is true when every query is DIDAuthentication', () => {
-    const request = classifyCHAPIGetEvent(getEvent([didAuthQuery]))
-    expect(isDIDAuthOnlyRequest(request)).toBe(true)
+describe('zcapQueriesOf', () => {
+  it('collects an array-valued AuthorizationCapabilityQuery', () => {
+    expect(zcapQueriesOf([authorizationCapabilityQuery])).toEqual([
+      capabilityDetail
+    ])
   })
 
-  it('handles a single (non-array) query object', () => {
-    const request = classifyCHAPIGetEvent(getEvent(didAuthQuery))
-    expect(isDIDAuthOnlyRequest(request)).toBe(true)
+  it('normalizes a single-object ZcapQuery (legacy demo shape)', () => {
+    expect(zcapQueriesOf([legacyZcapQuery])).toEqual([capabilityDetail])
   })
 
-  it('is false for a combined VC + DIDAuthentication request', () => {
-    const request = classifyCHAPIGetEvent(
-      getEvent([queryByExample, didAuthQuery])
-    )
-    expect(isDIDAuthOnlyRequest(request)).toBe(false)
+  it('flattens across multiple zcap queries and ignores other types', () => {
+    expect(
+      zcapQueriesOf([
+        queryByExample,
+        authorizationCapabilityQuery,
+        legacyZcapQuery,
+        didAuthQuery
+      ])
+    ).toEqual([capabilityDetail, capabilityDetail])
   })
 
-  it('is false for a plain VC request', () => {
-    const request = classifyCHAPIGetEvent(getEvent([queryByExample]))
-    expect(isDIDAuthOnlyRequest(request)).toBe(false)
-  })
-
-  it('is false for an offer', () => {
-    const offer = classifyCHAPIStoreEvent({
-      credentialRequestOrigin: 'https://issuer.example',
-      credential: {
-        data: {
-          '@context': ['https://www.w3.org/ns/credentials/v2'],
-          type: 'VerifiablePresentation'
-        }
-      },
-      respondWith: noop
-    } as unknown as CHAPIStoreEvent)
-    expect(isDIDAuthOnlyRequest(offer)).toBe(false)
+  it('is empty when no zcap query is present', () => {
+    expect(zcapQueriesOf([queryByExample, didAuthQuery])).toEqual([])
   })
 })
 
-describe('requestKindOf', () => {
-  it('is "vc" for a QueryByExample-only request', () => {
-    expect(
-      requestKindOf(classifyCHAPIGetEvent(getEvent([queryByExample])))
-    ).toBe('vc')
+describe('classifyRequest', () => {
+  it('classifies a DID-Auth-only request', () => {
+    const profile = classifyRequest(details([didAuthQuery]))
+    expect(profile).toEqual({
+      didAuth: true,
+      vcQueries: [],
+      zcapRequests: []
+    })
   })
 
-  it('is "didauth" for a DIDAuthentication-only request', () => {
-    expect(requestKindOf(classifyCHAPIGetEvent(getEvent([didAuthQuery])))).toBe(
-      'didauth'
+  it('classifies a VC-only request', () => {
+    const profile = classifyRequest(details([queryByExample]))
+    expect(profile.didAuth).toBe(false)
+    expect(profile.vcQueries).toEqual([queryByExample])
+    expect(profile.zcapRequests).toEqual([])
+  })
+
+  it('classifies a zcap-only request', () => {
+    const profile = classifyRequest(details([authorizationCapabilityQuery]))
+    expect(profile.didAuth).toBe(false)
+    expect(profile.vcQueries).toEqual([])
+    expect(profile.zcapRequests).toEqual([capabilityDetail])
+  })
+
+  it('classifies a combined DIDAuth + VC + zcap request', () => {
+    const profile = classifyRequest(
+      details([didAuthQuery, queryByExample, authorizationCapabilityQuery])
     )
+    expect(profile.didAuth).toBe(true)
+    expect(profile.vcQueries).toEqual([queryByExample])
+    expect(profile.zcapRequests).toEqual([capabilityDetail])
   })
 
-  it('is "vc+didauth" for a combined request', () => {
-    expect(
-      requestKindOf(
-        classifyCHAPIGetEvent(getEvent([queryByExample, didAuthQuery]))
-      )
-    ).toBe('vc+didauth')
+  it('handles a single (non-array) query object', () => {
+    const profile = classifyRequest(details(didAuthQuery))
+    expect(profile.didAuth).toBe(true)
+  })
+
+  it('round-trips the legacy demo request (ZcapQuery + DIDAuthentication)', () => {
+    const profile = classifyRequest(details([didAuthQuery, legacyZcapQuery]))
+    expect(profile.didAuth).toBe(true)
+    expect(profile.zcapRequests).toEqual([capabilityDetail])
   })
 })
 

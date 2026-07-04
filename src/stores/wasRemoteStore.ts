@@ -328,6 +328,49 @@ export class WASRemoteStore {
   }
 
   /**
+   * Provisions an arbitrary (RP-requested) collection in this user's Space:
+   * plaintext and non-public -- usable by a relying party through its delegated
+   * zcap, but not world-readable. This is the `ensureUserCollections` pattern
+   * minus the encryption marker and `setPublic`. Full-tier only: a delegated
+   * session holds no capability to (re)configure the Space, and only a fresh
+   * passphrase login provisions on the RP's behalf.
+   *
+   * @param options {object}
+   * @param options.id {string}   the WAS collection id (validated by the caller)
+   * @param [options.name] {string}   display name; defaults to the id
+   * @returns {Promise<string>}   the collection's base URL
+   */
+  async ensureCollection({
+    id,
+    name
+  }: {
+    id: string
+    name?: string
+  }): Promise<string> {
+    if (this._sessionCapabilities) {
+      throw new Error(
+        'A delegated session cannot provision collections; log in with the ' +
+          'passphrase.'
+      )
+    }
+    try {
+      await this.was
+        .space(this.spaceId)
+        .collection(id)
+        .configure({
+          name: name ?? id
+        })
+    } catch (err) {
+      console.error(`Error provisioning collection "${id}":`, err)
+      throw new Error(
+        `Error provisioning collection "${id}" in space "${this.spaceId}".`,
+        { cause: err }
+      )
+    }
+    return this._collectionBaseUrl(id)
+  }
+
+  /**
    * Builds the trailing-slash base URL of a collection within this user's
    * space, suitable for use as a stable identifier (e.g. in history entries).
    *

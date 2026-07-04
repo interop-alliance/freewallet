@@ -10,9 +10,57 @@ import * as vc from '@interop/vc'
 import { securityLoader } from '@interop/security-document-loader'
 import type { Session } from '@/types/auth'
 import { presentationSuiteFor } from './presentationSuite'
-import type { IVerifiableCredential, IVerifiablePresentation } from './types'
+import type {
+  IVerifiableCredential,
+  IVerifiablePresentation,
+  IZcap
+} from './types'
 
-const documentLoader = securityLoader({ fetchRemoteContexts: true }).build()
+/**
+ * Shared JSON-LD document loader for presentation and credential signing.
+ * Exported so single-VC issuance (`src/lib/loginCredential.ts`) reuses the
+ * same context resolution the VP compose path uses.
+ */
+export const documentLoader = securityLoader({
+  fetchRemoteContexts: true
+}).build()
+
+/**
+ * A presentation carrying an embedded `zcap` array. Embedded before signing so
+ * a DIDAuth proof covers the grants (D1). Each entry is a self-contained,
+ * self-authenticating delegated capability carrying its own `@context`.
+ */
+type PresentationWithZcaps = IVerifiablePresentation & {
+  '@context': string | Array<string | object>
+  zcap?: IZcap[]
+}
+
+/**
+ * The bare `zcap` term definition appended to the VP `@context` when grants are
+ * embedded. Only the top-level term is defined (mapped to an app-specific IRI);
+ * the zcap sub-contexts are *not* hoisted -- each embedded zcap self-describes
+ * via its own `@context`. Defining the term is what lets JSON-LD safe-mode
+ * canonicalization include (rather than reject) the grants, so the
+ * authentication proof genuinely covers them.
+ */
+const ZCAP_TERM_CONTEXT = {
+  '@protected': true,
+  zcap: { '@id': 'urn:freewallet:vocab#zcap', '@container': '@set' }
+} as const
+
+/**
+ * Embeds the delegated capabilities on the presentation and adds the bare
+ * `zcap` term to its `@context`.
+ */
+function embedZcaps(presentation: PresentationWithZcaps, zcaps: IZcap[]): void {
+  if (zcaps.length === 0) {
+    return
+  }
+  const base = presentation['@context']
+  const contextArray = Array.isArray(base) ? base : [base]
+  presentation['@context'] = [...contextArray, ZCAP_TERM_CONTEXT]
+  presentation.zcap = zcaps
+}
 
 /**
  * Creates a Verifiable Presentation for the requester.
@@ -27,6 +75,8 @@ const documentLoader = securityLoader({ fetchRemoteContexts: true }).build()
  * @param options.didAuthRequested {boolean} - Whether to sign the VP.
  * @param [options.cryptosuite] {string} - Negotiated cryptosuite; falls back to
  *   the wallet default (Ed25519Signature2020) when absent.
+ * @param [options.zcaps] {IZcap[]} - Delegated capabilities to embed as the
+ *   VP's `zcap` array (before signing, so a DIDAuth proof covers them).
  * @returns {Promise<IVerifiablePresentation>}
  */
 export async function composeVP({
@@ -35,7 +85,8 @@ export async function composeVP({
   challenge,
   domain,
   didAuthRequested,
-  cryptosuite
+  cryptosuite,
+  zcaps = []
 }: {
   session: Session
   selectedVCs?: IVerifiableCredential[]
@@ -43,9 +94,12 @@ export async function composeVP({
   domain?: string
   didAuthRequested: boolean
   cryptosuite?: string
+  zcaps?: IZcap[]
 }): Promise<IVerifiablePresentation> {
-  if (!didAuthRequested && selectedVCs.length === 0) {
-    throw new Error('A VP requires either credentials or a DID Auth request.')
+  if (!didAuthRequested && selectedVCs.length === 0 && zcaps.length === 0) {
+    throw new Error(
+      'A VP requires credentials, capabilities, or a DID Auth request.'
+    )
   }
   if (didAuthRequested && !(challenge && domain)) {
     throw new Error('Both "challenge" and "domain" are required for DID Auth.')
@@ -53,12 +107,15 @@ export async function composeVP({
 
   if (!didAuthRequested) {
     // Return an unsigned VP. verify: false skips per-VC validation (including
-    // expiration checks).
-    return vc.createPresentation({
-      verifiableCredential: selectedVCs,
+    // expiration checks). A zcap-only response rides here: the grants are
+    // individually signed and controller-bound, so they need no VP proof.
+    const presentation = vc.createPresentation({
+      verifiableCredential: selectedVCs.length > 0 ? selectedVCs : undefined,
       verify: false,
       version: 1.0
-    }) as IVerifiablePresentation
+    }) as PresentationWithZcaps
+    embedZcaps(presentation, zcaps)
+    return presentation
   }
 
   // DIDAuth signs with the passphrase-derived root key, which a restored
@@ -78,7 +135,12 @@ export async function composeVP({
     verifiableCredential: selectedVCs.length > 0 ? selectedVCs : undefined,
     verify: false,
     version
-  })
+  }) as PresentationWithZcaps
+
+  // Embed the grants before signing so the authentication proof covers them
+  // (D1). The entries additionally self-authenticate via their own delegation
+  // proofs and carry their own `@context`.
+  embedZcaps(presentation, zcaps)
 
   return (await vc.signPresentation({
     presentation,

@@ -2,6 +2,23 @@
 
 ## 0.13.1 - TBD
 
+### Added
+
+- **Login with Wallet.** A relying party can now send one CHAPI Verifiable
+  Presentation Request that asks for DID Authentication, a self-issued **Login
+  Credential** (a username, set on the Settings page), and one or more
+  **WAS storage capabilities** described abstractly (a named collection or the
+  whole Space). The `/wallet/get` popup shows a single consent screen with up
+  to three sections (identity, credential selection, storage grants) and
+  responds with a signed VP whose `verifiableCredential` carries the Login
+  Credential and whose `zcap` array carries the delegated capabilities
+  (embedded before signing, so the authentication proof covers them). Grants
+  are rooted at the user's own Space, whole-Space grants are capped to
+  read-only, and each grant expires after `VITE_RP_ZCAP_TTL_HOURS` (default 30
+  days). A zcap-only request returns an unsigned VP (the grants are
+  individually signed and bound to the relying party's DID). See
+  `public/docs/login-with-wallet.md` for the relying-party response format.
+
 ### Changed
 
 - The dashboard Sync button now triggers an immediate replication cycle on

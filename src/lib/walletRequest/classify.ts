@@ -5,14 +5,17 @@
  * (VC sharing, DID Authentication, or both).
  */
 import type {
+  ICapabilityQueryDetail,
   IDIDAuthenticationQuery,
+  IQueryByExample,
   IVPOffer,
   IVPRequest,
   IVPRDetails,
   IVPRQuery,
   IVerifiablePresentation,
+  IZcapQuery,
   WalletAPIMessage,
-  WalletRequestKind
+  WalletRequestProfile
 } from './types'
 
 /**
@@ -111,23 +114,6 @@ export function isDIDAuthRequested({
 }
 
 /**
- * Returns true if the message is a VPR whose queries are *all*
- * `DIDAuthentication` (i.e. no credential sharing is involved).
- *
- * @param message {WalletAPIMessage}
- * @returns {boolean}
- */
-export function isDIDAuthOnlyRequest(message: WalletAPIMessage): boolean {
-  if (!isVPRequest(message)) {
-    return false
-  }
-  const queries = queriesOf(message.verifiablePresentationRequest)
-  return (
-    queries.length > 0 && queries.every(q => q.type === 'DIDAuthentication')
-  )
-}
-
-/**
  * Normalizes a VPR's `query` (which may be a single object or an array) to an
  * array.
  *
@@ -140,17 +126,45 @@ export function queriesOf(request: IVPRDetails): IVPRQuery[] {
 }
 
 /**
- * Classifies a request into the workflow the page should dispatch to.
+ * Collects the requested capabilities from a query set: filters the two zcap
+ * query type strings (`AuthorizationCapabilityQuery` canonical, `ZcapQuery`
+ * legacy alias), normalizes each `capabilityQuery` (object or array) to an
+ * array, and flattens.
  *
- * @param request {IVPRequest}
- * @returns {WalletRequestKind}
+ * @param queries {IVPRQuery[]}
+ * @returns {ICapabilityQueryDetail[]}
  */
-export function requestKindOf(request: IVPRequest): WalletRequestKind {
-  if (isDIDAuthOnlyRequest(request)) {
-    return 'didauth'
+export function zcapQueriesOf(queries: IVPRQuery[]): ICapabilityQueryDetail[] {
+  return queries
+    .filter(
+      (query): query is IZcapQuery =>
+        query.type === 'AuthorizationCapabilityQuery' ||
+        query.type === 'ZcapQuery'
+    )
+    .flatMap(({ capabilityQuery }) =>
+      Array.isArray(capabilityQuery) ? capabilityQuery : [capabilityQuery]
+    )
+}
+
+/**
+ * Classifies a VPR body onto the two independent axes the consent screen and
+ * response assembly work from: whether DID Authentication is requested, and
+ * separately the credential (`QueryByExample`) and capability
+ * (`AuthorizationCapabilityQuery` / `ZcapQuery`) content asked for. Any
+ * combination is valid, including zcap-only.
+ *
+ * @param request {IVPRDetails}
+ * @returns {WalletRequestProfile}
+ */
+export function classifyRequest(request: IVPRDetails): WalletRequestProfile {
+  const queries = queriesOf(request)
+  return {
+    didAuth: isDIDAuthRequested({ queries }),
+    vcQueries: queries.filter(
+      (query): query is IQueryByExample => query.type === 'QueryByExample'
+    ),
+    zcapRequests: zcapQueriesOf(queries)
   }
-  const queries = queriesOf(request.verifiablePresentationRequest)
-  return isDIDAuthRequested({ queries }) ? 'vc+didauth' : 'vc'
 }
 
 /**

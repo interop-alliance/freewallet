@@ -12,7 +12,8 @@
  */
 import type {
   IVerifiableCredential,
-  IVerifiablePresentation
+  IVerifiablePresentation,
+  IZcap
 } from '@interop/data-integrity-core'
 
 /**
@@ -55,7 +56,7 @@ export type IVPRDetails = {
   domain?: string
 }
 
-export type IVPRQuery = IQueryByExample | IDIDAuthenticationQuery
+export type IVPRQuery = IQueryByExample | IDIDAuthenticationQuery | IZcapQuery
 
 /**
  * A request for one or more VCs matching an example credential shape.
@@ -89,20 +90,57 @@ export type IDIDAuthenticationQuery = {
 }
 
 /**
+ * A request for one or more delegated capabilities (zcaps) on the user's WAS
+ * storage. `AuthorizationCapabilityQuery` is the canonical type string (VCALM
+ * §3.4.4); `ZcapQuery` is a legacy alias sent by DCW / the
+ * `wallet-to-webapp-demo`. `capabilityQuery` may be a single detail object or
+ * an array of them.
+ *
+ * @see https://w3c.github.io/vcalm/ -- AuthorizationCapabilityQuery
+ */
+export type IZcapQuery = {
+  type: 'AuthorizationCapabilityQuery' | 'ZcapQuery'
+  capabilityQuery: ICapabilityQueryDetail | ICapabilityQueryDetail[]
+  challenge?: string
+}
+
+/**
+ * A single requested capability: which actions (`allowedAction`) the RP
+ * (`controller`) wants on which storage target (`invocationTarget`), with an
+ * optional human-readable `reason` and RP-chosen `referenceId`. The
+ * `invocationTarget` is either a plain URL (satisfied only under the user's own
+ * Space) or a wallet-defined descriptor object (`urn:was:collection` /
+ * `urn:was:space`), resolved by `resolveInvocationTarget`.
+ */
+export type ICapabilityQueryDetail = {
+  referenceId?: string
+  reason?: string
+  allowedAction?: string | string[]
+  controller: string
+  invocationTarget: string | { type: string; name?: string }
+}
+
+/**
  * The wallet's response to a request, delivered by whichever transport received
- * it (CHAPI `respondWith`, a future exchange-URL POST, etc). Zcaps land
- * later.
+ * it (CHAPI `respondWith`, a future exchange-URL POST, etc). Delegated zcaps
+ * ride *inside* the response VP (as a `zcap` array, embedded before signing),
+ * so this shape stays credential-presentation only.
  */
 export type WalletResponse = {
   verifiablePresentation?: IVerifiablePresentation
 }
 
 /**
- * Which workflow a classified request maps to:
- * - `'vc'` -- share one or more credentials (`QueryByExample` only);
- * - `'didauth'` -- prove DID Authentication only, no credentials;
- * - `'vc+didauth'` -- share credentials *and* prove DID Authentication.
+ * A VP Request classified on two independent axes: whether DID Authentication
+ * is requested, and separately what content is asked for (credentials and/or
+ * capability delegations). Any combination is valid, including zcap-only. The
+ * consent screen renders one section per non-empty axis; the two axes replace
+ * the former `'vc' | 'didauth' | 'vc+didauth'` cross-product enum.
  */
-export type WalletRequestKind = 'vc' | 'didauth' | 'vc+didauth'
+export type WalletRequestProfile = {
+  didAuth: boolean
+  vcQueries: IQueryByExample[]
+  zcapRequests: ICapabilityQueryDetail[]
+}
 
-export type { IVerifiableCredential, IVerifiablePresentation }
+export type { IVerifiableCredential, IVerifiablePresentation, IZcap }

@@ -15,6 +15,7 @@
     "close": "Cerrar",
     "loading": "Cargando…",
     "saving": "Guardando…",
+    "save": "Guardar",
     "verifying": "Verificando…",
     "continue": "Continuar",
     "done": "Listo",
@@ -54,7 +55,12 @@
     "kmsNone": "No hay un servidor de gestión de claves configurado; las claves permanecen en este dispositivo.",
     "keystore": "Almacén de claves",
     "keystoreProvisioned": "Aprovisionado",
-    "keystoreError": "No aprovisionado (falló el aprovisionamiento al iniciar sesión)"
+    "keystoreError": "No aprovisionado (falló el aprovisionamiento al iniciar sesión)",
+    "handleSection": "Identificador de inicio de sesión",
+    "handleLabel": "Nombre de usuario preferido",
+    "handleHint": "El nombre de usuario que ven los sitios cuando inicia sesión con su billetera. Se guarda como una credencial autoemitida; déjelo en blanco para quitarlo.",
+    "handleSaved": "Identificador de inicio de sesión guardado.",
+    "handleRequiresFullSession": "Inicie sesión con su frase de contraseña para establecer un identificador de inicio de sesión."
   },
   "landing": {
     "title": "Freewallet",
@@ -344,13 +350,27 @@
       "requestedBy": "Solicitado por",
       "selectPrompt": "Seleccione una credencial para compartir:",
       "walletEmpty": "Su billetera está vacía.",
+      "noMatches": "No hay credenciales coincidentes en su billetera.",
       "sharing": "Compartiendo credencial…",
       "didAuthTitle": "Solicitud de autenticación DID",
       "didAuthPrompt": "{{origin}} está solicitando autenticación DID.",
       "didAuthAlso": "{{origin}} también está solicitando autenticación DID.",
       "didAuthUnsupported": "Esta solicitud requiere un método DID que esta billetera no admite.",
       "domainMismatch": "El dominio de esta solicitud no coincide con su procedencia, por lo que no se puede autenticar de forma segura.",
-      "processFailed": "Ocurrió un problema al preparar la respuesta. Inténtelo de nuevo."
+      "processFailed": "Ocurrió un problema al preparar la respuesta. Inténtelo de nuevo.",
+      "loginTitle": "Inicie sesión con su billetera",
+      "shareHandle": "Compartir su nombre de usuario {{username}}",
+      "zcapHeading": "Acceso al almacenamiento",
+      "zcapTarget": {
+        "collection": "colección {{name}}",
+        "space": "todo su Espacio de almacenamiento"
+      },
+      "zcapSpaceWarning": "Esto otorga acceso a todo su Espacio de almacenamiento.",
+      "zcapReadOnlyNote": "Solo lectura",
+      "zcapEncryptedNote": "Esta colección está cifrada: este sitio solo verá texto cifrado.",
+      "zcapCannotFulfill": "Esta billetera no puede satisfacer esta solicitud.",
+      "zcapUnavailable": "Esta solicitud requiere almacenamiento remoto, que esta billetera no tiene configurado.",
+      "zcapExpiry": "Caduca en {{days}} días"
     },
     "store": {
       "title": "Guardar credencial",

@@ -15,6 +15,7 @@
     "close": "Close",
     "loading": "Loading…",
     "saving": "Saving…",
+    "save": "Save",
     "verifying": "Verifying…",
     "continue": "Continue",
     "done": "Done",
@@ -54,7 +55,12 @@
     "kmsNone": "No key management server is configured; keys stay on this device.",
     "keystore": "Keystore",
     "keystoreProvisioned": "Provisioned",
-    "keystoreError": "Not provisioned (provisioning failed at login)"
+    "keystoreError": "Not provisioned (provisioning failed at login)",
+    "handleSection": "Login handle",
+    "handleLabel": "Preferred username",
+    "handleHint": "The username sites see when you log in with your wallet. Stored as a self-issued credential; leave blank to unset.",
+    "handleSaved": "Login handle saved.",
+    "handleRequiresFullSession": "Log in with your passphrase to set a login handle."
   },
   "landing": {
     "title": "Freewallet",
@@ -344,13 +350,27 @@
       "requestedBy": "Requested by",
       "selectPrompt": "Select a credential to share:",
       "walletEmpty": "Your wallet is empty.",
+      "noMatches": "No matching credentials in your wallet.",
       "sharing": "Sharing credential…",
       "didAuthTitle": "DID Authentication request",
       "didAuthPrompt": "{{origin}} is requesting DID Authentication.",
       "didAuthAlso": "{{origin}} is also requesting DID Authentication.",
       "didAuthUnsupported": "This request asks for a DID method this wallet doesn't support.",
       "domainMismatch": "This request's domain doesn't match where it came from, so it can't be safely authenticated.",
-      "processFailed": "Something went wrong preparing the response. Please try again."
+      "processFailed": "Something went wrong preparing the response. Please try again.",
+      "loginTitle": "Log in with your wallet",
+      "shareHandle": "Share your username {{username}}",
+      "zcapHeading": "Storage access",
+      "zcapTarget": {
+        "collection": "collection {{name}}",
+        "space": "your whole storage Space"
+      },
+      "zcapSpaceWarning": "This grants access to your entire storage Space.",
+      "zcapReadOnlyNote": "Read-only",
+      "zcapEncryptedNote": "This collection is encrypted -- this site will only see ciphertext.",
+      "zcapCannotFulfill": "This wallet cannot fulfill this request.",
+      "zcapUnavailable": "This request needs remote storage, which this wallet isn't configured with.",
+      "zcapExpiry": "Expires in {{days}} days"
     },
     "store": {
       "title": "Store credential",

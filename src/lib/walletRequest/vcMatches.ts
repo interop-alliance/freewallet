@@ -1,0 +1,111 @@
+/**
+ * QueryByExample matching: filters stored credentials to those satisfying a
+ * request's `QueryByExample` queries. Resolves the long-standing "list all
+ * credentials" TODO -- when a request specifies an example `type`, the share
+ * screen shows only the credentials that actually match it.
+ */
+import type { StoredCredential } from '@/types/credential'
+import type { IQueryByExample } from './types'
+
+/**
+ * Normalizes a `type` value (string or array) to an array of strings.
+ */
+function typeArray(type: unknown): string[] {
+  if (typeof type === 'string') {
+    return [type]
+  }
+  return Array.isArray(type)
+    ? (type.filter(entry => typeof entry === 'string') as string[])
+    : []
+}
+
+/**
+ * Extracts a DID / id string from an issuer value that may be a string or an
+ * `{ id }` object.
+ */
+function issuerId(issuer: unknown): string | undefined {
+  if (typeof issuer === 'string') {
+    return issuer
+  }
+  if (issuer && typeof issuer === 'object' && 'id' in issuer) {
+    const { id } = issuer as { id?: unknown }
+    return typeof id === 'string' ? id : undefined
+  }
+  return undefined
+}
+
+/**
+ * Whether a stored VC matches a single QueryByExample `example`: every type
+ * listed in `example.type` must appear in the VC's `type`, and -- when the
+ * example pins an `issuer` -- the VC's issuer must equal it.
+ *
+ * @param options {object}
+ * @param options.credential {StoredCredential}
+ * @param options.example {IQueryByExample['credentialQuery']['example']}
+ * @returns {boolean}
+ */
+function matchesExample({
+  credential,
+  example
+}: {
+  credential: StoredCredential
+  example: IQueryByExample['credentialQuery']['example']
+}): boolean {
+  const wantedTypes = typeArray(example.type)
+  const credentialTypes = typeArray(credential.vc.type)
+  const typesMatch = wantedTypes.every(type => credentialTypes.includes(type))
+  if (!typesMatch) {
+    return false
+  }
+  const wantedIssuer = issuerId(example.issuer)
+  if (wantedIssuer) {
+    return issuerId(credential.vc.issuer) === wantedIssuer
+  }
+  return true
+}
+
+/**
+ * The credentials matching any of the given QueryByExample queries. Only
+ * queries whose `example` carries a `type` constrain the result; a query with
+ * no example type matches nothing here (the caller keeps the list-all behavior
+ * when *no* query specifies a type -- see `WalletGetPage`).
+ *
+ * @param options {object}
+ * @param options.credentials {StoredCredential[]}
+ * @param options.queries {IQueryByExample[]}
+ * @returns {StoredCredential[]}
+ */
+export function vcMatchesFor({
+  credentials,
+  queries
+}: {
+  credentials: StoredCredential[]
+  queries: IQueryByExample[]
+}): StoredCredential[] {
+  const examples = queries
+    .map(query => query.credentialQuery?.example)
+    .filter(
+      (example): example is IQueryByExample['credentialQuery']['example'] =>
+        !!example && typeArray(example.type).length > 0
+    )
+  if (examples.length === 0) {
+    return []
+  }
+  return credentials.filter(credential =>
+    examples.some(example => matchesExample({ credential, example }))
+  )
+}
+
+/**
+ * Whether any of the QueryByExample queries pins an example `type` (and so
+ * should filter the share list). When false, the caller keeps showing all
+ * stored credentials.
+ *
+ * @param queries {IQueryByExample[]}
+ * @returns {boolean}
+ */
+export function hasTypedExample(queries: IQueryByExample[]): boolean {
+  return queries.some(
+    query => typeArray(query.credentialQuery?.example?.type).length > 0
+  )
+}

@@ -6,12 +6,14 @@
  * `exchanges.ts#processRequest` (zcap and exchanger-POST branches dropped).
  */
 import type { Session } from '@/types/auth'
-import { isDIDAuthRequested, queriesOf } from './classify'
+import { classifyRequest, queriesOf } from './classify'
 import { composeVP } from './composeVP'
 import { negotiateCryptosuite } from './presentationSuite'
+import { processZcaps } from './processZcaps'
 import type {
   IVerifiableCredential,
   IVPRDetails,
+  IZcap,
   WalletResponse
 } from './types'
 
@@ -83,14 +85,15 @@ export async function processRequest({
   credentialRequestOrigin?: string
   selectedVCs?: IVerifiableCredential[]
 }): Promise<WalletResponse> {
+  const { didAuth, zcapRequests } = classifyRequest(request)
   const queries = queriesOf(request)
-  const didAuthRequested = isDIDAuthRequested({ queries })
   const { challenge, domain } = request
   // Honor any cryptosuite the verifier asks for (VCALM `acceptedCryptosuites`).
   const cryptosuite = negotiateCryptosuite(queries)
 
   // Security: never sign an authentication proof bound to a domain the request
-  // did not actually arrive from.
+  // did not actually arrive from. Enforced whenever a `domain` is present,
+  // including a zcap-only request whose (unsigned) VP still names an origin.
   if (
     domain &&
     !domainMatchesOrigin({ domain, origin: credentialRequestOrigin })
@@ -101,18 +104,23 @@ export async function processRequest({
     )
   }
 
-  if (!didAuthRequested && selectedVCs.length === 0) {
-    // Neither VCs selected nor DID Auth requested -- nothing to send.
+  // Delegate the approved capabilities first, then embed them in the VP.
+  const zcaps: IZcap[] =
+    zcapRequests.length > 0 ? await processZcaps({ zcapRequests, session }) : []
+
+  if (!didAuth && selectedVCs.length === 0 && zcaps.length === 0) {
+    // Nothing to send: no DID Auth, no VCs, and no satisfiable grants.
     return {}
   }
 
   const verifiablePresentation = await composeVP({
     session,
-    selectedVCs: selectedVCs,
+    selectedVCs,
     challenge,
     domain,
-    didAuthRequested,
-    cryptosuite
+    didAuthRequested: didAuth,
+    cryptosuite,
+    zcaps
   })
   return { verifiablePresentation }
 }

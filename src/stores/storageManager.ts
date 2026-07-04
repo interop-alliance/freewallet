@@ -365,6 +365,30 @@ export class StorageManager {
     })
   }
 
+  /**
+   * Provisions an arbitrary plaintext collection on the remote WAS Space, for
+   * a relying party's delegated capability. No local counterpart -- RP
+   * collections are the RP's data, reached only over its zcap. Requires a
+   * remote backend (full tier).
+   *
+   * @param options {object}
+   * @param options.id {string}
+   * @param [options.name] {string}
+   * @returns {Promise<void>}
+   */
+  async ensureCollection({
+    id,
+    name
+  }: {
+    id: string
+    name?: string
+  }): Promise<void> {
+    if (!this._remoteStore) {
+      throw new Error('Provisioning a collection requires remote storage.')
+    }
+    await this._remoteStore.ensureCollection({ id, name })
+  }
+
   async ensureUserCollections({ user }: { user: User }) {
     await this._localStore.ensureUserCollections({ user })
     // Re-key any plaintext rows a pre-encryption version of the app left in
@@ -559,6 +583,48 @@ export class StorageManager {
         summary: 'Credential unshared: ' + cid,
         actor: { email: user.email },
         object: cid,
+        created: new Date().toISOString()
+      }
+    })
+  }
+
+  /**
+   * Records (in the `wallet-activity` collection) a Login activity: the user
+   * logged in to a relying party via "Login with Wallet", granting the listed
+   * capabilities. The recorded zcap ids are the hook for a future revocation
+   * UI (the WAS server has no Space-side revocation endpoint yet, so grants
+   * are expiry-only for now).
+   *
+   * @param options {object}
+   * @param options.user {User}
+   * @param options.origin {string}   the relying party's origin
+   * @param options.grants {Array<{ id: string; target: string;
+   *   allowedActions: string[]; expires: string }>}
+   * @returns {Promise<void>}
+   */
+  async addHistoryLogin({
+    user,
+    origin,
+    grants
+  }: {
+    user: User
+    origin: string
+    grants: Array<{
+      id: string
+      target: string
+      allowedActions: string[]
+      expires: string
+    }>
+  }) {
+    const resourceId = uuidv7()
+    await this._addHistoryItem({
+      resourceId,
+      activity: {
+        id: resourceId,
+        type: ['Login'],
+        summary: `Logged in to ${origin} with wallet.`,
+        actor: { email: user.email },
+        object: { origin, zcaps: grants },
         created: new Date().toISOString()
       }
     })
