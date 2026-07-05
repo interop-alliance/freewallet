@@ -1,6 +1,6 @@
 # History
 
-## 0.13.1 - TBD
+## 0.14.0 - 2026-07-04
 
 ### Added
 
@@ -148,11 +148,13 @@
   `changes`-feed (`POST .../query`) + conditional-write (`PUT`/`DELETE`/`PUT
 .../meta`) endpoints. The core (`wasReplication`, `changesQuery`, `pushWrites`,
   `syncedDocSchema`) has no React or `@interop/was-client` imports -- all WAS
-  access is injected through a small `WasSyncPort` seam (`src/stores/wasSyncPort.ts`),
+  access is injected through a small `WasSyncPort` seam (
+  `src/stores/wasSyncPort.ts`),
   so it can later be extracted to a standalone `was-rxdb-replication` library.
   The port drives the raw signed `was.request()` escape hatch, moving stored
   bodies **verbatim** (codec-bypassing). The generic synced-doc schema carries
-  both a content revision (`version`/`data`) and an independently-versioned metadata
+  both a content revision (`version`/`data`) and an independently-versioned
+  metadata
   sub-resource (`metaVersion`/`custom`), matching the server's V2
   encrypted-metadata change-feed contract.
 - **SyncController + per-collection status.** `src/stores/syncController.ts`
@@ -163,7 +165,8 @@
   `error$` streams, shown on the Settings page. Reachability is inferred from
   replication itself (no health poll). Syncs `public-credentials`;
   `VITE_WAS_SERVER_URL` is re-interpreted as "a remote replica is available."
-  New optional env knobs `VITE_WAS_SYNC_RETRY_MS` and `VITE_WAS_SYNC_BATCH_SIZE`.
+  New optional env knobs `VITE_WAS_SYNC_RETRY_MS` and
+  `VITE_WAS_SYNC_BATCH_SIZE`.
 
 ## 0.12.0 - 2026-07-01
 
@@ -217,7 +220,8 @@
 - Guest mode now always uses local browser storage and never contacts the remote
   WAS server, matching its documented design. Previously, when
   `VITE_WAS_SERVER_URL` was set, guest login would also fail if that server was
-  unreachable -- making it useless as a fallback. `StorageManager.initStorageClients`
+  unreachable -- making it useless as a fallback.
+  `StorageManager.initStorageClients`
   now skips the remote backend for guest sessions.
 
 ### Changed
@@ -226,7 +230,8 @@
   The app's import contract is unchanged.
 - Upgrade `@zxcvbn-ts/*` to 4.x (`core` `^3.0.4` -> `^4.1.1`, `language-common`
   `^3.0.4` -> `^4.1.1`, `language-en` and `language-es-es` `^3.0.2` ->
-  `^4.1.0`). 4.x replaces the `zxcvbn()` / `zxcvbnOptions.setOptions()` singleton
+  `^4.1.0`). 4.x replaces the `zxcvbn()` / `zxcvbnOptions.setOptions()`
+  singleton
   API with a `ZxcvbnFactory` class, so `PasswordStrengthMeter` is rewired to
   construct a factory and call `.check(password).score`.
 
@@ -309,13 +314,15 @@
 
 ### Added
 
-- Add a separate WAS-integration e2e project (`pnpm run test:e2e:was`) that boots
+- Add a separate WAS-integration e2e project (`pnpm run test:e2e:was`) that
+  boots
   a local `was-teaching-server` and exercises the remote (WAS) storage path.
 
 ### Changed
 
 - Replace `@digitalcredentials/ssi` with `@interop/data-integrity-core` and
-  `@digitalcredentials/ed25519-signature-2020` with `@interop/ed25519-signature`.
+  `@digitalcredentials/ed25519-signature-2020` with
+  `@interop/ed25519-signature`.
 - Replace `@digitalcredentials/ezcap`, `@digitalcredentials/http-client`, and
   `@digitalcredentials/security-document-loader` with their TypeScript
   `@interop/` forks.
