@@ -15,7 +15,31 @@ import { readLogFromString, resolveDIDFromLog } from '@interop/did-method-webvh'
  * 2. The Settings rotation ceremony appends a verifying entry 2: the previously
  *    staged update key becomes active and the committed next-key hash rolls,
  *    while the did:web holder that DIDAuth presents is unchanged (decision 8).
+ * 3. A Space export -> import round-trip preserves the hosted `did.jsonl` (and
+ *    `did.json`) byte-exact and keeps their resource-level `PublicCanRead`: the
+ *    re-imported log still `resolveDIDFromLog`-verifies (any re-serialization
+ *    would break the JCS -> sha256 hash chain) and both stay world-readable.
  */
+
+/**
+ * The live `StorageManager`, published on `window.__E2E_STORAGE__` by the auth
+ * store in non-production builds. Space export / import (and the whole-`id`-
+ * collection delete this round-trip needs) are ZCap-signed operations that only
+ * the in-memory full-tier session can authorize, so the test drives them here
+ * rather than through `page.request`.
+ */
+type E2EStorage = {
+  exportSpace(): Promise<ReadableStream<Uint8Array>>
+  importSpace(options: {
+    tarFile: File
+  }): Promise<{ collectionsCreated: number; resourcesCreated: number }>
+  spaceId?: string
+  wasClient?: {
+    space(spaceId: string): {
+      collection(collectionId: string): { delete(): Promise<void> }
+    }
+  }
+}
 
 /**
  * Signup wizard walk with generous waits. Copied from `did-web.spec.ts`: each
@@ -178,4 +202,94 @@ test('rotating the update key appends a verifying entry and rolls the staged key
   await page.goto('/#/settings')
   await expect(page.getByText('Published DID', { exact: true })).toBeVisible()
   await expect(page.getByText(docBefore.id)).toBeVisible()
+})
+
+test('a Space export/import round-trip preserves did.jsonl byte-exact and world-readable', async ({
+  page
+}, testInfo) => {
+  // Signup provisioning plus a full export and re-import against one teaching
+  // server: give it slack.
+  test.slow()
+  await signup(page, testInfo)
+
+  const { didJsonUrl, logUrl } = await readPublishedUrls(page)
+
+  // --- Baseline: the published log + doc are world-readable and the log
+  //     self-certifies. Capture the exact bytes to compare after the round-trip.
+  const logRes = await page.request.get(logUrl)
+  expect(logRes.status()).toBe(200)
+  const logBefore = await logRes.text()
+  const didRes = await page.request.get(didJsonUrl)
+  expect(didRes.status()).toBe(200)
+  const docBefore = await didRes.text()
+  const resolvedBefore = await resolveDIDFromLog(readLogFromString(logBefore))
+  expect(resolvedBefore.meta.error).toBeUndefined()
+
+  // --- Export the whole Space through the live (full-tier, ZCap-signed)
+  //     client, reading the tar stream to bytes in-page. `showSaveFilePicker`
+  //     (the UI's sink) is absent in headless Chromium, so bypass the button
+  //     and call the StorageManager directly via the test seam.
+  const exportedTar = await page.evaluate(async () => {
+    const storage = (window as unknown as { __E2E_STORAGE__: E2EStorage })
+      .__E2E_STORAGE__
+    const stream = await storage.exportSpace()
+    const reader = stream.getReader()
+    const chunks: number[] = []
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+      chunks.push(...value)
+    }
+    return chunks
+  })
+  expect(exportedTar.length).toBeGreaterThan(0)
+
+  // --- Empty the target so the re-import actually rewrites the DID resources.
+  //     Import merges and SKIPS ids that already exist -- and a per-resource
+  //     delete only tombstones (which also blocks re-creation), so deleting the
+  //     whole `id` collection (physically removed, no tombstones) is the clean
+  //     way to force import to re-create the collection, its resources, and
+  //     their resource-level `PublicCanRead` policies.
+  await page.evaluate(async () => {
+    const storage = (window as unknown as { __E2E_STORAGE__: E2EStorage })
+      .__E2E_STORAGE__
+    await storage.wasClient!.space(storage.spaceId!).collection('id').delete()
+  })
+  // Gone: an unauthenticated fetch now 404s.
+  expect((await page.request.get(logUrl)).status()).toBe(404)
+
+  // --- Re-import the exact exported bytes; the importer must actually write
+  //     (not skip) into the now-empty `id` collection.
+  const stats = await page.evaluate(async (bytes: number[]) => {
+    const storage = (window as unknown as { __E2E_STORAGE__: E2EStorage })
+      .__E2E_STORAGE__
+    const tarFile = new File([new Uint8Array(bytes)], 'space.tar', {
+      type: 'application/x-tar'
+    })
+    return await storage.importSpace({ tarFile })
+  }, exportedTar)
+  expect(stats.collectionsCreated).toBeGreaterThan(0)
+  expect(stats.resourcesCreated).toBeGreaterThan(0)
+
+  // --- Policy round-trip: both DID resources are world-readable again (the
+  //     resource-level `PublicCanRead` survived export/import).
+  const logAfterRes = await page.request.get(logUrl)
+  expect(logAfterRes.status()).toBe(200)
+  const logAfter = await logAfterRes.text()
+  const didAfterRes = await page.request.get(didJsonUrl)
+  expect(didAfterRes.status()).toBe(200)
+
+  // --- Byte-exact: the re-imported bodies are identical to the pre-export
+  //     bytes (no re-canonicalization), so the hash chain is intact.
+  expect(logAfter).toBe(logBefore)
+  expect(await didAfterRes.text()).toBe(docBefore)
+
+  // --- The restored log still self-certifies: SCID + chain + proofs verify,
+  //     and it is the same DID at the same version as before the round-trip.
+  const resolvedAfter = await resolveDIDFromLog(readLogFromString(logAfter))
+  expect(resolvedAfter.meta.error).toBeUndefined()
+  expect(resolvedAfter.did).toBe(resolvedBefore.did)
+  expect(resolvedAfter.meta.versionId).toBe(resolvedBefore.meta.versionId)
 })

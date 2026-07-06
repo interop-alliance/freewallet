@@ -2,6 +2,24 @@ import { create } from 'zustand'
 import type { Session } from '@/types/auth'
 import { syncController } from '@/stores/syncController'
 
+/**
+ * E2E test seam. Space export / import (and the collection delete a round-trip
+ * needs) are ZCap-signed operations that only the live in-memory session can
+ * authorize,
+ * and the session is never otherwise reachable from page context. In
+ * non-production builds only, publish the active `StorageManager` on
+ * `window.__E2E_STORAGE__` so a Playwright spec can drive an export -> import
+ * round-trip through the real signer. Cleared on logout. No-op in production.
+ */
+function publishStorageSeam(session: Session | null): void {
+  if (import.meta.env.MODE === 'production') {
+    return
+  }
+  ;(
+    window as unknown as { __E2E_STORAGE__?: Session['storage'] }
+  ).__E2E_STORAGE__ = session?.storage
+}
+
 interface AuthState {
   // The full session lives in-memory only (the passphrase-derived keys are
   // never persisted). What survives a refresh is the *delegated* session:
@@ -22,6 +40,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   restoreStatus: 'idle',
   login: (session: Session) => {
     set({ session, restoreStatus: 'done' })
+    publishStorageSeam(session)
     // Kick off background replication (no-op for guests / no remote replica).
     // Fire-and-forget: the controller self-manages its errors and status.
     void syncController.start({ session })
@@ -54,6 +73,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         // fresh login does -- without any remote provisioning writes.
         await session.storage.ensureUserCollections({ user: session.user })
         set({ session })
+        publishStorageSeam(session)
         void syncController.start({ session })
       }
     } catch (err) {
@@ -63,7 +83,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     }
   },
   logout: async () => {
-    console.log('Clearing session...')
     await syncController.stop()
     const { session } = get()
     // Revoke the persisted session's keystore zcap (best-effort) and delete
@@ -78,6 +97,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     // Release the local RxDB database owned by the session's storage (data
     // stays in IndexedDB; only the passphrase-derived session is discarded).
     await get().session?.storage.close()
+    publishStorageSeam(null)
     set({ session: null, restoreStatus: 'done' })
   }
 }))

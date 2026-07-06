@@ -18,8 +18,7 @@ import { useEffect, useState } from 'react'
 import { initSessionFromSecret } from '@/session/initSession'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { registerWallet } from '@/lib/registerWallet'
-
-type AuthLocationState = { authMessageKey?: string; userMessage?: string }
+import type { AuthLocationState } from '@/types/auth'
 
 export function LoginPage() {
   const { t } = useTranslation()
@@ -51,14 +50,12 @@ export function LoginPage() {
       const data = new FormData(event.currentTarget)
       const passphrase = data.get('login-passphrase') as string
       if (!passphrase) {
-        console.log('No passphrase entered.')
         return
       }
       const { session, userExists } = await initSessionFromSecret({
         secret: passphrase
       })
       if (!userExists) {
-        console.log('User does not exist, redirecting to signup page.')
         return navigate('/signup', {
           state: { authMessageKey: 'auth.errors.profileNotFound' }
         })

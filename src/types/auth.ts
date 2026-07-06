@@ -96,6 +96,15 @@ export interface ControllerProfile {
 }
 
 /**
+ * Router location state passed between the auth pages (login / signup) to
+ * surface a one-shot banner message: either an i18n key or a literal string.
+ */
+export type AuthLocationState = {
+  authMessageKey?: string
+  userMessage?: string
+}
+
+/**
  * Full in-memory session for a logged-in user. Holds identity (user),
  * cryptographic credentials (profile), and the active storage backend
  * (storage). Discarded on page refresh -- though a `full` session leaves

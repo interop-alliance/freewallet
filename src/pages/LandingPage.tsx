@@ -10,18 +10,10 @@ import { LanguageSelector } from '@/components/LanguageSelector'
 import { ThemePicker } from '@/components/ThemePicker'
 import { useAppTheme } from '@/context/appThemeContext'
 import { landingStyles } from '@/styles/landingStyles'
-import { useEffect } from 'react'
-import { useAuthStore } from '@/stores/authStore'
-import { WAS_SERVER_URL } from '@/app.config'
 
 export function LandingPage() {
   const { t } = useTranslation()
   const { themeId } = useAppTheme()
-  const session = useAuthStore(state => state.session)
-  useEffect(() => {
-    console.log('Landing page, session:', session)
-    console.log('WAS_SERVER_URL:', WAS_SERVER_URL)
-  }, [session])
 
   return (
     <Box component="main" className="fw-page" sx={landingStyles.main}>

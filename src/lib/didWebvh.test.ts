@@ -17,6 +17,9 @@ import {
   updateDID
 } from '@interop/did-method-webvh'
 import { Ed25519VerificationKey } from '@interop/ed25519-verification-key'
+import * as vc from '@interop/vc'
+import { securityLoader } from '@interop/security-document-loader'
+import { verifyPresentation } from '@interop/verifier-core'
 import {
   didWebvhControllerTemplate,
   ensureDidWebvh,
@@ -27,6 +30,10 @@ import {
   type DidWebvhBlock
 } from './didWebvh'
 import { assembleDidDocument, type DidWebKeyMap } from './didWeb'
+import {
+  presentationSuiteFor,
+  EDDSA_RDFC_2022
+} from '@/lib/walletRequest/presentationSuite'
 import { loadSessionRecord, saveSessionRecord } from '@/lib/sessionKey'
 import {
   DID_DOCUMENT_RESOURCE,
@@ -683,6 +690,132 @@ describe('decision 5: Multikey webDoc shape', () => {
       true
     )
   })
+})
+
+/**
+ * Decision 5 compatibility pin, the runtime half: verifier-core must actually
+ * verify a DIDAuth VP whose holder resolves to the Multikey `webDoc` that Phase
+ * 2 adopts as `did.json`. The shape test above only asserts the document's VM
+ * `type` flipped from the 2020 suites to `Multikey`; this one proves the flip is
+ * safe for verifiers -- the holder path decision 8 deliberately keeps on
+ * did:web. Both the wallet's default `Ed25519Signature2020` (VC 1.0) and the
+ * negotiated `eddsa-rdfc-2022` (VC 2.0) presentation proofs are exercised
+ * against the same Multikey verification method, using the wallet's own
+ * `presentationSuiteFor`. Fully offline: a custom `httpGetService` serves the
+ * webDoc for the did:web resolution, so no network and no WAS server are
+ * touched.
+ */
+describe('decision 5: verifier-core verifies proofs against the Multikey webDoc', () => {
+  /**
+   * A real Ed25519 key published as a `Multikey` verification method in an
+   * offline-served did:web document -- the fixture both suites verify against.
+   */
+  async function multikeyDidWebFixture() {
+    const keyPair = await Ed25519VerificationKey.generate()
+    const did = 'did:web:example.com:space:space-abc:id'
+    const vmId = `${did}#${keyPair.publicKeyMultibase}`
+    keyPair.id = vmId
+    keyPair.controller = did
+
+    const webDoc = {
+      '@context': [
+        'https://www.w3.org/ns/did/v1',
+        'https://w3id.org/security/multikey/v1'
+      ],
+      id: did,
+      verificationMethod: [
+        {
+          id: vmId,
+          type: 'Multikey',
+          controller: did,
+          publicKeyMultibase: keyPair.publicKeyMultibase
+        }
+      ],
+      authentication: [vmId],
+      assertionMethod: [vmId]
+    }
+
+    // Serve only the did:web document. Bundled JSON-LD contexts resolve inside
+    // the security loader without ever reaching here, so any other fetch is an
+    // unexpected network reach the test should fail loudly on.
+    const httpGetService = {
+      async get(url: string) {
+        if (String(url).endsWith('/did.json')) {
+          return {
+            body: webDoc,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            status: 200
+          }
+        }
+        throw new Error(`unexpected network fetch in test: ${url}`)
+      }
+    }
+
+    // Under jsdom the node build of ed25519-verification-key signs via
+    // node:crypto, which returns a `Buffer`; `@scure/base` v2 (the suite's
+    // multibase encoder) rejects it because it checks `constructor.name ===
+    // 'Uint8Array'`, which `Buffer` fails. Real browsers use noble and return a
+    // plain Uint8Array, so this normalization is a test-environment shim only.
+    const rawSigner = keyPair.signer()
+    const signer = {
+      algorithm: rawSigner.algorithm,
+      id: rawSigner.id,
+      async sign(args: { data: Uint8Array }) {
+        return Uint8Array.from(await rawSigner.sign(args))
+      }
+    }
+
+    return { did, vmId, signer, httpGetService }
+  }
+
+  // fetchRemoteContexts: false pins issuance/signing to bundled contexts, so a
+  // missing context surfaces as a loud failure rather than a silent fetch.
+  const signingLoader = securityLoader({ fetchRemoteContexts: false }).build()
+
+  const cases = [
+    {
+      label: 'Ed25519Signature2020 (VC 1.0 default)',
+      cryptosuite: undefined,
+      version: 1.0
+    },
+    {
+      label: 'eddsa-rdfc-2022 (VC 2.0 DataIntegrityProof)',
+      cryptosuite: EDDSA_RDFC_2022,
+      version: 2.0
+    }
+  ]
+
+  it.each(cases)(
+    'a $label DIDAuth VP verifies against the Multikey VM',
+    async ({ cryptosuite, version }) => {
+      const { did, vmId, signer, httpGetService } =
+        await multikeyDidWebFixture()
+      const { suite } = presentationSuiteFor({ signer, cryptosuite })
+      const challenge = 'decision5-challenge'
+
+      const unsigned = vc.createPresentation({ holder: did, version })
+      const signedVP = await vc.signPresentation({
+        presentation: unsigned,
+        suite,
+        challenge,
+        documentLoader: signingLoader
+      })
+
+      // The DIDAuth proof is anchored on the Multikey VM (not a 2020-suite VM).
+      const proof = signedVP.proof as { verificationMethod: string }
+      expect(proof.verificationMethod).toBe(vmId)
+
+      const result = await verifyPresentation({
+        presentation: signedVP,
+        challenge,
+        registries: [],
+        httpGetService,
+        verbose: true
+      })
+
+      expect(result.verified).toBe(true)
+    }
+  )
 })
 
 /**

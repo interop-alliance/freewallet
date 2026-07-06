@@ -81,6 +81,17 @@
   through a handle: the client now fails closed when the pre-merge
   `describe()` is masked (404), and these upserts run with the root
   capability, where a 404 genuinely means the collection is absent.
+- **Test coverage for critical paths.** New unit suites for the login/identity
+  bootstrap (`initSession`), CHAPI wallet registration (`registerWallet`),
+  credential JSON parsing (`credentialsFromJSON`), and the ten previously
+  untested `viewMappers` modules; plus a new offline-deterministic e2e spec
+  (`tests/e2e/credential-flows.spec.ts`) covering the add, accept, delete, and
+  verify credential flows.
+- **Cleanup.** Moved the duplicated `AuthLocationState` type to
+  `src/types/auth.ts`; removed leftover debug `console.log` calls from the
+  landing, login, and signup pages and the auth store; removed the
+  commented-out `WALLET_LOCATION` constant from `app.config.ts`; `getBackends`
+  is now a named function declaration.
 
 ## 0.14.0 - 2026-07-04
 

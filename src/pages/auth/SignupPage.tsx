@@ -35,14 +35,13 @@ import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
 import { PASSWORD_RULES } from '@/app.config'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
 import { registerWallet } from '@/lib/registerWallet'
+import type { AuthLocationState } from '@/types/auth'
 
 const STEP_I18N_KEYS = [
   'auth.signup.steps.passphrase',
   'auth.signup.steps.email',
   'auth.signup.steps.storage'
 ] as const
-
-type AuthLocationState = { authMessageKey?: string; userMessage?: string }
 
 export function SignupPage() {
   const { t } = useTranslation()
@@ -88,7 +87,6 @@ export function SignupPage() {
         secret: passphrase
       })
       if (userExists) {
-        console.log('User already exists, redirecting to login page.')
         return navigate('/login', {
           state: { authMessageKey: 'auth.errors.profileExists' }
         })

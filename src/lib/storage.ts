@@ -48,7 +48,7 @@ export type StorageResourceList = {
   items: StorageResource[]
 }
 
-export const getBackends = (): StorageBackend[] => {
+export function getBackends(): StorageBackend[] {
   return [
     {
       id: 'default',

@@ -139,8 +139,6 @@ export const DATE_FMT: Intl.DateTimeFormatOptions = {
 
 export const MEDIATOR_BASE = 'https://authn.io/mediator?origin='
 
-// export const WALLET_LOCATION = window.location.origin + '/'
-
 export const KNOWN_REGISTRIES_URL =
   'https://digitalcredentials.github.io/dcc-known-registries/known-did-registries.json'
 
