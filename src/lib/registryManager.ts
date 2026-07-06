@@ -8,6 +8,7 @@ import {
 } from '@digitalcredentials/issuer-registry-client'
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
 import { KNOWN_REGISTRIES_URL, KnownDidRegistries } from '@/app.config'
+import { corsProxyFetch } from './corsProxy'
 
 const EMPTY_RESULT: LookupResult = {
   matchingIssuers: [],
@@ -21,7 +22,7 @@ async function loadRegistries(): Promise<EntityIdentityRegistry[]> {
   if (!registriesLoadPromise) {
     registriesLoadPromise = (async () => {
       try {
-        const regRes = await fetch(KNOWN_REGISTRIES_URL)
+        const regRes = await corsProxyFetch(KNOWN_REGISTRIES_URL)
         if (!regRes.ok) {
           throw new Error(`Registry fetch failed: ${regRes.status}`)
         }
