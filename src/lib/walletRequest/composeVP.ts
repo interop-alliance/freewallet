@@ -3,12 +3,15 @@
  * signed when DID Authentication was requested (proving control of the holder's
  * DID over the request's `challenge` / `domain`), and unsigned otherwise.
  * Ported from DCW's `composeVp.ts`, adapted to Freewallet's `Session`: the
- * signer is the Ed25519 key the CapabilityAgent already derived from the
- * passphrase, and the holder is the user's did:key.
+ * signer is the KMS-held did:web `authentication` key when one is provisioned
+ * (holder = the published did:web DID), falling back to the passphrase-derived
+ * root key (holder = the user's did:key) for guests, no-KMS deployments, and
+ * not-yet-provisioned sessions.
  */
 import * as vc from '@interop/vc'
 import { securityLoader } from '@interop/security-document-loader'
 import type { Session } from '@/types/auth'
+import { kmsAuthenticationSigner } from '@/lib/didWeb'
 import { presentationSuiteFor } from './presentationSuite'
 import type {
   IVerifiableCredential,
@@ -118,20 +121,34 @@ export async function composeVP({
     return presentation
   }
 
-  // DIDAuth signs with the passphrase-derived root key, which a restored
-  // (delegated tier) session does not hold -- it requires a fresh login.
-  if (!session.profile.keyAgent) {
-    throw new Error('DID Auth requires a full (passphrase) session.')
+  // Prefer the KMS-held did:web `authentication` key: the holder becomes the
+  // published did:web DID, and in a restored (`delegated` tier) session the
+  // browser session key invokes the persisted keystore `sign` capability, so
+  // DIDAuth needs no passphrase. Falls back to the passphrase-derived root
+  // key (holder = did:key) for guests, no-KMS deployments, and sessions where
+  // did:web provisioning has not (yet) succeeded.
+  const kmsSigner = await kmsAuthenticationSigner({ session })
+  let signer
+  let holder
+  if (kmsSigner) {
+    signer = kmsSigner
+    holder = session.profile.didWeb!.did
+  } else if (session.profile.keyAgent) {
+    signer = session.profile.keyAgent.getSigner()
+    holder = session.user.id
+  } else {
+    throw new Error(
+      'DID Auth requires a full (passphrase) session or a provisioned did:web.'
+    )
   }
   // Sign with the cryptosuite the verifier requested (via VCALM
   // `acceptedCryptosuites`), falling back to the wallet default. The suite
   // dictates the VC data model version: eddsa-rdfc-2022 proofs require VC 2.0,
   // the default Ed25519Signature2020 proof uses VC 1.0.
-  const signer = session.profile.keyAgent.getSigner()
   const { suite, version } = presentationSuiteFor({ signer, cryptosuite })
 
   const presentation = vc.createPresentation({
-    holder: session.user.id,
+    holder,
     verifiableCredential: selectedVCs.length > 0 ? selectedVCs : undefined,
     verify: false,
     version

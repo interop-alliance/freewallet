@@ -1,13 +1,24 @@
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import Divider from '@mui/material/Divider'
+import IconButton from '@mui/material/IconButton'
+import Link from '@mui/material/Link'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
+import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
+import { MdContentCopy } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { useInfoBox } from '@/hooks/useInfoBox'
+import { getFileUrl } from '@interop/did-method-webvh'
+import { rotateWebvhUpdateKey } from '@/lib/didWebvh'
 import { dashboardStyles } from '@/styles/appStyles'
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
@@ -92,6 +103,58 @@ export function SettingsPage() {
   // persisted record rather than a keystore agent.
   const keystoreId =
     session?.profile?.keystoreAgent?.keystoreId ?? session?.profile?.keystoreId
+  // The published did:web DID (present in both tiers once provisioned) and the
+  // world-readable URL its document resolves to.
+  const publishedDid = session?.profile?.didWeb?.did
+  const publishedDidUrl = session?.storage.publishedDidUrl
+  // The published did:webvh DID (Phase 2) and the world-readable URL its log
+  // resolves to, derived from the did by the library's canonical mapping
+  // (`https://<host>/space/<spaceId>/id/did.jsonl`) -- undefined until the log
+  // is provisioned (no did).
+  const publishedDidWebvh = session?.profile?.didWebvh?.did
+  const publishedDidWebvhLogUrl = publishedDidWebvh
+    ? getFileUrl(publishedDidWebvh)
+    : undefined
+  // Rotating the update key extends the append-only log with the root zcap, so
+  // it needs a full (passphrase) session -- the delegated tier has no root key.
+  const canRotate = session?.tier === 'full'
+  const [copiedDidWebvh, setCopiedDidWebvh] = useState(false)
+  const [rotateDialogOpen, setRotateDialogOpen] = useState(false)
+  const [rotating, setRotating] = useState(false)
+  const [rotateDone, setRotateDone] = useState(false)
+  const [rotateError, setRotateError] = useState(false)
+
+  const handleCopyDidWebvh = async () => {
+    if (!publishedDidWebvh) {
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(publishedDidWebvh)
+      setCopiedDidWebvh(true)
+      setTimeout(() => setCopiedDidWebvh(false), 1500)
+    } catch (err) {
+      console.error('Could not copy the did:webvh id:', err)
+    }
+  }
+
+  const handleRotate = async () => {
+    if (!session) {
+      return
+    }
+    setRotateDialogOpen(false)
+    setRotating(true)
+    setRotateDone(false)
+    setRotateError(false)
+    try {
+      await rotateWebvhUpdateKey({ session })
+      setRotateDone(true)
+    } catch (err) {
+      console.error('Could not rotate the did:webvh update key:', err)
+      setRotateError(true)
+    } finally {
+      setRotating(false)
+    }
+  }
 
   const handleDeleteAccount = async () => {
     if (!session) {
@@ -274,7 +337,173 @@ export function SettingsPage() {
               {t('settings.kmsNone')}
             </Typography>
           )}
+          {kmsConfigured && (
+            <Stack
+              direction="row"
+              sx={{ alignItems: 'center', gap: 2, flexWrap: 'wrap' }}
+            >
+              <Typography variant="body2" sx={{ minWidth: 200 }}>
+                {t('settings.publishedDid')}
+              </Typography>
+              <Chip
+                size="small"
+                color={publishedDid ? 'success' : 'default'}
+                label={
+                  publishedDid
+                    ? t('settings.publishedDidProvisioned')
+                    : t('settings.publishedDidNone')
+                }
+              />
+              {publishedDid && (
+                <Stack sx={{ gap: 0.5 }}>
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ wordBreak: 'break-all' }}
+                  >
+                    {publishedDid}
+                  </Typography>
+                  {publishedDidUrl && (
+                    <Link
+                      href={publishedDidUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      variant="body2"
+                      sx={{ wordBreak: 'break-all' }}
+                    >
+                      {publishedDidUrl}
+                    </Link>
+                  )}
+                </Stack>
+              )}
+            </Stack>
+          )}
+          {kmsConfigured && (
+            <Stack
+              direction="row"
+              sx={{ alignItems: 'center', gap: 2, flexWrap: 'wrap' }}
+            >
+              <Typography variant="body2" sx={{ minWidth: 200 }}>
+                {t('settings.publishedDidWebvh')}
+              </Typography>
+              <Chip
+                size="small"
+                color={publishedDidWebvh ? 'success' : 'default'}
+                label={
+                  publishedDidWebvh
+                    ? t('settings.publishedDidProvisioned')
+                    : t('settings.publishedDidNone')
+                }
+              />
+              {publishedDidWebvh && (
+                <Stack sx={{ gap: 0.5 }}>
+                  <Stack
+                    direction="row"
+                    sx={{ alignItems: 'center', gap: 0.5 }}
+                  >
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ wordBreak: 'break-all' }}
+                    >
+                      {publishedDidWebvh}
+                    </Typography>
+                    <Tooltip
+                      title={
+                        copiedDidWebvh ? t('common.copied') : t('common.copy')
+                      }
+                    >
+                      <IconButton
+                        size="small"
+                        onClick={handleCopyDidWebvh}
+                        aria-label={t('common.copy')}
+                        sx={{ p: 0.25, flexShrink: 0 }}
+                      >
+                        <MdContentCopy size={15} />
+                      </IconButton>
+                    </Tooltip>
+                  </Stack>
+                  {publishedDidWebvhLogUrl && (
+                    <Link
+                      href={publishedDidWebvhLogUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      variant="body2"
+                      sx={{ wordBreak: 'break-all' }}
+                    >
+                      {publishedDidWebvhLogUrl}
+                    </Link>
+                  )}
+                </Stack>
+              )}
+            </Stack>
+          )}
+          {kmsConfigured && publishedDidWebvh && (
+            <Stack sx={{ gap: 0.5, mt: 1 }}>
+              <Stack direction="row" sx={{ alignItems: 'center', gap: 2 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  sx={{ textTransform: 'none', borderRadius: 2 }}
+                  disabled={!canRotate || rotating}
+                  onClick={() => {
+                    setRotateDone(false)
+                    setRotateError(false)
+                    setRotateDialogOpen(true)
+                  }}
+                >
+                  {rotating
+                    ? t('settings.rotating')
+                    : t('settings.rotateUpdateKey')}
+                </Button>
+                <Typography variant="body2" color="text.secondary">
+                  {t('settings.rotateUpdateKeyHint')}
+                </Typography>
+              </Stack>
+              {!canRotate && (
+                <Typography variant="body2" color="text.secondary">
+                  {t('settings.rotateRequiresFullSession')}
+                </Typography>
+              )}
+              {rotateDone && (
+                <Typography variant="body2" color="success.main">
+                  {t('settings.rotateSuccess')}
+                </Typography>
+              )}
+              {rotateError && (
+                <Alert severity="error">{t('settings.rotateError')}</Alert>
+              )}
+            </Stack>
+          )}
         </Stack>
+
+        <Dialog
+          open={rotateDialogOpen}
+          onClose={() => setRotateDialogOpen(false)}
+        >
+          <DialogTitle>{t('settings.rotateConfirmTitle')}</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              {t('settings.rotateConfirmMessage')}
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              onClick={() => setRotateDialogOpen(false)}
+              sx={{ textTransform: 'none' }}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="contained"
+              disableElevation
+              onClick={handleRotate}
+              sx={{ textTransform: 'none' }}
+            >
+              {t('settings.rotateConfirmAction')}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
         <Divider />
 

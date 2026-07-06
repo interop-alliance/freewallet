@@ -11,8 +11,12 @@
  *   -- so the session key can sync and share but can never rewrite the
  *   Space Description (no controller takeover) or write outside the
  *   wallet's collections;
- * - plus a `sign` capability on the WebKMS keystore (inert until a signing
- *   key lives there; delegating it now means that work needs no re-login).
+ * - plus a `sign` capability on the WebKMS keystore, scoped to the did:web
+ *   `authentication` key (the webkms-client routes a capability-invoked
+ *   operation to the capability's own target, so it names that key rather
+ *   than the whole keystore) -- letting a restored session sign KMS-backed
+ *   DIDAuth with no re-login. Absent a did:web it falls back to the (inert)
+ *   keystore target.
  *
  * On the next page load `restoreDelegatedSession()` reconstitutes a
  * restricted session from the persisted record: the zcap client signs with
@@ -25,6 +29,8 @@ import { ZcapClient } from '@interop/ezcap'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import { KmsClient } from '@interop/webkms-client'
 import type { IZcap } from '@interop/data-integrity-core'
+import type { DidWebKeyMap } from '@/lib/didWeb'
+import type { WebvhUpdateKey, WebvhStagedKey } from '@/lib/didWebvh'
 import type { Session, User } from '@/types/auth'
 import {
   SESSION_ZCAP_TTL_MS,
@@ -63,6 +69,20 @@ export interface PersistedSessionRecord {
   // `sign` on the WebKMS keystore (present when one was provisioned).
   keystoreId?: string
   keystoreCapability?: IZcap
+  // The published did:web DID and its key-id map (present when did:web
+  // provisioning succeeded). Absent = pre-did:web record; a restored session
+  // then simply has no KMS-signed DIDAuth, degrading to today's behavior --
+  // so no record-version bump is needed.
+  didWeb?: { did: string; keys: DidWebKeyMap }
+  // The published did:webvh DID and its update-key refs (present when
+  // did:webvh provisioning succeeded). Key refs only, never secrets. Absent =
+  // pre-did:webvh record; the restored session simply has no `didWebvh`,
+  // degrading to did:web behavior -- additive, no record-version bump.
+  didWebvh?: {
+    did: string
+    updateKey: WebvhUpdateKey
+    stagedKey: WebvhStagedKey
+  }
 }
 
 const SESSION_WRITE_ACTIONS = ['GET', 'HEAD', 'PUT', 'POST', 'DELETE']
@@ -94,7 +114,7 @@ export async function persistDelegatedSession({
   }
   const spaceUrl = session.storage.spaceUrl!
   const spaceId = session.storage.spaceId!
-  const { zcapClient, keystoreAgent } = session.profile
+  const { zcapClient, keystoreAgent, didWeb, didWebvh } = session.profile
 
   const keyPair = await getOrCreateSessionKeyPair({ idb })
   const { did: sessionDid } = await sessionKeySigner({ keyPair })
@@ -123,13 +143,22 @@ export async function persistDelegatedSession({
     })
   }
 
-  // `sign` on the keystore, when one was provisioned at login.
+  // A `sign` capability for the did:web `authentication` key, when a keystore
+  // was provisioned. It targets that key's URL specifically, not the whole
+  // keystore: the webkms-client routes a capability-invoked operation to the
+  // capability's own `invocationTarget` (no client-side target attenuation),
+  // so a keystore-level target would POST the SignOperation to the wrong
+  // endpoint. The chain still roots at the keystore (KMS key operations root
+  // there). Without a did:web there is no key to sign with, so the capability
+  // falls back to the (inert) keystore target.
   let keystoreId: string | undefined
   let keystoreCapability: IZcap | undefined
-  if (keystoreAgent) {
+  if (keystoreAgent?.keystoreId) {
     keystoreId = keystoreAgent.keystoreId
+    const signTarget = didWeb?.keys.authentication.kmsKeyId ?? keystoreId
     keystoreCapability = await zcapClient.delegate({
-      invocationTarget: keystoreId,
+      capability: `urn:zcap:root:${encodeURIComponent(keystoreId)}`,
+      invocationTarget: signTarget,
       controller: sessionDid,
       allowedActions: ['sign'],
       expires
@@ -145,7 +174,9 @@ export async function persistDelegatedSession({
     spaceReadCapability,
     collectionCapabilities,
     keystoreId,
-    keystoreCapability
+    keystoreCapability,
+    didWeb,
+    didWebvh
   }
   await saveSessionRecord({ record, idb })
 }
@@ -207,7 +238,15 @@ export async function restoreDelegatedSession({
 
   return {
     user,
-    profile: { zcapClient, keystoreId: record.keystoreId },
+    profile: {
+      zcapClient,
+      keystoreId: record.keystoreId,
+      // Paired with the session key, these let the restored session sign with
+      // the KMS-held keys (KMS-signed DIDAuth) without the passphrase.
+      keystoreCapability: record.keystoreCapability,
+      didWeb: record.didWeb,
+      didWebvh: record.didWebvh
+    },
     storage,
     expires: record.expires,
     isGuest: false,

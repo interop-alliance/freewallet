@@ -10,11 +10,13 @@
  * prompt requires). On success it restores the delegated session and shows
  * who is signed in.
  *
- * For now, every popup operation (vault decrypt, DIDAuth) still needs
- * the passphrase -- so the parent keeps its login form; this notice adds
- * recognition ("you have a wallet here") and hands the first-party storage
- * factory up so a subsequent full login persists where the next popup
- * visit will find it.
+ * A KMS-signed DIDAuth request completes from the restored (delegated)
+ * session with no passphrase: the notice hands the restored session up via
+ * `onRestore` and the parent responds directly. Operations that need the
+ * vault KAK or the root key (credential decrypt, zcap delegation) still fall
+ * back to the passphrase form. The notice also hands the first-party storage
+ * factory up so a subsequent full login persists where the next popup visit
+ * will find it.
  */
 import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
@@ -27,6 +29,7 @@ import {
   storageAccessAvailable
 } from '@/lib/storageAccess'
 import { restoreDelegatedSession } from '@/session/delegatedSession'
+import type { Session } from '@/types/auth'
 
 type NoticeState = 'idle' | 'checking' | 'restored' | 'none' | 'unavailable'
 
@@ -45,10 +48,17 @@ interface SavedSessionNoticeProps {
    * through this factory so the next popup visit auto-recognizes.
    */
   onFirstPartyStorage: (idb: IDBFactory) => void
+  /**
+   * Fired with the restored (delegated) session when a saved login is found.
+   * The parent decides whether it can satisfy the request from it (a
+   * KMS-signed DID-Auth-only request) or must still prompt for the passphrase.
+   */
+  onRestore?: (session: Session) => void
 }
 
 export function SavedSessionNotice({
-  onFirstPartyStorage
+  onFirstPartyStorage,
+  onRestore
 }: SavedSessionNoticeProps) {
   const { t } = useTranslation()
   const [state, setState] = useState<NoticeState>('idle')
@@ -79,6 +89,7 @@ export function SavedSessionNotice({
       }
       setIdentity(displayIdentity(session.user))
       setState('restored')
+      onRestore?.(session)
     } catch (err) {
       console.warn('Saved-login restore failed:', err)
       setState(silent ? 'idle' : 'unavailable')

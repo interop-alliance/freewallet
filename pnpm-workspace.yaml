@@ -5,7 +5,6 @@ allowedDeprecatedVersions:
   get-graphql-from-jsonschema: '8.1.0'
   defekt: '9.3.0'
 minimumReleaseAgeExclude:
-  - '@interop/edv-client@17.4.0'
-  - '@interop/storage-core@0.3.1'
-  - '@interop/was-client@0.12.0'
-  - '@interop/webkms-client@14.5.0'
+  - '@interop/did-method-webvh@3.6.0'
+  - '@interop/was-client@0.13.1'
+  - '@interop/webkms-client@14.7.1'

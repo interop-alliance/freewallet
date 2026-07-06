@@ -13,7 +13,13 @@ import type { ZcapClient } from '@interop/ezcap'
 import type { RxCollection } from 'rxdb/plugins/core'
 import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@/lib/cidFrom'
-import { WALLET_STANDARD_COLLECTIONS, WAS_SERVER_URL } from '@/app.config'
+import {
+  ENABLE_DID_WEBVH,
+  WALLET_STANDARD_COLLECTIONS,
+  WAS_SERVER_URL
+} from '@/app.config'
+import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
+import { ensureDidWebvh, type DidWebKeyMapV2 } from '@/lib/didWebvh'
 import { createEdvDocCipher } from '@/stores/edvDocCipher'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import type { SyncedDoc } from '@/lib/sync'
@@ -121,6 +127,25 @@ export class StorageManager {
    */
   get spaceUrl(): string | undefined {
     return this._remoteStore?.spaceUrl
+  }
+
+  /**
+   * The world-readable URL the user's published did:web document resolves to,
+   * or undefined when there is no remote backend. (Whether a document has
+   * actually been published is a separate `profile.didWeb` check.)
+   */
+  get publishedDidUrl(): string | undefined {
+    return this._remoteStore?.didDocumentUrl()
+  }
+
+  /**
+   * The remote WAS store, or undefined when there is no remote backend. Exposed
+   * for the did:webvh rotation ceremony (`rotateWebvhUpdateKey`), which reads
+   * and rewrites the `id` collection's `did.jsonl` / `keys.json` / `did.json`
+   * directly through it.
+   */
+  get remoteStore(): WASRemoteStore | undefined {
+    return this._remoteStore
   }
 
   /**
@@ -389,7 +414,13 @@ export class StorageManager {
     await this._remoteStore.ensureCollection({ id, name })
   }
 
-  async ensureUserCollections({ user }: { user: User }) {
+  async ensureUserCollections({
+    user,
+    profile
+  }: {
+    user: User
+    profile?: ControllerProfile
+  }) {
     await this._localStore.ensureUserCollections({ user })
     // Re-key any plaintext rows a pre-encryption version of the app left in
     // the (now encrypted) local collections. Runs before login completes --
@@ -398,6 +429,54 @@ export class StorageManager {
     await this._localStore.migrateLocalPlaintextDocs()
     if (this._remoteStore) {
       await this._remoteStore.ensureUserCollections({ user })
+      // Provision and publish the user's did:web DID (full tier only -- a
+      // delegated session holds no keystore agent and restores `didWeb` from
+      // its record instead). Runs here, after the Space and `id` collection
+      // exist. Non-fatal like keystore provisioning: a KMS/WAS hiccup must not
+      // fail login; the settings page surfaces the unprovisioned state, and
+      // the idempotent flow resumes on the next full login.
+      if (profile?.keystoreAgent) {
+        try {
+          const did = didWebFromSpace({
+            wasServerUrl: this._remoteStore.storageServerUrl,
+            spaceId: this._remoteStore.spaceId
+          })
+          const keys = await ensureDidWeb({
+            keystoreAgent: profile.keystoreAgent,
+            remoteStore: this._remoteStore,
+            did
+          })
+          profile.didWeb = { did, keys }
+
+          // Provision and publish the did:webvh log alongside did:web (Phase
+          // 2, decision 6), in its own try so a webvh hiccup never rolls back
+          // the did:web provisioning. Gated on the opt-out flag. `ensureDidWeb`
+          // returned the parsed keys.json (with any webvh block), threaded in
+          // so steady state stays one keys.json read total.
+          if (ENABLE_DID_WEBVH) {
+            try {
+              const {
+                updateKey,
+                stagedKey,
+                did: webvhDid
+              } = await ensureDidWebvh({
+                keystoreAgent: profile.keystoreAgent,
+                remoteStore: this._remoteStore,
+                wasServerUrl: this._remoteStore.storageServerUrl,
+                spaceId: this._remoteStore.spaceId,
+                didWebKeys: keys as DidWebKeyMapV2
+              })
+              if (webvhDid) {
+                profile.didWebvh = { did: webvhDid, updateKey, stagedKey }
+              }
+            } catch (err) {
+              console.warn('did:webvh provisioning failed:', err)
+            }
+          }
+        } catch (err) {
+          console.warn('did:web provisioning failed:', err)
+        }
+      }
     }
   }
 

@@ -1,5 +1,87 @@
 # History
 
+## Unreleased - TBD
+
+### Added
+
+- **Hosted did:web DID (Phase 1).** Each full login now provisions and
+  publishes a multi-key `did:web` DID in the user's WAS Space, backed by
+  three KMS-held keys (`authentication` and `assertionMethod` Ed25519,
+  `keyAgreement` X25519). The DID document is an ordinary world-readable WAS
+  Resource -- `did:web:<host>:space:<spaceId>:id` resolves to
+  `https://<host>/space/<spaceId>/id/did.json` -- so hosting needs no server
+  changes. The verification-method-to-KMS-key map is stored (non-public) as
+  `keys.json` in the same new `id` collection (the recovery anchor, written
+  before the DID document), and cached in the delegated session record.
+  Provisioning is idempotent and non-fatal: the steady-state path is a single
+  read, a torn run resumes on the next login, and failure leaves login
+  unaffected. The Settings page shows the published DID and its resolution
+  URL.
+- **KMS-signed DIDAuth.** CHAPI DID Authentication (and the "Login with
+  Wallet" DID Auth VP) now presents the `did:web` DID and signs with the
+  KMS-held `authentication` key. In a refresh-restored (`delegated` tier)
+  session the browser session key invokes a persisted `sign` capability
+  (delegated at login, scoped to the `authentication` key), and the CHAPI
+  popup completes a DID-Auth-only request straight from the recognized saved
+  session -- so DIDAuth completes **without a passphrase re-prompt**. Guests,
+  no-KMS deployments, and not-yet-provisioned sessions keep the previous
+  root-key `did:key` DIDAuth.
+- **Hosted did:webvh DID log (Phase 2).** Each full login now also publishes a
+  hash-chained, self-certifying `did:webvh` DID log (`did.jsonl`) alongside the
+  `did:web` document, in the same `id` collection and served world-readable as
+  `text/jsonl` -- `did:webvh:<scid>:<host>:space:<spaceId>:id` resolves to
+  `https://<host>/space/<spaceId>/id/did.jsonl`, so hosting needs no server
+  changes. The log becomes the single source of truth: `did.json` is now its
+  `did:web` projection (verification methods flipped to `Multikey`, an
+  `alsoKnownAs` cross-link between the two ids), and the log's three
+  verification methods reuse the Phase 1 KMS keys. A dedicated KMS-held update
+  key (never the root `did:key`, never a document verification method) is the
+  log's write authority, with prerotation committed from the first entry; the
+  `keys.json` map gains a non-public `webvh` block recording the active,
+  staged, and retired update keys (the anchor that prevents a frozen log).
+  Provisioning is idempotent, crash-resumable, and non-fatal, runs directly
+  after the `did:web` provisioning, and is gated on the new
+  `VITE_ENABLE_DID_WEBVH` flag (default `true`; opt out with `false`). The
+  Settings page shows the published `did:webvh` id, its log URL, and a
+  full-tier **Rotate update key** action that reveals the staged key and
+  appends a fresh entry to the public log. CHAPI DIDAuth and "Login with
+  Wallet" still present the `did:web` holder for now, since few verifiers
+  resolve `did:webvh` yet (the `alsoKnownAs` cross-link correlates the two).
+  Adds the `@interop/did-method-webvh` dependency.
+- **`keys.json` repair path.** `repairKeyBindings` (`src/lib/didWebvh.ts`)
+  rebuilds a lost or rolled-back `keys.json` from the published artifacts plus
+  one WebKMS List Keys call: `did.json`'s verification methods and the log's
+  authorized `updateKeys` are matched back to their KMS key URLs by
+  `publicKeyMultibase`, and the staged prerotation key by hashing every listed
+  key against the log's committed `nextKeyHashes` (its only public trace);
+  what matched is rewritten as the new anchor, and an unmatchable binding
+  throws. The provisioning flow's frozen-log row (`did.jsonl` present, `webvh`
+  block lost) now runs this repair instead of failing -- losing `keys.json` no
+  longer permanently freezes the published DID log. Relies on the List Keys
+  `keyUrl` projection (was-teaching-server's K5 fix, typed in
+  `@interop/webkms-client` 14.7.1).
+
+### Changed
+
+- **Adopt `@interop/did-method-webvh` 3.6.0.** Dropped the freewallet
+  workarounds the library now subsumes: the `webvhLogVerifier` normalizing
+  wrapper (the library's realm-safe default verifier now works under
+  vitest + jsdom, and the create/update/resolve calls default it, so the
+  explicit `verifier:` option is gone everywhere); the hand-rolled
+  `logToJsonl` / `parseJsonlLog` serializers (now the library's
+  `logToJsonlString` / `readLogFromString`); the `didWebvhLogUrl` mapping (the
+  Settings log URL is now derived from the published did via the library's
+  `getFileUrl`); and the hand-built `proofValue`/multibase logic inside the
+  KMS update-key signer (now the library's `signerFromExternalKey`, with only
+  a thin `sign({ data })` shape adapter kept). The `{SCID}` placeholder is now
+  the library's exported `SCID_PLACEHOLDER`. Net behavior is unchanged.
+- **Adopt `@interop/webkms-client` 14.7.0** (adds `KeystoreAgent.listKeys()`).
+- **Adopt `@interop/was-client` 0.13.1.** Collection provisioning passes the
+  new `force: true` to `configure()` where a fresh collection is created
+  through a handle: the client now fails closed when the pre-merge
+  `describe()` is masked (404), and these upserts run with the root
+  capability, where a 404 genuinely means the collection is absent.
+
 ## 0.14.0 - 2026-07-04
 
 ### Added

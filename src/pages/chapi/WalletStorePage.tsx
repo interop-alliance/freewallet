@@ -81,7 +81,10 @@ export function WalletStorePage() {
         setLoginError(t('chapi.accountNotFound'))
         return
       }
-      await s.storage.ensureUserCollections({ user: s.user })
+      await s.storage.ensureUserCollections({
+        user: s.user,
+        profile: s.profile
+      })
       setSession(s)
       setPageState('confirming')
       if (firstPartyIdb) {

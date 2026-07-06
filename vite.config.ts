@@ -32,6 +32,20 @@ export default defineConfig({
       }
     }
   },
+  optimizeDeps: {
+    // Pre-bundle the password-strength engine's (large) zxcvbn dictionaries at
+    // dev-server start instead of on first demand. They are loaded lazily by
+    // PasswordStrengthMeter, so without this the dev server bundles them
+    // on-the-fly the first time the signup page needs a score -- a cold-start
+    // stall that can run to tens of seconds under load (and flakes the
+    // signup-driven e2e tests). Dev-only: production still lazy-loads them.
+    include: [
+      '@zxcvbn-ts/core',
+      '@zxcvbn-ts/language-common',
+      '@zxcvbn-ts/language-en',
+      '@zxcvbn-ts/language-es-es'
+    ]
+  },
   plugins: [react()],
   resolve: {
     alias: {

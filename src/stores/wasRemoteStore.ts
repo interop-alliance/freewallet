@@ -17,7 +17,11 @@ import type { IZcap } from '@interop/data-integrity-core'
 import { WasClient, type Collection, type Resource } from '@interop/was-client'
 import { createEdvEncryption } from '@interop/was-client/edv'
 import type { ControllerProfile, User } from '@/types/auth'
-import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
+import {
+  DID_DOCUMENT_RESOURCE,
+  ID_COLLECTION,
+  WALLET_STANDARD_COLLECTIONS
+} from '@/app.config'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
@@ -310,8 +314,13 @@ export class WASRemoteStore {
         // (private-credentials, wallet-activity); the others stay plaintext.
         // The marker's scheme is set-once on the server, but a late
         // declaration on a pre-marker collection is allowed, so re-running
-        // this against an existing Space upgrades it in place.
-        await collection.configure(encryption ? { name, encryption } : { name })
+        // this against an existing Space upgrades it in place. `force` lets
+        // the plaintext upsert create a fresh collection: this runs with the
+        // root capability, so a 404 from the pre-merge describe really means
+        // absent, not unreadable (was-client >= 0.13 fails closed otherwise).
+        await collection.configure(
+          encryption ? { name, encryption } : { name, force: true }
+        )
         if (isPublic) {
           await collection.setPublic()
         }
@@ -324,7 +333,145 @@ export class WASRemoteStore {
       }
       collections.set(key, { url: this._collectionBaseUrl(id) })
     }
+
+    // The `id` collection: standard-on-the-server but not wallet-synced, so it
+    // lives outside WALLET_STANDARD_COLLECTIONS and gets no local replica or
+    // collection map entry. Plaintext, no collection-level public grant (the
+    // DID document is published per-resource by `setIdResourcePublic`).
+    try {
+      // `force`: same root-capability reasoning as the standard collections
+      // above -- a 404 here means the collection does not exist yet.
+      await space.collection(ID_COLLECTION.id).configure({
+        name: ID_COLLECTION.name,
+        force: true
+      })
+    } catch (err) {
+      console.error(`Error creating collection "${ID_COLLECTION.id}":`, err)
+      throw new Error(
+        `Error creating collection "${ID_COLLECTION.id}" in space ` +
+          `"${this.spaceId}".`,
+        { cause: err }
+      )
+    }
+
     this.collections = collections
+  }
+
+  /**
+   * Returns a `Resource` handle for a resource in this Space's `id` collection,
+   * invoked with the root capability. Full-tier only: a delegated session
+   * holds no capability over the `id` collection (by design -- the DID
+   * document changes only at key ceremonies, which need the root key).
+   *
+   * @param resourceId {string}
+   * @returns {Resource}
+   */
+  private _idResource(resourceId: string): Resource {
+    if (this._sessionCapabilities) {
+      throw new Error(
+        'A delegated session cannot access the `id` collection; log in with ' +
+          'the passphrase.'
+      )
+    }
+    return this.was
+      .space(this.spaceId)
+      .collection(ID_COLLECTION.id)
+      .resource(resourceId)
+  }
+
+  /**
+   * Reads a resource from the `id` collection, returning the parsed body or
+   * `undefined` when it is missing (the DID provisioning existence probe).
+   *
+   * @param options {object}
+   * @param options.resourceId {string}
+   * @returns {Promise<unknown>}
+   */
+  async getIdResource({
+    resourceId
+  }: {
+    resourceId: string
+  }): Promise<unknown> {
+    const result = await this._idResource(resourceId).get()
+    return result === null ? undefined : result
+  }
+
+  /**
+   * Writes (upserts) a resource into the `id` collection. An object body is
+   * JSON-serialized; a string body (the raw `did.jsonl` JSON-Lines log) passes
+   * through verbatim. Either way the bytes are sent with an explicit content
+   * type -- `did.json` as `application/did+json`, `did.jsonl` as `text/jsonl`
+   * (a plain-object `put` would force `application/json`, and the JSON-Lines
+   * log is not a single JSON document).
+   *
+   * @param options {object}
+   * @param options.resourceId {string}
+   * @param options.content {object | string}   a JSON body, or a raw string body
+   * @param [options.contentType] {string}   defaults to `application/json`
+   * @returns {Promise<void>}
+   */
+  async putIdResource({
+    resourceId,
+    content,
+    contentType = 'application/json'
+  }: {
+    resourceId: string
+    content: object | string
+    contentType?: string
+  }): Promise<void> {
+    const serialized =
+      typeof content === 'string' ? content : JSON.stringify(content)
+    const body = new TextEncoder().encode(serialized)
+    await this._idResource(resourceId).put(body, { contentType })
+  }
+
+  /**
+   * Reads a resource from the `id` collection as raw text, without JSON parsing
+   * -- the did:webvh existence probe and log reader. Returns `undefined` when
+   * the resource is missing (WAS conflates 404 for missing/unauthorized). Used
+   * for `did.jsonl`, which is a JSON-Lines string rather than a JSON document.
+   *
+   * @param options {object}
+   * @param options.resourceId {string}
+   * @returns {Promise<string | undefined>}
+   */
+  async getIdResourceRaw({
+    resourceId
+  }: {
+    resourceId: string
+  }): Promise<string | undefined> {
+    const result = await this._idResource(resourceId).getText()
+    return result === null ? undefined : result
+  }
+
+  /**
+   * Makes a single resource in the `id` collection world-readable (a
+   * resource-level `PublicCanRead` policy). Used to publish `did.json` while
+   * the sibling `keys.json` stays capability-only.
+   *
+   * @param options {object}
+   * @param options.resourceId {string}
+   * @returns {Promise<void>}
+   */
+  async setIdResourcePublic({
+    resourceId
+  }: {
+    resourceId: string
+  }): Promise<void> {
+    await this._idResource(resourceId).setPublic()
+  }
+
+  /**
+   * The absolute, world-readable URL the published DID document resolves to
+   * (`https://<host>/space/<spaceId>/id/did.json`).
+   *
+   * @returns {string}
+   */
+  didDocumentUrl(): string {
+    return new URL(
+      `/space/${this.spaceId}/${ID_COLLECTION.id}/${DID_DOCUMENT_RESOURCE}`,
+      this.storageServerUrl
+    ).toString()
   }
 
   /**
@@ -354,11 +501,14 @@ export class WASRemoteStore {
       )
     }
     try {
+      // `force`: this provisioning upsert runs with the root capability, so
+      // a 404 from the pre-merge describe means the collection is absent.
       await this.was
         .space(this.spaceId)
         .collection(id)
         .configure({
-          name: name ?? id
+          name: name ?? id,
+          force: true
         })
     } catch (err) {
       console.error(`Error provisioning collection "${id}":`, err)

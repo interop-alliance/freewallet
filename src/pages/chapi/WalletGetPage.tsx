@@ -218,7 +218,10 @@ export function WalletGetPage() {
         setLoginError(t('chapi.accountNotFound'))
         return
       }
-      await loggedIn.storage.ensureUserCollections({ user: loggedIn.user })
+      await loggedIn.storage.ensureUserCollections({
+        user: loggedIn.user,
+        profile: loggedIn.profile
+      })
 
       // A zcap request needs a remote Space to delegate against; a guest or a
       // no-WAS wallet cannot fulfill it. Block before the consent screen.
@@ -268,6 +271,25 @@ export function WalletGetPage() {
         console.error('CHAPI login failed:', err)
         setLoginError(t('chapi.loginFailed'))
       }
+    }
+  }
+
+  /**
+   * Handles a saved (delegated) session recognized by SavedSessionNotice. A
+   * delegated session holds no root key and a locked vault, so it can satisfy
+   * only a DID-Auth-*only* request, and only when a KMS-backed did:web is
+   * provisioned (the `authentication` key signs without the passphrase). In
+   * that case we skip straight to the consent screen; otherwise recognition is
+   * cosmetic and the passphrase form stays.
+   */
+  function handleRestoredSession(restored: Session) {
+    const didAuthOnly =
+      profile.didAuth &&
+      profile.vcQueries.length === 0 &&
+      profile.zcapRequests.length === 0
+    if (didAuthOnly && restored.profile.didWeb) {
+      setSession(restored)
+      setPageState('selecting')
     }
   }
 
@@ -418,7 +440,10 @@ export function WalletGetPage() {
 
         {pageState === 'awaiting-login' && (
           <>
-            <SavedSessionNotice onFirstPartyStorage={setFirstPartyIdb} />
+            <SavedSessionNotice
+              onFirstPartyStorage={setFirstPartyIdb}
+              onRestore={handleRestoredSession}
+            />
             <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
           </>
         )}

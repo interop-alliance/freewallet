@@ -12,7 +12,10 @@ import type {
   IKeyResolver
 } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
+import type { IZcap } from '@interop/data-integrity-core'
 import type { KeystoreAgent } from '@interop/webkms-client'
+import type { DidWebKeyMap } from '@/lib/didWeb'
+import type { WebvhUpdateKey, WebvhStagedKey } from '@/lib/didWebvh'
 
 /**
  * Minimal interface over @interop/webkms-client's CapabilityAgent.
@@ -69,6 +72,27 @@ export interface ControllerProfile {
   // The keystore id, when known without a keystore agent (the delegated tier
   // restores it from the persisted session record for display).
   keystoreId?: string
+  // The delegated `sign` capability on the keystore, restored from the
+  // persisted record in the `delegated` tier. Paired with the browser session
+  // key, it lets a restored session sign with the KMS-held keys (e.g. DIDAuth)
+  // without the passphrase. Absent in the `full` tier (the root key invokes
+  // the keystore's root capability directly).
+  keystoreCapability?: IZcap
+  // The user's published did:web DID and its key-id map, present once
+  // provisioning has succeeded (`full` tier) or been restored from the
+  // persisted record (`delegated` tier). Absent for guests, without a
+  // KMS/WAS server, or when provisioning failed.
+  didWeb?: { did: string; keys: DidWebKeyMap }
+  // The user's published did:webvh DID and its update-key refs (Phase 2),
+  // present once the log has been published (`full` tier) or restored from the
+  // persisted record (`delegated` tier). Key refs only, never secrets. Absent
+  // when the did:webvh flag is off, without a KMS/WAS server, or when
+  // provisioning failed -- everything degrades to did:web behavior.
+  didWebvh?: {
+    did: string
+    updateKey: WebvhUpdateKey
+    stagedKey: WebvhStagedKey
+  }
 }
 
 /**

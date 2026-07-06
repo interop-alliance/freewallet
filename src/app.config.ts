@@ -88,6 +88,39 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
     encryption: { scheme: 'edv' }
   }
 ]
+/**
+ * The `id` collection: a standard-on-the-server collection that holds the
+ * user's published DID document (`did.json`) and its key-id map
+ * (`keys.json`). Deliberately kept out of WALLET_STANDARD_COLLECTIONS -- it
+ * gets no local RxDB replica, no background replication, and no
+ * per-collection session zcap. Provisioned (full tier only) alongside the
+ * standard collections; the DID document is made world-readable at the
+ * resource level (a `PublicCanRead` policy on `did.json`), while the key-id
+ * map stays capability-only.
+ *
+ * The path segments name the collection that holds the DID document, so the
+ * did:web id is `did:web:<host>:space:<spaceId>:id` and resolves to
+ * `https://<host>/space/<spaceId>/id/did.json`.
+ */
+export const ID_COLLECTION = { id: 'id', name: 'Identity' }
+// The world-readable DID document resource, served as `application/did+json`.
+export const DID_DOCUMENT_RESOURCE = 'did.json'
+// The (non-public) key-id map: verification method to KMS key id. The recovery
+// anchor -- written before `did.json` so a torn provisioning resumes from it.
+export const DID_KEYS_RESOURCE = 'keys.json'
+// The world-readable did:webvh history log (Phase 2), a raw JSON-Lines string
+// served as `text/jsonl`: one log entry per line, each a full DID-document
+// snapshot in a hash chain. Sibling of `did.json` in the same `id` collection;
+// `did:webvh:<scid>:<host>:space:<spaceId>:id` resolves to
+// `https://<host>/space/<spaceId>/id/did.jsonl`.
+export const DID_LOG_RESOURCE = 'did.jsonl'
+
+// Whether to provision and publish the user's did:webvh DID log alongside the
+// did:web document (Phase 2). An opt-out flag: default `true` (freewallet acts
+// as a did:webvh demo platform, publishing the log out of the box), disabled
+// only when `VITE_ENABLE_DID_WEBVH` is exactly the string `'false'`.
+export const ENABLE_DID_WEBVH = env.VITE_ENABLE_DID_WEBVH !== 'false'
+
 export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
 // CORS proxy for fetching remote credential URLs from AddCredentialPage.
 export const CORS_PROXY_URL =
