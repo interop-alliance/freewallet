@@ -7,11 +7,8 @@ import {
   type LookupResult
 } from '@digitalcredentials/issuer-registry-client'
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
-import {
-  KNOWN_REGISTRIES_URL,
-  KnownDidRegistries,
-  WAS_SERVER_URL
-} from '@/app.config'
+import { KNOWN_REGISTRIES_URL, KnownDidRegistries } from '@/app.config'
+import { corsProxyFetch } from './corsProxy'
 
 const EMPTY_RESULT: LookupResult = {
   matchingIssuers: [],
@@ -22,17 +19,6 @@ let cachedClient: RegistryClient | undefined
 let registriesLoadPromise: Promise<EntityIdentityRegistry[]> | undefined
 
 /**
- * Fetches a registry list from the given URL and validates the HTTP response.
- */
-async function fetchRegistries(url: string): Promise<EntityIdentityRegistry[]> {
-  const regRes = await fetch(url)
-  if (!regRes.ok) {
-    throw new Error(`Registry fetch failed: ${regRes.status}`)
-  }
-  return (await regRes.json()) as EntityIdentityRegistry[]
-}
-
-/**
  * Loads issuer registries by trying the direct URL first, then the WAS proxy,
  * and finally the local fallback list.
  */
@@ -40,19 +26,13 @@ async function loadRegistries(): Promise<EntityIdentityRegistry[]> {
   if (!registriesLoadPromise) {
     registriesLoadPromise = (async () => {
       try {
-        return await fetchRegistries(KNOWN_REGISTRIES_URL)
-      } catch (directError) {
-        if (WAS_SERVER_URL) {
-          try {
-            return await fetchRegistries(
-              `${WAS_SERVER_URL}/api/cors?url=${encodeURIComponent(KNOWN_REGISTRIES_URL)}`
-            )
-          } catch (proxyError) {
-            console.warn('Using fallback KnownDidRegistries:', proxyError)
-            return KnownDidRegistries
-          }
+        const regRes = await corsProxyFetch(KNOWN_REGISTRIES_URL)
+        if (!regRes.ok) {
+          throw new Error(`Registry fetch failed: ${regRes.status}`)
         }
-        console.warn('Using fallback KnownDidRegistries:', directError)
+        return (await regRes.json()) as EntityIdentityRegistry[]
+      } catch (err) {
+        console.warn('Using fallback KnownDidRegistries:', err)
         return KnownDidRegistries
       }
     })()
