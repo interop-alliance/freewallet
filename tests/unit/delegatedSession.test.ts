@@ -22,9 +22,16 @@ vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
   WAS_SERVER_URL: 'https://was.example.test'
 }))
+// Stub the vault module directly so these tests stay focused on the delegated
+// session and never touch WebCrypto or the vault-envelope persistence helpers.
+vi.mock('@/session/vault', () => ({
+  persistVaultEnvelope: vi.fn(),
+  unwrapVaultEnvelope: vi.fn()
+}))
 
 import { KmsClient } from '@interop/webkms-client'
 import * as sessionKey from '@/lib/sessionKey'
+import { persistVaultEnvelope, unwrapVaultEnvelope } from '@/session/vault'
 import {
   endDelegatedSession,
   persistDelegatedSession,
@@ -94,6 +101,9 @@ beforeEach(() => {
     signer: fakeSigner,
     did: SESSION_DID
   })
+  // The vault stays locked by default; the vault-specific tests opt in.
+  vi.mocked(persistVaultEnvelope).mockResolvedValue(undefined)
+  vi.mocked(unwrapVaultEnvelope).mockResolvedValue(null)
 })
 
 afterEach(() => {
@@ -160,6 +170,43 @@ describe('persistDelegatedSession', () => {
     )
   })
 
+  it('persists the vault envelope when the profile has a key agreement key', async () => {
+    const { session } = fullSessionStub()
+    const keyAgreementKey = { id: 'did:key:z6MkRoot#kak' } as unknown
+    ;(session.profile as { keyAgreementKey?: unknown }).keyAgreementKey =
+      keyAgreementKey
+    const idb = {} as IDBFactory
+
+    await persistDelegatedSession({ session, idb })
+
+    expect(persistVaultEnvelope).toHaveBeenCalledWith({
+      keyAgreementKey,
+      controller: 'did:key:z6MkRoot',
+      idb
+    })
+  })
+
+  it('does not persist a vault envelope without a key agreement key', async () => {
+    const { session } = fullSessionStub()
+
+    await persistDelegatedSession({ session })
+
+    expect(persistVaultEnvelope).not.toHaveBeenCalled()
+  })
+
+  it('still saves the record when the vault envelope fails to persist', async () => {
+    const { session } = fullSessionStub()
+    ;(session.profile as { keyAgreementKey?: unknown }).keyAgreementKey = {
+      id: 'did:key:z6MkRoot#kak'
+    }
+    vi.mocked(persistVaultEnvelope).mockRejectedValue(
+      new Error('vault persist failed')
+    )
+
+    await expect(persistDelegatedSession({ session })).resolves.toBeUndefined()
+    expect(sessionKey.saveSessionRecord).toHaveBeenCalled()
+  })
+
   it('skips guests and sessions without remote storage', async () => {
     const { session, delegate } = fullSessionStub()
     await persistDelegatedSession({
@@ -206,6 +253,49 @@ describe('restoreDelegatedSession', () => {
         })
       })
     )
+  })
+
+  it('unlocks the vault and carries the KAK when the envelope unwraps', async () => {
+    vi.mocked(sessionKey.loadSessionRecord).mockResolvedValue(persistedRecord())
+    const keyAgreementKey = { id: 'did:key:z6MkRoot#kak' } as never
+    const keyResolver = vi.fn() as never
+    vi.mocked(unwrapVaultEnvelope).mockResolvedValue({
+      keyAgreementKey,
+      keyResolver
+    })
+    const initSpy = vi
+      .spyOn(StorageManager, 'initDelegatedStorageClients')
+      .mockResolvedValue({ storage: {} as never })
+
+    const session = await restoreDelegatedSession()
+
+    expect(unwrapVaultEnvelope).toHaveBeenCalledWith({
+      controller: 'did:key:z6MkRoot',
+      idb: undefined
+    })
+    expect(initSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vaultKeys: { keyAgreementKey, keyResolver }
+      })
+    )
+    expect(session?.profile.keyAgreementKey).toBe(keyAgreementKey)
+    expect(session?.profile.keyResolver).toBe(keyResolver)
+  })
+
+  it('leaves the vault locked when the envelope does not unwrap', async () => {
+    vi.mocked(sessionKey.loadSessionRecord).mockResolvedValue(persistedRecord())
+    vi.mocked(unwrapVaultEnvelope).mockResolvedValue(null)
+    const initSpy = vi
+      .spyOn(StorageManager, 'initDelegatedStorageClients')
+      .mockResolvedValue({ storage: {} as never })
+
+    const session = await restoreDelegatedSession()
+
+    expect(initSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ vaultKeys: undefined })
+    )
+    expect(session?.profile.keyAgreementKey).toBeUndefined()
+    expect(session?.profile.keyResolver).toBeUndefined()
   })
 
   it('restores through a supplied IDBFactory (the popup storage-access handle)', async () => {

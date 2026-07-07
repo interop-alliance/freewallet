@@ -131,9 +131,10 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
 
       <Box component="main" sx={dashboardStyles.main}>
         <Toolbar />
-        {/* A restored (delegated) session has no passphrase-derived keys, so
-            the encrypted collections are locked until the user logs back in. */}
-        {session?.tier === 'delegated' && (
+        {/* A restored (delegated) session whose vault KAK could not be
+            recovered from the session vault envelope has locked encrypted
+            collections until the user logs back in. */}
+        {session?.storage.vaultLocked && (
           <Alert
             severity="info"
             sx={{ mb: 2 }}

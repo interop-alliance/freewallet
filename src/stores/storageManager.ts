@@ -8,7 +8,12 @@
  * replicates the local collections to it in the background, and the storage
  * browser / export / import / quota pages read through it directly.
  */
-import type { IVerifiableCredential, IZcap } from '@interop/data-integrity-core'
+import type {
+  IKeyAgreementKey,
+  IKeyResolver,
+  IVerifiableCredential,
+  IZcap
+} from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { RxCollection } from 'rxdb/plugins/core'
 import type { ControllerProfile, User } from '@/types/auth'
@@ -81,9 +86,11 @@ export class StorageManager {
 
   /**
    * Whether the encrypted collections are locked: true in a restored
-   * (`delegated` tier) session, where the passphrase-derived KAK is absent.
-   * Locked reads return nothing rather than raw envelopes; locked writes
-   * throw rather than store plaintext into an encrypted collection.
+   * (`delegated` tier) session whose vault KAK could not be recovered from
+   * the session vault envelope (fail closed -- absent, expired, or unusable
+   * envelopes all lock). Locked reads return nothing rather than raw
+   * envelopes; locked writes throw rather than store plaintext into an
+   * encrypted collection.
    */
   get vaultLocked(): boolean {
     return this._vaultLocked
@@ -175,6 +182,33 @@ export class StorageManager {
     })
   }
 
+  /**
+   * Builds the per-collection document ciphers for the encrypted standard
+   * collections from a session's key material (the vault KAK and its
+   * resolver).
+   */
+  private static async _buildCiphers({
+    keyAgreementKey,
+    keyResolver
+  }: {
+    keyAgreementKey: IKeyAgreementKey
+    keyResolver: IKeyResolver
+  }) {
+    const cipherEntries = await Promise.all(
+      WALLET_STANDARD_COLLECTIONS.filter(({ encryption }) => encryption).map(
+        async ({ key, id }) => [
+          key,
+          await createEdvDocCipher({
+            keyAgreementKey,
+            keyResolver,
+            collectionId: id
+          })
+        ]
+      )
+    )
+    return Object.fromEntries(cipherEntries)
+  }
+
   static async initStorageClients({
     user,
     profile,
@@ -195,25 +229,15 @@ export class StorageManager {
     // encrypts just as well; it is merely unrecoverable after logout, like the
     // rest of a guest session). The local store holds EDV envelopes for these
     // collections and replication ships them verbatim. (Restored delegated
-    // sessions, which have no KAK, initialize via
-    // `initDelegatedStorageClients` instead.)
+    // sessions initialize via `initDelegatedStorageClients` instead.)
     const { keyAgreementKey, keyResolver } = profile
     if (!keyAgreementKey || !keyResolver) {
       throw new Error('A full session profile requires the key material.')
     }
-    const cipherEntries = await Promise.all(
-      WALLET_STANDARD_COLLECTIONS.filter(({ encryption }) => encryption).map(
-        async ({ key, id }) => [
-          key,
-          await createEdvDocCipher({
-            keyAgreementKey,
-            keyResolver,
-            collectionId: id
-          })
-        ]
-      )
-    )
-    const ciphers = Object.fromEntries(cipherEntries)
+    const ciphers = await StorageManager._buildCiphers({
+      keyAgreementKey,
+      keyResolver
+    })
 
     // The local store is always the active replica.
     const { localStore } = await BrowserStore.initClient({ user, ciphers })
@@ -235,35 +259,45 @@ export class StorageManager {
   }
 
   /**
-   * Initializes storage for a restored (`delegated` tier) session: the local
-   * store opens without ciphers (the vault stays locked -- encrypted
-   * collections are unreadable and unwritable until re-login) and the remote
+   * Initializes storage for a restored (`delegated` tier) session: the remote
    * store invokes the persisted delegated capabilities instead of root
-   * capabilities. Envelope replication still works: it moves opaque stored
-   * bodies verbatim and never needs keys.
+   * capabilities. When the session vault envelope yielded the vault KAK
+   * (`vaultKeys`), the local store opens with the document ciphers and the
+   * vault is unlocked exactly as in a full session; without it the local
+   * store opens cipher-less and the vault stays locked -- encrypted
+   * collections are unreadable and unwritable until re-login, while envelope
+   * replication still works (it moves opaque stored bodies verbatim and never
+   * needs keys).
    *
    * @param options {object}
    * @param options.user {User}
    * @param options.zcapClient {ZcapClient}   signs with the session key
    * @param options.spaceId {string}
    * @param options.sessionCapabilities {SessionCapabilities}
+   * @param [options.vaultKeys] {object}   the vault KAK and its resolver,
+   *   recovered from the session vault envelope (absent = locked vault)
    * @returns {Promise<{ storage: StorageManager }>}
    */
   static async initDelegatedStorageClients({
     user,
     zcapClient,
     spaceId,
-    sessionCapabilities
+    sessionCapabilities,
+    vaultKeys
   }: {
     user: User
     zcapClient: ZcapClient
     spaceId: string
     sessionCapabilities: SessionCapabilities
+    vaultKeys?: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
   }) {
     if (!WAS_SERVER_URL) {
       throw new Error('A delegated session requires a remote WAS server.')
     }
-    const { localStore } = await BrowserStore.initClient({ user })
+    const ciphers = vaultKeys
+      ? await StorageManager._buildCiphers(vaultKeys)
+      : undefined
+    const { localStore } = await BrowserStore.initClient({ user, ciphers })
     const remoteStore = new WASRemoteStore({
       storageServerUrl: WAS_SERVER_URL,
       zcapClient,
@@ -274,7 +308,7 @@ export class StorageManager {
     const storage = new StorageManager({
       localStore,
       remoteStore,
-      vaultLocked: true
+      vaultLocked: !vaultKeys
     })
     return { storage }
   }

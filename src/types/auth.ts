@@ -51,10 +51,11 @@ export interface User {
  * In-memory only; never persisted.
  *
  * In the `delegated` session tier (a refresh-restored session,
- * `src/session/delegatedSession.ts`) only `zcapClient` is present -- it signs
- * with the browser session key and invokes the persisted delegated zcaps.
- * The passphrase-derived fields (`keyAgent`, `keyAgreementKey`,
- * `keyResolver`) require a fresh login.
+ * `src/session/delegatedSession.ts`) `zcapClient` signs with the browser
+ * session key and invokes the persisted delegated zcaps; `keyAgreementKey` /
+ * `keyResolver` are present only when the session vault envelope
+ * (`src/session/vault.ts`) yielded the vault KAK. The root `keyAgent` always
+ * requires a fresh login.
  */
 export interface ControllerProfile {
   keyAgent?: ICapabilityAgent
@@ -121,7 +122,9 @@ export interface Session {
   expires?: string // ISO date string, matches Auth.js convention
   isGuest: boolean
   // `full`: passphrase-derived root key present (fresh login). `delegated`:
-  // restored from persisted zcaps + the browser session key; the vault KAK is
-  // absent, so encrypted collections stay locked until re-login.
+  // restored from persisted zcaps + the browser session key; no root key, and
+  // the vault unlocks only if the session vault envelope yielded the KAK
+  // (fail closed -- otherwise encrypted collections stay locked until
+  // re-login). Gate UI on `storage.vaultLocked`, not on the tier.
   tier: 'full' | 'delegated'
 }

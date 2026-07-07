@@ -293,9 +293,15 @@ test('a restored delegated session completes DIDAuth in a popup with no passphra
   const useSaved = frame.getByRole('button', { name: 'Use saved login' })
   await expect(consent.or(useSaved)).toBeVisible({ timeout: 15_000 })
   if (!(await consent.isVisible())) {
-    await useSaved.click()
-    await expect(consent).toBeVisible({ timeout: 15_000 })
+    // The silent restore can complete between the visibility check and the
+    // click, unmounting the button in favor of the consent screen -- race
+    // the click against that outcome rather than insisting on the button.
+    await Promise.race([
+      useSaved.click().catch(() => undefined),
+      consent.waitFor({ state: 'visible', timeout: 15_000 })
+    ])
   }
+  await expect(consent).toBeVisible({ timeout: 15_000 })
 
   // 4. Approve; the VP comes back signed by the KMS key, no passphrase entered.
   await frame.getByRole('button', { name: 'Continue', exact: true }).click()

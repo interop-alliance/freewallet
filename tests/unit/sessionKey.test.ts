@@ -11,9 +11,12 @@ import { Ed25519VerificationKey } from '@interop/ed25519-verification-key'
 import {
   clearPersistedSession,
   deleteKeyringCache,
+  deleteVaultEnvelope,
   loadKeyringCache,
+  loadVaultEnvelope,
   saveKeyringCache,
   saveSessionRecord,
+  saveVaultEnvelope,
   loadSessionRecord,
   sessionKeyDid,
   sessionKeySigner
@@ -189,5 +192,73 @@ describe('keyring cache helpers', () => {
     await expect(
       loadKeyringCache({ spaceId: 'space-a', idb })
     ).resolves.toEqual({ keyring: true })
+  })
+})
+
+describe('vault envelope helpers', () => {
+  /**
+   * A distinct WebCrypto value for the wrapping-key half of the pair; the fake
+   * IDB stores values by reference, so any object round-trips.
+   *
+   * @returns {Promise<CryptoKey>}
+   */
+  async function generateWrappingKey(): Promise<CryptoKey> {
+    return (await crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    )) as CryptoKey
+  }
+
+  it('round-trips save / load / delete of the envelope pair', async () => {
+    const idb = createFakeIdb()
+    const wrappingKey = await generateWrappingKey()
+    const envelope = { version: 1, iv: new Uint8Array([1, 2, 3]) }
+
+    await expect(loadVaultEnvelope({ idb })).resolves.toBeNull()
+
+    await saveVaultEnvelope({ wrappingKey, envelope, idb })
+    await expect(loadVaultEnvelope({ idb })).resolves.toEqual({
+      wrappingKey,
+      envelope
+    })
+
+    await deleteVaultEnvelope({ idb })
+    await expect(loadVaultEnvelope({ idb })).resolves.toBeNull()
+  })
+
+  it('returns null when either half of the pair is missing', async () => {
+    const wrappingKey = await generateWrappingKey()
+    const envelope = { version: 1 }
+
+    // Envelope present, wrapping key missing.
+    const idbNoKey = createFakeIdb()
+    await saveVaultEnvelope({
+      wrappingKey: undefined as unknown as CryptoKey,
+      envelope,
+      idb: idbNoKey
+    })
+    await expect(loadVaultEnvelope({ idb: idbNoKey })).resolves.toBeNull()
+
+    // Wrapping key present, envelope missing.
+    const idbNoEnvelope = createFakeIdb()
+    await saveVaultEnvelope({
+      wrappingKey,
+      envelope: undefined,
+      idb: idbNoEnvelope
+    })
+    await expect(loadVaultEnvelope({ idb: idbNoEnvelope })).resolves.toBeNull()
+  })
+
+  it('is removed by clearPersistedSession alongside the session record', async () => {
+    const idb = createFakeIdb()
+    const wrappingKey = await generateWrappingKey()
+    await saveSessionRecord({ record: { session: true }, idb })
+    await saveVaultEnvelope({ wrappingKey, envelope: { version: 1 }, idb })
+
+    await clearPersistedSession({ idb })
+
+    await expect(loadSessionRecord({ idb })).resolves.toBeNull()
+    await expect(loadVaultEnvelope({ idb })).resolves.toBeNull()
   })
 })

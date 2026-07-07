@@ -4,6 +4,20 @@
 
 ### Added
 
+- **Session vault envelope.** At full login the vault KAK (the X25519 key
+  that encrypts/decrypts the wallet's private collections) is now wrapped
+  (AES-GCM) under a fresh non-extractable WebCrypto key and persisted in the
+  `freewallet-session` IndexedDB database with its own TTL (default 24h,
+  `VITE_SESSION_VAULT_TTL_HOURS`) -- so a refresh-restored (`delegated` tier)
+  session unlocks the vault without a passphrase re-prompt, in the main app
+  and in the CHAPI popup's saved-session recognition alike. Only the KAK is
+  ever wrapped -- never the data seed or the root signing key -- and the pair
+  is deleted on logout. Fail closed: an absent, expired, tampered, or
+  wrong-identity envelope leaves the vault locked exactly as before (and a
+  bad envelope is deleted so it is not retried). Setting the new
+  `VITE_REQUIRE_PASSPHRASE_FOR_VAULT=true` disables the envelope entirely:
+  nothing is persisted and vault access always requires a fresh passphrase
+  login (`src/session/vault.ts`).
 - **Hosted did:web DID (Phase 1).** Each full login now provisions and
   publishes a multi-key `did:web` DID in the user's WAS Space, backed by
   three KMS-held keys (`authentication` and `assertionMethod` Ed25519,

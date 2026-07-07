@@ -21,9 +21,13 @@
  * On the next page load `restoreDelegatedSession()` reconstitutes a
  * restricted session from the persisted record: the zcap client signs with
  * the non-extractable session key and invokes the delegated capabilities.
- * No root key and no vault KAK are present -- encrypted collections stay
- * locked ("logged in but locked vault") until the user re-enters the
- * passphrase; envelope replication and public/plaintext reads still work.
+ * No root key is present -- signing and delegation still require a
+ * passphrase re-login. The vault, however, can unlock without one: a full
+ * login also persists the session vault envelope (the vault KAK wrapped
+ * under a non-extractable AES-GCM key, `src/session/vault.ts`), and the
+ * restore path unwraps it, fail closed -- anything wrong with the envelope
+ * leaves the vault locked while envelope replication and public/plaintext
+ * reads still work.
  */
 import { ZcapClient } from '@interop/ezcap'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
@@ -45,6 +49,7 @@ import {
   saveSessionRecord,
   sessionKeySigner
 } from '@/lib/sessionKey'
+import { persistVaultEnvelope, unwrapVaultEnvelope } from '@/session/vault'
 import { StorageManager } from '@/stores/storageManager'
 
 /**
@@ -179,6 +184,23 @@ export async function persistDelegatedSession({
     didWebvh
   }
   await saveSessionRecord({ record, idb })
+
+  // Persist the session vault envelope (the vault KAK wrapped under a fresh
+  // non-extractable AES-GCM key, its own TTL), so the restored session can
+  // unlock the vault without the passphrase. Non-fatal: a failure here only
+  // costs passphrase-free vault access on restore, never the session record
+  // saved above.
+  if (session.profile.keyAgreementKey) {
+    try {
+      await persistVaultEnvelope({
+        keyAgreementKey: session.profile.keyAgreementKey,
+        controller: session.user.id,
+        idb
+      })
+    } catch (err) {
+      console.warn('Could not persist the session vault envelope:', err)
+    }
+  }
 }
 
 /**
@@ -226,6 +248,15 @@ export async function restoreDelegatedSession({
     invocationSigner: signer
   })
   const user: User = { id: record.controller, email: record.email }
+
+  // Try to unlock the vault from the session vault envelope. Fail closed:
+  // any problem (absent, expired, wrong identity, undecryptable) returns
+  // `null` and the storage clients initialize with a locked vault.
+  const vaultKeys = await unwrapVaultEnvelope({
+    controller: record.controller,
+    idb
+  })
+
   const { storage } = await StorageManager.initDelegatedStorageClients({
     user,
     zcapClient,
@@ -233,7 +264,8 @@ export async function restoreDelegatedSession({
     sessionCapabilities: {
       spaceRead: record.spaceReadCapability,
       collections: record.collectionCapabilities
-    }
+    },
+    vaultKeys: vaultKeys ?? undefined
   })
 
   return {
@@ -245,7 +277,11 @@ export async function restoreDelegatedSession({
       // the KMS-held keys (KMS-signed DIDAuth) without the passphrase.
       keystoreCapability: record.keystoreCapability,
       didWeb: record.didWeb,
-      didWebvh: record.didWebvh
+      didWebvh: record.didWebvh,
+      // The vault KAK recovered from the session vault envelope (absent when
+      // the envelope was missing or unusable -- the vault then stays locked).
+      keyAgreementKey: vaultKeys?.keyAgreementKey,
+      keyResolver: vaultKeys?.keyResolver
     },
     storage,
     expires: record.expires,

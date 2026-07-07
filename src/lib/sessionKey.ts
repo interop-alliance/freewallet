@@ -17,6 +17,8 @@ const SESSION_DB_NAME = 'freewallet-session'
 const SESSION_STORE = 'session'
 const KEY_PAIR_RECORD = 'key-pair'
 const SESSION_RECORD = 'record'
+const VAULT_KEY_RECORD = 'vault-key'
+const VAULT_ENVELOPE_RECORD = 'vault-envelope'
 
 /**
  * Every function below takes an optional `idb` (an `IDBFactory`), defaulting
@@ -175,10 +177,100 @@ export async function loadSessionRecord({
 }
 
 /**
- * Deletes the persisted session: the record *and* the key pair. Called on
- * logout -- the next login mints a fresh session key. The keyring cache
- * entries (see `saveKeyringCache`) are deliberately left intact so that
- * offline / no-WAS logins keep working across a logout.
+ * Saves the session vault envelope pair: the non-extractable AES-GCM
+ * wrapping key (a WebCrypto `CryptoKey`, structured-cloned like the session
+ * key pair) and the wrapped vault-KAK envelope it decrypts (see
+ * `src/session/vault.ts`). Overwrites any previous pair -- every full login
+ * mints a fresh wrapping key.
+ *
+ * @param options {object}
+ * @param options.wrappingKey {CryptoKey}
+ * @param options.envelope {unknown}
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function saveVaultEnvelope({
+  wrappingKey,
+  envelope,
+  idb
+}: {
+  wrappingKey: CryptoKey
+  envelope: unknown
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.put(wrappingKey, VAULT_KEY_RECORD),
+    idb
+  )
+  await withSessionStore(
+    'readwrite',
+    store => store.put(envelope, VAULT_ENVELOPE_RECORD),
+    idb
+  )
+}
+
+/**
+ * Loads the session vault envelope pair, or `null` when either half is
+ * missing (an envelope without its wrapping key -- or vice versa -- is
+ * useless).
+ *
+ * @param [options] {object}
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<{ wrappingKey: CryptoKey, envelope: unknown } | null>}
+ */
+export async function loadVaultEnvelope({
+  idb
+}: {
+  idb?: IDBFactory
+} = {}): Promise<{ wrappingKey: CryptoKey; envelope: unknown } | null> {
+  const wrappingKey = (await withSessionStore(
+    'readonly',
+    store => store.get(VAULT_KEY_RECORD),
+    idb
+  )) as CryptoKey | undefined
+  const envelope = await withSessionStore(
+    'readonly',
+    store => store.get(VAULT_ENVELOPE_RECORD),
+    idb
+  )
+  if (!wrappingKey || envelope === undefined || envelope === null) {
+    return null
+  }
+  return { wrappingKey, envelope }
+}
+
+/**
+ * Deletes the session vault envelope pair (both the wrapping key and the
+ * envelope). Called when the envelope turns out to be unusable (fail closed)
+ * and as part of clearing the persisted session.
+ *
+ * @param [options] {object}
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deleteVaultEnvelope({
+  idb
+}: {
+  idb?: IDBFactory
+} = {}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.delete(VAULT_ENVELOPE_RECORD),
+    idb
+  )
+  await withSessionStore(
+    'readwrite',
+    store => store.delete(VAULT_KEY_RECORD),
+    idb
+  )
+}
+
+/**
+ * Deletes the persisted session: the record, the key pair, and the vault
+ * envelope. Called on logout -- the next login mints a fresh session key.
+ * The keyring cache entries (see `saveKeyringCache`) are deliberately left
+ * intact so that offline / no-WAS logins keep working across a logout.
  *
  * @param [options] {object}
  * @param [options.idb] {IDBFactory}
@@ -199,6 +291,7 @@ export async function clearPersistedSession({
     store => store.delete(KEY_PAIR_RECORD),
     idb
   )
+  await deleteVaultEnvelope({ idb })
 }
 
 /**

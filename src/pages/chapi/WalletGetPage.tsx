@@ -281,11 +281,13 @@ export function WalletGetPage() {
 
   /**
    * Handles a saved (delegated) session recognized by SavedSessionNotice. A
-   * delegated session holds no root key and a locked vault, so it can satisfy
-   * only a DID-Auth-*only* request, and only when a KMS-backed did:web is
+   * delegated session holds no root key (though the session vault envelope
+   * may have unlocked its vault), so this fast path deliberately covers only
+   * a DID-Auth-*only* request, and only when a KMS-backed did:web is
    * provisioned (the `authentication` key signs without the passphrase). In
    * that case we skip straight to the consent screen; otherwise recognition is
-   * cosmetic and the passphrase form stays.
+   * cosmetic and the passphrase form stays. Extending the fast path to VC
+   * sharing over an unlocked vault is a deliberate non-goal for now.
    */
   function handleRestoredSession(restored: Session) {
     const didAuthOnly =

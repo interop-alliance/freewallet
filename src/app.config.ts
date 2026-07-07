@@ -31,6 +31,25 @@ export const SESSION_ZCAP_TTL_MS =
   60 *
   1000
 
+// Lifetime of the session vault envelope persisted at full login -- the vault
+// KAK wrapped under a non-extractable AES-GCM key (`src/session/vault.ts`),
+// which lets a restored (`delegated` tier) session unlock the vault without
+// the passphrase. Deliberately independent of the zcap TTL: the vault can
+// re-lock while the restored session (sync, plaintext reads) keeps working.
+export const SESSION_VAULT_TTL_MS =
+  (env.VITE_SESSION_VAULT_TTL_HOURS
+    ? Number(env.VITE_SESSION_VAULT_TTL_HOURS)
+    : 24) *
+  60 *
+  60 *
+  1000
+
+// Opt-out switch for the session vault envelope: when exactly 'true', the
+// vault KAK is never persisted in any form and restored sessions always
+// require a passphrase re-login to unlock the vault.
+export const REQUIRE_PASSPHRASE_FOR_VAULT =
+  env.VITE_REQUIRE_PASSPHRASE_FOR_VAULT === 'true'
+
 // Lifetime of the capabilities delegated to a relying party when a user
 // approves a "Login with Wallet" zcap request (`src/lib/walletRequest/
 // processZcaps.ts`). Default 30 days: the WAS server has no Space-side
