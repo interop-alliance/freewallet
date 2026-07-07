@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test'
+import { gotoGuestLogin } from './helpers/auth'
 
 test.describe('Guest login page', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/#/guest-login')
+    await gotoGuestLogin(page)
   })
 
   test('is on the guest-login route', async ({ page }) => {

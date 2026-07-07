@@ -1,10 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
-
-async function loginAsGuest(page: Page) {
-  await page.goto('/#/guest-login')
-  await page.getByRole('button', { name: 'Guest Mode Log In' }).click()
-  await expect(page).toHaveURL(/#\/dashboard/)
-}
+import { test, expect } from '@playwright/test'
+import { loginAsGuest } from './helpers/auth'
 
 test.describe('Settings page', () => {
   test('redirects to landing page when not logged in', async ({ page }) => {

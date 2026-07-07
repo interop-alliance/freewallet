@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { loginAsGuest } from './helpers/auth'
 
 /**
  * Storage quota UI in local (non-WAS) mode — no remote space, so the quota
@@ -6,9 +7,7 @@ import { test, expect } from '@playwright/test'
  */
 test.describe('Storage quota (local mode)', () => {
   test('does not show the quota card in guest mode', async ({ page }) => {
-    await page.goto('/#/guest-login')
-    await page.getByRole('button', { name: 'Guest Mode Log In' }).click()
-    await expect(page).toHaveURL(/#\/dashboard/)
+    await loginAsGuest(page)
 
     await page.goto('/#/storage')
     await expect(

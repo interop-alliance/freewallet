@@ -26,13 +26,15 @@ const REGISTRY_PAYLOAD = [
   }
 ]
 
-async function loadRegistryManager(wasServerUrl: string | undefined) {
+async function loadRegistryManager(
+  corsProxyFetch: (url: string) => ReturnType<typeof fetch>
+) {
   vi.resetModules()
   vi.doMock('@/app.config', () => ({
     KNOWN_REGISTRIES_URL: DIRECT_REGISTRIES_URL,
-    KnownDidRegistries: REGISTRY_PAYLOAD,
-    WAS_SERVER_URL: wasServerUrl
+    KnownDidRegistries: REGISTRY_PAYLOAD
   }))
+  vi.doMock('@/lib/corsProxy', () => ({ corsProxyFetch }))
 
   return import('@/lib/registryManager')
 }
@@ -43,7 +45,7 @@ describe('registryManager', () => {
     vi.clearAllMocks()
   })
 
-  it('fetches registries directly when the browser request succeeds', async () => {
+  it('loads registries via corsProxyFetch when the request succeeds', async () => {
     const fetchMock = vi.fn(async (url: URL | RequestInfo) => {
       expect(url).toBe(DIRECT_REGISTRIES_URL)
       return new Response(JSON.stringify(REGISTRY_PAYLOAD), {
@@ -53,37 +55,53 @@ describe('registryManager', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const { registryManager } = await loadRegistryManager(PROXY_BASE_URL)
+    const { registryManager } = await loadRegistryManager(url => fetch(url))
 
     await registryManager.lookupDid('did:key:z123')
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(registryClientUseMock).toHaveBeenCalledWith({
+      registries: REGISTRY_PAYLOAD
+    })
   })
 
-  it('falls back to the WAS proxy when the direct request fails', async () => {
+  it('loads registries via the WAS proxy URL when corsProxyFetch wraps fetch', async () => {
     const proxyUrl =
       `${PROXY_BASE_URL}/api/cors?url=` +
       encodeURIComponent(DIRECT_REGISTRIES_URL)
     const fetchMock = vi.fn(async (url: URL | RequestInfo) => {
-      if (url === DIRECT_REGISTRIES_URL) {
-        throw new TypeError('Failed to fetch')
-      }
-      if (url === proxyUrl) {
-        return new Response(JSON.stringify(REGISTRY_PAYLOAD), {
-          status: 200,
-          headers: { 'content-type': 'application/json' }
-        })
-      }
-      throw new Error(`Unexpected fetch url: ${String(url)}`)
+      expect(url).toBe(proxyUrl)
+      return new Response(JSON.stringify(REGISTRY_PAYLOAD), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const { registryManager } = await loadRegistryManager(PROXY_BASE_URL)
+    const { registryManager } = await loadRegistryManager(url =>
+      fetch(`${PROXY_BASE_URL}/api/cors?url=${encodeURIComponent(url)}`)
+    )
 
     await registryManager.lookupDid('did:key:z123')
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(fetchMock).toHaveBeenNthCalledWith(1, DIRECT_REGISTRIES_URL)
-    expect(fetchMock).toHaveBeenNthCalledWith(2, proxyUrl)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock).toHaveBeenCalledWith(proxyUrl)
+  })
+
+  it('uses fallback KnownDidRegistries when corsProxyFetch fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch')
+      })
+    )
+
+    const { registryManager } = await loadRegistryManager(url => fetch(url))
+
+    await registryManager.lookupDid('did:key:z123')
+
+    expect(registryClientUseMock).toHaveBeenCalledWith({
+      registries: REGISTRY_PAYLOAD
+    })
   })
 })
