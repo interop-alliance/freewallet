@@ -17,7 +17,7 @@ import type {
   IVerifiablePresentation
 } from '@interop/data-integrity-core'
 import { MEDIATOR_BASE } from '@/app.config'
-import { initSessionFromSecret } from '@/session/initSession'
+import { loginWithPassphrase } from '@/session/initSession'
 import { persistDelegatedSession } from '@/session/delegatedSession'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import type { Session } from '@/types/auth'
@@ -74,10 +74,15 @@ export function WalletStorePage() {
   async function handleLogin(passphrase: string) {
     setLoginError(null)
     try {
-      const { session: s, userExists } = await initSessionFromSecret({
-        secret: passphrase
+      // Thread the first-party IndexedDB factory (from the Storage Access API
+      // flow) into the keyring lookup so its cache read/write lands in
+      // first-party storage rather than the popup's partitioned bucket; fall
+      // back to the global factory when no handle is held.
+      const { session: s, userExists } = await loginWithPassphrase({
+        passphrase,
+        idb: firstPartyIdb ?? undefined
       })
-      if (!userExists) {
+      if (!s || !userExists) {
         setLoginError(t('chapi.accountNotFound'))
         return
       }

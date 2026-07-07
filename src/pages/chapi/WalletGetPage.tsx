@@ -24,7 +24,7 @@ import Typography from '@mui/material/Typography'
 import { loadOnce } from 'credential-handler-polyfill'
 import { receiveCredentialEvent } from 'web-credential-handler'
 import { MEDIATOR_BASE, RP_ZCAP_TTL_MS } from '@/app.config'
-import { initSessionFromSecret } from '@/session/initSession'
+import { loginWithPassphrase } from '@/session/initSession'
 import { persistDelegatedSession } from '@/session/delegatedSession'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
@@ -211,10 +211,15 @@ export function WalletGetPage() {
   async function handleLogin(passphrase: string) {
     setLoginError(null)
     try {
-      const { session: loggedIn, userExists } = await initSessionFromSecret({
-        secret: passphrase
+      // Thread the first-party IndexedDB factory (from the Storage Access API
+      // flow) into the keyring lookup so its cache read/write lands in
+      // first-party storage rather than the popup's partitioned bucket; fall
+      // back to the global factory when no handle is held.
+      const { session: loggedIn, userExists } = await loginWithPassphrase({
+        passphrase,
+        idb: firstPartyIdb ?? undefined
       })
-      if (!userExists) {
+      if (!loggedIn || !userExists) {
         setLoginError(t('chapi.accountNotFound'))
         return
       }

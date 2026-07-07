@@ -8,7 +8,92 @@
  */
 import { describe, expect, it } from 'vitest'
 import { Ed25519VerificationKey } from '@interop/ed25519-verification-key'
-import { sessionKeyDid, sessionKeySigner } from '@/lib/sessionKey'
+import {
+  clearPersistedSession,
+  deleteKeyringCache,
+  loadKeyringCache,
+  saveKeyringCache,
+  saveSessionRecord,
+  loadSessionRecord,
+  sessionKeyDid,
+  sessionKeySigner
+} from '@/lib/sessionKey'
+
+/**
+ * A minimal in-memory `IDBFactory` sufficient for the session-store helpers
+ * (a single object store, get/put/delete by key). Node has no IndexedDB, so
+ * the cache helpers are exercised against this fake instead.
+ *
+ * @returns {IDBFactory}
+ */
+function createFakeIdb(): IDBFactory {
+  const stores = new Map<string, Map<IDBValidKey, unknown>>()
+  let initialized = false
+  type Request = {
+    onsuccess?: () => void
+    onupgradeneeded?: () => void
+    onerror?: () => void
+    result?: unknown
+  }
+  function run(fn: () => unknown): Request {
+    const request: Request = {}
+    queueMicrotask(() => {
+      request.result = fn()
+      request.onsuccess?.()
+    })
+    return request
+  }
+  function storeApi(store: Map<IDBValidKey, unknown>) {
+    return {
+      get: (key: IDBValidKey) => run(() => store.get(key)),
+      put: (value: unknown, key: IDBValidKey) =>
+        run(() => {
+          store.set(key, value)
+          return key
+        }),
+      delete: (key: IDBValidKey) =>
+        run(() => {
+          store.delete(key)
+          return undefined
+        })
+    }
+  }
+  function makeDb() {
+    return {
+      createObjectStore(name: string) {
+        if (!stores.has(name)) {
+          stores.set(name, new Map())
+        }
+        return {}
+      },
+      transaction(name: string) {
+        let store = stores.get(name)
+        if (!store) {
+          store = new Map()
+          stores.set(name, store)
+        }
+        return {
+          objectStore: () => storeApi(store as Map<IDBValidKey, unknown>)
+        }
+      },
+      close() {}
+    }
+  }
+  return {
+    open() {
+      const request: Request = {}
+      queueMicrotask(() => {
+        request.result = makeDb()
+        if (!initialized) {
+          initialized = true
+          request.onupgradeneeded?.()
+        }
+        request.onsuccess?.()
+      })
+      return request
+    }
+  } as unknown as IDBFactory
+}
 
 async function generateKeyPair(): Promise<CryptoKeyPair> {
   return (await crypto.subtle.generateKey('Ed25519', false, [
@@ -53,5 +138,56 @@ describe('sessionKeySigner', () => {
     })
     const verifier = verificationKey.verifier()
     expect(await verifier.verify({ data, signature })).toBe(true)
+  })
+})
+
+describe('keyring cache helpers', () => {
+  it('round-trips save / load / delete keyed by unlock Space id', async () => {
+    const idb = createFakeIdb()
+    const record = { version: 1, wrapped: { jwe: { ciphertext: 'x' } } }
+
+    await expect(
+      loadKeyringCache({ spaceId: 'space-a', idb })
+    ).resolves.toBeNull()
+
+    await saveKeyringCache({ spaceId: 'space-a', record, idb })
+    await expect(
+      loadKeyringCache({ spaceId: 'space-a', idb })
+    ).resolves.toEqual(record)
+
+    await deleteKeyringCache({ spaceId: 'space-a', idb })
+    await expect(
+      loadKeyringCache({ spaceId: 'space-a', idb })
+    ).resolves.toBeNull()
+  })
+
+  it('keeps separate caches per Space id', async () => {
+    const idb = createFakeIdb()
+    await saveKeyringCache({ spaceId: 'space-a', record: { n: 1 }, idb })
+    await saveKeyringCache({ spaceId: 'space-b', record: { n: 2 }, idb })
+
+    await expect(
+      loadKeyringCache({ spaceId: 'space-a', idb })
+    ).resolves.toEqual({ n: 1 })
+    await expect(
+      loadKeyringCache({ spaceId: 'space-b', idb })
+    ).resolves.toEqual({ n: 2 })
+  })
+
+  it('survives clearPersistedSession (logout leaves the cache intact)', async () => {
+    const idb = createFakeIdb()
+    await saveSessionRecord({ record: { session: true }, idb })
+    await saveKeyringCache({
+      spaceId: 'space-a',
+      record: { keyring: true },
+      idb
+    })
+
+    await clearPersistedSession({ idb })
+
+    await expect(loadSessionRecord({ idb })).resolves.toBeNull()
+    await expect(
+      loadKeyringCache({ spaceId: 'space-a', idb })
+    ).resolves.toEqual({ keyring: true })
   })
 })

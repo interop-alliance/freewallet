@@ -15,7 +15,7 @@ import { authStyles } from '@/styles/appStyles'
 import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
-import { initSessionFromSecret } from '@/session/initSession'
+import { loginWithPassphrase } from '@/session/initSession'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { registerWallet } from '@/lib/registerWallet'
 import type { AuthLocationState } from '@/types/auth'
@@ -52,10 +52,10 @@ export function LoginPage() {
       if (!passphrase) {
         return
       }
-      const { session, userExists } = await initSessionFromSecret({
-        secret: passphrase
+      const { session, userExists } = await loginWithPassphrase({
+        passphrase
       })
-      if (!userExists) {
+      if (!session || !userExists) {
         return navigate('/signup', {
           state: { authMessageKey: 'auth.errors.profileNotFound' }
         })

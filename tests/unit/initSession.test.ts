@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * Unit tests for the session bootstrap (`src/session/initSession.ts`):
- * passphrase-to-identity derivation via CapabilityAgent, the zcap-agent and
+ * seed-to-identity derivation via CapabilityAgent, the zcap-agent and
  * key-material wiring on the profile, guest vs regular sessions, the `full`
  * tier stamp, `userExists` reporting, and KMS keystore provisioning (wired
  * when configured, non-fatal on failure). The network-touching boundaries --
@@ -35,21 +35,24 @@ vi.mock('@/stores/storageManager', () => ({
 import { ensureKeystore } from '@/lib/kms'
 import { StorageManager } from '@/stores/storageManager'
 import {
-  agentsFromSecret,
+  agentsFromSeed,
   initGuestSession,
-  initSessionFromSecret
+  initSessionFromSeed
 } from '@/session/initSession'
 
-const SECRET = 'correct horse battery staple'
 const KEYSTORE_ID = `${KMS_SERVER_URL}/keystores/z6QkKeystore`
+
+function randomSeed(): Uint8Array {
+  return crypto.getRandomValues(new Uint8Array(32))
+}
 
 /**
  * Independently derives the did:key the bootstrap should assign, using the
- * exact CapabilityAgent parameters `agentsFromSecret` uses.
+ * exact CapabilityAgent parameters `agentsFromSeed` uses.
  */
-async function expectedDid(secret: string | Uint8Array): Promise<string> {
-  const agent = await CapabilityAgent.fromSecret({
-    secret,
+async function expectedDid(seed: Uint8Array): Promise<string> {
+  const agent = await CapabilityAgent.fromSeed({
+    seed,
     handle: 'bootstrap',
     keyName: 'boostrap-key'
   })
@@ -74,12 +77,13 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('agentsFromSecret', () => {
+describe('agentsFromSeed', () => {
   it('derives the identity, zcap client, and key-agreement material', async () => {
+    const seed = randomSeed()
     const { keyAgent, zcapClient, keyAgreementKey, keyResolver } =
-      await agentsFromSecret({ secret: SECRET })
+      await agentsFromSeed({ seed })
 
-    expect(keyAgent.id).toBe(await expectedDid(SECRET))
+    expect(keyAgent.id).toBe(await expectedDid(seed))
     expect(keyAgent.id).toMatch(/^did:key:z6Mk/)
     expect(zcapClient).toBeInstanceOf(ZcapClient)
     // The X25519 key-agreement key is derived under the same did:key DID.
@@ -87,16 +91,17 @@ describe('agentsFromSecret', () => {
     expect(keyResolver).toBeInstanceOf(Function)
   })
 
-  it('is deterministic: the same secret yields the same did:key', async () => {
-    const first = await agentsFromSecret({ secret: SECRET })
-    const second = await agentsFromSecret({ secret: SECRET })
+  it('is deterministic: the same seed yields the same did:key', async () => {
+    const seed = randomSeed()
+    const first = await agentsFromSeed({ seed })
+    const second = await agentsFromSeed({ seed })
     expect(second.keyAgent.id).toBe(first.keyAgent.id)
     expect(second.keyAgreementKey.id).toBe(first.keyAgreementKey.id)
   })
 
   it('resolves its own key-agreement key id and rejects any other', async () => {
-    const { keyAgreementKey, keyResolver } = await agentsFromSecret({
-      secret: SECRET
+    const { keyAgreementKey, keyResolver } = await agentsFromSeed({
+      seed: randomSeed()
     })
     const resolved = await keyResolver({ id: keyAgreementKey.id })
     expect(resolved).toMatchObject({
@@ -110,14 +115,15 @@ describe('agentsFromSecret', () => {
   })
 })
 
-describe('initSessionFromSecret', () => {
+describe('initSessionFromSeed', () => {
   it('assigns the did:key identity and wires the profile', async () => {
-    const { session } = await initSessionFromSecret({
-      secret: SECRET,
+    const seed = randomSeed()
+    const { session } = await initSessionFromSeed({
+      seed,
       email: 'user@example.test'
     })
 
-    expect(session.user.id).toBe(await expectedDid(SECRET))
+    expect(session.user.id).toBe(await expectedDid(seed))
     expect(session.user.email).toBe('user@example.test')
     expect(session.profile.keyAgent?.id).toBe(session.user.id)
     expect(session.profile.zcapClient).toBeInstanceOf(ZcapClient)
@@ -126,20 +132,37 @@ describe('initSessionFromSecret', () => {
     expect(session.storage).toBe(fakeStorage)
   })
 
-  it('is deterministic across logins with the same secret', async () => {
-    const first = await initSessionFromSecret({ secret: SECRET })
-    const second = await initSessionFromSecret({ secret: SECRET })
+  it('is deterministic across logins with the same seed', async () => {
+    const seed = randomSeed()
+    const first = await initSessionFromSeed({ seed })
+    const second = await initSessionFromSeed({ seed })
     expect(second.session.user.id).toBe(first.session.user.id)
   })
 
   it('stamps a fresh login as the `full` tier and not a guest', async () => {
-    const { session } = await initSessionFromSecret({ secret: SECRET })
+    const { session } = await initSessionFromSeed({ seed: randomSeed() })
     expect(session.tier).toBe('full')
     expect(session.isGuest).toBe(false)
   })
 
+  it('carries the data seed on a non-guest profile', async () => {
+    const seed = randomSeed()
+    const { session } = await initSessionFromSeed({ seed })
+    expect(Array.from(session.profile.dataSeed as Uint8Array)).toEqual(
+      Array.from(seed)
+    )
+  })
+
+  it('omits the data seed on a guest profile', async () => {
+    const { session } = await initSessionFromSeed({
+      seed: randomSeed(),
+      isGuest: true
+    })
+    expect(session.profile.dataSeed).toBeUndefined()
+  })
+
   it('passes the derived user and profile to the storage bootstrap', async () => {
-    const { session } = await initSessionFromSecret({ secret: SECRET })
+    const { session } = await initSessionFromSeed({ seed: randomSeed() })
     expect(StorageManager.initStorageClients).toHaveBeenCalledWith({
       user: session.user,
       profile: session.profile,
@@ -152,12 +175,12 @@ describe('initSessionFromSecret', () => {
       storage: fakeStorage,
       userExists: true
     })
-    const { userExists } = await initSessionFromSecret({ secret: SECRET })
+    const { userExists } = await initSessionFromSeed({ seed: randomSeed() })
     expect(userExists).toBe(true)
   })
 
   it('reports a brand-new identity as not existing', async () => {
-    const { userExists } = await initSessionFromSecret({ secret: SECRET })
+    const { userExists } = await initSessionFromSeed({ seed: randomSeed() })
     expect(userExists).toBe(false)
   })
 
@@ -165,14 +188,14 @@ describe('initSessionFromSecret', () => {
     vi.mocked(StorageManager.initStorageClients).mockRejectedValue(
       new Error('storage unreachable')
     )
-    await expect(initSessionFromSecret({ secret: SECRET })).rejects.toThrow(
+    await expect(initSessionFromSeed({ seed: randomSeed() })).rejects.toThrow(
       'storage unreachable'
     )
   })
 
   describe('KMS keystore provisioning', () => {
     it('provisions a keystore and binds it onto the profile', async () => {
-      const { session } = await initSessionFromSecret({ secret: SECRET })
+      const { session } = await initSessionFromSeed({ seed: randomSeed() })
 
       expect(ensureKeystore).toHaveBeenCalledWith({
         kmsServerUrl: KMS_SERVER_URL,
@@ -188,7 +211,7 @@ describe('initSessionFromSecret', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       vi.mocked(ensureKeystore).mockRejectedValue(new Error('kms down'))
 
-      const { session } = await initSessionFromSecret({ secret: SECRET })
+      const { session } = await initSessionFromSeed({ seed: randomSeed() })
 
       expect(session.profile.keystoreAgent).toBeUndefined()
       expect(session.tier).toBe('full')
@@ -200,7 +223,7 @@ describe('initSessionFromSecret', () => {
 
     it('skips the KMS entirely when none is configured', async () => {
       kmsServerUrl = undefined
-      const { session } = await initSessionFromSecret({ secret: SECRET })
+      const { session } = await initSessionFromSeed({ seed: randomSeed() })
       expect(ensureKeystore).not.toHaveBeenCalled()
       expect(session.profile.keystoreAgent).toBeUndefined()
     })

@@ -20,6 +20,8 @@ import type { ControllerProfile, User } from '@/types/auth'
 import {
   DID_DOCUMENT_RESOURCE,
   ID_COLLECTION,
+  KEYRING_COLLECTION,
+  KEYRING_RESOURCE,
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
@@ -739,4 +741,157 @@ export class WASRemoteStore {
       throw new Error('Failed to import remote space.', { cause: err })
     }
   }
+}
+
+/**
+ * The keyring v2 unlock Space (`src/session/keyring.ts`) is a second, minimal
+ * WAS Space controlled by the passphrase-derived unlock identity -- completely
+ * separate from the wallet data Space, so these are standalone functions rather
+ * than `WASRemoteStore` methods (the store is bound to the data identity). Each
+ * builds its own `WasClient` over the unlock agent's `zcapClient`, whose
+ * invocation signer is the unlock root key (full-tier root invocation, no
+ * capability attached -- the same posture the data Space uses in the full
+ * tier). The one resource is a plaintext JSON document (its keyring payload is
+ * already ciphertext), so no encryption provider is wired in -- and the
+ * read/write handles pass the explicit `{ encryption: 'plaintext' }` override.
+ * The override is load-bearing: without it, the client decides plaintext vs
+ * encrypted by reading the collection description, and when the unlock Space
+ * does not exist yet (every keyring lookup for a fresh passphrase) that read
+ * 404s and the client refuses to guess, throwing an EncryptionError instead of
+ * surfacing the miss as a 404-shaped `null`.
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}   built on the unlock agent's signer
+ * @returns {WasClient}
+ */
+function unlockSpaceClient({
+  storageServerUrl,
+  zcapClient
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+}): WasClient {
+  return new WasClient({
+    serverUrl: storageServerUrl,
+    zcapClient
+  })
+}
+
+/**
+ * Ensures the unlock Space and its single `keyring` collection exist
+ * (upsert -- idempotent). Runs with the unlock root capability, so `force`
+ * lets the collection upsert treat a 404 from the pre-merge describe as
+ * genuinely absent rather than unreadable.
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param options.controller {string}   the unlock did:key
+ * @returns {Promise<void>}
+ */
+export async function ensureUnlockSpace({
+  storageServerUrl,
+  zcapClient,
+  spaceId,
+  controller
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+  spaceId: string
+  controller: string
+}): Promise<void> {
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  const space = was.space(spaceId)
+  await space.configure({ name: 'Freewallet Keyring', controller })
+  await space
+    .collection(KEYRING_COLLECTION.id)
+    .configure({ name: KEYRING_COLLECTION.name, force: true })
+}
+
+/**
+ * Reads the keyring record from the unlock Space, or returns `null` when it
+ * does not exist yet (a missing Space, collection, or resource all surface as
+ * a 404-shaped `null` from `resource.get()`). A network / unreachable error
+ * propagates, so callers can distinguish "no keyring" from "could not check".
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}
+ * @param options.spaceId {string}   the unlock Space id
+ * @returns {Promise<unknown | null>}
+ */
+export async function getUnlockKeyring({
+  storageServerUrl,
+  zcapClient,
+  spaceId
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+  spaceId: string
+}): Promise<unknown | null> {
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  const result = await was
+    .space(spaceId)
+    .collection(KEYRING_COLLECTION.id, { encryption: 'plaintext' })
+    .resource(KEYRING_RESOURCE)
+    .get()
+  return result === null ? null : result
+}
+
+/**
+ * Writes (upserts) the keyring record into the unlock Space as a JSON
+ * document. Serialized to bytes with an explicit `application/json`
+ * content-type (mirroring `putIdResource`).
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param options.record {object}   the keyring record
+ * @returns {Promise<void>}
+ */
+export async function putUnlockKeyring({
+  storageServerUrl,
+  zcapClient,
+  spaceId,
+  record
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+  spaceId: string
+  record: object
+}): Promise<void> {
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  const body = new TextEncoder().encode(JSON.stringify(record))
+  await was
+    .space(spaceId)
+    .collection(KEYRING_COLLECTION.id, { encryption: 'plaintext' })
+    .resource(KEYRING_RESOURCE)
+    .put(body, { contentType: 'application/json' })
+}
+
+/**
+ * Deletes the whole unlock Space (what retires an old passphrase on a
+ * passphrase change). `space.delete()` is idempotent, so an already-absent
+ * Space is a success.
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}
+ * @param options.spaceId {string}   the unlock Space id
+ * @returns {Promise<void>}
+ */
+export async function deleteUnlockSpace({
+  storageServerUrl,
+  zcapClient,
+  spaceId
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+  spaceId: string
+}): Promise<void> {
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  await was.space(spaceId).delete()
 }

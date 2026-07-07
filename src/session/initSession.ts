@@ -13,19 +13,20 @@ import type { ControllerProfile, Session, User } from '@/types/auth'
 import { KMS_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
 import { StorageManager } from '@/stores/storageManager'
+import { fetchKeyringSeed } from '@/session/keyring'
 
 /**
- * Creates bootstrap CapabilityAgent and ZcapClient instances from a secret
- * passphrase, plus the X25519 key agreement key used for encrypted storage.
- * These will be used to manage DIDs, sign zCaps, interface with storage, etc.
+ * Creates bootstrap CapabilityAgent and ZcapClient instances from an
+ * already-derived 32-byte seed, plus the X25519 key agreement key used for
+ * encrypted storage. These will be used to manage DIDs, sign zCaps, interface
+ * with storage, etc. The seed enters `CapabilityAgent.fromSeed` under the
+ * fixed `'bootstrap'` / `'boostrap-key'` names (the typo is load-bearing --
+ * every account's data identity derives through these exact names, so they
+ * can never change without stranding existing wallets).
  */
-export async function agentsFromSecret({
-  secret
-}: {
-  secret: string | Uint8Array
-}) {
-  const keyAgent = await CapabilityAgent.fromSecret({
-    secret,
+export async function agentsFromSeed({ seed }: { seed: Uint8Array }) {
+  const keyAgent = await CapabilityAgent.fromSeed({
+    seed,
     handle: 'bootstrap',
     keyName: 'boostrap-key'
   })
@@ -72,8 +73,11 @@ export async function initGuestSession() {
 
   const guestEmail = 'guest@example.com'
 
-  const { session } = await initSessionFromSecret({
-    secret: randomGuestSecret,
+  // The random 32 bytes are used directly as the data seed (no salted-hash
+  // step). A guest identity is ephemeral and never keyring-bound, so the
+  // derivation change relative to a passphrase login is harmless here.
+  const { session } = await initSessionFromSeed({
+    seed: randomGuestSecret,
     email: guestEmail,
     isGuest: true
   })
@@ -82,22 +86,34 @@ export async function initGuestSession() {
 }
 
 /**
- * Initializes a session (user, profile with zcap agents, storage manager)
- * for a given email and passphrase.
+ * Initializes a session (user, profile with zcap agents, storage manager) from
+ * an already-derived 32-byte data seed. This is the shared core behind the
+ * keyring path (`loginWithPassphrase`, `SignupPage`) and the guest bootstrap:
+ * everything downstream of "data seed in hand" -- KMS keystore provisioning,
+ * storage clients, the `full` tier stamp -- is identical regardless of how the
+ * seed was obtained.
+ *
+ * For non-guest sessions the seed is carried on `profile.dataSeed` (so Settings
+ * can re-bind the passphrase); guests skip it (a guest identity is ephemeral
+ * and never keyring-bound).
+ *
+ * @param options {object}
+ * @param options.seed {Uint8Array}   the 32-byte data seed
+ * @param [options.email] {string}
+ * @param [options.isGuest] {boolean}
+ * @returns {Promise<{ session: Session, userExists: boolean }>}
  */
-export async function initSessionFromSecret({
+export async function initSessionFromSeed({
+  seed,
   email,
-  secret,
   isGuest = false
 }: {
+  seed: Uint8Array
   email?: string
-  secret: string | Uint8Array
   isGuest?: boolean
 }) {
   const { keyAgent, zcapClient, keyAgreementKey, keyResolver } =
-    await agentsFromSecret({
-      secret: secret
-    })
+    await agentsFromSeed({ seed })
 
   // Ensure a KMS keystore exists for this controller (list-by-controller,
   // create on first login) and bind a KeystoreAgent to it. Guests skip the
@@ -130,6 +146,9 @@ export async function initSessionFromSecret({
     keyAgreementKey: keyAgreementKey as IKeyAgreementKey,
     keyResolver
   }
+  if (!isGuest) {
+    profile.dataSeed = seed
+  }
 
   const { storage, userExists } = await StorageManager.initStorageClients({
     user,
@@ -139,5 +158,60 @@ export async function initSessionFromSecret({
 
   const session = { user, profile, storage, isGuest, tier: 'full' } as Session
 
+  return { session, userExists }
+}
+
+/**
+ * Passphrase login (keyring v2). The keyring is the only login path: the
+ * passphrase derives an unlock identity that locates and unwraps the account's
+ * real data seed. Two branches:
+ *
+ * - **Keyring hit**: the passphrase's unlock identity located a keyring record;
+ *   the session is built from the unwrapped data seed (`initSessionFromSeed`).
+ *   The unwrapped controller is sanity-checked against the derived did:key -- a
+ *   mismatch means a corrupt record and throws rather than proceeding under the
+ *   wrong identity. Returns `{ session, userExists }` -- a hit whose data Space
+ *   is missing legitimately reports `userExists: false` (a half-finished
+ *   signup), and the caller sends it to signup, which rebinds.
+ * - **Miss**: no keyring anywhere, so there is no account. Returns
+ *   `{ session: null, userExists: false }` and the caller routes to signup.
+ *
+ * `fetchKeyringSeed` rethrows when the remote could not be reached (so the
+ * caller's storage-unreachable handling fires rather than misreading it as "no
+ * account"), and all storage/network errors from session init propagate
+ * unchanged.
+ *
+ * @param options {object}
+ * @param options.passphrase {string}
+ * @param [options.email] {string}
+ * @param [options.idb] {IDBFactory}   first-party IndexedDB for the keyring
+ *   cache (CHAPI popups thread the Storage Access API handle here)
+ * @returns {Promise<{ session: Session | null, userExists: boolean }>}
+ */
+export async function loginWithPassphrase({
+  passphrase,
+  email,
+  idb
+}: {
+  passphrase: string
+  email?: string
+  idb?: IDBFactory
+}): Promise<{ session: Session | null; userExists: boolean }> {
+  const found = await fetchKeyringSeed({ passphrase, idb })
+
+  if (!found) {
+    return { session: null, userExists: false }
+  }
+
+  const { session, userExists } = await initSessionFromSeed({
+    seed: found.seed,
+    email
+  })
+  if (session.user.id !== found.controller) {
+    throw new Error(
+      'Corrupt keyring record: the unwrapped controller does not match ' +
+        'the derived identity.'
+    )
+  }
   return { session, userExists }
 }

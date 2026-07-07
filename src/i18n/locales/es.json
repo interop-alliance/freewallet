@@ -73,7 +73,17 @@
     "handleLabel": "Nombre de usuario preferido",
     "handleHint": "El nombre de usuario que ven los sitios cuando inicia sesión con su billetera. Se guarda como una credencial autoemitida; déjelo en blanco para quitarlo.",
     "handleSaved": "Identificador de inicio de sesión guardado.",
-    "handleRequiresFullSession": "Inicie sesión con su frase de contraseña para establecer un identificador de inicio de sesión."
+    "handleRequiresFullSession": "Inicie sesión con su frase de contraseña para establecer un identificador de inicio de sesión.",
+    "passphraseSection": "Frase de contraseña",
+    "changePassphrase": "Cambiar frase de contraseña",
+    "currentPassphrase": "Frase de contraseña actual",
+    "newPassphrase": "Nueva frase de contraseña",
+    "changingPassphrase": "Cambiando...",
+    "passphraseChanged": "Frase de contraseña cambiada. La frase de contraseña anterior ya no desbloquea esta billetera.",
+    "passphraseChangedNotRetired": "Frase de contraseña cambiada. La frase de contraseña anterior no se pudo retirar por completo -- puede que aún desbloquee esta billetera.",
+    "passphraseIncorrect": "La frase de contraseña actual es incorrecta.",
+    "passphraseChangeFailed": "No se pudo cambiar su frase de contraseña. Inténtelo de nuevo.",
+    "passphraseRequiresFullSession": "Inicie sesión con su frase de contraseña para cambiarla."
   },
   "landing": {
     "title": "Freewallet",

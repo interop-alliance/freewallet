@@ -93,6 +93,9 @@ export interface ControllerProfile {
     updateKey: WebvhUpdateKey
     stagedKey: WebvhStagedKey
   }
+  // The 32-byte data seed behind `keyAgent`, held in memory in the `full` tier
+  // so Settings can re-bind the passphrase (keyring v2). Never persisted.
+  dataSeed?: Uint8Array
 }
 
 /**

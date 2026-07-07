@@ -176,7 +176,9 @@ export async function loadSessionRecord({
 
 /**
  * Deletes the persisted session: the record *and* the key pair. Called on
- * logout -- the next login mints a fresh session key.
+ * logout -- the next login mints a fresh session key. The keyring cache
+ * entries (see `saveKeyringCache`) are deliberately left intact so that
+ * offline / no-WAS logins keep working across a logout.
  *
  * @param [options] {object}
  * @param [options.idb] {IDBFactory}
@@ -195,6 +197,94 @@ export async function clearPersistedSession({
   await withSessionStore(
     'readwrite',
     store => store.delete(KEY_PAIR_RECORD),
+    idb
+  )
+}
+
+/**
+ * The object-store key under which a Space's keyring record is cached. Keyed by
+ * the unlock Space id, so several accounts (several unlock identities) can hold
+ * caches side by side in the shared session database.
+ *
+ * @param spaceId {string}
+ * @returns {string}
+ */
+function keyringCacheKey(spaceId: string): string {
+  return `keyring/${spaceId}`
+}
+
+/**
+ * Caches a keyring record locally (keyed by its unlock Space id) so that
+ * offline and no-WAS logins can unwrap the data seed without a remote read.
+ * The record is the ciphertext-bearing keyring document; it is inert without
+ * the passphrase that derives the unlock key-agreement key.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param options.record {unknown}   the keyring record to cache
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function saveKeyringCache({
+  spaceId,
+  record,
+  idb
+}: {
+  spaceId: string
+  record: unknown
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.put(record, keyringCacheKey(spaceId)),
+    idb
+  )
+}
+
+/**
+ * Loads a cached keyring record by its unlock Space id, or `null` if none is
+ * cached.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<unknown | null>}
+ */
+export async function loadKeyringCache({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<unknown | null> {
+  const stored = await withSessionStore(
+    'readonly',
+    store => store.get(keyringCacheKey(spaceId)),
+    idb
+  )
+  return stored ?? null
+}
+
+/**
+ * Deletes a cached keyring record by its unlock Space id. Used when the
+ * account's unlock identity changes (a passphrase change retires the old
+ * unlock Space and its cache).
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deleteKeyringCache({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.delete(keyringCacheKey(spaceId)),
     idb
   )
 }

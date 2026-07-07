@@ -128,9 +128,15 @@ test('a cross-site popup recognizes the saved login via the storage-access handl
   // prior grant without a gesture, else after the button click.
   const restored = frame.getByText(`Signed in as ${email}`)
   const useSaved = frame.getByRole('button', { name: 'Use saved login' })
-  await expect(restored.or(useSaved)).toBeVisible({ timeout: 15_000 })
+  await expect(restored.or(useSaved)).toBeVisible({ timeout: 30_000 })
   if (!(await restored.isVisible())) {
-    await useSaved.click()
+    // The silent restore can complete between the visibility check and the
+    // click, unmounting the button in favor of the recognized state -- race
+    // the click against that outcome rather than insisting on the button.
+    await Promise.race([
+      useSaved.click().catch(() => undefined),
+      restored.waitFor({ state: 'visible', timeout: 15_000 })
+    ])
   }
   await expect(restored).toBeVisible()
 

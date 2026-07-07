@@ -147,7 +147,16 @@ test('login VPR provisions a collection and returns Space-rooted grants', async 
   )!
   expect(spaceGrant.allowedAction).toEqual(['GET', 'HEAD'])
 
-  // The login is recorded in history.
+  // The login is recorded in history. The popup page itself has no navigation
+  // (after respondWith it stays on its terminal sharing screen; in a real
+  // CHAPI flow the mediator closes it), so log in to the main app shell: it
+  // opens the same per-user local replica the popup wrote the entry to, with
+  // the vault unlocked. Login pays the keyring's deliberately slow PBKDF2
+  // unlock derivation, so it can run past the default 5s assertion timeout.
+  await page.goto('/#/login')
+  await page.locator('input[type="password"]').fill(passphrase)
+  await page.getByRole('button', { name: 'Log in', exact: true }).click()
+  await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
   await goToHistory(page)
   await expectHistoryEntry(page, /Logged in to https:\/\/app\.example/)
 })

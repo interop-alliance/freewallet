@@ -121,6 +121,29 @@ export const DID_LOG_RESOURCE = 'did.jsonl'
 // only when `VITE_ENABLE_DID_WEBVH` is exactly the string `'false'`.
 export const ENABLE_DID_WEBVH = env.VITE_ENABLE_DID_WEBVH !== 'false'
 
+/**
+ * PBKDF2 parameters for the keyring unlock derivation
+ * (`unlockSeed = PBKDF2(passphrase)`). Version 1 pins exactly these
+ * parameters; the keyring record's `version` field records which set produced
+ * it, so changing any of them (iterations, hash, salt) requires minting a new
+ * record version rather than silently breaking existing unlock derivations.
+ * The salt is a fixed app-wide constant -- login stays passphrase-only, with
+ * no email (or other) input mixed into the derivation.
+ */
+export const KEYRING_KDF = {
+  version: 1,
+  iterations: 600_000,
+  hash: 'SHA-256',
+  salt: 'freewallet/keyring/unlock/v1'
+} as const
+
+// The unlock Space's single collection (holds the one keyring record), and the
+// record's resource id within it. The unlock Space is a minimal second Space,
+// controlled by the passphrase-derived unlock identity and separate from the
+// wallet data Space.
+export const KEYRING_COLLECTION = { id: 'keyring', name: 'Keyring' }
+export const KEYRING_RESOURCE = 'keyring.json'
+
 export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
 // CORS proxy for fetching remote credential URLs from AddCredentialPage.
 export const CORS_PROXY_URL =

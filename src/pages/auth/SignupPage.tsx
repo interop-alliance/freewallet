@@ -28,7 +28,8 @@ import { LanguageSelector } from '@/components/LanguageSelector'
 import { ThemePicker } from '@/components/ThemePicker'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
-import { initSessionFromSecret } from '@/session/initSession'
+import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
+import { bindPassphrase } from '@/session/keyring'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { useAuthStore } from '@/stores/authStore'
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
@@ -80,18 +81,37 @@ export function SignupPage() {
     setIsSubmitting(true)
     setErrorKey(null)
     try {
-      // initSessionFromSecret builds the session's StorageManager and reports
-      // whether this identity already has a wallet (locally or remote).
-      const { session, userExists } = await initSessionFromSecret({
-        email: email || undefined,
-        secret: passphrase
+      // Probe for an existing account first. loginWithPassphrase resolves the
+      // passphrase through the keyring and reports whether this identity already
+      // has a wallet; probing (rather than binding a raw seed straight away) is
+      // what prevents a re-signup with an existing passphrase from overwriting
+      // that account's keyring and orphaning the wallet.
+      const probe = await loginWithPassphrase({
+        passphrase,
+        email: email || undefined
       })
-      if (userExists) {
+      if (probe.userExists) {
         return navigate('/login', {
           state: { authMessageKey: 'auth.errors.profileExists' }
         })
       }
-      // This is a new user
+
+      // This is a new user. The data identity is a random 32-byte seed
+      // (unrecoverable without the keyring), so bind the passphrase BEFORE
+      // creating the data Space: an account whose keyring failed to publish
+      // must not be created, and binding first means a failed signup leaves no
+      // orphaned data Space behind.
+      const seed = crypto.getRandomValues(new Uint8Array(32))
+      const { session } = await initSessionFromSeed({
+        seed,
+        email: email || undefined
+      })
+      await bindPassphrase({
+        seed,
+        controller: session.user.id,
+        passphrase
+      })
+
       // Create Space and init collections
       await session.storage.ensureUserCollections({
         user: session.user,

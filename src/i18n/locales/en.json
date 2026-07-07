@@ -73,7 +73,17 @@
     "handleLabel": "Preferred username",
     "handleHint": "The username sites see when you log in with your wallet. Stored as a self-issued credential; leave blank to unset.",
     "handleSaved": "Login handle saved.",
-    "handleRequiresFullSession": "Log in with your passphrase to set a login handle."
+    "handleRequiresFullSession": "Log in with your passphrase to set a login handle.",
+    "passphraseSection": "Passphrase",
+    "changePassphrase": "Change passphrase",
+    "currentPassphrase": "Current passphrase",
+    "newPassphrase": "New passphrase",
+    "changingPassphrase": "Changing...",
+    "passphraseChanged": "Passphrase changed. The old passphrase no longer unlocks this wallet.",
+    "passphraseChangedNotRetired": "Passphrase changed. The old passphrase could not be fully retired -- it may still unlock this wallet.",
+    "passphraseIncorrect": "The current passphrase is incorrect.",
+    "passphraseChangeFailed": "Could not change your passphrase. Please try again.",
+    "passphraseRequiresFullSession": "Log in with your passphrase to change it."
   },
   "landing": {
     "title": "Freewallet",

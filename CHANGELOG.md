@@ -60,6 +60,32 @@
   longer permanently freezes the published DID log. Relies on the List Keys
   `keyUrl` projection (was-teaching-server's K5 fix, typed in
   `@interop/webkms-client` 14.7.1).
+- **Keyring v2: the wallet identity is decoupled from the passphrase.** The
+  passphrase now derives an _unlock identity_ (PBKDF2-stretched, 600k
+  iterations of SHA-256 with a fixed app salt -- a slow KDF the old chain
+  never had) that locates and unwraps the real _data identity_ from a
+  **keyring record**: the data seed wrapped (JWE, via the wallet's existing
+  EDV cipher stack) to the unlock key, stored in the unlock identity's own
+  minimal WAS Space (`keyring/keyring.json`) and cached locally in the
+  `freewallet-session` database (so offline and no-WAS logins keep working;
+  the remote copy is the source of truth and makes the passphrase portable
+  across devices). The data seed is **random 32 bytes** -- never derivable
+  from any passphrase -- generated at signup and bound to the passphrase
+  before the data Space is created (a failed keyring publish aborts the
+  signup rather than minting an unrecoverable account). Login is unified
+  behind `loginWithPassphrase` (keyring hit, or no account) across the login
+  page, signup probe, and both CHAPI popup pages (which thread the
+  first-party Storage Access API IndexedDB handle into the keyring cache).
+  Everything downstream of the data seed -- session tiers, vault KAK, KMS
+  keystore, did:web/did:webvh, sync -- is untouched, and guests never touch
+  the keyring. **Breaking (fresh start):** the keyring is the only login
+  path; accounts created before it (whose identity was derived directly from
+  the passphrase) no longer resolve and get "profile does not exist" at
+  login. There is no compatibility flag.
+- **Passphrase change.** A new full-tier Settings action re-wraps the data
+  seed under the new passphrase's unlock identity and deletes the old unlock
+  Space, which **retires the old passphrase**: since data seeds are random,
+  nothing about the wallet is derivable from a retired passphrase.
 
 ### Changed
 

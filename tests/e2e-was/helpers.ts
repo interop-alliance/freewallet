@@ -18,14 +18,21 @@ export async function signupViaWizard(page: Page, testInfo: TestInfo) {
 
   await page.goto('/#/signup')
   await page.locator('input[type="password"]').fill(passphrase)
-  await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled()
+  // The strength meter enables Next only after it scores the passphrase;
+  // under a parallel-worker CPU squeeze that can outlast the default 5s.
+  await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled({
+    timeout: 15_000
+  })
   await page.getByRole('button', { name: 'Next' }).click()
   await page.locator('input[type="email"]').fill(email)
   await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled()
   await page.getByRole('button', { name: 'Next' }).click()
   await expect(page).toHaveURL(/#\/signup\?.*step=storage/)
   await page.getByRole('button', { name: 'Create Wallet' }).click()
-  await expect(page).toHaveURL(/#\/dashboard/)
+  // Signup binds the keyring (a deliberately slow PBKDF2 derivation) on top of
+  // the KMS keystore and did:web/did:webvh provisioning, so the redirect to the
+  // dashboard can run past the default 5s assertion timeout.
+  await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
 
   return { passphrase, email }
 }

@@ -698,8 +698,7 @@ export async function repairKeyBindings({
  * Rotation changes no session zcap and must not extend the session's TTL, so
  * this patches only the record's `didWebvh` field rather than re-minting the
  * whole record via `persistDelegatedSession`. A no-op when no record is stored
- * (`VITE_REQUIRE_PASSPHRASE_FOR_VAULT` deployments still persist zcaps, but a
- * guest or never-persisted session has none) and best-effort otherwise: a
+ * (a guest or never-persisted session has none) and best-effort otherwise: a
  * refresh failure never rolls back a rotation the server already accepted.
  *
  * @param options {object}

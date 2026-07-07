@@ -35,11 +35,13 @@ test.describe('Refresh-surviving delegated session', () => {
     await goToStorage(page)
 
     // Re-entering the passphrase upgrades back to a full session: the
-    // notice disappears and the vault decrypts again.
+    // notice disappears and the vault decrypts again. Login now pays the
+    // keyring's deliberately slow PBKDF2 unlock derivation plus a remote
+    // keyring fetch, so it can run past the default 5s assertion timeout.
     await page.goto('/#/login')
     await page.locator('input[type="password"]').fill(passphrase)
     await page.getByRole('button', { name: 'Log in', exact: true }).click()
-    await expect(page).toHaveURL(/#\/dashboard/)
+    await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
     await expect(page.getByText(/vault is locked/)).toHaveCount(0)
     await expect(
       page.getByRole('link', { name: 'E2E Test Credential' })

@@ -19,10 +19,16 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { useInfoBox } from '@/hooks/useInfoBox'
 import { getFileUrl } from '@interop/did-method-webvh'
 import { rotateWebvhUpdateKey } from '@/lib/didWebvh'
+import { changePassphrase, WrongPassphraseError } from '@/session/keyring'
+import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
 import { dashboardStyles } from '@/styles/appStyles'
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
-import { KMS_SERVER_URL, SYNCED_COLLECTIONS } from '@/app.config'
+import {
+  KMS_SERVER_URL,
+  PASSWORD_RULES,
+  SYNCED_COLLECTIONS
+} from '@/app.config'
 import { useSyncStatusStore, type SyncStatus } from '@/stores/syncStatusStore'
 import {
   findLoginCredential,
@@ -94,6 +100,60 @@ export function SettingsPage() {
       console.error('Could not save the login handle:', err)
     } finally {
       setHandleSaving(false)
+    }
+  }
+  // Passphrase keyring (keyring v2) state. The whole section is shown for
+  // non-guest sessions; changing the passphrase re-binds the data seed under a
+  // new unlock identity, so it needs the full (passphrase) tier where the seed
+  // is in memory.
+  const keyringSectionVisible = !session?.isGuest
+  const canChangePassphrase =
+    session?.tier === 'full' && !!session?.profile?.dataSeed
+  const [oldPassphrase, setOldPassphrase] = useState('')
+  const [newPassphrase, setNewPassphrase] = useState('')
+  const [newPassphraseScore, setNewPassphraseScore] = useState(0)
+  const [changingPassphrase, setChangingPassphrase] = useState(false)
+  // `null` = not yet run; a boolean carries the last change's
+  // `oldPassphraseRetired` so the success copy can differ.
+  const [passphraseChangeSuccess, setPassphraseChangeSuccess] = useState<
+    boolean | null
+  >(null)
+  const [passphraseChangeError, setPassphraseChangeError] = useState<
+    'incorrect' | 'failed' | null
+  >(null)
+  const newPassphraseLengthPassed =
+    newPassphrase.length >= PASSWORD_RULES.minlength
+  const newPassphraseValid =
+    newPassphraseLengthPassed && newPassphraseScore >= PASSWORD_RULES.minscore
+
+  const handleChangePassphrase = async () => {
+    const profile = session?.profile
+    const seed = profile?.dataSeed
+    if (!session || !profile || !seed) {
+      return
+    }
+    setChangingPassphrase(true)
+    setPassphraseChangeSuccess(null)
+    setPassphraseChangeError(null)
+    try {
+      const { oldPassphraseRetired } = await changePassphrase({
+        seed,
+        controller: session.user.id,
+        oldPassphrase,
+        newPassphrase
+      })
+      setOldPassphrase('')
+      setNewPassphrase('')
+      setPassphraseChangeSuccess(oldPassphraseRetired)
+    } catch (err) {
+      if (err instanceof WrongPassphraseError) {
+        setPassphraseChangeError('incorrect')
+      } else {
+        console.error('Could not change the passphrase:', err)
+        setPassphraseChangeError('failed')
+      }
+    } finally {
+      setChangingPassphrase(false)
     }
   }
   // KMS keystore state: a keystore is provisioned at login whenever a KMS
@@ -272,6 +332,109 @@ export function SettingsPage() {
             </Typography>
           )}
         </Stack>
+
+        {keyringSectionVisible && (
+          <>
+            <Divider />
+
+            <Stack sx={{ gap: 1 }}>
+              <Typography variant="h6">
+                {t('settings.passphraseSection')}
+              </Typography>
+
+              {canChangePassphrase ? (
+                <Stack sx={{ gap: 1.5, mt: 1, maxWidth: 360 }}>
+                  <TextField
+                    size="small"
+                    type="password"
+                    label={t('settings.currentPassphrase')}
+                    autoComplete="current-password"
+                    value={oldPassphrase}
+                    onChange={event => {
+                      setOldPassphrase(event.target.value)
+                      setPassphraseChangeSuccess(null)
+                      setPassphraseChangeError(null)
+                    }}
+                  />
+                  <TextField
+                    size="small"
+                    type="password"
+                    label={t('settings.newPassphrase')}
+                    autoComplete="new-password"
+                    value={newPassphrase}
+                    onChange={event => {
+                      setNewPassphrase(event.target.value)
+                      setPassphraseChangeSuccess(null)
+                      setPassphraseChangeError(null)
+                    }}
+                  />
+                  <PasswordStrengthMeter
+                    password={newPassphrase}
+                    onChangeScore={setNewPassphraseScore}
+                    scoreWords={
+                      (t('auth.signup.passwordScores', {
+                        returnObjects: true
+                      }) as string[]) ?? [
+                        'Weak',
+                        'Weak',
+                        'Fair',
+                        'Strong',
+                        'Very strong'
+                      ]
+                    }
+                    shortScoreWord={t('auth.signup.passwordTooShort')}
+                  />
+                  <Typography
+                    variant="body2"
+                    color={
+                      newPassphraseLengthPassed
+                        ? 'success.main'
+                        : 'text.secondary'
+                    }
+                  >
+                    {newPassphraseLengthPassed ? '✓' : '✗'}{' '}
+                    {t('auth.signup.minChars', {
+                      count: PASSWORD_RULES.minlength
+                    })}
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    disableElevation
+                    sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
+                    disabled={
+                      changingPassphrase ||
+                      oldPassphrase.length === 0 ||
+                      !newPassphraseValid
+                    }
+                    onClick={handleChangePassphrase}
+                  >
+                    {changingPassphrase
+                      ? t('settings.changingPassphrase')
+                      : t('settings.changePassphrase')}
+                  </Button>
+                  {passphraseChangeSuccess !== null && (
+                    <Typography variant="body2" color="success.main">
+                      {passphraseChangeSuccess
+                        ? t('settings.passphraseChanged')
+                        : t('settings.passphraseChangedNotRetired')}
+                    </Typography>
+                  )}
+                  {passphraseChangeError && (
+                    <Alert severity="error">
+                      {passphraseChangeError === 'incorrect'
+                        ? t('settings.passphraseIncorrect')
+                        : t('settings.passphraseChangeFailed')}
+                    </Alert>
+                  )}
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  {t('settings.passphraseRequiresFullSession')}
+                </Typography>
+              )}
+            </Stack>
+          </>
+        )}
 
         <Divider />
 
