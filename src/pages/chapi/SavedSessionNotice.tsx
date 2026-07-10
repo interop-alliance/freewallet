@@ -25,6 +25,7 @@ import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
 import { WAS_SERVER_URL } from '@/app.config'
 import {
+  beyondCookiesStorageAccessSupported,
   requestFirstPartyStorage,
   storageAccessAvailable
 } from '@/lib/storageAccess'
@@ -67,8 +68,13 @@ export function SavedSessionNotice({
 
   // Without a remote WAS server no delegated session is ever persisted; and
   // without the Storage Access API (or outside an iframe) there is no
-  // partitioned bucket to escape.
-  const enabled = !!WAS_SERVER_URL && storageAccessAvailable()
+  // partitioned bucket to escape. The beyond-cookies handle exists only on
+  // Chromium, so off Chromium we skip the notice entirely (no button, no
+  // "unavailable" message) and leave the passphrase form to do the work.
+  const enabled =
+    !!WAS_SERVER_URL &&
+    storageAccessAvailable() &&
+    beyondCookiesStorageAccessSupported()
 
   async function attempt({ silent }: { silent: boolean }) {
     setState('checking')

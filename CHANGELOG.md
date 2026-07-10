@@ -1,5 +1,24 @@
 # History
 
+## 0.15.4 - TBD
+
+### Fixed
+
+- **CHAPI popup showed a "Use saved login" button that failed off Chromium.**
+  The saved-login recognition in the store and get popups relies on the Storage
+  Access API "beyond cookies" handle, which only Chromium browsers implement;
+  on Firefox and Safari the button always ended in "Saved login is not available
+  in this browser." The popup now detects the browser engine and hides the
+  saved-login notice entirely off Chromium, leaving just the passphrase form.
+- **CHAPI store popup reported a false "not saved" to exchange issuers.** When an
+  issuer delivers a credential through a VC API exchange, it receives the
+  credential out of band and expects the wallet to acknowledge with an
+  `OutOfBand` response so it can advance to its own status page; the store popup
+  was returning the stored presentation (`VerifiablePresentation`) instead, which
+  such an issuer reads as a failed store (vcplayground.org's issuer then toasts
+  "VC not saved to wallet."). The popup now answers an exchange offer with
+  `OutOfBand` and keeps echoing the presentation back only for inline offers.
+
 ## 0.15.3 - 2026-07-10
 
 ### Added

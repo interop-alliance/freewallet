@@ -45,6 +45,23 @@ export function isEmbedded(): boolean {
 }
 
 /**
+ * Whether this browser is Chromium-based (Chrome, Edge, and other Chromium
+ * derivatives). Only Chromium implements the Storage Access API
+ * "beyond cookies" extension the saved-login flow depends on; Firefox and
+ * Safari grant cookies-only access, returning no storage handle. There is no
+ * synchronous feature test for the extension itself -- the handle only
+ * reveals itself by calling `requestStorageAccess` -- so callers use this
+ * engine check to hide affordances (the "Use saved login" button and its
+ * "unavailable" message) that would only ever fail off Chromium. Chromium
+ * uniquely exposes `navigator.userAgentData`.
+ *
+ * @returns {boolean}
+ */
+export function beyondCookiesStorageAccessSupported(): boolean {
+  return !!(navigator as { userAgentData?: unknown }).userAgentData
+}
+
+/**
  * Whether attempting the Storage Access API flow is worthwhile here: an
  * embedded document in a browser that has `requestStorageAccess` at all.
  * (Whether the beyond-cookies handle is supported is only discoverable by

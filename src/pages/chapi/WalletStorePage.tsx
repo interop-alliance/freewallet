@@ -6,7 +6,9 @@
  * confirmation. The offer arrives either inline on the event or, when the issuer
  * names a VC API exchange, from that exchange -- which may first ask the wallet
  * to authenticate its holder DID, in which case the credentials are collected
- * after login rather than before it.
+ * after login rather than before it. An exchange issuer already holds the
+ * credential it delivered, so the popup acknowledges it with an `OutOfBand`
+ * CHAPI response; an inline offer gets the stored presentation echoed back.
  */
 import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
@@ -70,6 +72,12 @@ export function WalletStorePage() {
   // Every credential the offer carries; all are stored on confirmation.
   const [vcs, setVcs] = useState<IVerifiableCredential[]>([])
   const [vp, setVp] = useState<IVerifiablePresentation | null>(null)
+  // True when the offer arrived through a VC API exchange rather than inline on
+  // the CHAPI event. Such an issuer received the credential out of band (the
+  // wallet POSTed it to the exchange), so it expects an `OutOfBand` response to
+  // move on to its own status page; an inline offer expects the stored
+  // presentation echoed back instead.
+  const [viaExchange, setViaExchange] = useState(false)
   // Set when the issuance exchange opened with a DID-Auth request; answered
   // after login, and the credentials arrive in the reply.
   const [pendingDIDAuth, setPendingDIDAuth] = useState<PendingDIDAuth | null>(
@@ -109,6 +117,7 @@ export function WalletStorePage() {
       const offered = !!data && Object.keys(data).length > 0
       let incomingVp: IVerifiablePresentation
       if (!offered && exchange) {
+        setViaExchange(true)
         console.log('[CHAPI store] fetching the offer from %s', exchange)
         const opening = await beginExchange({ exchangeUrl: exchange })
         console.log(
@@ -317,8 +326,17 @@ export function WalletStorePage() {
     if (!chapiEvent || !vp) {
       return
     }
+    // An exchange issuer already holds the credential (it was collected over the
+    // exchange, not the CHAPI channel), so it wants an `OutOfBand` acknowledgement
+    // rather than the presentation echoed back -- anything else reads to it as a
+    // failed store. An inline offer, having no other channel, gets the stored
+    // presentation returned to it.
     chapiEvent.respondWith(
-      Promise.resolve({ dataType: 'VerifiablePresentation', data: vp })
+      Promise.resolve(
+        viaExchange
+          ? { dataType: 'OutOfBand', data: {} }
+          : { dataType: 'VerifiablePresentation', data: vp }
+      )
     )
   }
 
