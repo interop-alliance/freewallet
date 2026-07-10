@@ -26,6 +26,7 @@ import { issuerName } from '@/lib/viewMappers/issuerName'
 import { chapiStyles } from '@/styles/appStyles'
 import {
   classifyCHAPIStoreEvent,
+  credentialsOf,
   type CHAPIStoreEvent
 } from '@/lib/walletRequest'
 import { CHAPILoginForm } from './CHAPILoginForm'
@@ -42,6 +43,8 @@ export function WalletStorePage() {
   const [vp, setVp] = useState<IVerifiablePresentation | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
+  const [initError, setInitError] = useState<string | null>(null)
+  const [storeError, setStoreError] = useState<string | null>(null)
   // First-party storage factory from the Storage Access API flow (see
   // SavedSessionNotice); a full login persists its delegated session
   // through it so the next popup visit auto-recognizes the user.
@@ -57,18 +60,35 @@ export function WalletStorePage() {
     async function init() {
       await loadOnce(MEDIATOR_BASE + encodeURIComponent(window.location.origin))
       const event = (await receiveCredentialEvent()) as CHAPIStoreEvent
+      console.debug(
+        '[CHAPI store] incoming event from %s, dataType: %s\n%s',
+        event.credentialRequestOrigin ?? '(unknown origin)',
+        event.credential?.dataType ?? '(none)',
+        JSON.stringify(event.credential?.data, null, 2)
+      )
       const offer = classifyCHAPIStoreEvent(event)
       const incomingVp = offer.verifiablePresentation
-      const incomingVc = Array.isArray(incomingVp.verifiableCredential)
-        ? incomingVp.verifiableCredential[0]
-        : incomingVp.verifiableCredential
+      const [incomingVc] = credentialsOf(incomingVp)
+      if (!incomingVc) {
+        console.warn(
+          '[CHAPI store] the offered presentation carries no credential:\n%s',
+          JSON.stringify(incomingVp, null, 2)
+        )
+      }
       setCHAPIEvent(event)
       setVp(incomingVp)
       setVc(incomingVc ?? null)
       setPageState('awaiting-login')
     }
 
-    init().catch(console.error)
+    init().catch((err: unknown) => {
+      console.error('[CHAPI store] could not read the incoming offer:', err)
+      setInitError(
+        err instanceof Error
+          ? err.message
+          : 'Could not read the incoming offer.'
+      )
+    })
   }, [])
 
   async function handleLogin(passphrase: string) {
@@ -111,10 +131,23 @@ export function WalletStorePage() {
 
   async function handleConfirm() {
     if (!session || !vc) {
+      const reason = !session
+        ? 'no session is established'
+        : 'the offer carried no credential'
+      console.error('[CHAPI store] cannot store: %s.', reason)
+      setStoreError(`Cannot store: ${reason}.`)
       return
     }
-    await session.storage.addCredential({ credential: vc })
-    setPageState('stored')
+    setStoreError(null)
+    try {
+      await session.storage.addCredential({ credential: vc })
+      setPageState('stored')
+    } catch (err) {
+      console.error('[CHAPI store] addCredential failed:', err)
+      setStoreError(
+        err instanceof Error ? err.message : 'Could not store the credential.'
+      )
+    }
   }
 
   function handleCancel() {
@@ -148,6 +181,12 @@ export function WalletStorePage() {
           {t('chapi.store.title')}
         </Typography>
 
+        {initError && (
+          <Typography variant="body2" color="error.main">
+            {initError}
+          </Typography>
+        )}
+
         {vc && (
           <Box sx={chapiStyles.credentialSummary}>
             <Typography variant="body2" color="text.secondary">
@@ -173,21 +212,28 @@ export function WalletStorePage() {
         )}
 
         {pageState === 'confirming' && (
-          <Stack direction="row" spacing={2}>
-            <Button
-              variant="contained"
-              sx={{ textTransform: 'none' }}
-              onClick={handleConfirm}
-            >
-              {t('common.store')}
-            </Button>
-            <Button
-              variant="outlined"
-              sx={{ textTransform: 'none' }}
-              onClick={handleCancel}
-            >
-              {t('common.cancel')}
-            </Button>
+          <Stack spacing={2}>
+            {storeError && (
+              <Typography variant="body2" color="error.main">
+                {storeError}
+              </Typography>
+            )}
+            <Stack direction="row" spacing={2}>
+              <Button
+                variant="contained"
+                sx={{ textTransform: 'none' }}
+                onClick={handleConfirm}
+              >
+                {t('common.store')}
+              </Button>
+              <Button
+                variant="outlined"
+                sx={{ textTransform: 'none' }}
+                onClick={handleCancel}
+              >
+                {t('common.cancel')}
+              </Button>
+            </Stack>
           </Stack>
         )}
 

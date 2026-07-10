@@ -381,6 +381,8 @@
       "didAuthUnsupported": "This request asks for a DID method this wallet doesn't support.",
       "domainMismatch": "This request's domain doesn't match where it came from, so it can't be safely authenticated.",
       "processFailed": "Something went wrong preparing the response. Please try again.",
+      "malformedRequest": "This site didn't send a request this wallet can read.",
+      "exchangeFailed": "Could not reach the site's exchange server. Please try again.",
       "loginTitle": "Log in with your wallet",
       "shareHandle": "Share your username {{username}}",
       "zcapHeading": "Storage access",

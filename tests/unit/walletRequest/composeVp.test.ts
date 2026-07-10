@@ -46,6 +46,34 @@ describe('negotiateCryptosuite', () => {
     expect(negotiateCryptosuite(queries)).toBe(EDDSA_RDFC_2022)
   })
 
+  it('honors bare cryptosuite name strings', () => {
+    const queries: IVPRQuery[] = [
+      {
+        type: 'QueryByExample',
+        acceptedCryptosuites: ['Ed25519Signature2020', EDDSA_RDFC_2022],
+        credentialQuery: [{ example: { type: ['VerifiableCredential'] } }]
+      }
+    ]
+    expect(negotiateCryptosuite(queries)).toBe(EDDSA_RDFC_2022)
+  })
+
+  it('honors acceptedCryptosuites stated inside a credentialQuery', () => {
+    // Where vcplayground.org puts it. The example carries no VC 2.0 context,
+    // so only the explicit preference can select the suite here.
+    const queries: IVPRQuery[] = [
+      {
+        type: 'QueryByExample',
+        credentialQuery: [
+          {
+            example: { type: ['VerifiableCredential'] },
+            acceptedCryptosuites: ['Ed25519Signature2020', EDDSA_RDFC_2022]
+          }
+        ]
+      }
+    ]
+    expect(negotiateCryptosuite(queries)).toBe(EDDSA_RDFC_2022)
+  })
+
   it('falls back to default when listed suites are unsupported', () => {
     const queries: IVPRQuery[] = [
       {

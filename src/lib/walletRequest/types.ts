@@ -49,32 +49,62 @@ export type IVPRequest = {
 /**
  * The body of a Verifiable Presentation Request: one or more queries, plus the
  * `challenge` / `domain` used when a DID Authentication proof is requested.
+ * `query` is optional: a CHAPI request that carries a `protocols` entry sends an
+ * empty VPR body, deferring the real request to the named protocol exchange.
  */
 export type IVPRDetails = {
-  query: IVPRQuery | IVPRQuery[]
+  query?: IVPRQuery | IVPRQuery[]
   challenge?: string
   domain?: string
+  interact?: IVPRInteract
 }
 
 export type IVPRQuery = IQueryByExample | IDIDAuthenticationQuery | IZcapQuery
 
 /**
+ * The interaction endpoints a VPR offers for delivering the response, when the
+ * transport that carried the request is not itself the response channel.
+ *
+ * @see https://w3c-ccg.github.io/vp-request-spec/#interaction-types
+ */
+export type IVPRInteract = {
+  service?: Array<{ type: string; serviceEndpoint?: string }>
+}
+
+/**
+ * The cryptosuites a verifier will accept for the response proof. VCALM types
+ * each entry as an object, but verifiers in the wild (vcplayground.org among
+ * them) send bare cryptosuite name strings; both forms are accepted.
+ */
+export type IAcceptedCryptosuites = Array<string | { cryptosuite: string }>
+
+/**
+ * A single credential query within a `QueryByExample`: an example credential
+ * shape to match stored credentials against, plus an optional human-readable
+ * `reason` to show the user. `acceptedCryptosuites` may be stated here rather
+ * than on the enclosing query -- which is where vcplayground.org puts it.
+ */
+export type ICredentialQuery = {
+  reason?: string
+  acceptedCryptosuites?: IAcceptedCryptosuites
+  example: {
+    '@context'?: string | object | Array<string | object>
+    type?: string | string[]
+    issuer?: string | object | Array<string | object>
+    [x: string]: unknown
+  }
+}
+
+/**
  * A request for one or more VCs matching an example credential shape.
+ * `credentialQuery` may be a single detail object or an array of them.
  *
  * @see https://w3c-ccg.github.io/vp-request-spec/#query-by-example
  */
 export type IQueryByExample = {
   type: 'QueryByExample'
-  acceptedCryptosuites?: Array<{ cryptosuite: string }>
-  credentialQuery: {
-    reason?: string
-    example: {
-      '@context'?: string | object | Array<string | object>
-      type?: string | string[]
-      issuer?: string | object | Array<string | object>
-      [x: string]: unknown
-    }
-  }
+  acceptedCryptosuites?: IAcceptedCryptosuites
+  credentialQuery: ICredentialQuery | ICredentialQuery[]
 }
 
 /**
@@ -86,7 +116,7 @@ export type IQueryByExample = {
 export type IDIDAuthenticationQuery = {
   type: 'DIDAuthentication'
   acceptedMethods?: Array<{ method: string }>
-  acceptedCryptosuites?: Array<{ cryptosuite: string }>
+  acceptedCryptosuites?: IAcceptedCryptosuites
 }
 
 /**

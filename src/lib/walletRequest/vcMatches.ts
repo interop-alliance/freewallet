@@ -5,7 +5,8 @@
  * screen shows only the credentials that actually match it.
  */
 import type { StoredCredential } from '@/types/credential'
-import type { IQueryByExample } from './types'
+import { credentialQueriesOf } from './classify'
+import type { ICredentialQuery, IQueryByExample } from './types'
 
 /**
  * Normalizes a `type` value (string or array) to an array of strings.
@@ -41,7 +42,7 @@ function issuerId(issuer: unknown): string | undefined {
  *
  * @param options {object}
  * @param options.credential {StoredCredential}
- * @param options.example {IQueryByExample['credentialQuery']['example']}
+ * @param options.example {ICredentialQuery['example']}
  * @returns {boolean}
  */
 function matchesExample({
@@ -49,7 +50,7 @@ function matchesExample({
   example
 }: {
   credential: StoredCredential
-  example: IQueryByExample['credentialQuery']['example']
+  example: ICredentialQuery['example']
 }): boolean {
   const wantedTypes = typeArray(example.type)
   const credentialTypes = typeArray(credential.vc.type)
@@ -82,18 +83,32 @@ export function vcMatchesFor({
   credentials: StoredCredential[]
   queries: IQueryByExample[]
 }): StoredCredential[] {
-  const examples = queries
-    .map(query => query.credentialQuery?.example)
-    .filter(
-      (example): example is IQueryByExample['credentialQuery']['example'] =>
-        !!example && typeArray(example.type).length > 0
-    )
+  const examples = typedExamplesOf(queries)
   if (examples.length === 0) {
     return []
   }
   return credentials.filter(credential =>
     examples.some(example => matchesExample({ credential, example }))
   )
+}
+
+/**
+ * The example credential shapes pinned by a query set: every `credentialQuery`
+ * detail carrying an example `type`. Only these constrain the share list.
+ *
+ * @param queries {IQueryByExample[]}
+ * @returns {ICredentialQuery['example'][]}
+ */
+function typedExamplesOf(
+  queries: IQueryByExample[]
+): Array<ICredentialQuery['example']> {
+  return queries
+    .flatMap(query => credentialQueriesOf(query))
+    .map(({ example }) => example)
+    .filter(
+      (example): example is ICredentialQuery['example'] =>
+        !!example && typeArray(example.type).length > 0
+    )
 }
 
 /**
@@ -105,7 +120,5 @@ export function vcMatchesFor({
  * @returns {boolean}
  */
 export function hasTypedExample(queries: IQueryByExample[]): boolean {
-  return queries.some(
-    query => typeArray(query.credentialQuery?.example?.type).length > 0
-  )
+  return typedExamplesOf(queries).length > 0
 }

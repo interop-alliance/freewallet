@@ -1,5 +1,53 @@
 # History
 
+## Unreleased - TBD
+
+### Added
+
+- **VC API exchange requests (CHAPI `protocols.vcapi`).** A verifier may hand
+  the wallet an empty `VerifiablePresentation` request body and name a VC API
+  exchange URL under `credentialRequestOptions.web.protocols.vcapi` instead,
+  keeping the real Verifiable Presentation Request on its exchange server
+  (vcplayground.org's verifier always does this). The share popup now opens the
+  exchange, retrieves the request, runs it through the usual consent screen, and
+  POSTs the composed presentation back to the exchange as well as returning it
+  over the CHAPI channel. A failed delivery is reported rather than silently
+  handing the site a presentation it never received, and a multi-step exchange
+  (one that answers with a further request) is reported as unsupported.
+
+### Fixed
+
+- **CHAPI share requests hung on a spinner.** A request whose Verifiable
+  Presentation Request carried no `query` -- what every `protocols`-bearing
+  request sends -- made query normalization yield a one-element array holding
+  `undefined`, and classification then threw on reading its `type`. The popup's
+  initialization rejected into a bare `console.error`, leaving the page spinning
+  forever. Query normalization now drops entries that are not typed query
+  objects, an empty request body classifies cleanly, and any initialization
+  failure surfaces on the page.
+- **Array-shaped `credentialQuery` in a `QueryByExample`.** The VP Request
+  spec allows `credentialQuery` to be a single object or an array of them, and
+  verifiers send both (vcplayground.org sends the array). Only the object form
+  was read, so an array-shaped query showed no reason string and then threw
+  while matching stored credentials against its example. Both forms are now
+  normalized, as `capabilityQuery` already was.
+- **Bare-string `acceptedCryptosuites`.** Cryptosuite negotiation only read the
+  `{ cryptosuite }` object form, so a verifier listing plain cryptosuite name
+  strings got the wallet's legacy `Ed25519Signature2020` default instead of the
+  `eddsa-rdfc-2022` proof it asked for. Both forms are now accepted.
+
+- **CHAPI store of a bare credential.** Issuers may offer a bare
+  `VerifiableCredential` over `navigator.credentials.store()` rather than
+  wrapping it in a `VerifiablePresentation` (vcplayground.org does this). The
+  store popup only read `verifiableCredential` off the offered payload, so no
+  credential was found, the confirmation screen rendered without its summary,
+  and the Store button silently did nothing. The classifier now inspects the
+  event's `dataType` (and the payload `type`) and wraps a bare credential in an
+  unsigned presentation, matching the credential's VC data model version.
+- The CHAPI store popup now reports failures instead of failing silently: the
+  incoming offer is logged, and an unreadable offer, a missing credential, or a
+  storage write error surfaces on the page and in the console.
+
 ## 0.15.0 - 2026-07-09
 
 ### Added

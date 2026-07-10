@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { vcMatchesFor, hasTypedExample } from '@/lib/walletRequest'
-import type { IQueryByExample } from '@/lib/walletRequest'
+import type { ICredentialQuery, IQueryByExample } from '@/lib/walletRequest'
 import type { StoredCredential } from '@/types/credential'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 
@@ -31,9 +31,7 @@ const idVc = stored(
   'did:key:zIssuer'
 )
 
-function qbe(
-  example: IQueryByExample['credentialQuery']['example']
-): IQueryByExample {
+function qbe(example: ICredentialQuery['example']): IQueryByExample {
   return { type: 'QueryByExample', credentialQuery: { example } }
 }
 
@@ -66,6 +64,23 @@ describe('vcMatchesFor', () => {
       queries: [qbe({ type: 'LoginCredential', issuer: 'did:key:zUser' })]
     })
     expect(match.map(({ cid }) => cid)).toEqual(['login'])
+  })
+
+  it('matches through an array-shaped credentialQuery', () => {
+    // The form vcplayground.org sends.
+    const query: IQueryByExample = {
+      type: 'QueryByExample',
+      credentialQuery: [
+        { example: { type: 'LoginCredential' } },
+        { example: { type: 'IdentityCredential' } }
+      ]
+    }
+    const matches = vcMatchesFor({
+      credentials: [loginVc, idVc],
+      queries: [query]
+    })
+    expect(matches.map(({ cid }) => cid)).toEqual(['login', 'id'])
+    expect(hasTypedExample([query])).toBe(true)
   })
 
   it('returns nothing when no query specifies an example type', () => {

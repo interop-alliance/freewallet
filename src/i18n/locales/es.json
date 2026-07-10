@@ -381,6 +381,8 @@
       "didAuthUnsupported": "Esta solicitud requiere un método DID que esta billetera no admite.",
       "domainMismatch": "El dominio de esta solicitud no coincide con su procedencia, por lo que no se puede autenticar de forma segura.",
       "processFailed": "Ocurrió un problema al preparar la respuesta. Inténtelo de nuevo.",
+      "malformedRequest": "Este sitio no envió una solicitud que esta cartera pueda leer.",
+      "exchangeFailed": "No se pudo contactar con el servidor de intercambio del sitio. Inténtelo de nuevo.",
       "loginTitle": "Inicie sesión con su billetera",
       "shareHandle": "Compartir su nombre de usuario {{username}}",
       "zcapHeading": "Acceso al almacenamiento",

@@ -39,12 +39,16 @@ import type { Session } from '@/types/auth'
 import type { StoredCredential } from '@/types/credential'
 import {
   classifyRequest,
+  credentialQueriesOf,
   didAuthMethodSupported,
   domainMatchesOrigin,
   hasTypedExample,
   processRequest,
   queriesOf,
   resolveGrants,
+  startExchange,
+  submitPresentation,
+  vcApiExchangeUrl,
   vcMatchesFor,
   type CHAPIGetEvent,
   type IVerifiableCredential,
@@ -63,17 +67,25 @@ type PageState =
 
 /**
  * Why a request cannot proceed; maps to a `chapi.get.*` message key. Set before
- * login for the two statically-detectable DID-Auth cases, after login for a
- * zcap request this wallet cannot back, or after a failed compose.
+ * login for the statically-detectable DID-Auth cases, an unreadable request, or
+ * an exchange that could not be opened; after login for a zcap request this
+ * wallet cannot back, or a failed compose / delivery.
  */
 type BlockReason =
-  'unsupported' | 'domainMismatch' | 'zcapUnavailable' | 'processFailed'
+  | 'unsupported'
+  | 'domainMismatch'
+  | 'zcapUnavailable'
+  | 'processFailed'
+  | 'malformedRequest'
+  | 'exchangeFailed'
 
 const BLOCK_MESSAGE_KEY: Record<BlockReason, string> = {
   unsupported: 'chapi.get.didAuthUnsupported',
   domainMismatch: 'chapi.get.domainMismatch',
   zcapUnavailable: 'chapi.get.zcapUnavailable',
-  processFailed: 'chapi.get.processFailed'
+  processFailed: 'chapi.get.processFailed',
+  malformedRequest: 'chapi.get.malformedRequest',
+  exchangeFailed: 'chapi.get.exchangeFailed'
 }
 
 const RP_ZCAP_TTL_DAYS = Math.round(RP_ZCAP_TTL_MS / (24 * 60 * 60 * 1000))
@@ -108,9 +120,10 @@ function injectedCHAPIGetEvent(): CHAPIGetEvent | undefined {
 function reasonFrom(queries: IVPRQuery[]): string {
   for (const query of queries) {
     if (query.type === 'QueryByExample') {
-      const reason = query.credentialQuery?.reason
-      if (reason) {
-        return reason
+      for (const { reason } of credentialQueriesOf(query)) {
+        if (reason) {
+          return reason
+        }
       }
     }
   }
@@ -135,6 +148,9 @@ export function WalletGetPage() {
   const [profile, setProfile] = useState<WalletRequestProfile>(EMPTY_PROFILE)
   const [requestOrigin, setRequestOrigin] = useState('')
   const [requestReason, setRequestReason] = useState('')
+  // Set when the verifier deferred the request to a VC API exchange; the
+  // composed presentation is POSTed back there as well as returned over CHAPI.
+  const [exchangeUrl, setExchangeUrl] = useState<string | null>(null)
   const [blockReason, setBlockReason] = useState<BlockReason | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   // The credentials offered for sharing (filtered to the request's QBEs when
@@ -166,26 +182,47 @@ export function WalletGetPage() {
       }
       const event =
         injected ?? ((await receiveCredentialEvent()) as CHAPIGetEvent)
-      const details =
-        event.credentialRequestOptions?.web?.VerifiablePresentation
-      if (!details) {
-        throw new Error(
-          'CHAPI get event is missing a VerifiablePresentation request.'
-        )
-      }
-      const queries = queriesOf(details)
+      const web = event.credentialRequestOptions?.web
       const origin = event.credentialRequestOrigin
+      setCHAPIEvent(event)
+      setRequestOrigin(origin)
+
+      // A verifier that names a VC API exchange sends an empty VPR body and
+      // keeps the real request behind the exchange URL. Open it to retrieve
+      // the request the user is actually being asked to answer.
+      const exchange = vcApiExchangeUrl({ protocols: web?.protocols })
+      let details = web?.VerifiablePresentation
+      if (exchange && queriesOf(details ?? {}).length === 0) {
+        setExchangeUrl(exchange)
+        try {
+          details = await startExchange({ exchangeUrl: exchange })
+        } catch (err) {
+          console.error('Could not open the VC API exchange:', err)
+          setBlockReason('exchangeFailed')
+          setPageState('blocked')
+          return
+        }
+      }
+
+      const queries = details ? queriesOf(details) : []
+      if (!details || queries.length === 0) {
+        console.error('CHAPI get event carries no readable request.', web)
+        setBlockReason('malformedRequest')
+        setPageState('blocked')
+        return
+      }
       const requestProfile = classifyRequest(details)
 
-      setCHAPIEvent(event)
       setRequest(details)
-      setRequestOrigin(origin)
       setRequestReason(reasonFrom(queries))
       setProfile(requestProfile)
 
       // When DID Auth is involved the wallet must sign, so reject up front the
       // two cases it can never satisfy: an unsupported DID method, and a domain
-      // that does not match the channel origin (VCALM domain-binding).
+      // that does not match the channel origin (VCALM domain-binding). An
+      // exchange-sourced VPR names the verifier's own origin as its `domain`,
+      // never the (possibly third-party) host the exchange runs on, so the
+      // check is the same either way.
       if (requestProfile.didAuth) {
         if (!didAuthMethodSupported(queries)) {
           setBlockReason('unsupported')
@@ -205,7 +242,11 @@ export function WalletGetPage() {
       setPageState('awaiting-login')
     }
 
-    init().catch(console.error)
+    init().catch((err: unknown) => {
+      console.error('CHAPI get initialization failed:', err)
+      setBlockReason('malformedRequest')
+      setPageState('blocked')
+    })
   }, [])
 
   async function handleLogin(passphrase: string) {
@@ -314,8 +355,9 @@ export function WalletGetPage() {
 
   /**
    * Composes and returns the response VP (selected VCs plus any delegated
-   * grants), delivering it over the CHAPI channel and recording a Login
-   * activity when capabilities were granted.
+   * grants), delivering it over the CHAPI channel -- and, when the request came
+   * from a VC API exchange, POSTing it to the exchange as well -- then recording
+   * a Login activity when capabilities were granted.
    */
   async function respondAndClose() {
     if (!chapiEvent || !session || !request) {
@@ -325,29 +367,63 @@ export function WalletGetPage() {
     const selectedVCs: IVerifiableCredential[] = displayedCredentials
       .filter(({ cid }) => selectedCids.has(cid))
       .map(({ vc }) => vc)
+
+    let verifiablePresentation
     try {
-      const { verifiablePresentation } = await processRequest({
+      ;({ verifiablePresentation } = await processRequest({
         request,
         session,
         credentialRequestOrigin: requestOrigin,
         selectedVCs
-      })
-      chapiEvent.respondWith(
-        Promise.resolve(
-          verifiablePresentation
-            ? {
-                dataType: 'VerifiablePresentation',
-                data: verifiablePresentation
-              }
-            : null
-        )
-      )
-      recordLoginHistory(verifiablePresentation)
+      }))
     } catch (err) {
       console.error('CHAPI request processing failed:', err)
       setBlockReason('processFailed')
       setPageState('blocked')
+      return
     }
+
+    // The exchange, not the CHAPI channel, is the verifier's system of record
+    // for a VC API request, so a failed delivery is a failed response: report
+    // it rather than handing the site a presentation it never received.
+    if (exchangeUrl && verifiablePresentation) {
+      try {
+        const reply = await submitPresentation({
+          request,
+          exchangeUrl,
+          verifiablePresentation
+        })
+        // A reply carrying another request means a multi-step exchange the
+        // wallet cannot continue; the verifier has not received a complete
+        // response, so say so rather than reporting success.
+        if (reply.verifiablePresentationRequest) {
+          throw new Error(
+            'The exchange asked for a further presentation; multi-step ' +
+              'exchanges are not supported.'
+          )
+        }
+      } catch (err) {
+        console.error(
+          'Could not deliver the presentation to the exchange:',
+          err
+        )
+        setBlockReason('exchangeFailed')
+        setPageState('blocked')
+        return
+      }
+    }
+
+    chapiEvent.respondWith(
+      Promise.resolve(
+        verifiablePresentation
+          ? {
+              dataType: 'VerifiablePresentation',
+              data: verifiablePresentation
+            }
+          : null
+      )
+    )
+    recordLoginHistory(verifiablePresentation)
   }
 
   /**

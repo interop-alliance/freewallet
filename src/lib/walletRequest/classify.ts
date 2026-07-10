@@ -6,12 +6,14 @@
  */
 import type {
   ICapabilityQueryDetail,
+  ICredentialQuery,
   IDIDAuthenticationQuery,
   IQueryByExample,
   IVPOffer,
   IVPRequest,
   IVPRDetails,
   IVPRQuery,
+  IVerifiableCredential,
   IVerifiablePresentation,
   IZcapQuery,
   WalletAPIMessage,
@@ -19,15 +21,30 @@ import type {
 } from './types'
 
 /**
+ * The protocol handles a verifier offers alongside a CHAPI request. Only
+ * `vcapi` is acted on; `OID4VP` / `OID4VCI` and the `interact` URL (a QR /
+ * redirect flow for a wallet on another device) are recognized but unused.
+ */
+export interface CHAPIProtocols {
+  vcapi?: string
+  interact?: string
+  OID4VP?: string
+  OID4VCI?: string
+}
+
+/**
  * Raw CHAPI credential-get event. The `VerifiablePresentation` object CHAPI
  * hands us *is* the VPR body (`query` / `challenge` / `domain`); classification
- * rewraps it as an `IVpRequest`.
+ * rewraps it as an `IVpRequest`. When the verifier names a `protocols` handle
+ * it sends that body empty instead, and the VPR must be fetched from the
+ * protocol exchange (see `vcApiExchange.ts`).
  */
 export interface CHAPIGetEvent {
   credentialRequestOrigin: string
   credentialRequestOptions?: {
     web?: {
       VerifiablePresentation?: IVPRDetails
+      protocols?: CHAPIProtocols
     }
   }
   respondWith(
@@ -36,14 +53,107 @@ export interface CHAPIGetEvent {
 }
 
 /**
- * Raw CHAPI credential-store event. `credential.data` is the offered VP.
+ * Raw CHAPI credential-store event. `credential.data` is the offered payload,
+ * and `credential.dataType` names its shape: issuers may offer either a
+ * `VerifiablePresentation` wrapping the credential(s), or a bare
+ * `VerifiableCredential` (what vcplayground.org sends).
  */
 export interface CHAPIStoreEvent {
   credentialRequestOrigin?: string
-  credential: { data: IVerifiablePresentation }
+  credential: {
+    dataType?: string
+    data: IVerifiablePresentation | IVerifiableCredential
+  }
   respondWith(
     promise: Promise<{ dataType: string; data: unknown } | null>
   ): void
+}
+
+const VC_1_CONTEXT_URL = 'https://www.w3.org/2018/credentials/v1'
+const VC_2_CONTEXT_URL = 'https://www.w3.org/ns/credentials/v2'
+
+/**
+ * Normalizes a `type` value (string or array) to an array of strings.
+ */
+function typeArray(type: unknown): string[] {
+  if (typeof type === 'string') {
+    return [type]
+  }
+  return Array.isArray(type)
+    ? type.filter((entry): entry is string => typeof entry === 'string')
+    : []
+}
+
+/**
+ * Wraps a bare Verifiable Credential in an unsigned Verifiable Presentation,
+ * matching the credential's VC data model version so the presentation's
+ * `@context` stays coherent with the credential it carries.
+ *
+ * @param credential {IVerifiableCredential}
+ * @returns {IVerifiablePresentation}
+ */
+function presentationWrapping(
+  credential: IVerifiableCredential
+): IVerifiablePresentation {
+  const contexts = credential['@context']
+  const contextArray = Array.isArray(contexts) ? contexts : [contexts]
+  const isV2 = contextArray.includes(VC_2_CONTEXT_URL)
+  return {
+    '@context': [isV2 ? VC_2_CONTEXT_URL : VC_1_CONTEXT_URL],
+    type: ['VerifiablePresentation'],
+    verifiableCredential: [credential]
+  } as IVerifiablePresentation
+}
+
+/**
+ * The offered payload as a Verifiable Presentation: passed through when the
+ * issuer already offered one, and wrapped when it offered a bare Verifiable
+ * Credential.
+ *
+ * @param credential {CHAPIStoreEvent['credential']}
+ * @returns {IVerifiablePresentation}
+ */
+function offeredPresentation({
+  dataType,
+  data
+}: CHAPIStoreEvent['credential']): IVerifiablePresentation {
+  const types = typeArray((data as { type?: unknown })?.type)
+  const isPresentation =
+    dataType === 'VerifiablePresentation' ||
+    types.includes('VerifiablePresentation') ||
+    'verifiableCredential' in (data ?? {})
+  if (isPresentation) {
+    return data as IVerifiablePresentation
+  }
+  if (
+    dataType === 'VerifiableCredential' ||
+    types.includes('VerifiableCredential')
+  ) {
+    return presentationWrapping(data as IVerifiableCredential)
+  }
+  throw new Error(
+    `CHAPI store event offered an unrecognized payload (dataType: ${
+      dataType ?? 'undefined'
+    }, type: ${JSON.stringify(types)}).`
+  )
+}
+
+/**
+ * The Verifiable Credentials carried by a presentation, normalized to an array.
+ *
+ * @param presentation {IVerifiablePresentation}
+ * @returns {IVerifiableCredential[]}
+ */
+export function credentialsOf(
+  presentation: IVerifiablePresentation
+): IVerifiableCredential[] {
+  const { verifiableCredential } = presentation
+  if (!verifiableCredential) {
+    return []
+  }
+  return Array.isArray(verifiableCredential)
+    ? verifiableCredential
+    : [verifiableCredential]
 }
 
 /**
@@ -67,14 +177,15 @@ export function classifyCHAPIGetEvent(event: CHAPIGetEvent): IVPRequest {
 }
 
 /**
- * Wraps a CHAPI store event as an `IVpOffer`.
+ * Wraps a CHAPI store event as an `IVpOffer`. A bare offered credential is
+ * wrapped in an unsigned presentation, so downstream code always sees a VP.
  *
  * @param event {CHAPIStoreEvent}
  * @returns {IVPOffer}
  */
 export function classifyCHAPIStoreEvent(event: CHAPIStoreEvent): IVPOffer {
   return {
-    verifiablePresentation: event.credential.data,
+    verifiablePresentation: offeredPresentation(event.credential),
     credentialRequestOrigin: event.credentialRequestOrigin
   }
 }
@@ -115,14 +226,40 @@ export function isDIDAuthRequested({
 
 /**
  * Normalizes a VPR's `query` (which may be a single object or an array) to an
- * array.
+ * array, dropping anything that is not a typed query object. A VPR body can
+ * legitimately carry no queries at all -- a CHAPI request that names a
+ * `protocols` exchange sends an empty body -- so callers get an empty array
+ * rather than an array holding `undefined`.
  *
  * @param request {IVPRDetails}
  * @returns {IVPRQuery[]}
  */
 export function queriesOf(request: IVPRDetails): IVPRQuery[] {
   const { query } = request
-  return Array.isArray(query) ? query : [query]
+  const queries = Array.isArray(query) ? query : [query]
+  return queries.filter(
+    (entry): entry is IVPRQuery =>
+      !!entry &&
+      typeof entry === 'object' &&
+      typeof (entry as { type?: unknown }).type === 'string'
+  )
+}
+
+/**
+ * Normalizes a `QueryByExample`'s `credentialQuery` (a single detail object or
+ * an array of them) to an array.
+ *
+ * @param query {IQueryByExample}
+ * @returns {ICredentialQuery[]}
+ */
+export function credentialQueriesOf(
+  query: IQueryByExample
+): ICredentialQuery[] {
+  const { credentialQuery } = query
+  if (!credentialQuery) {
+    return []
+  }
+  return Array.isArray(credentialQuery) ? credentialQuery : [credentialQuery]
 }
 
 /**

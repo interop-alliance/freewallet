@@ -6,7 +6,8 @@ import { DataIntegrityProof } from '@interop/data-integrity-proof'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import { eddsaRdfc2022 } from '@interop/ed25519-signature/eddsa-rdfc-2022'
 import type { ISigner } from '@interop/data-integrity-core'
-import type { IVPRQuery } from './types'
+import { credentialQueriesOf } from './classify'
+import type { IAcceptedCryptosuites, IVPRQuery } from './types'
 
 /**
  * VCALM cryptosuite identifier for the modern EdDSA Data Integrity proof. This
@@ -43,15 +44,56 @@ function contextIncludes(context: unknown, url: string): boolean {
 }
 
 /**
+ * Normalizes an `acceptedCryptosuites` list to cryptosuite name strings,
+ * accepting both the VCALM `{ cryptosuite }` object form and the bare string
+ * form verifiers send in practice.
+ *
+ * @param [accepted] {IAcceptedCryptosuites}
+ * @returns {string[]}
+ */
+function cryptosuiteNames(accepted?: IAcceptedCryptosuites): string[] {
+  if (!Array.isArray(accepted)) {
+    return []
+  }
+  return accepted
+    .map(entry => (typeof entry === 'string' ? entry : entry?.cryptosuite))
+    .filter((name): name is string => typeof name === 'string')
+}
+
+/**
+ * Every cryptosuite a query offers, in the order the verifier stated them. A
+ * `QueryByExample` may carry the preference on the query itself (VCALM) or
+ * inside each of its `credentialQuery` details (what verifiers send in
+ * practice); both are collected.
+ *
+ * @param query {IVPRQuery}
+ * @returns {string[]}
+ */
+function acceptedCryptosuitesOf(query: IVPRQuery): string[] {
+  const onQuery =
+    'acceptedCryptosuites' in query
+      ? cryptosuiteNames(query.acceptedCryptosuites)
+      : []
+  if (query.type !== 'QueryByExample') {
+    return onQuery
+  }
+  const onDetails = credentialQueriesOf(query).flatMap(
+    ({ acceptedCryptosuites }) => cryptosuiteNames(acceptedCryptosuites)
+  )
+  return [...onQuery, ...onDetails]
+}
+
+/**
  * Decides the cryptosuite the wallet should sign a presentation with, in two
  * tiers:
  *
  * 1. The explicit, spec-sanctioned signal: an `acceptedCryptosuites` preference
- *    (allowed on both DIDAuthentication and QueryByExample queries). The
- *    verifier's stated order is honored, picking the first listed suite the
- *    wallet supports. If the verifier listed suites but none are supported, the
- *    wallet falls back to its default rather than overriding their explicit
- *    choice with the heuristic below.
+ *    (allowed on DIDAuthentication and QueryByExample queries, and on a
+ *    QueryByExample's individual `credentialQuery` details). The verifier's
+ *    stated order is honored, picking the first listed suite the wallet
+ *    supports. If the verifier listed suites but none are supported, the wallet
+ *    falls back to its default rather than overriding their explicit choice
+ *    with the heuristic below.
  * 2. A fallback heuristic when no `acceptedCryptosuites` is given: if a
  *    QueryByExample asks for a VC 2.0 example credential, infer the verifier
  *    wants a VC 2.0 `DataIntegrityProof` (eddsa-rdfc-2022) response.
@@ -65,11 +107,7 @@ function contextIncludes(context: unknown, url: string): boolean {
  * @see https://w3c.github.io/vcalm/ -- the `acceptedCryptosuites` query field
  */
 export function negotiateCryptosuite(queries: IVPRQuery[]): string | undefined {
-  const accepted = queries.flatMap(query =>
-    'acceptedCryptosuites' in query && query.acceptedCryptosuites
-      ? query.acceptedCryptosuites.map(({ cryptosuite }) => cryptosuite)
-      : []
-  )
+  const accepted = queries.flatMap(query => acceptedCryptosuitesOf(query))
   if (accepted.length > 0) {
     return accepted.find(cryptosuite =>
       SUPPORTED_CRYPTOSUITES.includes(cryptosuite)
@@ -81,9 +119,8 @@ export function negotiateCryptosuite(queries: IVPRQuery[]): string | undefined {
   const requestsV2Example = queries.some(
     query =>
       query.type === 'QueryByExample' &&
-      contextIncludes(
-        query.credentialQuery?.example?.['@context'],
-        CREDENTIALS_CONTEXT_V2_URL
+      credentialQueriesOf(query).some(({ example }) =>
+        contextIncludes(example?.['@context'], CREDENTIALS_CONTEXT_V2_URL)
       )
   )
   return requestsV2Example ? EDDSA_RDFC_2022 : undefined
