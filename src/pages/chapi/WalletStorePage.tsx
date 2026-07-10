@@ -4,7 +4,9 @@
  * Intercepts the CHAPI event, prompts the user to log in with their passphrase,
  * then stores every credential the offer carries to their wallet on
  * confirmation. The offer arrives either inline on the event or, when the issuer
- * names a VC API exchange, from that exchange.
+ * names a VC API exchange, from that exchange -- which may first ask the wallet
+ * to authenticate its holder DID, in which case the credentials are collected
+ * after login rather than before it.
  */
 import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
@@ -27,17 +29,39 @@ import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
 import { chapiStyles } from '@/styles/appStyles'
 import {
+  beginExchange,
   classifyCHAPIStoreEvent,
+  classifyRequest,
+  collectIssuedPresentation,
+  composeVP,
   credentialsOf,
-  fetchOfferedPresentation,
+  negotiateCryptosuite,
+  queriesOf,
   vcApiExchangeUrl,
-  type CHAPIStoreEvent
+  type CHAPIStoreEvent,
+  type IVPRDetails
 } from '@/lib/walletRequest'
 import { CHAPILoginForm } from './CHAPILoginForm'
 import { SavedSessionNotice } from './SavedSessionNotice'
 import { useTranslation } from 'react-i18next'
 
-type PageState = 'initializing' | 'awaiting-login' | 'confirming' | 'stored'
+type PageState =
+  | 'initializing'
+  | 'awaiting-login'
+  | 'authenticating'
+  | 'confirming'
+  | 'stored'
+  | 'failed'
+
+/**
+ * The holder-binding step an issuance exchange may open with: the exchange URL
+ * to answer, and the DID-Auth VPR it asked. Held until the user logs in, since
+ * signing the answer needs their key.
+ */
+type PendingDIDAuth = {
+  exchangeUrl: string
+  request: IVPRDetails
+}
 
 export function WalletStorePage() {
   const { t } = useTranslation()
@@ -46,6 +70,11 @@ export function WalletStorePage() {
   // Every credential the offer carries; all are stored on confirmation.
   const [vcs, setVcs] = useState<IVerifiableCredential[]>([])
   const [vp, setVp] = useState<IVerifiablePresentation | null>(null)
+  // Set when the issuance exchange opened with a DID-Auth request; answered
+  // after login, and the credentials arrive in the reply.
+  const [pendingDIDAuth, setPendingDIDAuth] = useState<PendingDIDAuth | null>(
+    null
+  )
   const [session, setSession] = useState<Session | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
   const [initError, setInitError] = useState<string | null>(null)
@@ -81,11 +110,37 @@ export function WalletStorePage() {
       let incomingVp: IVerifiablePresentation
       if (!offered && exchange) {
         console.log('[CHAPI store] fetching the offer from %s', exchange)
-        incomingVp = await fetchOfferedPresentation({ exchangeUrl: exchange })
+        const opening = await beginExchange({ exchangeUrl: exchange })
         console.log(
-          '[CHAPI store] the exchange offered:\n%s',
-          JSON.stringify(incomingVp, null, 2)
+          '[CHAPI store] the exchange answered:\n%s',
+          JSON.stringify(opening, null, 2)
         )
+
+        // Holder binding: the issuer wants a DID-Auth presentation before it
+        // hands over the credentials. Signing it needs the user's key, so the
+        // exchange is resumed once they have logged in.
+        const request = opening.verifiablePresentationRequest
+        if (!opening.verifiablePresentation && request) {
+          const { didAuth, vcQueries, zcapRequests } = classifyRequest(request)
+          if (!didAuth || vcQueries.length > 0 || zcapRequests.length > 0) {
+            throw new Error(
+              `The exchange at ${exchange} asked for something other than DID ` +
+                'Authentication before offering a credential; such exchanges ' +
+                'are not supported.'
+            )
+          }
+          setCHAPIEvent(event)
+          setPendingDIDAuth({ exchangeUrl: exchange, request })
+          setPageState('awaiting-login')
+          return
+        }
+
+        if (!opening.verifiablePresentation) {
+          throw new Error(
+            `The exchange at ${exchange} offered no verifiablePresentation.`
+          )
+        }
+        incomingVp = opening.verifiablePresentation
       } else {
         incomingVp = classifyCHAPIStoreEvent(event).verifiablePresentation
       }
@@ -110,6 +165,7 @@ export function WalletStorePage() {
           ? err.message
           : 'Could not read the incoming offer.'
       )
+      setPageState('failed')
     })
   }, [])
 
@@ -133,7 +189,12 @@ export function WalletStorePage() {
         profile: s.profile
       })
       setSession(s)
-      setPageState('confirming')
+      if (pendingDIDAuth) {
+        setPageState('authenticating')
+        void authenticate({ session: s, pending: pendingDIDAuth })
+      } else {
+        setPageState('confirming')
+      }
       if (firstPartyIdb) {
         void persistDelegatedSession({ session: s, idb: firstPartyIdb }).catch(
           (err: unknown) => {
@@ -148,6 +209,62 @@ export function WalletStorePage() {
         console.error('CHAPI login failed:', err)
         setLoginError(t('chapi.loginFailed'))
       }
+    }
+  }
+
+  /**
+   * Answers the issuance exchange's holder-binding step: signs a DID-Auth
+   * presentation over the exchange's challenge and trades it for the offered
+   * credentials. The `domain` falls back to the exchange's own origin, which is
+   * where the answer is POSTed, for issuers that state a challenge but no
+   * domain.
+   */
+  async function authenticate({
+    session: loggedIn,
+    pending: { exchangeUrl, request }
+  }: {
+    session: Session
+    pending: PendingDIDAuth
+  }) {
+    try {
+      const verifiablePresentation = await composeVP({
+        session: loggedIn,
+        didAuthRequested: true,
+        challenge: request.challenge,
+        domain: request.domain ?? new URL(exchangeUrl).origin,
+        cryptosuite: negotiateCryptosuite(queriesOf(request))
+      })
+      console.log(
+        '[CHAPI store] authenticating to the exchange with:\n%s',
+        JSON.stringify(verifiablePresentation, null, 2)
+      )
+      const offeredVp = await collectIssuedPresentation({
+        request,
+        exchangeUrl,
+        verifiablePresentation
+      })
+      console.log(
+        '[CHAPI store] the exchange offered:\n%s',
+        JSON.stringify(offeredVp, null, 2)
+      )
+      const credentials = credentialsOf(offeredVp)
+      if (credentials.length === 0) {
+        console.warn(
+          '[CHAPI store] the offered presentation carries no credential:\n%s',
+          JSON.stringify(offeredVp, null, 2)
+        )
+      }
+      setVp(offeredVp)
+      setVcs(credentials)
+      setPageState('confirming')
+    } catch (err) {
+      console.error('[CHAPI store] the exchange authentication failed:', err)
+      setInitError(
+        err instanceof Error
+          ? err.message
+          : 'Could not authenticate to the issuer.'
+      )
+      setPageState('failed')
     }
   }
 
@@ -223,10 +340,28 @@ export function WalletStorePage() {
           {t('chapi.store.title')}
         </Typography>
 
-        {initError && (
-          <Typography variant="body2" color="error.main">
-            {initError}
-          </Typography>
+        {pageState === 'failed' && (
+          <Stack spacing={2}>
+            <Typography variant="body2" color="error.main">
+              {initError}
+            </Typography>
+            <Button
+              variant="outlined"
+              sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+              onClick={handleCancel}
+            >
+              {t('common.cancel')}
+            </Button>
+          </Stack>
+        )}
+
+        {pageState === 'authenticating' && (
+          <Box sx={chapiStyles.doneMessage}>
+            <CircularProgress size={20} />
+            <Typography variant="body2">
+              {t('chapi.store.authenticating')}
+            </Typography>
+          </Box>
         )}
 
         {vcs.map((offeredVc, index) => (

@@ -1,5 +1,24 @@
 # History
 
+## 0.15.3 - TBD
+
+### Added
+
+- **DID Authentication holder binding on the store popup.** An issuance exchange
+  may answer the wallet's opening message with a `DIDAuthentication` request
+  rather than the credentials, binding what it issues to the holder's DID
+  (vcplayground.org's issuer does this whenever DID Auth is checked). The store
+  popup previously reported such exchanges as unsupported. It now defers the
+  exchange until the user logs in, signs a presentation over the exchange's
+  challenge (falling back to the exchange origin when it states no `domain`),
+  and collects the offered credentials from the reply.
+
+### Fixed
+
+- The CHAPI store popup left a spinner on screen when it could not read the
+  incoming offer, hiding the error it had already recorded. The failure and a
+  Cancel button are now shown.
+
 ## 0.15.2 - 2026-07-10
 
 ### Added

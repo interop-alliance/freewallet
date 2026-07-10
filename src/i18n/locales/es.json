@@ -399,6 +399,7 @@
     },
     "store": {
       "title": "Guardar credencial",
+      "authenticating": "Autenticando con el emisor...",
       "storedSuccess": "{{count}} credenciales almacenadas correctamente.",
       "storedSuccess_one": "Credencial almacenada correctamente."
     },

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
-  fetchOfferedPresentation,
+  beginExchange,
+  collectIssuedPresentation,
   presentationEndpointFor,
   startExchange,
   submitPresentation,
@@ -108,32 +109,70 @@ describe('startExchange', () => {
   })
 })
 
-describe('fetchOfferedPresentation', () => {
-  it('returns the presentation an issuance exchange offers', async () => {
+describe('beginExchange', () => {
+  it('returns the presentation an issuance exchange offers outright', async () => {
     const fetchMock = mockFetch({
       body: JSON.stringify({ verifiablePresentation: PRESENTATION })
     })
-    const offered = await fetchOfferedPresentation({
-      exchangeUrl: EXCHANGE_URL
-    })
+    const opening = await beginExchange({ exchangeUrl: EXCHANGE_URL })
 
-    expect(offered).toEqual(PRESENTATION)
+    expect(opening.verifiablePresentation).toEqual(PRESENTATION)
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe(EXCHANGE_URL)
     expect(init.body).toBe('{}')
   })
 
-  it('rejects an exchange that demands a presentation first', async () => {
+  it('returns the VPR of an exchange that asks for holder binding', async () => {
     mockFetch({ body: JSON.stringify({ verifiablePresentationRequest: VPR }) })
-    await expect(
-      fetchOfferedPresentation({ exchangeUrl: EXCHANGE_URL })
-    ).rejects.toThrow(/asked for a presentation before offering a credential/)
+    const opening = await beginExchange({ exchangeUrl: EXCHANGE_URL })
+
+    expect(opening.verifiablePresentationRequest).toEqual(VPR)
+    expect(opening.verifiablePresentation).toBeUndefined()
+  })
+})
+
+describe('collectIssuedPresentation', () => {
+  it('trades the DID-Auth presentation for the offered credentials', async () => {
+    const offered = {
+      ...PRESENTATION,
+      verifiableCredential: []
+    } as IVerifiablePresentation
+    const fetchMock = mockFetch({
+      body: JSON.stringify({ verifiablePresentation: offered })
+    })
+    const result = await collectIssuedPresentation({
+      request: VPR,
+      exchangeUrl: EXCHANGE_URL,
+      verifiablePresentation: PRESENTATION
+    })
+
+    expect(result).toEqual(offered)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe(EXCHANGE_URL)
+    expect(JSON.parse(init.body)).toEqual({
+      verifiablePresentation: PRESENTATION
+    })
   })
 
-  it('rejects an exchange that offers nothing', async () => {
+  it('rejects an exchange that asks for a further presentation', async () => {
+    mockFetch({ body: JSON.stringify({ verifiablePresentationRequest: VPR }) })
+    await expect(
+      collectIssuedPresentation({
+        request: VPR,
+        exchangeUrl: EXCHANGE_URL,
+        verifiablePresentation: PRESENTATION
+      })
+    ).rejects.toThrow(/asked for a further presentation/)
+  })
+
+  it('rejects an exchange that offers nothing back', async () => {
     mockFetch({ body: '' })
     await expect(
-      fetchOfferedPresentation({ exchangeUrl: EXCHANGE_URL })
+      collectIssuedPresentation({
+        request: VPR,
+        exchangeUrl: EXCHANGE_URL,
+        verifiablePresentation: PRESENTATION
+      })
     ).rejects.toThrow(/offered no verifiablePresentation/)
   })
 })

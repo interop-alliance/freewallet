@@ -10,6 +10,11 @@
  * empty body, receive the VPR) and `submitPresentation` (POST the composed VP
  * to the VPR's presentation service endpoint, defaulting to the exchange URL).
  *
+ * An issuance exchange runs the same two calls in the other direction: the
+ * opening message is answered either with the credentials directly or -- when
+ * the issuer binds them to a holder DID -- with a DID-Auth VPR, whose signed
+ * answer `collectIssuedPresentation` trades for the credentials.
+ *
  * @see https://w3c-ccg.github.io/vc-api/#exchange-examples
  */
 import type { CHAPIProtocols } from './classify'
@@ -133,29 +138,39 @@ export async function beginExchange({
 }
 
 /**
- * Opens the exchange and collects the presentation an issuer is offering. An
- * issuance exchange answers the opening message with the credentials directly;
- * one that first demands a presentation of its own (holder binding, say) is not
- * something this wallet can answer here, and says so.
+ * Answers an issuance exchange's holder-binding step: POSTs the wallet's
+ * DID-Auth presentation and collects the credentials the issuer hands back in
+ * return. A reply carrying yet another `verifiablePresentationRequest` means a
+ * further round this wallet does not answer.
  *
  * @param options {object}
+ * @param options.request {IVPRDetails} - The VPR the exchange opened with.
  * @param options.exchangeUrl {string}
- * @returns {Promise<IVerifiablePresentation>}
+ * @param options.verifiablePresentation {IVerifiablePresentation} - The signed
+ *   DID-Auth presentation proving control of the holder DID.
+ * @returns {Promise<IVerifiablePresentation>} The offered presentation.
  */
-export async function fetchOfferedPresentation({
-  exchangeUrl
+export async function collectIssuedPresentation({
+  request,
+  exchangeUrl,
+  verifiablePresentation
 }: {
+  request: IVPRDetails
   exchangeUrl: string
+  verifiablePresentation: IVerifiablePresentation
 }): Promise<IVerifiablePresentation> {
-  const { verifiablePresentation, verifiablePresentationRequest } =
-    await beginExchange({ exchangeUrl })
-  if (verifiablePresentation) {
-    return verifiablePresentation
+  const reply = await submitPresentation({
+    request,
+    exchangeUrl,
+    verifiablePresentation
+  })
+  if (reply.verifiablePresentation) {
+    return reply.verifiablePresentation
   }
-  if (verifiablePresentationRequest) {
+  if (reply.verifiablePresentationRequest) {
     throw new Error(
-      `The exchange at ${exchangeUrl} asked for a presentation before ` +
-        'offering a credential; such exchanges are not supported.'
+      `The exchange at ${exchangeUrl} asked for a further presentation; ` +
+        'multi-step exchanges are not supported.'
     )
   }
   throw new Error(

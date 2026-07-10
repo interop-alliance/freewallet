@@ -399,6 +399,7 @@
     },
     "store": {
       "title": "Store credential",
+      "authenticating": "Authenticating with the issuer...",
       "storedSuccess": "{{count}} credentials stored successfully.",
       "storedSuccess_one": "Credential stored successfully."
     },
