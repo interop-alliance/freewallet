@@ -1,7 +1,7 @@
 {
   "name": "Freewallet",
   "short_name": "Freewallet",
-  "icons": [{ "src": "wallet.svg", "sizes": "192x192", "type": "image/png" }],
+  "icons": [{ "src": "wallet.svg", "sizes": "192x192", "type": "image/svg+xml" }],
   "start_url": "/#/",
   "display": "standalone",
   "credential_handler": {
