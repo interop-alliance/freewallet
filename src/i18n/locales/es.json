@@ -399,7 +399,8 @@
     },
     "store": {
       "title": "Guardar credencial",
-      "storedSuccess": "Credencial guardada correctamente."
+      "storedSuccess": "{{count}} credenciales almacenadas correctamente.",
+      "storedSuccess_one": "Credencial almacenada correctamente."
     },
     "savedSession": {
       "button": "Usar sesión guardada",

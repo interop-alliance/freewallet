@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
+  fetchOfferedPresentation,
   presentationEndpointFor,
   startExchange,
   submitPresentation,
@@ -104,6 +105,36 @@ describe('startExchange', () => {
     await expect(startExchange({ exchangeUrl: EXCHANGE_URL })).rejects.toThrow(
       /responded 404/
     )
+  })
+})
+
+describe('fetchOfferedPresentation', () => {
+  it('returns the presentation an issuance exchange offers', async () => {
+    const fetchMock = mockFetch({
+      body: JSON.stringify({ verifiablePresentation: PRESENTATION })
+    })
+    const offered = await fetchOfferedPresentation({
+      exchangeUrl: EXCHANGE_URL
+    })
+
+    expect(offered).toEqual(PRESENTATION)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe(EXCHANGE_URL)
+    expect(init.body).toBe('{}')
+  })
+
+  it('rejects an exchange that demands a presentation first', async () => {
+    mockFetch({ body: JSON.stringify({ verifiablePresentationRequest: VPR }) })
+    await expect(
+      fetchOfferedPresentation({ exchangeUrl: EXCHANGE_URL })
+    ).rejects.toThrow(/asked for a presentation before offering a credential/)
+  })
+
+  it('rejects an exchange that offers nothing', async () => {
+    mockFetch({ body: '' })
+    await expect(
+      fetchOfferedPresentation({ exchangeUrl: EXCHANGE_URL })
+    ).rejects.toThrow(/offered no verifiablePresentation/)
   })
 })
 

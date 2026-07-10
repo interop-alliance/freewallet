@@ -399,7 +399,8 @@
     },
     "store": {
       "title": "Store credential",
-      "storedSuccess": "Credential stored successfully."
+      "storedSuccess": "{{count}} credentials stored successfully.",
+      "storedSuccess_one": "Credential stored successfully."
     },
     "savedSession": {
       "button": "Use saved login",

@@ -105,10 +105,7 @@ export async function startExchange({
 }: {
   exchangeUrl: string
 }): Promise<IVPRDetails> {
-  const { verifiablePresentationRequest } = await postToExchange({
-    url: exchangeUrl,
-    body: {}
-  })
+  const { verifiablePresentationRequest } = await beginExchange({ exchangeUrl })
   if (!verifiablePresentationRequest) {
     throw new Error(
       `The exchange at ${exchangeUrl} did not return a ` +
@@ -116,6 +113,54 @@ export async function startExchange({
     )
   }
   return verifiablePresentationRequest
+}
+
+/**
+ * Opens an exchange: the wallet's first message is always an empty JSON body,
+ * whether the exchange goes on to request a presentation (a verifier) or to
+ * offer one (an issuer).
+ *
+ * @param options {object}
+ * @param options.exchangeUrl {string}
+ * @returns {Promise<VCAPIExchangeResponse>}
+ */
+export async function beginExchange({
+  exchangeUrl
+}: {
+  exchangeUrl: string
+}): Promise<VCAPIExchangeResponse> {
+  return postToExchange({ url: exchangeUrl, body: {} })
+}
+
+/**
+ * Opens the exchange and collects the presentation an issuer is offering. An
+ * issuance exchange answers the opening message with the credentials directly;
+ * one that first demands a presentation of its own (holder binding, say) is not
+ * something this wallet can answer here, and says so.
+ *
+ * @param options {object}
+ * @param options.exchangeUrl {string}
+ * @returns {Promise<IVerifiablePresentation>}
+ */
+export async function fetchOfferedPresentation({
+  exchangeUrl
+}: {
+  exchangeUrl: string
+}): Promise<IVerifiablePresentation> {
+  const { verifiablePresentation, verifiablePresentationRequest } =
+    await beginExchange({ exchangeUrl })
+  if (verifiablePresentation) {
+    return verifiablePresentation
+  }
+  if (verifiablePresentationRequest) {
+    throw new Error(
+      `The exchange at ${exchangeUrl} asked for a presentation before ` +
+        'offering a credential; such exchanges are not supported.'
+    )
+  }
+  throw new Error(
+    `The exchange at ${exchangeUrl} offered no verifiablePresentation.`
+  )
 }
 
 /**

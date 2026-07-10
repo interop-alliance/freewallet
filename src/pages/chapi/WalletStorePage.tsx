@@ -2,7 +2,9 @@
  * CHAPI credential-store popup. Runs inside a CHAPI-managed popup iframe (not
  * the main app shell) when a third-party site calls navigator.credentials.store().
  * Intercepts the CHAPI event, prompts the user to log in with their passphrase,
- * then stores the incoming VC to their wallet on confirmation.
+ * then stores every credential the offer carries to their wallet on
+ * confirmation. The offer arrives either inline on the event or, when the issuer
+ * names a VC API exchange, from that exchange.
  */
 import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
@@ -27,6 +29,8 @@ import { chapiStyles } from '@/styles/appStyles'
 import {
   classifyCHAPIStoreEvent,
   credentialsOf,
+  fetchOfferedPresentation,
+  vcApiExchangeUrl,
   type CHAPIStoreEvent
 } from '@/lib/walletRequest'
 import { CHAPILoginForm } from './CHAPILoginForm'
@@ -39,7 +43,8 @@ export function WalletStorePage() {
   const { t } = useTranslation()
   const [pageState, setPageState] = useState<PageState>('initializing')
   const [chapiEvent, setCHAPIEvent] = useState<CHAPIStoreEvent | null>(null)
-  const [vc, setVc] = useState<IVerifiableCredential | null>(null)
+  // Every credential the offer carries; all are stored on confirmation.
+  const [vcs, setVcs] = useState<IVerifiableCredential[]>([])
   const [vp, setVp] = useState<IVerifiablePresentation | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
@@ -60,16 +65,33 @@ export function WalletStorePage() {
     async function init() {
       await loadOnce(MEDIATOR_BASE + encodeURIComponent(window.location.origin))
       const event = (await receiveCredentialEvent()) as CHAPIStoreEvent
-      console.debug(
-        '[CHAPI store] incoming event from %s, dataType: %s\n%s',
+      const { dataType, data, options } = event.credential ?? {}
+      console.log(
+        '[CHAPI store] incoming event from %s, dataType: %s, protocols: %s\n%s',
         event.credentialRequestOrigin ?? '(unknown origin)',
-        event.credential?.dataType ?? '(none)',
-        JSON.stringify(event.credential?.data, null, 2)
+        dataType ?? '(none)',
+        JSON.stringify(options?.protocols ?? {}),
+        JSON.stringify(data, null, 2)
       )
-      const offer = classifyCHAPIStoreEvent(event)
-      const incomingVp = offer.verifiablePresentation
-      const [incomingVc] = credentialsOf(incomingVp)
-      if (!incomingVc) {
+
+      // An issuer that names a VC API exchange sends an empty payload and keeps
+      // the credentials it is offering on the exchange server.
+      const exchange = vcApiExchangeUrl({ protocols: options?.protocols })
+      const offered = !!data && Object.keys(data).length > 0
+      let incomingVp: IVerifiablePresentation
+      if (!offered && exchange) {
+        console.log('[CHAPI store] fetching the offer from %s', exchange)
+        incomingVp = await fetchOfferedPresentation({ exchangeUrl: exchange })
+        console.log(
+          '[CHAPI store] the exchange offered:\n%s',
+          JSON.stringify(incomingVp, null, 2)
+        )
+      } else {
+        incomingVp = classifyCHAPIStoreEvent(event).verifiablePresentation
+      }
+
+      const credentials = credentialsOf(incomingVp)
+      if (credentials.length === 0) {
         console.warn(
           '[CHAPI store] the offered presentation carries no credential:\n%s',
           JSON.stringify(incomingVp, null, 2)
@@ -77,7 +99,7 @@ export function WalletStorePage() {
       }
       setCHAPIEvent(event)
       setVp(incomingVp)
-      setVc(incomingVc ?? null)
+      setVcs(credentials)
       setPageState('awaiting-login')
     }
 
@@ -129,8 +151,14 @@ export function WalletStorePage() {
     }
   }
 
+  /**
+   * Stores every credential the offer carried. Each is written independently,
+   * so a failure part-way through leaves the earlier writes in place; the page
+   * says how many were stored rather than reporting a clean success or a clean
+   * failure for a run that was neither.
+   */
   async function handleConfirm() {
-    if (!session || !vc) {
+    if (!session || vcs.length === 0) {
       const reason = !session
         ? 'no session is established'
         : 'the offer carried no credential'
@@ -139,13 +167,27 @@ export function WalletStorePage() {
       return
     }
     setStoreError(null)
+    let stored = 0
     try {
-      await session.storage.addCredential({ credential: vc })
+      for (const credential of vcs) {
+        await session.storage.addCredential({ credential })
+        stored++
+      }
       setPageState('stored')
     } catch (err) {
-      console.error('[CHAPI store] addCredential failed:', err)
-      setStoreError(
+      console.error(
+        '[CHAPI store] addCredential failed after storing %d of %d:',
+        stored,
+        vcs.length,
+        err
+      )
+      const detail =
         err instanceof Error ? err.message : 'Could not store the credential.'
+      setStoreError(
+        stored > 0
+          ? `Stored ${stored} of ${vcs.length} credentials, then failed: ` +
+              `${detail}`
+          : detail
       )
     }
   }
@@ -187,22 +229,22 @@ export function WalletStorePage() {
           </Typography>
         )}
 
-        {vc && (
-          <Box sx={chapiStyles.credentialSummary}>
+        {vcs.map((offeredVc, index) => (
+          <Box key={offeredVc.id ?? index} sx={chapiStyles.credentialSummary}>
             <Typography variant="body2" color="text.secondary">
               {t('common.type')}
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              {credentialTitle(vc)}
+              {credentialTitle(offeredVc)}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               {t('common.issuer')}
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              {issuerName(vc)}
+              {issuerName(offeredVc)}
             </Typography>
           </Box>
-        )}
+        ))}
 
         {pageState === 'awaiting-login' && (
           <>
@@ -240,7 +282,7 @@ export function WalletStorePage() {
         {pageState === 'stored' && (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             <Typography variant="body2" color="success.main">
-              {t('chapi.store.storedSuccess')}
+              {t('chapi.store.storedSuccess', { count: vcs.length })}
             </Typography>
             <Button
               variant="contained"

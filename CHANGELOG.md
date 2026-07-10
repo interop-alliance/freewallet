@@ -1,5 +1,32 @@
 # History
 
+## Unreleased - TBD
+
+### Added
+
+- **VC API exchange offers on the store popup (CHAPI `protocols.vcapi`).** An
+  issuer may offer an empty credential payload and name a VC API exchange URL
+  under `credential.options.protocols.vcapi` instead, keeping the credentials it
+  is issuing on its exchange server (vcplayground.org's issuer always does
+  this). The store popup previously read the empty payload, found no credential,
+  and refused to store. It now opens the exchange and collects the offered
+  presentation from it, the same way the share popup already retrieves a
+  presentation request. An exchange that demands a presentation before offering
+  a credential is reported as unsupported.
+
+### Changed
+
+- The CHAPI store popup now stores **every** credential an offer carries, rather
+  than only the first. All of them are summarized on the confirmation screen;
+  each is written independently, and a failure part-way through reports how many
+  were stored rather than claiming a clean success or a clean failure.
+
+### Fixed
+
+- The CHAPI store popup logged the incoming offer at `console.debug`, which
+  browsers hide by default. It now logs at the default level, and reports the
+  protocols the issuer offered and the presentation fetched from an exchange.
+
 ## 0.15.1 - 2026-07-10
 
 ### Added

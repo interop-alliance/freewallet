@@ -56,13 +56,20 @@ export interface CHAPIGetEvent {
  * Raw CHAPI credential-store event. `credential.data` is the offered payload,
  * and `credential.dataType` names its shape: issuers may offer either a
  * `VerifiablePresentation` wrapping the credential(s), or a bare
- * `VerifiableCredential` (what vcplayground.org sends).
+ * `VerifiableCredential` (what vcplayground.org sends). An issuer that names a
+ * `protocols` handle in `credential.options` sends `data` empty instead, and
+ * the offered credentials must be fetched from the protocol exchange (see
+ * `vcApiExchange.ts`).
  */
 export interface CHAPIStoreEvent {
   credentialRequestOrigin?: string
   credential: {
     dataType?: string
     data: IVerifiablePresentation | IVerifiableCredential
+    options?: {
+      protocols?: CHAPIProtocols
+      recommendedHandlerOrigins?: string[]
+    }
   }
   respondWith(
     promise: Promise<{ dataType: string; data: unknown } | null>
