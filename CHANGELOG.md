@@ -1,5 +1,31 @@
 # History
 
+## 0.15.5 - TBD
+
+### Added
+
+- **Recognize the CHAPI `interact` protocol in credential requests.** The newer
+  single-call CHAPI entry point (`chapi.interact()`) hands the wallet an
+  exchange URL under `protocols.interact` rather than the classic
+  `protocols.vcapi`, with an empty presentation/store body, and does not depend
+  on `navigator.credentials` (which browsers are expected to freeze). The get
+  and store popups now read either handle -- preferring `interact` when both are
+  present -- so requests from sites that adopt the new API open the exchange
+  instead of being rejected as unreadable. The exchange itself is handled by the
+  existing VC API machinery, since the `interact` URL is an opaque HTTP exchange
+  endpoint like `vcapi`.
+
+### Fixed
+
+- **"Allow Wallet" CHAPI prompt reappeared on every visit to Login/Signup.**
+  `registerWallet()` runs from a mount effect on the Login, Signup, and Guest
+  login pages, and it unconditionally called `installHandler()`, whose only
+  action is the mediator's `permissions.request()` -- the prompting call, which
+  always shows the "Allow Wallet" popup regardless of prior grants. Registration
+  now first queries the existing `credentialhandler` permission state (a
+  non-prompting call) and only installs the handler when the origin has not
+  already been granted, so the prompt appears at most once per browser.
+
 ## 0.15.4 - 2026-07-10
 
 ### Fixed

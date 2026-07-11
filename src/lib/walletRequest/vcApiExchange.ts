@@ -39,9 +39,16 @@ export interface VCAPIExchangeResponse {
 }
 
 /**
- * The exchange URL a CHAPI request defers to, if any. Present only when the
- * verifier chose the VC API protocol, in which case the request's VPR body is
- * empty and everything of substance lives behind this URL.
+ * The exchange URL a CHAPI request defers to, if any. Present when the verifier
+ * or issuer chose an exchange-based protocol, in which case the request's VPR
+ * (or store) body is empty and everything of substance lives behind this URL.
+ *
+ * Two protocol handles carry such a URL: the classic `vcapi` key, and the
+ * `interact` key of the newer `chapi.interact()` API (a "meta" protocol whose
+ * URL is opaque -- the underlying exchange is negotiated behind it, exactly as
+ * with `vcapi`). Both are plain HTTP exchange endpoints the wallet POSTs to, so
+ * they are handled identically here; `interact` is preferred when a request
+ * carries both.
  *
  * @param options {object}
  * @param [options.protocols] {CHAPIProtocols}
@@ -52,8 +59,8 @@ export function vcApiExchangeUrl({
 }: {
   protocols?: CHAPIProtocols
 }): string | undefined {
-  const vcapi = protocols?.vcapi
-  return typeof vcapi === 'string' && vcapi.length > 0 ? vcapi : undefined
+  const candidates = [protocols?.interact, protocols?.vcapi]
+  return candidates.find(url => typeof url === 'string' && url.length > 0)
 }
 
 /**

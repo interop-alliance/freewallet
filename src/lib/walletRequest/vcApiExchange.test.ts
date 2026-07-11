@@ -65,10 +65,27 @@ afterEach(() => {
 })
 
 describe('vcApiExchangeUrl', () => {
+  const INTERACT_URL =
+    'https://coordinator.example/interactions/z1A2b3C4d5E6f7G8h9'
+
   it('returns the vcapi exchange URL when the verifier names one', () => {
     expect(vcApiExchangeUrl({ protocols: { vcapi: EXCHANGE_URL } })).toBe(
       EXCHANGE_URL
     )
+  })
+
+  it('returns the interact URL of the chapi.interact() API', () => {
+    expect(vcApiExchangeUrl({ protocols: { interact: INTERACT_URL } })).toBe(
+      INTERACT_URL
+    )
+  })
+
+  it('prefers the interact URL over vcapi when both are present', () => {
+    expect(
+      vcApiExchangeUrl({
+        protocols: { interact: INTERACT_URL, vcapi: EXCHANGE_URL }
+      })
+    ).toBe(INTERACT_URL)
   })
 
   it('returns undefined when no protocols are offered', () => {
@@ -77,6 +94,12 @@ describe('vcApiExchangeUrl', () => {
     expect(
       vcApiExchangeUrl({ protocols: { OID4VP: 'openid4vp://' } })
     ).toBeUndefined()
+  })
+
+  it('ignores an empty interact value and falls back to vcapi', () => {
+    expect(
+      vcApiExchangeUrl({ protocols: { interact: '', vcapi: EXCHANGE_URL } })
+    ).toBe(EXCHANGE_URL)
   })
 })
 
