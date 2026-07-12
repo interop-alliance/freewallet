@@ -127,8 +127,13 @@ export async function persistDelegatedSession({
   const expires = new Date(Date.now() + SESSION_ZCAP_TTL_MS)
   const spaceRootCapability = `urn:zcap:root:${encodeURIComponent(spaceUrl)}`
 
+  // All five delegations are independent, pure signing operations (no server
+  // round trip), so they run concurrently under Promise.all. A rejection from
+  // any of them rejects the whole call, exactly as the previous serial awaits
+  // did.
+
   // Read-only over the whole Space (chain root: the Space itself).
-  const spaceReadCapability = await zcapClient.delegate({
+  const spaceReadPromise = zcapClient.delegate({
     invocationTarget: spaceUrl,
     controller: sessionDid,
     allowedActions: ['GET', 'HEAD'],
@@ -137,16 +142,17 @@ export async function persistDelegatedSession({
 
   // Read/write per standard collection: rooted at the Space, target
   // attenuated down to the collection at delegation time.
-  const collectionCapabilities: Record<string, IZcap> = {}
-  for (const { id } of WALLET_STANDARD_COLLECTIONS) {
-    collectionCapabilities[id] = await zcapClient.delegate({
-      capability: spaceRootCapability,
-      invocationTarget: `${spaceUrl}/${id}`,
-      controller: sessionDid,
-      allowedActions: SESSION_WRITE_ACTIONS,
-      expires
-    })
-  }
+  const collectionPromises = WALLET_STANDARD_COLLECTIONS.map(({ id }) =>
+    zcapClient
+      .delegate({
+        capability: spaceRootCapability,
+        invocationTarget: `${spaceUrl}/${id}`,
+        controller: sessionDid,
+        allowedActions: SESSION_WRITE_ACTIONS,
+        expires
+      })
+      .then(capability => [id, capability] as const)
+  )
 
   // A `sign` capability for the did:web `authentication` key, when a keystore
   // was provisioned. It targets that key's URL specifically, not the whole
@@ -157,11 +163,11 @@ export async function persistDelegatedSession({
   // there). Without a did:web there is no key to sign with, so the capability
   // falls back to the (inert) keystore target.
   let keystoreId: string | undefined
-  let keystoreCapability: IZcap | undefined
+  let keystorePromise: Promise<IZcap | undefined> = Promise.resolve(undefined)
   if (keystoreAgent?.keystoreId) {
     keystoreId = keystoreAgent.keystoreId
     const signTarget = didWeb?.keys.authentication.kmsKeyId ?? keystoreId
-    keystoreCapability = await zcapClient.delegate({
+    keystorePromise = zcapClient.delegate({
       capability: `urn:zcap:root:${encodeURIComponent(keystoreId)}`,
       invocationTarget: signTarget,
       controller: sessionDid,
@@ -169,6 +175,16 @@ export async function persistDelegatedSession({
       expires
     })
   }
+
+  const [spaceReadCapability, collectionEntries, keystoreCapability] =
+    await Promise.all([
+      spaceReadPromise,
+      Promise.all(collectionPromises),
+      keystorePromise
+    ])
+  const collectionCapabilities = Object.fromEntries(
+    collectionEntries
+  ) as Record<string, IZcap>
 
   const record: PersistedSessionRecord = {
     controller: session.user.id,
@@ -224,10 +240,12 @@ export async function restoreDelegatedSession({
   if (!WAS_SERVER_URL) {
     return null
   }
-  const record = (await loadSessionRecord({
-    idb
-  })) as PersistedSessionRecord | null
-  const keyPair = await loadSessionKeyPair({ idb })
+  // The record and the session key pair are independent reads; load them
+  // concurrently rather than one after the other.
+  const [record, keyPair] = await Promise.all([
+    loadSessionRecord({ idb }) as Promise<PersistedSessionRecord | null>,
+    loadSessionKeyPair({ idb })
+  ])
   if (!record || !keyPair) {
     return null
   }

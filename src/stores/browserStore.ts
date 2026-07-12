@@ -53,6 +53,23 @@ export class BrowserStore {
   // bad row bricking the whole list.
   private _undecryptableCredentials = 0
   private _undecryptableHistory = 0
+  // Session-lifetime decrypt caches, keyed by RxDB row id. Every credential
+  // operation (list, load-one, delete, add's dedupe scan) otherwise re-decrypts
+  // the whole collection and re-derives `cidFrom` per row; these memoize the
+  // decrypted content identity so a row is decrypted at most once per session.
+  // The key is safe: a row id is the content-derived hash of the JWE
+  // ciphertext, so it maps to exactly one plaintext under this instance's fixed
+  // cipher (ciphers are injected at construction and never swapped -- a vault
+  // lock/unlock or a different user builds a fresh BrowserStore). The caches are
+  // therefore implicitly scoped per user/db-prefix and per cipher set. Entries
+  // are dropped when their row is removed and both caches are cleared on
+  // teardown; an insert needs no invalidation because a new envelope always
+  // carries a fresh, previously-unseen id.
+  private _credentialCache = new Map<
+    string,
+    { cid: string; vc: IVerifiableCredential }
+  >()
+  private _historyCache = new Map<string, WalletActivity>()
 
   constructor({
     dbPrefix,
@@ -239,11 +256,18 @@ export class BrowserStore {
     for (const doc of docs) {
       const { id, data } = doc.toMutableJSON()
       if (cipher && isEncryptedEnvelope(data)) {
+        const cached = this._credentialCache.get(id)
+        if (cached) {
+          entries.push({ rowId: id, cid: cached.cid, vc: cached.vc })
+          continue
+        }
         try {
           const vc = (await cipher.decrypt({
             envelope: data!
           })) as unknown as IVerifiableCredential
-          entries.push({ rowId: id, cid: await cidFrom({ doc: vc }), vc })
+          const cid = await cidFrom({ doc: vc })
+          this._credentialCache.set(id, { cid, vc })
+          entries.push({ rowId: id, cid, vc })
         } catch (err) {
           console.warn(
             `Skipping undecryptable private-credentials row "${id}":`,
@@ -365,6 +389,7 @@ export class BrowserStore {
     if (doc) {
       await doc.remove()
     }
+    this._credentialCache.delete(rowId)
   }
 
   /**
@@ -515,17 +540,23 @@ export class BrowserStore {
       const { id: rowId, data } = rxDoc.toMutableJSON()
       let activity: WalletActivity
       if (cipher && isEncryptedEnvelope(data)) {
-        try {
-          activity = (await cipher.decrypt({
-            envelope: data!
-          })) as WalletActivity
-        } catch (err) {
-          console.warn(
-            `Skipping undecryptable wallet-activity row "${rowId}":`,
-            err
-          )
-          undecryptable += 1
-          continue
+        const cached = this._historyCache.get(rowId)
+        if (cached) {
+          activity = cached
+        } else {
+          try {
+            activity = (await cipher.decrypt({
+              envelope: data!
+            })) as WalletActivity
+          } catch (err) {
+            console.warn(
+              `Skipping undecryptable wallet-activity row "${rowId}":`,
+              err
+            )
+            undecryptable += 1
+            continue
+          }
+          this._historyCache.set(rowId, activity)
         }
       } else {
         activity = data as WalletActivity
@@ -558,9 +589,20 @@ export class BrowserStore {
    * remotely, which the server treats as an idempotent no-op. The original's
    * `updatedAt` is preserved so log/list ordering survives the re-key.
    *
+   * Runs at most once per user: after the first pass no never-synced plaintext
+   * row can remain, so a persistent per-`dbPrefix` marker (localStorage, guarded
+   * for the non-browser test/SSR environments) short-circuits the full-collection
+   * scan that would otherwise materialize every encrypted row on every later
+   * login and unlocked-vault restore.
+   *
    * @returns {Promise<void>}
    */
   async migrateLocalPlaintextDocs() {
+    const markerKey = `freewallet:plaintext-migrated:${this.dbPrefix}`
+    const hasLocalStorage = typeof localStorage !== 'undefined'
+    if (hasLocalStorage && localStorage.getItem(markerKey)) {
+      return
+    }
     for (const [logicalKey, cipher] of Object.entries(this._ciphers ?? {})) {
       const collection = this.rxCollection(logicalKey)
       const docs = await collection.find().exec()
@@ -578,6 +620,9 @@ export class BrowserStore {
         })
         await doc.remove()
       }
+    }
+    if (hasLocalStorage) {
+      localStorage.setItem(markerKey, new Date().toISOString())
     }
   }
 
@@ -629,6 +674,8 @@ export class BrowserStore {
    * @returns {Promise<void>}
    */
   async wipeStorage() {
+    this._credentialCache.clear()
+    this._historyCache.clear()
     if (this.db) {
       await this.db.remove()
       this.db = undefined
@@ -690,6 +737,8 @@ export class BrowserStore {
    * @returns {Promise<void>}
    */
   async close() {
+    this._credentialCache.clear()
+    this._historyCache.clear()
     if (this.db) {
       await this.db.close()
       this.db = undefined

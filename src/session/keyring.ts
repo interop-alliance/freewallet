@@ -696,13 +696,11 @@ export async function changePassphrase({
   })
 
   // Retire the old unlock identity -- but only when it differs from the new
-  // one (an old == new rebind must not delete the Space just written).
-  const newUnlock = await deriveUnlockIdentity({
-    passphrase: newPassphrase,
-    kdf
-  })
+  // one (an old == new rebind must not delete the Space just written). The
+  // spaceId is deterministic from the passphrase, so comparing the passphrases
+  // answers this without a third unlock derivation.
   let oldSpaceDeleted = true
-  if (newUnlock.spaceId !== oldUnlock.spaceId) {
+  if (newPassphrase !== oldPassphrase) {
     if (WAS_SERVER_URL) {
       try {
         await deleteUnlockSpace({

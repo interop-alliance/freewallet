@@ -24,7 +24,6 @@ export function DashboardPage() {
   const [credentials, setCredentials] = useState<StoredCredential[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
-  const [syncCount, setSyncCount] = useState(0)
   const [scanQrOpen, setScanQrOpen] = useState(false)
   const [loadError, setLoadError] = useState(false)
   // Rows the vault is unlocked for but that still would not decrypt (corrupted
@@ -92,7 +91,6 @@ export function DashboardPage() {
       // pulled changes land in the local replica in the background.
       syncController.reSync()
       await loadCredentials()
-      setSyncCount(count => count + 1)
     } catch (err) {
       console.error('Could not refresh credentials:', err)
       setLoadError(true)
@@ -109,7 +107,6 @@ export function DashboardPage() {
     try {
       await session.storage.purgeUndecryptableCredentials()
       await loadCredentials()
-      setSyncCount(count => count + 1)
     } catch (err) {
       console.error('Could not remove undecryptable credentials:', err)
       setLoadError(true)
@@ -195,11 +192,7 @@ export function DashboardPage() {
         ) : (
           <Box sx={dashboardStyles.credentialsGrid}>
             {credentials.map(({ cid, vc }) => (
-              <CredentialCard
-                key={`${cid}-${syncCount}`}
-                cid={cid}
-                credential={vc}
-              />
+              <CredentialCard key={cid} cid={cid} credential={vc} />
             ))}
           </Box>
         )}

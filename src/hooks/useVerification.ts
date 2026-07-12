@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
+import { canonicalize as jcsCanonicalize } from 'json-canonicalize'
 import { verifyResultToChecklist } from '@/lib/viewMappers/mapVerificationToUi'
 import {
   issuerRegistryInfoFromVerifyPayload,
@@ -19,6 +20,54 @@ export interface UseVerificationReturn {
   issuerRegistry: IssuerRegistryInfo | null
 }
 
+/**
+ * How long a verification result stays reusable. Verifying a credential does
+ * full JSON-LD canonicalization, a signature check, and status-list plus
+ * registry network fetches, so remounts (e.g. a dashboard sync tick) and
+ * revisits within this window reuse the cached result instead of redoing all
+ * of that work. The window is short enough that a freshly revoked or expired
+ * credential is re-checked soon after.
+ */
+const VERIFICATION_CACHE_TTL_MS = 5 * 60 * 1000
+
+interface VerificationCacheEntry {
+  checkedAt: number
+  result: VerificationResult
+  issuerRegistry: IssuerRegistryInfo | null
+}
+
+/**
+ * Module-level, process-lifetime cache of verification results. Keyed by the
+ * canonicalized credential plus the active language (checklist messages are
+ * localized), so distinct credentials and languages never collide. Only
+ * successful mappings are stored -- transient failures fall through and are
+ * retried on the next mount.
+ */
+const verificationCache = new Map<string, VerificationCacheEntry>()
+
+function verificationCacheKey(
+  credential: IVerifiableCredential,
+  language: string
+): string {
+  return `${language}::${jcsCanonicalize(credential as object)}`
+}
+
+/**
+ * Synchronously read a still-fresh cache entry, or `null` on miss/expiry.
+ */
+function readVerificationCache(
+  credential: IVerifiableCredential,
+  language: string
+): VerificationCacheEntry | null {
+  const cached = verificationCache.get(
+    verificationCacheKey(credential, language)
+  )
+  if (cached && Date.now() - cached.checkedAt < VERIFICATION_CACHE_TTL_MS) {
+    return cached
+  }
+  return null
+}
+
 async function verifyAndMap(
   credential: IVerifiableCredential,
   t: TFunction
@@ -32,6 +81,27 @@ async function verifyAndMap(
     result: verifyResultToChecklist(raw, credential, t),
     issuerRegistry: issuerRegistryInfoFromVerifyPayload(raw)
   }
+}
+
+/**
+ * Verify a credential and store the freshly mapped result in the cache,
+ * overwriting any prior entry for the same credential/language. Used both on a
+ * cache miss and by the imperative `verify()` re-check, which always bypasses
+ * the cache.
+ */
+async function verifyAndStore(
+  credential: IVerifiableCredential,
+  t: TFunction,
+  language: string
+): Promise<VerificationCacheEntry> {
+  const mapped = await verifyAndMap(credential, t)
+  const entry: VerificationCacheEntry = {
+    checkedAt: Date.now(),
+    result: mapped.result,
+    issuerRegistry: mapped.issuerRegistry
+  }
+  verificationCache.set(verificationCacheKey(credential, language), entry)
+  return entry
 }
 
 export function useVerification(
@@ -63,10 +133,11 @@ export function useVerification(
     setLoading(true)
     setError(null)
     try {
-      const mapped = await verifyAndMap(credential, t)
-      setResult(mapped.result)
-      setIssuerRegistry(mapped.issuerRegistry)
-      setLastCheckedAt(new Date())
+      // The imperative re-check always bypasses the cache and refreshes it.
+      const entry = await verifyAndStore(credential, t, i18n.language)
+      setResult(entry.result)
+      setIssuerRegistry(entry.issuerRegistry)
+      setLastCheckedAt(new Date(entry.checkedAt))
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e))
       setError(err)
@@ -76,24 +147,37 @@ export function useVerification(
     } finally {
       setLoading(false)
     }
-  }, [credential, t])
+  }, [credential, i18n.language, t])
 
   useEffect(() => {
     if (!runOnMount || !credential) {
       return
     }
+    const language = i18n.language
     let cancelled = false
     async function run() {
+      // A fresh cached result skips the whole verification pass. It is applied
+      // before the first await (so before paint), avoiding the "verifying"
+      // flicker on remount.
+      const cached = readVerificationCache(credential!, language)
+      if (cached) {
+        setResult(cached.result)
+        setIssuerRegistry(cached.issuerRegistry)
+        setLastCheckedAt(new Date(cached.checkedAt))
+        setError(null)
+        setLoading(false)
+        return
+      }
       setLoading(true)
       setError(null)
       try {
-        const mapped = await verifyAndMap(credential!, t)
+        const entry = await verifyAndStore(credential!, t, language)
         if (cancelled) {
           return
         }
-        setResult(mapped.result)
-        setIssuerRegistry(mapped.issuerRegistry)
-        setLastCheckedAt(new Date())
+        setResult(entry.result)
+        setIssuerRegistry(entry.issuerRegistry)
+        setLastCheckedAt(new Date(entry.checkedAt))
       } catch (e) {
         if (cancelled) {
           return

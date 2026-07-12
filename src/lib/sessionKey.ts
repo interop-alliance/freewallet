@@ -67,14 +67,43 @@ async function withSessionStore(
   operation: (store: IDBObjectStore) => IDBRequest,
   idb?: IDBFactory
 ): Promise<unknown> {
+  const [result] = await withSessionStoreBatch(mode, [operation], idb)
+  return result
+}
+
+/**
+ * Runs several independent get/put/delete operations against the session
+ * object store within a single transaction on one open connection, resolving
+ * to their results in order. Batching this way avoids repeating the
+ * openSessionDb() handshake (and the version check it carries) once per
+ * operation -- the page-load restore, the login-time envelope save, and
+ * logout each touch several records that would otherwise be serial
+ * open/close cycles.
+ *
+ * @param mode {IDBTransactionMode}
+ * @param operations {Array<(store: IDBObjectStore) => IDBRequest>}
+ * @param [idb] {IDBFactory}
+ * @returns {Promise<unknown[]>}
+ */
+async function withSessionStoreBatch(
+  mode: IDBTransactionMode,
+  operations: Array<(store: IDBObjectStore) => IDBRequest>,
+  idb?: IDBFactory
+): Promise<unknown[]> {
   const db = await openSessionDb({ idb })
   try {
-    return await new Promise((resolve, reject) => {
-      const transaction = db.transaction(SESSION_STORE, mode)
-      const request = operation(transaction.objectStore(SESSION_STORE))
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
-    })
+    const transaction = db.transaction(SESSION_STORE, mode)
+    const store = transaction.objectStore(SESSION_STORE)
+    return await Promise.all(
+      operations.map(
+        operation =>
+          new Promise((resolve, reject) => {
+            const request = operation(store)
+            request.onsuccess = () => resolve(request.result)
+            request.onerror = () => reject(request.error)
+          })
+      )
+    )
   } finally {
     db.close()
   }
@@ -198,14 +227,12 @@ export async function saveVaultEnvelope({
   envelope: unknown
   idb?: IDBFactory
 }): Promise<void> {
-  await withSessionStore(
+  await withSessionStoreBatch(
     'readwrite',
-    store => store.put(wrappingKey, VAULT_KEY_RECORD),
-    idb
-  )
-  await withSessionStore(
-    'readwrite',
-    store => store.put(envelope, VAULT_ENVELOPE_RECORD),
+    [
+      store => store.put(wrappingKey, VAULT_KEY_RECORD),
+      store => store.put(envelope, VAULT_ENVELOPE_RECORD)
+    ],
     idb
   )
 }
@@ -224,16 +251,14 @@ export async function loadVaultEnvelope({
 }: {
   idb?: IDBFactory
 } = {}): Promise<{ wrappingKey: CryptoKey; envelope: unknown } | null> {
-  const wrappingKey = (await withSessionStore(
+  const [wrappingKey, envelope] = (await withSessionStoreBatch(
     'readonly',
-    store => store.get(VAULT_KEY_RECORD),
+    [
+      store => store.get(VAULT_KEY_RECORD),
+      store => store.get(VAULT_ENVELOPE_RECORD)
+    ],
     idb
-  )) as CryptoKey | undefined
-  const envelope = await withSessionStore(
-    'readonly',
-    store => store.get(VAULT_ENVELOPE_RECORD),
-    idb
-  )
+  )) as [CryptoKey | undefined, unknown]
   if (!wrappingKey || envelope === undefined || envelope === null) {
     return null
   }
@@ -254,14 +279,12 @@ export async function deleteVaultEnvelope({
 }: {
   idb?: IDBFactory
 } = {}): Promise<void> {
-  await withSessionStore(
+  await withSessionStoreBatch(
     'readwrite',
-    store => store.delete(VAULT_ENVELOPE_RECORD),
-    idb
-  )
-  await withSessionStore(
-    'readwrite',
-    store => store.delete(VAULT_KEY_RECORD),
+    [
+      store => store.delete(VAULT_ENVELOPE_RECORD),
+      store => store.delete(VAULT_KEY_RECORD)
+    ],
     idb
   )
 }
@@ -283,17 +306,19 @@ export async function clearPersistedSession({
 }: {
   idb?: IDBFactory
 } = {}): Promise<void> {
-  await withSessionStore(
+  // The record, the key pair, and the vault envelope pair (its wrapping key
+  // and envelope) all clear in a single transaction rather than four serial
+  // open/close cycles.
+  await withSessionStoreBatch(
     'readwrite',
-    store => store.delete(SESSION_RECORD),
+    [
+      store => store.delete(SESSION_RECORD),
+      store => store.delete(KEY_PAIR_RECORD),
+      store => store.delete(VAULT_ENVELOPE_RECORD),
+      store => store.delete(VAULT_KEY_RECORD)
+    ],
     idb
   )
-  await withSessionStore(
-    'readwrite',
-    store => store.delete(KEY_PAIR_RECORD),
-    idb
-  )
-  await deleteVaultEnvelope({ idb })
 }
 
 /**

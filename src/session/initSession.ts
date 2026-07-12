@@ -122,21 +122,23 @@ export async function initSessionFromSeed({
 
   // Ensure a KMS keystore exists for this controller (list-by-controller,
   // create on first login) and bind a KeystoreAgent to it. Guests skip the
-  // KMS entirely, as they skip WAS. Failure is non-fatal for now: no wallet
-  // feature depends on the keystore yet, so a KMS outage must not lock
-  // users out -- the settings page surfaces the unprovisioned state.
-  let keystoreAgent
-  if (!isGuest && KMS_SERVER_URL) {
-    try {
-      keystoreAgent = await ensureKeystore({
-        kmsServerUrl: KMS_SERVER_URL,
-        keyAgent,
-        zcapClient
-      })
-    } catch (err) {
-      console.warn('KMS keystore provisioning failed:', err)
-    }
-  }
+  // KMS entirely, as they skip WAS. This provisioning round trip runs
+  // concurrently with storage init below -- nothing in the storage bootstrap
+  // depends on the keystore, so the two independent trips need not be
+  // serialized. Failure is non-fatal for now: no wallet feature depends on
+  // the keystore yet, so a KMS outage must not lock users out -- the settings
+  // page surfaces the unprovisioned state.
+  const keystorePromise =
+    !isGuest && KMS_SERVER_URL
+      ? ensureKeystore({
+          kmsServerUrl: KMS_SERVER_URL,
+          keyAgent,
+          zcapClient
+        }).catch(err => {
+          console.warn('KMS keystore provisioning failed:', err)
+          return undefined
+        })
+      : Promise.resolve(undefined)
 
   const user: User = {
     id: keyAgent.id, // a did:key DID
@@ -145,7 +147,6 @@ export async function initSessionFromSeed({
   const profile: ControllerProfile = {
     keyAgent,
     zcapClient,
-    keystoreAgent,
     // `id` is always set on the KAK here (a controller was supplied at
     // derivation), so it satisfies IKeyAgreementKey's required `id`.
     keyAgreementKey: keyAgreementKey as IKeyAgreementKey,
@@ -155,12 +156,18 @@ export async function initSessionFromSeed({
     profile.dataSeed = seed
   }
 
-  const { storage, userExists } = await StorageManager.initStorageClients({
-    user,
-    profile,
-    isGuest,
-    remoteDirect: remoteDirectStorage
-  })
+  const [keystoreAgent, { storage, userExists }] = await Promise.all([
+    keystorePromise,
+    StorageManager.initStorageClients({
+      user,
+      profile,
+      isGuest,
+      remoteDirect: remoteDirectStorage
+    })
+  ])
+  // Bind the provisioned keystore onto the (already-shared) profile object;
+  // the session below references the same profile.
+  profile.keystoreAgent = keystoreAgent
 
   const session = { user, profile, storage, isGuest, tier: 'full' } as Session
 

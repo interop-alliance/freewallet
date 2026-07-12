@@ -322,60 +322,68 @@ export class WASRemoteStore {
       )
     }
 
-    // Space created, now create the standard collections.
+    // Space created, now create the standard collections plus the `id`
+    // collection. Each collection's own configure-then-setPublic ordering
+    // stays sequential within its chain, but the independent chains -- which
+    // depend only on the Space already existing -- run concurrently under a
+    // single Promise.all, collapsing what was a series of signed round trips
+    // into one batch on every full login (including each CHAPI popup). A
+    // rejected chain surfaces as Promise.all's first rejection; as with the
+    // former serial loop, chains that already completed leave their
+    // provisioning in place (partial provisioning was possible before too).
     const collections: ICollectionsSet = new Map()
-    for (const {
-      key,
-      id,
-      name,
-      isPublic,
-      encryption
-    } of WALLET_STANDARD_COLLECTIONS) {
-      try {
-        const collection = space.collection(id)
-        // Declare the encryption marker only for collections that opt in
-        // (private-credentials, wallet-activity); the others stay plaintext.
-        // The marker's scheme is set-once on the server, but a late
-        // declaration on a pre-marker collection is allowed, so re-running
-        // this against an existing Space upgrades it in place. `force` lets
-        // the plaintext upsert create a fresh collection: this runs with the
-        // root capability, so a 404 from the pre-merge describe really means
-        // absent, not unreadable (was-client >= 0.13 fails closed otherwise).
-        await collection.configure(
-          encryption ? { name, encryption } : { name, force: true }
-        )
-        if (isPublic) {
-          await collection.setPublic()
+    const provisionStandardCollections = WALLET_STANDARD_COLLECTIONS.map(
+      async ({ key, id, name, isPublic, encryption }) => {
+        try {
+          const collection = space.collection(id)
+          // Declare the encryption marker only for collections that opt in
+          // (private-credentials, wallet-activity); the others stay plaintext.
+          // The marker's scheme is set-once on the server, but a late
+          // declaration on a pre-marker collection is allowed, so re-running
+          // this against an existing Space upgrades it in place. `force` lets
+          // the plaintext upsert create a fresh collection: this runs with the
+          // root capability, so a 404 from the pre-merge describe really means
+          // absent, not unreadable (was-client >= 0.13 fails closed otherwise).
+          await collection.configure(
+            encryption ? { name, encryption } : { name, force: true }
+          )
+          if (isPublic) {
+            await collection.setPublic()
+          }
+        } catch (err) {
+          console.error(`Error creating collection "${id}":`, err)
+          throw new Error(
+            `Error creating collection "${id}" in space "${this.spaceId}".`,
+            { cause: err }
+          )
         }
-      } catch (err) {
-        console.error(`Error creating collection "${id}":`, err)
-        throw new Error(
-          `Error creating collection "${id}" in space "${this.spaceId}".`,
-          { cause: err }
-        )
+        collections.set(key, { url: this._collectionBaseUrl(id) })
       }
-      collections.set(key, { url: this._collectionBaseUrl(id) })
-    }
+    )
 
     // The `id` collection: standard-on-the-server but not wallet-synced, so it
     // lives outside WALLET_STANDARD_COLLECTIONS and gets no local replica or
     // collection map entry. Plaintext, no collection-level public grant (the
     // DID document is published per-resource by `setIdResourcePublic`).
-    try {
-      // `force`: same root-capability reasoning as the standard collections
-      // above -- a 404 here means the collection does not exist yet.
-      await space.collection(ID_COLLECTION.id).configure({
-        name: ID_COLLECTION.name,
-        force: true
-      })
-    } catch (err) {
-      console.error(`Error creating collection "${ID_COLLECTION.id}":`, err)
-      throw new Error(
-        `Error creating collection "${ID_COLLECTION.id}" in space ` +
-          `"${this.spaceId}".`,
-        { cause: err }
-      )
-    }
+    const provisionIdCollection = (async () => {
+      try {
+        // `force`: same root-capability reasoning as the standard collections
+        // above -- a 404 here means the collection does not exist yet.
+        await space.collection(ID_COLLECTION.id).configure({
+          name: ID_COLLECTION.name,
+          force: true
+        })
+      } catch (err) {
+        console.error(`Error creating collection "${ID_COLLECTION.id}":`, err)
+        throw new Error(
+          `Error creating collection "${ID_COLLECTION.id}" in space ` +
+            `"${this.spaceId}".`,
+          { cause: err }
+        )
+      }
+    })()
+
+    await Promise.all([...provisionStandardCollections, provisionIdCollection])
 
     this.collections = collections
   }
@@ -662,6 +670,10 @@ export class WASRemoteStore {
       })
     }
     const items = (listing?.items ?? []) as Array<StorageCollection>
+    // The listing's `CollectionSummary` carries no public flag (only id / url /
+    // name), so each collection's `PublicCanRead` status still needs its own
+    // policy describe. Fan those out under a single Promise.all rather than a
+    // serial loop, so the N probes overlap instead of waiting one-by-one.
     return await Promise.all(
       items.map(async item => {
         const isPublic = await this._collectionFromUrl(item.url).isPublic()

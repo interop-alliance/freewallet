@@ -276,10 +276,20 @@ export function WalletGetPage() {
         setLoginError(t('chapi.accountNotFound'))
         return
       }
-      await loggedIn.storage.ensureUserCollections({
-        user: loggedIn.user,
-        profile: loggedIn.profile
-      })
+      // ensureUserCollections (remote provisioning + did:web round trips) and
+      // the credential list have no data dependency in remote-direct mode: the
+      // standard collections are guaranteed to exist by account signup (a popup
+      // login requires an existing account, and signup provisions them), so the
+      // list read cannot 404 on a missing collection. Run both concurrently so
+      // the consent screen is not gated on provisioning round trips it does not
+      // need.
+      const [, stored] = await Promise.all([
+        loggedIn.storage.ensureUserCollections({
+          user: loggedIn.user,
+          profile: loggedIn.profile
+        }),
+        loggedIn.storage.listCredentials()
+      ])
 
       // A zcap request needs a remote Space to delegate against; a guest or a
       // no-WAS wallet cannot fulfill it. Block before the consent screen.
@@ -293,7 +303,6 @@ export function WalletGetPage() {
         return
       }
 
-      const stored = await loggedIn.storage.listCredentials()
       const displayed = hasTypedExample(profile.vcQueries)
         ? vcMatchesFor({ credentials: stored, queries: profile.vcQueries })
         : stored
