@@ -17,6 +17,22 @@
 
 ### Fixed
 
+- **A passphrase change now takes effect on other devices.** Passphrase login
+  answered from the locally cached keyring record before consulting the WAS
+  server, and the cache never expired -- so a passphrase retired via "Change
+  passphrase" on one device kept unlocking the account indefinitely on every
+  other device that had cached it, defeating rotation after a compromise. The
+  keyring lookup is now remote-first whenever a WAS server is configured: the
+  remote copy is the source of truth, a missing remote record drops the local
+  cache and reports "no account", and the cache only answers as an offline
+  fallback within a bounded window (`VITE_KEYRING_CACHE_TTL_HOURS`, default 7
+  days; cache entries are now stamped with their write time). The
+  old-passphrase check inside "Change passphrase" follows the same
+  remote-first rule. Cache entries written before this change carry no
+  timestamp and fail closed on the offline path -- one online login refreshes
+  them. No-WAS deployments are unchanged: there the cache is the keyring's
+  only copy and remains authoritative with no TTL.
+
 - **"Allow Wallet" CHAPI prompt reappeared on every visit to Login/Signup.**
   `registerWallet()` runs from a mount effect on the Login, Signup, and Guest
   login pages, and it unconditionally called `installHandler()`, whose only

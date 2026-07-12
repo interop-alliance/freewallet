@@ -156,12 +156,44 @@ describe('keyring cache helpers', () => {
     await saveKeyringCache({ spaceId: 'space-a', record, idb })
     await expect(
       loadKeyringCache({ spaceId: 'space-a', idb })
-    ).resolves.toEqual(record)
+    ).resolves.toEqual({ record, cachedAt: expect.any(Number) })
 
     await deleteKeyringCache({ spaceId: 'space-a', idb })
     await expect(
       loadKeyringCache({ spaceId: 'space-a', idb })
     ).resolves.toBeNull()
+  })
+
+  it('stamps the entry with the write time', async () => {
+    const idb = createFakeIdb()
+    const before = Date.now()
+    await saveKeyringCache({ spaceId: 'space-a', record: { n: 1 }, idb })
+    const after = Date.now()
+
+    const entry = await loadKeyringCache({ spaceId: 'space-a', idb })
+    expect(entry!.cachedAt).toBeGreaterThanOrEqual(before)
+    expect(entry!.cachedAt).toBeLessThanOrEqual(after)
+  })
+
+  it('returns a legacy bare record with cachedAt: null', async () => {
+    const idb = createFakeIdb()
+    const legacyRecord = { version: 1, wrapped: { jwe: { ciphertext: 'x' } } }
+    // Written directly (no write-time stamp), as caches predating timestamps.
+    const db = await new Promise<IDBDatabase>(resolve => {
+      const request = idb.open('freewallet-session', 1)
+      request.onsuccess = () => resolve(request.result)
+    })
+    await new Promise<void>(resolve => {
+      const request = db
+        .transaction('session', 'readwrite')
+        .objectStore('session')
+        .put(legacyRecord, 'keyring/space-legacy')
+      request.onsuccess = () => resolve()
+    })
+
+    await expect(
+      loadKeyringCache({ spaceId: 'space-legacy', idb })
+    ).resolves.toEqual({ record: legacyRecord, cachedAt: null })
   })
 
   it('keeps separate caches per Space id', async () => {
@@ -171,10 +203,10 @@ describe('keyring cache helpers', () => {
 
     await expect(
       loadKeyringCache({ spaceId: 'space-a', idb })
-    ).resolves.toEqual({ n: 1 })
+    ).resolves.toMatchObject({ record: { n: 1 } })
     await expect(
       loadKeyringCache({ spaceId: 'space-b', idb })
-    ).resolves.toEqual({ n: 2 })
+    ).resolves.toMatchObject({ record: { n: 2 } })
   })
 
   it('survives clearPersistedSession (logout leaves the cache intact)', async () => {
@@ -191,7 +223,7 @@ describe('keyring cache helpers', () => {
     await expect(loadSessionRecord({ idb })).resolves.toBeNull()
     await expect(
       loadKeyringCache({ spaceId: 'space-a', idb })
-    ).resolves.toEqual({ keyring: true })
+    ).resolves.toMatchObject({ record: { keyring: true } })
   })
 })
 

@@ -270,7 +270,9 @@ export async function deleteVaultEnvelope({
  * Deletes the persisted session: the record, the key pair, and the vault
  * envelope. Called on logout -- the next login mints a fresh session key.
  * The keyring cache entries (see `saveKeyringCache`) are deliberately left
- * intact so that offline / no-WAS logins keep working across a logout.
+ * intact so that offline / no-WAS logins keep working across a logout;
+ * when a WAS server is configured their offline use is bounded by the
+ * keyring cache TTL.
  *
  * @param [options] {object}
  * @param [options.idb] {IDBFactory}
@@ -310,7 +312,9 @@ function keyringCacheKey(spaceId: string): string {
  * Caches a keyring record locally (keyed by its unlock Space id) so that
  * offline and no-WAS logins can unwrap the data seed without a remote read.
  * The record is the ciphertext-bearing keyring document; it is inert without
- * the passphrase that derives the unlock key-agreement key.
+ * the passphrase that derives the unlock key-agreement key. The entry is
+ * stamped with the write time so callers can bound how long it may answer
+ * as an offline fallback (see `fetchKeyringSeed` in `src/session/keyring.ts`).
  *
  * @param options {object}
  * @param options.spaceId {string}   the unlock Space id
@@ -329,19 +333,21 @@ export async function saveKeyringCache({
 }): Promise<void> {
   await withSessionStore(
     'readwrite',
-    store => store.put(record, keyringCacheKey(spaceId)),
+    store =>
+      store.put({ record, cachedAt: Date.now() }, keyringCacheKey(spaceId)),
     idb
   )
 }
 
 /**
  * Loads a cached keyring record by its unlock Space id, or `null` if none is
- * cached.
+ * cached. A legacy entry (a bare record cached before write-time stamps
+ * existed) comes back with `cachedAt: null` -- usable, but of unknown age.
  *
  * @param options {object}
  * @param options.spaceId {string}   the unlock Space id
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<unknown | null>}
+ * @returns {Promise<{ record: unknown, cachedAt: number | null } | null>}
  */
 export async function loadKeyringCache({
   spaceId,
@@ -349,13 +355,20 @@ export async function loadKeyringCache({
 }: {
   spaceId: string
   idb?: IDBFactory
-}): Promise<unknown | null> {
+}): Promise<{ record: unknown; cachedAt: number | null } | null> {
   const stored = await withSessionStore(
     'readonly',
     store => store.get(keyringCacheKey(spaceId)),
     idb
   )
-  return stored ?? null
+  if (stored === undefined || stored === null) {
+    return null
+  }
+  const entry = stored as { record?: unknown; cachedAt?: unknown }
+  if (entry.record !== undefined && typeof entry.cachedAt === 'number') {
+    return { record: entry.record, cachedAt: entry.cachedAt }
+  }
+  return { record: stored, cachedAt: null }
 }
 
 /**

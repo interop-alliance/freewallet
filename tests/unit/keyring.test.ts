@@ -18,6 +18,7 @@ import { WasError } from '@interop/was-client'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
 import { createEdvDocCipher } from '@/stores/edvDocCipher'
 import { loadKeyringCache } from '@/lib/sessionKey'
+import { KEYRING_CACHE_TTL_MS } from '@/app.config'
 
 /**
  * Shared mutable state for the two mocks: the configured WAS url (mutable so a
@@ -148,6 +149,33 @@ function createFakeIdb(): IDBFactory {
 }
 
 /**
+ * Writes a raw value directly into the fake session store at a keyring-cache
+ * key (bypassing `saveKeyringCache` and its write-time stamp), to simulate a
+ * legacy cache entry written before timestamps existed.
+ */
+async function putRawCacheEntry({
+  idb,
+  spaceId,
+  value
+}: {
+  idb: IDBFactory
+  spaceId: string
+  value: unknown
+}): Promise<void> {
+  const db = await new Promise<IDBDatabase>(resolve => {
+    const request = idb.open('freewallet-session', 1)
+    request.onsuccess = () => resolve(request.result)
+  })
+  await new Promise<void>(resolve => {
+    const request = db
+      .transaction('session', 'readwrite')
+      .objectStore('session')
+      .put(value, `keyring/${spaceId}`)
+    request.onsuccess = () => resolve()
+  })
+}
+
+/**
  * Independently derives the unlock identity (KAK + resolver + Space id) for a
  * passphrase, using the exact steps `src/session/keyring.ts` uses. Lets a test
  * craft records at the right unlock Space and assert derivation determinism.
@@ -238,6 +266,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.clearAllMocks()
 })
 
@@ -347,7 +376,7 @@ describe('wrap / unwrap', () => {
 })
 
 describe('fetchKeyringSeed', () => {
-  it('serves a cache hit without a remote read', async () => {
+  it('consults the remote even on a cache hit (the remote is the source of truth)', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
       seed: randomSeed(),
@@ -364,7 +393,102 @@ describe('fetchKeyringSeed', () => {
       kdf: KDF
     })
     expect(found).not.toBeNull()
-    expect(getUnlockKeyring).not.toHaveBeenCalled()
+    expect(getUnlockKeyring).toHaveBeenCalledOnce()
+  })
+
+  it('drops the cache and returns null when the remote keyring is gone (passphrase retired on another device)', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      seed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'retired passphrase',
+      idb,
+      kdf: KDF
+    })
+    // Simulate a passphrase change made on another device: the old unlock
+    // Space is deleted remotely while this device's cache still holds the
+    // record.
+    wasState.spaces.clear()
+
+    const found = await fetchKeyringSeed({
+      passphrase: 'retired passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found).toBeNull()
+
+    const { spaceId } = await unlockFor('retired passphrase')
+    await expect(loadKeyringCache({ spaceId, idb })).resolves.toBeNull()
+  })
+
+  it('falls back to a fresh cache when the remote is unreachable', async () => {
+    const idb = createFakeIdb()
+    const seed = randomSeed()
+    await bindPassphrase({
+      seed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'offline fallback passphrase',
+      idb,
+      kdf: KDF
+    })
+    wasState.getError = new WasError('NetworkError when attempting to fetch', {
+      cause: new TypeError('NetworkError when attempting to fetch')
+    })
+
+    const found = await fetchKeyringSeed({
+      passphrase: 'offline fallback passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found).not.toBeNull()
+    expect(Array.from(found!.seed)).toEqual(Array.from(seed))
+  })
+
+  it('rethrows when the remote is unreachable and the cache has expired', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      seed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'expired cache passphrase',
+      idb,
+      kdf: KDF
+    })
+    vi.setSystemTime(Date.now() + KEYRING_CACHE_TTL_MS + 60_000)
+    const networkError = new WasError('NetworkError when attempting to fetch', {
+      cause: new TypeError('NetworkError when attempting to fetch')
+    })
+    wasState.getError = networkError
+
+    await expect(
+      fetchKeyringSeed({
+        passphrase: 'expired cache passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).rejects.toBe(networkError)
+  })
+
+  it('rethrows when the remote is unreachable and the cached record predates timestamps', async () => {
+    const idb = createFakeIdb()
+    const { record, spaceId } = await craftRecord({
+      passphrase: 'legacy cache passphrase',
+      plaintext: {
+        seed: seedToBase64Url(randomSeed()),
+        controller: DATA_CONTROLLER,
+        createdAt: new Date().toISOString()
+      }
+    })
+    // A bare record at the cache key, as written before write-time stamps.
+    await putRawCacheEntry({ idb, spaceId, value: record })
+    const networkError = new WasError('NetworkError when attempting to fetch', {
+      cause: new TypeError('NetworkError when attempting to fetch')
+    })
+    wasState.getError = networkError
+
+    await expect(
+      fetchKeyringSeed({ passphrase: 'legacy cache passphrase', idb, kdf: KDF })
+    ).rejects.toBe(networkError)
   })
 
   it('reads remote on a cache miss and refreshes the cache', async () => {
@@ -426,6 +550,32 @@ describe('fetchKeyringSeed', () => {
       kdf: KDF
     })
     expect(found).toBeNull()
+    expect(getUnlockKeyring).not.toHaveBeenCalled()
+  })
+
+  it('serves the cache with no TTL when no WAS server is configured', async () => {
+    wasState.url = undefined
+    const idb = createFakeIdb()
+    const seed = randomSeed()
+    await bindPassphrase({
+      seed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'no was warm cache passphrase',
+      idb,
+      kdf: KDF
+    })
+    // Far past the WAS-mode TTL: with no remote copy the cache is the
+    // keyring's only copy and stays authoritative regardless of age.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.now() + KEYRING_CACHE_TTL_MS * 10)
+
+    const found = await fetchKeyringSeed({
+      passphrase: 'no was warm cache passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found).not.toBeNull()
+    expect(Array.from(found!.seed)).toEqual(Array.from(seed))
     expect(getUnlockKeyring).not.toHaveBeenCalled()
   })
 })
@@ -532,6 +682,32 @@ describe('changePassphrase', () => {
         seed: randomSeed(),
         controller: DATA_CONTROLLER,
         oldPassphrase: 'a wrong old passphrase',
+        newPassphrase: 'brand new passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).rejects.toBeInstanceOf(WrongPassphraseError)
+  })
+
+  it('rejects an old passphrase already retired on another device despite a cached record', async () => {
+    const idb = createFakeIdb()
+    const seed = randomSeed()
+    await bindPassphrase({
+      seed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'stale old passphrase',
+      idb,
+      kdf: KDF
+    })
+    // Retired elsewhere: the unlock Space is gone remotely, the local cache
+    // still holds the record. Verification must consult the remote and fail.
+    wasState.spaces.clear()
+
+    await expect(
+      changePassphrase({
+        seed,
+        controller: DATA_CONTROLLER,
+        oldPassphrase: 'stale old passphrase',
         newPassphrase: 'brand new passphrase',
         idb,
         kdf: KDF

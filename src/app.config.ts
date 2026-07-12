@@ -163,6 +163,14 @@ export const KEYRING_KDF = {
 export const KEYRING_COLLECTION = { id: 'keyring', name: 'Keyring' }
 export const KEYRING_RESOURCE = 'keyring.json'
 
+// Offline-fallback lifetime of a locally cached keyring record when a WAS
+// server is configured (the remote copy is the source of truth and is
+// consulted first on every login). Bounds how long a passphrase retired on
+// another device can keep unlocking this one while it is offline. Has no
+// effect in no-WAS deployments, where the cache is the keyring's only copy.
+export const KEYRING_CACHE_TTL_MS =
+  (Number(env.VITE_KEYRING_CACHE_TTL_HOURS) || 7 * 24) * 60 * 60 * 1000
+
 export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
 // CORS proxy for fetching remote credential URLs from AddCredentialPage.
 export const CORS_PROXY_URL =

@@ -16,16 +16,19 @@
  * (`keyring/keyring.json`) -- the only placement that is locatable before the
  * data identity is known. Its payload is the data seed wrapped (JWE, ECDH-ES to
  * the unlock KAK) via the same EDV cipher the wallet already ships, so the
- * unlock Space never publicly links the two identities. A **local cache** of
- * the record in the `freewallet-session` IndexedDB database makes offline and
- * no-WAS logins work; the remote copy is the source of truth and makes the
- * passphrase portable across devices.
+ * unlock Space never publicly links the two identities. The remote copy is the
+ * source of truth and is consulted first on every login; a **local cache** of
+ * the record in the `freewallet-session` IndexedDB database serves no-WAS
+ * deployments and, within a bounded TTL (`KEYRING_CACHE_TTL_MS`), offline
+ * logins when the remote is unreachable.
  *
  * A passphrase change re-wraps the data seed under a new unlock identity, PUTs
  * it to the new unlock Space, then deletes the old unlock Space -- which is
  * what retires the old passphrase (the random data seed is never derivable from
  * a passphrase, so once its unlock Space is gone the old passphrase resolves to
- * nothing).
+ * nothing). Because login checks the remote first, other devices see the
+ * retirement on their next online login (their stale caches are dropped);
+ * offline, a stale cache stops answering once its TTL lapses.
  */
 import { CapabilityAgent } from '@interop/webkms-client'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
@@ -35,7 +38,12 @@ import type {
   IKeyAgreementKey,
   IKeyResolver
 } from '@interop/data-integrity-core'
-import { KEYRING_COLLECTION, KEYRING_KDF, WAS_SERVER_URL } from '@/app.config'
+import {
+  KEYRING_CACHE_TTL_MS,
+  KEYRING_COLLECTION,
+  KEYRING_KDF,
+  WAS_SERVER_URL
+} from '@/app.config'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
 import { createEdvDocCipher } from '@/stores/edvDocCipher'
 import {
@@ -288,13 +296,18 @@ async function unwrapSeed({
 }
 
 /**
- * Locates and unwraps the keyring for a passphrase: local cache first, then
- * (when a WAS server is configured) remote GET on cache miss; a successful
- * remote read refreshes the cache. Returns the recovered `KeyringSeed`, or
- * `null` when no keyring exists anywhere (a 404-shaped miss -- there is no
- * account for this passphrase). A network/unreachable error during the remote
- * GET rethrows, so the caller sees "could not check" rather than misreading it
- * as "no account". With no WAS server configured the lookup is cache-only.
+ * Locates and unwraps the keyring for a passphrase. When a WAS server is
+ * configured the remote copy is consulted first -- it is the source of truth,
+ * and checking it before the cache is what makes a passphrase change on
+ * another device take effect here: a found record refreshes the local cache,
+ * while a 404-shaped miss (a null record) drops any cached copy and returns
+ * `null` (no account for this passphrase -- never bound, or retired by a
+ * passphrase change). When the remote GET fails (network/unreachable), the
+ * cache answers as an offline fallback, but only within
+ * `KEYRING_CACHE_TTL_MS`; past that (or with no usable cache) the error
+ * rethrows, so the caller sees "could not check" rather than misreading it as
+ * "no account". With no WAS server configured the cache is the keyring's only
+ * copy, so the lookup is cache-only with no TTL.
  *
  * @param options {object}
  * @param options.passphrase {string}
@@ -313,37 +326,63 @@ export async function fetchKeyringSeed({
 }): Promise<KeyringSeed | null> {
   const unlock = await deriveUnlockIdentity({ passphrase, kdf })
 
-  const cached = await loadKeyringCache({ spaceId: unlock.spaceId, idb })
-  if (cached) {
+  if (!WAS_SERVER_URL) {
+    // No remote: the cache is the keyring's only copy -- authoritative, no TTL.
+    const cached = await loadKeyringCache({ spaceId: unlock.spaceId, idb })
+    if (!cached) {
+      return null
+    }
     try {
       return await unwrapSeed({
-        record: cached,
+        record: cached.record,
         keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
         keyResolver: unlock.keyResolver
       })
     } catch (err) {
-      // A cache entry that no longer unwraps (corruption, a stale record from
-      // before a remote passphrase change) must not block login -- drop it and
-      // fall through to the remote copy, the source of truth.
       console.warn('Discarding an unusable cached keyring record:', err)
       await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
+      return null
     }
   }
 
-  if (!WAS_SERVER_URL) {
-    return null
+  let record: unknown
+  try {
+    record = await getUnlockKeyring({
+      storageServerUrl: WAS_SERVER_URL,
+      zcapClient: unlock.zcapClient,
+      spaceId: unlock.spaceId
+    })
+  } catch (err) {
+    // Remote unreachable: fall back to the cache (offline logins), but only
+    // within its TTL -- past that (or for an unstamped legacy entry) the
+    // error rethrows, so the caller reports "could not check" instead of
+    // honoring an unboundedly stale record.
+    const cached = await loadKeyringCache({ spaceId: unlock.spaceId, idb })
+    if (
+      !cached ||
+      cached.cachedAt === null ||
+      Date.now() - cached.cachedAt > KEYRING_CACHE_TTL_MS
+    ) {
+      throw err
+    }
+    try {
+      return await unwrapSeed({
+        record: cached.record,
+        keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+        keyResolver: unlock.keyResolver
+      })
+    } catch (unwrapErr) {
+      console.warn('Discarding an unusable cached keyring record:', unwrapErr)
+      await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
+      throw err
+    }
   }
 
-  // A network/unreachable error rethrows: a returning user whose remote is
-  // momentarily down must not be misread as having no account. Only a real
-  // 404-shaped miss (a null record) means there is no keyring.
-  const record = await getUnlockKeyring({
-    storageServerUrl: WAS_SERVER_URL,
-    zcapClient: unlock.zcapClient,
-    spaceId: unlock.spaceId
-  })
-
   if (!record) {
+    // A 404-shaped miss: no keyring for this passphrase (never bound, or
+    // retired by a passphrase change on this or another device). Drop any
+    // cached copy so the retired passphrase cannot keep resolving offline.
+    await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
     return null
   }
 
@@ -423,7 +462,8 @@ export class WrongPassphraseError extends Error {
 
 /**
  * Changes the account passphrase. Verifies the old passphrase by unwrapping its
- * keyring (cache, then remote) and matching the recovered controller against
+ * keyring (the remote copy when a WAS server is configured -- the source of
+ * truth -- else the local cache) and matching the recovered controller against
  * the data did:key, binds the new passphrase, then deletes the old unlock Space
  * and its cache entry.
  *
@@ -466,16 +506,22 @@ export async function changePassphrase({
     kdf
   })
 
-  // Verify the old passphrase via its keyring: cache first, then remote. A
-  // network error while reading the remote rethrows -- an unreachable remote
-  // must not be misread as a wrong passphrase.
-  let oldRecord = await loadKeyringCache({ spaceId: oldUnlock.spaceId, idb })
-  if (!oldRecord && WAS_SERVER_URL) {
+  // Verify the old passphrase via its keyring. With a WAS server configured
+  // the remote copy is read -- the source of truth, so a locally cached record
+  // cannot verify a passphrase already retired on another device. A network
+  // error while reading the remote rethrows -- an unreachable remote must not
+  // be misread as a wrong passphrase. With no WAS server the local cache is
+  // the keyring's only copy.
+  let oldRecord: unknown
+  if (WAS_SERVER_URL) {
     oldRecord = await getUnlockKeyring({
       storageServerUrl: WAS_SERVER_URL,
       zcapClient: oldUnlock.zcapClient,
       spaceId: oldUnlock.spaceId
     })
+  } else {
+    const cached = await loadKeyringCache({ spaceId: oldUnlock.spaceId, idb })
+    oldRecord = cached?.record ?? null
   }
 
   if (!oldRecord) {
