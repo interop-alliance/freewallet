@@ -166,7 +166,8 @@ describe('initSessionFromSeed', () => {
     expect(StorageManager.initStorageClients).toHaveBeenCalledWith({
       user: session.user,
       profile: session.profile,
-      isGuest: false
+      isGuest: false,
+      remoteDirect: false
     })
   })
 

@@ -220,12 +220,14 @@ export class BrowserStore {
    * store the row is the credential's EDV envelope keyed by its
    * content-derived envelope-hash id; because encryption is nondeterministic,
    * idempotence is by the credential's content cid (a re-add of a stored
-   * credential is a no-op), not by row id.
+   * credential is a no-op), not by row id. Returns whether a row was actually
+   * inserted (`false` when the credential was already present), so the caller
+   * can gate credential-created history on a genuine insert.
    *
    * @param options {object}
    * @param options.cid {string}
    * @param options.credential {IVerifiableCredential}
-   * @returns {Promise<void>}
+   * @returns {Promise<boolean>}
    */
   async addCredential({
     cid,
@@ -233,19 +235,28 @@ export class BrowserStore {
   }: {
     cid: string
     credential: IVerifiableCredential
-  }) {
+  }): Promise<boolean> {
     const cipher = this._ciphers?.privateCredentials
     if (!cipher) {
+      // Cipher-less (plaintext) store: the row is keyed by cid, so an existing
+      // (live) row means an already-stored credential. Checking first derives
+      // inserted-ness, since insertIfNotExists returns the conflicting doc.
+      const existing = await this.rxCollection('privateCredentials')
+        .findOne(cid)
+        .exec()
+      if (existing) {
+        return false
+      }
       await this._insertDoc({
         logicalKey: 'privateCredentials',
         id: cid,
         data: credential as unknown as Json
       })
-      return
+      return true
     }
     const entries = await this._credentialEntries()
     if (entries.some(entry => entry.cid === cid)) {
-      return
+      return false
     }
     const { id, envelope } = await cipher.encrypt({
       data: credential as unknown as Json
@@ -255,6 +266,7 @@ export class BrowserStore {
       id,
       data: envelope
     })
+    return true
   }
 
   /**

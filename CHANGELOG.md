@@ -17,6 +17,20 @@
 
 ### Fixed
 
+- **CHAPI popup store and share now use the remote storage directly.** A CHAPI
+  popup runs in a third-party partitioned iframe, so its local IndexedDB is an
+  isolated bucket no background sync reaches. Credentials stored through the
+  store popup were stranded in that bucket (invisible to the main app and the
+  remote storage), and the get popup always saw an empty wallet, so sharing and
+  the "Login with Wallet" credential flow could not find anything to offer. A
+  popup session now reads and writes the standard remote collections directly,
+  writing exactly what background replication would have pushed so the main app
+  picks it up cleanly. Guest and no-server sessions are unaffected.
+- **Credential-added history entries are now recorded uniformly.** Logging a
+  credential-created activity moved into the shared storage call, gated on an
+  actual insert, so every entry point records it once (and re-adding a stored
+  credential logs nothing). The welcome credential written at sign-up and guest
+  login now gets a history entry too.
 - **A zcap query with no `capabilityQuery` is now reported as a malformed
   request.** A `ZcapQuery` / `AuthorizationCapabilityQuery` missing its
   `capabilityQuery` detail used to slip an `undefined` descriptor into the

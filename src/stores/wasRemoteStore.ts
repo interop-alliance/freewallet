@@ -2,10 +2,17 @@
  * WASRemoteStore: the remote WAS (Wallet Attached Storage) backend, attached
  * when VITE_WAS_SERVER_URL is set. Since the local BrowserStore became the
  * always-active replica, this class no longer serves credential / history /
- * public-link reads and writes -- those replicate in the background through
- * the sync controller. What remains here is the Space lifecycle (create /
- * exists / wipe), the storage-browser read-through over arbitrary Collections
- * and Resources, export / import, and quotas.
+ * public-link reads and writes for the main app -- those replicate in the
+ * background through the sync controller. What remains here is the Space
+ * lifecycle (create / exists / wipe), the storage-browser read-through over
+ * arbitrary Collections and Resources, export / import, and quotas.
+ *
+ * One exception is the CHAPI popup: its local IndexedDB is a third-party
+ * partitioned bucket no sync controller drives, so a remote-direct popup
+ * session (see `StorageManager`) reads and writes the standard synced
+ * collections here directly, through `listSyncedResources` /
+ * `getSyncedResource` / `putSyncedResource` -- reproducing verbatim what
+ * background replication would have pushed.
  *
  * All WAS operations go through `@interop/was-client`'s `WasClient` and its
  * lazy navigational handles (`space` / `collection` / `resource`) rather than
@@ -25,6 +32,9 @@ import {
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
+// Deep import (bypassing the `@/lib/sync` barrel) so this eagerly loaded module
+// does not drag the barrel's RxDB replication machinery into the entry chunk.
+import type { Json } from '@/lib/sync/types.js'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
 import {
@@ -32,6 +42,7 @@ import {
   isTextLikeContentType
 } from '@/lib/storageResource'
 import type { ImportSpaceSummary } from '@/stores/storageManager'
+import { errorStatus } from '@/stores/wasSyncPort'
 
 /**
  * Map from logical collection name to its WAS base URL.
@@ -663,6 +674,129 @@ export class WASRemoteStore {
       `/space/${this.spaceId}/${collectionId}/${cid}`,
       this.storageServerUrl
     ).toString()
+  }
+
+  /**
+   * Lists the raw resource entries (id + absolute url) of one of the wallet's
+   * standard synced collections, addressed straight from its collection id
+   * rather than the `collections` map -- which a remote-direct popup session
+   * never populates. Metadata only (no bodies), so it never touches the
+   * fail-closed encryption codec. Server order is preserved as-is; callers that
+   * need content ordering must derive it themselves (best-effort here).
+   *
+   * @param options {object}
+   * @param options.logicalKey {string}   e.g. 'privateCredentials' | 'walletActivity'.
+   * @returns {Promise<Array<{ id: string; url: string }>>}
+   */
+  async listSyncedResources({
+    logicalKey
+  }: {
+    logicalKey: string
+  }): Promise<Array<{ id: string; url: string }>> {
+    const collectionId = this._collectionId(logicalKey)
+    let listing
+    try {
+      listing = await this.was
+        .space(
+          this.spaceId,
+          this._handleOptions({ spaceId: this.spaceId, collectionId })
+        )
+        .collection(collectionId)
+        .list()
+    } catch (err) {
+      console.error(
+        `Error listing synced resources for "${collectionId}":`,
+        err
+      )
+      throw new Error(
+        `Failed to list resources in collection "${collectionId}".`,
+        { cause: err }
+      )
+    }
+    const items = (listing?.items ?? []) as Array<{ id: string; url: string }>
+    return items.map(({ id, url }) => ({ id, url }))
+  }
+
+  /**
+   * Reads one resource of a standard synced collection as its raw stored body
+   * (the EDV envelope or a plaintext document), bypassing the fail-closed
+   * encryption codec via the raw `was.request()` escape hatch -- the same
+   * verbatim-body contract the sync port uses. Returns `undefined` when the
+   * resource is missing (WAS conflates 404 for missing/unauthorized).
+   *
+   * @param options {object}
+   * @param options.logicalKey {string}
+   * @param options.resourceId {string}
+   * @returns {Promise<Json | undefined>}
+   */
+  async getSyncedResource({
+    logicalKey,
+    resourceId
+  }: {
+    logicalKey: string
+    resourceId: string
+  }): Promise<Json | undefined> {
+    const collectionId = this._collectionId(logicalKey)
+    try {
+      const response = await this.was.request({
+        capability: this.sessionCapabilityFor({ collectionId }),
+        path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
+          resourceId
+        )}`,
+        method: 'GET'
+      })
+      return response.data as Json
+    } catch (err) {
+      if (errorStatus(err) === 404) {
+        return undefined
+      }
+      throw err
+    }
+  }
+
+  /**
+   * Writes one resource into a standard synced collection: the caller-supplied
+   * raw body under the caller-supplied id, created-if-absent
+   * (`If-None-Match: *`), via the raw `was.request()` escape hatch so the body
+   * is stored verbatim (no re-encryption). This reproduces exactly what
+   * background replication would have pushed, so the main app's replication
+   * pulls it cleanly. A `412` means the identical row already exists (the
+   * content-derived id collided) and is reported as not-created rather than
+   * thrown.
+   *
+   * @param options {object}
+   * @param options.logicalKey {string}
+   * @param options.resourceId {string}   the content-derived envelope-hash id
+   * @param options.body {Json}   the raw EDV envelope (or plaintext document)
+   * @returns {Promise<{ created: boolean }>}
+   */
+  async putSyncedResource({
+    logicalKey,
+    resourceId,
+    body
+  }: {
+    logicalKey: string
+    resourceId: string
+    body: Json
+  }): Promise<{ created: boolean }> {
+    const collectionId = this._collectionId(logicalKey)
+    try {
+      await this.was.request({
+        capability: this.sessionCapabilityFor({ collectionId, write: true }),
+        path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
+          resourceId
+        )}`,
+        method: 'PUT',
+        json: body as object,
+        headers: { 'if-none-match': '*' }
+      })
+      return { created: true }
+    } catch (err) {
+      if (errorStatus(err) === 412) {
+        return { created: false }
+      }
+      throw err
+    }
   }
 
   async wipeStorage() {

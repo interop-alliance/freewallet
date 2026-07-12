@@ -266,7 +266,11 @@ export function WalletGetPage() {
       // back to the global factory when no handle is held.
       const { session: loggedIn, userExists } = await loginWithPassphrase({
         passphrase,
-        idb: firstPartyIdb ?? undefined
+        idb: firstPartyIdb ?? undefined,
+        // The popup's local IndexedDB is third-party partitioned and no sync
+        // controller runs here, so read the shared credentials straight from
+        // the remote WAS collections.
+        remoteDirectStorage: true
       })
       if (!loggedIn || !userExists) {
         setLoginError(t('chapi.accountNotFound'))

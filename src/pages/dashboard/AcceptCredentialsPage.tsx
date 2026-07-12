@@ -15,7 +15,6 @@ import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { credentialCardStyles, dashboardStyles } from '@/styles/appStyles'
-import { cidFrom } from '@/lib/cidFrom'
 
 export function AcceptCredentialsPage() {
   const { t } = useTranslation()
@@ -51,10 +50,10 @@ export function AcceptCredentialsPage() {
       await Promise.all(
         credentials.map(async credential => {
           console.log('Storing credential:', credentialTitle(credential))
-          await session.storage.addCredential({ credential })
-          const cid = await cidFrom({ doc: credential })
-          await session.storage.addHistoryCredentialCreated({
-            cid,
+          // addCredential records the credential-created history entry itself,
+          // gated on an actual insert.
+          await session.storage.addCredential({
+            credential,
             user: session.user
           })
         })

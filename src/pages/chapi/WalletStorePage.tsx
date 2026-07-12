@@ -65,6 +65,23 @@ type PendingDIDAuth = {
   request: IVPRDetails
 }
 
+/**
+ * E2E test seam. A CHAPI popup cannot run in an automated browser because
+ * `receiveCredentialEvent()` only resolves through the CHAPI mediator
+ * handshake, which no test harness performs. In non-production builds only, a
+ * Playwright spec may inject a ready-made event on
+ * `window.__E2E_CHAPI_STORE_EVENT__` (with a `respondWith` that records the
+ * payload) to drive this popup deterministically. Returns undefined in
+ * production and whenever no event was injected, so the real CHAPI path runs.
+ */
+function injectedCHAPIStoreEvent(): CHAPIStoreEvent | undefined {
+  if (import.meta.env.MODE === 'production') {
+    return undefined
+  }
+  return (window as unknown as { __E2E_CHAPI_STORE_EVENT__?: CHAPIStoreEvent })
+    .__E2E_CHAPI_STORE_EVENT__
+}
+
 export function WalletStorePage() {
   const { t } = useTranslation()
   const [pageState, setPageState] = useState<PageState>('initializing')
@@ -101,8 +118,14 @@ export function WalletStorePage() {
     initialized.current = true
 
     async function init() {
-      await loadOnce(MEDIATOR_BASE + encodeURIComponent(window.location.origin))
-      const event = (await receiveCredentialEvent()) as CHAPIStoreEvent
+      const injected = injectedCHAPIStoreEvent()
+      if (!injected) {
+        await loadOnce(
+          MEDIATOR_BASE + encodeURIComponent(window.location.origin)
+        )
+      }
+      const event =
+        injected ?? ((await receiveCredentialEvent()) as CHAPIStoreEvent)
       const { dataType, data, options } = event.credential ?? {}
       console.log(
         '[CHAPI store] incoming event from %s, dataType: %s, protocols: %s\n%s',
@@ -188,7 +211,11 @@ export function WalletStorePage() {
       // back to the global factory when no handle is held.
       const { session: s, userExists } = await loginWithPassphrase({
         passphrase,
-        idb: firstPartyIdb ?? undefined
+        idb: firstPartyIdb ?? undefined,
+        // The popup's local IndexedDB is third-party partitioned and no sync
+        // controller runs here, so route credential + history operations
+        // straight to the remote WAS collections.
+        remoteDirectStorage: true
       })
       if (!s || !userExists) {
         setLoginError(t('chapi.accountNotFound'))
@@ -298,7 +325,7 @@ export function WalletStorePage() {
     let stored = 0
     try {
       for (const credential of vcs) {
-        await session.storage.addCredential({ credential })
+        await session.storage.addCredential({ credential, user: session.user })
         stored++
       }
       setPageState('stored')

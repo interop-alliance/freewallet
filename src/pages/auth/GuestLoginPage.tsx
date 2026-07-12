@@ -48,7 +48,10 @@ export function GuestLoginPage() {
       await session.storage.addHistorySpaceCreated({ user: session.user })
 
       // Add a "welcome" credential to storage
-      await session.storage.addCredential({ credential: welcomeCredential })
+      await session.storage.addCredential({
+        credential: welcomeCredential,
+        user: session.user
+      })
       login(session)
       navigate('/dashboard')
     } catch (err) {

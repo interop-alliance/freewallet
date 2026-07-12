@@ -39,7 +39,7 @@ import {
  * @param err {unknown}
  * @returns {number | undefined}
  */
-function errorStatus(err: unknown): number | undefined {
+export function errorStatus(err: unknown): number | undefined {
   return (
     (err as { status?: number }).status ??
     (err as { response?: { status?: number } }).response?.status

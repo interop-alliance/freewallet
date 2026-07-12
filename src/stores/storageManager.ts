@@ -7,6 +7,18 @@
  * not as a primary store, but as a remote replica: the sync controller
  * replicates the local collections to it in the background, and the storage
  * browser / export / import / quota pages read through it directly.
+ *
+ * The one deviation is remote-direct mode (`remoteDirect`), used by the CHAPI
+ * popup. A popup runs in a third-party partitioned iframe: its local
+ * BrowserStore binds a partitioned IndexedDB no sync controller drives, so a
+ * credential stored there would be stranded and a credential list would always
+ * come back empty. In remote-direct mode the credential and history operations
+ * therefore route straight to the remote WAS collections (`WASRemoteStore`'s
+ * `listSyncedResources` / `getSyncedResource` / `putSyncedResource`),
+ * reproducing verbatim what background replication would have pushed so the
+ * main app pulls it cleanly. It is effective only when a remote store is
+ * configured; a guest / no-WAS session falls back to the local BrowserStore
+ * behavior unchanged.
  */
 import type {
   IKeyAgreementKey,
@@ -25,9 +37,13 @@ import {
 } from '@/app.config'
 import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
 import { ensureDidWebvh, type DidWebKeyMapV2 } from '@/lib/didWebvh'
-import { createEdvDocCipher } from '@/stores/edvDocCipher'
+import {
+  createEdvDocCipher,
+  isEncryptedEnvelope,
+  type DocCipher
+} from '@/stores/edvDocCipher'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
-import type { SyncedDoc } from '@/lib/sync'
+import type { Json, SyncedDoc } from '@/lib/sync'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
 import type { FetchedCollectionResource } from '@/lib/storageResource'
 import type { StoredCredential } from '@/types/credential'
@@ -69,19 +85,40 @@ export class StorageManager {
   private _localStore: BrowserStore
   private _remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
   private _vaultLocked: boolean
+  // The per-collection document ciphers (same set handed to the local store),
+  // kept here for remote-direct mode's own encrypt/decrypt at the WAS seam.
+  private _ciphers?: Record<string, DocCipher>
+  // Route credential + history operations straight to the remote WAS
+  // collections instead of the local BrowserStore (the CHAPI popup path).
+  private _remoteDirect: boolean
 
   constructor({
     localStore,
     remoteStore,
-    vaultLocked = false
+    vaultLocked = false,
+    ciphers,
+    remoteDirect = false
   }: {
     localStore: BrowserStore
     remoteStore?: WASRemoteStore
     vaultLocked?: boolean
+    ciphers?: Record<string, DocCipher>
+    remoteDirect?: boolean
   }) {
     this._localStore = localStore
     this._remoteStore = remoteStore
     this._vaultLocked = vaultLocked
+    this._ciphers = ciphers
+    this._remoteDirect = remoteDirect
+  }
+
+  /**
+   * Whether remote-direct routing is actually in effect: the flag is only
+   * meaningful when a remote store is configured (a guest / no-WAS session
+   * always uses the local BrowserStore).
+   */
+  private get _effectiveRemoteDirect(): boolean {
+    return this._remoteDirect && !!this._remoteStore
   }
 
   /**
@@ -212,11 +249,15 @@ export class StorageManager {
   static async initStorageClients({
     user,
     profile,
-    isGuest = false
+    isGuest = false,
+    remoteDirect = false
   }: {
     user: User
     profile: ControllerProfile
     isGuest?: boolean
+    // Route credential + history operations straight to the remote WAS
+    // collections (the CHAPI popup path, whose local IndexedDB is partitioned).
+    remoteDirect?: boolean
   }) {
     // Guest sessions never touch the remote WAS server -- they get no remote
     // replica. This keeps guest mode usable as a fallback even when the
@@ -254,7 +295,12 @@ export class StorageManager {
       // an existing remote Space.
       userExists = userExists || (await remoteStore.userExists())
     }
-    const storage = new StorageManager({ localStore, remoteStore })
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      remoteDirect
+    })
     return { storage, userExists }
   }
 
@@ -308,24 +354,68 @@ export class StorageManager {
     const storage = new StorageManager({
       localStore,
       remoteStore,
-      vaultLocked: !vaultKeys
+      vaultLocked: !vaultKeys,
+      ciphers
     })
     return { storage }
   }
 
-  async addCredential({ credential }: { credential: IVerifiableCredential }) {
+  /**
+   * Stores a credential and, when a row was actually inserted (a re-add of a
+   * stored credential is a no-op), records its Create history entry. Routes to
+   * the remote WAS `private-credentials` collection in effective remote-direct
+   * mode (the CHAPI popup), otherwise to the local active replica.
+   *
+   * @param options {object}
+   * @param options.credential {IVerifiableCredential}
+   * @param options.user {User}   recorded as the history entry's actor
+   * @returns {Promise<void>}
+   */
+  async addCredential({
+    credential,
+    user
+  }: {
+    credential: IVerifiableCredential
+    user: User
+  }) {
     this._requireUnlockedVault()
     // The credential's content cid is its page-facing identity (idempotence,
-    // routes, history); the local store encrypts the VC into an EDV envelope
-    // keyed by a content-derived envelope-hash id, and replication mirrors
-    // that envelope to the remote `private-credentials` collection.
+    // routes, history); the store encrypts the VC into an EDV envelope keyed by
+    // a content-derived envelope-hash id. Locally this envelope replicates to
+    // the remote `private-credentials` collection; in remote-direct mode it is
+    // written straight there.
     const cid = await cidFrom({ doc: credential })
-    await this._localStore.addCredential({ cid, credential })
+    const inserted = this._effectiveRemoteDirect
+      ? await this._addCredentialRemote({ cid, credential })
+      : await this._localStore.addCredential({ cid, credential })
+    if (inserted) {
+      // Best-effort: the credential is already durably stored, and losing a
+      // log line beats reporting the whole store as failed (in remote-direct
+      // mode the history entry is its own remote write and can fail alone).
+      try {
+        await this.addHistoryCredentialCreated({ cid, user })
+      } catch (err) {
+        console.warn('Could not record the credential-created activity:', err)
+      }
+    }
   }
 
   async listCredentials(): Promise<Array<StoredCredential>> {
     if (this._vaultLocked) {
       return []
+    }
+    if (this._effectiveRemoteDirect) {
+      const entries = await this._remoteCredentialEntries()
+      const seen = new Set<string>()
+      const credentials: StoredCredential[] = []
+      for (const { cid, vc } of entries) {
+        if (seen.has(cid)) {
+          continue
+        }
+        seen.add(cid)
+        credentials.push({ cid, vc })
+      }
+      return credentials
     }
     return await this._localStore.listCredentials()
   }
@@ -338,7 +428,106 @@ export class StorageManager {
     if (this._vaultLocked) {
       return undefined
     }
+    if (this._effectiveRemoteDirect) {
+      const entries = await this._remoteCredentialEntries()
+      return entries.find(entry => entry.cid === cid)?.vc
+    }
     return await this._localStore.loadCredential({ cid })
+  }
+
+  /**
+   * Reads every resource of the remote `private-credentials` collection and
+   * resolves each to its content cid + decrypted VC, mirroring
+   * `BrowserStore._credentialEntries` (decrypt envelope rows, pass legacy
+   * plaintext rows through keyed by their resource id). The per-resource GETs
+   * run in parallel. Order is whatever the WAS listing returns (best-effort);
+   * dedupe keys on the content cid, so ordering only affects which duplicate
+   * copy wins, not correctness. Remote-direct mode only.
+   *
+   * @returns {Promise<Array<{ resourceId: string; cid: string;
+   *   vc: IVerifiableCredential }>>}
+   */
+  private async _remoteCredentialEntries(): Promise<
+    Array<{ resourceId: string; cid: string; vc: IVerifiableCredential }>
+  > {
+    const remote = this._remoteStore!
+    const cipher = this._ciphers?.privateCredentials
+    const resources = await remote.listSyncedResources({
+      logicalKey: 'privateCredentials'
+    })
+    const bodies = await Promise.all(
+      resources.map(({ id }) =>
+        remote.getSyncedResource({
+          logicalKey: 'privateCredentials',
+          resourceId: id
+        })
+      )
+    )
+    const entries: Array<{
+      resourceId: string
+      cid: string
+      vc: IVerifiableCredential
+    }> = []
+    for (let index = 0; index < resources.length; index++) {
+      const data = bodies[index]
+      if (data === undefined) {
+        continue
+      }
+      const { id: resourceId } = resources[index]
+      if (cipher && isEncryptedEnvelope(data)) {
+        const vc = (await cipher.decrypt({
+          envelope: data
+        })) as unknown as IVerifiableCredential
+        entries.push({ resourceId, cid: await cidFrom({ doc: vc }), vc })
+      } else {
+        entries.push({
+          resourceId,
+          cid: resourceId,
+          vc: data as unknown as IVerifiableCredential
+        })
+      }
+    }
+    return entries
+  }
+
+  /**
+   * Adds a credential to the remote `private-credentials` collection: dedupe by
+   * content cid against the remote contents, then encrypt into an EDV envelope
+   * and PUT it under its content-derived envelope-hash id (`If-None-Match: *`).
+   * Returns whether a row was actually written. Remote-direct mode only.
+   *
+   * @param options {object}
+   * @param options.cid {string}
+   * @param options.credential {IVerifiableCredential}
+   * @returns {Promise<boolean>}
+   */
+  private async _addCredentialRemote({
+    cid,
+    credential
+  }: {
+    cid: string
+    credential: IVerifiableCredential
+  }): Promise<boolean> {
+    const cipher = this._ciphers?.privateCredentials
+    if (!cipher) {
+      throw new Error(
+        'Remote-direct credential storage requires the private-credentials ' +
+          'cipher (an unlocked vault).'
+      )
+    }
+    const entries = await this._remoteCredentialEntries()
+    if (entries.some(entry => entry.cid === cid)) {
+      return false
+    }
+    const { id, envelope } = await cipher.encrypt({
+      data: credential as unknown as Json
+    })
+    const { created } = await this._remoteStore!.putSyncedResource({
+      logicalKey: 'privateCredentials',
+      resourceId: id,
+      body: envelope
+    })
+    return created
   }
 
   async deleteCredential({ cid }: { cid: string }) {
@@ -537,7 +726,42 @@ export class StorageManager {
       console.warn('Vault locked; skipping wallet-activity entry.')
       return
     }
+    if (this._effectiveRemoteDirect) {
+      await this._addHistoryItemRemote({ activity })
+      return
+    }
     await this._localStore.addHistoryItem({ resourceId, activity })
+  }
+
+  /**
+   * Writes one activity straight to the remote `wallet-activity` collection:
+   * encrypt into an EDV envelope and PUT it under its content-derived
+   * envelope-hash id. The caller's `resourceId` lives on only as the activity's
+   * own `id` inside the encrypted document (mirroring the local store).
+   * Remote-direct mode only.
+   *
+   * @param options {object}
+   * @param options.activity {WalletActivity}
+   * @returns {Promise<void>}
+   */
+  private async _addHistoryItemRemote({
+    activity
+  }: {
+    activity: WalletActivity
+  }) {
+    const cipher = this._ciphers?.walletActivity
+    if (!cipher) {
+      throw new Error(
+        'Remote-direct history storage requires the wallet-activity cipher ' +
+          '(an unlocked vault).'
+      )
+    }
+    const { id, envelope } = await cipher.encrypt({ data: activity as Json })
+    await this._remoteStore!.putSyncedResource({
+      logicalKey: 'walletActivity',
+      resourceId: id,
+      body: envelope
+    })
   }
 
   /**

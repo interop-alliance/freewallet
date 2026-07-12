@@ -101,16 +101,21 @@ export async function initGuestSession() {
  * @param options.seed {Uint8Array}   the 32-byte data seed
  * @param [options.email] {string}
  * @param [options.isGuest] {boolean}
+ * @param [options.remoteDirectStorage] {boolean}   route credential + history
+ *   operations straight to the remote WAS collections (the CHAPI popup, whose
+ *   local IndexedDB is third-party partitioned); default false
  * @returns {Promise<{ session: Session, userExists: boolean }>}
  */
 export async function initSessionFromSeed({
   seed,
   email,
-  isGuest = false
+  isGuest = false,
+  remoteDirectStorage = false
 }: {
   seed: Uint8Array
   email?: string
   isGuest?: boolean
+  remoteDirectStorage?: boolean
 }) {
   const { keyAgent, zcapClient, keyAgreementKey, keyResolver } =
     await agentsFromSeed({ seed })
@@ -153,7 +158,8 @@ export async function initSessionFromSeed({
   const { storage, userExists } = await StorageManager.initStorageClients({
     user,
     profile,
-    isGuest
+    isGuest,
+    remoteDirect: remoteDirectStorage
   })
 
   const session = { user, profile, storage, isGuest, tier: 'full' } as Session
@@ -189,16 +195,21 @@ export async function initSessionFromSeed({
  * @param [options.email] {string}
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the keyring
  *   cache (CHAPI popups thread the Storage Access API handle here)
+ * @param [options.remoteDirectStorage] {boolean}   route credential + history
+ *   operations straight to the remote WAS collections (the CHAPI popup);
+ *   default false
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 export async function loginWithPassphrase({
   passphrase,
   email,
-  idb
+  idb,
+  remoteDirectStorage = false
 }: {
   passphrase: string
   email?: string
   idb?: IDBFactory
+  remoteDirectStorage?: boolean
 }): Promise<{ session: Session | null; userExists: boolean }> {
   const found = await fetchKeyringSeed({ passphrase, idb })
 
@@ -208,7 +219,8 @@ export async function loginWithPassphrase({
 
   const { session, userExists } = await initSessionFromSeed({
     seed: found.seed,
-    email
+    email,
+    remoteDirectStorage
   })
   if (session.user.id !== found.controller) {
     throw new KeyringRecordUnusableError({

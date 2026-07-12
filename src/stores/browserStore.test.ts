@@ -406,10 +406,10 @@ describe('StorageManager (local-first facade)', () => {
   }
 
   it('adds and lists credentials locally, keyed by content cid', async () => {
-    const { storage } = await initManager()
+    const { storage, user } = await initManager()
     const credential = makeCredential('Alice')
 
-    await storage.addCredential({ credential })
+    await storage.addCredential({ credential, user })
 
     const listed = await storage.listCredentials()
     expect(listed).toHaveLength(1)
@@ -456,14 +456,168 @@ describe('StorageManager (local-first facade)', () => {
   })
 
   it('deletes a credential locally', async () => {
-    const { storage } = await initManager()
+    const { storage, user } = await initManager()
     const credential = makeCredential('Alice')
-    await storage.addCredential({ credential })
+    await storage.addCredential({ credential, user })
     const cid = await cidFrom({ doc: credential })
 
     await storage.deleteCredential({ cid })
 
     expect(await storage.loadCredential({ cid })).toBeUndefined()
     expect(await storage.listCredentials()).toHaveLength(0)
+  })
+
+  it('records credential-created history only on an actual insert', async () => {
+    const { storage, user } = await initManager()
+    const credential = makeCredential('Alice')
+
+    // First add inserts and logs; the re-add dedupes and must not log again.
+    await storage.addCredential({ credential, user })
+    await storage.addCredential({ credential, user })
+
+    const items = await storage.listHistoryItems()
+    expect(items).toHaveLength(1)
+    expect(items[0].doc.summary).toMatch(/Credential created/)
+  })
+})
+
+/**
+ * An in-memory stand-in for the remote WAS standard collections: one map of
+ * resource-id to raw stored body per logical collection, exposing the same
+ * `listSyncedResources` / `getSyncedResource` / `putSyncedResource` surface the
+ * StorageManager's remote-direct path calls. `putSyncedResource` honors the
+ * create-if-absent contract (a second write to an existing id reports
+ * `created: false`).
+ */
+function makeFakeRemoteStore(): {
+  remoteStore: WASRemoteStore
+  collections: Map<string, Map<string, Json>>
+} {
+  const collections = new Map<string, Map<string, Json>>()
+  const collectionFor = (logicalKey: string): Map<string, Json> => {
+    let collection = collections.get(logicalKey)
+    if (!collection) {
+      collection = new Map<string, Json>()
+      collections.set(logicalKey, collection)
+    }
+    return collection
+  }
+  const remoteStore = {
+    async listSyncedResources({ logicalKey }: { logicalKey: string }) {
+      return [...collectionFor(logicalKey).keys()].map(id => ({
+        id,
+        url: `/space/s/${logicalKey}/${id}`
+      }))
+    },
+    async getSyncedResource({
+      logicalKey,
+      resourceId
+    }: {
+      logicalKey: string
+      resourceId: string
+    }) {
+      return collectionFor(logicalKey).get(resourceId)
+    },
+    async putSyncedResource({
+      logicalKey,
+      resourceId,
+      body
+    }: {
+      logicalKey: string
+      resourceId: string
+      body: Json
+    }) {
+      const collection = collectionFor(logicalKey)
+      if (collection.has(resourceId)) {
+        return { created: false }
+      }
+      collection.set(resourceId, body)
+      return { created: true }
+    }
+  } as unknown as WASRemoteStore
+  return { remoteStore, collections }
+}
+
+describe('StorageManager (remote-direct popup mode)', () => {
+  it('routes credential add/list/load to the remote store, deduping by cid', async () => {
+    const ciphers = encryptedCiphers()
+    const { localStore, user } = await initLocalStore({ ciphers })
+    const { remoteStore, collections } = makeFakeRemoteStore()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      remoteDirect: true
+    })
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+
+    await storage.addCredential({ credential, user })
+    // A re-add dedupes against the remote contents (no second envelope row).
+    await storage.addCredential({ credential, user })
+
+    expect(collections.get('privateCredentials')!.size).toBe(1)
+    expect(await storage.listCredentials()).toEqual([{ cid, vc: credential }])
+    expect(await storage.loadCredential({ cid })).toEqual(credential)
+    // Nothing was written to the local (partitioned) store.
+    expect(await localStore.listCredentials()).toHaveLength(0)
+  })
+
+  it('records credential-created history remotely only on an actual insert', async () => {
+    const ciphers = encryptedCiphers()
+    const { localStore, user } = await initLocalStore({ ciphers })
+    const { remoteStore, collections } = makeFakeRemoteStore()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      remoteDirect: true
+    })
+    const credential = makeCredential('Alice')
+
+    await storage.addCredential({ credential, user })
+    await storage.addCredential({ credential, user })
+
+    // One credential, one history entry -- the deduped re-add logs nothing.
+    expect(collections.get('privateCredentials')!.size).toBe(1)
+    expect(collections.get('walletActivity')!.size).toBe(1)
+  })
+
+  it('returns [] and throws on writes when the vault is locked', async () => {
+    const ciphers = encryptedCiphers()
+    const { localStore, user } = await initLocalStore({ ciphers })
+    const { remoteStore } = makeFakeRemoteStore()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      remoteDirect: true,
+      vaultLocked: true
+    })
+    const credential = makeCredential('Alice')
+
+    expect(await storage.listCredentials()).toEqual([])
+    await expect(storage.addCredential({ credential, user })).rejects.toThrow(
+      /locked/
+    )
+  })
+
+  it('falls back to the local store when no remote store is configured', async () => {
+    const ciphers = encryptedCiphers()
+    const { localStore, user } = await initLocalStore({ ciphers })
+    // remoteDirect requested but no remote store: effective mode is off.
+    const storage = new StorageManager({
+      localStore,
+      ciphers,
+      remoteDirect: true
+    })
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+
+    await storage.addCredential({ credential, user })
+
+    expect(await storage.listCredentials()).toEqual([{ cid, vc: credential }])
+    // The write landed in the local store, not any remote surface.
+    expect(await localStore.listCredentials()).toHaveLength(1)
   })
 })

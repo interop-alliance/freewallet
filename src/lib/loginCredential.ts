@@ -204,5 +204,5 @@ export async function setLoginHandle({
     return
   }
   const credential = await issueLoginCredential({ session, username: trimmed })
-  await session.storage.addCredential({ credential })
+  await session.storage.addCredential({ credential, user: session.user })
 }

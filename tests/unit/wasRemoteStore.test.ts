@@ -2,20 +2,29 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { ZcapClient } from '@interop/ezcap'
 import type { WasClient } from '@interop/was-client'
-import { WASRemoteStore } from '../../src/stores/wasRemoteStore'
+import {
+  WASRemoteStore,
+  type SessionCapabilities
+} from '../../src/stores/wasRemoteStore'
 import { bufferToBase64Url, digestHash } from '../../src/lib/cidFrom'
 import type { ControllerProfile, User } from '../../src/types/auth'
 
 /**
  * Builds a WASRemoteStore whose `was` client has been replaced with a stub, so
  * tests exercise the store's handle navigation without real network/ezcap I/O.
+ * Passing `sessionCapabilities` puts the store in the delegated tier (it
+ * attaches those capabilities rather than invoking root capabilities).
  */
-function storeWithStubbedClient(was: unknown): WASRemoteStore {
+function storeWithStubbedClient(
+  was: unknown,
+  sessionCapabilities?: SessionCapabilities
+): WASRemoteStore {
   const store = new WASRemoteStore({
     storageServerUrl: 'https://example.test',
     zcapClient: { request: vi.fn() } as unknown as ZcapClient,
     spaceId: 'space-id',
-    controller: 'did:key:test'
+    controller: 'did:key:test',
+    sessionCapabilities
   })
   store.was = was as WasClient
   return store
@@ -151,6 +160,159 @@ describe('WASRemoteStore.fetchCollectionResource', () => {
     if (result.kind === 'binary') {
       expect(result.contentType).toBe('image/png')
     }
+  })
+})
+
+/**
+ * A delegated-tier capability set: a Space-read zcap plus a read/write zcap on
+ * the `private-credentials` collection.
+ */
+const SESSION_CAPABILITIES = {
+  spaceRead: { id: 'urn:zcap:space-read' },
+  collections: {
+    'private-credentials': { id: 'urn:zcap:private-credentials' }
+  }
+} as unknown as SessionCapabilities
+
+describe('WASRemoteStore.listSyncedResources', () => {
+  it('lists resource ids/urls of a standard collection (id-addressed)', async () => {
+    const items = [
+      { id: 'z6Env1', url: '/space/space-id/private-credentials/z6Env1' },
+      { id: 'z6Env2', url: '/space/space-id/private-credentials/z6Env2' }
+    ]
+    const list = vi.fn().mockResolvedValue({ totalItems: 2, items })
+    const collection = vi.fn().mockReturnValue({ list })
+    const space = vi.fn().mockReturnValue({ collection })
+    const store = storeWithStubbedClient({ space })
+
+    await expect(
+      store.listSyncedResources({ logicalKey: 'privateCredentials' })
+    ).resolves.toEqual(items)
+    // Full tier: no capability attached to the space handle.
+    expect(space).toHaveBeenCalledWith('space-id', {})
+    expect(collection).toHaveBeenCalledWith('private-credentials')
+  })
+
+  it('attaches the space-read capability in the delegated tier', async () => {
+    const list = vi.fn().mockResolvedValue({ totalItems: 0, items: [] })
+    const collection = vi.fn().mockReturnValue({ list })
+    const space = vi.fn().mockReturnValue({ collection })
+    const store = storeWithStubbedClient({ space }, SESSION_CAPABILITIES)
+
+    await store.listSyncedResources({ logicalKey: 'privateCredentials' })
+    expect(space).toHaveBeenCalledWith('space-id', {
+      capability: SESSION_CAPABILITIES.spaceRead
+    })
+  })
+})
+
+describe('WASRemoteStore.getSyncedResource', () => {
+  it('reads the raw stored body via a root GET in the full tier', async () => {
+    const envelope = { id: 'z6Env1', sequence: 0, jwe: { ciphertext: 'x' } }
+    const request = vi.fn().mockResolvedValue({ data: envelope })
+    const store = storeWithStubbedClient({ request })
+
+    await expect(
+      store.getSyncedResource({
+        logicalKey: 'privateCredentials',
+        resourceId: 'z6Env1'
+      })
+    ).resolves.toEqual(envelope)
+    expect(request).toHaveBeenCalledWith({
+      capability: undefined,
+      path: '/space/space-id/private-credentials/z6Env1',
+      method: 'GET'
+    })
+  })
+
+  it('attaches the space-read capability in the delegated tier', async () => {
+    const request = vi.fn().mockResolvedValue({ data: {} })
+    const store = storeWithStubbedClient({ request }, SESSION_CAPABILITIES)
+
+    await store.getSyncedResource({
+      logicalKey: 'privateCredentials',
+      resourceId: 'z6Env1'
+    })
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ capability: SESSION_CAPABILITIES.spaceRead })
+    )
+  })
+
+  it('returns undefined on a 404', async () => {
+    const request = vi.fn().mockRejectedValue({ status: 404 })
+    const store = storeWithStubbedClient({ request })
+
+    await expect(
+      store.getSyncedResource({
+        logicalKey: 'privateCredentials',
+        resourceId: 'missing'
+      })
+    ).resolves.toBeUndefined()
+  })
+})
+
+describe('WASRemoteStore.putSyncedResource', () => {
+  it('creates the raw envelope with If-None-Match: * (full tier)', async () => {
+    const envelope = { id: 'z6Env1', sequence: 0, jwe: { ciphertext: 'x' } }
+    const request = vi.fn().mockResolvedValue({})
+    const store = storeWithStubbedClient({ request })
+
+    await expect(
+      store.putSyncedResource({
+        logicalKey: 'privateCredentials',
+        resourceId: 'z6Env1',
+        body: envelope
+      })
+    ).resolves.toEqual({ created: true })
+    expect(request).toHaveBeenCalledWith({
+      capability: undefined,
+      path: '/space/space-id/private-credentials/z6Env1',
+      method: 'PUT',
+      json: envelope,
+      headers: { 'if-none-match': '*' }
+    })
+  })
+
+  it('attaches the collection read/write capability in the delegated tier', async () => {
+    const request = vi.fn().mockResolvedValue({})
+    const store = storeWithStubbedClient({ request }, SESSION_CAPABILITIES)
+
+    await store.putSyncedResource({
+      logicalKey: 'privateCredentials',
+      resourceId: 'z6Env1',
+      body: { jwe: {} }
+    })
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capability: SESSION_CAPABILITIES.collections['private-credentials']
+      })
+    )
+  })
+
+  it('tolerates a 412 as an already-existing row (created: false)', async () => {
+    const request = vi.fn().mockRejectedValue({ status: 412 })
+    const store = storeWithStubbedClient({ request })
+
+    await expect(
+      store.putSyncedResource({
+        logicalKey: 'privateCredentials',
+        resourceId: 'z6Env1',
+        body: { jwe: {} }
+      })
+    ).resolves.toEqual({ created: false })
+  })
+
+  it('propagates a non-412 write error', async () => {
+    const request = vi.fn().mockRejectedValue({ status: 500 })
+    const store = storeWithStubbedClient({ request })
+
+    await expect(
+      store.putSyncedResource({
+        logicalKey: 'privateCredentials',
+        resourceId: 'z6Env1',
+        body: { jwe: {} }
+      })
+    ).rejects.toEqual({ status: 500 })
   })
 })
 
