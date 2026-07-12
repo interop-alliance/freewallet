@@ -12,7 +12,7 @@ import { canonicalize as jcsCanonicalize } from 'json-canonicalize'
  * @returns {string} base64url-encoded digest hash
  */
 export async function cidFrom({ doc }: { doc: object }) {
-  const canonicalized = JSON.stringify(jcsCanonicalize(doc))
+  const canonicalized = jcsCanonicalize(doc)
   const hashBuffer = await digestHash(canonicalized)
   return bufferToBase64Url(hashBuffer)
 }

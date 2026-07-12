@@ -41,8 +41,17 @@ export function CredentialDetailPage() {
     onSuccess: () => navigate('/dashboard')
   })
 
+  const vaultLocked = !!session?.storage?.vaultLocked
+
   useEffect(() => {
     if (!session || !cid) {
+      return
+    }
+    // With the vault locked, encrypted credentials are unreadable until a
+    // passphrase re-login. `loadCredential` fails closed (returns undefined),
+    // so skip the load entirely and render the locked state below rather than
+    // mapping the empty result to a misleading 404.
+    if (session.storage.vaultLocked) {
       return
     }
     session.storage
@@ -67,7 +76,9 @@ export function CredentialDetailPage() {
     void requestDelete()
   }
 
-  if (!cid || isNotFound) {
+  // A locked vault is not a missing credential -- keep the user inside the
+  // dashboard layout (which shows the unlock banner) instead of a 404.
+  if (!cid || (isNotFound && !vaultLocked)) {
     return <NotFoundPage />
   }
 
@@ -89,7 +100,9 @@ export function CredentialDetailPage() {
             {t('credential.shareError')}
           </Alert>
         )}
-        {credential ? (
+        {vaultLocked ? (
+          <Alert severity="info">{t('credential.lockedVault')}</Alert>
+        ) : credential ? (
           <CredentialDetail
             vc={credential.vc}
             cid={cid}

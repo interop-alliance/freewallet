@@ -159,6 +159,17 @@
   relying party's own free-text reason so it cannot be spoofed -- plus an
   explicit warning on any grant that carries write access.
 
+- **Credential ids now hash the canonical JSON bytes as documented.** The CID
+  formula ran an extra `JSON.stringify` over the already-canonical JCS string,
+  so it hashed the JSON-escaped, re-quoted text rather than the canonical bytes
+  -- diverging from `base64url(sha256(utf8(JCS(doc))))` and from what external
+  tools compute for the same credential. The wrapper is gone, so stored
+  credential ids change. Public-credential rows (the only rows keyed directly by
+  cid) are re-keyed automatically at the next login, locally and on the remote
+  storage: each is re-inserted under its correct cid and its old-cid row is
+  tombstoned. As a result, any public-link URL copied before this change stops
+  resolving and the credential must be re-shared to mint a fresh link.
+
 ## 0.15.4 - 2026-07-10
 
 ### Fixed

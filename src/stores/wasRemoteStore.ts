@@ -209,6 +209,16 @@ export class WASRemoteStore {
   /**
    * Returns a `Resource` handle addressed by an arbitrary WAS resource URL.
    *
+   * The handle forces the `plaintext` encryption override, so a `get()` returns
+   * the raw stored body (the EDV envelope for an encryption-marked collection)
+   * rather than running the codec. The override is load-bearing: this store's
+   * `WasClient` is built with a fail-closed encryption provider (its
+   * `resolveKeys` always returns `null`), so without it a read of a marked
+   * collection's resource would throw during codec resolution before the GET.
+   * That matches the storage browser's contract -- it renders raw bodies
+   * verbatim and never touches keys. The delete path never runs the codec, so
+   * the override is a no-op there.
+   *
    * @param url {string}
    * @param [options] {object}
    * @param [options.write] {boolean}   the handle will be used to write
@@ -225,7 +235,7 @@ export class WASRemoteStore {
     return this.was
       .space(spaceId, this._handleOptions({ spaceId, collectionId, write }))
       .collection(collectionId)
-      .resource(resourceId)
+      .resource(resourceId, { encryption: 'plaintext' })
   }
 
   /**

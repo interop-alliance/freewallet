@@ -161,6 +161,10 @@
     "title": "Freewallet Dashboard",
     "addCredential": "Add Credential",
     "credentialsHeading": "Credentials",
+    "loadError": "Could not load your credentials. Please try again.",
+    "undecryptable_one": "{{count}} credential could not be decrypted. It may be corrupted or saved under a different passphrase.",
+    "undecryptable_other": "{{count}} credentials could not be decrypted. They may be corrupted or saved under a different passphrase.",
+    "removeUndecryptable": "Remove",
     "scanQr": {
       "button": "Scan QR",
       "title": "Scan credential QR",
@@ -271,6 +275,7 @@
     "resumeTitle": "Resume",
     "loading": "Loading credential…",
     "loadError": "Could not load this credential. Please try again.",
+    "lockedVault": "This credential is in your locked vault. Log in with your passphrase to view it.",
     "deleteError": "Could not delete this credential. Please try again.",
     "deleteAria": "Delete credential",
     "delete": "Delete",

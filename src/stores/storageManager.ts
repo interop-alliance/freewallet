@@ -475,10 +475,20 @@ export class StorageManager {
       }
       const { id: resourceId } = resources[index]
       if (cipher && isEncryptedEnvelope(data)) {
-        const vc = (await cipher.decrypt({
-          envelope: data
-        })) as unknown as IVerifiableCredential
-        entries.push({ resourceId, cid: await cidFrom({ doc: vc }), vc })
+        try {
+          const vc = (await cipher.decrypt({
+            envelope: data
+          })) as unknown as IVerifiableCredential
+          entries.push({ resourceId, cid: await cidFrom({ doc: vc }), vc })
+        } catch (err) {
+          // One undecryptable remote row must not brick the whole popup list
+          // (mirrors the local store's tolerant read path).
+          console.warn(
+            `Skipping undecryptable remote private-credentials resource ` +
+              `"${resourceId}":`,
+            err
+          )
+        }
       } else {
         entries.push({
           resourceId,
@@ -532,6 +542,35 @@ export class StorageManager {
 
   async deleteCredential({ cid }: { cid: string }) {
     await this._localStore.deleteCredential({ cid })
+  }
+
+  /**
+   * The count of local `private-credentials` rows the most recent
+   * {@link listCredentials} read had to skip because their envelope would not
+   * decrypt under the current vault KAK (corrupted, or written under a
+   * mismatched KAK). Zero when the vault is locked (that read returns nothing).
+   * Surfaced so the dashboard can warn the user without one bad row bricking
+   * the list.
+   *
+   * @returns {number}
+   */
+  get undecryptableCredentials(): number {
+    return this._localStore.undecryptableCredentials
+  }
+
+  /**
+   * Removes the local `private-credentials` rows that could not be decrypted,
+   * so the user can clear rows that can never be shown. Returns the number of
+   * rows removed. No-op with the vault locked (nothing is undecryptable there;
+   * locked rows are left intact).
+   *
+   * @returns {Promise<number>}
+   */
+  async purgeUndecryptableCredentials(): Promise<number> {
+    if (this._vaultLocked) {
+      return 0
+    }
+    return await this._localStore.purgeUndecryptableCredentials()
   }
 
   async wipeStorage() {
@@ -650,6 +689,11 @@ export class StorageManager {
     // and so before background replication starts -- because the remote
     // collections reject plaintext pushes once their encryption marker is set.
     await this._localStore.migrateLocalPlaintextDocs()
+    // Re-key any `public-credentials` rows left under the pre-fix CID formula.
+    // Runs regardless of vault state -- public rows are plaintext -- and before
+    // replication so the tombstone and the re-keyed row reach the remote
+    // collection.
+    await this._localStore.migratePublicCredentialCids()
     if (this._remoteStore) {
       await this._remoteStore.ensureUserCollections({ user })
       // Provision and publish the user's did:web DID (full tier only -- a

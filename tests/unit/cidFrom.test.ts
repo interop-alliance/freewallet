@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest'
+import { canonicalize } from 'json-canonicalize'
 import { cidFrom, bufferToBase64Url } from '../../src/lib/cidFrom'
 
 describe('bufferToBase64Url', () => {
@@ -50,5 +51,18 @@ describe('cidFrom', () => {
     const r1 = await cidFrom({ doc: { a: 1, b: 2 } })
     const r2 = await cidFrom({ doc: { b: 2, a: 1 } })
     expect(r1).toBe(r2)
+  })
+
+  it('hashes the canonical JCS bytes -- base64url(sha256(utf8(JCS(doc))))', async () => {
+    // Compute the spec formula independently (not via cidFrom): SHA-256 over
+    // the utf-8 bytes of the canonical JSON string, base64url-encoded.
+    const doc = { b: 2, a: 1, nested: { z: true, y: 'x' } }
+    const canonical = canonicalize(doc)
+    const digest = await globalThis.crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(canonical)
+    )
+    const expected = bufferToBase64Url(digest)
+    expect(await cidFrom({ doc })).toBe(expected)
   })
 })

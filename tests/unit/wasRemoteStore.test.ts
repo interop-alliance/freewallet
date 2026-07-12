@@ -139,6 +139,27 @@ describe('WASRemoteStore.fetchCollectionResource', () => {
     ).resolves.toEqual({ kind: 'json', data: { hello: 'world' } })
   })
 
+  it('forces the plaintext override so a marked collection returns its raw envelope', async () => {
+    // The store's WasClient is built with a fail-closed encryption provider, so
+    // the storage browser must read encryption-marked resources as plaintext:
+    // the raw EDV envelope, not a decoded body it cannot key for.
+    const envelope = { id: 'z6Env1', jwe: { ciphertext: 'x' } }
+    const get = vi.fn().mockResolvedValue(envelope)
+    const resource = vi.fn().mockReturnValue({ get })
+    const collection = vi.fn().mockReturnValue({ resource })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collection })
+    })
+
+    await expect(
+      store.fetchCollectionResource({
+        id: 'z6Env1',
+        url: '/space/space-id/private-credentials/z6Env1'
+      })
+    ).resolves.toEqual({ kind: 'json', data: envelope })
+    expect(resource).toHaveBeenCalledWith('z6Env1', { encryption: 'plaintext' })
+  })
+
   it('returns binary for a non-text blob body', async () => {
     const blob = new Blob([new Uint8Array([1, 2, 3])], {
       type: 'image/png'

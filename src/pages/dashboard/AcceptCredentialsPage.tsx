@@ -7,10 +7,11 @@ import CardContent from '@mui/material/CardContent'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { BsAward } from 'react-icons/bs'
-import { useLocation, useNavigate } from 'react-router'
+import { Navigate, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { useAuthStore } from '@/stores/authStore'
+import { cidFrom } from '@/lib/cidFrom'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
 import { DashboardLayout } from '@/components/DashboardLayout'
@@ -36,8 +37,10 @@ export function AcceptCredentialsPage() {
     | undefined
 
   if (credentials.length === 0) {
-    navigate('/dashboard')
-    return
+    // A render-phase navigate() is a silent no-op in React Router; returning a
+    // <Navigate> element performs the redirect so a deep-linked visitor with no
+    // incoming credentials is not left on a permanently blank page.
+    return <Navigate to="/dashboard" replace />
   }
 
   async function handleAcceptAll() {
@@ -47,17 +50,33 @@ export function AcceptCredentialsPage() {
     setSaving(true)
     setStoreError(false)
     try {
-      await Promise.all(
-        credentials.map(async credential => {
-          console.log('Storing credential:', credentialTitle(credential))
-          // addCredential records the credential-created history entry itself,
-          // gated on an actual insert.
-          await session.storage.addCredential({
-            credential,
-            user: session.user
-          })
+      // Dedupe the incoming batch by content cid up front: the same VC appearing
+      // twice would otherwise be stored as two distinct EDV envelope rows (JWE
+      // encryption is nondeterministic, so each gets a different content-derived
+      // row id) plus two history entries, since the store-level dedupe scan is
+      // per-cid. Deduping here also avoids a redundant cidFrom recompute per item.
+      const uniqueCredentials: IVerifiableCredential[] = []
+      const seenCids = new Set<string>()
+      for (const credential of credentials) {
+        const cid = await cidFrom({ doc: credential })
+        if (seenCids.has(cid)) {
+          continue
+        }
+        seenCids.add(cid)
+        uniqueCredentials.push(credential)
+      }
+      // Store sequentially so each store-level dedupe scan sees the prior
+      // inserts; a concurrent Promise.all would run every scan before any insert
+      // landed, defeating the store's own dedupe for repeats across the batch.
+      for (const credential of uniqueCredentials) {
+        console.log('Storing credential:', credentialTitle(credential))
+        // addCredential records the credential-created history entry itself,
+        // gated on an actual insert.
+        await session.storage.addCredential({
+          credential,
+          user: session.user
         })
-      )
+      }
       if (importSummary) {
         window.alert(
           t('storage.importSuccess', {

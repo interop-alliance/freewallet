@@ -161,6 +161,10 @@
     "title": "Panel de Freewallet",
     "addCredential": "Añadir credencial",
     "credentialsHeading": "Credenciales",
+    "loadError": "No se pudieron cargar sus credenciales. Inténtelo de nuevo.",
+    "undecryptable_one": "No se pudo descifrar {{count}} credencial. Puede estar dañada o guardada con otra frase de contraseña.",
+    "undecryptable_other": "No se pudieron descifrar {{count}} credenciales. Pueden estar dañadas o guardadas con otra frase de contraseña.",
+    "removeUndecryptable": "Eliminar",
     "scanQr": {
       "button": "Escanear QR",
       "title": "Escanear QR de credencial",
@@ -271,6 +275,7 @@
     "resumeTitle": "Currículum",
     "loading": "Cargando credencial…",
     "loadError": "No se pudo cargar esta credencial. Inténtelo de nuevo.",
+    "lockedVault": "Esta credencial está en su bóveda bloqueada. Inicie sesión con su frase de contraseña para verla.",
     "deleteError": "No se pudo eliminar esta credencial. Inténtelo de nuevo.",
     "deleteAria": "Eliminar credencial",
     "delete": "Eliminar",

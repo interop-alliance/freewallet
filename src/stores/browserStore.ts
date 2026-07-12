@@ -45,6 +45,14 @@ export class BrowserStore {
   private _collections?: Record<string, RxCollection<SyncedDoc>>
   private _storage: RxStorage<unknown, unknown>
   private _ciphers?: Record<string, DocCipher>
+  // Count of rows the most recent list read had to skip because their envelope
+  // would not decrypt under the current vault KAK (corrupted, replicated
+  // verbatim from another identity, or written under a mismatched KAK). A
+  // locked vault -- no cipher at all -- is a different, fail-closed case and is
+  // not counted here. Surfaced so the pages can warn the user without any one
+  // bad row bricking the whole list.
+  private _undecryptableCredentials = 0
+  private _undecryptableHistory = 0
 
   constructor({
     dbPrefix,
@@ -180,30 +188,69 @@ export class BrowserStore {
   }
 
   /**
+   * The count of `private-credentials` rows the most recent
+   * {@link listCredentials} call had to skip because their envelope would not
+   * decrypt under the current vault KAK. Zero when the vault is locked (that
+   * path returns nothing rather than attempting to decrypt).
+   *
+   * @returns {number}
+   */
+  get undecryptableCredentials(): number {
+    return this._undecryptableCredentials
+  }
+
+  /**
+   * The count of `wallet-activity` rows the most recent
+   * {@link listHistoryItems} call had to skip for the same reason.
+   *
+   * @returns {number}
+   */
+  get undecryptableHistory(): number {
+    return this._undecryptableHistory
+  }
+
+  /**
    * Reads every live `private-credentials` row, oldest first, decrypting
    * envelope rows and passing legacy plaintext rows through. Each entry keeps
    * its RxDB row id (the write/delete key) alongside the credential's content
    * cid (the page-facing key): for an envelope row the cid is recomputed from
    * the decrypted VC, for a plaintext row it IS the row id.
    *
-   * @returns {Promise<Array<{ rowId: string; cid: string;
-   *   vc: IVerifiableCredential }>>}
+   * A single row whose envelope does not decrypt under the current KAK
+   * (corrupted, replicated verbatim from another identity, or written under a
+   * mismatched KAK) is skipped -- logged and collected in `undecryptableRowIds`
+   * -- rather than rejecting the whole read, so one poisoned row cannot brick
+   * list/load/add/delete. The row id is returned so a caller can still target
+   * (and remove) it even though its content cid is unknowable.
+   *
+   * @returns {Promise<{ entries: Array<{ rowId: string; cid: string;
+   *   vc: IVerifiableCredential }>; undecryptableRowIds: string[] }>}
    */
-  private async _credentialEntries(): Promise<
-    Array<{ rowId: string; cid: string; vc: IVerifiableCredential }>
-  > {
+  private async _credentialEntries(): Promise<{
+    entries: Array<{ rowId: string; cid: string; vc: IVerifiableCredential }>
+    undecryptableRowIds: string[]
+  }> {
     const docs = await this.rxCollection('privateCredentials')
       .find({ sort: [{ updatedAt: 'asc' }] })
       .exec()
     const cipher = this._ciphers?.privateCredentials
     const entries = []
+    const undecryptableRowIds: string[] = []
     for (const doc of docs) {
       const { id, data } = doc.toMutableJSON()
       if (cipher && isEncryptedEnvelope(data)) {
-        const vc = (await cipher.decrypt({
-          envelope: data!
-        })) as unknown as IVerifiableCredential
-        entries.push({ rowId: id, cid: await cidFrom({ doc: vc }), vc })
+        try {
+          const vc = (await cipher.decrypt({
+            envelope: data!
+          })) as unknown as IVerifiableCredential
+          entries.push({ rowId: id, cid: await cidFrom({ doc: vc }), vc })
+        } catch (err) {
+          console.warn(
+            `Skipping undecryptable private-credentials row "${id}":`,
+            err
+          )
+          undecryptableRowIds.push(id)
+        }
       } else {
         entries.push({
           rowId: id,
@@ -212,7 +259,7 @@ export class BrowserStore {
         })
       }
     }
-    return entries
+    return { entries, undecryptableRowIds }
   }
 
   /**
@@ -254,7 +301,7 @@ export class BrowserStore {
       })
       return true
     }
-    const entries = await this._credentialEntries()
+    const { entries } = await this._credentialEntries()
     if (entries.some(entry => entry.cid === cid)) {
       return false
     }
@@ -275,7 +322,7 @@ export class BrowserStore {
    * @returns {Promise<IVerifiableCredential | undefined>}
    */
   async loadCredential({ cid }: { cid: string }) {
-    const entries = await this._credentialEntries()
+    const { entries } = await this._credentialEntries()
     return entries.find(entry => entry.cid === cid)?.vc
   }
 
@@ -291,17 +338,52 @@ export class BrowserStore {
    * @returns {Promise<void>}
    */
   async deleteCredential({ cid }: { cid: string }) {
-    const entries = await this._credentialEntries()
-    const collection = this.rxCollection('privateCredentials')
+    const { entries } = await this._credentialEntries()
     for (const entry of entries) {
       if (entry.cid !== cid) {
         continue
       }
-      const doc = await collection.findOne(entry.rowId).exec()
-      if (doc) {
-        await doc.remove()
-      }
+      await this.deleteCredentialByRowId({ rowId: entry.rowId })
     }
+  }
+
+  /**
+   * Removes a single `private-credentials` row by its RxDB row id (a soft
+   * delete replication pushes as a tombstone). Unlike {@link deleteCredential},
+   * this needs no decryption, so it is the way to remove an undecryptable row
+   * whose content cid cannot be recovered (see {@link undecryptableCredentials}
+   * / {@link purgeUndecryptableCredentials}).
+   *
+   * @param options {object}
+   * @param options.rowId {string}
+   * @returns {Promise<void>}
+   */
+  async deleteCredentialByRowId({ rowId }: { rowId: string }) {
+    const doc = await this.rxCollection('privateCredentials')
+      .findOne(rowId)
+      .exec()
+    if (doc) {
+      await doc.remove()
+    }
+  }
+
+  /**
+   * Removes every `private-credentials` row whose envelope will not decrypt
+   * under the current vault KAK, so a user can clear rows that can never be
+   * shown (corrupted, or written under a mismatched KAK). Requires an unlocked
+   * vault: with the vault locked there is no cipher and nothing is treated as
+   * undecryptable (fail closed -- locked rows are left intact). Returns the
+   * number of rows removed.
+   *
+   * @returns {Promise<number>}
+   */
+  async purgeUndecryptableCredentials(): Promise<number> {
+    const { undecryptableRowIds } = await this._credentialEntries()
+    for (const rowId of undecryptableRowIds) {
+      await this.deleteCredentialByRowId({ rowId })
+    }
+    this._undecryptableCredentials = 0
+    return undecryptableRowIds.length
   }
 
   /**
@@ -311,7 +393,8 @@ export class BrowserStore {
    * @returns {Promise<Array<StoredCredential>>}
    */
   async listCredentials(): Promise<Array<StoredCredential>> {
-    const entries = await this._credentialEntries()
+    const { entries, undecryptableRowIds } = await this._credentialEntries()
+    this._undecryptableCredentials = undecryptableRowIds.length
     const seen = new Set<string>()
     const credentials: StoredCredential[] = []
     for (const { cid, vc } of entries) {
@@ -412,6 +495,10 @@ export class BrowserStore {
    * is the activity's own id (a uuid minted at record time); duplicate rows
    * carrying the same activity are collapsed to their oldest copy.
    *
+   * A row whose envelope will not decrypt under the current KAK is skipped
+   * (logged and counted in {@link undecryptableHistory}) rather than rejecting
+   * the whole read, so one poisoned row cannot hang the history page.
+   *
    * @returns {Promise<Array<{ id: string; doc: WalletActivity }>>}
    */
   async listHistoryItems(): Promise<
@@ -423,12 +510,26 @@ export class BrowserStore {
     const cipher = this._ciphers?.walletActivity
     const seen = new Set<string>()
     const items: Array<{ id: string; doc: WalletActivity }> = []
+    let undecryptable = 0
     for (const rxDoc of docs) {
       const { id: rowId, data } = rxDoc.toMutableJSON()
-      const activity =
-        cipher && isEncryptedEnvelope(data)
-          ? ((await cipher.decrypt({ envelope: data! })) as WalletActivity)
-          : (data as WalletActivity)
+      let activity: WalletActivity
+      if (cipher && isEncryptedEnvelope(data)) {
+        try {
+          activity = (await cipher.decrypt({
+            envelope: data!
+          })) as WalletActivity
+        } catch (err) {
+          console.warn(
+            `Skipping undecryptable wallet-activity row "${rowId}":`,
+            err
+          )
+          undecryptable += 1
+          continue
+        }
+      } else {
+        activity = data as WalletActivity
+      }
       const id = activity.id ?? rowId
       if (seen.has(id)) {
         continue
@@ -436,6 +537,7 @@ export class BrowserStore {
       seen.add(id)
       items.push({ id, doc: activity })
     }
+    this._undecryptableHistory = undecryptable
     return items
   }
 
@@ -476,6 +578,46 @@ export class BrowserStore {
         })
         await doc.remove()
       }
+    }
+  }
+
+  /**
+   * One-time re-key of the `public-credentials` collection after the CID
+   * formula fix. The pre-fix formula hashed the JSON-escaped canonical string
+   * rather than the canonical JCS bytes, so a public credential's row id no
+   * longer matches `cidFrom` of its body. Each mis-keyed row is re-inserted
+   * under the recomputed cid (with its `updatedAt` preserved and `version` 0 so
+   * it pushes as a create) and the old row is soft-deleted.
+   *
+   * Runs at login before replication starts, so the tombstone and the new row
+   * both propagate to the remote collection. Unlike the plaintext migration
+   * there is no `version` gate: pulled rows must be re-keyed too, so the remote
+   * old-cid resource gets tombstoned. Idempotent by construction (a correctly
+   * keyed row is skipped) and cheap (public rows are few and plaintext), so no
+   * marker gating. Note that any public link already shared to an old-cid
+   * resource stops resolving once its remote row is tombstoned.
+   *
+   * @returns {Promise<void>}
+   */
+  async migratePublicCredentialCids() {
+    const collection = this.rxCollection('publicCredentials')
+    const docs = await collection.find().exec()
+    for (const doc of docs) {
+      const { id, updatedAt, data } = doc.toMutableJSON()
+      if (data === undefined) {
+        continue
+      }
+      const cid = await cidFrom({ doc: data as object })
+      if (cid === id) {
+        continue
+      }
+      await collection.insertIfNotExists({
+        id: cid,
+        updatedAt,
+        version: 0,
+        data
+      })
+      await doc.remove()
     }
   }
 

@@ -317,6 +317,116 @@ describe('BrowserStore (encrypted collections)', () => {
     ])
   })
 
+  /**
+   * Inserts a poisoned envelope row directly: it looks like an EDV envelope
+   * (its `jwe` is an object, so `isEncryptedEnvelope` accepts it) but its
+   * ciphertext is not valid JSON, so the fake cipher's `decrypt` throws --
+   * standing in for a row corrupted, replicated verbatim from another
+   * identity, or written under a mismatched KAK.
+   */
+  async function insertUndecryptableRow(
+    localStore: BrowserStore,
+    logicalKey: string,
+    rowId: string
+  ) {
+    await localStore.rxCollection(logicalKey).insert({
+      id: rowId,
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: { id: rowId, sequence: 0, jwe: { ciphertext: 'not-json{' } } as Json
+    })
+  }
+
+  describe('undecryptable rows (per-row fail-soft)', () => {
+    it('skips a poisoned credential row, still listing the good ones', async () => {
+      const { localStore } = await initLocalStore({
+        ciphers: encryptedCiphers()
+      })
+      const credential = makeCredential('Alice')
+      const cid = await cidFrom({ doc: credential })
+      await localStore.addCredential({ cid, credential })
+      await insertUndecryptableRow(localStore, 'privateCredentials', 'z6Poison')
+
+      const listed = await localStore.listCredentials()
+
+      expect(listed).toEqual([{ cid, vc: credential }])
+      expect(localStore.undecryptableCredentials).toBe(1)
+      // The good credential still loads and the poisoned row does not throw.
+      expect(await localStore.loadCredential({ cid })).toEqual(credential)
+    })
+
+    it('still deletes a good credential despite a poisoned sibling row', async () => {
+      const { localStore } = await initLocalStore({
+        ciphers: encryptedCiphers()
+      })
+      const credential = makeCredential('Alice')
+      const cid = await cidFrom({ doc: credential })
+      await localStore.addCredential({ cid, credential })
+      await insertUndecryptableRow(localStore, 'privateCredentials', 'z6Poison')
+
+      await localStore.deleteCredential({ cid })
+
+      expect(await localStore.listCredentials()).toHaveLength(0)
+      // The poisoned row survives (it carries no recoverable cid).
+      expect(
+        await localStore.rxCollection('privateCredentials').find().exec()
+      ).toHaveLength(1)
+    })
+
+    it('purges undecryptable credential rows on request', async () => {
+      const { localStore } = await initLocalStore({
+        ciphers: encryptedCiphers()
+      })
+      const credential = makeCredential('Alice')
+      const cid = await cidFrom({ doc: credential })
+      await localStore.addCredential({ cid, credential })
+      await insertUndecryptableRow(localStore, 'privateCredentials', 'z6Poison')
+      await localStore.listCredentials()
+      expect(localStore.undecryptableCredentials).toBe(1)
+
+      const removed = await localStore.purgeUndecryptableCredentials()
+
+      expect(removed).toBe(1)
+      expect(localStore.undecryptableCredentials).toBe(0)
+      // The good credential is untouched; only the poisoned row is gone.
+      expect(await localStore.listCredentials()).toEqual([
+        { cid, vc: credential }
+      ])
+      expect(
+        await localStore.rxCollection('privateCredentials').find().exec()
+      ).toHaveLength(1)
+    })
+
+    it('removes a credential by row id without decrypting it', async () => {
+      const { localStore } = await initLocalStore({
+        ciphers: encryptedCiphers()
+      })
+      await insertUndecryptableRow(localStore, 'privateCredentials', 'z6Poison')
+
+      await localStore.deleteCredentialByRowId({ rowId: 'z6Poison' })
+
+      expect(
+        await localStore.rxCollection('privateCredentials').find().exec()
+      ).toHaveLength(0)
+    })
+
+    it('skips a poisoned history row, still listing the good ones', async () => {
+      const { localStore } = await initLocalStore({
+        ciphers: encryptedCiphers()
+      })
+      await localStore.addHistoryItem({
+        resourceId: 'first',
+        activity: { id: 'first', summary: 'one' }
+      })
+      await insertUndecryptableRow(localStore, 'walletActivity', 'z6Poison')
+
+      const items = await localStore.listHistoryItems()
+
+      expect(items.map(({ doc }) => doc.summary)).toEqual(['one'])
+      expect(localStore.undecryptableHistory).toBe(1)
+    })
+  })
+
   describe('migrateLocalPlaintextDocs', () => {
     it('re-keys never-synced plaintext rows into envelopes, preserving updatedAt', async () => {
       const { localStore } = await initLocalStore({
@@ -386,6 +496,100 @@ describe('BrowserStore (encrypted collections)', () => {
       expect(rows).toHaveLength(1)
       expect(await localStore.listCredentials()).toHaveLength(1)
     })
+  })
+})
+
+describe('migratePublicCredentialCids', () => {
+  it('re-keys a row stored under the pre-fix cid, preserving updatedAt', async () => {
+    const { localStore } = await initLocalStore()
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+    const wrongCid = 'z6PreFixWrongCid'
+    const originalUpdatedAt = '2026-01-02T03:04:05.000Z'
+    // Seed a public row under a wrong id, as the pre-fix formula would have.
+    await localStore.rxCollection('publicCredentials').insert({
+      id: wrongCid,
+      updatedAt: originalUpdatedAt,
+      version: 0,
+      data: credential as unknown as Json
+    })
+
+    await localStore.migratePublicCredentialCids()
+
+    // The row now lives under the correct cid; the old id is soft-deleted.
+    expect(await localStore.hasPublicCredential({ cid })).toBe(true)
+    expect(await localStore.hasPublicCredential({ cid: wrongCid })).toBe(false)
+    const doc = await localStore
+      .rxCollection('publicCredentials')
+      .findOne(cid)
+      .exec()
+    expect(doc).not.toBeNull()
+    const row = doc!.toMutableJSON()
+    expect(row.updatedAt).toBe(originalUpdatedAt)
+    expect(row.data).toEqual(credential)
+  })
+
+  it('re-keys a pulled row (any version), not just never-synced rows', async () => {
+    const { localStore } = await initLocalStore()
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+    await localStore.rxCollection('publicCredentials').insert({
+      id: 'z6PreFixWrongCid',
+      updatedAt: new Date().toISOString(),
+      version: 4,
+      data: credential as unknown as Json
+    })
+
+    await localStore.migratePublicCredentialCids()
+
+    expect(await localStore.hasPublicCredential({ cid })).toBe(true)
+    expect(
+      await localStore.hasPublicCredential({ cid: 'z6PreFixWrongCid' })
+    ).toBe(false)
+  })
+
+  it('leaves a correctly-keyed row untouched (no churn)', async () => {
+    const { localStore } = await initLocalStore()
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+    await localStore.addPublicCredential({ cid, credential })
+    const before = (await localStore
+      .rxCollection('publicCredentials')
+      .findOne(cid)
+      .exec())!.toMutableJSON()
+
+    await localStore.migratePublicCredentialCids()
+
+    const rows = await localStore
+      .rxCollection('publicCredentials')
+      .find()
+      .exec()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].toMutableJSON()).toEqual(before)
+  })
+
+  it('is a no-op on a second run', async () => {
+    const { localStore } = await initLocalStore()
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+    await localStore.rxCollection('publicCredentials').insert({
+      id: 'z6PreFixWrongCid',
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: credential as unknown as Json
+    })
+
+    await localStore.migratePublicCredentialCids()
+    await localStore.migratePublicCredentialCids()
+
+    expect(await localStore.hasPublicCredential({ cid })).toBe(true)
+    // Only the re-keyed row remains live (the wrong-id row is tombstoned).
+    const rows = await localStore
+      .rxCollection('publicCredentials')
+      .find()
+      .exec()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].toMutableJSON().id).toBe(cid)
   })
 })
 
@@ -465,6 +669,31 @@ describe('StorageManager (local-first facade)', () => {
 
     expect(await storage.loadCredential({ cid })).toBeUndefined()
     expect(await storage.listCredentials()).toHaveLength(0)
+  })
+
+  it('surfaces and purges undecryptable credentials through the facade', async () => {
+    const ciphers = encryptedCiphers()
+    const { localStore, user } = await initLocalStore({ ciphers })
+    const storage = new StorageManager({ localStore, ciphers })
+    const credential = makeCredential('Alice')
+    await storage.addCredential({ credential, user })
+    await localStore.rxCollection('privateCredentials').insert({
+      id: 'z6Poison',
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: {
+        id: 'z6Poison',
+        sequence: 0,
+        jwe: { ciphertext: 'not-json{' }
+      } as Json
+    })
+
+    const listed = await storage.listCredentials()
+    expect(listed).toHaveLength(1)
+    expect(storage.undecryptableCredentials).toBe(1)
+
+    expect(await storage.purgeUndecryptableCredentials()).toBe(1)
+    expect(storage.undecryptableCredentials).toBe(0)
   })
 
   it('records credential-created history only on an actual insert', async () => {
