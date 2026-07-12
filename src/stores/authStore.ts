@@ -42,8 +42,14 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ session, restoreStatus: 'done' })
     publishStorageSeam(session)
     // Kick off background replication (no-op for guests / no remote replica).
-    // Fire-and-forget: the controller self-manages its errors and status.
-    void syncController.start({ session })
+    // `restart` (not `start`) so a controller left running by a previous
+    // session -- a restored delegated session being upgraded by re-login, or a
+    // switch to a second account without an intervening logout -- is stopped
+    // before the new one starts; a bare `start()` would no-op on its already-
+    // running guard and silently never replicate. Fire-and-forget keeps login
+    // non-blocking; `restart` serializes the stop-then-start internally so the
+    // ordering holds. The controller self-manages its errors and status.
+    void syncController.restart({ session })
     // Mint and persist the refresh-survival zcaps (full sessions only --
     // a delegated session cannot delegate). Fire-and-forget: failure only
     // costs refresh-survival, never the login. Dynamically imported so the
@@ -74,7 +80,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         await session.storage.ensureUserCollections({ user: session.user })
         set({ session })
         publishStorageSeam(session)
-        void syncController.start({ session })
+        // At boot the controller singleton is freshly constructed, so no prior
+        // session's replication can be running here; `restart` (rather than
+        // `start`) is nonetheless used for uniformity with the login path and
+        // to defensively tear down any stale controller before starting. The
+        // internal stop-then-start is a no-op on an empty controller.
+        void syncController.restart({ session })
       }
     } catch (err) {
       console.warn('Could not restore a delegated session:', err)

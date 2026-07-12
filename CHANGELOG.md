@@ -89,6 +89,34 @@
   so an abandoned exchange expiring on the verifier's side is the correct
   outcome, now documented as such rather than left as an accident.
 
+- **Background sync no longer silently stops after a re-login.** Re-entering
+  the passphrase over a restored session (or logging into a second account
+  without logging out first) reopened the local database -- which cancelled the
+  running replication -- but the sync controller's start call no-oped on its
+  already-running guard, so nothing replicated for the rest of the session,
+  with no error shown. The login path now restarts the controller (a serialized
+  stop-then-start; overlapping lifecycle transitions queue rather than
+  interleave), so replication always tracks the current session and an
+  account switch tears down the previous account's replication.
+
+- **A storage-server outage during first-login provisioning now shows the
+  right error.** The unreachable-server detection only recognized a raw
+  storage-client error, but the space/collection provisioning steps rethrow
+  that error wrapped in a plain `Error` -- so an outage striking during
+  provisioning (rather than the initial probe) surfaced as the generic
+  "could not finish setting up your wallet" message instead of the
+  "storage unreachable" state with its guest-mode fallback. The check now
+  unwraps the error `cause` chain (with depth and cycle guards) before
+  classifying.
+
+- **Wiping local storage now actually waits for the databases to be deleted.**
+  The wipe issued the IndexedDB delete requests and returned immediately,
+  so account deletion and re-signup could proceed while the wallet databases
+  still existed -- letting a prompt re-signup see remnants of the old account.
+  Each deletion is now awaited to completion; when another open tab blocks a
+  deletion, a warning is logged and the wipe proceeds rather than hanging
+  (the queued deletion completes once that tab closes).
+
 - **A passphrase change now takes effect on other devices.** Passphrase login
   answered from the locally cached keyring record before consulting the WAS
   server, and the cache never expired -- so a passphrase retired via "Change

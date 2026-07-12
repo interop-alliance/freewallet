@@ -495,12 +495,51 @@ export class BrowserStore {
     // Guarded: absent under the memory storage used in unit tests.
     if (typeof indexedDB !== 'undefined') {
       const databases = await indexedDB.databases()
-      for (const db of databases) {
-        if (db.name!.includes(this.dbPrefix)) {
-          indexedDB.deleteDatabase(db.name!)
-        }
-      }
+      await Promise.all(
+        databases
+          .filter(db => db.name!.includes(this.dbPrefix))
+          .map(db => this._deleteDatabase(db.name!))
+      )
     }
+  }
+
+  /**
+   * Deletes a single IndexedDB database, resolving only once the request
+   * settles so `wipeStorage` cannot report success while the database still
+   * exists. `deleteDatabase` fires `onsuccess` on completion and `onerror` on
+   * failure; both resolve here (errors are logged, not thrown, so one stuck
+   * database does not abort the wipe of the others).
+   *
+   * `onblocked` fires when another tab still holds an open connection: the
+   * request then stays pending and may never complete while that tab lives.
+   * We deliberately do not wait for that -- blocking `wipeStorage` on a
+   * sibling tab could hang logout / account deletion indefinitely. Instead we
+   * log a warning and resolve; the deletion remains queued and completes once
+   * the other connection closes.
+   *
+   * @param name {string}
+   * @returns {Promise<void>}
+   */
+  private _deleteDatabase(name: string): Promise<void> {
+    return new Promise<void>(resolve => {
+      const request = indexedDB.deleteDatabase(name)
+      request.onsuccess = () => resolve()
+      request.onerror = () => {
+        console.error(
+          `Failed to delete IndexedDB database "${name}":`,
+          request.error
+        )
+        resolve()
+      }
+      request.onblocked = () => {
+        console.warn(
+          `Deletion of IndexedDB database "${name}" is blocked by another ` +
+            'open connection (e.g. a second tab); it will complete once that ' +
+            'connection closes.'
+        )
+        resolve()
+      }
+    })
   }
 
   /**

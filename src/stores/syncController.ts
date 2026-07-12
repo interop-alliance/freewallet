@@ -51,18 +51,81 @@ class SyncController {
   private _replications: CollectionReplication[] = []
   private _onlineHandler?: () => void
   private _started = false
+  // Serializes every lifecycle transition (start / stop / restart) onto a
+  // single chain so overlapping login / logout calls can never interleave and
+  // leave dangling replications or a stale `_started` flag. A start racing a
+  // stop is thereby impossible: each runs to completion before the next begins.
+  private _queue: Promise<void> = Promise.resolve()
 
   /**
-   * Starts background replication for a logged-in session. A no-op for guests,
-   * or when no remote WAS replica is configured, or when already running.
-   * Expects the session storage's local collections to be initialized
-   * (`ensureUserCollections()` runs before login).
+   * Serializes a lifecycle task after any in-flight one. Rejections are
+   * swallowed on the chain (each task already handles its own errors) so a
+   * single failure cannot wedge every subsequent transition; the returned
+   * promise still reflects this task's own outcome for callers that await it.
+   *
+   * @param task {() => Promise<void>}
+   * @returns {Promise<void>}
+   */
+  private _enqueue(task: () => Promise<void>): Promise<void> {
+    const next = this._queue.then(task, task)
+    this._queue = next.catch(() => {})
+    return next
+  }
+
+  /**
+   * Starts background replication for a logged-in session, serialized after any
+   * in-flight lifecycle transition. A no-op for guests, when no remote WAS
+   * replica is configured, or when already running.
    *
    * @param options {object}
    * @param options.session {Session}
    * @returns {Promise<void>}
    */
-  async start({ session }: { session: Session }): Promise<void> {
+  start({ session }: { session: Session }): Promise<void> {
+    return this._enqueue(() => this._start({ session }))
+  }
+
+  /**
+   * Stops any running replication, then starts it fresh for `session`,
+   * serialized as a single atomic transition. This is the login path's entry
+   * point: it guarantees a controller left running by a previous (restored or
+   * other-account) session is torn down before the new one starts, closing the
+   * `_started`-guard hole where a re-login would otherwise silently never
+   * replicate.
+   *
+   * @param options {object}
+   * @param options.session {Session}
+   * @returns {Promise<void>}
+   */
+  restart({ session }: { session: Session }): Promise<void> {
+    return this._enqueue(async () => {
+      await this._stop()
+      await this._start({ session })
+    })
+  }
+
+  /**
+   * Stops background replication and releases all resources, serialized after
+   * any in-flight lifecycle transition. Idempotent.
+   *
+   * @returns {Promise<void>}
+   */
+  stop(): Promise<void> {
+    return this._enqueue(() => this._stop())
+  }
+
+  /**
+   * Starts background replication for a logged-in session. A no-op for guests,
+   * or when no remote WAS replica is configured, or when already running.
+   * Expects the session storage's local collections to be initialized
+   * (`ensureUserCollections()` runs before login). Runs inside the serialized
+   * queue; callers use `start()` / `restart()`.
+   *
+   * @param options {object}
+   * @param options.session {Session}
+   * @returns {Promise<void>}
+   */
+  private async _start({ session }: { session: Session }): Promise<void> {
     if (this._started) {
       return
     }
@@ -126,8 +189,10 @@ class SyncController {
       window.addEventListener('online', this._onlineHandler)
     } catch (err) {
       console.error('Failed to start sync controller:', err)
-      // Leave any partial state for stop() to tear down cleanly.
-      await this.stop()
+      // Tear down any partial state cleanly. Call the internal `_stop()`
+      // directly rather than the queueing `stop()`: we already hold the queue,
+      // so enqueuing here would deadlock on our own in-flight task.
+      await this._stop()
     }
   }
 
@@ -148,10 +213,11 @@ class SyncController {
   /**
    * Stops replication and releases all resources (the underlying database is
    * owned by the session's storage, which closes it on logout). Idempotent.
+   * Runs inside the serialized queue; callers use `stop()` / `restart()`.
    *
    * @returns {Promise<void>}
    */
-  async stop(): Promise<void> {
+  private async _stop(): Promise<void> {
     if (this._onlineHandler) {
       window.removeEventListener('online', this._onlineHandler)
       this._onlineHandler = undefined
