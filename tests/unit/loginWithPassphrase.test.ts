@@ -12,7 +12,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
 
-vi.mock('@/session/keyring', () => ({
+vi.mock('@/session/keyring', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/keyring')>()),
   fetchKeyringSeed: vi.fn()
 }))
 vi.mock('@/lib/kms', () => ({ ensureKeystore: vi.fn() }))
@@ -21,7 +22,7 @@ vi.mock('@/stores/storageManager', () => ({
 }))
 
 import { StorageManager } from '@/stores/storageManager'
-import { fetchKeyringSeed } from '@/session/keyring'
+import { fetchKeyringSeed, KeyringRecordUnusableError } from '@/session/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
 
 const PASSPHRASE = 'correct horse battery staple'
@@ -102,7 +103,7 @@ describe('loginWithPassphrase -- keyring hit', () => {
 
     await expect(
       loginWithPassphrase({ passphrase: PASSPHRASE })
-    ).rejects.toThrow(/corrupt keyring record/i)
+    ).rejects.toThrow(KeyringRecordUnusableError)
   })
 })
 

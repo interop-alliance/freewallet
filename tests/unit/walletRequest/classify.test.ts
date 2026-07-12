@@ -160,6 +160,23 @@ describe('zcapQueriesOf', () => {
   it('is empty when no zcap query is present', () => {
     expect(zcapQueriesOf([queryByExample, didAuthQuery])).toEqual([])
   })
+
+  it('throws when a zcap query has no capabilityQuery', () => {
+    expect(() =>
+      zcapQueriesOf([{ type: 'ZcapQuery' } as IVPRQuery])
+    ).toThrow(/missing its capabilityQuery detail/)
+  })
+
+  it('throws when an array capabilityQuery holds a non-object entry', () => {
+    expect(() =>
+      zcapQueriesOf([
+        {
+          type: 'AuthorizationCapabilityQuery',
+          capabilityQuery: [capabilityDetail, null]
+        } as unknown as IVPRQuery
+      ])
+    ).toThrow(/missing its capabilityQuery detail/)
+  })
 })
 
 describe('classifyRequest', () => {
@@ -204,6 +221,12 @@ describe('classifyRequest', () => {
     const profile = classifyRequest(details([didAuthQuery, legacyZcapQuery]))
     expect(profile.didAuth).toBe(true)
     expect(profile.zcapRequests).toEqual([capabilityDetail])
+  })
+
+  it('throws on a capabilityQuery-less zcap query (malformed request)', () => {
+    expect(() =>
+      classifyRequest(details([{ type: 'ZcapQuery' } as IVPRQuery]))
+    ).toThrow(/missing its capabilityQuery detail/)
   })
 })
 

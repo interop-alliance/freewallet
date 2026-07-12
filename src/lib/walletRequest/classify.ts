@@ -273,7 +273,11 @@ export function credentialQueriesOf(
  * Collects the requested capabilities from a query set: filters the two zcap
  * query type strings (`AuthorizationCapabilityQuery` canonical, `ZcapQuery`
  * legacy alias), normalizes each `capabilityQuery` (object or array) to an
- * array, and flattens.
+ * array, and flattens. A zcap query whose `capabilityQuery` is missing or not
+ * an object is malformed -- there is nothing to ask consent for -- so it
+ * throws rather than letting an `undefined` descriptor reach grant
+ * resolution; classification-time callers surface the throw as a
+ * malformed-request state.
  *
  * @param queries {IVPRQuery[]}
  * @returns {ICapabilityQueryDetail[]}
@@ -285,9 +289,19 @@ export function zcapQueriesOf(queries: IVPRQuery[]): ICapabilityQueryDetail[] {
         query.type === 'AuthorizationCapabilityQuery' ||
         query.type === 'ZcapQuery'
     )
-    .flatMap(({ capabilityQuery }) =>
-      Array.isArray(capabilityQuery) ? capabilityQuery : [capabilityQuery]
-    )
+    .flatMap(({ type, capabilityQuery }) => {
+      const detailEntries = Array.isArray(capabilityQuery)
+        ? capabilityQuery
+        : [capabilityQuery]
+      for (const detail of detailEntries) {
+        if (!detail || typeof detail !== 'object') {
+          throw new Error(
+            `A "${type}" query is missing its capabilityQuery detail.`
+          )
+        }
+      }
+      return detailEntries
+    })
 }
 
 /**

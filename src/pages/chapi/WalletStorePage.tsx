@@ -87,6 +87,7 @@ export function WalletStorePage() {
   const [loginError, setLoginError] = useState<string | null>(null)
   const [initError, setInitError] = useState<string | null>(null)
   const [storeError, setStoreError] = useState<string | null>(null)
+  const [storing, setStoring] = useState(false)
   // First-party storage factory from the Storage Access API flow (see
   // SavedSessionNotice); a full login persists its delegated session
   // through it so the next popup visit auto-recognizes the user.
@@ -293,6 +294,7 @@ export function WalletStorePage() {
       return
     }
     setStoreError(null)
+    setStoring(true)
     let stored = 0
     try {
       for (const credential of vcs) {
@@ -315,6 +317,8 @@ export function WalletStorePage() {
               `${detail}`
           : detail
       )
+    } finally {
+      setStoring(false)
     }
   }
 
@@ -418,6 +422,7 @@ export function WalletStorePage() {
                 variant="contained"
                 sx={{ textTransform: 'none' }}
                 onClick={handleConfirm}
+                disabled={storing}
               >
                 {t('common.store')}
               </Button>
@@ -425,6 +430,7 @@ export function WalletStorePage() {
                 variant="outlined"
                 sx={{ textTransform: 'none' }}
                 onClick={handleCancel}
+                disabled={storing}
               >
                 {t('common.cancel')}
               </Button>

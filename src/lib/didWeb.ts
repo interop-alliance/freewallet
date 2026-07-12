@@ -319,10 +319,10 @@ export async function kmsAuthenticationSigner({
   }
 
   // Delegated tier: sign with the session key over the persisted keystore
-  // `sign` capability. The capability targets the whole keystore, so it is
-  // assigned after construction (the constructor rejects a `capability` and
-  // `.fromCapability` would overwrite `kmsId` with the keystore URL); `sign`
-  // then invokes it against the specific key's `kmsId` via target attenuation.
+  // `sign` capability. The capability targets the authentication key's own
+  // `kmsId` (webkms-client invokes at the capability's `invocationTarget`,
+  // with no client-side attenuation); it is assigned after construction
+  // because the constructor rejects a `capability` option.
   if (keystoreId && keystoreCapability && zcapClient.invocationSigner) {
     const key = new AsymmetricKey({
       id: vmId,

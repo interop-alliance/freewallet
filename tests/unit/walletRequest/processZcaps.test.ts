@@ -34,6 +34,46 @@ const spaceDetail: ICapabilityQueryDetail = {
   invocationTarget: { type: 'urn:was:space' }
 }
 
+// A write request on a standard wallet collection (via descriptor object).
+const standardCollectionDetail: ICapabilityQueryDetail = {
+  referenceId: 'private-write',
+  allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE'],
+  controller: RP_DID,
+  invocationTarget: { type: 'urn:was:collection', name: 'private-credentials' }
+}
+
+// A write request on a standard wallet collection, expressed as a plain URL.
+const standardCollectionUrlDetail: ICapabilityQueryDetail = {
+  referenceId: 'private-write-url',
+  allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE'],
+  controller: RP_DID,
+  invocationTarget: `${SPACE_URL}/private-credentials`
+}
+
+// A write request on a resource *inside* a standard collection (plain URL).
+const standardResourceUrlDetail: ICapabilityQueryDetail = {
+  referenceId: 'private-resource-write-url',
+  allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE'],
+  controller: RP_DID,
+  invocationTarget: `${SPACE_URL}/private-credentials/some-resource`
+}
+
+// A write request on the `id` collection (the published DID document).
+const idCollectionDetail: ICapabilityQueryDetail = {
+  referenceId: 'id-write',
+  allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE'],
+  controller: RP_DID,
+  invocationTarget: { type: 'urn:was:collection', name: 'id' }
+}
+
+// A write request on the DID document resource itself (plain URL).
+const didDocumentUrlDetail: ICapabilityQueryDetail = {
+  referenceId: 'did-doc-write-url',
+  allowedAction: ['PUT'],
+  controller: RP_DID,
+  invocationTarget: `${SPACE_URL}/id/did.json`
+}
+
 const foreignDetail: ICapabilityQueryDetail = {
   controller: RP_DID,
   invocationTarget: 'https://someone-else.example/space/OTHER/data'
@@ -225,7 +265,7 @@ describe('resolveGrant action handling', () => {
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
   })
 
-  it('passes through explicit collection actions', () => {
+  it('passes through explicit RP-collection actions and flags write', () => {
     const grant = resolveGrant({
       descriptor: collectionDetail,
       spaceUrl: SPACE_URL
@@ -237,10 +277,70 @@ describe('resolveGrant action handling', () => {
       'POST',
       'DELETE'
     ])
+    expect(grant.write).toBe(true)
+  })
+
+  it('caps a standard-collection write to read-only (descriptor form)', () => {
+    const grant = resolveGrant({
+      descriptor: standardCollectionDetail,
+      spaceUrl: SPACE_URL
+    })
+    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+    expect(grant.write).toBe(false)
+  })
+
+  it('caps a standard-collection write to read-only (string URL form)', () => {
+    const grant = resolveGrant({
+      descriptor: standardCollectionUrlDetail,
+      spaceUrl: SPACE_URL
+    })
+    expect(grant.target.collectionId).toBe('private-credentials')
+    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+    expect(grant.write).toBe(false)
+  })
+
+  it('caps a write to a resource inside a standard collection (string URL)', () => {
+    const grant = resolveGrant({
+      descriptor: standardResourceUrlDetail,
+      spaceUrl: SPACE_URL
+    })
+    expect(grant.target.collectionId).toBe('private-credentials')
+    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+    expect(grant.write).toBe(false)
+  })
+
+  it('caps an id-collection write to read-only (descriptor form)', () => {
+    const grant = resolveGrant({
+      descriptor: idCollectionDetail,
+      spaceUrl: SPACE_URL
+    })
+    expect(grant.target.collectionId).toBe('id')
+    // Provisioned at login, like the standard collections.
+    expect(grant.target.needsProvisioning).toBe(false)
+    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+    expect(grant.write).toBe(false)
+  })
+
+  it('caps a write to the DID document resource (string URL)', () => {
+    const grant = resolveGrant({
+      descriptor: didDocumentUrlDetail,
+      spaceUrl: SPACE_URL
+    })
+    expect(grant.target.collectionId).toBe('id')
+    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+    expect(grant.write).toBe(false)
+  })
+
+  it('marks a read-only grant as not a write', () => {
+    const grant = resolveGrant({ descriptor: spaceDetail, spaceUrl: SPACE_URL })
+    expect(grant.write).toBe(false)
   })
 })
 
 describe('processZcaps', () => {
+  const READ_TTL_MS = 720 * 60 * 60 * 1000
+  const WRITE_TTL_MS = 168 * 60 * 60 * 1000
+
   it('delegates satisfiable grants, provisions, and skips foreign targets', async () => {
     delegated.length = 0
     ensureCalls.length = 0
@@ -248,7 +348,8 @@ describe('processZcaps', () => {
     const zcaps = await processZcaps({
       zcapRequests: [collectionDetail, spaceDetail, foreignDetail],
       session,
-      ttlMs: 720 * 60 * 60 * 1000
+      ttlMs: READ_TTL_MS,
+      writeTtlMs: WRITE_TTL_MS
     })
 
     expect(zcaps).toHaveLength(2)
@@ -280,10 +381,55 @@ describe('processZcaps', () => {
     expect(spaceZcap.invocationTarget).toBe(SPACE_URL)
     expect(spaceZcap.allowedAction).toEqual(['GET', 'HEAD'])
 
-    // Expiry ~30 days out (from the passed ttl).
+    // The RP collection grant is a write, so it uses the shorter write TTL.
     const expiresMs = new Date(collectionZcap.expires).getTime()
-    const expected = before + 720 * 60 * 60 * 1000
+    const expected = before + WRITE_TTL_MS
     expect(Math.abs(expiresMs - expected)).toBeLessThan(60 * 1000)
+  })
+
+  it('caps a standard-collection write to read-only when delegating', async () => {
+    delegated.length = 0
+    ensureCalls.length = 0
+    const zcaps = await processZcaps({
+      zcapRequests: [standardCollectionDetail, standardResourceUrlDetail],
+      session
+    })
+    // Standard collections are never provisioned.
+    expect(ensureCalls).toEqual([])
+    expect(zcaps).toHaveLength(2)
+    for (const zcap of zcaps) {
+      expect(
+        (zcap as unknown as { allowedAction: string[] }).allowedAction
+      ).toEqual(['GET', 'HEAD'])
+    }
+  })
+
+  it('gives write grants the shorter TTL and read grants the longer one', async () => {
+    delegated.length = 0
+    ensureCalls.length = 0
+    const before = Date.now()
+    const zcaps = await processZcaps({
+      // Write (RP collection) then read-only (standard collection).
+      zcapRequests: [collectionDetail, standardCollectionDetail],
+      session,
+      ttlMs: READ_TTL_MS,
+      writeTtlMs: WRITE_TTL_MS
+    })
+
+    const writeExpires = new Date(
+      (zcaps[0] as unknown as { expires: string }).expires
+    ).getTime()
+    const readExpires = new Date(
+      (zcaps[1] as unknown as { expires: string }).expires
+    ).getTime()
+    expect(Math.abs(writeExpires - (before + WRITE_TTL_MS))).toBeLessThan(
+      60 * 1000
+    )
+    expect(Math.abs(readExpires - (before + READ_TTL_MS))).toBeLessThan(
+      60 * 1000
+    )
+    // The write grant expires strictly sooner than the read-only grant.
+    expect(writeExpires).toBeLessThan(readExpires)
   })
 
   it('throws when the session has no remote storage', async () => {

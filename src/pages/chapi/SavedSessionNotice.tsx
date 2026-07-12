@@ -12,8 +12,10 @@
  *
  * A KMS-signed DIDAuth request completes from the restored (delegated)
  * session with no passphrase: the notice hands the restored session up via
- * `onRestore` and the parent responds directly. Operations that need the
- * vault KAK or the root key (credential decrypt, zcap delegation) still fall
+ * `onRestore` and the parent responds directly. A restored session can come
+ * back vault-unlocked (session vault envelope), so what limits egress is the
+ * parent's own gating -- WalletGetPage only takes this path for DIDAuth-only
+ * requests; operations that need the root key (zcap delegation) still fall
  * back to the passphrase form. The notice also hands the first-party storage
  * factory up so a subsequent full login persists where the next popup visit
  * will find it.

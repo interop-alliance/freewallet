@@ -122,3 +122,26 @@ function typedExamplesOf(
 export function hasTypedExample(queries: IQueryByExample[]): boolean {
   return typedExamplesOf(queries).length > 0
 }
+
+/**
+ * Whether any typed example in the query set explicitly lists the given
+ * credential `type`. Lets the caller distinguish a request that actually asks
+ * for a particular type (e.g. a LoginCredential) from a generic, untyped
+ * "any VC" request.
+ *
+ * @param options {object}
+ * @param options.queries {IQueryByExample[]}
+ * @param options.type {string}
+ * @returns {boolean}
+ */
+export function requestsCredentialType({
+  queries,
+  type
+}: {
+  queries: IQueryByExample[]
+  type: string
+}): boolean {
+  return typedExamplesOf(queries).some(example =>
+    typeArray(example.type).includes(type)
+  )
+}

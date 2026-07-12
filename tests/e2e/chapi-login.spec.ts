@@ -204,6 +204,105 @@ test.describe('CHAPI Login with Wallet', () => {
     expect(payload.data.verifiableCredential).toBeUndefined()
   })
 
+  test('an empty share disables Continue (only Cancel answers)', async ({
+    page
+  }, testInfo) => {
+    const token = `${Date.now()}-w${testInfo.workerIndex}`
+    const passphrase = `Str0ngpass-${token}-Aa1!`
+    const email = `e2e-${token}@example.com`
+
+    await createWallet(page, passphrase, email)
+
+    // A VC-only request (no DID Authentication) for a credential type the
+    // wallet does not hold: nothing to share, so Continue must stay disabled
+    // -- an enabled Continue would compose an empty response and leave an
+    // exchange-sourced verifier waiting on an answer that never comes.
+    await injectGetEvent(page, {
+      origin: 'https://app.example',
+      query: [
+        {
+          type: 'QueryByExample',
+          credentialQuery: {
+            reason: 'Show a movie ticket.',
+            example: { type: 'MovieTicketCredential' }
+          }
+        }
+      ],
+      challenge: `chal-${token}`
+    })
+    await openGetPopup(page)
+
+    await loginInPopup(page, passphrase)
+
+    await expect(page.getByText(/no matching credentials/i)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
+
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    await expect
+      .poll(async () => (await readResponse(page)) !== undefined)
+      .toBe(true)
+    const response = (await readResponse(page)) as { value: unknown }
+    expect(response.value).toBeNull()
+  })
+
+  test('a generic untyped request leaves the Login Credential unchecked', async ({
+    page
+  }, testInfo) => {
+    const token = `${Date.now()}-w${testInfo.workerIndex}`
+    const passphrase = `Str0ngpass-${token}-Aa1!`
+    const email = `e2e-${token}@example.com`
+
+    await createWallet(page, passphrase, email)
+    await setHandle(page, 'alice')
+
+    // A generic "any VC" request that never asks for a LoginCredential: the
+    // stored Login Credential is still listed, but it must not be pre-checked
+    // -- sharing the username has to be a deliberate click.
+    await injectGetEvent(page, {
+      origin: 'https://app.example',
+      query: [
+        {
+          type: 'QueryByExample',
+          credentialQuery: {
+            reason: 'Present any credential.',
+            example: {}
+          }
+        }
+      ],
+      challenge: `chal-${token}`
+    })
+    await openGetPopup(page)
+
+    await loginInPopup(page, passphrase)
+
+    // The row is shown with the friendly username label, but nothing is
+    // pre-checked for a request that did not ask for a Login Credential.
+    await expect(page.getByText(/share your username alice/i)).toBeVisible()
+    await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(0)
+  })
+
+  test('a LoginCredential-typed request pre-checks the Login Credential', async ({
+    page
+  }, testInfo) => {
+    const token = `${Date.now()}-w${testInfo.workerIndex}`
+    const passphrase = `Str0ngpass-${token}-Aa1!`
+    const email = `e2e-${token}@example.com`
+    const challenge = `chal-${token}`
+
+    await createWallet(page, passphrase, email)
+    await setHandle(page, 'alice')
+
+    // The login VPR explicitly requests a LoginCredential, so the matching row
+    // is pre-checked (one Continue completes the common login case).
+    await injectGetEvent(page, loginQuery(challenge))
+    await openGetPopup(page)
+
+    await loginInPopup(page, passphrase)
+
+    await expect(page.getByText(/share your username alice/i)).toBeVisible()
+    await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(1)
+  })
+
   test('a zcap request blocks cleanly on a no-WAS wallet', async ({
     page
   }, testInfo) => {

@@ -4,15 +4,37 @@
  * Space, provisions any missing RP collection, and delegates a capability to
  * the relying party's DID. All delegations are rooted at the user's Space root
  * capability (`urn:zcap:root:<spaceUrl>`); targets outside the Space are
- * unsatisfiable by construction, and whole-Space grants are stripped to
- * read-only (never write) -- the same attenuation reasoning as
- * `src/session/delegatedSession.ts`.
+ * unsatisfiable by construction.
+ *
+ * Two attenuation caps hold every grant read-only unless the RP owns the
+ * target, the same reasoning as `src/session/delegatedSession.ts`:
+ *
+ * - whole-Space grants are stripped to read-only (a Space-wide write would
+ *   permit rewriting the Space Description, i.e. controller takeover);
+ * - grants on a protected wallet collection -- the standard collections
+ *   (`private-credentials`, `public-credentials`, `wallet-activity`) and the
+ *   `id` collection holding the user's published DID document -- are stripped
+ *   to read-only too: an RP may read but never rewrite or delete the user's
+ *   own credentials or published identity.
+ *
+ * Only an RP-provisioned (non-protected) collection keeps its requested write
+ * actions. The cap applies whether the target arrives as a descriptor object
+ * or as a plain URL string under the Space (the collection id is derived from
+ * the first path segment after the Space URL either way), so a string target
+ * cannot bypass it.
  *
  * Resolution (`resolveGrants`) is pure and drives the consent preview; the
  * delegation step (`processZcaps`) runs only on the consent-approved path.
+ * Write grants (any action beyond GET/HEAD) are delegated for a shorter TTL
+ * than read-only grants.
  */
 import type { Session } from '@/types/auth'
-import { RP_ZCAP_TTL_MS, WALLET_STANDARD_COLLECTIONS } from '@/app.config'
+import {
+  ID_COLLECTION,
+  RP_ZCAP_TTL_MS,
+  RP_ZCAP_WRITE_TTL_MS,
+  WALLET_STANDARD_COLLECTIONS
+} from '@/app.config'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 
 /**
@@ -22,11 +44,43 @@ import type { ICapabilityQueryDetail, IZcap } from './types'
 const DEFAULT_ACTIONS = ['GET', 'HEAD']
 
 /**
- * The actions a whole-Space grant is capped at. A Space-wide write capability
- * would permit rewriting the Space Description (controller takeover), so
- * `urn:was:space` grants are always delegated read-only.
+ * The read-only action cap. A Space-wide write capability would permit
+ * rewriting the Space Description (controller takeover), a write on a
+ * standard wallet collection would let an RP rewrite or delete the user's own
+ * credentials, and a write on the `id` collection would let an RP rewrite the
+ * user's published DID document -- so all are always delegated read-only.
  */
-const SPACE_READ_ACTIONS = ['GET', 'HEAD']
+const READ_ONLY_ACTIONS = ['GET', 'HEAD']
+
+/**
+ * Whether an action set includes anything beyond read-only (GET/HEAD): a
+ * write-bearing grant, used to pick the shorter TTL and warn on consent.
+ *
+ * @param allowedActions {string[]}
+ * @returns {boolean}
+ */
+function includesWrite(allowedActions: string[]): boolean {
+  return allowedActions.some(
+    action => !READ_ONLY_ACTIONS.includes(action.toUpperCase())
+  )
+}
+
+/**
+ * Whether a resolved collection id names a protected wallet collection --
+ * a standard collection (`private-credentials`, `public-credentials`,
+ * `wallet-activity`) or the `id` collection holding the user's published DID
+ * document -- which an RP may read but never write.
+ *
+ * @param collectionId {string | undefined}
+ * @returns {boolean}
+ */
+function isProtectedCollection(collectionId: string | undefined): boolean {
+  return (
+    !!collectionId &&
+    (collectionId === ID_COLLECTION.id ||
+      WALLET_STANDARD_COLLECTIONS.some(entry => entry.id === collectionId))
+  )
+}
 
 /**
  * Collection id naming rule (D2): lowercase alphanumerics and hyphens, not
@@ -63,6 +117,9 @@ export interface ResolvedGrant {
   descriptor: ICapabilityQueryDetail
   target: ResolvedTarget
   allowedActions: string[]
+  // The capped actions include a write (anything beyond GET/HEAD): drives the
+  // consent write warning and the shorter write-grant TTL.
+  write: boolean
 }
 
 /**
@@ -101,7 +158,11 @@ const UNSATISFIABLE: ResolvedTarget = {
  * Resolves an abstract `invocationTarget` descriptor against the user's Space:
  *
  * - a plain URL string under `spaceUrl` -- used verbatim (an exact `spaceUrl`
- *   is treated as a whole-Space grant); any other string -- unsatisfiable;
+ *   is treated as a whole-Space grant); the collection id is derived from the
+ *   first path segment after the Space URL (so a URL under a standard
+ *   collection, or a resource inside one, is flagged `collectionId` /
+ *   `encrypted` and gets the same read-only cap as its descriptor form); any
+ *   other string -- unsatisfiable;
  * - `{ type: 'urn:was:collection', name }` -- `${spaceUrl}/${name}` after
  *   validating `name`, flagged `needsProvisioning` unless it is a standard
  *   collection (and `encrypted` for the two EDV collections);
@@ -121,13 +182,31 @@ export function resolveInvocationTarget({
   spaceUrl: string
 }): ResolvedTarget {
   if (typeof descriptor === 'string') {
-    if (descriptor === spaceUrl || descriptor.startsWith(`${spaceUrl}/`)) {
+    if (descriptor === spaceUrl) {
       return {
         satisfiable: true,
         invocationTarget: descriptor,
-        wholeSpace: descriptor === spaceUrl,
+        wholeSpace: true,
         needsProvisioning: false,
         encrypted: false
+      }
+    }
+    if (descriptor.startsWith(`${spaceUrl}/`)) {
+      // Derive the collection id from the first path segment after the Space
+      // URL, so a plain URL under a standard collection is capped exactly like
+      // its `urn:was:collection` descriptor form.
+      const rest = descriptor.slice(spaceUrl.length + 1)
+      const segment = rest.split('/')[0]
+      const standard = WALLET_STANDARD_COLLECTIONS.find(
+        entry => entry.id === segment
+      )
+      return {
+        satisfiable: true,
+        invocationTarget: descriptor,
+        wholeSpace: false,
+        needsProvisioning: false,
+        collectionId: segment || undefined,
+        encrypted: !!standard?.encryption
       }
     }
     return UNSATISFIABLE
@@ -155,7 +234,8 @@ export function resolveInvocationTarget({
       satisfiable: true,
       invocationTarget: `${spaceUrl}/${name}`,
       wholeSpace: false,
-      needsProvisioning: !standard,
+      // The `id` collection is provisioned at login, like the standard ones.
+      needsProvisioning: !standard && name !== ID_COLLECTION.id,
       collectionId: name,
       encrypted: !!standard?.encryption
     }
@@ -182,8 +262,10 @@ function normalizeActions(
 
 /**
  * Resolves a single requested capability into a `ResolvedGrant`: its target
- * plus the normalized, security-capped actions (whole-Space grants forced to
- * read-only).
+ * plus the normalized, security-capped actions. Whole-Space grants and grants
+ * on a protected wallet collection are forced to read-only; only an
+ * RP-provisioned collection keeps its requested write actions. The resulting
+ * `write` flag records whether the capped actions still include a write.
  *
  * @param options {object}
  * @param options.descriptor {ICapabilityQueryDetail}
@@ -201,10 +283,17 @@ export function resolveGrant({
     descriptor: descriptor.invocationTarget,
     spaceUrl
   })
-  const allowedActions = target.wholeSpace
-    ? [...SPACE_READ_ACTIONS]
+  const readOnly =
+    target.wholeSpace || isProtectedCollection(target.collectionId)
+  const allowedActions = readOnly
+    ? [...READ_ONLY_ACTIONS]
     : normalizeActions(descriptor.allowedAction)
-  return { descriptor, target, allowedActions }
+  return {
+    descriptor,
+    target,
+    allowedActions,
+    write: includesWrite(allowedActions)
+  }
 }
 
 /**
@@ -237,17 +326,22 @@ export function resolveGrants({
  * @param options {object}
  * @param options.zcapRequests {ICapabilityQueryDetail[]}
  * @param options.session {Session}
- * @param [options.ttlMs] {number}   grant lifetime; defaults to RP_ZCAP_TTL_MS
+ * @param [options.ttlMs] {number}   read-only grant lifetime; defaults to
+ *   RP_ZCAP_TTL_MS
+ * @param [options.writeTtlMs] {number}   write grant lifetime; defaults to
+ *   RP_ZCAP_WRITE_TTL_MS (shorter than the read TTL)
  * @returns {Promise<IZcap[]>}
  */
 export async function processZcaps({
   zcapRequests,
   session,
-  ttlMs = RP_ZCAP_TTL_MS
+  ttlMs = RP_ZCAP_TTL_MS,
+  writeTtlMs = RP_ZCAP_WRITE_TTL_MS
 }: {
   zcapRequests: ICapabilityQueryDetail[]
   session: Session
   ttlMs?: number
+  writeTtlMs?: number
 }): Promise<IZcap[]> {
   if (!session.storage.hasRemoteStorage || !session.storage.spaceUrl) {
     throw new ZcapUnavailableError()
@@ -258,18 +352,24 @@ export async function processZcaps({
 
   const spaceUrl = session.storage.spaceUrl
   const spaceRootCapability = `urn:zcap:root:${encodeURIComponent(spaceUrl)}`
-  const expires = new Date(Date.now() + ttlMs)
+  const now = Date.now()
   const { zcapClient } = session.profile
 
   const zcaps: IZcap[] = []
   for (const descriptor of zcapRequests) {
-    const { target, allowedActions } = resolveGrant({ descriptor, spaceUrl })
+    const { target, allowedActions, write } = resolveGrant({
+      descriptor,
+      spaceUrl
+    })
     if (!target.satisfiable || !target.invocationTarget) {
       continue
     }
     if (target.needsProvisioning && target.collectionId) {
       await session.storage.ensureCollection({ id: target.collectionId })
     }
+    // Write grants live for the shorter write TTL; read-only grants for the
+    // longer read TTL.
+    const expires = new Date(now + (write ? writeTtlMs : ttlMs))
     const zcap = await zcapClient.delegate({
       capability: spaceRootCapability,
       invocationTarget: target.invocationTarget,

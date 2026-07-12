@@ -29,6 +29,10 @@
  * nothing). Because login checks the remote first, other devices see the
  * retirement on their next online login (their stale caches are dropped);
  * offline, a stale cache stops answering once its TTL lapses.
+ *
+ * Account deletion retires the keyring the same way -- it deletes the unlock
+ * Space and its cache outright, after the caller has wiped the data Space
+ * (once the keyring is gone the data seed is unrecoverable).
  */
 import { CapabilityAgent } from '@interop/webkms-client'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
@@ -296,6 +300,23 @@ async function unwrapSeed({
 }
 
 /**
+ * Thrown by `fetchKeyringSeed` when a keyring record was found under the
+ * passphrase's unlock Space but could not be unwrapped or validated -- a
+ * genuinely corrupt/malformed record. Distinct from "no account" (a `null`
+ * return; a wrong passphrase resolves to a different unlock Space and misses)
+ * and from an unreachable server (a rethrown network error), so callers can
+ * surface it with its own recovery guidance.
+ */
+export class KeyringRecordUnusableError extends Error {
+  constructor({ cause }: { cause?: unknown } = {}) {
+    const detail = cause instanceof Error ? ` ${cause.message}` : ''
+    super(`Unusable keyring record.${detail}`)
+    this.name = 'KeyringRecordUnusableError'
+    this.cause = cause
+  }
+}
+
+/**
  * Locates and unwraps the keyring for a passphrase. When a WAS server is
  * configured the remote copy is consulted first -- it is the source of truth,
  * and checking it before the cache is what makes a passphrase change on
@@ -306,8 +327,11 @@ async function unwrapSeed({
  * cache answers as an offline fallback, but only within
  * `KEYRING_CACHE_TTL_MS`; past that (or with no usable cache) the error
  * rethrows, so the caller sees "could not check" rather than misreading it as
- * "no account". With no WAS server configured the cache is the keyring's only
- * copy, so the lookup is cache-only with no TTL.
+ * "no account". A remote record that fails to unwrap or validate throws
+ * `KeyringRecordUnusableError` (corrupt record -- a state distinct from both
+ * "no account" and "server unreachable") and never refreshes the cache. With
+ * no WAS server configured the cache is the keyring's only copy, so the
+ * lookup is cache-only with no TTL.
  *
  * @param options {object}
  * @param options.passphrase {string}
@@ -386,11 +410,20 @@ export async function fetchKeyringSeed({
     return null
   }
 
-  const found = await unwrapSeed({
-    record,
-    keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-    keyResolver: unlock.keyResolver
-  })
+  let found: KeyringSeed
+  try {
+    found = await unwrapSeed({
+      record,
+      keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+      keyResolver: unlock.keyResolver
+    })
+  } catch (err) {
+    // A record exists under the correct unlock Space but does not unwrap:
+    // a corrupt/malformed record, not a wrong passphrase (that resolves to
+    // a different Space and misses above). Surface it as its own state --
+    // and never refresh the cache from an unusable record.
+    throw new KeyringRecordUnusableError({ cause: err })
+  }
   await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
   return found
 }
@@ -461,6 +494,146 @@ export class WrongPassphraseError extends Error {
 }
 
 /**
+ * Verifies an already-derived unlock identity against a data controller by
+ * reading and unwrapping its keyring record. When a WAS server is configured
+ * the remote copy is read -- the source of truth, so a locally cached record
+ * cannot verify a passphrase already retired on another device; with no WAS
+ * server the local cache is the keyring's only copy.
+ *
+ * A missing record, or one that fails to unwrap or whose controller does not
+ * match, is a `WrongPassphraseError`. A network error while reading the remote
+ * record rethrows unchanged -- being unable to verify while the remote is
+ * unreachable must not read as a wrong passphrase. Shared by `changePassphrase`
+ * and `verifyPassphrase`.
+ *
+ * @param options {object}
+ * @param options.unlock {Awaited<ReturnType<typeof deriveUnlockIdentity>>}
+ *   the unlock identity for the passphrase being verified
+ * @param options.controller {string}   the data did:key to match
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+async function verifyUnlockKeyring({
+  unlock,
+  controller,
+  idb
+}: {
+  unlock: Awaited<ReturnType<typeof deriveUnlockIdentity>>
+  controller: string
+  idb?: IDBFactory
+}): Promise<void> {
+  let record: unknown
+  if (WAS_SERVER_URL) {
+    record = await getUnlockKeyring({
+      storageServerUrl: WAS_SERVER_URL,
+      zcapClient: unlock.zcapClient,
+      spaceId: unlock.spaceId
+    })
+  } else {
+    const cached = await loadKeyringCache({ spaceId: unlock.spaceId, idb })
+    record = cached?.record ?? null
+  }
+
+  if (!record) {
+    throw new WrongPassphraseError()
+  }
+  let verified = false
+  try {
+    const unwrapped = await unwrapSeed({
+      record,
+      keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+      keyResolver: unlock.keyResolver
+    })
+    verified = unwrapped.controller === controller
+  } catch {
+    // A record that does not unwrap for this controller is a wrong passphrase.
+  }
+  if (!verified) {
+    throw new WrongPassphraseError()
+  }
+}
+
+/**
+ * Verifies a passphrase against its keyring without changing anything, so
+ * destructive flows (account deletion) can confirm the passphrase before
+ * acting. Derives the unlock identity for `passphrase` and runs the shared
+ * keyring verification against `controller` (the data did:key).
+ *
+ * Throws `WrongPassphraseError` when the passphrase does not unlock a keyring
+ * bound to `controller`. A network error while reading the remote record
+ * rethrows unchanged -- an unreachable remote must not read as a wrong
+ * passphrase.
+ *
+ * @param options {object}
+ * @param options.controller {string}   the data did:key
+ * @param options.passphrase {string}
+ * @param [options.idb] {IDBFactory}
+ * @param [options.kdf] {UnlockKdf}
+ * @returns {Promise<void>}
+ */
+export async function verifyPassphrase({
+  controller,
+  passphrase,
+  idb,
+  kdf = KEYRING_KDF
+}: {
+  controller: string
+  passphrase: string
+  idb?: IDBFactory
+  kdf?: UnlockKdf
+}): Promise<void> {
+  const unlock = await deriveUnlockIdentity({ passphrase, kdf })
+  await verifyUnlockKeyring({ unlock, controller, idb })
+}
+
+/**
+ * Retires a passphrase's keyring as part of account deletion: derives the
+ * unlock identity, deletes its unlock Space (when a WAS server is configured),
+ * and always clears the local cache. With no WAS server configured there is no
+ * Space, so `unlockSpaceDeleted` stays `true`.
+ *
+ * Performs no verification -- a wrong passphrase derives a different unlock
+ * Space id and `deleteUnlockSpace` is idempotent, so callers confirm the
+ * passphrase first via `verifyPassphrase`. Once the keyring is gone the data
+ * seed is unrecoverable (the random data seed is never derivable from a
+ * passphrase), so callers must wipe/dispose the data Space before calling this.
+ *
+ * @param options {object}
+ * @param options.passphrase {string}
+ * @param [options.idb] {IDBFactory}
+ * @param [options.kdf] {UnlockKdf}
+ * @returns {Promise<{ unlockSpaceDeleted: boolean }>}
+ */
+export async function deleteKeyring({
+  passphrase,
+  idb,
+  kdf = KEYRING_KDF
+}: {
+  passphrase: string
+  idb?: IDBFactory
+  kdf?: UnlockKdf
+}): Promise<{ unlockSpaceDeleted: boolean }> {
+  const unlock = await deriveUnlockIdentity({ passphrase, kdf })
+
+  let unlockSpaceDeleted = true
+  if (WAS_SERVER_URL) {
+    try {
+      await deleteUnlockSpace({
+        storageServerUrl: WAS_SERVER_URL,
+        zcapClient: unlock.zcapClient,
+        spaceId: unlock.spaceId
+      })
+    } catch (err) {
+      console.warn('Could not delete the unlock Space:', err)
+      unlockSpaceDeleted = false
+    }
+  }
+  await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
+
+  return { unlockSpaceDeleted }
+}
+
+/**
  * Changes the account passphrase. Verifies the old passphrase by unwrapping its
  * keyring (the remote copy when a WAS server is configured -- the source of
  * truth -- else the local cache) and matching the recovered controller against
@@ -512,35 +685,7 @@ export async function changePassphrase({
   // error while reading the remote rethrows -- an unreachable remote must not
   // be misread as a wrong passphrase. With no WAS server the local cache is
   // the keyring's only copy.
-  let oldRecord: unknown
-  if (WAS_SERVER_URL) {
-    oldRecord = await getUnlockKeyring({
-      storageServerUrl: WAS_SERVER_URL,
-      zcapClient: oldUnlock.zcapClient,
-      spaceId: oldUnlock.spaceId
-    })
-  } else {
-    const cached = await loadKeyringCache({ spaceId: oldUnlock.spaceId, idb })
-    oldRecord = cached?.record ?? null
-  }
-
-  if (!oldRecord) {
-    throw new WrongPassphraseError()
-  }
-  let verified = false
-  try {
-    const unwrapped = await unwrapSeed({
-      record: oldRecord,
-      keyAgreementKey: oldUnlock.keyAgreementKey as IKeyAgreementKey,
-      keyResolver: oldUnlock.keyResolver
-    })
-    verified = unwrapped.controller === controller
-  } catch {
-    // A record that does not unwrap for this controller is a wrong passphrase.
-  }
-  if (!verified) {
-    throw new WrongPassphraseError()
-  }
+  await verifyUnlockKeyring({ unlock: oldUnlock, controller, idb })
 
   await bindPassphrase({
     seed,

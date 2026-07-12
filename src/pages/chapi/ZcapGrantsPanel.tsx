@@ -1,11 +1,15 @@
 /**
  * The "Storage access" section of the CHAPI login consent screen: one row per
- * requested capability, showing the relying party's reason, a human-readable
- * target, the actions to be granted, and the expiry. Encrypted standard
- * collections get a ciphertext note; whole-Space grants get a warning banner
- * and an explicit read-only label; unsatisfiable grants render greyed with a
- * "cannot fulfill" note. Display-only -- approval is the single Continue button
- * on the parent page.
+ * requested capability, showing the relying party's reason, the recipient DID
+ * the capability is delegated to, a human-readable target, the actions to be
+ * granted, and the expiry. Encrypted standard collections get a ciphertext
+ * note; whole-Space grants get a warning banner and an explicit read-only
+ * label; write grants get a warning banner, the warning border, and the
+ * shorter write expiry; unsatisfiable grants render greyed with a "cannot
+ * fulfill" note. Because the RP-supplied `reason` is attacker-controlled free
+ * text, the recipient DID is rendered separately with its own label and a
+ * monospace style so it cannot be spoofed by the reason. Display-only --
+ * approval is the single Continue button on the parent page.
  */
 import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
@@ -40,10 +44,12 @@ function targetLabel(
 
 export function ZcapGrantsPanel({
   grants,
-  ttlDays
+  ttlDays,
+  writeTtlDays
 }: {
   grants: ResolvedGrant[]
   ttlDays: number
+  writeTtlDays: number
 }) {
   const { t } = useTranslation()
 
@@ -53,15 +59,17 @@ export function ZcapGrantsPanel({
         {t('chapi.get.zcapHeading')}
       </Typography>
       {grants.map((grant, index) => {
-        const { target, allowedActions, descriptor } = grant
+        const { target, allowedActions, descriptor, write } = grant
         const satisfiable = target.satisfiable
+        // Warning border for whole-Space grants and any write grant.
+        const highlight = target.wholeSpace || write
         return (
           <Box
             key={descriptor.referenceId ?? index}
             sx={{
               p: 1.5,
               border: 1,
-              borderColor: target.wholeSpace ? 'warning.main' : 'divider',
+              borderColor: highlight ? 'warning.main' : 'divider',
               borderRadius: 2,
               opacity: satisfiable ? 1 : 0.6
             }}
@@ -71,6 +79,25 @@ export function ZcapGrantsPanel({
                 {descriptor.reason}
               </Typography>
             )}
+
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', mb: 0.5 }}
+            >
+              {t('chapi.get.zcapRecipient')}
+            </Typography>
+            <Typography
+              variant="caption"
+              component="div"
+              sx={{
+                fontFamily: 'monospace',
+                wordBreak: 'break-all',
+                mb: 0.5
+              }}
+            >
+              {descriptor.controller}
+            </Typography>
 
             {satisfiable ? (
               <>
@@ -99,6 +126,16 @@ export function ZcapGrantsPanel({
                   </Typography>
                 )}
 
+                {write && (
+                  <Typography
+                    variant="caption"
+                    color="warning.main"
+                    sx={{ display: 'block', mt: 0.5 }}
+                  >
+                    {t('chapi.get.zcapWriteWarning')}
+                  </Typography>
+                )}
+
                 {target.encrypted && (
                   <Typography
                     variant="caption"
@@ -114,7 +151,9 @@ export function ZcapGrantsPanel({
                   color="text.secondary"
                   sx={{ display: 'block', mt: 0.5 }}
                 >
-                  {t('chapi.get.zcapExpiry', { days: ttlDays })}
+                  {t('chapi.get.zcapExpiry', {
+                    days: write ? writeTtlDays : ttlDays
+                  })}
                 </Typography>
               </>
             ) : (

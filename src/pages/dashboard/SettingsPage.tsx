@@ -19,7 +19,12 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { useInfoBox } from '@/hooks/useInfoBox'
 import { getFileUrl } from '@interop/did-method-webvh'
 import { rotateWebvhUpdateKey } from '@/lib/didWebvh'
-import { changePassphrase, WrongPassphraseError } from '@/session/keyring'
+import {
+  changePassphrase,
+  deleteKeyring,
+  verifyPassphrase,
+  WrongPassphraseError
+} from '@/session/keyring'
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
 import { dashboardStyles } from '@/styles/appStyles'
 import { useEffect, useState } from 'react'
@@ -49,10 +54,20 @@ const SYNC_CHIP_COLOR: Record<
 export function SettingsPage() {
   const { t } = useTranslation()
   const session = useAuthStore(state => state.session)
+  const logout = useAuthStore(state => state.logout)
   const syncStatuses = useSyncStatusStore(state => state.statuses)
   const { displayInfoBox } = useInfoBox()
   const [deleteError, setDeleteError] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deletePassphrase, setDeletePassphrase] = useState('')
+  const [deletePassphraseIncorrect, setDeletePassphraseIncorrect] =
+    useState(false)
+  const [deleting, setDeleting] = useState(false)
   const hasRemoteStorage = !!session?.storage?.hasRemoteStorage
+  // Deleting the account issues a Space DELETE, which only the root key (the
+  // Space controller) can sign -- the delegated tier's zcaps are read-only on
+  // the Space, so the wipe would always be rejected by the server.
+  const canDeleteAccount = session?.tier === 'full'
   // Login handle: a self-issued LoginCredential's preferredUsername. Editable
   // only with a full (passphrase) session -- the delegated tier has no signer
   // and a locked vault, so it cannot issue or read the credential.
@@ -216,27 +231,80 @@ export function SettingsPage() {
     }
   }
 
+  const openDeleteDialog = () => {
+    setDeleteError(false)
+    setDeletePassphrase('')
+    setDeletePassphraseIncorrect(false)
+    setDeleteDialogOpen(true)
+  }
+
   const handleDeleteAccount = async () => {
     if (!session) {
       return
     }
-    const confirmed = window.confirm(t('settings.deleteConfirm'))
-    if (!confirmed) {
-      return
-    }
+    const isGuest = !!session.isGuest
     setDeleteError(false)
+    setDeletePassphraseIncorrect(false)
+    setDeleting(true)
     try {
-      console.log('Wiping user data...')
-      await session.storage?.wipeStorage()
-    } catch (err) {
-      // Do not log the user out if the wipe failed -- surface the error so
-      // they know their remote data is still present.
-      console.error('Error wiping user data:', err)
-      setDeleteError(true)
-      return
+      // (a) Confirm the passphrase before wiping anything -- a wrong passphrase
+      // must not delete data. Guests have no keyring, so this is skipped.
+      if (!isGuest) {
+        try {
+          await verifyPassphrase({
+            controller: session.user.id,
+            passphrase: deletePassphrase
+          })
+        } catch (err) {
+          if (err instanceof WrongPassphraseError) {
+            setDeletePassphraseIncorrect(true)
+            return
+          }
+          // Any other failure (e.g. the remote is unreachable) is a generic
+          // delete failure -- do not touch the user's data.
+          console.error('Could not verify the passphrase for deletion:', err)
+          setDeleteError(true)
+          setDeleteDialogOpen(false)
+          return
+        }
+      }
+      // (b) Wipe the data Space and the local replica. On failure keep the old
+      // semantics: surface the error, do not log out (the data is still there).
+      try {
+        console.log('Wiping user data...')
+        await session.storage?.wipeStorage()
+      } catch (err) {
+        console.error('Error wiping user data:', err)
+        setDeleteError(true)
+        setDeleteDialogOpen(false)
+        return
+      }
+      // (c) Retire the passphrase keyring only after a successful wipe -- if the
+      // keyring died first and the wipe then failed, the data Space would be
+      // orphaned unrecoverably. Non-fatal: the data is already gone, so a
+      // leftover record is only a hygiene residue. Guests have no keyring.
+      if (!isGuest) {
+        try {
+          const { unlockSpaceDeleted } = await deleteKeyring({
+            passphrase: deletePassphrase
+          })
+          if (!unlockSpaceDeleted) {
+            console.warn(
+              'Could not delete the unlock Space during account deletion.'
+            )
+          }
+        } catch (err) {
+          console.warn('Could not retire the passphrase keyring:', err)
+        }
+      }
+      // (d) End the persisted delegated session (session key, zcaps, vault
+      // envelope) so the next load cannot restore a live session for the
+      // deleted identity, then (e) hard-reload to the landing page.
+      await logout()
+      window.location.href = '/'
+    } finally {
+      setDeleting(false)
     }
-    window.location.href = '/' // hard reload
-    return
   }
 
   return (
@@ -270,7 +338,8 @@ export function SettingsPage() {
             variant="contained"
             disableElevation
             sx={dashboardStyles.deleteAccountButton}
-            onClick={handleDeleteAccount}
+            disabled={!canDeleteAccount}
+            onClick={openDeleteDialog}
           >
             {t('settings.deleteAccount')}
           </Button>
@@ -282,6 +351,12 @@ export function SettingsPage() {
             {t('settings.deleteAccountHint')}
           </Typography>
         </Stack>
+
+        {!canDeleteAccount && (
+          <Typography variant="body2" color="text.secondary">
+            {t('settings.deleteRequiresFullSession')}
+          </Typography>
+        )}
 
         {deleteError && (
           <Alert severity="error">{t('settings.deleteError')}</Alert>
@@ -639,6 +714,63 @@ export function SettingsPage() {
             </Stack>
           )}
         </Stack>
+
+        <Dialog
+          open={deleteDialogOpen}
+          onClose={() => {
+            if (!deleting) {
+              setDeleteDialogOpen(false)
+            }
+          }}
+        >
+          <DialogTitle>{t('settings.deleteConfirmTitle')}</DialogTitle>
+          <DialogContent>
+            <DialogContentText>{t('settings.deleteConfirm')}</DialogContentText>
+            {!session?.isGuest && (
+              <TextField
+                fullWidth
+                size="small"
+                type="password"
+                label={t('settings.deletePassphraseLabel')}
+                autoComplete="current-password"
+                value={deletePassphrase}
+                onChange={event => {
+                  setDeletePassphrase(event.target.value)
+                  setDeletePassphraseIncorrect(false)
+                }}
+                sx={{ mt: 2 }}
+              />
+            )}
+            {deletePassphraseIncorrect && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {t('settings.deletePassphraseIncorrect')}
+              </Alert>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deleting}
+              sx={{ textTransform: 'none' }}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="contained"
+              disableElevation
+              color="error"
+              onClick={handleDeleteAccount}
+              disabled={
+                deleting || (!session?.isGuest && deletePassphrase.length === 0)
+              }
+              sx={{ textTransform: 'none' }}
+            >
+              {deleting
+                ? t('settings.deleting')
+                : t('settings.deleteConfirmAction')}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
         <Dialog
           open={rotateDialogOpen}

@@ -13,7 +13,7 @@ import type { ControllerProfile, Session, User } from '@/types/auth'
 import { KMS_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
 import { StorageManager } from '@/stores/storageManager'
-import { fetchKeyringSeed } from '@/session/keyring'
+import { fetchKeyringSeed, KeyringRecordUnusableError } from '@/session/keyring'
 
 /**
  * Creates bootstrap CapabilityAgent and ZcapClient instances from an
@@ -169,8 +169,11 @@ export async function initSessionFromSeed({
  * - **Keyring hit**: the passphrase's unlock identity located a keyring record;
  *   the session is built from the unwrapped data seed (`initSessionFromSeed`).
  *   The unwrapped controller is sanity-checked against the derived did:key -- a
- *   mismatch means a corrupt record and throws rather than proceeding under the
- *   wrong identity. Returns `{ session, userExists }` -- a hit whose data Space
+ *   mismatch means a corrupt record and throws `KeyringRecordUnusableError`
+ *   rather than proceeding under the wrong identity (the same error
+ *   `fetchKeyringSeed` throws for a record that fails to unwrap, so callers
+ *   surface one "keyring record unusable" state). Returns
+ *   `{ session, userExists }` -- a hit whose data Space
  *   is missing legitimately reports `userExists: false` (a half-finished
  *   signup), and the caller sends it to signup, which rebinds.
  * - **Miss**: no keyring anywhere, so there is no account. Returns
@@ -208,10 +211,11 @@ export async function loginWithPassphrase({
     email
   })
   if (session.user.id !== found.controller) {
-    throw new Error(
-      'Corrupt keyring record: the unwrapped controller does not match ' +
-        'the derived identity.'
-    )
+    throw new KeyringRecordUnusableError({
+      cause: new Error(
+        'The unwrapped controller does not match the derived identity.'
+      )
+    })
   }
   return { session, userExists }
 }

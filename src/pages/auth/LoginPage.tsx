@@ -16,6 +16,7 @@ import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { loginWithPassphrase } from '@/session/initSession'
+import { KeyringRecordUnusableError } from '@/session/keyring'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { registerWallet } from '@/lib/registerWallet'
 import type { AuthLocationState } from '@/types/auth'
@@ -70,6 +71,11 @@ export function LoginPage() {
       // The WAS storage server is unreachable -- offer a guest-mode fallback.
       if (isStorageUnreachable(err)) {
         setErrorKey('auth.errors.storageUnreachable')
+      } else if (err instanceof KeyringRecordUnusableError) {
+        // A keyring record was found but is corrupt -- not a server outage
+        // and not a wrong passphrase; surface it with recovery guidance.
+        console.error('Login failed:', err)
+        setErrorKey('auth.errors.keyringUnusable')
       } else {
         console.error('Login failed:', err)
         setErrorKey('auth.errors.setupFailed')

@@ -57,6 +57,13 @@ export const REQUIRE_PASSPHRASE_FOR_VAULT =
 export const RP_ZCAP_TTL_MS =
   (Number(env.VITE_RP_ZCAP_TTL_HOURS) || 720) * 60 * 60 * 1000
 
+// Lifetime of a *write* capability delegated to a relying party (a grant on an
+// RP-provisioned collection whose actions go beyond GET/HEAD). Default 7 days:
+// deliberately shorter than the read-only TTL, since a stolen write grant can
+// mutate RP data and there is no Space-side revocation endpoint.
+export const RP_ZCAP_WRITE_TTL_MS =
+  (Number(env.VITE_RP_ZCAP_WRITE_TTL_HOURS) || 168) * 60 * 60 * 1000
+
 // Background-replication tuning (both optional).
 // `VITE_WAS_SYNC_RETRY_MS` -- RxDB `retryTime` backoff between failed cycles.
 export const WAS_SYNC_RETRY_MS = env.VITE_WAS_SYNC_RETRY_MS

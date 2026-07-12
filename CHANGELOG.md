@@ -17,6 +17,64 @@
 
 ### Fixed
 
+- **A zcap query with no `capabilityQuery` is now reported as a malformed
+  request.** A `ZcapQuery` / `AuthorizationCapabilityQuery` missing its
+  `capabilityQuery` detail used to slip an `undefined` descriptor into the
+  request profile, which blew up during grant resolution after login and
+  showed the misleading generic "login failed" message. Classification now
+  rejects such queries up front, so the share popup shows the accurate
+  "this site didn't send a request this wallet can read" blocked state
+  before the user is ever asked to log in.
+
+- **A corrupt keyring record now surfaces its own login error.** When the
+  passphrase located a keyring record on the storage server but the record
+  failed to unwrap or validate (a genuinely corrupt/malformed record -- a wrong
+  passphrase never reaches this point), the failure bubbled out as the generic
+  "could not finish setting up your wallet" message. The remote unwrap is now
+  guarded like the cached one, throwing a dedicated `KeyringRecordUnusableError`
+  (also used for the unwrapped-controller sanity check), and the login page
+  shows a distinct message with recovery guidance -- separate from a server
+  outage. An unusable record no longer refreshes the local keyring cache.
+
+- **Deleting the account now fully retires the identity.** The delete flow
+  wiped the data but never ended the persisted browser session, so the next
+  visit silently restored a live session for the just-deleted identity, and it
+  left the passphrase keyring behind, so the wrapped data seed outlived the
+  account. Deleting now also ends the persisted session (its session key,
+  zcaps, and vault envelope) and retires the passphrase keyring -- deleting the
+  unlock Space on the storage server and its local cached copy. The confirmation
+  is now an in-app dialog that asks for the passphrase and verifies it before
+  wiping anything, so a wrong passphrase can never destroy data; guest sessions
+  have no passphrase and skip that step.
+
+- **The Delete Account button is now disabled in a restored session.** Deleting
+  the account requires the passphrase-derived root key (only the Space
+  controller may delete the Space), so in a restored session the delete always
+  failed server-side and surfaced only a generic error with no hint at the
+  cause. The button is now disabled there, with a note to log in with the
+  passphrase first -- matching the other passphrase-gated Settings controls.
+
+- **A generic credential request no longer pre-checks your Login Credential.**
+  The share popup pre-selected the newest self-issued Login Credential for
+  every request, so a verifier asking for "any VC" -- one that never mentioned
+  a Login Credential -- arrived with the row already checked, and a single
+  Continue click would disclose the account's username. The Login Credential is
+  now pre-selected only when the request explicitly asks for that type (the
+  DID Authentication / login flows); a generic request starts with nothing
+  checked, so sharing the username is always a deliberate choice.
+
+- **The share popup no longer lets an empty share leave a verifier's exchange
+  hanging.** With no DID Authentication in the request, nothing selected, and
+  no satisfiable storage grant, Continue composed an empty response: the
+  exchange endpoint (the verifier's system of record for a VC API request)
+  never received anything and sat waiting until its own expiry, while the
+  CHAPI channel got a bare `null`. Continue is now disabled when there is
+  nothing to share, so the only way out of an empty consent screen is Cancel.
+  Cancel itself (and any blocked-state exit) still answers only the CHAPI
+  channel by design: the exchange protocol defines no holder decline message,
+  so an abandoned exchange expiring on the verifier's side is the correct
+  outcome, now documented as such rather than left as an accident.
+
 - **A passphrase change now takes effect on other devices.** Passphrase login
   answered from the locally cached keyring record before consulting the WAS
   server, and the cache never expired -- so a passphrase retired via "Change
@@ -41,6 +99,23 @@
   now first queries the existing `credentialhandler` permission state (a
   non-prompting call) and only installs the handler when the origin has not
   already been granted, so the prompt appears at most once per browser.
+
+- **"Login with Wallet" storage grants are hardened against write abuse.** A
+  relying party could request write actions (PUT/POST/DELETE) on the user's own
+  protected collections -- the standard `private-credentials`,
+  `public-credentials`, and `wallet-activity` collections, and the `id`
+  collection holding the published DID document -- and, by naming a plain
+  resource URL under the Space rather than a collection descriptor, sidestep
+  the checks entirely. Grants on any protected collection are now capped to
+  read-only (GET/HEAD), matching the existing whole-Space cap, and the cap is
+  applied by deriving the collection from the target URL as well as the
+  descriptor object, so a string target cannot bypass it; only an
+  RP-provisioned collection may still receive writes. Those write grants are delegated for a shorter lifetime than
+  read-only grants (`VITE_RP_ZCAP_WRITE_TTL_HOURS`, default 7 days, versus the
+  read-only `VITE_RP_ZCAP_TTL_HOURS`, default 30 days), and the consent screen
+  now shows the recipient DID on every grant -- rendered distinctly from the
+  relying party's own free-text reason so it cannot be spoofed -- plus an
+  explicit warning on any grant that carries write access.
 
 ## 0.15.4 - 2026-07-10
 

@@ -60,7 +60,10 @@ vi.mock('@/stores/wasRemoteStore', () => ({
 import {
   bindPassphrase,
   changePassphrase,
+  deleteKeyring,
   fetchKeyringSeed,
+  KeyringRecordUnusableError,
+  verifyPassphrase,
   WrongPassphraseError
 } from '@/session/keyring'
 import {
@@ -372,6 +375,25 @@ describe('wrap / unwrap', () => {
     await expect(
       fetchKeyringSeed({ passphrase: 'short seed passphrase', idb, kdf: KDF })
     ).rejects.toThrow(/32 bytes/)
+  })
+
+  it('maps a corrupt remote record to KeyringRecordUnusableError and never caches it', async () => {
+    const idb = createFakeIdb()
+    const { spaceId } = await unlockFor('corrupt record passphrase')
+    // A record with the right shape but an undecryptable payload -- the
+    // "genuinely corrupt record under the correct unlock Space" case.
+    wasState.spaces.set(spaceId, { version: 1, wrapped: { garbage: true } })
+
+    await expect(
+      fetchKeyringSeed({
+        passphrase: 'corrupt record passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).rejects.toThrow(KeyringRecordUnusableError)
+
+    // The unusable record must not have refreshed the local cache.
+    expect(await loadKeyringCache({ spaceId, idb })).toBeNull()
   })
 })
 
@@ -819,5 +841,175 @@ describe('changePassphrase', () => {
 
     expect(deleteUnlockSpace).not.toHaveBeenCalled()
     expect(wasState.spaces.has(spaceId)).toBe(true)
+  })
+})
+
+describe('verifyPassphrase', () => {
+  it('resolves for the bound passphrase and correct controller', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      seed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'verify correct passphrase',
+      idb,
+      kdf: KDF
+    })
+
+    await expect(
+      verifyPassphrase({
+        controller: DATA_CONTROLLER,
+        passphrase: 'verify correct passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).resolves.toBeUndefined()
+  })
+
+  it('throws WrongPassphraseError for a wrong passphrase', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      seed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'the correct passphrase',
+      idb,
+      kdf: KDF
+    })
+
+    await expect(
+      verifyPassphrase({
+        controller: DATA_CONTROLLER,
+        passphrase: 'a wrong passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).rejects.toBeInstanceOf(WrongPassphraseError)
+  })
+
+  it('throws WrongPassphraseError when the controller does not match', async () => {
+    const idb = createFakeIdb()
+    const { record, spaceId } = await craftRecord({
+      passphrase: 'verify mismatch passphrase',
+      plaintext: {
+        seed: seedToBase64Url(randomSeed()),
+        controller: 'did:key:z6MkSomeOtherDataController',
+        createdAt: new Date().toISOString()
+      }
+    })
+    wasState.spaces.set(spaceId, record)
+
+    await expect(
+      verifyPassphrase({
+        controller: DATA_CONTROLLER,
+        passphrase: 'verify mismatch passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).rejects.toBeInstanceOf(WrongPassphraseError)
+  })
+
+  it('rethrows an unreachable remote (not a wrong passphrase)', async () => {
+    const seed = randomSeed()
+    // Bind through a separate profile so the verify cache is empty and the
+    // verify must hit the remote, which is then made unreachable.
+    await bindPassphrase({
+      seed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'verify unreachable passphrase',
+      idb: createFakeIdb(),
+      kdf: KDF
+    })
+    const networkError = new WasError('NetworkError when attempting to fetch', {
+      cause: new TypeError('NetworkError when attempting to fetch')
+    })
+    wasState.getError = networkError
+
+    await expect(
+      verifyPassphrase({
+        controller: DATA_CONTROLLER,
+        passphrase: 'verify unreachable passphrase',
+        idb: createFakeIdb(),
+        kdf: KDF
+      })
+    ).rejects.toBe(networkError)
+  })
+})
+
+describe('deleteKeyring', () => {
+  it('deletes the unlock Space and the local cache', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      seed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'delete keyring passphrase',
+      idb,
+      kdf: KDF
+    })
+    const { spaceId } = await unlockFor('delete keyring passphrase')
+
+    const { unlockSpaceDeleted } = await deleteKeyring({
+      passphrase: 'delete keyring passphrase',
+      idb,
+      kdf: KDF
+    })
+
+    expect(unlockSpaceDeleted).toBe(true)
+    expect(deleteUnlockSpace).toHaveBeenCalledOnce()
+    expect(wasState.spaces.has(spaceId)).toBe(false)
+    await expect(loadKeyringCache({ spaceId, idb })).resolves.toBeNull()
+    // The keyring is gone: no seed resolves for this passphrase any more.
+    await expect(
+      fetchKeyringSeed({
+        passphrase: 'delete keyring passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).resolves.toBeNull()
+  })
+
+  it('clears the cache and reports unlockSpaceDeleted: false when the remote delete fails', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      seed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'delete-fails keyring passphrase',
+      idb,
+      kdf: KDF
+    })
+    const { spaceId } = await unlockFor('delete-fails keyring passphrase')
+    vi.mocked(deleteUnlockSpace).mockRejectedValueOnce(
+      new Error('delete failed')
+    )
+
+    const { unlockSpaceDeleted } = await deleteKeyring({
+      passphrase: 'delete-fails keyring passphrase',
+      idb,
+      kdf: KDF
+    })
+
+    expect(unlockSpaceDeleted).toBe(false)
+    await expect(loadKeyringCache({ spaceId, idb })).resolves.toBeNull()
+  })
+
+  it('clears the cache with no remote call when no WAS server is configured', async () => {
+    wasState.url = undefined
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      seed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'delete no-was passphrase',
+      idb,
+      kdf: KDF
+    })
+    const { spaceId } = await unlockFor('delete no-was passphrase')
+
+    const { unlockSpaceDeleted } = await deleteKeyring({
+      passphrase: 'delete no-was passphrase',
+      idb,
+      kdf: KDF
+    })
+
+    expect(unlockSpaceDeleted).toBe(true)
+    expect(deleteUnlockSpace).not.toHaveBeenCalled()
+    await expect(loadKeyringCache({ spaceId, idb })).resolves.toBeNull()
   })
 })

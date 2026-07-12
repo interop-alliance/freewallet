@@ -40,7 +40,13 @@
     "deleteAccount": "Delete Account",
     "deleteAccountHint": "Your login, keys, and all data will be deleted.",
     "deleteConfirm": "Are you sure you want to delete your account? This action cannot be undone.",
+    "deleteConfirmTitle": "Delete your account?",
+    "deleteConfirmAction": "Delete account",
+    "deletePassphraseLabel": "Passphrase",
+    "deletePassphraseIncorrect": "That passphrase is incorrect.",
+    "deleting": "Deleting…",
     "deleteError": "Could not delete your account data. Please try again.",
+    "deleteRequiresFullSession": "Log in with your passphrase to delete your account.",
     "about": "About",
     "version": "Freewallet version {{version}}",
     "syncSection": "Sync",
@@ -97,6 +103,7 @@
       "profileNotFound": "This profile does not exist, please sign up.",
       "profileExists": "This profile already exists, please log in.",
       "setupFailed": "Could not finish setting up your wallet. Please try again.",
+      "keyringUnusable": "Your account was found, but its stored login record could not be read. If this keeps happening, change your passphrase from a device where you are still logged in to write a fresh record.",
       "storageUnreachable": "Could not reach the storage server. While we're fixing it, try <guest>guest mode</guest>."
     },
     "login": {
@@ -391,6 +398,8 @@
         "space": "your whole storage Space"
       },
       "zcapSpaceWarning": "This grants access to your entire storage Space.",
+      "zcapRecipient": "Access granted to:",
+      "zcapWriteWarning": "This site will be able to add, change, or delete data in this collection.",
       "zcapReadOnlyNote": "Read-only",
       "zcapEncryptedNote": "This collection is encrypted -- this site will only see ciphertext.",
       "zcapCannotFulfill": "This wallet cannot fulfill this request.",

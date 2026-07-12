@@ -23,7 +23,11 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { loadOnce } from 'credential-handler-polyfill'
 import { receiveCredentialEvent } from 'web-credential-handler'
-import { MEDIATOR_BASE, RP_ZCAP_TTL_MS } from '@/app.config'
+import {
+  MEDIATOR_BASE,
+  RP_ZCAP_TTL_MS,
+  RP_ZCAP_WRITE_TTL_MS
+} from '@/app.config'
 import { loginWithPassphrase } from '@/session/initSession'
 import { persistDelegatedSession } from '@/session/delegatedSession'
 import { isStorageUnreachable } from '@/lib/storageErrors'
@@ -45,6 +49,7 @@ import {
   hasTypedExample,
   processRequest,
   queriesOf,
+  requestsCredentialType,
   resolveGrants,
   startExchange,
   submitPresentation,
@@ -89,6 +94,9 @@ const BLOCK_MESSAGE_KEY: Record<BlockReason, string> = {
 }
 
 const RP_ZCAP_TTL_DAYS = Math.round(RP_ZCAP_TTL_MS / (24 * 60 * 60 * 1000))
+const RP_ZCAP_WRITE_TTL_DAYS = Math.round(
+  RP_ZCAP_WRITE_TTL_MS / (24 * 60 * 60 * 1000)
+)
 
 const EMPTY_PROFILE: WalletRequestProfile = {
   didAuth: false,
@@ -287,8 +295,16 @@ export function WalletGetPage() {
         : stored
       setDisplayedCredentials(displayed)
 
-      // Pre-select a matched Login Credential (the common login case).
-      const loginMatch = findLoginCredential({ credentials: displayed })
+      // Pre-select a matched Login Credential only when the request explicitly
+      // asks for one (the login flows); a generic request starts with nothing
+      // checked so sharing the username is always a deliberate choice.
+      const wantsLogin = requestsCredentialType({
+        queries: profile.vcQueries,
+        type: LOGIN_CREDENTIAL_TYPE
+      })
+      const loginMatch = wantsLogin
+        ? findLoginCredential({ credentials: displayed })
+        : null
       setSelectedCids(new Set(loginMatch ? [loginMatch.cid] : []))
 
       if (profile.zcapRequests.length > 0 && loggedIn.storage.spaceUrl) {
@@ -385,7 +401,11 @@ export function WalletGetPage() {
 
     // The exchange, not the CHAPI channel, is the verifier's system of record
     // for a VC API request, so a failed delivery is a failed response: report
-    // it rather than handing the site a presentation it never received.
+    // it rather than handing the site a presentation it never received. An
+    // empty compose (`{}`) cannot reach this point with an exchange open --
+    // Continue is disabled when there is nothing to share -- but if it ever
+    // did, skipping the POST is still right: the exchange protocol has no
+    // decline message, so an unanswered exchange expires on its own.
     if (exchangeUrl && verifiablePresentation) {
       try {
         const reply = await submitPresentation({
@@ -462,6 +482,14 @@ export function WalletGetPage() {
       })
   }
 
+  /**
+   * Declines the request: answers the CHAPI channel with `null` (the
+   * VP-Request convention for a user cancel). When the request came from a VC
+   * API exchange, the exchange is deliberately abandoned rather than notified:
+   * the protocol defines no decline message (no DELETE, no error POST a
+   * holder may send), so walking away and letting the exchange's own
+   * `expires` reap it is the correct behavior, not an oversight.
+   */
   function handleCancel() {
     chapiEvent?.respondWith(Promise.resolve(null))
   }
@@ -481,6 +509,14 @@ export function WalletGetPage() {
     profile.didAuth &&
     profile.vcQueries.length === 0 &&
     profile.zcapRequests.length === 0
+  // With no DID Auth to sign, no credentials picked, and no satisfiable grant,
+  // Continue would compose nothing (processRequest returns `{}`) -- keep it
+  // disabled so the only way out of an empty consent screen is Cancel, which
+  // answers both CHAPI and any open exchange.
+  const nothingToShare =
+    !profile.didAuth &&
+    selectedCids.size === 0 &&
+    !resolvedGrants.some(({ target }) => target.satisfiable)
   const title =
     profile.zcapRequests.length > 0
       ? t('chapi.get.loginTitle')
@@ -601,6 +637,7 @@ export function WalletGetPage() {
               <ZcapGrantsPanel
                 grants={resolvedGrants}
                 ttlDays={RP_ZCAP_TTL_DAYS}
+                writeTtlDays={RP_ZCAP_WRITE_TTL_DAYS}
               />
             )}
 
@@ -609,6 +646,7 @@ export function WalletGetPage() {
                 variant="contained"
                 sx={{ textTransform: 'none' }}
                 onClick={respondAndClose}
+                disabled={nothingToShare}
               >
                 {t('common.continue')}
               </Button>
