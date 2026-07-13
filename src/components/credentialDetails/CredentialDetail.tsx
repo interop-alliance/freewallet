@@ -7,14 +7,18 @@ import {
   Divider,
   Link,
   Collapse,
-  Button
+  Button,
+  IconButton,
+  Tooltip
 } from '@mui/material'
+import { MdCheck, MdContentCopy } from 'react-icons/md'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { getProofCreatedIso } from '@/lib/getProofCreatedIso'
 import { useVerification } from '@/hooks/useVerification'
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { IssuerInfo } from '@/components/credentialDetails/IssuerInfo'
 import {
   VerificationPanel,
@@ -57,6 +61,11 @@ export function CredentialDetail({
   const verification = useVerification(vc)
   const [showRaw, setShowRaw] = useState(false)
   const rawJson = useMemo(() => JSON.stringify(vc, null, 2), [vc])
+  const { copied, copy: copyRawJson } = useCopyToClipboard({
+    onError: (err: unknown) => {
+      console.error('Could not copy credential JSON:', err)
+    }
+  })
   const evidenceList = useMemo(() => {
     const raw = (vc as Record<string, unknown>).evidence
     if (!raw) {
@@ -275,10 +284,24 @@ export function CredentialDetail({
             {showRaw ? t('credential.hideJson') : t('credential.viewSource')}
           </Button>
           <Collapse in={showRaw} unmountOnExit>
-            <JsonHighlight
-              code={rawJson}
-              sx={credentialDetailStyles.codeBlock}
-            />
+            <Box sx={sx.codeBlockWrapper}>
+              <Tooltip title={copied ? t('common.copied') : t('common.copy')}>
+                <IconButton
+                  size="small"
+                  aria-label={t('common.copy')}
+                  onClick={() => {
+                    void copyRawJson(rawJson)
+                  }}
+                  sx={sx.codeBlockCopyButton}
+                >
+                  {copied ? <MdCheck /> : <MdContentCopy />}
+                </IconButton>
+              </Tooltip>
+              <JsonHighlight
+                code={rawJson}
+                sx={credentialDetailStyles.codeBlock}
+              />
+            </Box>
           </Collapse>
         </Box>
       </Paper>

@@ -193,6 +193,20 @@ export const credentialDetailCardStyles = {
     px: 2,
     py: 1
   },
+  codeBlockWrapper: {
+    position: 'relative'
+  },
+  codeBlockCopyButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 1,
+    color: '#e5e7eb',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    '&:hover': {
+      backgroundColor: 'rgba(255,255,255,0.18)'
+    }
+  },
   rawToggle: {
     textTransform: 'none' as const,
     color: 'text.secondary'
