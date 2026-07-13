@@ -346,6 +346,9 @@ export const credentialCardStyles = {
     minHeight: 160,
     display: 'flex',
     flexDirection: 'column',
+    // ButtonBase centers its children; undo that so the content fills the card
+    alignItems: 'stretch',
+    justifyContent: 'flex-start',
     borderRadius: 3
   },
   cardContent: {
