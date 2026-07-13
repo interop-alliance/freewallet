@@ -4,6 +4,8 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
+import ToggleButton from '@mui/material/ToggleButton'
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -17,6 +19,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { storageStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
 import type { StorageResource } from '@/lib/storage'
+import type { Json } from '@/lib/sync'
 import {
   isVerifiableCredentialData,
   type FetchedCollectionResource
@@ -48,6 +51,12 @@ export function CollectionResourcePage() {
 
   const [resource, setResource] = useState<StorageResource | null>(null)
   const [payload, setPayload] = useState<FetchedCollectionResource | null>(null)
+  // The stored EDV envelope source when this resource is encrypted (null for
+  // plaintext resources), and which source view the code block shows.
+  const [envelopeText, setEnvelopeText] = useState<string | null>(null)
+  const [sourceView, setSourceView] = useState<'decrypted' | 'envelope'>(
+    'decrypted'
+  )
   const [isLoading, setIsLoading] = useState(true)
   const [errorKey, setErrorKey] = useState<string | null>(null)
   const [credentialCid, setCredentialCid] = useState<string | null>(null)
@@ -116,13 +125,33 @@ export function CollectionResourcePage() {
           return
         }
 
-        if (body.kind !== 'json' || !isVerifiableCredentialData(body.data)) {
+        // An encrypted-collection resource arrives as an EDV envelope; with
+        // an unlocked vault, recover the credential behind it and keep the
+        // envelope source around for the alternate view.
+        const decrypted =
+          body.kind === 'json'
+            ? await storage.decryptCollectionResource({
+                collectionId,
+                data: body.data as Json
+              })
+            : undefined
+        if (cancelled) {
+          return
+        }
+        const data = decrypted ?? (body.kind === 'json' ? body.data : null)
+
+        if (body.kind !== 'json' || !isVerifiableCredentialData(data)) {
           setErrorKey('storage.resourceNotVerifiableCredential')
           setPayload(null)
+          setEnvelopeText(null)
           return
         }
 
-        setPayload(body)
+        setPayload({ kind: 'json', data })
+        setEnvelopeText(
+          decrypted !== undefined ? JSON.stringify(body.data, null, 2) : null
+        )
+        setSourceView('decrypted')
       } catch (e) {
         console.error('Failed to load collection resource:', e)
         if (!cancelled) {
@@ -180,6 +209,9 @@ export function CollectionResourcePage() {
     return JSON.stringify(payload.data, null, 2)
   }, [payload])
 
+  const shownSourceText =
+    sourceView === 'envelope' && envelopeText !== null ? envelopeText : jsonText
+
   const displayTitle = useMemo(() => {
     if (vc) {
       return credentialTitle(vc)
@@ -198,12 +230,12 @@ export function CollectionResourcePage() {
   }, [vc])
 
   const handleDownload = useCallback(() => {
-    if (!jsonText || !resourceId) {
+    if (!shownSourceText || !resourceId) {
       return
     }
-    const blob = new Blob([jsonText], { type: 'application/json' })
+    const blob = new Blob([shownSourceText], { type: 'application/json' })
     downloadBlob({ blob, filename: `${resourceId}.json` })
-  }, [jsonText, resourceId])
+  }, [shownSourceText, resourceId])
 
   const handleDelete = useCallback(async () => {
     if (!credentialCid) {
@@ -321,8 +353,28 @@ export function CollectionResourcePage() {
               </Stack>
             </Paper>
 
+            {envelopeText !== null && (
+              <ToggleButtonGroup
+                size="small"
+                exclusive
+                value={sourceView}
+                onChange={(_event, view: 'decrypted' | 'envelope' | null) => {
+                  if (view) {
+                    setSourceView(view)
+                  }
+                }}
+                sx={{ mb: 1 }}
+              >
+                <ToggleButton value="decrypted" sx={{ textTransform: 'none' }}>
+                  {t('storage.viewDecrypted')}
+                </ToggleButton>
+                <ToggleButton value="envelope" sx={{ textTransform: 'none' }}>
+                  {t('storage.viewEnvelope')}
+                </ToggleButton>
+              </ToggleButtonGroup>
+            )}
             <JsonHighlight
-              code={jsonText}
+              code={shownSourceText}
               sx={credentialDetailStyles.codeBlock}
             />
           </>

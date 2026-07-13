@@ -230,6 +230,8 @@
     "download": "Download",
     "copySnippet": "Copy",
     "copied": "Copied!",
+    "viewDecrypted": "Decrypted contents",
+    "viewEnvelope": "Encrypted envelope",
     "backToFiles": "Back to list",
     "deleteResource": "Delete",
     "deleteResourceConfirm": "Delete this file from storage? This cannot be undone.",

@@ -230,6 +230,8 @@
     "download": "Descargar",
     "copySnippet": "Copiar",
     "copied": "¡Copiado!",
+    "viewDecrypted": "Contenido descifrado",
+    "viewEnvelope": "Sobre cifrado",
     "backToFiles": "Volver a la lista",
     "deleteResource": "Eliminar",
     "deleteResourceConfirm": "¿Eliminar este archivo del almacenamiento? Esta acción no se puede deshacer.",

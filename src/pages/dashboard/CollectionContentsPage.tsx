@@ -7,6 +7,8 @@ import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
+import ToggleButton from '@mui/material/ToggleButton'
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -24,6 +26,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { storageStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
+import type { Json } from '@/lib/sync'
 import {
   isVerifiableCredentialData,
   type FetchedCollectionResource
@@ -61,6 +64,13 @@ export function CollectionContentsPage() {
     useState<StorageResource | null>(null)
   const [resourcePayload, setResourcePayload] =
     useState<FetchedCollectionResource | null>(null)
+  // The decrypted document behind an EDV envelope resource (null when the
+  // resource is plaintext or could not be decrypted), and which of the two
+  // views the snippet dialog shows.
+  const [decryptedData, setDecryptedData] = useState<Json | null>(null)
+  const [resourceView, setResourceView] = useState<'decrypted' | 'envelope'>(
+    'decrypted'
+  )
   const [resourceLoading, setResourceLoading] = useState(false)
   const [resourceError, setResourceError] = useState<string | null>(null)
   const {
@@ -78,6 +88,7 @@ export function CollectionContentsPage() {
   const clearResourcePreview = useCallback(() => {
     setSelectedResource(null)
     setResourcePayload(null)
+    setDecryptedData(null)
     setResourceError(null)
     setResourceLoading(false)
     resetSnippetCopied()
@@ -88,6 +99,7 @@ export function CollectionContentsPage() {
     setPreviousCollectionId(collectionId)
     setSelectedResource(null)
     setResourcePayload(null)
+    setDecryptedData(null)
     setResourceError(null)
     setResourceLoading(false)
     resetSnippetCopied()
@@ -152,14 +164,25 @@ export function CollectionContentsPage() {
       }
       setSelectedResource(resource)
       setResourcePayload(null)
+      setDecryptedData(null)
       setResourceError(null)
       setResourceLoading(true)
       resetSnippetCopied()
       try {
         const body = await storage.fetchCollectionResource(resource)
+        // An encrypted-collection resource arrives as an EDV envelope; with
+        // an unlocked vault, recover the document behind it so the preview
+        // can offer both views.
+        const decrypted =
+          body.kind === 'json' && collectionId
+            ? await storage.decryptCollectionResource({
+                collectionId,
+                data: body.data as Json
+              })
+            : undefined
         if (
           body.kind === 'json' &&
-          isVerifiableCredentialData(body.data) &&
+          isVerifiableCredentialData(decrypted ?? body.data) &&
           collectionId
         ) {
           navigate(
@@ -168,6 +191,8 @@ export function CollectionContentsPage() {
           return
         }
         setResourcePayload(body)
+        setDecryptedData(decrypted ?? null)
+        setResourceView(decrypted !== undefined ? 'decrypted' : 'envelope')
       } catch (e) {
         console.error('Failed to load resource:', e)
         setResourceError(t('storage.resourceLoadError'))
@@ -184,13 +209,17 @@ export function CollectionContentsPage() {
       return ''
     }
     if (resourcePayload.kind === 'json') {
-      return JSON.stringify(resourcePayload.data, null, 2)
+      const shown =
+        decryptedData !== null && resourceView === 'decrypted'
+          ? decryptedData
+          : resourcePayload.data
+      return JSON.stringify(shown, null, 2)
     }
     if (resourcePayload.kind === 'text') {
       return resourcePayload.text
     }
     return ''
-  }, [resourcePayload])
+  }, [decryptedData, resourcePayload, resourceView])
 
   const snippetDialogOpen =
     Boolean(selectedResource) &&
@@ -395,6 +424,26 @@ export function CollectionContentsPage() {
             >
               {resourcePreviewTitle || t('storage.resourceTitle')}
             </Typography>
+            {decryptedData !== null && (
+              <ToggleButtonGroup
+                size="small"
+                exclusive
+                value={resourceView}
+                onChange={(_event, view: 'decrypted' | 'envelope' | null) => {
+                  if (view) {
+                    setResourceView(view)
+                  }
+                }}
+                sx={{ flexShrink: 0 }}
+              >
+                <ToggleButton value="decrypted" sx={{ textTransform: 'none' }}>
+                  {t('storage.viewDecrypted')}
+                </ToggleButton>
+                <ToggleButton value="envelope" sx={{ textTransform: 'none' }}>
+                  {t('storage.viewEnvelope')}
+                </ToggleButton>
+              </ToggleButtonGroup>
+            )}
             {resourcePayload?.kind === 'json' && (
               <Button
                 size="small"

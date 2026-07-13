@@ -652,6 +652,50 @@ export class StorageManager {
     return await this._remoteStore.fetchCollectionResource(resource)
   }
 
+  /**
+   * Best-effort decryption of a fetched storage-browser resource body: when
+   * the body is an EDV envelope from one of the encrypted standard
+   * collections and this session holds that collection's cipher (unlocked
+   * vault), returns the decrypted document. Returns undefined otherwise --
+   * plaintext bodies, non-standard collections, a locked vault, or an
+   * envelope that fails to decrypt (logged, not thrown), letting callers fall
+   * back to showing the raw envelope.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id (e.g.
+   *   `private-credentials`)
+   * @param options.data {Json}   the fetched JSON resource body
+   * @returns {Promise<Json | undefined>}
+   */
+  async decryptCollectionResource({
+    collectionId,
+    data
+  }: {
+    collectionId: string
+    data: Json
+  }): Promise<Json | undefined> {
+    if (!isEncryptedEnvelope(data)) {
+      return undefined
+    }
+    const entry = WALLET_STANDARD_COLLECTIONS.find(
+      collection => collection.id === collectionId && collection.encryption
+    )
+    const cipher = entry && this._ciphers?.[entry.key]
+    if (!cipher) {
+      return undefined
+    }
+    try {
+      return await cipher.decrypt({ envelope: data })
+    } catch (err) {
+      console.warn(
+        `Could not decrypt resource envelope from collection ` +
+          `"${collectionId}":`,
+        err
+      )
+      return undefined
+    }
+  }
+
   async deleteCollectionResource(resource: StorageResource): Promise<void> {
     if (!this._remoteStore) {
       throw new Error('Remote storage is not configured for this session.')

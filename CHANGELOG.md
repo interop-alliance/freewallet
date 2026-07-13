@@ -4,6 +4,17 @@
 
 ### Added
 
+- **Decrypted / encrypted-envelope views in the storage browser.** Opening a
+  resource from an encrypted collection (`private-credentials`,
+  `wallet-activity`) used to show only the raw EDV envelope (the JWE). With an
+  unlocked vault, the storage browser now decrypts the envelope and offers a
+  two-button toggle between "Decrypted contents" and "Encrypted envelope" --
+  in the resource preview dialog and on the resource detail page. An encrypted
+  credential now also gets the full credential detail treatment (title,
+  description, View details / Download / Delete), same as a plaintext one.
+  Copy and Download follow whichever view is active. With a locked vault (or a
+  foreign envelope), the raw envelope is shown as before.
+
 - **Toast notifications for wallet actions.** Actions that previously succeeded
   silently now confirm themselves: deleting a credential ("Credential deleted."),
   creating or removing its public link, saving accepted credentials, and
