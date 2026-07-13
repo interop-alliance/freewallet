@@ -11,6 +11,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { useAuthStore } from '@/stores/authStore'
+import { showToast } from '@/stores/toastStore'
 import { cidFrom } from '@/lib/cidFrom'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
@@ -87,6 +88,11 @@ export function AcceptCredentialsPage() {
           })
         )
       }
+      showToast({
+        message: t('acceptCredentials.stored', {
+          count: uniqueCredentials.length
+        })
+      })
       navigate('/dashboard')
     } catch (err) {
       console.error('Error storing credentials:', err)

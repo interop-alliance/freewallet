@@ -11,6 +11,7 @@ import Toolbar from '@mui/material/Toolbar'
 import Typography from '@mui/material/Typography'
 import { LanguageSelector } from '@/components/LanguageSelector'
 import { ThemePicker } from '@/components/ThemePicker'
+import { Toast } from '@/components/Toast'
 import { dashboardStyles } from '@/styles/appStyles'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
 import { useAuthStore } from '@/stores/authStore'
@@ -157,6 +158,8 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
         </Typography>
         {children}
       </Box>
+
+      <Toast />
     </Box>
   )
 }

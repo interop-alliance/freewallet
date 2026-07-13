@@ -144,6 +144,9 @@ test.describe('Credential flows', () => {
     await page.getByRole('button', { name: 'Delete', exact: true }).click()
     await expect(page).toHaveURL(/#\/dashboard/)
     await expect(page.getByText(WELCOME_TITLE)).toHaveCount(0)
+    // The success toast is posted before the navigation, so it lands on the
+    // dashboard the user is returned to.
+    await expect(page.getByText('Credential deleted.')).toBeVisible()
   })
 
   test('verify: opening a credential runs verification to a terminal state', async ({

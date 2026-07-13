@@ -165,6 +165,8 @@
     "undecryptable_one": "No se pudo descifrar {{count}} credencial. Puede estar dañada o guardada con otra frase de contraseña.",
     "undecryptable_other": "No se pudieron descifrar {{count}} credenciales. Pueden estar dañadas o guardadas con otra frase de contraseña.",
     "removeUndecryptable": "Eliminar",
+    "undecryptableRemoved_one": "Se eliminó {{count}} credencial no descifrable.",
+    "undecryptableRemoved_other": "Se eliminaron {{count}} credenciales no descifrables.",
     "scanQr": {
       "button": "Escanear QR",
       "title": "Escanear QR de credencial",
@@ -277,6 +279,10 @@
     "loadError": "No se pudo cargar esta credencial. Inténtelo de nuevo.",
     "lockedVault": "Esta credencial está en su bóveda bloqueada. Inicie sesión con su frase de contraseña para verla.",
     "deleteError": "No se pudo eliminar esta credencial. Inténtelo de nuevo.",
+    "deleted": "Credencial eliminada.",
+    "deletedWithPublic": "Se eliminaron la credencial y su enlace público.",
+    "publicLinkCreated": "Enlace público creado.",
+    "publicLinkRemoved": "Enlace público eliminado.",
     "deleteAria": "Eliminar credencial",
     "delete": "Eliminar",
     "deleteDialog": {
@@ -351,7 +357,9 @@
   "acceptCredentials": {
     "title": "Aceptar credenciales",
     "acceptAll": "Aceptar todas",
-    "storeError": "No se pudieron guardar las credenciales. Inténtelo de nuevo."
+    "storeError": "No se pudieron guardar las credenciales. Inténtelo de nuevo.",
+    "stored_one": "Credencial guardada.",
+    "stored_other": "Se guardaron {{count}} credenciales."
   },
   "notFound": {
     "title": "Página no encontrada",

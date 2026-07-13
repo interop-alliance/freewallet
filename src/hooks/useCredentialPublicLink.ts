@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
+import { showToast } from '@/stores/toastStore'
 import { cidFrom } from '@/lib/cidFrom'
 import type { Session } from '@/types/auth'
 import type { CredentialShareActions } from '@/types/credentialActions'
@@ -17,6 +19,7 @@ export function useCredentialPublicLink({
   credential?: IVerifiableCredential
   session: Session | null
 }) {
+  const { t } = useTranslation()
   const [cid, setCid] = useState<string | null>(null)
   const [isShared, setIsShared] = useState(false)
   const [publicLink, setPublicLink] = useState<string | null>(null)
@@ -75,13 +78,14 @@ export function useCredentialPublicLink({
         cid,
         user: session.user
       })
+      showToast({ message: t('credential.publicLinkCreated') })
     } catch (err) {
       console.error('Error creating public link:', err)
       setError(true)
     } finally {
       setBusy(false)
     }
-  }, [cid, credential, session])
+  }, [cid, credential, session, t])
 
   const remove = useCallback(async () => {
     if (!session || !cid) {
@@ -97,13 +101,14 @@ export function useCredentialPublicLink({
         cid,
         user: session.user
       })
+      showToast({ message: t('credential.publicLinkRemoved') })
     } catch (err) {
       console.error('Error removing public link:', err)
       setError(true)
     } finally {
       setBusy(false)
     }
-  }, [cid, session])
+  }, [cid, session, t])
 
   const toggle = useCallback(() => {
     if (isShared) {

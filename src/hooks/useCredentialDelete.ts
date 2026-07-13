@@ -1,4 +1,6 @@
 import { useCallback, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { showToast } from '@/stores/toastStore'
 import type { Session } from '@/types/auth'
 
 /**
@@ -15,6 +17,7 @@ export function useCredentialDelete({
   cid?: string
   onSuccess: () => void
 }) {
+  const { t } = useTranslation()
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState(false)
@@ -43,9 +46,17 @@ export function useCredentialDelete({
         return
       }
       setDeleteDialogOpen(false)
+      // Posted to the global toast store rather than local state: onSuccess
+      // navigates away from this page, so only a store-backed message survives
+      // to be shown on the page the user lands on.
+      showToast({
+        message: alsoRemovePublic
+          ? t('credential.deletedWithPublic')
+          : t('credential.deleted')
+      })
       onSuccess()
     },
-    [session, cid, onSuccess]
+    [session, cid, onSuccess, t]
   )
 
   const requestDelete = useCallback(async () => {

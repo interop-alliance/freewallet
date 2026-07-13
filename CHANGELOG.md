@@ -1,5 +1,18 @@
 # History
 
+## Unreleased - TBD
+
+### Added
+
+- **Toast notifications for wallet actions.** Actions that previously succeeded
+  silently now confirm themselves: deleting a credential ("Credential deleted."),
+  creating or removing its public link, saving accepted credentials, and
+  removing undecryptable rows. Messages are posted to a small global store
+  (`src/stores/toastStore.ts`) and rendered as a MUI Snackbar by
+  `DashboardLayout`, so a message posted just before a redirect -- as delete does
+  -- still shows on the page the user lands on. Existing error `Alert`s are
+  unchanged; they stay in place on the page rather than auto-dismissing.
+
 ## 0.15.5 - 2026-07-12
 
 ### Added

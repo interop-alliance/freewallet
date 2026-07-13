@@ -9,6 +9,7 @@ import { Link as RouterLink, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { useAuthStore } from '@/stores/authStore'
+import { showToast } from '@/stores/toastStore'
 import { syncController } from '@/stores/syncController'
 import { dashboardStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
@@ -105,8 +106,12 @@ export function DashboardPage() {
       return
     }
     try {
+      const removed = session.storage.undecryptableCredentials
       await session.storage.purgeUndecryptableCredentials()
       await loadCredentials()
+      showToast({
+        message: t('dashboard.undecryptableRemoved', { count: removed })
+      })
     } catch (err) {
       console.error('Could not remove undecryptable credentials:', err)
       setLoadError(true)

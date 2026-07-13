@@ -165,6 +165,8 @@
     "undecryptable_one": "{{count}} credential could not be decrypted. It may be corrupted or saved under a different passphrase.",
     "undecryptable_other": "{{count}} credentials could not be decrypted. They may be corrupted or saved under a different passphrase.",
     "removeUndecryptable": "Remove",
+    "undecryptableRemoved_one": "{{count}} undecryptable credential removed.",
+    "undecryptableRemoved_other": "{{count}} undecryptable credentials removed.",
     "scanQr": {
       "button": "Scan QR",
       "title": "Scan credential QR",
@@ -277,6 +279,10 @@
     "loadError": "Could not load this credential. Please try again.",
     "lockedVault": "This credential is in your locked vault. Log in with your passphrase to view it.",
     "deleteError": "Could not delete this credential. Please try again.",
+    "deleted": "Credential deleted.",
+    "deletedWithPublic": "Credential and its public link deleted.",
+    "publicLinkCreated": "Public link created.",
+    "publicLinkRemoved": "Public link removed.",
     "deleteAria": "Delete credential",
     "delete": "Delete",
     "deleteDialog": {
@@ -351,7 +357,9 @@
   "acceptCredentials": {
     "title": "Accept credentials",
     "acceptAll": "Accept all",
-    "storeError": "Could not save the credentials. Please try again."
+    "storeError": "Could not save the credentials. Please try again.",
+    "stored_one": "Credential saved.",
+    "stored_other": "{{count}} credentials saved."
   },
   "notFound": {
     "title": "Page not found",
