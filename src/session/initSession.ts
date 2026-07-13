@@ -12,6 +12,7 @@ import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import type { ControllerProfile, Session, User } from '@/types/auth'
 import { KMS_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
+import { singleKeyResolver } from '@/lib/keyResolver'
 import { StorageManager } from '@/stores/storageManager'
 import { fetchKeyringSeed, KeyringRecordUnusableError } from '@/session/keyring'
 
@@ -50,16 +51,7 @@ export async function agentsFromSeed({ seed }: { seed: Uint8Array }) {
     X25519KeyAgreementKey2020.fromEd25519VerificationKey2020({
       keyPair: keyAgent.getVerificationKeyPair()
     })
-  const keyResolver = async ({ id }: { id?: string }) => {
-    if (id !== keyAgreementKey.id) {
-      throw new Error(`Unknown key id "${id}".`)
-    }
-    return {
-      id: keyAgreementKey.id,
-      type: keyAgreementKey.type,
-      publicKeyMultibase: keyAgreementKey.publicKeyMultibase
-    }
-  }
+  const keyResolver = singleKeyResolver({ keyAgreementKey })
 
   return { keyAgent, zcapClient, keyAgreementKey, keyResolver }
 }
@@ -76,10 +68,14 @@ export async function initGuestSession() {
   // The random 32 bytes are used directly as the data seed (no salted-hash
   // step). A guest identity is ephemeral and never keyring-bound, so the
   // derivation change relative to a passphrase login is harmless here.
+  // Guest is a new-wallet flow: `provisionNewWallet` owns collection
+  // provisioning (plus the initial history + welcome credential), so session
+  // creation must not also fire it.
   const { session } = await initSessionFromSeed({
     seed: randomGuestSecret,
     email: guestEmail,
-    isGuest: true
+    isGuest: true,
+    provisionStorage: false
   })
 
   return { session }
@@ -97,6 +93,17 @@ export async function initGuestSession() {
  * can re-bind the passphrase); guests skip it (a guest identity is ephemeral
  * and never keyring-bound).
  *
+ * Collection provisioning is folded in here rather than left as a separate
+ * post-login step at every callsite: when `provisionStorage` is set (the
+ * default -- returning-login and CHAPI-popup flows) the session's
+ * `ensureUserCollections` is *fired but not awaited* and its promise exposed as
+ * `session.storageReady`, so a caller can run a hot read concurrently with
+ * provisioning yet still `await session.storageReady` when it needs the
+ * collections ready. The new-wallet flows (signup, guest) pass
+ * `provisionStorage: false`: their provisioning is a deliberately ordered
+ * sequence owned by `provisionNewWallet` (signup must bind the passphrase
+ * before the data Space is created), so session creation must not fire it.
+ *
  * @param options {object}
  * @param options.seed {Uint8Array}   the 32-byte data seed
  * @param [options.email] {string}
@@ -104,18 +111,23 @@ export async function initGuestSession() {
  * @param [options.remoteDirectStorage] {boolean}   route credential + history
  *   operations straight to the remote WAS collections (the CHAPI popup, whose
  *   local IndexedDB is third-party partitioned); default false
+ * @param [options.provisionStorage] {boolean}   fire `ensureUserCollections`
+ *   from session creation and expose it as `session.storageReady`; default
+ *   true. Set false for the new-wallet flows that provision explicitly.
  * @returns {Promise<{ session: Session, userExists: boolean }>}
  */
 export async function initSessionFromSeed({
   seed,
   email,
   isGuest = false,
-  remoteDirectStorage = false
+  remoteDirectStorage = false,
+  provisionStorage = true
 }: {
   seed: Uint8Array
   email?: string
   isGuest?: boolean
   remoteDirectStorage?: boolean
+  provisionStorage?: boolean
 }) {
   const { keyAgent, zcapClient, keyAgreementKey, keyResolver } =
     await agentsFromSeed({ seed })
@@ -171,6 +183,18 @@ export async function initSessionFromSeed({
 
   const session = { user, profile, storage, isGuest, tier: 'full' } as Session
 
+  // Fold collection provisioning into the session-creation seam: fire (do not
+  // await) `ensureUserCollections` and expose it as `session.storageReady`, so
+  // callers get a session that is provisioning itself rather than a separate
+  // post-login step they must each remember. `ensureUserCollections` opens the
+  // always-present local RxDB collections and, only when a remote store is
+  // configured, provisions the remote Space / did:web -- so it is correct for
+  // guests (local only) and returning logins alike. The new-wallet flows opt
+  // out (`provisionStorage: false`) and provision explicitly.
+  if (provisionStorage) {
+    session.storageReady = storage.ensureUserCollections({ user, profile })
+  }
+
   return { session, userExists }
 }
 
@@ -205,18 +229,24 @@ export async function initSessionFromSeed({
  * @param [options.remoteDirectStorage] {boolean}   route credential + history
  *   operations straight to the remote WAS collections (the CHAPI popup);
  *   default false
+ * @param [options.provisionStorage] {boolean}   fire `ensureUserCollections`
+ *   from session creation and expose it as `session.storageReady`; default
+ *   true. Signup's existence probe passes false (it discards the session after
+ *   reading `userExists`, so nothing should provision on its behalf).
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 export async function loginWithPassphrase({
   passphrase,
   email,
   idb,
-  remoteDirectStorage = false
+  remoteDirectStorage = false,
+  provisionStorage = true
 }: {
   passphrase: string
   email?: string
   idb?: IDBFactory
   remoteDirectStorage?: boolean
+  provisionStorage?: boolean
 }): Promise<{ session: Session | null; userExists: boolean }> {
   const found = await fetchKeyringSeed({ passphrase, idb })
 
@@ -227,9 +257,14 @@ export async function loginWithPassphrase({
   const { session, userExists } = await initSessionFromSeed({
     seed: found.seed,
     email,
-    remoteDirectStorage
+    remoteDirectStorage,
+    provisionStorage
   })
   if (session.user.id !== found.controller) {
+    // A corrupt record under the correct unlock Space: the session is
+    // discarded, so settle its fired provisioning promise rather than leave it
+    // an unhandled rejection if it also fails.
+    session.storageReady?.catch(() => {})
     throw new KeyringRecordUnusableError({
       cause: new Error(
         'The unwrapped controller does not match the derived identity.'

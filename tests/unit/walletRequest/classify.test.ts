@@ -3,8 +3,6 @@ import {
   classifyCHAPIGetEvent,
   classifyCHAPIStoreEvent,
   classifyRequest,
-  isVPOffer,
-  isVPRequest,
   isDIDAuthRequested,
   zcapQueriesOf,
   didAuthMethodSupported,
@@ -71,7 +69,6 @@ describe('classifyCHAPIGetEvent', () => {
   it('wraps the VerifiablePresentation body as an IVpRequest', () => {
     const request = classifyCHAPIGetEvent(getEvent([queryByExample]))
 
-    expect(isVPRequest(request)).toBe(true)
     expect(request.credentialRequestOrigin).toBe('https://verifier.example')
     expect(request.verifiablePresentationRequest.challenge).toBe('abc-123')
     expect(request.verifiablePresentationRequest.domain).toBe(
@@ -110,8 +107,6 @@ describe('classifyCHAPIStoreEvent', () => {
 
     const offer = classifyCHAPIStoreEvent(event)
 
-    expect(isVPOffer(offer)).toBe(true)
-    expect(isVPRequest(offer)).toBe(false)
     expect(offer.credentialRequestOrigin).toBe('https://issuer.example')
     expect(offer.verifiablePresentation).toBe(vp)
   })
@@ -162,9 +157,9 @@ describe('zcapQueriesOf', () => {
   })
 
   it('throws when a zcap query has no capabilityQuery', () => {
-    expect(() =>
-      zcapQueriesOf([{ type: 'ZcapQuery' } as IVPRQuery])
-    ).toThrow(/missing its capabilityQuery detail/)
+    expect(() => zcapQueriesOf([{ type: 'ZcapQuery' } as IVPRQuery])).toThrow(
+      /missing its capabilityQuery detail/
+    )
   })
 
   it('throws when an array capabilityQuery holds a non-object entry', () => {

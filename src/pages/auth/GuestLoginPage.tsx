@@ -11,8 +11,8 @@ import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { initGuestSession } from '@/session/initSession'
+import { provisionNewWallet } from '@/session/provisionNewWallet'
 import { useAuthStore } from '@/stores/authStore'
-import { welcomeCredential } from '@/fixtures/welcomeCredential'
 import { registerWallet } from '@/lib/registerWallet'
 
 export function GuestLoginPage() {
@@ -41,17 +41,9 @@ export function GuestLoginPage() {
       // get no remote replica).
       const { session } = await initGuestSession()
 
-      await session.storage.ensureUserCollections({ user: session.user })
-
-      // Now that we have somewhere to write _to_, start the history
-      await session.storage.addHistoryNewAccount({ user: session.user })
-      await session.storage.addHistorySpaceCreated({ user: session.user })
-
-      // Add a "welcome" credential to storage
-      await session.storage.addCredential({
-        credential: welcomeCredential,
-        user: session.user
-      })
+      // Provision collections, record the initial history, and seed the
+      // welcome credential -- the same new-wallet sequence signup runs.
+      await provisionNewWallet({ session })
       login(session)
       navigate('/dashboard')
     } catch (err) {

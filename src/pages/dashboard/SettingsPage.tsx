@@ -17,6 +17,7 @@ import { MdContentCopy } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { useInfoBox } from '@/hooks/useInfoBox'
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { getFileUrl } from '@interop/did-method-webvh'
 import { rotateWebvhUpdateKey } from '@/lib/didWebvh'
 import {
@@ -193,7 +194,11 @@ export function SettingsPage() {
   // Rotating the update key extends the append-only log with the root zcap, so
   // it needs a full (passphrase) session -- the delegated tier has no root key.
   const canRotate = session?.tier === 'full'
-  const [copiedDidWebvh, setCopiedDidWebvh] = useState(false)
+  const { copied: copiedDidWebvh, copy: copyDidWebvh } = useCopyToClipboard({
+    onError: (err: unknown) => {
+      console.error('Could not copy the did:webvh id:', err)
+    }
+  })
   const [rotateDialogOpen, setRotateDialogOpen] = useState(false)
   const [rotating, setRotating] = useState(false)
   const [rotateDone, setRotateDone] = useState(false)
@@ -203,13 +208,7 @@ export function SettingsPage() {
     if (!publishedDidWebvh) {
       return
     }
-    try {
-      await navigator.clipboard.writeText(publishedDidWebvh)
-      setCopiedDidWebvh(true)
-      setTimeout(() => setCopiedDidWebvh(false), 1500)
-    } catch (err) {
-      console.error('Could not copy the did:webvh id:', err)
-    }
+    await copyDidWebvh(publishedDidWebvh)
   }
 
   const handleRotate = async () => {

@@ -14,8 +14,9 @@
  * promptly rather than waiting out the backoff. Status is driven off
  * `active$` / `error$` into the `syncStatusStore` for the UI.
  *
- * The collection set is data-driven (`SYNCED_COLLECTIONS`): all three standard
- * collections replicate through the same adapter. The encrypted ones
+ * The collection set is data-driven (`SYNCED_COLLECTIONS`, projected from the
+ * standard collections): every standard collection replicates through the same
+ * adapter. The encrypted ones
  * (`private-credentials`, `wallet-activity`) need nothing special here -- their
  * locally stored EDV envelopes ship verbatim; encrypt/decrypt happens at the
  * storage layer's read/write time, never in the sync path.

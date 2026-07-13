@@ -19,6 +19,7 @@ import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type { Session } from '@/types/auth'
 import type { StoredCredential } from '@/types/credential'
 import { documentLoader } from '@/lib/walletRequest/composeVP'
+import { issuerId, subjectId, typeArray } from '@/lib/vcShape'
 
 /**
  * The `type` term identifying a Login Credential (both the wallet-defined type
@@ -37,41 +38,6 @@ const LOGIN_CREDENTIAL_CONTEXT = {
 } as const
 
 const VC_1_CONTEXT_URL = 'https://www.w3.org/2018/credentials/v1'
-
-/**
- * Normalizes a `type` value (string or array) to an array of strings.
- */
-function typeArray(type: unknown): string[] {
-  if (typeof type === 'string') {
-    return [type]
-  }
-  return Array.isArray(type)
-    ? (type.filter(t => typeof t === 'string') as string[])
-    : []
-}
-
-/**
- * Extracts a DID string from an issuer that may be a string or an
- * `{ id }` object.
- */
-function issuerId(issuer: unknown): string | undefined {
-  if (typeof issuer === 'string') {
-    return issuer
-  }
-  if (issuer && typeof issuer === 'object' && 'id' in issuer) {
-    const { id } = issuer as { id?: unknown }
-    return typeof id === 'string' ? id : undefined
-  }
-  return undefined
-}
-
-/**
- * The credentialSubject id of a VC, when present.
- */
-function subjectId(credential: IVerifiableCredential): string | undefined {
-  const subject = credential.credentialSubject as { id?: unknown } | undefined
-  return subject && typeof subject.id === 'string' ? subject.id : undefined
-}
 
 /**
  * Issues (signs) a self-issued Login Credential for the given username. The

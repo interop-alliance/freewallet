@@ -28,9 +28,10 @@ import {
   RP_ZCAP_TTL_MS,
   RP_ZCAP_WRITE_TTL_MS
 } from '@/app.config'
-import { loginWithPassphrase } from '@/session/initSession'
-import { persistDelegatedSession } from '@/session/delegatedSession'
-import { isStorageUnreachable } from '@/lib/storageErrors'
+import {
+  completePopupLogin,
+  mapPopupLoginError
+} from '@/session/completePopupLogin'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
 import {
@@ -44,21 +45,25 @@ import type { StoredCredential } from '@/types/credential'
 import {
   classifyRequest,
   credentialQueriesOf,
+  deliverPresentation,
   didAuthMethodSupported,
   domainMatchesOrigin,
   hasTypedExample,
+  hasZcapStorage,
+  isDidAuthOnly,
   processRequest,
   queriesOf,
   requestsCredentialType,
   resolveGrants,
   startExchange,
-  submitPresentation,
   vcApiExchangeUrl,
   vcMatchesFor,
+  ZcapUnavailableError,
   type CHAPIGetEvent,
   type IVerifiableCredential,
   type IVPRDetails,
   type IVPRQuery,
+  type IZcap,
   type ResolvedGrant,
   type WalletRequestProfile
 } from '@/lib/walletRequest'
@@ -259,44 +264,46 @@ export function WalletGetPage() {
 
   async function handleLogin(passphrase: string) {
     setLoginError(null)
+    // The shared popup login sequence (keyring resolve in remote-direct mode,
+    // account-not-found guard, delegated-session persistence, error mapping)
+    // lives in completePopupLogin; only the credential-selection work below is
+    // page-specific.
+    const result = await completePopupLogin({ passphrase, firstPartyIdb })
+    if ('errorKey' in result) {
+      setLoginError(t(result.errorKey))
+      return
+    }
+    const loggedIn = result.session
     try {
-      // Thread the first-party IndexedDB factory (from the Storage Access API
-      // flow) into the keyring lookup so its cache read/write lands in
-      // first-party storage rather than the popup's partitioned bucket; fall
-      // back to the global factory when no handle is held.
-      const { session: loggedIn, userExists } = await loginWithPassphrase({
-        passphrase,
-        idb: firstPartyIdb ?? undefined,
-        // The popup's local IndexedDB is third-party partitioned and no sync
-        // controller runs here, so read the shared credentials straight from
-        // the remote WAS collections.
-        remoteDirectStorage: true
-      })
-      if (!loggedIn || !userExists) {
-        setLoginError(t('chapi.accountNotFound'))
-        return
+      // Session creation fired `ensureUserCollections` (remote provisioning +
+      // did:web round trips) as `session.storageReady`; it and the credential
+      // list have no data dependency in remote-direct mode: the standard
+      // collections are guaranteed to exist by account signup (a popup login
+      // requires an existing account, and signup provisions them), so the list
+      // read cannot 404 on a missing collection. Await both together so the
+      // consent screen is not gated on provisioning round trips it does not
+      // need. In a pathological half-provisioned state the concurrent read can
+      // surface an error here -- an accepted trade-off for not re-serializing.
+      // When remote-direct routing is NOT in effect (guest / no-WAS fallback),
+      // the read targets the local collections `storageReady` initializes, so
+      // it must wait for them -- a fast, local-only wait.
+      let stored: StoredCredential[]
+      if (loggedIn.storage.remoteDirectActive) {
+        ;[, stored] = await Promise.all([
+          loggedIn.storageReady,
+          loggedIn.storage.listCredentials()
+        ])
+      } else {
+        await loggedIn.storageReady
+        stored = await loggedIn.storage.listCredentials()
       }
-      // ensureUserCollections (remote provisioning + did:web round trips) and
-      // the credential list have no data dependency in remote-direct mode: the
-      // standard collections are guaranteed to exist by account signup (a popup
-      // login requires an existing account, and signup provisions them), so the
-      // list read cannot 404 on a missing collection. Run both concurrently so
-      // the consent screen is not gated on provisioning round trips it does not
-      // need.
-      const [, stored] = await Promise.all([
-        loggedIn.storage.ensureUserCollections({
-          user: loggedIn.user,
-          profile: loggedIn.profile
-        }),
-        loggedIn.storage.listCredentials()
-      ])
 
       // A zcap request needs a remote Space to delegate against; a guest or a
-      // no-WAS wallet cannot fulfill it. Block before the consent screen.
-      if (
-        profile.zcapRequests.length > 0 &&
-        !loggedIn.storage.hasRemoteStorage
-      ) {
+      // no-WAS wallet cannot fulfill it. Surface it before the consent screen
+      // via the same predicate `processZcaps` guards on (which the eventual
+      // delegation would otherwise raise as `ZcapUnavailableError`), so the
+      // block does not appear only after the user clicks Continue.
+      if (profile.zcapRequests.length > 0 && !hasZcapStorage(loggedIn)) {
         setSession(loggedIn)
         setBlockReason('zcapUnavailable')
         setPageState('blocked')
@@ -331,21 +338,8 @@ export function WalletGetPage() {
 
       setSession(loggedIn)
       setPageState('selecting')
-      if (firstPartyIdb) {
-        void persistDelegatedSession({
-          session: loggedIn,
-          idb: firstPartyIdb
-        }).catch((err: unknown) => {
-          console.warn('Could not persist the delegated session:', err)
-        })
-      }
     } catch (err) {
-      if (isStorageUnreachable(err)) {
-        setLoginError(t('chapi.storageUnreachable'))
-      } else {
-        console.error('CHAPI login failed:', err)
-        setLoginError(t('chapi.loginFailed'))
-      }
+      setLoginError(t(mapPopupLoginError(err)))
     }
   }
 
@@ -360,11 +354,7 @@ export function WalletGetPage() {
    * sharing over an unlocked vault is a deliberate non-goal for now.
    */
   function handleRestoredSession(restored: Session) {
-    const didAuthOnly =
-      profile.didAuth &&
-      profile.vcQueries.length === 0 &&
-      profile.zcapRequests.length === 0
-    if (didAuthOnly && restored.profile.didWeb) {
+    if (isDidAuthOnly(profile) && restored.profile.didWeb) {
       setSession(restored)
       setPageState('selecting')
     }
@@ -398,16 +388,26 @@ export function WalletGetPage() {
       .map(({ vc }) => vc)
 
     let verifiablePresentation
+    let grantedZcaps: IZcap[]
     try {
-      ;({ verifiablePresentation } = await processRequest({
+      const response = await processRequest({
         request,
         session,
         credentialRequestOrigin: requestOrigin,
         selectedVCs
-      }))
+      })
+      verifiablePresentation = response.verifiablePresentation
+      grantedZcaps = response.zcaps ?? []
     } catch (err) {
-      console.error('CHAPI request processing failed:', err)
-      setBlockReason('processFailed')
+      // A remote Space that vanished between consent and submit surfaces the
+      // same typed error the login-time preflight guards against; map it to the
+      // matching block reason rather than the generic processing failure.
+      if (err instanceof ZcapUnavailableError) {
+        setBlockReason('zcapUnavailable')
+      } else {
+        console.error('CHAPI request processing failed:', err)
+        setBlockReason('processFailed')
+      }
       setPageState('blocked')
       return
     }
@@ -421,20 +421,14 @@ export function WalletGetPage() {
     // decline message, so an unanswered exchange expires on its own.
     if (exchangeUrl && verifiablePresentation) {
       try {
-        const reply = await submitPresentation({
+        // `deliverPresentation` owns the reply inspection (a multi-step reply is
+        // an unfinished, hence failed, delivery), the same logic
+        // `collectIssuedPresentation` uses for the issuance direction.
+        await deliverPresentation({
           request,
           exchangeUrl,
           verifiablePresentation
         })
-        // A reply carrying another request means a multi-step exchange the
-        // wallet cannot continue; the verifier has not received a complete
-        // response, so say so rather than reporting success.
-        if (reply.verifiablePresentationRequest) {
-          throw new Error(
-            'The exchange asked for a further presentation; multi-step ' +
-              'exchanges are not supported.'
-          )
-        }
       } catch (err) {
         console.error(
           'Could not deliver the presentation to the exchange:',
@@ -456,38 +450,33 @@ export function WalletGetPage() {
           : null
       )
     )
-    recordLoginHistory(verifiablePresentation)
+    recordLoginHistory(grantedZcaps)
   }
 
   /**
    * Fire-and-forget Login-activity record when the request granted storage
-   * capabilities or authenticated the user's DID. Reads the granted zcaps back
-   * off the response VP (they were embedded during compose).
+   * capabilities or authenticated the user's DID. Records the capabilities
+   * `processRequest` actually delegated (threaded out alongside the VP), rather
+   * than reading them back off the composed VP's embedded `zcap` array.
    */
-  function recordLoginHistory(verifiablePresentation: unknown) {
+  function recordLoginHistory(zcaps: IZcap[]) {
     if (!session || (!profile.didAuth && profile.zcapRequests.length === 0)) {
       return
     }
-    const vp = verifiablePresentation as
-      | {
-          zcap?: Array<{
-            id: string
-            invocationTarget: string
-            allowedAction?: string | string[]
-            expires: string
-          }>
-        }
-      | undefined
-    const grants = (vp?.zcap ?? []).map(zcap => ({
-      id: zcap.id,
-      target: zcap.invocationTarget,
-      allowedActions: Array.isArray(zcap.allowedAction)
-        ? zcap.allowedAction
-        : zcap.allowedAction
-          ? [zcap.allowedAction]
-          : [],
-      expires: zcap.expires
-    }))
+    const grants = zcaps.map(zcap => {
+      const allowedAction =
+        'allowedAction' in zcap ? zcap.allowedAction : undefined
+      return {
+        id: zcap.id,
+        target: zcap.invocationTarget,
+        allowedActions: Array.isArray(allowedAction)
+          ? allowedAction
+          : allowedAction
+            ? [allowedAction]
+            : [],
+        expires: 'expires' in zcap ? zcap.expires : ''
+      }
+    })
     void session.storage
       .addHistoryLogin({ user: session.user, origin: requestOrigin, grants })
       .catch((err: unknown) => {
@@ -518,10 +507,7 @@ export function WalletGetPage() {
     )
   }
 
-  const isDidAuthOnly =
-    profile.didAuth &&
-    profile.vcQueries.length === 0 &&
-    profile.zcapRequests.length === 0
+  const didAuthOnly = isDidAuthOnly(profile)
   // With no DID Auth to sign, no credentials picked, and no satisfiable grant,
   // Continue would compose nothing (processRequest returns `{}`) -- keep it
   // disabled so the only way out of an empty consent screen is Cancel, which
@@ -533,7 +519,7 @@ export function WalletGetPage() {
   const title =
     profile.zcapRequests.length > 0
       ? t('chapi.get.loginTitle')
-      : isDidAuthOnly
+      : didAuthOnly
         ? t('chapi.get.didAuthTitle')
         : t('chapi.get.title')
 

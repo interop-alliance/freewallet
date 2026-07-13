@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   Box,
   Button,
@@ -20,6 +19,7 @@ import {
   MdPublic
 } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { credentialDetailCardStyles as sx } from '@/styles/credentialStyles'
 import type {
   CredentialDetailActions,
@@ -153,7 +153,11 @@ export function PublicLinkDisplay({ url }: { url: string }) {
   const theme = useTheme()
   const isSmall = useMediaQuery(theme.breakpoints.down('sm'))
   const isMedium = useMediaQuery(theme.breakpoints.down('md'))
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopyToClipboard({
+    onError: (err: unknown) => {
+      console.error('Could not copy public link:', err)
+    }
+  })
 
   let maxLength = 32
   if (isSmall) {
@@ -164,13 +168,7 @@ export function PublicLinkDisplay({ url }: { url: string }) {
   const displayUrl = truncateUrl(url, maxLength)
 
   async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch (err) {
-      console.error('Could not copy public link:', err)
-    }
+    await copy(url)
   }
 
   const copyTooltip = copied ? t('credential.linkCopied') : t('common.copy')

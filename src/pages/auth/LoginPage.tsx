@@ -61,10 +61,9 @@ export function LoginPage() {
           state: { authMessageKey: 'auth.errors.profileNotFound' }
         })
       }
-      await session.storage.ensureUserCollections({
-        user: session.user,
-        profile: session.profile
-      })
+      // Session creation fired `ensureUserCollections` as `session.storageReady`;
+      // wait for the collections to be provisioned/opened before proceeding.
+      await session.storageReady
       login(session)
       navigate('/dashboard', { replace: true })
     } catch (err) {

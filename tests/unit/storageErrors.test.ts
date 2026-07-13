@@ -43,16 +43,21 @@ describe('isStorageUnreachable', () => {
   })
 
   it('returns true for a WasError (no status) wrapped via cause', () => {
-    const inner = new WasError('NetworkError when attempting to fetch resource', {
-      cause: new TypeError('NetworkError when attempting to fetch resource')
-    })
+    const inner = new WasError(
+      'NetworkError when attempting to fetch resource',
+      {
+        cause: new TypeError('NetworkError when attempting to fetch resource')
+      }
+    )
     const wrapped = new Error('Failed to configure space', { cause: inner })
     expect(isStorageUnreachable(wrapped)).toBe(true)
   })
 
   it('returns true for a WasServerError wrapped via cause', () => {
     const inner = new WasServerError('Bad Gateway', { status: 502 })
-    const wrapped = new Error('Failed to configure collection', { cause: inner })
+    const wrapped = new Error('Failed to configure collection', {
+      cause: inner
+    })
     expect(isStorageUnreachable(wrapped)).toBe(true)
   })
 

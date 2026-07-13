@@ -26,7 +26,18 @@ import { fetchKeyringSeed, KeyringRecordUnusableError } from '@/session/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
 
 const PASSPHRASE = 'correct horse battery staple'
-const fakeStorage = { isFakeStorage: true } as never
+
+/**
+ * A storage stub carrying the `ensureUserCollections` seam that session
+ * creation fires (as `session.storageReady`).
+ */
+function makeFakeStorage() {
+  return {
+    isFakeStorage: true,
+    ensureUserCollections: vi.fn().mockResolvedValue(undefined)
+  } as unknown as StorageManager
+}
+let fakeStorage = makeFakeStorage()
 
 /**
  * The did:key a seed reconstitutes to under the bootstrap parameters -- the
@@ -47,6 +58,7 @@ function randomSeed(): Uint8Array {
 }
 
 beforeEach(() => {
+  fakeStorage = makeFakeStorage()
   vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
     storage: fakeStorage,
     userExists: false
@@ -76,6 +88,31 @@ describe('loginWithPassphrase -- keyring hit', () => {
     expect(session).not.toBeNull()
     expect(session!.user.id).toBe(controller)
     expect(userExists).toBe(true)
+  })
+
+  it('fires ensureUserCollections as storageReady by default', async () => {
+    const seed = randomSeed()
+    const controller = await didFromSeed(seed)
+    vi.mocked(fetchKeyringSeed).mockResolvedValue({ seed, controller })
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+
+    expect(fakeStorage.ensureUserCollections).toHaveBeenCalledOnce()
+    expect(session!.storageReady).toBeInstanceOf(Promise)
+  })
+
+  it('forwards provisionStorage: false (the signup probe) to skip provisioning', async () => {
+    const seed = randomSeed()
+    const controller = await didFromSeed(seed)
+    vi.mocked(fetchKeyringSeed).mockResolvedValue({ seed, controller })
+
+    const { session } = await loginWithPassphrase({
+      passphrase: PASSPHRASE,
+      provisionStorage: false
+    })
+
+    expect(fakeStorage.ensureUserCollections).not.toHaveBeenCalled()
+    expect(session!.storageReady).toBeUndefined()
   })
 
   it('reports userExists: false when the data Space is missing (half-finished signup)', async () => {

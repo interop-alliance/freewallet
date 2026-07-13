@@ -32,7 +32,8 @@ vi.mock('@/stores/wasSyncPort', () => ({
 
 // Each `createWasReplication` call yields a distinct fake replication state so
 // the test can count creations and track which states get cancelled.
-const createdStates: Array<{ id: string; cancel: ReturnType<typeof vi.fn> }> = []
+const createdStates: Array<{ id: string; cancel: ReturnType<typeof vi.fn> }> =
+  []
 vi.mock('@/lib/sync', () => ({
   createWasReplication: vi.fn(({ replicationIdentifier }) => {
     const state = {
@@ -115,8 +116,12 @@ describe('SyncController lifecycle', () => {
     // Two restarts fired without awaiting the first: the queue must run them
     // one after the other, leaving exactly one live batch and no dangling
     // replications from the intermediate transition.
-    const first = syncController.restart({ session: fakeSession({ spaceId: 'A' }) })
-    const second = syncController.restart({ session: fakeSession({ spaceId: 'B' }) })
+    const first = syncController.restart({
+      session: fakeSession({ spaceId: 'A' })
+    })
+    const second = syncController.restart({
+      session: fakeSession({ spaceId: 'B' })
+    })
     await Promise.all([first, second])
 
     // Two full batches created across the two starts...

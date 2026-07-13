@@ -59,10 +59,22 @@ async function expectedDid(seed: Uint8Array): Promise<string> {
   return agent.id
 }
 
-const fakeStorage = { isFakeStorage: true } as never
+/**
+ * A storage stub carrying the `ensureUserCollections` seam that session
+ * creation now fires (as `session.storageReady`). Each call returns a fresh
+ * one so the spy assertions are per-test.
+ */
+function makeFakeStorage() {
+  return {
+    isFakeStorage: true,
+    ensureUserCollections: vi.fn().mockResolvedValue(undefined)
+  } as unknown as StorageManager
+}
+let fakeStorage = makeFakeStorage()
 
 beforeEach(() => {
   kmsServerUrl = KMS_SERVER_URL
+  fakeStorage = makeFakeStorage()
   vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
     storage: fakeStorage,
     userExists: false
@@ -171,6 +183,25 @@ describe('initSessionFromSeed', () => {
     })
   })
 
+  it('fires ensureUserCollections as session.storageReady by default', async () => {
+    const { session } = await initSessionFromSeed({ seed: randomSeed() })
+    expect(fakeStorage.ensureUserCollections).toHaveBeenCalledWith({
+      user: session.user,
+      profile: session.profile
+    })
+    expect(session.storageReady).toBeInstanceOf(Promise)
+    await expect(session.storageReady).resolves.toBeUndefined()
+  })
+
+  it('skips provisioning (no storageReady) when provisionStorage is false', async () => {
+    const { session } = await initSessionFromSeed({
+      seed: randomSeed(),
+      provisionStorage: false
+    })
+    expect(fakeStorage.ensureUserCollections).not.toHaveBeenCalled()
+    expect(session.storageReady).toBeUndefined()
+  })
+
   it('reports userExists for a returning identity', async () => {
     vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
       storage: fakeStorage,
@@ -242,6 +273,10 @@ describe('initGuestSession', () => {
     expect(StorageManager.initStorageClients).toHaveBeenCalledWith(
       expect.objectContaining({ isGuest: true })
     )
+    // Guest is a new-wallet flow: provisioning is owned by provisionNewWallet,
+    // so session creation must not fire ensureUserCollections.
+    expect(fakeStorage.ensureUserCollections).not.toHaveBeenCalled()
+    expect(session.storageReady).toBeUndefined()
   })
 
   it('derives a fresh random identity per guest session', async () => {

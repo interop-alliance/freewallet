@@ -5,6 +5,7 @@
  * the basis for the WAS spaceId.
  */
 import { canonicalize as jcsCanonicalize } from 'json-canonicalize'
+import { base64urlnopad } from '@scure/base'
 
 /**
  * Create a CID (Content-addressed Identifier) from a given JSON object
@@ -24,11 +25,16 @@ export async function digestHash(original: string) {
   return await globalThis.crypto.subtle.digest('SHA-256', msgUint8)
 }
 
-export function bufferToBase64Url(buffer: ArrayBuffer) {
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte)
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+/**
+ * Encodes raw bytes as an unpadded, URL-safe base64 string. Accepts either an
+ * ArrayBuffer or a Uint8Array; both are normalized to a byte view for the
+ * codec. Output is byte-for-byte the unpadded base64url that every CID,
+ * dbPrefix, and spaceId depends on.
+ *
+ * @param buffer {ArrayBuffer | Uint8Array}
+ * @returns {string}
+ */
+export function bufferToBase64Url(buffer: ArrayBuffer | Uint8Array) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
+  return base64urlnopad.encode(bytes)
 }

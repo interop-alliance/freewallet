@@ -122,6 +122,15 @@ export class StorageManager {
   }
 
   /**
+   * Public view of {@link _effectiveRemoteDirect}, for callers that must know
+   * where reads actually route (e.g. whether a read depends on the local
+   * collections that `ensureUserCollections` initializes).
+   */
+  get remoteDirectActive(): boolean {
+    return this._effectiveRemoteDirect
+  }
+
+  /**
    * Whether the encrypted collections are locked: true in a restored
    * (`delegated` tier) session whose vault KAK could not be recovered from
    * the session vault envelope (fail closed -- absent, expired, or unusable
@@ -863,6 +872,43 @@ export class StorageManager {
   }
 
   /**
+   * Records (in the `wallet-activity` collection) a single credential activity.
+   * Backs the four `addHistoryCredential*` wrappers, which differ only in the
+   * activity type and the summary verb.
+   *
+   * @param options {object}
+   * @param options.cid {string} - CID of the credential (used as history object id).
+   * @param options.user {User} - Session user object (used to record history object actor).
+   * @param options.type {string} - the activity type, e.g. 'Create' | 'Delete'.
+   * @param options.verb {string} - the summary verb, e.g. 'created' | 'deleted'.
+   * @returns {Promise<void>}
+   */
+  private async _addCredentialActivity({
+    cid,
+    user,
+    type,
+    verb
+  }: {
+    cid: string
+    user: User
+    type: string
+    verb: string
+  }) {
+    const resourceId = uuidv7()
+    await this._addHistoryItem({
+      resourceId,
+      activity: {
+        id: resourceId,
+        type: [type],
+        summary: `Credential ${verb}: ${cid}`,
+        actor: { email: user.email },
+        object: cid,
+        created: new Date().toISOString()
+      }
+    })
+  }
+
+  /**
    * Records (in the `wallet-activity` collection) the Create activity for
    * a credential.
    *
@@ -877,19 +923,14 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    const resourceId = uuidv7()
-    await this._addHistoryItem({
-      resourceId,
-      activity: {
-        id: resourceId,
-        type: ['Create'],
-        summary: 'Credential created: ' + cid,
-        actor: { email: user.email },
-        object: cid,
-        created: new Date().toISOString()
-      }
+    await this._addCredentialActivity({
+      cid,
+      user,
+      type: 'Create',
+      verb: 'created'
     })
   }
+
   /**
    * Records (in the `wallet-activity` collection) the Delete activity for
    * a credential.
@@ -905,17 +946,11 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    const resourceId = uuidv7()
-    await this._addHistoryItem({
-      resourceId,
-      activity: {
-        id: resourceId,
-        type: ['Delete'],
-        summary: 'Credential deleted: ' + cid,
-        actor: { email: user.email },
-        object: cid,
-        created: new Date().toISOString()
-      }
+    await this._addCredentialActivity({
+      cid,
+      user,
+      type: 'Delete',
+      verb: 'deleted'
     })
   }
 
@@ -927,17 +962,11 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async addHistoryCredentialShared({ cid, user }: { cid: string; user: User }) {
-    const resourceId = uuidv7()
-    await this._addHistoryItem({
-      resourceId,
-      activity: {
-        id: resourceId,
-        type: ['Share'],
-        summary: 'Credential shared: ' + cid,
-        actor: { email: user.email },
-        object: cid,
-        created: new Date().toISOString()
-      }
+    await this._addCredentialActivity({
+      cid,
+      user,
+      type: 'Share',
+      verb: 'shared'
     })
   }
 
@@ -955,17 +984,11 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    const resourceId = uuidv7()
-    await this._addHistoryItem({
-      resourceId,
-      activity: {
-        id: resourceId,
-        type: ['Unshare'],
-        summary: 'Credential unshared: ' + cid,
-        actor: { email: user.email },
-        object: cid,
-        created: new Date().toISOString()
-      }
+    await this._addCredentialActivity({
+      cid,
+      user,
+      type: 'Unshare',
+      verb: 'unshared'
     })
   }
 

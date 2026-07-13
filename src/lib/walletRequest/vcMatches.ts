@@ -7,33 +7,7 @@
 import type { StoredCredential } from '@/types/credential'
 import { credentialQueriesOf } from './classify'
 import type { ICredentialQuery, IQueryByExample } from './types'
-
-/**
- * Normalizes a `type` value (string or array) to an array of strings.
- */
-function typeArray(type: unknown): string[] {
-  if (typeof type === 'string') {
-    return [type]
-  }
-  return Array.isArray(type)
-    ? (type.filter(entry => typeof entry === 'string') as string[])
-    : []
-}
-
-/**
- * Extracts a DID / id string from an issuer value that may be a string or an
- * `{ id }` object.
- */
-function issuerId(issuer: unknown): string | undefined {
-  if (typeof issuer === 'string') {
-    return issuer
-  }
-  if (issuer && typeof issuer === 'object' && 'id' in issuer) {
-    const { id } = issuer as { id?: unknown }
-    return typeof id === 'string' ? id : undefined
-  }
-  return undefined
-}
+import { issuerId, typeArray } from '@/lib/vcShape'
 
 /**
  * Whether a stored VC matches a single QueryByExample `example`: every type

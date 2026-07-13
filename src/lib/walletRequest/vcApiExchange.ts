@@ -145,10 +145,69 @@ export async function beginExchange({
 }
 
 /**
+ * Reply inspection shared by both exchange directions (a verifier collecting the
+ * wallet's presentation, an issuer offering credentials back). This wallet
+ * answers a single round, so a reply carrying a further
+ * `verifiablePresentationRequest` is a multi-step exchange it cannot continue:
+ * throw rather than pretend the exchange closed. A reply without one is a
+ * completed round and returns normally.
+ *
+ * @param options {object}
+ * @param options.reply {VCAPIExchangeResponse}
+ * @param options.exchangeUrl {string}
+ * @returns {void}
+ */
+function assertExchangeComplete({
+  reply,
+  exchangeUrl
+}: {
+  reply: VCAPIExchangeResponse
+  exchangeUrl: string
+}): void {
+  if (reply.verifiablePresentationRequest) {
+    throw new Error(
+      `The exchange at ${exchangeUrl} asked for a further presentation; ` +
+        'multi-step exchanges are not supported.'
+    )
+  }
+}
+
+/**
+ * Delivers the wallet's composed presentation to a verifier's exchange and
+ * confirms the exchange finished. The exchange, not the CHAPI channel, is the
+ * verifier's system of record, so an unfinished (multi-step) reply is a failed
+ * delivery: `assertExchangeComplete` throws and the caller reports it rather
+ * than pretending the response was received.
+ *
+ * @param options {object}
+ * @param options.request {IVPRDetails} - The VPR the exchange handed back.
+ * @param options.exchangeUrl {string}
+ * @param options.verifiablePresentation {IVerifiablePresentation}
+ * @returns {Promise<void>}
+ */
+export async function deliverPresentation({
+  request,
+  exchangeUrl,
+  verifiablePresentation
+}: {
+  request: IVPRDetails
+  exchangeUrl: string
+  verifiablePresentation: IVerifiablePresentation
+}): Promise<void> {
+  const reply = await submitPresentation({
+    request,
+    exchangeUrl,
+    verifiablePresentation
+  })
+  assertExchangeComplete({ reply, exchangeUrl })
+}
+
+/**
  * Answers an issuance exchange's holder-binding step: POSTs the wallet's
  * DID-Auth presentation and collects the credentials the issuer hands back in
  * return. A reply carrying yet another `verifiablePresentationRequest` means a
- * further round this wallet does not answer.
+ * further round this wallet does not answer (rejected by
+ * `assertExchangeComplete`).
  *
  * @param options {object}
  * @param options.request {IVPRDetails} - The VPR the exchange opened with.
@@ -174,12 +233,7 @@ export async function collectIssuedPresentation({
   if (reply.verifiablePresentation) {
     return reply.verifiablePresentation
   }
-  if (reply.verifiablePresentationRequest) {
-    throw new Error(
-      `The exchange at ${exchangeUrl} asked for a further presentation; ` +
-        'multi-step exchanges are not supported.'
-    )
-  }
+  assertExchangeComplete({ reply, exchangeUrl })
   throw new Error(
     `The exchange at ${exchangeUrl} offered no verifiablePresentation.`
   )
@@ -211,11 +265,13 @@ export function presentationEndpointFor({
 }
 
 /**
- * Delivers the wallet's composed presentation to the exchange. The exchange is
- * complete unless the reply carries a further `verifiablePresentationRequest`,
- * which a multi-step exchange uses to ask for more; this wallet answers a single
- * round, so the caller inspects the reply and reports an unfinished exchange
- * rather than pretending it closed.
+ * Delivers the wallet's composed presentation to the exchange and returns the
+ * raw reply. The exchange is complete unless the reply carries a further
+ * `verifiablePresentationRequest`, which a multi-step exchange uses to ask for
+ * more; this wallet answers a single round, so the finalize helpers
+ * (`deliverPresentation`, `collectIssuedPresentation`) inspect the reply via
+ * `assertExchangeComplete` and report an unfinished exchange rather than
+ * pretending it closed.
  *
  * @param options {object}
  * @param options.request {IVPRDetails} - The VPR the exchange handed back.

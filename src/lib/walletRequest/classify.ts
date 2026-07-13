@@ -16,9 +16,9 @@ import type {
   IVerifiableCredential,
   IVerifiablePresentation,
   IZcapQuery,
-  WalletAPIMessage,
   WalletRequestProfile
 } from './types'
+import { typeArray } from '@/lib/vcShape'
 
 /**
  * The protocol handles a verifier offers alongside a CHAPI request. Only
@@ -78,18 +78,6 @@ export interface CHAPIStoreEvent {
 
 const VC_1_CONTEXT_URL = 'https://www.w3.org/2018/credentials/v1'
 const VC_2_CONTEXT_URL = 'https://www.w3.org/ns/credentials/v2'
-
-/**
- * Normalizes a `type` value (string or array) to an array of strings.
- */
-function typeArray(type: unknown): string[] {
-  if (typeof type === 'string') {
-    return [type]
-  }
-  return Array.isArray(type)
-    ? type.filter((entry): entry is string => typeof entry === 'string')
-    : []
-}
 
 /**
  * Wraps a bare Verifiable Credential in an unsigned Verifiable Presentation,
@@ -195,20 +183,6 @@ export function classifyCHAPIStoreEvent(event: CHAPIStoreEvent): IVPOffer {
     verifiablePresentation: offeredPresentation(event.credential),
     credentialRequestOrigin: event.credentialRequestOrigin
   }
-}
-
-/**
- * Type guard: the message is an offer of a credential for storage.
- */
-export function isVPOffer(message: WalletAPIMessage): message is IVPOffer {
-  return 'verifiablePresentation' in message
-}
-
-/**
- * Type guard: the message is a request for credentials / DID Authentication.
- */
-export function isVPRequest(message: WalletAPIMessage): message is IVPRequest {
-  return 'verifiablePresentationRequest' in message
 }
 
 /**
@@ -323,6 +297,23 @@ export function classifyRequest(request: IVPRDetails): WalletRequestProfile {
     ),
     zcapRequests: zcapQueriesOf(queries)
   }
+}
+
+/**
+ * Whether a classified request is DID-Authentication *only*: it asks the wallet
+ * to prove control of its DID and nothing else (no credential queries, no
+ * capability requests). Derived from the profile so the popup's restore
+ * fast-path and its render both dispatch on the one predicate.
+ *
+ * @param profile {WalletRequestProfile}
+ * @returns {boolean}
+ */
+export function isDidAuthOnly(profile: WalletRequestProfile): boolean {
+  return (
+    profile.didAuth &&
+    profile.vcQueries.length === 0 &&
+    profile.zcapRequests.length === 0
+  )
 }
 
 /**

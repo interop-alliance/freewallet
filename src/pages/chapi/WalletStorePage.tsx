@@ -23,9 +23,10 @@ import type {
   IVerifiablePresentation
 } from '@interop/data-integrity-core'
 import { MEDIATOR_BASE } from '@/app.config'
-import { loginWithPassphrase } from '@/session/initSession'
-import { persistDelegatedSession } from '@/session/delegatedSession'
-import { isStorageUnreachable } from '@/lib/storageErrors'
+import {
+  completePopupLogin,
+  mapPopupLoginError
+} from '@/session/completePopupLogin'
 import type { Session } from '@/types/auth'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
@@ -204,27 +205,21 @@ export function WalletStorePage() {
 
   async function handleLogin(passphrase: string) {
     setLoginError(null)
+    // The shared popup login sequence (keyring resolve in remote-direct mode,
+    // account-not-found guard, delegated-session persistence, error mapping)
+    // lives in completePopupLogin; only the offer-handling work below is
+    // page-specific.
+    const result = await completePopupLogin({ passphrase, firstPartyIdb })
+    if ('errorKey' in result) {
+      setLoginError(t(result.errorKey))
+      return
+    }
+    const s = result.session
     try {
-      // Thread the first-party IndexedDB factory (from the Storage Access API
-      // flow) into the keyring lookup so its cache read/write lands in
-      // first-party storage rather than the popup's partitioned bucket; fall
-      // back to the global factory when no handle is held.
-      const { session: s, userExists } = await loginWithPassphrase({
-        passphrase,
-        idb: firstPartyIdb ?? undefined,
-        // The popup's local IndexedDB is third-party partitioned and no sync
-        // controller runs here, so route credential + history operations
-        // straight to the remote WAS collections.
-        remoteDirectStorage: true
-      })
-      if (!s || !userExists) {
-        setLoginError(t('chapi.accountNotFound'))
-        return
-      }
-      await s.storage.ensureUserCollections({
-        user: s.user,
-        profile: s.profile
-      })
+      // Session creation fired `ensureUserCollections` as `session.storageReady`;
+      // wait for the collections to be provisioned/opened before storing into
+      // them.
+      await s.storageReady
       setSession(s)
       if (pendingDIDAuth) {
         setPageState('authenticating')
@@ -232,20 +227,8 @@ export function WalletStorePage() {
       } else {
         setPageState('confirming')
       }
-      if (firstPartyIdb) {
-        void persistDelegatedSession({ session: s, idb: firstPartyIdb }).catch(
-          (err: unknown) => {
-            console.warn('Could not persist the delegated session:', err)
-          }
-        )
-      }
     } catch (err) {
-      if (isStorageUnreachable(err)) {
-        setLoginError(t('chapi.storageUnreachable'))
-      } else {
-        console.error('CHAPI login failed:', err)
-        setLoginError(t('chapi.loginFailed'))
-      }
+      setLoginError(t(mapPopupLoginError(err)))
     }
   }
 

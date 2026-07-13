@@ -28,6 +28,7 @@
  * Write grants (any action beyond GET/HEAD) are delegated for a shorter TTL
  * than read-only grants.
  */
+import { generateZcapUri } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
 import {
   ID_COLLECTION,
@@ -145,6 +146,21 @@ export class ZcapRequiresFullSessionError extends Error {
     super(message)
     this.name = 'ZcapRequiresFullSessionError'
   }
+}
+
+/**
+ * Whether a session can back a zcap request at all: it must have a remote WAS
+ * Space (both a remote store and a resolved `spaceUrl`) to delegate against.
+ * This is the exact condition `processZcaps` enforces before delegating (it
+ * throws `ZcapUnavailableError` otherwise), exposed so a caller can surface the
+ * same block earlier -- before showing consent -- without re-deriving (and
+ * under-specifying) the guard.
+ *
+ * @param session {Session}
+ * @returns {boolean}
+ */
+export function hasZcapStorage(session: Session): boolean {
+  return !!session.storage.hasRemoteStorage && !!session.storage.spaceUrl
 }
 
 const UNSATISFIABLE: ResolvedTarget = {
@@ -343,15 +359,16 @@ export async function processZcaps({
   ttlMs?: number
   writeTtlMs?: number
 }): Promise<IZcap[]> {
-  if (!session.storage.hasRemoteStorage || !session.storage.spaceUrl) {
+  if (!hasZcapStorage(session)) {
     throw new ZcapUnavailableError()
   }
   if (session.tier !== 'full' || !session.profile.keyAgent) {
     throw new ZcapRequiresFullSessionError()
   }
 
-  const spaceUrl = session.storage.spaceUrl
-  const spaceRootCapability = `urn:zcap:root:${encodeURIComponent(spaceUrl)}`
+  // `hasZcapStorage` above guarantees a resolved `spaceUrl`.
+  const spaceUrl = session.storage.spaceUrl!
+  const spaceRootCapability = await generateZcapUri({ url: spaceUrl })
   const now = Date.now()
   const { zcapClient } = session.profile
 

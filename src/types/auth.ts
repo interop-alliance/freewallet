@@ -119,6 +119,15 @@ export interface Session {
   user: User
   profile: ControllerProfile
   storage: StorageManager
+  // Resolves once the session's collections have been provisioned/opened by
+  // the session-creation seam (`initSessionFromSeed` for a fresh login,
+  // `restoreDelegatedSession` for a restored one). It is fired -- not awaited
+  // -- inside session creation, so hot post-login reads (the CHAPI popup's
+  // credential list) can run concurrently with provisioning; callers that need
+  // provisioning finished `await session.storageReady`. Absent on the
+  // new-wallet flows (signup, guest), whose provisioning is owned by
+  // `provisionNewWallet` in a deliberate order.
+  storageReady?: Promise<void>
   expires?: string // ISO date string, matches Auth.js convention
   isGuest: boolean
   // `full`: passphrase-derived root key present (fresh login). `delegated`:

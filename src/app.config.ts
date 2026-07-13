@@ -74,17 +74,6 @@ export const WAS_SYNC_BATCH_SIZE = env.VITE_WAS_SYNC_BATCH_SIZE
   ? Number(env.VITE_WAS_SYNC_BATCH_SIZE)
   : undefined
 
-// The WAS collections replicated by the sync controller: all three standard
-// collections, through the same collection-agnostic adapter. All are immutable
-// per item and content-addressed -- `public-credentials` plaintext (keyed by
-// credential cid), the other two as EDV envelopes (keyed by a hash of the JWE
-// ciphertext); the adapter ships the stored bodies verbatim either way.
-export const SYNCED_COLLECTIONS: Array<{ key: string; id: string }> = [
-  { key: 'privateCredentials', id: 'private-credentials' },
-  { key: 'publicCredentials', id: 'public-credentials' },
-  { key: 'walletActivity', id: 'wallet-activity' }
-]
-
 export const WALLET_STANDARD_COLLECTIONS: Array<{
   key: string
   id: string
@@ -114,6 +103,17 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
     encryption: { scheme: 'edv' }
   }
 ]
+
+// The WAS collections replicated by the sync controller: every standard
+// collection, projected down to the (key, id) pair the collection-agnostic
+// adapter needs. Every WALLET_STANDARD_COLLECTIONS entry syncs -- the `id`
+// collection (below) is deliberately kept out of that list and so out of this
+// one. All synced collections are immutable per item and content-addressed --
+// `public-credentials` plaintext (keyed by credential cid), the encrypted ones
+// as EDV envelopes (keyed by a hash of the JWE ciphertext); the adapter ships
+// the stored bodies verbatim either way.
+export const SYNCED_COLLECTIONS: Array<{ key: string; id: string }> =
+  WALLET_STANDARD_COLLECTIONS.map(({ key, id }) => ({ key, id }))
 /**
  * The `id` collection: a standard-on-the-server collection that holds the
  * user's published DID document (`did.json`) and its key-id map

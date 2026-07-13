@@ -122,5 +122,8 @@ export async function processRequest({
     cryptosuite,
     zcaps
   })
-  return { verifiablePresentation }
+  // Return the delegated capabilities alongside the VP so the caller can log
+  // exactly what was granted from these objects, rather than reading them back
+  // off the composed VP.
+  return { verifiablePresentation, zcaps }
 }

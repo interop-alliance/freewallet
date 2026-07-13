@@ -49,6 +49,7 @@ import {
   WAS_SERVER_URL
 } from '@/app.config'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
+import { singleKeyResolver } from '@/lib/keyResolver'
 import { createEdvDocCipher } from '@/stores/edvDocCipher'
 import {
   deleteKeyringCache,
@@ -80,20 +81,6 @@ type UnlockKdf = {
 export interface KeyringSeed {
   seed: Uint8Array
   controller: string
-}
-
-/**
- * Encodes raw bytes as an unpadded base64url string.
- *
- * @param bytes {Uint8Array}
- * @returns {string}
- */
-function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = ''
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte)
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
 }
 
 /**
@@ -187,16 +174,7 @@ async function deriveUnlockIdentity({
     X25519KeyAgreementKey2020.fromEd25519VerificationKey2020({
       keyPair: agent.getVerificationKeyPair()
     })
-  const keyResolver: IKeyResolver = async ({ id }: { id?: string }) => {
-    if (id !== keyAgreementKey.id) {
-      throw new Error(`Unknown key id "${id}".`)
-    }
-    return {
-      id: keyAgreementKey.id,
-      type: keyAgreementKey.type,
-      publicKeyMultibase: keyAgreementKey.publicKeyMultibase
-    }
-  }
+  const keyResolver: IKeyResolver = singleKeyResolver({ keyAgreementKey })
 
   const spaceId = bufferToBase64Url(await digestHash(agent.id))
   return { agent, zcapClient, keyAgreementKey, keyResolver, spaceId }
@@ -231,7 +209,7 @@ async function wrapSeed({
   })
   const { envelope } = await cipher.encrypt({
     data: {
-      seed: bytesToBase64Url(seed),
+      seed: bufferToBase64Url(seed),
       controller,
       createdAt: new Date().toISOString()
     }

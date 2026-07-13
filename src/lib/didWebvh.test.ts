@@ -133,7 +133,7 @@ describe('kmsUpdateKeySigner', () => {
     })
 
     const result = await createDID({
-      domain: 'localhost:8080',
+      address: 'localhost:8080',
       paths: ['space', SPACE_ID, 'id'],
       signer,
       updateKeys: [active.publicKeyMultibase],
@@ -654,7 +654,7 @@ describe('decision 5: Multikey webDoc shape', () => {
     const controllerTemplate = `did:webvh:{SCID}:localhost%3A8080:space:${SPACE_ID}:id`
 
     const result = await createDID({
-      domain: 'localhost:8080',
+      address: 'localhost:8080',
       paths: ['space', SPACE_ID, 'id'],
       signer,
       updateKeys: [active.publicKeyMultibase],
@@ -832,7 +832,7 @@ describe('updateDID sparse semantics (rotation pin)', () => {
     const staged = await inMemoryKey()
     const controllerTemplate = `did:webvh:{SCID}:localhost%3A8080:space:${SPACE_ID}:id`
     const created = await createDID({
-      domain: 'localhost:8080',
+      address: 'localhost:8080',
       paths: ['space', SPACE_ID, 'id'],
       signer: kmsUpdateKeySigner({
         key: active.keyPair.signer(),

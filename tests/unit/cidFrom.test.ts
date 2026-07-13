@@ -20,6 +20,12 @@ describe('bufferToBase64Url', () => {
   it('returns an empty string for an empty buffer', () => {
     expect(bufferToBase64Url(new ArrayBuffer(0))).toBe('')
   })
+
+  it('accepts a Uint8Array directly and matches its ArrayBuffer', () => {
+    const bytes = new Uint8Array([0, 255, 128])
+    expect(bufferToBase64Url(bytes)).toBe('AP-A')
+    expect(bufferToBase64Url(bytes)).toBe(bufferToBase64Url(bytes.buffer))
+  })
 })
 
 describe('cidFrom', () => {

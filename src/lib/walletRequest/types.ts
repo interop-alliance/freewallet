@@ -17,12 +17,6 @@ import type {
 } from '@interop/data-integrity-core'
 
 /**
- * The union of VC API message types the wallet can classify. Zcap and exchange
- * invitation / issue request messages are deferred to later work.
- */
-export type WalletAPIMessage = IVPRequest | IVPOffer
-
-/**
  * "I'm offering the following credentials" -- a Verifiable Presentation offered
  * to the wallet for storage.
  *
@@ -153,11 +147,15 @@ export type ICapabilityQueryDetail = {
 /**
  * The wallet's response to a request, delivered by whichever transport received
  * it (CHAPI `respondWith`, a future exchange-URL POST, etc). Delegated zcaps
- * ride *inside* the response VP (as a `zcap` array, embedded before signing),
- * so this shape stays credential-presentation only.
+ * ride *inside* the response VP (as a `zcap` array, embedded before signing);
+ * they are also threaded back out here as `zcaps` -- the same objects that were
+ * delegated -- so a caller can record exactly what was granted without
+ * re-parsing the VP's (compose-shape-coupled) `zcap` array. Empty or absent
+ * when the request granted no capabilities.
  */
 export type WalletResponse = {
   verifiablePresentation?: IVerifiablePresentation
+  zcaps?: IZcap[]
 }
 
 /**

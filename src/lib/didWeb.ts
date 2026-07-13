@@ -14,6 +14,7 @@ import type { KeystoreAgent } from '@interop/webkms-client'
 import type { ISigner } from '@interop/data-integrity-core'
 import type { Session } from '@/types/auth'
 import { DID_DOCUMENT_RESOURCE, DID_KEYS_RESOURCE } from '@/app.config'
+import { getKmsSignFunction, kmsSignFunction } from '@/lib/kms'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
 /**
@@ -83,12 +84,13 @@ export function didWebFromSpace({
 }
 
 /**
- * The `publicKeyMultibase` a verification-method id carries in its fragment.
- * The KMS expanded `#{publicKeyMultibase}` at generate time, so the fragment
- * IS the multibase key (no separate key-description fetch needed).
+ * The bare `publicKeyMultibase` a KMS key alias or verification-method id
+ * carries in its fragment. The KMS expanded `#{publicKeyMultibase}` at generate
+ * time, so the fragment IS the multibase key (no separate key-description fetch
+ * needed).
  */
-function multibaseOf(vmId: string): string {
-  return vmId.slice(vmId.lastIndexOf('#') + 1)
+export function multibaseOf(id: string): string {
+  return id.slice(id.lastIndexOf('#') + 1)
 }
 
 /**
@@ -261,24 +263,24 @@ export async function ensureDidWeb({
 }
 
 /**
- * Wraps a KMS `AsymmetricKey` as a plain `{ id, algorithm, sign }` signer. The
- * wrapper is essential, not cosmetic: the data-integrity suites shallow-spread
- * the signer (`{ ...signer }`), which would drop `AsymmetricKey.sign` (a
- * prototype method). `id` is overridden to the verification-method id so the
- * proof names the right `verificationMethod`; `algorithm` satisfies the suite's
- * `Ed25519` check.
+ * Wraps a KMS-backed `sign` closure as a plain `{ id, algorithm, sign }`
+ * signer. `id` is overridden to the verification-method id so the proof names
+ * the right `verificationMethod`; `algorithm` satisfies the suite's `Ed25519`
+ * check. The `sign` closure comes from `kmsSignFunction`, which re-expresses the
+ * KMS key's prototype `sign` method as an own property so the data-integrity
+ * suites' shallow spread (`{ ...signer }`) preserves it.
  */
 function signerFromKey({
-  key,
+  sign,
   vmId
 }: {
-  key: AsymmetricKey
+  sign: (input: { data: Uint8Array }) => Promise<Uint8Array>
   vmId: string
 }): ISigner {
   return {
     id: vmId,
     algorithm: 'Ed25519',
-    sign: ({ data }: { data: Uint8Array }) => key.sign({ data })
+    sign
   } as unknown as ISigner
 }
 
@@ -310,12 +312,12 @@ export async function kmsAuthenticationSigner({
 
   // Full tier: root key controls the keystore.
   if (keystoreAgent) {
-    const key = await keystoreAgent.getAsymmetricKey({
+    const sign = await getKmsSignFunction({
+      keystoreAgent,
       id: vmId,
-      kmsId: kmsKeyId,
-      type: ED25519_VM_TYPE
+      kmsKeyId
     })
-    return signerFromKey({ key, vmId })
+    return signerFromKey({ sign, vmId })
   }
 
   // Delegated tier: sign with the session key over the persisted keystore
@@ -332,7 +334,7 @@ export async function kmsAuthenticationSigner({
       kmsClient: new KmsClient({ keystoreId })
     })
     key.capability = keystoreCapability
-    return signerFromKey({ key, vmId })
+    return signerFromKey({ sign: kmsSignFunction({ key }), vmId })
   }
 
   return undefined

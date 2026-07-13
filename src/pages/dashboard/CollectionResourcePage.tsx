@@ -26,6 +26,7 @@ import { PublicAccessIcon } from '@/components/storage/PublicAccessIcon'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
 import { cidFrom } from '@/lib/cidFrom'
+import { downloadBlob } from '@/lib/downloadBlob'
 
 export function CollectionResourcePage() {
   const { t } = useTranslation()
@@ -201,14 +202,7 @@ export function CollectionResourcePage() {
       return
     }
     const blob = new Blob([jsonText], { type: 'application/json' })
-    const blobUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = `${resourceId}.json`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(blobUrl)
+    downloadBlob({ blob, filename: `${resourceId}.json` })
   }, [jsonText, resourceId])
 
   const handleDelete = useCallback(async () => {

@@ -30,11 +30,11 @@ import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
 import { bindPassphrase } from '@/session/keyring'
+import { provisionNewWallet } from '@/session/provisionNewWallet'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { useAuthStore } from '@/stores/authStore'
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
 import { PASSWORD_RULES } from '@/app.config'
-import { welcomeCredential } from '@/fixtures/welcomeCredential'
 import { registerWallet } from '@/lib/registerWallet'
 import type { AuthLocationState } from '@/types/auth'
 
@@ -85,10 +85,12 @@ export function SignupPage() {
       // passphrase through the keyring and reports whether this identity already
       // has a wallet; probing (rather than binding a raw seed straight away) is
       // what prevents a re-signup with an existing passphrase from overwriting
-      // that account's keyring and orphaning the wallet.
+      // that account's keyring and orphaning the wallet. The probe session is
+      // discarded after reading `userExists`, so it must not provision.
       const probe = await loginWithPassphrase({
         passphrase,
-        email: email || undefined
+        email: email || undefined,
+        provisionStorage: false
       })
       if (probe.userExists) {
         return navigate('/login', {
@@ -100,11 +102,14 @@ export function SignupPage() {
       // (unrecoverable without the keyring), so bind the passphrase BEFORE
       // creating the data Space: an account whose keyring failed to publish
       // must not be created, and binding first means a failed signup leaves no
-      // orphaned data Space behind.
+      // orphaned data Space behind. Session creation therefore does not
+      // provision (`provisionStorage: false`); `provisionNewWallet` runs the
+      // ordered provisioning sequence only after the bind succeeds.
       const seed = crypto.getRandomValues(new Uint8Array(32))
       const { session } = await initSessionFromSeed({
         seed,
-        email: email || undefined
+        email: email || undefined,
+        provisionStorage: false
       })
       await bindPassphrase({
         seed,
@@ -112,20 +117,9 @@ export function SignupPage() {
         passphrase
       })
 
-      // Create Space and init collections
-      await session.storage.ensureUserCollections({
-        user: session.user,
-        profile: session.profile
-      })
-      // Now that we have somewhere to write _to_, start the history
-      await session.storage.addHistoryNewAccount({ user: session.user })
-      await session.storage.addHistorySpaceCreated({ user: session.user })
-
-      // Add a "welcome" credential to storage
-      await session.storage.addCredential({
-        credential: welcomeCredential,
-        user: session.user
-      })
+      // Provision collections, record the initial history, and seed the
+      // welcome credential.
+      await provisionNewWallet({ session })
       login(session)
       navigate('/dashboard')
     } catch (err) {

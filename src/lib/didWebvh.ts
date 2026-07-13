@@ -41,7 +41,9 @@ import {
   DID_LOG_RESOURCE,
   ID_COLLECTION
 } from '@/app.config'
+import { multibaseOf } from '@/lib/didWeb'
 import type { DidWebKey, DidWebKeyMap } from '@/lib/didWeb'
+import { getKmsSignFunction } from '@/lib/kms'
 import { loadSessionRecord, saveSessionRecord } from '@/lib/sessionKey'
 import type { PersistedSessionRecord } from '@/session/delegatedSession'
 import type { Session } from '@/types/auth'
@@ -163,17 +165,17 @@ export function kmsUpdateKeySigner({
 }): Signer {
   return signerFromExternalKey({
     publicKeyMultibase,
-    sign: ({ data }) => key.sign({ data })
+    sign: async ({ data }) => {
+      const signature = await key.sign({ data })
+      // Re-wrap as a plain Uint8Array: a signer may return a Node Buffer (or
+      // a cross-realm view), which the library's strict byte check rejects.
+      return new Uint8Array(
+        signature.buffer,
+        signature.byteOffset,
+        signature.byteLength
+      )
+    }
   })
-}
-
-/**
- * The bare `publicKeyMultibase` a KMS key alias or verification-method id
- * carries in its fragment (the KMS expanded `#{publicKeyMultibase}` at generate
- * time, so the fragment IS the multibase key).
- */
-function multibaseOf(id: string): string {
-  return id.slice(id.lastIndexOf('#') + 1)
 }
 
 /**
@@ -278,13 +280,13 @@ async function updateKeySigner({
   keystoreAgent: KeystoreAgent
   updateKey: WebvhUpdateKey
 }): Promise<Signer> {
-  const key = await keystoreAgent.getAsymmetricKey({
+  const sign = await getKmsSignFunction({
+    keystoreAgent,
     id: `did:key:${updateKey.publicKeyMultibase}#${updateKey.publicKeyMultibase}`,
-    kmsId: updateKey.kmsKeyId,
-    type: 'Ed25519VerificationKey2020'
+    kmsKeyId: updateKey.kmsKeyId
   })
   return kmsUpdateKeySigner({
-    key,
+    key: { sign },
     publicKeyMultibase: updateKey.publicKeyMultibase
   })
 }
@@ -326,7 +328,7 @@ async function createWebvhLog({
     assembleWebvhVerificationMethods({ controllerTemplate, didWebKeys })
 
   const result = await createDID({
-    domain: host,
+    address: host,
     paths: ['space', spaceId, ID_COLLECTION.id],
     signer,
     updateKeys: [webvh.updateKey.publicKeyMultibase],

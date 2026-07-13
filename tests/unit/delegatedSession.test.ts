@@ -94,6 +94,16 @@ function persistedRecord(
   }
 }
 
+/**
+ * A restored-session storage stub carrying the `ensureUserCollections` seam
+ * that `restoreDelegatedSession` fires as `session.storageReady`.
+ */
+function delegatedStorageStub() {
+  return {
+    ensureUserCollections: vi.fn().mockResolvedValue(undefined)
+  } as unknown as StorageManager
+}
+
 beforeEach(() => {
   vi.mocked(sessionKey.getOrCreateSessionKeyPair).mockResolvedValue(fakeKeyPair)
   vi.mocked(sessionKey.loadSessionKeyPair).mockResolvedValue(fakeKeyPair)
@@ -227,7 +237,7 @@ describe('persistDelegatedSession', () => {
 describe('restoreDelegatedSession', () => {
   it('reconstitutes a delegated-tier session from a valid record', async () => {
     vi.mocked(sessionKey.loadSessionRecord).mockResolvedValue(persistedRecord())
-    const storage = {} as never
+    const storage = delegatedStorageStub()
     const initSpy = vi
       .spyOn(StorageManager, 'initDelegatedStorageClients')
       .mockResolvedValue({ storage })
@@ -236,6 +246,11 @@ describe('restoreDelegatedSession', () => {
 
     expect(session).not.toBeNull()
     expect(session?.tier).toBe('delegated')
+    // Session creation fires ensureUserCollections as storageReady.
+    expect(storage.ensureUserCollections).toHaveBeenCalledWith({
+      user: session!.user
+    })
+    expect(session?.storageReady).toBeInstanceOf(Promise)
     expect(session?.isGuest).toBe(false)
     expect(session?.user).toEqual({
       id: 'did:key:z6MkRoot',
@@ -265,7 +280,7 @@ describe('restoreDelegatedSession', () => {
     })
     const initSpy = vi
       .spyOn(StorageManager, 'initDelegatedStorageClients')
-      .mockResolvedValue({ storage: {} as never })
+      .mockResolvedValue({ storage: delegatedStorageStub() })
 
     const session = await restoreDelegatedSession()
 
@@ -287,7 +302,7 @@ describe('restoreDelegatedSession', () => {
     vi.mocked(unwrapVaultEnvelope).mockResolvedValue(null)
     const initSpy = vi
       .spyOn(StorageManager, 'initDelegatedStorageClients')
-      .mockResolvedValue({ storage: {} as never })
+      .mockResolvedValue({ storage: delegatedStorageStub() })
 
     const session = await restoreDelegatedSession()
 
@@ -301,7 +316,7 @@ describe('restoreDelegatedSession', () => {
   it('restores through a supplied IDBFactory (the popup storage-access handle)', async () => {
     vi.mocked(sessionKey.loadSessionRecord).mockResolvedValue(persistedRecord())
     vi.spyOn(StorageManager, 'initDelegatedStorageClients').mockResolvedValue({
-      storage: {} as never
+      storage: delegatedStorageStub()
     })
     const idb = {} as IDBFactory
 

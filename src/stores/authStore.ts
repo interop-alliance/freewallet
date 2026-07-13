@@ -74,10 +74,13 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         await import('@/session/delegatedSession')
       const session = await restoreDelegatedSession()
       if (session) {
-        // Opens the local RxDB collections (and rebuilds the remote
-        // collection map) so pages and replication find them, exactly as a
-        // fresh login does -- without any remote provisioning writes.
-        await session.storage.ensureUserCollections({ user: session.user })
+        // Session creation (restoreDelegatedSession) already fired
+        // `ensureUserCollections` as `session.storageReady`, opening the local
+        // RxDB collections and rebuilding the remote collection map so pages
+        // and replication find them, exactly as a fresh login does -- without
+        // any remote provisioning writes. Wait for it before treating the
+        // session as ready.
+        await session.storageReady
         set({ session })
         publishStorageSeam(session)
         // At boot the controller singleton is freshly constructed, so no prior

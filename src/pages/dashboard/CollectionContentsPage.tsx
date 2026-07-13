@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Dialog from '@mui/material/Dialog'
@@ -29,6 +29,8 @@ import {
   type FetchedCollectionResource
 } from '@/lib/storageResource'
 import { extensionFromMime } from '@/lib/extensionFromMime'
+import { downloadBlob } from '@/lib/downloadBlob'
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { ResourceTable } from '@/components/storage/ResourceTable'
 import { PublicAccessIcon } from '@/components/storage/PublicAccessIcon'
 import { StorageEmptyState } from '@/components/storage/EmptyState'
@@ -61,29 +63,25 @@ export function CollectionContentsPage() {
     useState<FetchedCollectionResource | null>(null)
   const [resourceLoading, setResourceLoading] = useState(false)
   const [resourceError, setResourceError] = useState<string | null>(null)
-  const [snippetCopied, setSnippetCopied] = useState(false)
-
-  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const {
+    copied: snippetCopied,
+    copy: copySnippet,
+    reset: resetSnippetCopied
+  } = useCopyToClipboard({
+    resetDelay: 2000,
+    fallbackToExecCommand: true,
+    onError: (err: unknown) => {
+      console.warn('Copy to clipboard failed:', err)
+    }
+  })
 
   const clearResourcePreview = useCallback(() => {
     setSelectedResource(null)
     setResourcePayload(null)
     setResourceError(null)
     setResourceLoading(false)
-    setSnippetCopied(false)
-    if (copyResetTimerRef.current) {
-      clearTimeout(copyResetTimerRef.current)
-      copyResetTimerRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      if (copyResetTimerRef.current) {
-        clearTimeout(copyResetTimerRef.current)
-      }
-    }
-  }, [])
+    resetSnippetCopied()
+  }, [resetSnippetCopied])
 
   const [previousCollectionId, setPreviousCollectionId] = useState(collectionId)
   if (previousCollectionId !== collectionId) {
@@ -92,7 +90,7 @@ export function CollectionContentsPage() {
     setResourcePayload(null)
     setResourceError(null)
     setResourceLoading(false)
-    setSnippetCopied(false)
+    resetSnippetCopied()
   }
 
   useEffect(() => {
@@ -156,7 +154,7 @@ export function CollectionContentsPage() {
       setResourcePayload(null)
       setResourceError(null)
       setResourceLoading(true)
-      setSnippetCopied(false)
+      resetSnippetCopied()
       try {
         const body = await storage.fetchCollectionResource(resource)
         if (
@@ -178,7 +176,7 @@ export function CollectionContentsPage() {
         setResourceLoading(false)
       }
     },
-    [collectionId, navigate, storage, t]
+    [collectionId, navigate, resetSnippetCopied, storage, t]
   )
 
   const snippetText = useMemo(() => {
@@ -204,38 +202,8 @@ export function CollectionContentsPage() {
     if (!snippetText) {
       return
     }
-    const markCopied = () => {
-      setSnippetCopied(true)
-      if (copyResetTimerRef.current) {
-        clearTimeout(copyResetTimerRef.current)
-      }
-      copyResetTimerRef.current = setTimeout(() => {
-        setSnippetCopied(false)
-        copyResetTimerRef.current = null
-      }, 2000)
-    }
-    try {
-      await navigator.clipboard.writeText(snippetText)
-      markCopied()
-      return
-    } catch {
-      /* fall through */
-    }
-    try {
-      const ta = document.createElement('textarea')
-      ta.value = snippetText
-      ta.setAttribute('readonly', '')
-      ta.style.position = 'fixed'
-      ta.style.left = '-9999px'
-      document.body.appendChild(ta)
-      ta.select()
-      document.execCommand('copy')
-      document.body.removeChild(ta)
-      markCopied()
-    } catch (err) {
-      console.warn('Copy to clipboard failed:', err)
-    }
-  }, [snippetText])
+    await copySnippet(snippetText)
+  }, [copySnippet, snippetText])
 
   const handleDownloadResource = useCallback(() => {
     if (!resourcePayload || !collectionId) {
@@ -255,14 +223,7 @@ export function CollectionContentsPage() {
     } else {
       return
     }
-    const blobUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = fname
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(blobUrl)
+    downloadBlob({ blob, filename: fname })
   }, [collectionId, resourcePayload, selectedResource?.id, snippetText])
 
   const resourcePreviewTitle = selectedResource

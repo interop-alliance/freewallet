@@ -29,7 +29,7 @@
  * leaves the vault locked while envelope replication and public/plaintext
  * reads still work.
  */
-import { ZcapClient } from '@interop/ezcap'
+import { generateZcapUri, ZcapClient } from '@interop/ezcap'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import { KmsClient } from '@interop/webkms-client'
 import type { IZcap } from '@interop/data-integrity-core'
@@ -125,7 +125,7 @@ export async function persistDelegatedSession({
   const { did: sessionDid } = await sessionKeySigner({ keyPair })
 
   const expires = new Date(Date.now() + SESSION_ZCAP_TTL_MS)
-  const spaceRootCapability = `urn:zcap:root:${encodeURIComponent(spaceUrl)}`
+  const spaceRootCapability = await generateZcapUri({ url: spaceUrl })
 
   // All five delegations are independent, pure signing operations (no server
   // round trip), so they run concurrently under Promise.all. A rejection from
@@ -168,7 +168,7 @@ export async function persistDelegatedSession({
     keystoreId = keystoreAgent.keystoreId
     const signTarget = didWeb?.keys.authentication.kmsKeyId ?? keystoreId
     keystorePromise = zcapClient.delegate({
-      capability: `urn:zcap:root:${encodeURIComponent(keystoreId)}`,
+      capability: await generateZcapUri({ url: keystoreId }),
       invocationTarget: signTarget,
       controller: sessionDid,
       allowedActions: ['sign'],
@@ -286,8 +286,18 @@ export async function restoreDelegatedSession({
     vaultKeys: vaultKeys ?? undefined
   })
 
+  // Fold provisioning into the session-creation seam, matching the fresh-login
+  // path: fire (do not await) `ensureUserCollections` and expose it as
+  // `session.storageReady`. For a delegated session this only opens the local
+  // RxDB collections and rebuilds the remote collection-URL map (the full
+  // session that delegated already provisioned the Space; the session
+  // capabilities could not authorize provisioning writes anyway), so it is
+  // free of remote provisioning writes.
+  const storageReady = storage.ensureUserCollections({ user })
+
   return {
     user,
+    storageReady,
     profile: {
       zcapClient,
       keystoreId: record.keystoreId,

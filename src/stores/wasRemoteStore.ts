@@ -48,7 +48,7 @@ import { errorStatus } from '@/stores/wasSyncPort'
  * Map from logical collection name to its WAS base URL.
  * Expected keys: 'privateCredentials' | 'publicCredentials' | 'walletActivity'
  */
-export type ICollectionsSet = Map<string, { url: string }>
+export type ICollectionsSet = Map<string, string>
 
 /**
  * The parsed components of a WAS resource/collection URL
@@ -112,14 +112,6 @@ export class WASRemoteStore {
     this.controller = controller
     this.spaceUrl = new URL(`/space/${spaceId}`, storageServerUrl).toString()
     this._sessionCapabilities = sessionCapabilities
-  }
-
-  /**
-   * Whether this store invokes delegated session capabilities (a restored
-   * `delegated` tier session) rather than root capabilities.
-   */
-  get isDelegated(): boolean {
-    return !!this._sessionCapabilities
   }
 
   /**
@@ -274,14 +266,14 @@ export class WASRemoteStore {
    * @returns {string}
    */
   collectionUrl(collectionId: string): string {
-    const collection = this.collections?.get(collectionId)
-    if (!collection) {
+    const collectionUrl = this.collections?.get(collectionId)
+    if (!collectionUrl) {
       throw new Error(
         `Collection "${collectionId}" is not initialized. ` +
           'Call ensureUserCollections() first.'
       )
     }
-    return collection.url
+    return collectionUrl
   }
 
   async userExists() {
@@ -301,7 +293,7 @@ export class WASRemoteStore {
     if (this._sessionCapabilities) {
       const collections: ICollectionsSet = new Map()
       for (const { key, id } of WALLET_STANDARD_COLLECTIONS) {
-        collections.set(key, { url: this._collectionBaseUrl(id) })
+        collections.set(key, this._collectionBaseUrl(id))
       }
       this.collections = collections
       return
@@ -357,7 +349,7 @@ export class WASRemoteStore {
             { cause: err }
           )
         }
-        collections.set(key, { url: this._collectionBaseUrl(id) })
+        collections.set(key, this._collectionBaseUrl(id))
       }
     )
 
@@ -838,10 +830,6 @@ export class WASRemoteStore {
         method: 'GET',
         capability: this.sessionCapabilityFor()
       })
-
-      if (response.status === 404 || response.status === 501) {
-        return null
-      }
 
       return response.data as SpaceQuotaReport
     } catch (err) {
