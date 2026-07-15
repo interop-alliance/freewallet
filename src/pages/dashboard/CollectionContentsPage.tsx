@@ -44,12 +44,13 @@ import { downloadBlob } from '@/lib/downloadBlob'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { ResourceTable } from '@/components/storage/ResourceTable'
 import { PublicAccessIcon } from '@/components/storage/PublicAccessIcon'
+import { EncryptedAccessIcon } from '@/components/storage/EncryptedAccessIcon'
 import { StorageEmptyState } from '@/components/storage/EmptyState'
 import {
   getCollectionDisplayName,
-  getResourceDisplayName
+  getResourceDisplayName,
+  isEncryptedCollection
 } from '@/components/storage/displayUtils'
-import { ID_COLLECTION, WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 
 export function CollectionContentsPage() {
   const { t } = useTranslation()
@@ -346,6 +347,12 @@ export function CollectionContentsPage() {
                   <Box component="span" sx={storageStyles.folderMetaPublic}>
                     {' · '}
                     <PublicAccessIcon />
+                  </Box>
+                )}
+                {collection && isEncryptedCollection(collection) && (
+                  <Box component="span" sx={storageStyles.folderMetaEncrypted}>
+                    {' · '}
+                    <EncryptedAccessIcon />
                   </Box>
                 )}
               </Typography>

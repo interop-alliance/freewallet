@@ -788,6 +788,27 @@ export const storageStyles = {
     display: 'inline',
     whiteSpace: 'nowrap'
   },
+  encryptedAccessMeta: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 0.25,
+    color: 'info.main',
+    verticalAlign: 'middle'
+  },
+  encryptedAccessMetaIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    lineHeight: 0
+  },
+  encryptedAccessMetaLabel: {
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    color: 'inherit'
+  },
+  folderMetaEncrypted: {
+    display: 'inline',
+    whiteSpace: 'nowrap'
+  },
   folderName: {
     fontWeight: 600,
     overflow: 'hidden',

@@ -258,6 +258,7 @@
     "exportError": "Could not export space. Please try again.",
     "collectionBackend": "Default (WAS)",
     "publicAccess": "Public Readable",
+    "encrypted": "Encrypted",
     "resourceCount": "{{count}} resources",
     "emptyCollectionsTitle": "No collections yet",
     "emptyCollectionsDescription": "Collections will appear here once your wallet creates storage folders.",

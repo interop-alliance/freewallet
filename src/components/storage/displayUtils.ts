@@ -1,6 +1,10 @@
 import type { TFunction } from 'i18next'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
-import { KNOWN_EXTENSIONS, COMMON_CONTENT_TYPES } from '@/app.config'
+import {
+  KNOWN_EXTENSIONS,
+  COMMON_CONTENT_TYPES,
+  WALLET_STANDARD_COLLECTIONS
+} from '@/app.config'
 
 export function getCollectionDisplayName(
   collection: StorageCollection
@@ -9,6 +13,18 @@ export function getCollectionDisplayName(
     return collection.name
   }
   return collection.id
+}
+
+/**
+ * Whether a collection is one of the standard wallet collections stored as
+ * client-side-encrypted EDV envelopes. The server's collection listing
+ * carries no encryption marker, so this is resolved against the client's own
+ * catalogue rather than `collection` itself.
+ */
+export function isEncryptedCollection(collection: StorageCollection): boolean {
+  return WALLET_STANDARD_COLLECTIONS.some(
+    entry => entry.id === collection.id && entry.encryption
+  )
 }
 
 export function getResourceDisplayName(resource: StorageResource): string {
