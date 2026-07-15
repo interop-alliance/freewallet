@@ -733,6 +733,13 @@ export class StorageManager {
     await this._remoteStore.ensureCollection({ id, name, isPublic })
   }
 
+  async deleteCollection({ id }: { id: string }): Promise<void> {
+    if (!this._remoteStore) {
+      throw new Error('Deleting a collection requires remote storage.')
+    }
+    await this._remoteStore.deleteCollection({ id })
+  }
+
   async ensureUserCollections({
     user,
     profile

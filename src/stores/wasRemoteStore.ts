@@ -556,6 +556,26 @@ export class WASRemoteStore {
   }
 
   /**
+   * Deletes an entire collection (and all resources within it) from this
+   * user's Space. Idempotent.
+   *
+   * @param options {object}
+   * @param options.id {string}   the WAS collection id
+   * @returns {Promise<void>}
+   */
+  async deleteCollection({ id }: { id: string }): Promise<void> {
+    try {
+      await this.was.space(this.spaceId).collection(id).delete()
+    } catch (err) {
+      console.error(`Error deleting collection "${id}":`, err)
+      throw new Error(
+        `Error deleting collection "${id}" in space "${this.spaceId}".`,
+        { cause: err }
+      )
+    }
+  }
+
+  /**
    * Builds the trailing-slash base URL of a collection within this user's
    * space, suitable for use as a stable identifier (e.g. in history entries).
    *

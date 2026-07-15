@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
 import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Paper from '@mui/material/Paper'
@@ -16,6 +19,7 @@ import {
   MdArrowBack,
   MdClose,
   MdContentCopy,
+  MdDeleteOutline,
   MdDownload,
   MdFolder,
   MdFolderOpen
@@ -23,8 +27,12 @@ import {
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { JsonHighlight } from '@/components/JsonHighlight'
 import { useAuthStore } from '@/stores/authStore'
+import { showToast } from '@/stores/toastStore'
 import { storageStyles } from '@/styles/appStyles'
-import { credentialDetailStyles } from '@/styles/credentialStyles'
+import {
+  credentialDetailCardStyles,
+  credentialDetailStyles
+} from '@/styles/credentialStyles'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import type { Json } from '@/lib/sync'
 import {
@@ -41,6 +49,7 @@ import {
   getCollectionDisplayName,
   getResourceDisplayName
 } from '@/components/storage/displayUtils'
+import { ID_COLLECTION, WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 
 export function CollectionContentsPage() {
   const { t } = useTranslation()
@@ -59,6 +68,10 @@ export function CollectionContentsPage() {
   const [resources, setResources] = useState<StorageResource[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [errorKey, setErrorKey] = useState<string | null>(null)
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deletingCollection, setDeletingCollection] = useState(false)
+  const [deleteCollectionError, setDeleteCollectionError] = useState(false)
 
   const [selectedResource, setSelectedResource] =
     useState<StorageResource | null>(null)
@@ -255,6 +268,27 @@ export function CollectionContentsPage() {
     downloadBlob({ blob, filename: fname })
   }, [collectionId, resourcePayload, selectedResource?.id, snippetText])
 
+  const handleDeleteCollection = useCallback(async () => {
+    if (!storage?.hasRemoteStorage || !collectionId) {
+      return
+    }
+    setDeleteCollectionError(false)
+    setDeletingCollection(true)
+    try {
+      await storage.deleteCollection({ id: collectionId })
+      showToast({ message: t('storage.collectionDeleted') })
+      navigate('/storage')
+    } catch (err) {
+      console.error('Failed to delete collection:', err)
+      setDeleteCollectionError(true)
+      setDeletingCollection(false)
+      return
+    } finally {
+      setDeletingCollection(false)
+      setDeleteDialogOpen(false)
+    }
+  }, [collectionId, navigate, storage, t])
+
   const resourcePreviewTitle = selectedResource
     ? getResourceDisplayName(selectedResource)
     : ''
@@ -297,7 +331,7 @@ export function CollectionContentsPage() {
           <Box sx={storageStyles.contentsTitleIcon} aria-hidden>
             <MdFolder />
           </Box>
-          <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+          <Stack spacing={0.25} sx={{ minWidth: 0, flex: 1 }}>
             <Typography variant="h5" sx={storageStyles.contentsTitle}>
               {folderDisplayName}
             </Typography>
@@ -317,9 +351,30 @@ export function CollectionContentsPage() {
               </Typography>
             )}
           </Stack>
+          {collection && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<MdDeleteOutline size={18} />}
+              onClick={() => setDeleteDialogOpen(true)}
+              sx={{
+                ...credentialDetailCardStyles.deleteButton,
+                flexShrink: 0,
+                alignSelf: 'center'
+              }}
+            >
+              {t('storage.deleteCollection')}
+            </Button>
+          )}
         </Stack>
 
         <Box sx={storageStyles.contentsBody}>
+          {deleteCollectionError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {t('storage.deleteCollectionError')}
+            </Alert>
+          )}
+
           {isLoading && (
             <Typography variant="body1" sx={storageStyles.statusText}>
               {t('storage.loadingResources')}
@@ -483,6 +538,41 @@ export function CollectionContentsPage() {
               sx={credentialDetailStyles.codeBlock}
             />
           </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={deleteDialogOpen}
+          onClose={() => {
+            if (!deletingCollection) {
+              setDeleteDialogOpen(false)
+            }
+          }}
+        >
+          <DialogTitle>{t('storage.deleteCollectionConfirmTitle')}</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              {t('storage.deleteCollectionConfirm', {
+                name: folderDisplayName,
+                count: collection?.totalItems ?? resources.length
+              })}
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions sx={{ gap: 1, px: 3, pb: 2 }}>
+            <Button
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deletingCollection}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              onClick={() => void handleDeleteCollection()}
+              color="error"
+              variant="contained"
+              disabled={deletingCollection}
+            >
+              {t('storage.deleteCollection')}
+            </Button>
+          </DialogActions>
         </Dialog>
       </Box>
     </DashboardLayout>
