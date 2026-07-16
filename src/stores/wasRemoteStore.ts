@@ -700,8 +700,16 @@ export class WASRemoteStore {
     // serial loop, so the N probes overlap instead of waiting one-by-one.
     return await Promise.all(
       items.map(async item => {
-        const isPublic = await this._collectionFromUrl(item.url).isPublic()
-        return { ...item, isPublic }
+        const handle = this._collectionFromUrl(item.url)
+        const [isPublic, description] = await Promise.all([
+          handle.isPublic(),
+          handle.describe()
+        ])
+        return {
+          ...item,
+          isPublic,
+          isEncrypted: Boolean(description?.encryption)
+        }
       })
     )
   }

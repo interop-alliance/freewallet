@@ -18,6 +18,7 @@ export type StorageCollection = {
   type?: string[]
   totalItems?: number
   isPublic?: boolean
+  isEncrypted?: boolean
 }
 
 export type StorageCollectionList = {

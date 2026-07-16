@@ -48,8 +48,7 @@ import { EncryptedAccessIcon } from '@/components/storage/EncryptedAccessIcon'
 import { StorageEmptyState } from '@/components/storage/EmptyState'
 import {
   getCollectionDisplayName,
-  getResourceDisplayName,
-  isEncryptedCollection
+  getResourceDisplayName
 } from '@/components/storage/displayUtils'
 
 export function CollectionContentsPage() {
@@ -349,7 +348,7 @@ export function CollectionContentsPage() {
                     <PublicAccessIcon />
                   </Box>
                 )}
-                {collection && isEncryptedCollection(collection) && (
+                {collection?.isEncrypted && (
                   <Box component="span" sx={storageStyles.folderMetaEncrypted}>
                     {' · '}
                     <EncryptedAccessIcon />

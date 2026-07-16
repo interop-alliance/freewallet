@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { MdFolder, MdFolderOpen } from 'react-icons/md'
 import type { StorageCollection } from '@/lib/storage'
 import { storageStyles } from '@/styles/appStyles'
-import { getCollectionDisplayName, isEncryptedCollection } from './displayUtils'
+import { getCollectionDisplayName } from './displayUtils'
 import { PublicAccessIcon } from './PublicAccessIcon'
 import { EncryptedAccessIcon } from './EncryptedAccessIcon'
 import { StorageEmptyState } from './EmptyState'
@@ -95,7 +95,7 @@ function CollectionFolderCard({
                   <PublicAccessIcon />
                 </Box>
               )}
-              {isEncryptedCollection(collection) && (
+              {collection.isEncrypted && (
                 <Box component="span" sx={storageStyles.folderMetaEncrypted}>
                   {' · '}
                   <EncryptedAccessIcon />
