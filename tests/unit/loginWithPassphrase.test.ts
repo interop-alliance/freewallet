@@ -24,6 +24,7 @@ vi.mock('@/stores/storageManager', () => ({
 import { StorageManager } from '@/stores/storageManager'
 import { fetchKeyringSeed, KeyringRecordUnusableError } from '@/session/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
+import { ensureKeystore } from '@/lib/kms'
 
 const PASSPHRASE = 'correct horse battery staple'
 
@@ -63,6 +64,7 @@ beforeEach(() => {
     storage: fakeStorage,
     userExists: false
   })
+  vi.mocked(ensureKeystore).mockResolvedValue(undefined as never)
   vi.mocked(fetchKeyringSeed).mockReset()
 })
 

@@ -41,17 +41,21 @@ describe('WASRemoteStore.listCollections', () => {
       items
     })
     const isPublic = vi.fn().mockResolvedValue(false)
-    const collection = vi.fn().mockReturnValue({ isPublic })
+    const describeCollection = vi.fn().mockResolvedValue({})
+    const collection = vi
+      .fn()
+      .mockReturnValue({ isPublic, describe: describeCollection })
     const store = storeWithStubbedClient({
       space: vi.fn().mockReturnValue({ collections, collection })
     })
 
     await expect(store.listCollections()).resolves.toEqual([
-      { ...items[0], isPublic: false }
+      { ...items[0], isPublic: false, isEncrypted: false }
     ])
     expect(collections).toHaveBeenCalledOnce()
     expect(collection).toHaveBeenCalledWith('private-credentials')
     expect(isPublic).toHaveBeenCalledOnce()
+    expect(describeCollection).toHaveBeenCalledOnce()
   })
 
   it('returns an empty array when the space is missing', async () => {
