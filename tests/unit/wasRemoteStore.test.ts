@@ -355,6 +355,63 @@ describe('WASRemoteStore.initClient', () => {
   })
 })
 
+describe('WASRemoteStore.ensureCollection', () => {
+  it('configures a plaintext collection and skips setPublic by default', async () => {
+    const configure = vi.fn().mockResolvedValue(undefined)
+    const setPublic = vi.fn().mockResolvedValue(undefined)
+    const collection = vi.fn().mockReturnValue({ configure, setPublic })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collection })
+    })
+
+    await store.ensureCollection({ id: 'example-app-data' })
+    expect(collection).toHaveBeenCalledWith('example-app-data')
+    // No encryption marker: the collection is provisioned plaintext.
+    expect(configure).toHaveBeenCalledWith({
+      name: 'example-app-data',
+      force: true
+    })
+    expect(setPublic).not.toHaveBeenCalled()
+  })
+
+  it('sets a collection-level PublicCanRead policy with isPublic', async () => {
+    const configure = vi.fn().mockResolvedValue(undefined)
+    const setPublic = vi.fn().mockResolvedValue(undefined)
+    const collection = vi.fn().mockReturnValue({ configure, setPublic })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collection })
+    })
+
+    await store.ensureCollection({ id: 'example-app-public', isPublic: true })
+    expect(configure).toHaveBeenCalledWith({
+      name: 'example-app-public',
+      force: true
+    })
+    expect(setPublic).toHaveBeenCalledOnce()
+  })
+
+  it('wraps a setPublic failure in the provisioning error', async () => {
+    const configure = vi.fn().mockResolvedValue(undefined)
+    const setPublic = vi.fn().mockRejectedValue(new Error('policy boom'))
+    const collection = vi.fn().mockReturnValue({ configure, setPublic })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collection })
+    })
+
+    await expect(
+      store.ensureCollection({ id: 'example-app-public', isPublic: true })
+    ).rejects.toThrow(/Error provisioning collection/)
+  })
+
+  it('refuses to provision in the delegated tier', async () => {
+    const store = storeWithStubbedClient({}, SESSION_CAPABILITIES)
+
+    await expect(
+      store.ensureCollection({ id: 'example-app-public', isPublic: true })
+    ).rejects.toThrow(/delegated session cannot provision/)
+  })
+})
+
 describe('WASRemoteStore.ensureUserCollections', () => {
   it('throws if space creation fails', async () => {
     const store = storeWithStubbedClient({

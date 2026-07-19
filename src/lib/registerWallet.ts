@@ -3,6 +3,19 @@ import { installHandler } from 'web-credential-handler'
 import { DEPLOY_URL, MEDIATOR_BASE } from '@/app.config'
 
 /**
+ * The native WebAuthn `create()`, bound to its container before the CHAPI
+ * polyfill runs (this module always loads before the polyfill does). The
+ * polyfill wraps `navigator.credentials` in a Proxy and installs its own
+ * bound `get`/`store` -- but `create` falls through the Proxy's default trap
+ * as an unbound native method, so calling it post-polyfill throws
+ * `TypeError: Illegal invocation`, breaking every passkey registration.
+ * `registerWallet` re-attaches this bound original after the polyfill loads.
+ */
+const nativeCredentialsCreate = navigator.credentials?.create?.bind(
+  navigator.credentials
+)
+
+/**
  * Reads the current 'credentialhandler' permission state from the mediator
  * without prompting the user. The polyfill attaches its permission manager to
  * `navigator.credentialsPolyfill` once `loadOnce` has run.
@@ -46,6 +59,12 @@ export async function registerWallet(): Promise<void> {
   console.log(`Registering wallet at ${mediatedWalletUrl}...`)
   try {
     await loadOnce(mediatedWalletUrl)
+    if (nativeCredentialsCreate) {
+      // Restore a working WebAuthn `create` on the polyfill's Proxy (its set
+      // trap lands this on the underlying native container, shadowing the
+      // prototype method the Proxy would otherwise return unbound).
+      navigator.credentials.create = nativeCredentialsCreate
+    }
     if ((await queryHandlerPermission()) === 'granted') {
       console.log('Wallet already registered with browser.')
       return

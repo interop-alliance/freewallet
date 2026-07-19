@@ -21,6 +21,24 @@ See:
 
 ### Supported Features
 
+#### Passkey unlock
+
+Alongside the passphrase, an account can be unlocked with a **passkey**
+(WebAuthn). You can sign up with a passkey, log in with one, and add, rename,
+or remove passkeys from Settings. A passkey is a peer unlock method with full
+account control -- not a second factor -- and is phishing-resistant because it
+is bound to the app's origin. There is no login server and no server-side
+WebAuthn verification: the passkey's PRF-extension output feeds a key
+derivation that unlocks the wallet locally, so nothing about the passkey is
+stored or checked remotely. Passkey unlock needs the WebAuthn PRF extension,
+which some browsers and platforms do not provide; the passphrase is always
+offered as a fallback. Settings shows a Synced / Sync available / Not synced
+badge per passkey, since a not-synced passkey lost with its device cannot
+recover the wallet. See [`public/docs/passkeys.md`](public/docs/passkeys.md)
+for the full compatibility and recovery story. Optionally set
+`VITE_PASSKEY_RP_ID` to scope passkeys across subdomains (changing the origin
+or RP ID orphans every registered passkey).
+
 ### Tech Stack
 
 Development:
@@ -59,6 +77,7 @@ All are optional; the app runs without any set (local storage, no remote server)
 | `VITE_SESSION_VAULT_TTL_HOURS`      | _(zcap TTL)_                               | Lifetime of the session vault envelope minted at login (refresh-surviving vault unlock).                                                                                                                                                                                             |
 | `VITE_REQUIRE_PASSPHRASE_FOR_VAULT` | `false`                                    | When `true`, skips minting the session vault envelope: restored sessions always come back with the vault locked.                                                                                                                                                                     |
 | `VITE_KEYRING_CACHE_TTL_HOURS`      | `168`                                      | Offline-fallback lifetime of the locally cached keyring record when a WAS server is configured (the remote copy is consulted first on every login). No effect in no-WAS deployments, where the cache is the keyring's only copy.                                                     |
+| `VITE_PASSKEY_RP_ID`                | _(none)_                                   | WebAuthn Relying Party ID for passkey ceremonies. When unset, the page origin's registrable domain applies. **Changing the origin or the RP ID orphans every registered passkey.**                                                                                                   |
 | `VITE_RP_ZCAP_TTL_HOURS`            | `720`                                      | Lifetime of a read-only capability delegated to a relying party on an approved "Login with Wallet" zcap request. Expiry is the sole limiter on RP grants (no Space-side revocation endpoint).                                                                                        |
 | `VITE_RP_ZCAP_WRITE_TTL_HOURS`      | `168`                                      | Lifetime of a _write_ capability delegated to a relying party (a grant on an RP-provisioned collection whose actions go beyond GET/HEAD). Deliberately shorter than the read-only TTL.                                                                                               |
 | `VITE_SERVER_URL`                   | `http://localhost:5173`                    | This app's own URL (used for CHAPI registration).                                                                                                                                                                                                                                    |

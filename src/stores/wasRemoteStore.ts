@@ -29,6 +29,8 @@ import {
   ID_COLLECTION,
   KEYRING_COLLECTION,
   KEYRING_RESOURCE,
+  UNLOCK_METHODS_COLLECTION,
+  UNLOCK_METHODS_RESOURCE,
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
@@ -499,23 +501,32 @@ export class WASRemoteStore {
 
   /**
    * Provisions an arbitrary (RP-requested) collection in this user's Space:
-   * plaintext and non-public -- usable by a relying party through its delegated
-   * zcap, but not world-readable. This is the `ensureUserCollections` pattern
-   * minus the encryption marker and `setPublic`. Full-tier only: a delegated
-   * session holds no capability to (re)configure the Space, and only a fresh
-   * passphrase login provisions on the RP's behalf.
+   * always plaintext (no encryption marker) -- usable by a relying party
+   * through its delegated zcap. By default it is not world-readable; with
+   * `isPublic`, a collection-level `PublicCanRead` policy is set at
+   * provisioning time, so anyone on the web can read it without
+   * authorization (writes stay capability-only). Policy endpoints are
+   * capability-only on the server, so only the wallet -- holding the space
+   * root -- can set it. This is the `ensureUserCollections` pattern minus the
+   * encryption marker. Full-tier only: a delegated session holds no
+   * capability to (re)configure the Space, and only a fresh passphrase login
+   * provisions on the RP's behalf.
    *
    * @param options {object}
    * @param options.id {string}   the WAS collection id (validated by the caller)
    * @param [options.name] {string}   display name; defaults to the id
+   * @param [options.isPublic] {boolean}   set a collection-level PublicCanRead
+   *   policy after configuring
    * @returns {Promise<string>}   the collection's base URL
    */
   async ensureCollection({
     id,
-    name
+    name,
+    isPublic
   }: {
     id: string
     name?: string
+    isPublic?: boolean
   }): Promise<string> {
     if (this._sessionCapabilities) {
       throw new Error(
@@ -524,15 +535,16 @@ export class WASRemoteStore {
       )
     }
     try {
+      const collection = this.was.space(this.spaceId).collection(id)
       // `force`: this provisioning upsert runs with the root capability, so
       // a 404 from the pre-merge describe means the collection is absent.
-      await this.was
-        .space(this.spaceId)
-        .collection(id)
-        .configure({
-          name: name ?? id,
-          force: true
-        })
+      await collection.configure({
+        name: name ?? id,
+        force: true
+      })
+      if (isPublic) {
+        await collection.setPublic()
+      }
     } catch (err) {
       console.error(`Error provisioning collection "${id}":`, err)
       throw new Error(
@@ -1038,4 +1050,140 @@ export async function deleteUnlockSpace({
 }): Promise<void> {
   const was = unlockSpaceClient({ storageServerUrl, zcapClient })
   await was.space(spaceId).delete()
+}
+
+/**
+ * Deletes an unlock Space with an explicitly attached management capability,
+ * rather than by root invocation. The `zcapClient` here is the DATA identity's
+ * (not the unlock identity's); the attached `capability` -- the management zcap
+ * the unlock identity delegated to the data identity at bind time -- is what
+ * authorizes the DELETE against the unlock Space. This is the tap-free
+ * revocation path for a lost unlock method: the data identity can retire it
+ * without re-deriving the unlock identity from the (possibly lost) secret. A
+ * 404 is treated as success (idempotent -- the Space is already gone).
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}   the data identity's client
+ * @param options.spaceId {string}   the unlock Space id
+ * @param options.capability {IZcap}   the delegated management zcap
+ * @returns {Promise<void>}
+ */
+export async function deleteUnlockSpaceWithCapability({
+  storageServerUrl,
+  zcapClient,
+  spaceId,
+  capability
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+  spaceId: string
+  capability: IZcap
+}): Promise<void> {
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  try {
+    await was.request({
+      capability,
+      path: `/space/${spaceId}`,
+      method: 'DELETE'
+    })
+  } catch (err) {
+    if (errorStatus(err) === 404) {
+      return
+    }
+    throw err
+  }
+}
+
+/**
+ * Ensures the `unlock-methods` collection exists in the user's DATA Space
+ * (upsert -- idempotent), so the first registry PUT has somewhere to land. The
+ * data Space itself already exists (provisioned at signup), so only the
+ * collection is configured. Runs with the root capability, so `force` lets the
+ * upsert treat a 404 from the pre-merge describe as genuinely absent. As with
+ * the keyring, the collection is plaintext on the server (it stores a
+ * JWE-wrapped record, opaque to the server).
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}   the data identity's root client
+ * @param options.spaceId {string}   the data Space id
+ * @returns {Promise<void>}
+ */
+export async function ensureUnlockMethodsCollection({
+  storageServerUrl,
+  zcapClient,
+  spaceId
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+  spaceId: string
+}): Promise<void> {
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  await was
+    .space(spaceId)
+    .collection(UNLOCK_METHODS_COLLECTION.id)
+    .configure({ name: UNLOCK_METHODS_COLLECTION.name, force: true })
+}
+
+/**
+ * Reads the unlock-methods registry record from the data Space, or returns
+ * `null` when it does not exist yet (a missing collection or resource surfaces
+ * as a 404-shaped `null` from `resource.get()`). A network / unreachable error
+ * propagates.
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}   the data identity's root client
+ * @param options.spaceId {string}   the data Space id
+ * @returns {Promise<unknown | null>}
+ */
+export async function getUnlockMethodsRecord({
+  storageServerUrl,
+  zcapClient,
+  spaceId
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+  spaceId: string
+}): Promise<unknown | null> {
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  const result = await was
+    .space(spaceId)
+    .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
+    .resource(UNLOCK_METHODS_RESOURCE)
+    .get()
+  return result === null ? null : result
+}
+
+/**
+ * Writes (upserts) the unlock-methods registry record into the data Space as a
+ * JSON document. Serialized to bytes with an explicit `application/json`
+ * content-type (mirroring `putUnlockKeyring`).
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}   the data identity's root client
+ * @param options.spaceId {string}   the data Space id
+ * @param options.record {object}   the wrapped registry record
+ * @returns {Promise<void>}
+ */
+export async function putUnlockMethodsRecord({
+  storageServerUrl,
+  zcapClient,
+  spaceId,
+  record
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+  spaceId: string
+  record: object
+}): Promise<void> {
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  const body = new TextEncoder().encode(JSON.stringify(record))
+  await was
+    .space(spaceId)
+    .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
+    .resource(UNLOCK_METHODS_RESOURCE)
+    .put(body, { contentType: 'application/json' })
 }

@@ -10,11 +10,13 @@ import { ZcapClient } from '@interop/ezcap'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import type { ControllerProfile, Session, User } from '@/types/auth'
-import { KMS_SERVER_URL } from '@/app.config'
+import { KMS_SERVER_URL, PASSKEY_KDF } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
 import { singleKeyResolver } from '@/lib/keyResolver'
+import { assertPasskeyPrf } from '@/lib/passkey'
 import { StorageManager } from '@/stores/storageManager'
 import { fetchKeyringSeed, KeyringRecordUnusableError } from '@/session/keyring'
+import type { KeyringFetchResult } from '@/session/keyring'
 
 /**
  * Creates bootstrap CapabilityAgent and ZcapClient instances from an
@@ -248,15 +250,62 @@ export async function loginWithPassphrase({
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
 }): Promise<{ session: Session | null; userExists: boolean }> {
-  const found = await fetchKeyringSeed({ passphrase, idb })
+  const found = await fetchKeyringSeed({
+    passphrase,
+    idb,
+    mintManageCapability: true
+  })
 
   if (!found) {
     return { session: null, userExists: false }
   }
 
+  return sessionFromKeyringHit({
+    found,
+    type: 'passphrase',
+    email,
+    remoteDirectStorage,
+    provisionStorage
+  })
+}
+
+/**
+ * Shared tail of the keyring login paths: builds the session from an unwrapped
+ * keyring hit and sanity-checks the recovered controller against the derived
+ * did:key. A mismatch means a corrupt record and throws
+ * `KeyringRecordUnusableError` rather than proceeding under the wrong
+ * identity. The session email prefers the caller's fresh value (the login
+ * form) over the one carried by the keyring record.
+ *
+ * Records which unlock method produced this full session on
+ * `profile.unlockMethod` (its type, unlock Space id, and the management zcap
+ * `fetchKeyringSeed` minted), so Settings can backfill the unlock-methods
+ * registry without re-prompting for the secret.
+ *
+ * @param options {object}
+ * @param options.found {KeyringFetchResult}   the unwrapped keyring hit
+ * @param options.type {'passphrase' | 'passkey'}   the method that unlocked
+ * @param [options.email] {string}   caller-supplied email, when any
+ * @param [options.remoteDirectStorage] {boolean}
+ * @param [options.provisionStorage] {boolean}
+ * @returns {Promise<{ session: Session, userExists: boolean }>}
+ */
+async function sessionFromKeyringHit({
+  found,
+  type,
+  email,
+  remoteDirectStorage = false,
+  provisionStorage = true
+}: {
+  found: KeyringFetchResult
+  type: 'passphrase' | 'passkey'
+  email?: string
+  remoteDirectStorage?: boolean
+  provisionStorage?: boolean
+}): Promise<{ session: Session; userExists: boolean }> {
   const { session, userExists } = await initSessionFromSeed({
     seed: found.seed,
-    email,
+    email: email ?? found.email,
     remoteDirectStorage,
     provisionStorage
   })
@@ -271,5 +320,70 @@ export async function loginWithPassphrase({
       )
     })
   }
+  // The profile object is plain; stamp the unlock method that produced this
+  // session so Settings can backfill the registry without the secret.
+  session.profile.unlockMethod = {
+    type,
+    unlockSpaceId: found.unlockSpaceId,
+    manageCapability: found.manageCapability
+  }
   return { session, userExists }
+}
+
+/**
+ * Passkey login. Runs the one-tap PRF assertion ceremony (the browser account
+ * picker scopes to this RP's discoverable credentials), derives the unlock
+ * identity from the PRF output under the passkey KDF, and resolves it through
+ * the keyring exactly like the passphrase path -- the two differ only in the
+ * secret and its KDF. The email (absent from any login form here) is
+ * recovered from the keyring record when one was bound.
+ *
+ * Ceremony failures propagate as the typed errors from `src/lib/passkey.ts`
+ * (`PasskeyCancelledError`, `PasskeyPrfUnsupportedError`); a keyring miss --
+ * a passkey with no bound wallet, e.g. one orphaned by a revocation --
+ * returns `{ session: null, userExists: false }`. `fetchKeyringSeed`
+ * rethrows when the remote could not be reached, so callers'
+ * storage-unreachable handling fires rather than misreading it as "no
+ * account".
+ *
+ * @param options {object}
+ * @param [options.idb] {IDBFactory}   first-party IndexedDB for the keyring
+ *   cache (CHAPI popups thread the Storage Access API handle here)
+ * @param [options.remoteDirectStorage] {boolean}   route credential + history
+ *   operations straight to the remote WAS collections; default false
+ * @param [options.provisionStorage] {boolean}   fire `ensureUserCollections`
+ *   from session creation and expose it as `session.storageReady`; default
+ *   true
+ * @param [options.signal] {AbortSignal}   aborts the WebAuthn ceremony
+ * @returns {Promise<{ session: Session | null, userExists: boolean }>}
+ */
+export async function loginWithPasskey({
+  idb,
+  remoteDirectStorage = false,
+  provisionStorage = true,
+  signal
+}: {
+  idb?: IDBFactory
+  remoteDirectStorage?: boolean
+  provisionStorage?: boolean
+  signal?: AbortSignal
+} = {}): Promise<{ session: Session | null; userExists: boolean }> {
+  const { prfOutput } = await assertPasskeyPrf({ signal })
+
+  const found = await fetchKeyringSeed({
+    secret: prfOutput,
+    kdf: PASSKEY_KDF,
+    idb,
+    mintManageCapability: true
+  })
+  if (!found) {
+    return { session: null, userExists: false }
+  }
+
+  return sessionFromKeyringHit({
+    found,
+    type: 'passkey',
+    remoteDirectStorage,
+    provisionStorage
+  })
 }

@@ -148,20 +148,52 @@ export const DID_LOG_RESOURCE = 'did.jsonl'
 export const ENABLE_DID_WEBVH = env.VITE_ENABLE_DID_WEBVH !== 'false'
 
 /**
- * PBKDF2 parameters for the keyring unlock derivation
+ * PBKDF2 parameters for the passphrase unlock derivation
  * (`unlockSeed = PBKDF2(passphrase)`). Version 1 pins exactly these
  * parameters; the keyring record's `version` field records which set produced
  * it, so changing any of them (iterations, hash, salt) requires minting a new
  * record version rather than silently breaking existing unlock derivations.
  * The salt is a fixed app-wide constant -- login stays passphrase-only, with
- * no email (or other) input mixed into the derivation.
+ * no email (or other) input mixed into the derivation. Every unlock method's
+ * KDF carries a distinct salt, so two methods can never derive the same
+ * unlock Space.
  */
 export const KEYRING_KDF = {
   version: 1,
+  algorithm: 'PBKDF2',
   iterations: 600_000,
   hash: 'SHA-256',
   salt: 'freewallet/keyring/unlock/v1'
 } as const
+
+/**
+ * HKDF parameters for the passkey unlock derivation
+ * (`unlockSeed = HKDF(prfOutput)`). The WebAuthn PRF output is uniform
+ * 32-byte key material, so no PBKDF2-style stretching is needed. The salt
+ * differs from every other unlock method's salt (two methods must never
+ * derive the same unlock Space); as with `KEYRING_KDF`, `version` pins the
+ * parameter set.
+ */
+export const PASSKEY_KDF = {
+  version: 1,
+  algorithm: 'HKDF',
+  hash: 'SHA-256',
+  salt: 'freewallet/keyring/passkey/v1',
+  info: 'freewallet/unlock-seed'
+} as const
+
+// The fixed app-wide WebAuthn PRF evaluation input. Safe as a shared public
+// constant: the PRF output is an HMAC keyed per-credential inside the
+// authenticator, so a common input still yields per-credential secrets. The
+// string is versioned so a future `v2` can force new derivations.
+export const PASSKEY_PRF_INPUT = new TextEncoder().encode(
+  'freewallet/passkey/prf/v1'
+)
+
+// WebAuthn Relying Party ID for passkey ceremonies. Default unset: the page
+// origin's registrable domain applies. Changing the origin or the RP ID
+// orphans every registered passkey.
+export const PASSKEY_RP_ID = env.VITE_PASSKEY_RP_ID || undefined
 
 // The unlock Space's single collection (holds the one keyring record), and the
 // record's resource id within it. The unlock Space is a minimal second Space,
@@ -169,6 +201,29 @@ export const KEYRING_KDF = {
 // wallet data Space.
 export const KEYRING_COLLECTION = { id: 'keyring', name: 'Keyring' }
 export const KEYRING_RESOURCE = 'keyring.json'
+
+// The unlock-methods registry: a single collection in the user's DATA Space
+// (not the unlock Space) holding one `methods.json` resource -- the list of an
+// account's unlock methods (passphrase, passkeys). Deliberately kept out of
+// WALLET_STANDARD_COLLECTIONS / SYNCED_COLLECTIONS: it gets no RxDB replica and
+// no background replication, and is read/written directly like the keyring
+// record (remote as source of truth, last-write-wins).
+export const UNLOCK_METHODS_COLLECTION = {
+  id: 'unlock-methods',
+  name: 'Unlock Methods'
+}
+export const UNLOCK_METHODS_RESOURCE = 'methods.json'
+
+// Lifetime of the management zcap an unlock identity delegates to the data
+// identity at bind time (`src/session/keyring.ts`). Deliberately long-lived
+// (10 years): the capability grants only GET/DELETE on that one unlock Space,
+// so its worst-case leak is denial of a single unlock method (someone deletes
+// that Space -- the method stops working, the wallet stays reachable via the
+// others), never decryption. The WAS server enforces no maximum TTL on Space
+// routes and the zcap is revocable at Space scope, so an unbounded lifetime is
+// acceptable -- and long enough that a lost method stays revocable years later
+// without re-deriving its unlock identity from the (possibly lost) secret.
+export const UNLOCK_MANAGE_ZCAP_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000
 
 // Offline-fallback lifetime of a locally cached keyring record when a WAS
 // server is configured (the remote copy is the source of truth and is

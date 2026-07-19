@@ -160,3 +160,77 @@ test('login VPR provisions a collection and returns Space-rooted grants', async 
   await goToHistory(page)
   await expectHistoryEntry(page, /Logged in to https:\/\/app\.example/)
 })
+
+test('public-collection VPR provisions a world-readable collection', async ({
+  page,
+  request
+}, testInfo) => {
+  const { passphrase } = await signupViaWizard(page, testInfo)
+  const challenge = `chal-pub-${Date.now()}-w${testInfo.workerIndex}`
+
+  await injectGetEvent(page, {
+    origin: 'https://app.example',
+    query: [
+      { type: 'DIDAuthentication', acceptedMethods: [{ method: 'key' }] },
+      {
+        type: 'AuthorizationCapabilityQuery',
+        capabilityQuery: [
+          {
+            referenceId: 'example-app-public',
+            reason: 'Example App publishes your posts for anyone to read.',
+            allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
+            controller: RP_DID,
+            invocationTarget: {
+              type: 'urn:was:public-collection',
+              name: 'example-app-public'
+            }
+          }
+        ]
+      }
+    ],
+    challenge,
+    domain: 'app.example'
+  })
+
+  await page.goto('/#/wallet/get')
+  await page.reload()
+
+  await page.locator('input[type="password"]').fill(passphrase)
+  await page.getByRole('button', { name: 'Continue' }).click()
+
+  // Consent screen shows the world-readable warning for the public grant.
+  await expect(page.getByText('Storage access')).toBeVisible()
+  await expect(page.getByText(/collection example-app-public/)).toBeVisible()
+  await expect(
+    page.getByText(/anyone on the web will be able to read it/i)
+  ).toBeVisible()
+  // Public implies plaintext, so the ciphertext note never applies.
+  await expect(
+    page.getByText(/this site will only see ciphertext/i)
+  ).toHaveCount(0)
+  await page.getByRole('button', { name: 'Continue' }).click()
+
+  await expect
+    .poll(async () => (await readResponse(page)) !== undefined, {
+      timeout: 20000
+    })
+    .toBe(true)
+
+  const response = (await readResponse(page)) as { value: unknown }
+  const payload = response.value as {
+    data: {
+      zcap: Array<{ invocationTarget: string; allowedAction: string[] }>
+    }
+  }
+
+  // The delegated zcap still carries the requested write actions.
+  expect(payload.data.zcap).toHaveLength(1)
+  const grant = payload.data.zcap[0]
+  expect(grant.invocationTarget.endsWith('/example-app-public')).toBe(true)
+  expect(grant.allowedAction).toContain('PUT')
+
+  // The collection itself is world-readable: an unauthenticated (no zcap,
+  // no cookies) GET on the collection URL lists it instead of being denied.
+  const anonymousList = await request.get(grant.invocationTarget)
+  expect(anonymousList.status()).toBe(200)
+})

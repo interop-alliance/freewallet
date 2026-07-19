@@ -23,6 +23,13 @@
  * the first path segment after the Space URL either way), so a string target
  * cannot bypass it.
  *
+ * A `urn:was:public-collection` grant provisions a plaintext collection with a
+ * collection-level world-readable (PublicCanRead) policy, set by the wallet at
+ * provisioning time. Public covers only unauthenticated reads; writes stay
+ * capability-only, so the grant still delegates the usual collection-scoped
+ * zcap (with the ordinary write TTL). A public grant on a protected wallet
+ * collection is unsatisfiable, unconditionally.
+ *
  * Resolution (`resolveGrants`) is pure and drives the consent preview; the
  * delegation step (`processZcaps`) runs only on the consent-approved path.
  * Write grants (any action beyond GET/HEAD) are delegated for a shorter TTL
@@ -107,6 +114,9 @@ export interface ResolvedTarget {
   collectionId?: string
   // A standard EDV-encrypted collection: the RP will only see ciphertext.
   encrypted: boolean
+  // A `urn:was:public-collection` grant: provisioned plaintext with a
+  // collection-level PublicCanRead policy, so anyone on the web can read it.
+  isPublic: boolean
 }
 
 /**
@@ -167,7 +177,8 @@ const UNSATISFIABLE: ResolvedTarget = {
   satisfiable: false,
   wholeSpace: false,
   needsProvisioning: false,
-  encrypted: false
+  encrypted: false,
+  isPublic: false
 }
 
 /**
@@ -182,6 +193,10 @@ const UNSATISFIABLE: ResolvedTarget = {
  * - `{ type: 'urn:was:collection', name }` -- `${spaceUrl}/${name}` after
  *   validating `name`, flagged `needsProvisioning` unless it is a standard
  *   collection (and `encrypted` for the two EDV collections);
+ * - `{ type: 'urn:was:public-collection', name }` -- like `urn:was:collection`
+ *   but flagged `isPublic`: provisioned plaintext with a world-readable
+ *   (PublicCanRead) policy. Unsatisfiable on a protected wallet collection --
+ *   an RP must never be able to flip the user's own collections public;
  * - `{ type: 'urn:was:space' }` -- `spaceUrl`, flagged `wholeSpace`;
  * - anything else -- unsatisfiable.
  *
@@ -204,7 +219,8 @@ export function resolveInvocationTarget({
         invocationTarget: descriptor,
         wholeSpace: true,
         needsProvisioning: false,
-        encrypted: false
+        encrypted: false,
+        isPublic: false
       }
     }
     if (descriptor.startsWith(`${spaceUrl}/`)) {
@@ -222,7 +238,8 @@ export function resolveInvocationTarget({
         wholeSpace: false,
         needsProvisioning: false,
         collectionId: segment || undefined,
-        encrypted: !!standard?.encryption
+        encrypted: !!standard?.encryption,
+        isPublic: false
       }
     }
     return UNSATISFIABLE
@@ -234,7 +251,8 @@ export function resolveInvocationTarget({
       invocationTarget: spaceUrl,
       wholeSpace: true,
       needsProvisioning: false,
-      encrypted: false
+      encrypted: false,
+      isPublic: false
     }
   }
 
@@ -253,7 +271,32 @@ export function resolveInvocationTarget({
       // The `id` collection is provisioned at login, like the standard ones.
       needsProvisioning: !standard && name !== ID_COLLECTION.id,
       collectionId: name,
-      encrypted: !!standard?.encryption
+      encrypted: !!standard?.encryption,
+      isPublic: false
+    }
+  }
+
+  if (descriptor?.type === 'urn:was:public-collection') {
+    const { name } = descriptor
+    if (!name || !COLLECTION_NAME_RE.test(name)) {
+      return UNSATISFIABLE
+    }
+    // A public grant on a protected wallet collection is refused
+    // unconditionally: an RP must never be able to make the user's own
+    // credentials, activity log, or published identity world-readable.
+    if (isProtectedCollection(name)) {
+      return UNSATISFIABLE
+    }
+    return {
+      satisfiable: true,
+      invocationTarget: `${spaceUrl}/${name}`,
+      wholeSpace: false,
+      needsProvisioning: true,
+      collectionId: name,
+      // Public implies plaintext: the collection is provisioned without an
+      // encryption marker, so a ciphertext note never applies.
+      encrypted: false,
+      isPublic: true
     }
   }
 
@@ -382,7 +425,13 @@ export async function processZcaps({
       continue
     }
     if (target.needsProvisioning && target.collectionId) {
-      await session.storage.ensureCollection({ id: target.collectionId })
+      // A public-collection grant provisions plaintext plus a collection-level
+      // PublicCanRead policy; the wallet (holding the space root) sets the
+      // policy -- the RP's delegated zcap could not.
+      await session.storage.ensureCollection({
+        id: target.collectionId,
+        isPublic: target.isPublic
+      })
     }
     // Write grants live for the shorter write TTL; read-only grants for the
     // longer read TTL.

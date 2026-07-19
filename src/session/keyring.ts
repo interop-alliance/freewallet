@@ -7,10 +7,14 @@
  *   behind the did:key, the spaceId, the KMS keystore controller, and the
  *   vault KAK. It is a random 32-byte seed, never derivable from any
  *   passphrase.
- * - The **unlock identity** is derived from the passphrase at login
- *   (`unlockSeed = PBKDF2(passphrase)`, then `CapabilityAgent.fromSeed` with a
- *   distinct `'unlock'` handle so it can never collide with the data identity's
- *   `'bootstrap'` derivation). It controls nothing but its own minimal Space.
+ * - The **unlock identity** is derived from an unlock secret at login -- the
+ *   passphrase today; a passkey PRF output or a recovery code are further
+ *   methods on the same seam (`unlockSeed = KDF(secret)` per the method's
+ *   `UnlockKdf`, then `CapabilityAgent.fromSeed` with a distinct `'unlock'`
+ *   handle so it can never collide with the data identity's `'bootstrap'`
+ *   derivation). It controls nothing but its own minimal Space. One unlock
+ *   method = one unlock identity = one unlock Space; each method's KDF salt
+ *   differs, so two methods can never derive the same Space.
  *
  * The **keyring record** lives in the unlock identity's own Space
  * (`keyring/keyring.json`) -- the only placement that is locatable before the
@@ -40,12 +44,14 @@ import { ZcapClient } from '@interop/ezcap'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import type {
   IKeyAgreementKey,
-  IKeyResolver
+  IKeyResolver,
+  IZcap
 } from '@interop/data-integrity-core'
 import {
   KEYRING_CACHE_TTL_MS,
   KEYRING_COLLECTION,
   KEYRING_KDF,
+  UNLOCK_MANAGE_ZCAP_TTL_MS,
   WAS_SERVER_URL
 } from '@/app.config'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
@@ -64,23 +70,90 @@ import {
 } from '@/stores/wasRemoteStore'
 
 /**
- * PBKDF2 parameters for the unlock derivation. Defaults to `KEYRING_KDF`;
- * overridable so tests can dial the iteration count down to stay fast. The
- * `version` from `KEYRING_KDF` is stamped onto the record, not consumed here.
+ * Unlock-derivation parameters, one variant per KDF family: PBKDF2 stretches
+ * a low-entropy passphrase; HKDF expands already-uniform key material (e.g. a
+ * passkey PRF output). Each unlock method pins its own parameter set -- and
+ * its own salt, so two methods can never derive the same unlock identity.
+ * The `version` records which parameter set produced a derivation; the
+ * keyring record's own `version` is stamped separately.
  */
-type UnlockKdf = {
-  iterations: number
-  hash: string
-  salt: string
-}
+export type UnlockKdf =
+  | {
+      version: number
+      algorithm: 'PBKDF2'
+      iterations: number
+      hash: string
+      salt: string
+    }
+  | {
+      version: number
+      algorithm: 'HKDF'
+      hash: string
+      salt: string
+      info: string
+    }
 
 /**
  * The recovered data identity: the 32-byte data seed plus the controller
- * (data did:key) the keyring record carries alongside it.
+ * (data did:key) the keyring record carries alongside it. `email` is the
+ * account email captured at bind time (when one was given) -- carried in the
+ * record so any unlock method recovers it (a passkey login has no login form
+ * to ask on).
  */
 export interface KeyringSeed {
   seed: Uint8Array
   controller: string
+  email?: string
+}
+
+/**
+ * What `fetchKeyringSeed` returns to callers on a hit: the recovered data
+ * identity (`KeyringSeed`), plus the derived unlock Space id (always -- it is
+ * already computed) and, when `mintManageCapability` was requested and a WAS
+ * server is configured, a management zcap the unlock identity delegated to the
+ * recovered `controller`. The capability grants GET/DELETE on the unlock Space
+ * only, so a later Settings flow can retire this method (a lost passkey) with
+ * the session's root key -- no re-derivation from, or tap on, the secret.
+ */
+export interface KeyringFetchResult extends KeyringSeed {
+  unlockSpaceId: string
+  manageCapability?: IZcap
+}
+
+/**
+ * Delegates the long-lived management zcap on an unlock Space to the data
+ * identity: GET/DELETE on the unlock Space URL, controlled by the data did:key,
+ * expiring after `UNLOCK_MANAGE_ZCAP_TTL_MS`. Pure signing (no server round
+ * trip); the chain roots at the Space's synthesized root capability (the ezcap
+ * client generates it from the target). Only ever called when a WAS server is
+ * configured -- the unlock Space, and thus the capability, exist only then.
+ *
+ * @param options {object}
+ * @param options.zcapClient {ZcapClient}   the unlock identity's client (it can
+ *   both invoke and delegate)
+ * @param options.spaceId {string}   the unlock Space id
+ * @param options.controller {string}   the data did:key to delegate to
+ * @returns {Promise<IZcap>}
+ */
+async function delegateUnlockManagement({
+  zcapClient,
+  spaceId,
+  controller
+}: {
+  zcapClient: ZcapClient
+  spaceId: string
+  controller: string
+}): Promise<IZcap> {
+  const invocationTarget = new URL(
+    `/space/${spaceId}`,
+    WAS_SERVER_URL
+  ).toString()
+  return await zcapClient.delegate({
+    invocationTarget,
+    controller,
+    allowedActions: ['GET', 'DELETE'],
+    expires: new Date(Date.now() + UNLOCK_MANAGE_ZCAP_TTL_MS)
+  })
 }
 
 /**
@@ -104,33 +177,61 @@ function base64UrlToBytes(value: string): Uint8Array {
 }
 
 /**
- * Stretches the passphrase into a 32-byte unlock seed via PBKDF2 (WebCrypto).
+ * Derives the 32-byte unlock seed from an unlock secret (WebCrypto),
+ * branching on the KDF family: PBKDF2 stretches a passphrase, HKDF expands
+ * already-uniform key material such as a passkey PRF output.
  *
  * @param options {object}
- * @param options.passphrase {string}
+ * @param options.secret {string | Uint8Array}
  * @param options.kdf {UnlockKdf}
  * @returns {Promise<Uint8Array>}
  */
 async function deriveUnlockSeed({
-  passphrase,
+  secret,
   kdf
 }: {
-  passphrase: string
+  secret: string | Uint8Array
   kdf: UnlockKdf
 }): Promise<Uint8Array> {
+  // Copy a bytes secret into a fresh buffer: WebCrypto's BufferSource wants a
+  // plain ArrayBuffer-backed view, which a caller's slice may not be.
+  const secretBytes =
+    typeof secret === 'string'
+      ? new TextEncoder().encode(secret)
+      : new Uint8Array(secret)
+  if (kdf.algorithm === 'PBKDF2') {
+    const baseKey = await crypto.subtle.importKey(
+      'raw',
+      secretBytes,
+      'PBKDF2',
+      false,
+      ['deriveBits']
+    )
+    const bits = await crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        salt: new TextEncoder().encode(kdf.salt),
+        iterations: kdf.iterations,
+        hash: kdf.hash
+      },
+      baseKey,
+      256
+    )
+    return new Uint8Array(bits)
+  }
   const baseKey = await crypto.subtle.importKey(
     'raw',
-    new TextEncoder().encode(passphrase),
-    'PBKDF2',
+    secretBytes,
+    'HKDF',
     false,
     ['deriveBits']
   )
   const bits = await crypto.subtle.deriveBits(
     {
-      name: 'PBKDF2',
+      name: 'HKDF',
+      hash: kdf.hash,
       salt: new TextEncoder().encode(kdf.salt),
-      iterations: kdf.iterations,
-      hash: kdf.hash
+      info: new TextEncoder().encode(kdf.info)
     },
     baseKey,
     256
@@ -139,32 +240,36 @@ async function deriveUnlockSeed({
 }
 
 /**
- * Derives the full unlock identity from a passphrase: the unlock
- * CapabilityAgent, an invocation-only ZcapClient (the unlock agent never
- * delegates), the unlock KAK + resolver for wrap/unwrap, and the unlock
- * Space id.
+ * Derives the full unlock identity from an unlock secret: the unlock
+ * CapabilityAgent, a ZcapClient that can both invoke and delegate (the
+ * unlock agent delegates a management zcap on its own Space to the data
+ * identity at bind time), the unlock KAK + resolver for wrap/unwrap, and the
+ * unlock Space id. Performs no I/O -- exported as the derivation seam for
+ * tests and future unlock methods.
  *
  * @param options {object}
- * @param options.passphrase {string}
+ * @param options.secret {string | Uint8Array}
  * @param options.kdf {UnlockKdf}
  * @returns {Promise<object>}
  */
-async function deriveUnlockIdentity({
-  passphrase,
+export async function deriveUnlockIdentity({
+  secret,
   kdf
 }: {
-  passphrase: string
+  secret: string | Uint8Array
   kdf: UnlockKdf
 }) {
-  const seed = await deriveUnlockSeed({ passphrase, kdf })
+  const seed = await deriveUnlockSeed({ secret, kdf })
   const agent = await CapabilityAgent.fromSeed({
     seed,
     handle: 'unlock',
     keyName: 'unlock-key'
   })
+  const signer = agent.getSigner()
   const zcapClient = new ZcapClient({
     SuiteClass: Ed25519Signature2020,
-    invocationSigner: agent.getSigner()
+    invocationSigner: signer,
+    delegationSigner: signer
   })
 
   // The unlock KAK is the Montgomery form of the unlock signing key -- the same
@@ -187,6 +292,7 @@ async function deriveUnlockIdentity({
  * @param options {object}
  * @param options.seed {Uint8Array}
  * @param options.controller {string}   the data did:key
+ * @param [options.email] {string}   the account email, when known
  * @param options.keyAgreementKey {IKeyAgreementKey}   the unlock KAK
  * @param options.keyResolver {IKeyResolver}
  * @returns {Promise<{ version: number, wrapped: unknown }>}
@@ -194,11 +300,13 @@ async function deriveUnlockIdentity({
 async function wrapSeed({
   seed,
   controller,
+  email,
   keyAgreementKey,
   keyResolver
 }: {
   seed: Uint8Array
   controller: string
+  email?: string
   keyAgreementKey: IKeyAgreementKey
   keyResolver: IKeyResolver
 }): Promise<{ version: number; wrapped: unknown }> {
@@ -211,6 +319,7 @@ async function wrapSeed({
     data: {
       seed: bufferToBase64Url(seed),
       controller,
+      ...(email ? { email } : {}),
       createdAt: new Date().toISOString()
     }
   })
@@ -258,6 +367,7 @@ async function unwrapSeed({
   })) as {
     seed?: unknown
     controller?: unknown
+    email?: unknown
   }
 
   if (typeof plaintext.controller !== 'string' || !plaintext.controller) {
@@ -273,7 +383,12 @@ async function unwrapSeed({
 
   return {
     seed,
-    controller: plaintext.controller
+    controller: plaintext.controller,
+    // A record written before emails were carried (or bound without one)
+    // simply has no email; anything non-string is ignored, not fatal.
+    ...(typeof plaintext.email === 'string' && plaintext.email
+      ? { email: plaintext.email }
+      : {})
   }
 }
 
@@ -295,13 +410,13 @@ export class KeyringRecordUnusableError extends Error {
 }
 
 /**
- * Locates and unwraps the keyring for a passphrase. When a WAS server is
+ * Locates and unwraps the keyring for an unlock secret. When a WAS server is
  * configured the remote copy is consulted first -- it is the source of truth,
- * and checking it before the cache is what makes a passphrase change on
- * another device take effect here: a found record refreshes the local cache,
- * while a 404-shaped miss (a null record) drops any cached copy and returns
- * `null` (no account for this passphrase -- never bound, or retired by a
- * passphrase change). When the remote GET fails (network/unreachable), the
+ * and checking it before the cache is what makes a method change (e.g. a
+ * passphrase change) on another device take effect here: a found record
+ * refreshes the local cache, while a 404-shaped miss (a null record) drops
+ * any cached copy and returns `null` (no account for this secret -- never
+ * bound, or retired). When the remote GET fails (network/unreachable), the
  * cache answers as an offline fallback, but only within
  * `KEYRING_CACHE_TTL_MS`; past that (or with no usable cache) the error
  * rethrows, so the caller sees "could not check" rather than misreading it as
@@ -311,22 +426,41 @@ export class KeyringRecordUnusableError extends Error {
  * no WAS server configured the cache is the keyring's only copy, so the
  * lookup is cache-only with no TTL.
  *
+ * The result on a hit always carries the derived `unlockSpaceId` (cheap -- it
+ * is already computed); when `mintManageCapability` is set and a WAS server is
+ * configured it also carries a `manageCapability` delegated to the recovered
+ * controller (pure signing, minted on both the remote-hit and cache-fallback
+ * paths), so a full login can record the method's revocation authority in the
+ * unlock-methods registry.
+ *
  * @param options {object}
- * @param options.passphrase {string}
+ * @param [options.secret] {string | Uint8Array}   the unlock secret
+ * @param [options.passphrase] {string}   compat alias for `secret` (existing
+ *   passphrase call sites); one of the two is required
  * @param [options.idb] {IDBFactory}
- * @param [options.kdf] {UnlockKdf}
- * @returns {Promise<KeyringSeed | null>}
+ * @param [options.kdf] {UnlockKdf}   the unlock method's KDF parameters
+ * @param [options.mintManageCapability] {boolean}   also delegate the unlock
+ *   Space management zcap to the recovered controller; default false
+ * @returns {Promise<KeyringFetchResult | null>}
  */
 export async function fetchKeyringSeed({
+  secret,
   passphrase,
   idb,
-  kdf = KEYRING_KDF
+  kdf = KEYRING_KDF,
+  mintManageCapability = false
 }: {
-  passphrase: string
+  secret?: string | Uint8Array
+  passphrase?: string
   idb?: IDBFactory
   kdf?: UnlockKdf
-}): Promise<KeyringSeed | null> {
-  const unlock = await deriveUnlockIdentity({ passphrase, kdf })
+  mintManageCapability?: boolean
+}): Promise<KeyringFetchResult | null> {
+  const unlockSecret = secret ?? passphrase
+  if (unlockSecret === undefined) {
+    throw new TypeError('An unlock secret is required.')
+  }
+  const unlock = await deriveUnlockIdentity({ secret: unlockSecret, kdf })
 
   if (!WAS_SERVER_URL) {
     // No remote: the cache is the keyring's only copy -- authoritative, no TTL.
@@ -335,10 +469,15 @@ export async function fetchKeyringSeed({
       return null
     }
     try {
-      return await unwrapSeed({
+      const unwrapped = await unwrapSeed({
         record: cached.record,
         keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
         keyResolver: unlock.keyResolver
+      })
+      return await buildFetchResult({
+        found: unwrapped,
+        unlock,
+        mintManageCapability
       })
     } catch (err) {
       console.warn('Discarding an unusable cached keyring record:', err)
@@ -368,10 +507,15 @@ export async function fetchKeyringSeed({
       throw err
     }
     try {
-      return await unwrapSeed({
+      const unwrapped = await unwrapSeed({
         record: cached.record,
         keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
         keyResolver: unlock.keyResolver
+      })
+      return await buildFetchResult({
+        found: unwrapped,
+        unlock,
+        mintManageCapability
       })
     } catch (unwrapErr) {
       console.warn('Discarding an unusable cached keyring record:', unwrapErr)
@@ -403,45 +547,94 @@ export async function fetchKeyringSeed({
     throw new KeyringRecordUnusableError({ cause: err })
   }
   await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
-  return found
+  return await buildFetchResult({ found, unlock, mintManageCapability })
 }
 
 /**
- * Binds a passphrase to a data seed: derives the unlock identity, ensures the
- * unlock Space (when WAS is configured), wraps and PUTs the keyring record,
- * and saves the local cache. Throws on failure (the caller decides fatality --
- * fatal for signups). With no WAS server configured the keyring is cache-only,
- * so the account is then only recoverable in this browser profile.
+ * Assembles a `fetchKeyringSeed` hit: the unwrapped `KeyringSeed` plus the
+ * derived unlock Space id and, when requested and a WAS server is configured,
+ * the management zcap delegated to the recovered controller.
+ *
+ * @param options {object}
+ * @param options.found {KeyringSeed}   the unwrapped record
+ * @param options.unlock {Awaited<ReturnType<typeof deriveUnlockIdentity>>}
+ * @param options.mintManageCapability {boolean}
+ * @returns {Promise<KeyringFetchResult>}
+ */
+async function buildFetchResult({
+  found,
+  unlock,
+  mintManageCapability
+}: {
+  found: KeyringSeed
+  unlock: Awaited<ReturnType<typeof deriveUnlockIdentity>>
+  mintManageCapability: boolean
+}): Promise<KeyringFetchResult> {
+  const result: KeyringFetchResult = {
+    ...found,
+    unlockSpaceId: unlock.spaceId
+  }
+  if (mintManageCapability && WAS_SERVER_URL) {
+    result.manageCapability = await delegateUnlockManagement({
+      zcapClient: unlock.zcapClient,
+      spaceId: unlock.spaceId,
+      controller: found.controller
+    })
+  }
+  return result
+}
+
+/**
+ * Binds an unlock secret to a data seed: derives the unlock identity for the
+ * method's KDF, ensures the unlock Space (when WAS is configured), wraps and
+ * PUTs the keyring record, and saves the local cache. Throws on failure (the
+ * caller decides fatality -- fatal for signups). With no WAS server configured
+ * the keyring is cache-only, so the account is then only recoverable in this
+ * browser profile. Returns the unlock Space id so callers (the unlock-methods
+ * registry) can record which Space this method resolves to.
  *
  * @param options {object}
  * @param options.seed {Uint8Array}   the data seed
  * @param options.controller {string}   the data did:key
- * @param options.passphrase {string}
+ * @param options.secret {string | Uint8Array}   the unlock secret
+ * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
+ * @param [options.email] {string}   the account email, carried in the wrapped
+ *   record so any unlock method recovers it at login
+ * @param [options.delegateManagementTo] {string}   a data did:key to delegate
+ *   the unlock Space management zcap to (GET/DELETE on this unlock Space). When
+ *   set and a WAS server is configured, the returned `manageCapability` is the
+ *   revocation authority a later Settings flow uses to retire this method (a
+ *   lost passkey) without tapping or re-deriving from the secret.
  * @param [options.idb] {IDBFactory}
- * @param [options.kdf] {UnlockKdf}
- * @returns {Promise<void>}
+ * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap }>}
  */
-export async function bindPassphrase({
+export async function bindUnlockSecret({
   seed,
   controller,
-  passphrase,
-  idb,
-  kdf = KEYRING_KDF
+  secret,
+  kdf,
+  email,
+  delegateManagementTo,
+  idb
 }: {
   seed: Uint8Array
   controller: string
-  passphrase: string
+  secret: string | Uint8Array
+  kdf: UnlockKdf
+  email?: string
+  delegateManagementTo?: string
   idb?: IDBFactory
-  kdf?: UnlockKdf
-}): Promise<void> {
-  const unlock = await deriveUnlockIdentity({ passphrase, kdf })
+}): Promise<{ unlockSpaceId: string; manageCapability?: IZcap }> {
+  const unlock = await deriveUnlockIdentity({ secret, kdf })
   const record = await wrapSeed({
     seed,
     controller,
+    email,
     keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
     keyResolver: unlock.keyResolver
   })
 
+  let manageCapability: IZcap | undefined
   if (WAS_SERVER_URL) {
     await ensureUnlockSpace({
       storageServerUrl: WAS_SERVER_URL,
@@ -455,14 +648,71 @@ export async function bindPassphrase({
       spaceId: unlock.spaceId,
       record
     })
+    if (delegateManagementTo) {
+      // The unlock agent delegates GET/DELETE on its own Space to the data
+      // identity, so a lost method stays revocable without re-deriving this
+      // unlock identity from the (possibly lost) secret. Pure signing.
+      manageCapability = await delegateUnlockManagement({
+        zcapClient: unlock.zcapClient,
+        spaceId: unlock.spaceId,
+        controller: delegateManagementTo
+      })
+    }
   }
 
   await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
+
+  return { unlockSpaceId: unlock.spaceId, manageCapability }
 }
 
 /**
- * Thrown by `changePassphrase` when the supplied current passphrase does not
- * unlock a keyring for this account.
+ * Binds a passphrase to a data seed -- the passphrase-shaped wrapper over
+ * `bindUnlockSecret`, defaulting to the app's passphrase KDF.
+ *
+ * @param options {object}
+ * @param options.seed {Uint8Array}   the data seed
+ * @param options.controller {string}   the data did:key
+ * @param options.passphrase {string}
+ * @param [options.email] {string}   the account email, carried in the wrapped
+ *   record
+ * @param [options.delegateManagementTo] {string}   a data did:key to delegate
+ *   the unlock Space management zcap to (see `bindUnlockSecret`)
+ * @param [options.idb] {IDBFactory}
+ * @param [options.kdf] {UnlockKdf}
+ * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap }>}
+ */
+export async function bindPassphrase({
+  seed,
+  controller,
+  passphrase,
+  email,
+  delegateManagementTo,
+  idb,
+  kdf = KEYRING_KDF
+}: {
+  seed: Uint8Array
+  controller: string
+  passphrase: string
+  email?: string
+  delegateManagementTo?: string
+  idb?: IDBFactory
+  kdf?: UnlockKdf
+}): Promise<{ unlockSpaceId: string; manageCapability?: IZcap }> {
+  return bindUnlockSecret({
+    seed,
+    controller,
+    secret: passphrase,
+    kdf,
+    email,
+    delegateManagementTo,
+    idb
+  })
+}
+
+/**
+ * Thrown when a supplied unlock secret (the current passphrase, most
+ * commonly) does not unlock a keyring for this account. Shared by every
+ * unlock method's verification path.
  */
 export class WrongPassphraseError extends Error {
   constructor(message = 'The current passphrase is incorrect.') {
@@ -489,7 +739,8 @@ export class WrongPassphraseError extends Error {
  *   the unlock identity for the passphrase being verified
  * @param options.controller {string}   the data did:key to match
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
+ * @returns {Promise<KeyringSeed>}   the verified record's unwrapped contents
+ *   (so a rebind can preserve fields such as the email)
  */
 async function verifyUnlockKeyring({
   unlock,
@@ -499,7 +750,7 @@ async function verifyUnlockKeyring({
   unlock: Awaited<ReturnType<typeof deriveUnlockIdentity>>
   controller: string
   idb?: IDBFactory
-}): Promise<void> {
+}): Promise<KeyringSeed> {
   let record: unknown
   if (WAS_SERVER_URL) {
     record = await getUnlockKeyring({
@@ -515,32 +766,58 @@ async function verifyUnlockKeyring({
   if (!record) {
     throw new WrongPassphraseError()
   }
-  let verified = false
+  let unwrapped: KeyringSeed | null = null
   try {
-    const unwrapped = await unwrapSeed({
+    unwrapped = await unwrapSeed({
       record,
       keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
       keyResolver: unlock.keyResolver
     })
-    verified = unwrapped.controller === controller
   } catch {
     // A record that does not unwrap for this controller is a wrong passphrase.
   }
-  if (!verified) {
+  if (!unwrapped || unwrapped.controller !== controller) {
     throw new WrongPassphraseError()
   }
+  return unwrapped
 }
 
 /**
- * Verifies a passphrase against its keyring without changing anything, so
- * destructive flows (account deletion) can confirm the passphrase before
- * acting. Derives the unlock identity for `passphrase` and runs the shared
- * keyring verification against `controller` (the data did:key).
+ * Verifies an unlock secret against its keyring without changing anything, so
+ * destructive flows (account deletion) can confirm the secret before acting.
+ * Derives the unlock identity for `secret` under the method's KDF and runs
+ * the shared keyring verification against `controller` (the data did:key).
  *
- * Throws `WrongPassphraseError` when the passphrase does not unlock a keyring
+ * Throws `WrongPassphraseError` when the secret does not unlock a keyring
  * bound to `controller`. A network error while reading the remote record
  * rethrows unchanged -- an unreachable remote must not read as a wrong
- * passphrase.
+ * secret.
+ *
+ * @param options {object}
+ * @param options.controller {string}   the data did:key
+ * @param options.secret {string | Uint8Array}   the unlock secret
+ * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function verifyUnlockSecret({
+  controller,
+  secret,
+  kdf,
+  idb
+}: {
+  controller: string
+  secret: string | Uint8Array
+  kdf: UnlockKdf
+  idb?: IDBFactory
+}): Promise<void> {
+  const unlock = await deriveUnlockIdentity({ secret, kdf })
+  await verifyUnlockKeyring({ unlock, controller, idb })
+}
+
+/**
+ * Verifies a passphrase against its keyring -- the passphrase-shaped wrapper
+ * over `verifyUnlockSecret`, defaulting to the app's passphrase KDF.
  *
  * @param options {object}
  * @param options.controller {string}   the data did:key
@@ -560,38 +837,38 @@ export async function verifyPassphrase({
   idb?: IDBFactory
   kdf?: UnlockKdf
 }): Promise<void> {
-  const unlock = await deriveUnlockIdentity({ passphrase, kdf })
-  await verifyUnlockKeyring({ unlock, controller, idb })
+  return verifyUnlockSecret({ controller, secret: passphrase, kdf, idb })
 }
 
 /**
- * Retires a passphrase's keyring as part of account deletion: derives the
- * unlock identity, deletes its unlock Space (when a WAS server is configured),
- * and always clears the local cache. With no WAS server configured there is no
- * Space, so `unlockSpaceDeleted` stays `true`.
+ * Retires an unlock method's keyring (account deletion, method removal):
+ * derives the unlock identity, deletes its unlock Space (when a WAS server is
+ * configured), and always clears the local cache. With no WAS server
+ * configured there is no Space, so `unlockSpaceDeleted` stays `true`.
  *
- * Performs no verification -- a wrong passphrase derives a different unlock
- * Space id and `deleteUnlockSpace` is idempotent, so callers confirm the
- * passphrase first via `verifyPassphrase`. Once the keyring is gone the data
- * seed is unrecoverable (the random data seed is never derivable from a
- * passphrase), so callers must wipe/dispose the data Space before calling this.
+ * Performs no verification -- a wrong secret derives a different unlock Space
+ * id and `deleteUnlockSpace` is idempotent, so callers confirm the secret
+ * first via `verifyUnlockSecret`. Once an account's last keyring is gone the
+ * data seed is unrecoverable (the random data seed is never derivable from an
+ * unlock secret), so callers must wipe/dispose the data Space before deleting
+ * the final method.
  *
  * @param options {object}
- * @param options.passphrase {string}
+ * @param options.secret {string | Uint8Array}   the unlock secret
+ * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
  * @param [options.idb] {IDBFactory}
- * @param [options.kdf] {UnlockKdf}
  * @returns {Promise<{ unlockSpaceDeleted: boolean }>}
  */
-export async function deleteKeyring({
-  passphrase,
-  idb,
-  kdf = KEYRING_KDF
+export async function deleteUnlockMethod({
+  secret,
+  kdf,
+  idb
 }: {
-  passphrase: string
+  secret: string | Uint8Array
+  kdf: UnlockKdf
   idb?: IDBFactory
-  kdf?: UnlockKdf
 }): Promise<{ unlockSpaceDeleted: boolean }> {
-  const unlock = await deriveUnlockIdentity({ passphrase, kdf })
+  const unlock = await deriveUnlockIdentity({ secret, kdf })
 
   let unlockSpaceDeleted = true
   if (WAS_SERVER_URL) {
@@ -612,6 +889,29 @@ export async function deleteKeyring({
 }
 
 /**
+ * Retires a passphrase's keyring as part of account deletion -- the
+ * passphrase-shaped wrapper over `deleteUnlockMethod`, defaulting to the
+ * app's passphrase KDF.
+ *
+ * @param options {object}
+ * @param options.passphrase {string}
+ * @param [options.idb] {IDBFactory}
+ * @param [options.kdf] {UnlockKdf}
+ * @returns {Promise<{ unlockSpaceDeleted: boolean }>}
+ */
+export async function deleteKeyring({
+  passphrase,
+  idb,
+  kdf = KEYRING_KDF
+}: {
+  passphrase: string
+  idb?: IDBFactory
+  kdf?: UnlockKdf
+}): Promise<{ unlockSpaceDeleted: boolean }> {
+  return deleteUnlockMethod({ secret: passphrase, kdf, idb })
+}
+
+/**
  * Changes the account passphrase. Verifies the old passphrase by unwrapping its
  * keyring (the remote copy when a WAS server is configured -- the source of
  * truth -- else the local cache) and matching the recovered controller against
@@ -628,6 +928,11 @@ export async function deleteKeyring({
  * when the deletion failed. An old == new passphrase call rebinds in place and
  * never deletes the just-written Space.
  *
+ * The new passphrase's `unlockSpaceId` and `manageCapability` are returned (the
+ * new bind delegates the management zcap to `controller`), so Settings can
+ * update the unlock-methods registry's passphrase entry to the new Space and
+ * its revocation authority.
+ *
  * @param options {object}
  * @param options.seed {Uint8Array}   the data seed
  * @param options.controller {string}   the data did:key
@@ -635,7 +940,7 @@ export async function deleteKeyring({
  * @param options.newPassphrase {string}
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
- * @returns {Promise<{ oldPassphraseRetired: boolean }>}
+ * @returns {Promise<{ oldPassphraseRetired: boolean, unlockSpaceId: string, manageCapability?: IZcap }>}
  */
 export async function changePassphrase({
   seed,
@@ -651,9 +956,13 @@ export async function changePassphrase({
   newPassphrase: string
   idb?: IDBFactory
   kdf?: UnlockKdf
-}): Promise<{ oldPassphraseRetired: boolean }> {
+}): Promise<{
+  oldPassphraseRetired: boolean
+  unlockSpaceId: string
+  manageCapability?: IZcap
+}> {
   const oldUnlock = await deriveUnlockIdentity({
-    passphrase: oldPassphrase,
+    secret: oldPassphrase,
     kdf
   })
 
@@ -663,12 +972,21 @@ export async function changePassphrase({
   // error while reading the remote rethrows -- an unreachable remote must not
   // be misread as a wrong passphrase. With no WAS server the local cache is
   // the keyring's only copy.
-  await verifyUnlockKeyring({ unlock: oldUnlock, controller, idb })
+  const verified = await verifyUnlockKeyring({
+    unlock: oldUnlock,
+    controller,
+    idb
+  })
 
-  await bindPassphrase({
+  const { unlockSpaceId, manageCapability } = await bindPassphrase({
     seed,
     controller,
     passphrase: newPassphrase,
+    // Preserve the account email carried by the old record across the rebind.
+    email: verified.email,
+    // Delegate the new unlock Space's management zcap to the data identity, so
+    // Settings can record it in the registry (and revoke this method later).
+    delegateManagementTo: controller,
     idb,
     kdf
   })
@@ -696,5 +1014,9 @@ export async function changePassphrase({
 
   // The old unlock Space is gone (deleted, or old == new so nothing to delete);
   // only a failed deletion leaves the old passphrase live.
-  return { oldPassphraseRetired: oldSpaceDeleted }
+  return {
+    oldPassphraseRetired: oldSpaceDeleted,
+    unlockSpaceId,
+    manageCapability
+  }
 }

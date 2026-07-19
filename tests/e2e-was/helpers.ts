@@ -83,7 +83,10 @@ export async function expectCollectionUsage(
 }
 
 export async function expectHistoryEntry(page: Page, summary: string | RegExp) {
-  await expect(page.getByText(summary)).toBeVisible({ timeout: 15_000 })
+  // `.first()`: a pattern may legitimately match several entries (e.g. the
+  // welcome credential seeded at signup also records a "Credential created"
+  // entry); the assertion is that at least one matching entry is shown.
+  await expect(page.getByText(summary).first()).toBeVisible({ timeout: 15_000 })
 }
 
 export const E2E_TEST_CREDENTIAL = {

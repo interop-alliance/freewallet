@@ -74,6 +74,18 @@ const didDocumentUrlDetail: ICapabilityQueryDetail = {
   invocationTarget: `${SPACE_URL}/id/did.json`
 }
 
+// A public-collection request: plaintext + collection-level PublicCanRead.
+const publicCollectionDetail: ICapabilityQueryDetail = {
+  referenceId: 'example-app-public',
+  reason: 'Example App publishes your posts for anyone to read.',
+  allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
+  controller: RP_DID,
+  invocationTarget: {
+    type: 'urn:was:public-collection',
+    name: 'example-app-public'
+  }
+}
+
 const foreignDetail: ICapabilityQueryDetail = {
   controller: RP_DID,
   invocationTarget: 'https://someone-else.example/space/OTHER/data'
@@ -86,7 +98,7 @@ const foreignDetail: ICapabilityQueryDetail = {
  */
 let session: Session
 let delegated: Array<Record<string, unknown>>
-let ensureCalls: string[]
+let ensureCalls: Array<{ id: string; isPublic?: boolean }>
 
 beforeAll(async () => {
   const keyAgent = await CapabilityAgent.fromSecret({
@@ -136,8 +148,14 @@ beforeAll(async () => {
   const storage = {
     hasRemoteStorage: true,
     spaceUrl: SPACE_URL,
-    async ensureCollection({ id }: { id: string }) {
-      ensureCalls.push(id)
+    async ensureCollection({
+      id,
+      isPublic
+    }: {
+      id: string
+      isPublic?: boolean
+    }) {
+      ensureCalls.push({ id, isPublic })
     }
   }
 
@@ -246,6 +264,72 @@ describe('resolveInvocationTarget', () => {
       }).satisfiable
     ).toBe(false)
   })
+
+  it('resolves a public collection: plaintext, provisioned, isPublic', () => {
+    const target = resolveInvocationTarget({
+      descriptor: {
+        type: 'urn:was:public-collection',
+        name: 'example-app-public'
+      },
+      spaceUrl: SPACE_URL
+    })
+    expect(target).toMatchObject({
+      satisfiable: true,
+      invocationTarget: `${SPACE_URL}/example-app-public`,
+      needsProvisioning: true,
+      collectionId: 'example-app-public',
+      encrypted: false,
+      isPublic: true
+    })
+  })
+
+  it('never flags a non-public descriptor isPublic', () => {
+    for (const descriptor of [
+      { type: 'urn:was:collection', name: 'example-app-data' },
+      { type: 'urn:was:space' }
+    ]) {
+      expect(
+        resolveInvocationTarget({ descriptor, spaceUrl: SPACE_URL }).isPublic
+      ).toBe(false)
+    }
+    expect(
+      resolveInvocationTarget({
+        descriptor: `${SPACE_URL}/example-app-data`,
+        spaceUrl: SPACE_URL
+      }).isPublic
+    ).toBe(false)
+  })
+
+  it('refuses a public grant on protected wallet collections', () => {
+    for (const name of [
+      'private-credentials',
+      'public-credentials',
+      'wallet-activity',
+      'id'
+    ]) {
+      expect(
+        resolveInvocationTarget({
+          descriptor: { type: 'urn:was:public-collection', name },
+          spaceUrl: SPACE_URL
+        }).satisfiable
+      ).toBe(false)
+    }
+  })
+
+  it('rejects an invalid public-collection name', () => {
+    expect(
+      resolveInvocationTarget({
+        descriptor: { type: 'urn:was:public-collection', name: 'Bad_Name!' },
+        spaceUrl: SPACE_URL
+      }).satisfiable
+    ).toBe(false)
+    expect(
+      resolveInvocationTarget({
+        descriptor: { type: 'urn:was:public-collection' },
+        spaceUrl: SPACE_URL
+      }).satisfiable
+    ).toBe(false)
+  })
 })
 
 describe('resolveGrant action handling', () => {
@@ -335,6 +419,22 @@ describe('resolveGrant action handling', () => {
     const grant = resolveGrant({ descriptor: spaceDetail, spaceUrl: SPACE_URL })
     expect(grant.write).toBe(false)
   })
+
+  it('keeps requested write actions on a public RP collection', () => {
+    const grant = resolveGrant({
+      descriptor: publicCollectionDetail,
+      spaceUrl: SPACE_URL
+    })
+    expect(grant.target.isPublic).toBe(true)
+    expect(grant.allowedActions).toEqual([
+      'GET',
+      'HEAD',
+      'PUT',
+      'POST',
+      'DELETE'
+    ])
+    expect(grant.write).toBe(true)
+  })
 })
 
 describe('processZcaps', () => {
@@ -353,8 +453,8 @@ describe('processZcaps', () => {
     })
 
     expect(zcaps).toHaveLength(2)
-    // Only the un-provisioned RP collection is created.
-    expect(ensureCalls).toEqual(['example-app-data'])
+    // Only the un-provisioned RP collection is created (and not made public).
+    expect(ensureCalls).toEqual([{ id: 'example-app-data', isPublic: false }])
 
     const collectionZcap = zcaps[0] as unknown as {
       invocationTarget: string
@@ -430,6 +530,55 @@ describe('processZcaps', () => {
     )
     // The write grant expires strictly sooner than the read-only grant.
     expect(writeExpires).toBeLessThan(readExpires)
+  })
+
+  it('provisions a public collection as public and delegates the usual RW zcap', async () => {
+    delegated.length = 0
+    ensureCalls.length = 0
+    const before = Date.now()
+    const zcaps = await processZcaps({
+      zcapRequests: [publicCollectionDetail],
+      session,
+      ttlMs: READ_TTL_MS,
+      writeTtlMs: WRITE_TTL_MS
+    })
+
+    expect(ensureCalls).toEqual([{ id: 'example-app-public', isPublic: true }])
+    expect(zcaps).toHaveLength(1)
+    const zcap = zcaps[0] as unknown as {
+      invocationTarget: string
+      allowedAction: string[]
+      expires: string
+    }
+    expect(zcap.invocationTarget).toBe(`${SPACE_URL}/example-app-public`)
+    // Public covers only unauthenticated reads; the delegated zcap still
+    // carries the requested write actions, with the ordinary write TTL.
+    expect(zcap.allowedAction).toEqual(['GET', 'HEAD', 'PUT', 'POST', 'DELETE'])
+    const expiresMs = new Date(zcap.expires).getTime()
+    expect(Math.abs(expiresMs - (before + WRITE_TTL_MS))).toBeLessThan(
+      60 * 1000
+    )
+  })
+
+  it('skips a public grant on a protected collection entirely', async () => {
+    delegated.length = 0
+    ensureCalls.length = 0
+    const zcaps = await processZcaps({
+      zcapRequests: [
+        {
+          referenceId: 'protected-public',
+          allowedAction: ['GET', 'HEAD'],
+          controller: RP_DID,
+          invocationTarget: {
+            type: 'urn:was:public-collection',
+            name: 'private-credentials'
+          }
+        }
+      ],
+      session
+    })
+    expect(zcaps).toHaveLength(0)
+    expect(ensureCalls).toEqual([])
   })
 
   it('throws when the session has no remote storage', async () => {

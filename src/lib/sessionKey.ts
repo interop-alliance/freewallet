@@ -421,6 +421,206 @@ export async function deleteKeyringCache({
 }
 
 /**
+ * The object-store key under which an account's unlock-methods registry record
+ * is cached. Keyed by the data controller did:key, so several accounts can hold
+ * caches side by side in the shared session database. (The controller DID, not
+ * the data Space id, is the stable identity available wherever the registry is
+ * read -- including no-WAS deployments that have no Space.)
+ *
+ * @param controller {string}   the data did:key
+ * @returns {string}
+ */
+function unlockMethodsCacheKey(controller: string): string {
+  return `unlock-methods/${controller}`
+}
+
+/**
+ * Caches an unlock-methods registry record locally (keyed by the data
+ * controller did:key) so a no-WAS deployment has a copy to read and a
+ * WAS-configured one can refresh on a remote hit. The record is the
+ * JWE-wrapped registry document; it is inert without the vault KAK that
+ * decrypts it.
+ *
+ * @param options {object}
+ * @param options.controller {string}   the data did:key
+ * @param options.record {unknown}   the wrapped registry record to cache
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function saveUnlockMethodsCache({
+  controller,
+  record,
+  idb
+}: {
+  controller: string
+  record: unknown
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.put(record, unlockMethodsCacheKey(controller)),
+    idb
+  )
+}
+
+/**
+ * Loads a cached unlock-methods registry record by the data controller did:key,
+ * or `null` if none is cached.
+ *
+ * @param options {object}
+ * @param options.controller {string}   the data did:key
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<unknown | null>}
+ */
+export async function loadUnlockMethodsCache({
+  controller,
+  idb
+}: {
+  controller: string
+  idb?: IDBFactory
+}): Promise<unknown | null> {
+  const stored = await withSessionStore(
+    'readonly',
+    store => store.get(unlockMethodsCacheKey(controller)),
+    idb
+  )
+  return stored === undefined ? null : stored
+}
+
+/**
+ * Deletes a cached unlock-methods registry record by the data controller
+ * did:key. Used when the remote registry is gone (a 404-shaped miss).
+ *
+ * @param options {object}
+ * @param options.controller {string}   the data did:key
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deleteUnlockMethodsCache({
+  controller,
+  idb
+}: {
+  controller: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.delete(unlockMethodsCacheKey(controller)),
+    idb
+  )
+}
+
+/**
+ * The object-store key under which an account's passkey-safety notice is
+ * stored. Keyed by the data controller did:key -- matching the unlock-methods
+ * cache -- so several accounts can hold notices side by side in the shared
+ * session database.
+ *
+ * @param controller {string}   the data did:key
+ * @returns {string}
+ */
+function passkeySafetyKey(controller: string): string {
+  return `passkey-safety/${controller}`
+}
+
+/**
+ * Saves the passkey-safety notice: the local-only, per-controller marker that a
+ * passkey-only signup left the account with a single unlock method. Its presence
+ * drives the dashboard's recurring "add a second login method" safety prompt
+ * (the stored backup flags scale that prompt's urgency); it is deleted once a
+ * second unlock method exists. Local-only and never replicated -- a UI
+ * reminder, not account state. The write time is stamped here.
+ *
+ * @param options {object}
+ * @param options.controller {string}   the data did:key
+ * @param options.backupEligibility {boolean}   the passkey's BE flag at signup
+ * @param options.backupState {boolean}   the passkey's BS flag at signup
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function savePasskeySafetyNotice({
+  controller,
+  backupEligibility,
+  backupState,
+  idb
+}: {
+  controller: string
+  backupEligibility: boolean
+  backupState: boolean
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store =>
+      store.put(
+        {
+          backupEligibility,
+          backupState,
+          createdAt: new Date().toISOString()
+        },
+        passkeySafetyKey(controller)
+      ),
+    idb
+  )
+}
+
+/**
+ * Loads an account's passkey-safety notice by the data controller did:key, or
+ * `null` if none is stored.
+ *
+ * @param options {object}
+ * @param options.controller {string}   the data did:key
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<{ backupEligibility: boolean, backupState: boolean, createdAt: string } | null>}
+ */
+export async function loadPasskeySafetyNotice({
+  controller,
+  idb
+}: {
+  controller: string
+  idb?: IDBFactory
+}): Promise<{
+  backupEligibility: boolean
+  backupState: boolean
+  createdAt: string
+} | null> {
+  const stored = await withSessionStore(
+    'readonly',
+    store => store.get(passkeySafetyKey(controller)),
+    idb
+  )
+  return (
+    (stored as
+      | { backupEligibility: boolean; backupState: boolean; createdAt: string }
+      | undefined) ?? null
+  )
+}
+
+/**
+ * Deletes an account's passkey-safety notice by the data controller did:key.
+ * Called once a second unlock method exists (the account is no longer
+ * passkey-only) and for hygiene during account deletion.
+ *
+ * @param options {object}
+ * @param options.controller {string}   the data did:key
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deletePasskeySafetyNotice({
+  controller,
+  idb
+}: {
+  controller: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.delete(passkeySafetyKey(controller)),
+    idb
+  )
+}
+
+/**
  * Computes the session key's did:key DID from its (always-exportable) public
  * key: export as JWK, re-encode as the multicodec/multibase fingerprint.
  *

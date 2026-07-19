@@ -134,7 +134,8 @@ export type IZcapQuery = {
  * optional human-readable `reason` and RP-chosen `referenceId`. The
  * `invocationTarget` is either a plain URL (satisfied only under the user's own
  * Space) or a wallet-defined descriptor object (`urn:was:collection` /
- * `urn:was:space`), resolved by `resolveInvocationTarget`.
+ * `urn:was:public-collection` / `urn:was:space`), resolved by
+ * `resolveInvocationTarget`.
  */
 export type ICapabilityQueryDetail = {
   referenceId?: string

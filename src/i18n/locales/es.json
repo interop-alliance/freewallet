@@ -90,7 +90,42 @@
     "passphraseChangedNotRetired": "Frase de contraseña cambiada. La frase de contraseña anterior no se pudo retirar por completo -- puede que aún desbloquee esta billetera.",
     "passphraseIncorrect": "La frase de contraseña actual es incorrecta.",
     "passphraseChangeFailed": "No se pudo cambiar su frase de contraseña. Inténtelo de nuevo.",
-    "passphraseRequiresFullSession": "Inicie sesión con su frase de contraseña para cambiarla."
+    "passphraseRequiresFullSession": "Inicie sesión con su frase de contraseña para cambiarla.",
+    "passkeysSection": "Llaves de acceso",
+    "addPasskey": "Agregar una llave de acceso",
+    "addingPasskey": "Agregando...",
+    "passkeyAdded": "Llave de acceso agregada. Ahora puede desbloquear esta billetera con ella.",
+    "passkeyDuplicate": "Ya existe una llave de acceso para esta billetera en este dispositivo.",
+    "passkeyPrfUnsupported": "Esta llave de acceso o este navegador no puede desbloquear Freewallet. Pruebe con otra llave de acceso.",
+    "passkeyAddFailed": "No se pudo agregar la llave de acceso. Inténtelo de nuevo.",
+    "passkeysRequiresFullSession": "Inicie sesión con su frase de contraseña para agregar una llave de acceso.",
+    "passkeyRetryTitle": "Se necesita un toque más",
+    "passkeyRetryMessage": "Su autenticador necesita una segunda solicitud para terminar de configurar esta llave de acceso. Continúe para confirmar.",
+    "passkeyRetryConfirm": "Continuar",
+    "passkeyRetryCancel": "Cancelar",
+    "passkeyLoadError": "No se pudieron cargar sus llaves de acceso. Es posible que algunas acciones no estén disponibles.",
+    "passkeyNameLabel": "Nombre de la llave de acceso",
+    "passkeyLabelSaved": "Nombre de la llave de acceso guardado.",
+    "passkeyCreatedOn": "Agregada el {{date}}",
+    "passkeySyncSynced": "Sincronizada",
+    "passkeySyncAvailable": "Sincronización disponible",
+    "passkeySyncNone": "Sin sincronizar",
+    "passkeyNotSyncedHint": "Una llave de acceso marcada como \"Sin sincronizar\" existe únicamente en el autenticador que la creó -- si pierde ese dispositivo, ya no podrá desbloquear esta billetera.",
+    "passkeyRemove": "Eliminar",
+    "passkeyRemoveTitle": "¿Eliminar esta llave de acceso?",
+    "passkeyRemoveConfirm": "Esta llave de acceso ya no desbloqueará esta billetera.",
+    "passkeyRemoveCeremonyNote": "Se le pedirá que toque esta llave de acceso para confirmar.",
+    "passkeyRemoveConfirmAction": "Eliminar llave de acceso",
+    "passkeyRemoving": "Eliminando...",
+    "passkeyRemoved": "Llave de acceso eliminada.",
+    "passkeyRemoveFailed": "No se pudo eliminar la llave de acceso. Inténtelo de nuevo.",
+    "passkeyLastMethod": "Esta es la única forma de desbloquear esta billetera, por lo que no se puede eliminar. Agregue otra llave de acceso o una frase de contraseña primero.",
+    "addPassphraseHint": "Esta billetera se desbloquea solo con una llave de acceso. Agregue una frase de contraseña como forma de respaldo para desbloquearla.",
+    "addPassphrase": "Agregar una frase de contraseña",
+    "addingPassphrase": "Agregando...",
+    "passphraseAdded": "Frase de contraseña agregada. Ahora puede desbloquear esta billetera con ella.",
+    "passphraseAddedHint": "Frase de contraseña agregada. Ahora puede desbloquear esta billetera con ella.",
+    "addPassphraseFailed": "No se pudo agregar la frase de contraseña. Inténtelo de nuevo."
   },
   "landing": {
     "title": "Freewallet",
@@ -105,14 +140,15 @@
       "profileExists": "Este perfil ya existe; inicie sesión.",
       "setupFailed": "No se pudo terminar de configurar su billetera. Inténtelo de nuevo.",
       "keyringUnusable": "Se encontró su cuenta, pero su registro de acceso guardado no se pudo leer. Si el problema persiste, cambie su frase de contraseña desde un dispositivo donde aún tenga la sesión iniciada para escribir un registro nuevo.",
-      "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Mientras lo solucionamos, pruebe el <guest>modo invitado</guest>."
+      "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Mientras lo solucionamos, pruebe el <guest>modo invitado</guest>.",
+      "passkeyNoAccount": "No se encontró ninguna billetera para esta llave de acceso. Inicie sesión con su frase de contraseña y luego agregue esta llave de acceso desde Configuración.",
+      "passkeyPrfUnsupported": "Esta llave de acceso o este navegador no puede desbloquear Freewallet. Pruebe con otra llave de acceso o inicie sesión con su frase de contraseña."
     },
     "login": {
       "heading": "Iniciar sesión",
       "passphraseLabel": "Frase de contraseña:",
       "submit": "Iniciar sesión",
       "passkey": "Iniciar sesión con llave de acceso",
-      "comingSoon": "(Próximamente.)",
       "noWallet": "¿No tiene una billetera?",
       "signUpLink": "Registrarse"
     },
@@ -120,6 +156,7 @@
       "heading": "Registrarse",
       "steps": {
         "passphrase": "Frase de contraseña",
+        "passkey": "Llave de acceso",
         "email": "Correo",
         "storage": "Almacenamiento"
       },
@@ -129,7 +166,7 @@
       "passwordTooShort": "Muy corta",
       "minChars": "Al menos {{count}} caracteres",
       "passkey": "Registrarse con llave de acceso",
-      "comingSoon": "(Próximamente.)",
+      "passkeyHint": "Use el bloqueo de pantalla de su dispositivo o una llave de seguridad -- sin frase de contraseña.",
       "next": "Siguiente",
       "back": "Atrás",
       "hasWallet": "¿Ya tiene una billetera?",
@@ -168,6 +205,11 @@
     "removeUndecryptable": "Eliminar",
     "undecryptableRemoved_one": "Se eliminó {{count}} credencial no descifrable.",
     "undecryptableRemoved_other": "Se eliminaron {{count}} credenciales no descifrables.",
+    "passkeySafety": {
+      "notSynced": "El único acceso de esta billetera es una llave de acceso guardada en este dispositivo. Si pierde el dispositivo, pierde la billetera. Agregue un segundo método de acceso en Ajustes.",
+      "synced": "Esta billetera tiene un único acceso con llave de acceso. Agregue un segundo método de acceso por si pierde el acceso a ella.",
+      "action": "Abrir Ajustes"
+    },
     "scanQr": {
       "button": "Escanear QR",
       "title": "Escanear QR de credencial",
@@ -414,6 +456,7 @@
         "space": "todo su Espacio de almacenamiento"
       },
       "zcapSpaceWarning": "Esto otorga acceso a todo su Espacio de almacenamiento.",
+      "zcapPublicWarning": "Esta colección será pública: cualquier persona en la web podrá leerla, sin iniciar sesión.",
       "zcapRecipient": "Acceso otorgado a:",
       "zcapWriteWarning": "Este sitio podrá agregar, cambiar o eliminar datos en esta colección.",
       "zcapReadOnlyNote": "Solo lectura",

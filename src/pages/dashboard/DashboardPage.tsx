@@ -1,15 +1,22 @@
 import { useState, useEffect, useCallback } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
+import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import Button from '@mui/material/Button'
-import { MdAddCircleOutline, MdQrCodeScanner, MdSync } from 'react-icons/md'
+import {
+  MdAddCircleOutline,
+  MdClose,
+  MdQrCodeScanner,
+  MdSync
+} from 'react-icons/md'
 import { Link as RouterLink, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
+import { loadPasskeySafetyNotice } from '@/lib/sessionKey'
 import { syncController } from '@/stores/syncController'
 import { dashboardStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
@@ -32,6 +39,14 @@ export function DashboardPage() {
   // so the user can see and clear them rather than one poisoned row hanging the
   // page.
   const [undecryptableCount, setUndecryptableCount] = useState(0)
+  // The passkey-only safety notice: present when this wallet was created with a
+  // single passkey and no second unlock method has been added yet. Drives a
+  // recurring "add a second login method" prompt.
+  const [passkeySafetyNotice, setPasskeySafetyNotice] = useState<{
+    backupEligibility: boolean
+    backupState: boolean
+    createdAt: string
+  } | null>(null)
 
   const handleQrCredentialsReady = useCallback(
     (resolved: IVerifiableCredential[]) => {
@@ -80,6 +95,29 @@ export function DashboardPage() {
     initialLoad()
 
     // clean up effect
+    return () => {
+      cancelled = true
+    }
+  }, [session])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadNotice() {
+      if (!session || session.isGuest) {
+        return
+      }
+      try {
+        const notice = await loadPasskeySafetyNotice({
+          controller: session.user.id
+        })
+        if (!cancelled) {
+          setPasskeySafetyNotice(notice)
+        }
+      } catch (err) {
+        console.error('Could not load the passkey-safety notice:', err)
+      }
+    }
+    void loadNotice()
     return () => {
       cancelled = true
     }
@@ -171,6 +209,42 @@ export function DashboardPage() {
           }
         >
           {t('dashboard.undecryptable', { count: undecryptableCount })}
+        </Alert>
+      )}
+
+      {passkeySafetyNotice && (
+        <Alert
+          severity={passkeySafetyNotice.backupState ? 'info' : 'warning'}
+          sx={{ mb: 2 }}
+          // The action carries its own close button (an `action` prop replaces
+          // the Alert's built-in `onClose` icon). Dismissing clears only the
+          // component state -- the notice record is left in place, so the
+          // prompt recurs on the next visit until a second unlock method
+          // resolves it.
+          action={
+            <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
+              <Button
+                component={RouterLink}
+                to="/settings"
+                color="inherit"
+                size="small"
+              >
+                {t('dashboard.passkeySafety.action')}
+              </Button>
+              <IconButton
+                color="inherit"
+                size="small"
+                aria-label={t('common.close')}
+                onClick={() => setPasskeySafetyNotice(null)}
+              >
+                <MdClose size={18} />
+              </IconButton>
+            </Stack>
+          }
+        >
+          {passkeySafetyNotice.backupState
+            ? t('dashboard.passkeySafety.synced')
+            : t('dashboard.passkeySafety.notSynced')}
         </Alert>
       )}
 

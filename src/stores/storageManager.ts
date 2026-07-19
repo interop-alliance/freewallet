@@ -709,24 +709,28 @@ export class StorageManager {
    * Provisions an arbitrary plaintext collection on the remote WAS Space, for
    * a relying party's delegated capability. No local counterpart -- RP
    * collections are the RP's data, reached only over its zcap. Requires a
-   * remote backend (full tier).
+   * remote backend (full tier). With `isPublic`, the collection also gets a
+   * collection-level world-readable (PublicCanRead) policy.
    *
    * @param options {object}
    * @param options.id {string}
    * @param [options.name] {string}
+   * @param [options.isPublic] {boolean}
    * @returns {Promise<void>}
    */
   async ensureCollection({
     id,
-    name
+    name,
+    isPublic
   }: {
     id: string
     name?: string
+    isPublic?: boolean
   }): Promise<void> {
     if (!this._remoteStore) {
       throw new Error('Provisioning a collection requires remote storage.')
     }
-    await this._remoteStore.ensureCollection({ id, name })
+    await this._remoteStore.ensureCollection({ id, name, isPublic })
   }
 
   async ensureUserCollections({

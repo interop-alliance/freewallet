@@ -11,9 +11,12 @@ import { Ed25519VerificationKey } from '@interop/ed25519-verification-key'
 import {
   clearPersistedSession,
   deleteKeyringCache,
+  deletePasskeySafetyNotice,
   deleteVaultEnvelope,
   loadKeyringCache,
+  loadPasskeySafetyNotice,
   loadVaultEnvelope,
+  savePasskeySafetyNotice,
   saveKeyringCache,
   saveSessionRecord,
   saveVaultEnvelope,
@@ -224,6 +227,77 @@ describe('keyring cache helpers', () => {
     await expect(
       loadKeyringCache({ spaceId: 'space-a', idb })
     ).resolves.toMatchObject({ record: { keyring: true } })
+  })
+})
+
+describe('passkey-safety notice helpers', () => {
+  it('round-trips save / load / delete keyed by controller', async () => {
+    const idb = createFakeIdb()
+    const controller = 'did:key:z6MkController'
+
+    await expect(
+      loadPasskeySafetyNotice({ controller, idb })
+    ).resolves.toBeNull()
+
+    await savePasskeySafetyNotice({
+      controller,
+      backupEligibility: true,
+      backupState: false,
+      idb
+    })
+    await expect(loadPasskeySafetyNotice({ controller, idb })).resolves.toEqual(
+      {
+        backupEligibility: true,
+        backupState: false,
+        createdAt: expect.any(String)
+      }
+    )
+
+    await deletePasskeySafetyNotice({ controller, idb })
+    await expect(
+      loadPasskeySafetyNotice({ controller, idb })
+    ).resolves.toBeNull()
+  })
+
+  it('stamps the notice with an ISO createdAt', async () => {
+    const idb = createFakeIdb()
+    const controller = 'did:key:z6MkController'
+    const before = Date.now()
+    await savePasskeySafetyNotice({
+      controller,
+      backupEligibility: false,
+      backupState: false,
+      idb
+    })
+    const after = Date.now()
+
+    const notice = await loadPasskeySafetyNotice({ controller, idb })
+    const stamped = Date.parse(notice!.createdAt)
+    expect(stamped).toBeGreaterThanOrEqual(before)
+    expect(stamped).toBeLessThanOrEqual(after)
+  })
+
+  it('keeps separate notices per controller', async () => {
+    const idb = createFakeIdb()
+    await savePasskeySafetyNotice({
+      controller: 'did:key:z6MkA',
+      backupEligibility: true,
+      backupState: true,
+      idb
+    })
+    await savePasskeySafetyNotice({
+      controller: 'did:key:z6MkB',
+      backupEligibility: false,
+      backupState: false,
+      idb
+    })
+
+    await expect(
+      loadPasskeySafetyNotice({ controller: 'did:key:z6MkA', idb })
+    ).resolves.toMatchObject({ backupEligibility: true, backupState: true })
+    await expect(
+      loadPasskeySafetyNotice({ controller: 'did:key:z6MkB', idb })
+    ).resolves.toMatchObject({ backupEligibility: false, backupState: false })
   })
 })
 

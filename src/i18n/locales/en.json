@@ -90,7 +90,42 @@
     "passphraseChangedNotRetired": "Passphrase changed. The old passphrase could not be fully retired -- it may still unlock this wallet.",
     "passphraseIncorrect": "The current passphrase is incorrect.",
     "passphraseChangeFailed": "Could not change your passphrase. Please try again.",
-    "passphraseRequiresFullSession": "Log in with your passphrase to change it."
+    "passphraseRequiresFullSession": "Log in with your passphrase to change it.",
+    "passkeysSection": "Passkeys",
+    "addPasskey": "Add a passkey",
+    "addingPasskey": "Adding...",
+    "passkeyAdded": "Passkey added. You can now unlock this wallet with it.",
+    "passkeyDuplicate": "A passkey for this wallet already exists on this device.",
+    "passkeyPrfUnsupported": "This passkey or browser cannot unlock Freewallet. Try a different passkey.",
+    "passkeyAddFailed": "Could not add the passkey. Please try again.",
+    "passkeysRequiresFullSession": "Log in with your passphrase to add a passkey.",
+    "passkeyRetryTitle": "One more tap needed",
+    "passkeyRetryMessage": "Your authenticator needs a second prompt to finish setting up this passkey. Continue to confirm.",
+    "passkeyRetryConfirm": "Continue",
+    "passkeyRetryCancel": "Cancel",
+    "passkeyLoadError": "Could not load your passkeys. Some passkey actions may be unavailable.",
+    "passkeyNameLabel": "Passkey name",
+    "passkeyLabelSaved": "Passkey name saved.",
+    "passkeyCreatedOn": "Added {{date}}",
+    "passkeySyncSynced": "Synced",
+    "passkeySyncAvailable": "Sync available",
+    "passkeySyncNone": "Not synced",
+    "passkeyNotSyncedHint": "A passkey shown as \"Not synced\" lives only on the one authenticator that created it -- if you lose that device, it can no longer unlock this wallet.",
+    "passkeyRemove": "Remove",
+    "passkeyRemoveTitle": "Remove this passkey?",
+    "passkeyRemoveConfirm": "This passkey will no longer unlock this wallet.",
+    "passkeyRemoveCeremonyNote": "You will be asked to tap this passkey to confirm.",
+    "passkeyRemoveConfirmAction": "Remove passkey",
+    "passkeyRemoving": "Removing...",
+    "passkeyRemoved": "Passkey removed.",
+    "passkeyRemoveFailed": "Could not remove the passkey. Please try again.",
+    "passkeyLastMethod": "This is the only way to unlock this wallet, so it cannot be removed. Add another passkey or a passphrase first.",
+    "addPassphraseHint": "This wallet unlocks with a passkey only. Add a passphrase as a backup way to unlock it.",
+    "addPassphrase": "Add a passphrase",
+    "addingPassphrase": "Adding...",
+    "passphraseAdded": "Passphrase added. You can now unlock this wallet with it.",
+    "passphraseAddedHint": "Passphrase added. You can now unlock this wallet with it.",
+    "addPassphraseFailed": "Could not add a passphrase. Please try again."
   },
   "landing": {
     "title": "Freewallet",
@@ -105,14 +140,15 @@
       "profileExists": "This profile already exists, please log in.",
       "setupFailed": "Could not finish setting up your wallet. Please try again.",
       "keyringUnusable": "Your account was found, but its stored login record could not be read. If this keeps happening, change your passphrase from a device where you are still logged in to write a fresh record.",
-      "storageUnreachable": "Could not reach the storage server. While we're fixing it, try <guest>guest mode</guest>."
+      "storageUnreachable": "Could not reach the storage server. While we're fixing it, try <guest>guest mode</guest>.",
+      "passkeyNoAccount": "No wallet was found for this passkey. Log in with your passphrase, then add this passkey from Settings.",
+      "passkeyPrfUnsupported": "This passkey or browser cannot unlock Freewallet. Try a different passkey or log in with your passphrase."
     },
     "login": {
       "heading": "Log in",
       "passphraseLabel": "Passphrase:",
       "submit": "Log in",
       "passkey": "Log in with a Passkey",
-      "comingSoon": "(Coming soon.)",
       "noWallet": "Don't have an existing wallet?",
       "signUpLink": "Sign up"
     },
@@ -120,6 +156,7 @@
       "heading": "Sign up",
       "steps": {
         "passphrase": "Passphrase",
+        "passkey": "Passkey",
         "email": "Email",
         "storage": "Storage Selection"
       },
@@ -129,7 +166,7 @@
       "passwordTooShort": "Too short",
       "minChars": "At least {{count}} characters",
       "passkey": "Sign up with a Passkey",
-      "comingSoon": "(Coming soon.)",
+      "passkeyHint": "Use your device's screen lock or a security key -- no passphrase needed.",
       "next": "Next",
       "back": "Back",
       "hasWallet": "Already have a wallet?",
@@ -168,6 +205,11 @@
     "removeUndecryptable": "Remove",
     "undecryptableRemoved_one": "{{count}} undecryptable credential removed.",
     "undecryptableRemoved_other": "{{count}} undecryptable credentials removed.",
+    "passkeySafety": {
+      "notSynced": "This wallet's only login is a passkey stored on this device. If you lose the device, you lose the wallet. Add a second login method in Settings.",
+      "synced": "This wallet has a single passkey login. Add a second login method in case you lose access to it.",
+      "action": "Open Settings"
+    },
     "scanQr": {
       "button": "Scan QR",
       "title": "Scan credential QR",
@@ -414,6 +456,7 @@
         "space": "your whole storage Space"
       },
       "zcapSpaceWarning": "This grants access to your entire storage Space.",
+      "zcapPublicWarning": "This collection will be public: anyone on the web will be able to read it, without logging in.",
       "zcapRecipient": "Access granted to:",
       "zcapWriteWarning": "This site will be able to add, change, or delete data in this collection.",
       "zcapReadOnlyNote": "Read-only",

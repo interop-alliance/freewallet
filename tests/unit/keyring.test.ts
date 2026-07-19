@@ -1,10 +1,15 @@
 // @vitest-environment node
 /**
  * Unit tests for the keyring v2 module (`src/session/keyring.ts`): the unlock
- * derivation (deterministic, passphrase-sensitive), the wrap/unwrap round-trip
+ * derivation (deterministic, secret-sensitive), the wrap/unwrap round-trip
  * and its record validation, and the `fetchKeyringSeed` / `bindPassphrase` /
  * `changePassphrase` public contract across the WAS-configured and cache-only
- * branches. The unlock-Space WAS helpers are replaced by an in-memory fake
+ * branches. The module is now method-agnostic -- unlock derivation runs off a
+ * generic `{ secret, kdf }` pair (a string passphrase under PBKDF2, or uniform
+ * byte material such as a passkey PRF output under HKDF) via the exported
+ * `deriveUnlockIdentity` / `bindUnlockSecret` seam, and the passphrase
+ * functions are thin wrappers over it; the frozen-vector block pins the
+ * production salts. The unlock-Space WAS helpers are replaced by an in-memory fake
  * keyed by unlock Space id; the `freewallet-session` IndexedDB cache is backed
  * by a minimal in-memory `IDBFactory` (node has no IndexedDB). Tiny PBKDF2
  * iteration counts keep the derivation fast; the real EDV cipher and
@@ -13,12 +18,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
-import type { IKeyAgreementKey } from '@interop/data-integrity-core'
+import type {
+  IDelegatedZcap,
+  IKeyAgreementKey
+} from '@interop/data-integrity-core'
 import { WasError } from '@interop/was-client'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
 import { createEdvDocCipher } from '@/stores/edvDocCipher'
 import { loadKeyringCache } from '@/lib/sessionKey'
-import { KEYRING_CACHE_TTL_MS } from '@/app.config'
+import {
+  KEYRING_CACHE_TTL_MS,
+  KEYRING_KDF,
+  PASSKEY_KDF,
+  UNLOCK_MANAGE_ZCAP_TTL_MS
+} from '@/app.config'
 
 /**
  * Shared mutable state for the two mocks: the configured WAS url (mutable so a
@@ -59,8 +72,10 @@ vi.mock('@/stores/wasRemoteStore', () => ({
 
 import {
   bindPassphrase,
+  bindUnlockSecret,
   changePassphrase,
   deleteKeyring,
+  deriveUnlockIdentity,
   fetchKeyringSeed,
   KeyringRecordUnusableError,
   verifyPassphrase,
@@ -72,7 +87,13 @@ import {
   getUnlockKeyring
 } from '@/stores/wasRemoteStore'
 
-const KDF = { iterations: 2, hash: 'SHA-256', salt: 'freewallet/test/unlock' }
+const KDF = {
+  version: 1,
+  algorithm: 'PBKDF2',
+  iterations: 2,
+  hash: 'SHA-256',
+  salt: 'freewallet/test/unlock'
+} as const
 const DATA_CONTROLLER = 'did:key:z6MkDataControllerForTests'
 
 /**
@@ -646,11 +667,62 @@ describe('bindPassphrase', () => {
       idb,
       kdf: KDF
     }
-    await bindPassphrase(args)
-    await expect(bindPassphrase(args)).resolves.toBeUndefined()
-
     const { spaceId } = await unlockFor('idempotent passphrase')
+    await bindPassphrase(args)
+    await expect(bindPassphrase(args)).resolves.toEqual({
+      unlockSpaceId: spaceId
+    })
     expect(wasState.spaces.has(spaceId)).toBe(true)
+  })
+
+  it('returns the unlock Space id it bound', async () => {
+    const idb = createFakeIdb()
+    const { unlockSpaceId } = await bindPassphrase({
+      seed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'space id return passphrase',
+      idb,
+      kdf: KDF
+    })
+    const { spaceId } = await unlockFor('space id return passphrase')
+    expect(unlockSpaceId).toBe(spaceId)
+  })
+
+  it('carries the email through the wrapped record to fetchKeyringSeed', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      seed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'email carrying passphrase',
+      email: 'holder@example.com',
+      idb,
+      kdf: KDF
+    })
+
+    const found = await fetchKeyringSeed({
+      passphrase: 'email carrying passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.email).toBe('holder@example.com')
+  })
+
+  it('omits the email when none was bound', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      seed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'no email passphrase',
+      idb,
+      kdf: KDF
+    })
+
+    const found = await fetchKeyringSeed({
+      passphrase: 'no email passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.email).toBeUndefined()
   })
 })
 
@@ -816,6 +888,35 @@ describe('changePassphrase', () => {
     })
 
     expect(oldPassphraseRetired).toBe(false)
+  })
+
+  it('preserves the bound email across the rebind', async () => {
+    const idb = createFakeIdb()
+    const seed = randomSeed()
+    await bindPassphrase({
+      seed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'email rebind old passphrase',
+      email: 'holder@example.com',
+      idb,
+      kdf: KDF
+    })
+
+    await changePassphrase({
+      seed,
+      controller: DATA_CONTROLLER,
+      oldPassphrase: 'email rebind old passphrase',
+      newPassphrase: 'email rebind new passphrase',
+      idb,
+      kdf: KDF
+    })
+
+    const found = await fetchKeyringSeed({
+      passphrase: 'email rebind new passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.email).toBe('holder@example.com')
   })
 
   it('does not delete the Space when old and new passphrases are equal', async () => {
@@ -1011,5 +1112,314 @@ describe('deleteKeyring', () => {
     expect(unlockSpaceDeleted).toBe(true)
     expect(deleteUnlockSpace).not.toHaveBeenCalled()
     await expect(loadKeyringCache({ spaceId, idb })).resolves.toBeNull()
+  })
+})
+
+describe('deriveUnlockIdentity (method-agnostic derivation)', () => {
+  /**
+   * Frozen derivation vectors: these pin the production KDF salts (and the
+   * whole derivation pipeline, down to the did:key encoding and the spaceId
+   * hash) forever. If any of these values changes, existing users can no
+   * longer locate their keyring -- so a failure here is a red flag, not a
+   * value to blindly update.
+   */
+  describe('frozen derivation vectors', () => {
+    it('pins the passphrase (PBKDF2) unlock Space under the real KEYRING_KDF', async () => {
+      const { agent, spaceId } = await deriveUnlockIdentity({
+        secret: 'freewallet test vector passphrase',
+        kdf: KEYRING_KDF
+      })
+      expect(agent.id).toBe(
+        'did:key:z6Mku4aGYK4PLysHqrpUNzoNbiu4ixzAEUEkefqamgFwY6vD'
+      )
+      expect(spaceId).toBe('PVkVUyJ24oyQh2BebkeUOygDfR5opfhJhG4KkMYTlzU')
+    })
+
+    it('pins the passkey (HKDF) unlock Space under the real PASSKEY_KDF', async () => {
+      const secret = new Uint8Array(32)
+      for (let index = 0; index < 32; index++) {
+        secret[index] = index
+      }
+      const { agent, spaceId } = await deriveUnlockIdentity({
+        secret,
+        kdf: PASSKEY_KDF
+      })
+      expect(agent.id).toBe(
+        'did:key:z6MkrWQ669H4SiPPYSHKhcx1QnWS5oP1gbD45GkQLVU6ecPU'
+      )
+      expect(spaceId).toBe('aAW83Cs-iZk6xEx8eYqF8WcKo6v5PE8CwEeYToOELkM')
+    })
+  })
+
+  describe('KDF-family and salt separation', () => {
+    // A fixed 32-byte input reused across the separation cases, so any
+    // difference in derived Space is attributable to the KDF alone.
+    const fixedSecret = new Uint8Array(32)
+    for (let index = 0; index < 32; index++) {
+      fixedSecret[index] = (index * 7 + 3) & 0xff
+    }
+
+    it('derives different Spaces under PBKDF2 vs HKDF for the same input (equal salts)', async () => {
+      const sharedSalt = 'freewallet/test/shared-salt'
+      const pbkdf2 = await deriveUnlockIdentity({
+        secret: fixedSecret,
+        kdf: {
+          version: 1,
+          algorithm: 'PBKDF2',
+          iterations: 2,
+          hash: 'SHA-256',
+          salt: sharedSalt
+        }
+      })
+      const hkdf = await deriveUnlockIdentity({
+        secret: fixedSecret,
+        kdf: {
+          version: 1,
+          algorithm: 'HKDF',
+          hash: 'SHA-256',
+          salt: sharedSalt,
+          info: 'freewallet/test/info'
+        }
+      })
+      expect(hkdf.spaceId).not.toBe(pbkdf2.spaceId)
+    })
+
+    it('derives different Spaces under two HKDF kdfs differing only in salt', async () => {
+      const info = 'freewallet/test/info'
+      const saltA = await deriveUnlockIdentity({
+        secret: fixedSecret,
+        kdf: {
+          version: 1,
+          algorithm: 'HKDF',
+          hash: 'SHA-256',
+          salt: 'freewallet/test/salt-a',
+          info
+        }
+      })
+      const saltB = await deriveUnlockIdentity({
+        secret: fixedSecret,
+        kdf: {
+          version: 1,
+          algorithm: 'HKDF',
+          hash: 'SHA-256',
+          salt: 'freewallet/test/salt-b',
+          info
+        }
+      })
+      expect(saltB.spaceId).not.toBe(saltA.spaceId)
+    })
+
+    it('derives different Spaces under two HKDF kdfs differing only in info', async () => {
+      const salt = 'freewallet/test/shared-salt'
+      const infoA = await deriveUnlockIdentity({
+        secret: fixedSecret,
+        kdf: {
+          version: 1,
+          algorithm: 'HKDF',
+          hash: 'SHA-256',
+          salt,
+          info: 'freewallet/test/info-a'
+        }
+      })
+      const infoB = await deriveUnlockIdentity({
+        secret: fixedSecret,
+        kdf: {
+          version: 1,
+          algorithm: 'HKDF',
+          hash: 'SHA-256',
+          salt,
+          info: 'freewallet/test/info-b'
+        }
+      })
+      expect(infoB.spaceId).not.toBe(infoA.spaceId)
+    })
+  })
+
+  describe('bindUnlockSecret with an injected PRF output', () => {
+    it('binds and recovers a data seed under a 32-byte passkey-PRF secret', async () => {
+      const idb = createFakeIdb()
+      const prfOutput = new Uint8Array(32)
+      crypto.getRandomValues(prfOutput)
+      const seed = randomSeed()
+
+      await bindUnlockSecret({
+        seed,
+        controller: DATA_CONTROLLER,
+        secret: prfOutput,
+        kdf: PASSKEY_KDF,
+        idb
+      })
+
+      const found = await fetchKeyringSeed({
+        secret: prfOutput,
+        kdf: PASSKEY_KDF,
+        idb
+      })
+      expect(found).not.toBeNull()
+      expect(Array.from(found!.seed)).toEqual(Array.from(seed))
+      expect(found!.controller).toBe(DATA_CONTROLLER)
+    })
+
+    it('misses (returns null) for a different 32-byte secret', async () => {
+      const idb = createFakeIdb()
+      const prfOutput = new Uint8Array(32)
+      crypto.getRandomValues(prfOutput)
+
+      await bindUnlockSecret({
+        seed: randomSeed(),
+        controller: DATA_CONTROLLER,
+        secret: prfOutput,
+        kdf: PASSKEY_KDF,
+        idb
+      })
+
+      const otherOutput = new Uint8Array(32)
+      crypto.getRandomValues(otherOutput)
+      const miss = await fetchKeyringSeed({
+        secret: otherOutput,
+        kdf: PASSKEY_KDF,
+        idb
+      })
+      expect(miss).toBeNull()
+    })
+  })
+})
+
+describe('management zcap delegation', () => {
+  /**
+   * The unlock Space URL a management zcap targets, built exactly as the module
+   * builds it from the mocked WAS url.
+   */
+  function unlockSpaceUrl(spaceId: string): string {
+    return new URL(`/space/${spaceId}`, wasState.url).toString()
+  }
+
+  describe('bindUnlockSecret with delegateManagementTo', () => {
+    it('delegates a GET/DELETE zcap on the unlock Space to the data identity', async () => {
+      const idb = createFakeIdb()
+      const { manageCapability, unlockSpaceId } = await bindUnlockSecret({
+        seed: randomSeed(),
+        controller: DATA_CONTROLLER,
+        secret: 'manage delegate passphrase',
+        kdf: KDF,
+        delegateManagementTo: DATA_CONTROLLER,
+        idb
+      })
+
+      expect(manageCapability).toBeDefined()
+      const cap = manageCapability as IDelegatedZcap
+      expect(cap.controller).toBe(DATA_CONTROLLER)
+      expect(cap.allowedAction).toEqual(['GET', 'DELETE'])
+      expect(cap.invocationTarget).toBe(unlockSpaceUrl(unlockSpaceId))
+
+      // ~10 years out, within a generous minute of the expected instant.
+      const expiresMs = Date.parse(cap.expires)
+      const expectedMs = Date.now() + UNLOCK_MANAGE_ZCAP_TTL_MS
+      expect(Math.abs(expiresMs - expectedMs)).toBeLessThan(60_000)
+    })
+
+    it('returns no capability without delegateManagementTo', async () => {
+      const idb = createFakeIdb()
+      const { manageCapability } = await bindUnlockSecret({
+        seed: randomSeed(),
+        controller: DATA_CONTROLLER,
+        secret: 'no delegate passphrase',
+        kdf: KDF,
+        idb
+      })
+      expect(manageCapability).toBeUndefined()
+    })
+
+    it('returns no capability when no WAS server is configured', async () => {
+      wasState.url = undefined
+      const idb = createFakeIdb()
+      const { manageCapability } = await bindUnlockSecret({
+        seed: randomSeed(),
+        controller: DATA_CONTROLLER,
+        secret: 'no was delegate passphrase',
+        kdf: KDF,
+        delegateManagementTo: DATA_CONTROLLER,
+        idb
+      })
+      expect(manageCapability).toBeUndefined()
+    })
+  })
+
+  describe('fetchKeyringSeed with mintManageCapability', () => {
+    it('returns the unlock Space id and a capability delegated to the recovered controller', async () => {
+      const idb = createFakeIdb()
+      const { spaceId } = await unlockFor('mint on fetch passphrase')
+      await bindPassphrase({
+        seed: randomSeed(),
+        controller: DATA_CONTROLLER,
+        passphrase: 'mint on fetch passphrase',
+        idb,
+        kdf: KDF
+      })
+
+      const found = await fetchKeyringSeed({
+        passphrase: 'mint on fetch passphrase',
+        idb,
+        kdf: KDF,
+        mintManageCapability: true
+      })
+
+      expect(found).not.toBeNull()
+      expect(found!.unlockSpaceId).toBe(spaceId)
+      const cap = found!.manageCapability as IDelegatedZcap
+      expect(cap.controller).toBe(DATA_CONTROLLER)
+      expect(cap.allowedAction).toEqual(['GET', 'DELETE'])
+      expect(cap.invocationTarget).toBe(unlockSpaceUrl(spaceId))
+    })
+
+    it('returns the unlock Space id but no capability without mintManageCapability', async () => {
+      const idb = createFakeIdb()
+      const { spaceId } = await unlockFor('no mint passphrase')
+      await bindPassphrase({
+        seed: randomSeed(),
+        controller: DATA_CONTROLLER,
+        passphrase: 'no mint passphrase',
+        idb,
+        kdf: KDF
+      })
+
+      const found = await fetchKeyringSeed({
+        passphrase: 'no mint passphrase',
+        idb,
+        kdf: KDF
+      })
+      expect(found!.unlockSpaceId).toBe(spaceId)
+      expect(found!.manageCapability).toBeUndefined()
+    })
+  })
+
+  describe('changePassphrase return value', () => {
+    it("returns the new passphrase's unlock Space id and management capability", async () => {
+      const idb = createFakeIdb()
+      const seed = randomSeed()
+      await bindPassphrase({
+        seed,
+        controller: DATA_CONTROLLER,
+        passphrase: 'change return old passphrase',
+        idb,
+        kdf: KDF
+      })
+      const newSpace = (await unlockFor('change return new passphrase')).spaceId
+
+      const { unlockSpaceId, manageCapability } = await changePassphrase({
+        seed,
+        controller: DATA_CONTROLLER,
+        oldPassphrase: 'change return old passphrase',
+        newPassphrase: 'change return new passphrase',
+        idb,
+        kdf: KDF
+      })
+
+      expect(unlockSpaceId).toBe(newSpace)
+      const cap = manageCapability as IDelegatedZcap
+      expect(cap.controller).toBe(DATA_CONTROLLER)
+      expect(cap.allowedAction).toEqual(['GET', 'DELETE'])
+      expect(cap.invocationTarget).toBe(unlockSpaceUrl(newSpace))
+    })
   })
 })

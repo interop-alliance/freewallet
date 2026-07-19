@@ -75,7 +75,11 @@ describe('loginWithPassphrase -- keyring hit', () => {
   it('builds the session from the unwrapped seed', async () => {
     const seed = randomSeed()
     const controller = await didFromSeed(seed)
-    vi.mocked(fetchKeyringSeed).mockResolvedValue({ seed, controller })
+    vi.mocked(fetchKeyringSeed).mockResolvedValue({
+      seed,
+      controller,
+      unlockSpaceId: 'unlock-space-test'
+    })
     vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
       storage: fakeStorage,
       userExists: true
@@ -93,7 +97,11 @@ describe('loginWithPassphrase -- keyring hit', () => {
   it('fires ensureUserCollections as storageReady by default', async () => {
     const seed = randomSeed()
     const controller = await didFromSeed(seed)
-    vi.mocked(fetchKeyringSeed).mockResolvedValue({ seed, controller })
+    vi.mocked(fetchKeyringSeed).mockResolvedValue({
+      seed,
+      controller,
+      unlockSpaceId: 'unlock-space-test'
+    })
 
     const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
 
@@ -104,7 +112,11 @@ describe('loginWithPassphrase -- keyring hit', () => {
   it('forwards provisionStorage: false (the signup probe) to skip provisioning', async () => {
     const seed = randomSeed()
     const controller = await didFromSeed(seed)
-    vi.mocked(fetchKeyringSeed).mockResolvedValue({ seed, controller })
+    vi.mocked(fetchKeyringSeed).mockResolvedValue({
+      seed,
+      controller,
+      unlockSpaceId: 'unlock-space-test'
+    })
 
     const { session } = await loginWithPassphrase({
       passphrase: PASSPHRASE,
@@ -118,7 +130,11 @@ describe('loginWithPassphrase -- keyring hit', () => {
   it('reports userExists: false when the data Space is missing (half-finished signup)', async () => {
     const seed = randomSeed()
     const controller = await didFromSeed(seed)
-    vi.mocked(fetchKeyringSeed).mockResolvedValue({ seed, controller })
+    vi.mocked(fetchKeyringSeed).mockResolvedValue({
+      seed,
+      controller,
+      unlockSpaceId: 'unlock-space-test'
+    })
     vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
       storage: fakeStorage,
       userExists: false
@@ -135,7 +151,8 @@ describe('loginWithPassphrase -- keyring hit', () => {
   it('throws on a controller / identity mismatch (corrupt record)', async () => {
     vi.mocked(fetchKeyringSeed).mockResolvedValue({
       seed: randomSeed(),
-      controller: 'did:key:z6MkWrongControllerForThisSeed'
+      controller: 'did:key:z6MkWrongControllerForThisSeed',
+      unlockSpaceId: 'unlock-space-test'
     })
 
     await expect(

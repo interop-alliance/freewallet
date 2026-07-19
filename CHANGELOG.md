@@ -4,6 +4,50 @@
 
 ### Added
 
+- **Public-collection grants in "Login with Wallet"
+  (`urn:was:public-collection`).** A relying party can now request a
+  world-readable collection. On approval the wallet provisions the collection
+  plaintext (public implies plaintext -- no encryption marker), sets a
+  collection-level `PublicCanRead` policy at provisioning time (the wallet
+  holds the space root; policy endpoints are capability-only, so an app can
+  never escalate a private collection to public on its own), and delegates the
+  usual collection-scoped read/write zcap to the app's DID -- public covers
+  only unauthenticated reads; writes stay capability-only, with the existing
+  write-grant TTL. The consent screen renders such a grant with a dedicated
+  warning banner stating that anyone on the web will be able to read the
+  collection (and no ciphertext note, which does not apply). A public grant on
+  the wallet's protected collections (`private-credentials`,
+  `public-credentials`, `wallet-activity`, `id`) is refused unconditionally,
+  and genuinely unknown descriptor types still render as "cannot fulfill".
+
+- **Passkey unlock (sign up and log in with a passkey).** An account can now be
+  unlocked with a passkey in addition to a passphrase. Signup offers a passkey
+  path (create the wallet, register a passkey, land on the dashboard), and login
+  offers a one-tap passkey option that reconstitutes a full session. A passkey
+  is a peer unlock method with full account control, not a second factor; it is
+  phishing-resistant because it is bound to the app's origin. There is no login
+  server: the passkey's WebAuthn PRF-extension output feeds a key derivation
+  that unlocks the wallet locally, with no server-side WebAuthn verification and
+  nothing about the passkey stored remotely. User verification (biometric or
+  PIN) is required on every ceremony. Passkey unlock depends on the WebAuthn PRF
+  extension, which some browsers and platforms do not provide; the passphrase
+  option is always available as a fallback, and PRF failures surface a clear
+  message with a link to the passkeys documentation. A new
+  `public/docs/passkeys.md` page covers capabilities, platform compatibility,
+  and the recovery story.
+
+- **Passkey management in Settings.** A new Passkeys section lets you add a
+  passkey, rename it, and remove it. Each passkey shows a sync badge -- Synced,
+  Sync available, or Not synced -- read from the authenticator's backup flags at
+  registration, so you can see whether a passkey is backed up to your platform
+  account (and would survive a lost device) or lives only in that one
+  authenticator. Removing a passkey genuinely retires it, and a lost passkey can
+  be removed without the device it lives on. Settings refuses to remove the last
+  remaining unlock method, which would leave the wallet unrecoverable. An account
+  created with a passkey only gains an "Add a passphrase" option so it can have a
+  second way in, and a post-signup prompt encourages adding a second unlock
+  method (more urgently when the only passkey is not backed up).
+
 - **Decrypted / encrypted-envelope views in the storage browser.** Opening a
   resource from an encrypted collection (`private-credentials`,
   `wallet-activity`) used to show only the raw EDV envelope (the JWE). With an

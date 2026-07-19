@@ -97,6 +97,17 @@ export interface ControllerProfile {
   // The 32-byte data seed behind `keyAgent`, held in memory in the `full` tier
   // so Settings can re-bind the passphrase (keyring v2). Never persisted.
   dataSeed?: Uint8Array
+  // Which unlock method produced this full session, and the management zcap it
+  // delegated to the data identity at bind time. In-memory only, `full` tier
+  // only, never persisted (the PersistedSessionRecord stays method-agnostic):
+  // it lets Settings backfill the unlock-methods registry (recording the
+  // passphrase entry's unlock Space and its management capability) without
+  // re-prompting for the secret.
+  unlockMethod?: {
+    type: 'passphrase' | 'passkey'
+    unlockSpaceId: string
+    manageCapability?: IZcap
+  }
 }
 
 /**

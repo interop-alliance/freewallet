@@ -5,7 +5,9 @@
  * granted, and the expiry. Encrypted standard collections get a ciphertext
  * note; whole-Space grants get a warning banner and an explicit read-only
  * label; write grants get a warning banner, the warning border, and the
- * shorter write expiry; unsatisfiable grants render greyed with a "cannot
+ * shorter write expiry; public-collection grants get a warning banner stating
+ * anyone on the web can read the collection (and, being plaintext, never a
+ * ciphertext note); unsatisfiable grants render greyed with a "cannot
  * fulfill" note. Because the RP-supplied `reason` is attacker-controlled free
  * text, the recipient DID is rendered separately with its own label and a
  * monospace style so it cannot be spoofed by the reason. Display-only --
@@ -61,8 +63,8 @@ export function ZcapGrantsPanel({
       {grants.map((grant, index) => {
         const { target, allowedActions, descriptor, write } = grant
         const satisfiable = target.satisfiable
-        // Warning border for whole-Space grants and any write grant.
-        const highlight = target.wholeSpace || write
+        // Warning border for whole-Space, public-collection, and write grants.
+        const highlight = target.wholeSpace || target.isPublic || write
         return (
           <Box
             key={descriptor.referenceId ?? index}
@@ -123,6 +125,16 @@ export function ZcapGrantsPanel({
                   >
                     {t('chapi.get.zcapSpaceWarning')}{' '}
                     {t('chapi.get.zcapReadOnlyNote')}
+                  </Typography>
+                )}
+
+                {target.isPublic && (
+                  <Typography
+                    variant="caption"
+                    color="warning.main"
+                    sx={{ display: 'block', mt: 0.5 }}
+                  >
+                    {t('chapi.get.zcapPublicWarning')}
                   </Typography>
                 )}
 

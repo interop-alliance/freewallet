@@ -1,10 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Box,
   Button,
   Card,
   CardContent,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Link,
   Stack,
   Step,
@@ -24,28 +29,53 @@ import {
   useSearchParams
 } from 'react-router'
 import { Trans, useTranslation } from 'react-i18next'
+import { base64urlnopad } from '@scure/base'
 import { LanguageSelector } from '@/components/LanguageSelector'
 import { ThemePicker } from '@/components/ThemePicker'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
-import { bindPassphrase } from '@/session/keyring'
+import { bindPassphrase, bindUnlockSecret } from '@/session/keyring'
+import {
+  putUnlockMethods,
+  type PasskeyUnlockMethod,
+  type UnlockMethodsRecord
+} from '@/session/unlockMethods'
 import { provisionNewWallet } from '@/session/provisionNewWallet'
 import { isStorageUnreachable } from '@/lib/storageErrors'
+import {
+  PasskeyCancelledError,
+  PasskeyPrfUnsupportedError,
+  passkeySupported,
+  registerPasskey
+} from '@/lib/passkey'
+import { savePasskeySafetyNotice } from '@/lib/sessionKey'
 import { useAuthStore } from '@/stores/authStore'
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
-import { PASSWORD_RULES } from '@/app.config'
+import { DATE_FMT, PASSKEY_KDF, PASSWORD_RULES } from '@/app.config'
 import { registerWallet } from '@/lib/registerWallet'
 import type { AuthLocationState } from '@/types/auth'
 
-const STEP_I18N_KEYS = [
-  'auth.signup.steps.passphrase',
-  'auth.signup.steps.email',
-  'auth.signup.steps.storage'
-] as const
+/**
+ * The stepper labels, first entry chosen by the login method: the passkey
+ * method names its first step "Passkey", the passphrase method "Passphrase".
+ * The email and storage steps are shared.
+ *
+ * @param method {'passphrase' | 'passkey'}
+ * @returns {readonly string[]}
+ */
+function stepI18nKeys(method: 'passphrase' | 'passkey') {
+  return [
+    method === 'passkey'
+      ? 'auth.signup.steps.passkey'
+      : 'auth.signup.steps.passphrase',
+    'auth.signup.steps.email',
+    'auth.signup.steps.storage'
+  ] as const
+}
 
 export function SignupPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const theme = useTheme()
   const isCompactStepper = useMediaQuery(theme.breakpoints.down('sm'))
   const navigate = useNavigate()
@@ -66,20 +96,152 @@ export function SignupPage() {
   const [score, setScore] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorKey, setErrorKey] = useState<string | null>(null)
+  // PRF-retry consent dialog (passkey signup): some authenticators evaluate the
+  // WebAuthn PRF only during a second (assertion) ceremony. `registerPasskey`
+  // calls `promptForPrfRetry` when that is needed; the promise resolves on the
+  // user's choice in the dialog below.
+  const [prfRetryOpen, setPrfRetryOpen] = useState(false)
+  const prfRetryResolve = useRef<((consented: boolean) => void) | null>(null)
+
+  const promptForPrfRetry = (): Promise<boolean> => {
+    setPrfRetryOpen(true)
+    return new Promise<boolean>(resolve => {
+      prfRetryResolve.current = resolve
+    })
+  }
+
+  const resolvePrfRetry = (consented: boolean) => {
+    setPrfRetryOpen(false)
+    prfRetryResolve.current?.(consented)
+    prfRetryResolve.current = null
+  }
 
   const stepParam = searchParams.get('step')
   const activeStep = stepParam === 'storage' ? 2 : stepParam === 'email' ? 1 : 0
+  // The chosen login method, tracked in the URL search params so a mid-wizard
+  // reload keeps it. Passphrase is the default (an absent/other value).
+  const method: 'passphrase' | 'passkey' =
+    searchParams.get('method') === 'passkey' ? 'passkey' : 'passphrase'
+  const stepKeys = stepI18nKeys(method)
 
   const handleSignup = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (isSubmitting) {
       return
     }
-    if (activeStep !== STEP_I18N_KEYS.length - 1 || !canSubmit) {
+    if (activeStep !== stepKeys.length - 1 || !canSubmit) {
       return
     }
     setIsSubmitting(true)
     setErrorKey(null)
+
+    if (method === 'passkey') {
+      try {
+        // No `userExists` probe: a fresh credential cannot collide with an
+        // existing account, so there is nothing to probe (unlike the
+        // passphrase path).
+        const seed = crypto.getRandomValues(new Uint8Array(32))
+        const { session } = await initSessionFromSeed({
+          seed,
+          email: email || undefined,
+          provisionStorage: false
+        })
+
+        // Register the passkey. A brand-new wallet has no authenticator
+        // credentials yet, so there is nothing to exclude.
+        const userHandle = crypto.getRandomValues(new Uint8Array(16))
+        const userName =
+          email ||
+          `Freewallet ${new Date().toLocaleDateString(i18n.language, DATE_FMT)}`
+        const registration = await registerPasskey({
+          userHandle,
+          userName,
+          promptForPrfRetry
+        })
+
+        // Bind the passkey's PRF output to the data seed BEFORE creating the
+        // data Space: an account whose keyring failed to publish must not be
+        // created, and binding first means a failed signup leaves no orphaned
+        // data Space behind.
+        const { unlockSpaceId, manageCapability } = await bindUnlockSecret({
+          seed,
+          controller: session.user.id,
+          secret: registration.prfOutput,
+          kdf: PASSKEY_KDF,
+          // Carried inside the wrapped record so any unlock method recovers the
+          // account email.
+          email: email || undefined,
+          // Delegate this passkey's unlock Space management zcap to the data
+          // identity, so a lost passkey stays revocable tap-free from Settings.
+          delegateManagementTo: session.user.id
+        })
+
+        // Provision collections, record the initial history, and seed the
+        // welcome credential.
+        await provisionNewWallet({ session })
+
+        // Write the initial unlock-methods registry only now: it lives in the
+        // data Space, which `provisionNewWallet` just created, so this must run
+        // after provisioning (`putUnlockMethods` needs the Space to exist).
+        // Non-fatal -- the passkey already logs in.
+        const now = new Date()
+        const entry: PasskeyUnlockMethod = {
+          type: 'passkey',
+          label: `Passkey created ${now.toLocaleDateString(
+            i18n.language,
+            DATE_FMT
+          )}`,
+          createdAt: now.toISOString(),
+          credentialId: base64urlnopad.encode(registration.credentialId),
+          transports: registration.transports,
+          backupEligibility: registration.backupEligibility,
+          backupState: registration.backupState,
+          unlockSpaceId,
+          ...(manageCapability ? { manageCapability } : {})
+        }
+        const record: UnlockMethodsRecord = {
+          version: 1,
+          userHandle: base64urlnopad.encode(userHandle),
+          methods: [entry]
+        }
+        try {
+          await putUnlockMethods({ session, record })
+        } catch (err) {
+          console.warn('Could not record the new passkey in the registry:', err)
+        }
+
+        // Mark this as a passkey-only account so the dashboard can prompt the
+        // user to add a second unlock method. Non-fatal.
+        try {
+          await savePasskeySafetyNotice({
+            controller: session.user.id,
+            backupEligibility: registration.backupEligibility,
+            backupState: registration.backupState
+          })
+        } catch (err) {
+          console.warn('Could not save the passkey-safety notice:', err)
+        }
+
+        login(session)
+        navigate('/dashboard')
+      } catch (err) {
+        if (err instanceof PasskeyCancelledError) {
+          // The user dismissed the ceremony (or declined the PRF retry): silent.
+        } else if (err instanceof PasskeyPrfUnsupportedError) {
+          setErrorKey('auth.errors.passkeyPrfUnsupported')
+        } else if (isStorageUnreachable(err)) {
+          // The WAS storage server is unreachable -- offer a guest-mode fallback.
+          setErrorKey('auth.errors.storageUnreachable')
+        } else {
+          console.error('Error completing signup:', err)
+          setErrorKey('auth.errors.setupFailed')
+        }
+      } finally {
+        setIsSubmitting(false)
+      }
+      return
+    }
+
     try {
       // Probe for an existing account first. loginWithPassphrase resolves the
       // passphrase through the keyring and reports whether this identity already
@@ -114,7 +276,10 @@ export function SignupPage() {
       await bindPassphrase({
         seed,
         controller: session.user.id,
-        passphrase
+        passphrase,
+        // Carried inside the wrapped record so any unlock method (a passkey
+        // login has no form to ask on) recovers the account email.
+        email: email || undefined
       })
 
       // Provision collections, record the initial history, and seed the
@@ -141,28 +306,50 @@ export function SignupPage() {
   const lengthPassed = passphrase.length >= PASSWORD_RULES.minlength
   const scorePassed = score >= PASSWORD_RULES.minscore
   const passphraseStepComplete = lengthPassed && scorePassed
-  const canSubmit = emailValid && passphraseStepComplete
+  // The passkey method has no passphrase to satisfy, so only the email must be
+  // valid; the passphrase method also needs a complete passphrase step.
+  const canSubmit =
+    method === 'passkey' ? emailValid : emailValid && passphraseStepComplete
 
   const goNext = () => {
     if (!passphraseStepComplete) {
       return
     }
+    // Passphrase is the default method, so omit the method param.
     setSearchParams({ ['step']: 'email' })
+  }
+
+  // Advance to the email step with the passkey method recorded in the URL.
+  const goPasskey = () => {
+    setSearchParams({ ['method']: 'passkey', ['step']: 'email' })
   }
 
   const goNextFromEmail = () => {
     if (!emailValid) {
       return
     }
-    setSearchParams({ ['step']: 'storage' })
+    setSearchParams(
+      method === 'passkey'
+        ? { ['method']: 'passkey', ['step']: 'storage' }
+        : { ['step']: 'storage' }
+    )
   }
 
   // Navigate to the explicit previous step rather than popping browser
   // history. This keeps Back inside the wizard even when the user deep-linked
   // or reloaded directly into a later step (where history(-1) would escape the
-  // signup flow entirely).
+  // signup flow entirely). The method param is preserved back to the email
+  // step; returning to step 0 (the method choice) drops it.
   const goBack = () => {
-    setSearchParams(activeStep === 2 ? { ['step']: 'email' } : {})
+    if (activeStep === 2) {
+      setSearchParams(
+        method === 'passkey'
+          ? { ['method']: 'passkey', ['step']: 'email' }
+          : { ['step']: 'email' }
+      )
+      return
+    }
+    setSearchParams({})
   }
 
   return (
@@ -216,7 +403,7 @@ export function SignupPage() {
             alternativeLabel={!isCompactStepper}
             sx={authStyles.signupStepper}
           >
-            {STEP_I18N_KEYS.map(key => (
+            {stepKeys.map(key => (
               <Step key={key}>
                 <StepLabel>{t(key)}</StepLabel>
               </Step>
@@ -280,21 +467,24 @@ export function SignupPage() {
               </Card>
 
               {/* Passkey card */}
-              <Card sx={authStyles.passkeyCard} variant="outlined">
-                <CardContent sx={authStyles.passkeyCardContent}>
-                  <Button
-                    variant="contained"
-                    disabled
-                    startIcon={<FiKey />}
-                    sx={authStyles.passkeyButton}
-                  >
-                    {t('auth.signup.passkey')}
-                  </Button>
-                  <Typography variant="body2" color="text.secondary">
-                    {t('auth.signup.comingSoon')}
-                  </Typography>
-                </CardContent>
-              </Card>
+              {passkeySupported() && (
+                <Card sx={authStyles.passkeyCard} variant="outlined">
+                  <CardContent sx={authStyles.passkeyCardContent}>
+                    <Button
+                      variant="contained"
+                      type="button"
+                      onClick={goPasskey}
+                      startIcon={<FiKey />}
+                      sx={authStyles.passkeyButton}
+                    >
+                      {t('auth.signup.passkey')}
+                    </Button>
+                    <Typography variant="body2" color="text.secondary">
+                      {t('auth.signup.passkeyHint')}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              )}
             </Box>
 
             <Button
@@ -450,6 +640,31 @@ export function SignupPage() {
             </Stack>
           </>
         )}
+
+        <Dialog open={prfRetryOpen} onClose={() => resolvePrfRetry(false)}>
+          <DialogTitle>{t('settings.passkeyRetryTitle')}</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              {t('settings.passkeyRetryMessage')}
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              onClick={() => resolvePrfRetry(false)}
+              sx={{ textTransform: 'none' }}
+            >
+              {t('settings.passkeyRetryCancel')}
+            </Button>
+            <Button
+              variant="contained"
+              disableElevation
+              onClick={() => resolvePrfRetry(true)}
+              sx={{ textTransform: 'none' }}
+            >
+              {t('settings.passkeyRetryConfirm')}
+            </Button>
+          </DialogActions>
+        </Dialog>
       </Box>
     </Box>
   )
