@@ -745,6 +745,20 @@ export const storageStyles = {
     gap: 1,
     width: '100%'
   },
+  collectionGroupHeading: {
+    fontWeight: 600,
+    mb: 1
+  },
+  collectionGroupHeadingMuted: {
+    fontWeight: 600,
+    mb: 1,
+    color: 'text.secondary'
+  },
+  collectionGroupNote: {
+    color: 'text.secondary',
+    mt: -0.5,
+    mb: 1
+  },
   folderCard: {
     borderRadius: 2,
     transition: 'border-color 120ms ease, box-shadow 120ms ease',

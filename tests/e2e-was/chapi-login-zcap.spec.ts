@@ -107,7 +107,9 @@ test('login VPR provisions a collection and returns Space-rooted grants', async 
 
   // Consent screen lists the grants; approve.
   await expect(page.getByText('Storage access')).toBeVisible()
-  await expect(page.getByText(/collection example-app-data/)).toBeVisible()
+  await expect(
+    page.getByText('example-app-data', { exact: true })
+  ).toBeVisible()
   await page.getByRole('button', { name: 'Continue' }).click()
 
   await expect
@@ -200,7 +202,9 @@ test('public-collection VPR provisions a world-readable collection', async ({
 
   // Consent screen shows the world-readable warning for the public grant.
   await expect(page.getByText('Storage access')).toBeVisible()
-  await expect(page.getByText(/collection example-app-public/)).toBeVisible()
+  await expect(
+    page.getByText('example-app-public', { exact: true })
+  ).toBeVisible()
   await expect(
     page.getByText(/anyone on the web will be able to read it/i)
   ).toBeVisible()

@@ -304,12 +304,6 @@ export const StoragePage = () => {
         />
       )}
 
-      <Box sx={storageStyles.sectionHeader}>
-        <Typography variant="h4" sx={storageStyles.sectionHeading}>
-          {t('storage.collections')}
-        </Typography>
-      </Box>
-
       <Box sx={storageStyles.collectionsWrap}>
         {hasRemoteStorage && isLoadingCollections && (
           <Typography variant="body1" sx={storageStyles.statusText}>

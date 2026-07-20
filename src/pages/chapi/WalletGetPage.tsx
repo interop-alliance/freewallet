@@ -15,10 +15,10 @@
  * A single Continue button approves everything shown; Cancel responds `null`.
  *
  * An App Connect request (`profile.appConnect`) replaces the three generic
- * sections with a dedicated app-centric panel: "Connect {app}?", first-run vs
- * returning copy, and the requested collections + access -- one Connect
- * button approves the whole thing (match-or-mint the app key, delegate the
- * grants to its DID, respond in a single round).
+ * sections with a dedicated app-centric panel: "Connect {app} to storage?",
+ * first-run vs returning copy, and the requested collections + access -- one
+ * Connect button approves the whole thing (match-or-mint the app key,
+ * delegate the grants to its DID, respond in a single round).
  */
 import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
@@ -76,6 +76,7 @@ import {
   type WalletResponse
 } from '@/lib/walletRequest'
 import { appKeySubjectDid, findAppKeyCredential } from '@/lib/appKey'
+import { fetchAppManifest, type AppManifestInfo } from '@/lib/appManifest'
 import { ZcapGrantsPanel } from './ZcapGrantsPanel'
 import { CHAPILoginForm } from './CHAPILoginForm'
 import { SavedSessionNotice } from './SavedSessionNotice'
@@ -186,6 +187,9 @@ export function WalletGetPage() {
   // App Connect: whether no stored app key matched at login time (the consent
   // copy differs); the authoritative match-or-mint happens at approve time.
   const [appKeyFirstRun, setAppKeyFirstRun] = useState(false)
+  // App Connect: the requesting origin's Web App Manifest (logo, description),
+  // fetched in the background for the consent screen; display-only garnish.
+  const [appManifest, setAppManifest] = useState<AppManifestInfo | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
   // First-party storage factory from the Storage Access API flow (see
   // SavedSessionNotice); a full login persists its delegated session
@@ -274,6 +278,26 @@ export function WalletGetPage() {
       setPageState('blocked')
     })
   }, [])
+
+  // App Connect: fetch the requesting origin's app manifest in the background
+  // so the consent screen can show the app's logo and description. Best-effort
+  // only -- a missing manifest (or no CORS) leaves the screen unchanged.
+  useEffect(() => {
+    if (!profile.appConnect || !requestOrigin) {
+      return
+    }
+    let cancelled = false
+    fetchAppManifest({ origin: requestOrigin })
+      .then(info => {
+        if (!cancelled && info) {
+          setAppManifest(info)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [profile.appConnect, requestOrigin])
 
   async function handleLogin(passphrase: string) {
     setLoginError(null)
@@ -608,10 +632,39 @@ export function WalletGetPage() {
         </Typography>
 
         <Box>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
             {t('chapi.get.requestedBy')}
           </Typography>
+          {appConnect && (
+            <Stack
+              direction="row"
+              spacing={1}
+              alignItems="center"
+              sx={{ mt: 0.5 }}
+            >
+              {appManifest?.iconUrl && (
+                <Box
+                  component="img"
+                  src={appManifest.iconUrl}
+                  alt=""
+                  sx={{ width: 32, height: 32, borderRadius: 1 }}
+                />
+              )}
+              <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                {appConnect.app.name}
+              </Typography>
+            </Stack>
+          )}
           <Typography sx={chapiStyles.originChip}>{requestOrigin}</Typography>
+          {appConnect && appManifest?.description && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', mt: 0.5 }}
+            >
+              {appManifest.description}
+            </Typography>
+          )}
         </Box>
 
         {requestReason && (
@@ -660,6 +713,7 @@ export function WalletGetPage() {
                 ttlDays={RP_ZCAP_TTL_DAYS}
                 writeTtlDays={RP_ZCAP_WRITE_TTL_DAYS}
                 hideRecipient
+                heading={t('chapi.get.appConnect.zcapHeading')}
               />
             )}
 

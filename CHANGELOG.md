@@ -1,5 +1,19 @@
 # History
 
+## 0.18.0 - TBD
+
+### Changed
+
+- **App Connect consent screen refresh.** The CHAPI "Connect {app}?" panel now
+  reads "Connect {app} to storage?", attempts to fetch Web App Manifest,
+  emphasizes relevant fields.
+- **Storage page collections grouped by category.** The collections overview
+  now renders three sections instead of one flat list: "Wallet Contents" (the
+  private and publicly shared credential collections), "Application
+  Collections" (anything registered by connected applications and sites;
+  hidden when empty), and "Wallet System Collections" (activity log, identity,
+  unlock methods).
+
 ## 0.17.0 - 2026-07-20
 
 ### Changed

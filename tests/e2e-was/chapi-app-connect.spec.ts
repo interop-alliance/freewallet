@@ -157,7 +157,7 @@ async function connectViaPopup(
 
   // The app-centric consent panel: "Connect {app}?" plus the run-specific copy.
   await expect(
-    page.getByRole('heading', { name: 'Connect Test App?' })
+    page.getByRole('heading', { name: 'Connect Test App to storage?' })
   ).toBeVisible({ timeout: 15000 })
   if (firstRun) {
     await expect(
@@ -168,8 +168,9 @@ async function connectViaPopup(
       page.getByText(/wants to use the app key saved in your wallet/)
     ).toBeVisible()
   }
-  // The requested collection is previewed in the storage-access panel.
-  await expect(page.getByText(/collection test-app-data/)).toBeVisible()
+  // The requested collection is previewed in the storage-access panel (the
+  // collection id renders as its own monospace badge).
+  await expect(page.getByText('test-app-data', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'Connect' }).click()
 

@@ -21,18 +21,37 @@ import { useTranslation } from 'react-i18next'
 import type { ResolvedGrant } from '@/lib/walletRequest'
 
 /**
- * A human-readable label for a resolved grant's target.
+ * A human-readable label for a resolved grant's target. A collection target
+ * renders its id as a distinct monospace badge so it stands out from the
+ * surrounding copy; the other targets stay plain text.
  */
 function targetLabel(
   grant: ResolvedGrant,
   t: (key: string, opts?: Record<string, unknown>) => string
-): string {
+) {
   const { target } = grant
   if (target.wholeSpace) {
     return t('chapi.get.zcapTarget.space')
   }
   if (target.collectionId) {
-    return t('chapi.get.zcapTarget.collection', { name: target.collectionId })
+    return (
+      <>
+        {t('chapi.get.zcapTarget.collection')}{' '}
+        <Box
+          component="span"
+          sx={{
+            fontFamily: 'monospace',
+            bgcolor: 'action.hover',
+            px: 0.75,
+            py: 0.25,
+            borderRadius: 1,
+            wordBreak: 'break-all'
+          }}
+        >
+          {target.collectionId}
+        </Box>
+      </>
+    )
   }
   if (target.invocationTarget) {
     try {
@@ -48,7 +67,8 @@ export function ZcapGrantsPanel({
   grants,
   ttlDays,
   writeTtlDays,
-  hideRecipient = false
+  hideRecipient = false,
+  heading
 }: {
   grants: ResolvedGrant[]
   ttlDays: number
@@ -56,13 +76,16 @@ export function ZcapGrantsPanel({
   // App Connect consent hides the recipient DID rows: the recipient is the
   // app's own (possibly not-yet-minted) key, not a DID the user could vet.
   hideRecipient?: boolean
+  // Overrides the default "Storage access" section heading (App Connect uses
+  // app-centric phrasing).
+  heading?: string
 }) {
   const { t } = useTranslation()
 
   return (
     <Stack spacing={1}>
-      <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-        {t('chapi.get.zcapHeading')}
+      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+        {heading ?? t('chapi.get.zcapHeading')}
       </Typography>
       {grants.map((grant, index) => {
         const { target, allowedActions, descriptor, write } = grant
@@ -173,7 +196,8 @@ export function ZcapGrantsPanel({
                 >
                   {t('chapi.get.zcapExpiry', {
                     days: write ? writeTtlDays : ttlDays
-                  })}
+                  })}{' '}
+                  {t('chapi.get.zcapRevokeNote')}
                 </Typography>
               </>
             ) : (
