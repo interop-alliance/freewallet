@@ -4,7 +4,10 @@
  * {@link WasSyncPort}; nothing here imports React or `@interop/was-client`.
  */
 export { createWasReplication } from './wasReplication.js'
-export { syncedDocSchema } from './syncedDocSchema.js'
+export {
+  syncedDocSchema,
+  syncedDocMigrationStrategies
+} from './syncedDocSchema.js'
 export { createPullHandler, wireDocToRxDoc } from './changesQuery.js'
 export { createPushHandler, formatEtag } from './pushWrites.js'
 export {

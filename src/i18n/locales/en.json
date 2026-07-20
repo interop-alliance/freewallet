@@ -125,7 +125,25 @@
     "addingPassphrase": "Adding...",
     "passphraseAdded": "Passphrase added. You can now unlock this wallet with it.",
     "passphraseAddedHint": "Passphrase added. You can now unlock this wallet with it.",
-    "addPassphraseFailed": "Could not add a passphrase. Please try again."
+    "addPassphraseFailed": "Could not add a passphrase. Please try again.",
+    "sharedSection": "Shared collections",
+    "sharedSectionHint": "Encrypted collections you have shared with other readers. Removing access rotates the collection's encryption key so data written afterwards stays private.",
+    "sharedRequiresRemote": "No remote storage is configured, so there is nothing to share.",
+    "sharedVaultLocked": "Your vault is locked. Log in with your passphrase to view and manage shared collections.",
+    "sharedLoadError": "Could not load your shared collections. Please try again.",
+    "sharedRequiresFullSession": "Log in with your passphrase to change what is shared.",
+    "sharedNothingForCollection": "Nothing is shared.",
+    "sharedCollectionPrivateCredentials": "Verifiable Credentials",
+    "sharedCollectionWalletActivity": "Wallet Activity Log",
+    "sharedExpires": "Access expires {{date}}",
+    "sharedExpiryUnknown": "No expiry recorded",
+    "sharedRemove": "Remove access",
+    "sharedRemoveTitle": "Remove access?",
+    "sharedRemoveConfirm": "Removing access stops this reader from fetching this collection and rotates the encryption key so anything written from now on is unreadable to it. It may still hold copies of data it accessed before now. This cannot be undone.",
+    "sharedRemoveConfirmAction": "Remove access",
+    "sharedRemoving": "Removing...",
+    "sharedRemoved": "Access removed.",
+    "sharedRemoveFailed": "Could not remove access. Please try again."
   },
   "landing": {
     "title": "Freewallet",
@@ -470,7 +488,14 @@
       "zcapEncryptedNote": "This collection is encrypted -- this site will only see ciphertext.",
       "zcapCannotFulfill": "This wallet cannot fulfill this request.",
       "zcapUnavailable": "This request needs remote storage, which this wallet isn't configured with.",
-      "zcapExpiry": "Expires in {{days}} days"
+      "zcapExpiry": "Expires in {{days}} days",
+      "appConnect": {
+        "title": "Connect {{appName}}?",
+        "firstRun": "{{appName}} will keep an app key in your wallet so you can open your data on other devices.",
+        "returning": "{{appName}} wants to use the app key saved in your wallet.",
+        "connect": "Connect",
+        "connecting": "Connecting…"
+      }
     },
     "store": {
       "title": "Store credential",

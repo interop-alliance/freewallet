@@ -125,7 +125,25 @@
     "addingPassphrase": "Agregando...",
     "passphraseAdded": "Frase de contraseña agregada. Ahora puede desbloquear esta billetera con ella.",
     "passphraseAddedHint": "Frase de contraseña agregada. Ahora puede desbloquear esta billetera con ella.",
-    "addPassphraseFailed": "No se pudo agregar la frase de contraseña. Inténtelo de nuevo."
+    "addPassphraseFailed": "No se pudo agregar la frase de contraseña. Inténtelo de nuevo.",
+    "sharedSection": "Colecciones compartidas",
+    "sharedSectionHint": "Colecciones cifradas que ha compartido con otros lectores. Quitar el acceso rota la clave de cifrado de la colección para que los datos escritos después permanezcan privados.",
+    "sharedRequiresRemote": "No hay almacenamiento remoto configurado, por lo que no hay nada que compartir.",
+    "sharedVaultLocked": "Su bóveda está bloqueada. Inicie sesión con su frase de contraseña para ver y administrar las colecciones compartidas.",
+    "sharedLoadError": "No se pudieron cargar sus colecciones compartidas. Inténtelo de nuevo.",
+    "sharedRequiresFullSession": "Inicie sesión con su frase de contraseña para cambiar lo que se comparte.",
+    "sharedNothingForCollection": "No se comparte nada.",
+    "sharedCollectionPrivateCredentials": "Credenciales verificables",
+    "sharedCollectionWalletActivity": "Registro de actividad de la billetera",
+    "sharedExpires": "El acceso vence el {{date}}",
+    "sharedExpiryUnknown": "Sin fecha de vencimiento registrada",
+    "sharedRemove": "Quitar acceso",
+    "sharedRemoveTitle": "¿Quitar acceso?",
+    "sharedRemoveConfirm": "Quitar el acceso impide que este lector obtenga esta colección y rota la clave de cifrado para que todo lo que se escriba a partir de ahora le resulte ilegible. Es posible que aún conserve copias de los datos a los que accedió antes de ahora. Esta acción no se puede deshacer.",
+    "sharedRemoveConfirmAction": "Quitar acceso",
+    "sharedRemoving": "Quitando...",
+    "sharedRemoved": "Acceso quitado.",
+    "sharedRemoveFailed": "No se pudo quitar el acceso. Inténtelo de nuevo."
   },
   "landing": {
     "title": "Freewallet",
@@ -470,7 +488,14 @@
       "zcapEncryptedNote": "Esta colección está cifrada: este sitio solo verá texto cifrado.",
       "zcapCannotFulfill": "Esta billetera no puede satisfacer esta solicitud.",
       "zcapUnavailable": "Esta solicitud requiere almacenamiento remoto, que esta billetera no tiene configurado.",
-      "zcapExpiry": "Caduca en {{days}} días"
+      "zcapExpiry": "Caduca en {{days}} días",
+      "appConnect": {
+        "title": "¿Conectar {{appName}}?",
+        "firstRun": "{{appName}} guardará una clave de aplicación en su billetera para que pueda abrir sus datos en otros dispositivos.",
+        "returning": "{{appName}} quiere usar la clave de aplicación guardada en su billetera.",
+        "connect": "Conectar",
+        "connecting": "Conectando…"
+      }
     },
     "store": {
       "title": "Guardar credencial",

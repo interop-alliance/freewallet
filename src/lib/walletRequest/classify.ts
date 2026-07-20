@@ -5,6 +5,9 @@
  * (VC sharing, DID Authentication, or both).
  */
 import type {
+  IAppConnectCapabilityQuery,
+  IAppConnectQuery,
+  IAppConnectRequest,
   ICapabilityQueryDetail,
   ICredentialQuery,
   IDIDAuthenticationQuery,
@@ -279,11 +282,80 @@ export function zcapQueriesOf(queries: IVPRQuery[]): ICapabilityQueryDetail[] {
 }
 
 /**
- * Classifies a VPR body onto the two independent axes the consent screen and
+ * Extracts the App Connect request from a query set, when one is present. An
+ * `AppConnectQuery` is one mental model per popup: the request must not also
+ * carry `QueryByExample` or standalone zcap queries, at most one
+ * `AppConnectQuery` is allowed, and its `app` block must name the display
+ * name and the `credentialType` / `vocabBase` pair the wallet needs to match
+ * or mint the app-key credential. Violations throw; classification-time
+ * callers surface the throw as a malformed-request state. The capability
+ * queries are normalized to an array (absent means "no grants requested" --
+ * a connect that only recovers the app key is legal).
+ *
+ * @param queries {IVPRQuery[]}
+ * @returns {IAppConnectRequest | null}
+ */
+export function appConnectRequestOf(
+  queries: IVPRQuery[]
+): IAppConnectRequest | null {
+  const appConnectQueries = queries.filter(
+    (query): query is IAppConnectQuery => query.type === 'AppConnectQuery'
+  )
+  if (appConnectQueries.length === 0) {
+    return null
+  }
+  if (appConnectQueries.length > 1) {
+    throw new Error('More than one AppConnectQuery found, exiting.')
+  }
+  const mixed = queries.some(
+    query =>
+      query.type === 'QueryByExample' ||
+      query.type === 'AuthorizationCapabilityQuery' ||
+      query.type === 'ZcapQuery'
+  )
+  if (mixed) {
+    throw new Error(
+      'An AppConnectQuery cannot be combined with QueryByExample or ' +
+        'standalone capability queries.'
+    )
+  }
+  const { app, capabilityQuery } = appConnectQueries[0]
+  if (
+    !app ||
+    typeof app.name !== 'string' ||
+    typeof app.credentialType !== 'string' ||
+    typeof app.vocabBase !== 'string'
+  ) {
+    throw new Error(
+      'An AppConnectQuery is missing its app name / credentialType / ' +
+        'vocabBase.'
+    )
+  }
+  const capabilityQueries: IAppConnectCapabilityQuery[] =
+    capabilityQuery === undefined
+      ? []
+      : Array.isArray(capabilityQuery)
+        ? capabilityQuery
+        : [capabilityQuery]
+  for (const detail of capabilityQueries) {
+    if (!detail || typeof detail !== 'object') {
+      throw new Error(
+        'An AppConnectQuery carries a malformed capabilityQuery entry.'
+      )
+    }
+  }
+  return { app, capabilityQueries }
+}
+
+/**
+ * Classifies a VPR body onto the independent axes the consent screen and
  * response assembly work from: whether DID Authentication is requested, and
- * separately the credential (`QueryByExample`) and capability
- * (`AuthorizationCapabilityQuery` / `ZcapQuery`) content asked for. Any
- * combination is valid, including zcap-only.
+ * separately the credential (`QueryByExample`), capability
+ * (`AuthorizationCapabilityQuery` / `ZcapQuery`), and App Connect
+ * (`AppConnectQuery`) content asked for. Any combination of the first three
+ * is valid, including zcap-only; an App Connect request excludes the
+ * credential and standalone capability queries (enforced by
+ * `appConnectRequestOf`).
  *
  * @param request {IVPRDetails}
  * @returns {WalletRequestProfile}
@@ -295,7 +367,8 @@ export function classifyRequest(request: IVPRDetails): WalletRequestProfile {
     vcQueries: queries.filter(
       (query): query is IQueryByExample => query.type === 'QueryByExample'
     ),
-    zcapRequests: zcapQueriesOf(queries)
+    zcapRequests: zcapQueriesOf(queries),
+    appConnect: appConnectRequestOf(queries)
   }
 }
 
@@ -312,7 +385,8 @@ export function isDidAuthOnly(profile: WalletRequestProfile): boolean {
   return (
     profile.didAuth &&
     profile.vcQueries.length === 0 &&
-    profile.zcapRequests.length === 0
+    profile.zcapRequests.length === 0 &&
+    !profile.appConnect
   )
 }
 

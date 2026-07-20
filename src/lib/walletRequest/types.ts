@@ -53,7 +53,8 @@ export type IVPRDetails = {
   interact?: IVPRInteract
 }
 
-export type IVPRQuery = IQueryByExample | IDIDAuthenticationQuery | IZcapQuery
+export type IVPRQuery =
+  IQueryByExample | IDIDAuthenticationQuery | IZcapQuery | IAppConnectQuery
 
 /**
  * The interaction endpoints a VPR offers for delivering the response, when the
@@ -146,17 +147,67 @@ export type ICapabilityQueryDetail = {
 }
 
 /**
+ * A requested capability within an App Connect request: the same shape as
+ * `ICapabilityQueryDetail` minus `controller` (the wallet fills it with the
+ * app-key credential's subject DID -- the request cannot name a DID it does
+ * not know yet) and minus `reason` (the App Connect consent screen supersedes
+ * per-grant reason lines).
+ */
+export type IAppConnectCapabilityQuery = Omit<
+  ICapabilityQueryDetail,
+  'controller' | 'reason'
+>
+
+/**
+ * The app identity an App Connect request presents: a display `name` for the
+ * consent screen, plus the `credentialType` / `vocabBase` pair that
+ * parameterizes the app-key credential the wallet matches (returning user) or
+ * mints (first run).
+ */
+export type IAppConnectApp = {
+  name: string
+  credentialType: string
+  vocabBase: string
+}
+
+/**
+ * "Connect this app to the user's wallet and Space" -- a single-round request
+ * that combines app-key recovery-or-minting with capability delegation. The
+ * wallet finds (or self-issues) the app-key credential for the requesting
+ * origin, delegates the requested capabilities to its subject DID, and
+ * returns credential + grants in one signed presentation.
+ */
+export type IAppConnectQuery = {
+  type: 'AppConnectQuery'
+  app: IAppConnectApp
+  capabilityQuery?: IAppConnectCapabilityQuery | IAppConnectCapabilityQuery[]
+}
+
+/**
+ * An App Connect request as classified onto the `WalletRequestProfile`: the
+ * app identity plus its capability queries normalized to an array.
+ */
+export type IAppConnectRequest = {
+  app: IAppConnectApp
+  capabilityQueries: IAppConnectCapabilityQuery[]
+}
+
+/**
  * The wallet's response to a request, delivered by whichever transport received
  * it (CHAPI `respondWith`, a future exchange-URL POST, etc). Delegated zcaps
  * ride *inside* the response VP (as a `zcap` array, embedded before signing);
  * they are also threaded back out here as `zcaps` -- the same objects that were
  * delegated -- so a caller can record exactly what was granted without
  * re-parsing the VP's (compose-shape-coupled) `zcap` array. Empty or absent
- * when the request granted no capabilities.
+ * when the request granted no capabilities. For an App Connect request,
+ * `appConnect` reports what the wallet did (first run vs returning, and the
+ * app-key subject DID the grants were delegated to) so the caller can log it
+ * without re-parsing the VP.
  */
 export type WalletResponse = {
   verifiablePresentation?: IVerifiablePresentation
   zcaps?: IZcap[]
+  appConnect?: { firstRun: boolean; subjectDid: string }
 }
 
 /**
@@ -164,12 +215,16 @@ export type WalletResponse = {
  * is requested, and separately what content is asked for (credentials and/or
  * capability delegations). Any combination is valid, including zcap-only. The
  * consent screen renders one section per non-empty axis; the two axes replace
- * the former `'vc' | 'didauth' | 'vc+didauth'` cross-product enum.
+ * the former `'vc' | 'didauth' | 'vc+didauth'` cross-product enum. An App
+ * Connect request (`appConnect` set) is exclusive with the credential and
+ * standalone capability axes -- one mental model per popup -- and renders its
+ * own dedicated consent panel.
  */
 export type WalletRequestProfile = {
   didAuth: boolean
   vcQueries: IQueryByExample[]
   zcapRequests: ICapabilityQueryDetail[]
+  appConnect: IAppConnectRequest | null
 }
 
 export type { IVerifiableCredential, IVerifiablePresentation, IZcap }

@@ -21,7 +21,13 @@
  */
 import type { ZcapClient } from '@interop/ezcap'
 import type { IZcap } from '@interop/data-integrity-core'
-import { WasClient, type Collection, type Resource } from '@interop/was-client'
+import {
+  WasClient,
+  type Collection,
+  type CollectionEncryption,
+  type Resource,
+  type Space
+} from '@interop/was-client'
 import { createEdvEncryption } from '@interop/was-client/edv'
 import type { ControllerProfile, User } from '@/types/auth'
 import {
@@ -276,6 +282,59 @@ export class WASRemoteStore {
       )
     }
     return collectionUrl
+  }
+
+  /**
+   * Reads a standard collection's `encryption` marker (the widened
+   * `CollectionEncryption` with its `epochs` / `currentEpoch` roster), or
+   * `undefined` when the collection is plaintext or has no marker. Attaches the
+   * session capability so a restored (`delegated` tier) session -- whose Space
+   * read zcap covers the description GET -- can read it too. Network errors
+   * throw through: callers treat a marker fetch as best-effort and fall back to
+   * a cached copy.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id (e.g.
+   *   `private-credentials`)
+   * @returns {Promise<CollectionEncryption | undefined>}
+   */
+  async collectionEncryption({
+    collectionId
+  }: {
+    collectionId: string
+  }): Promise<CollectionEncryption | undefined> {
+    const description = await this.was
+      .space(
+        this.spaceId,
+        this._handleOptions({ spaceId: this.spaceId, collectionId })
+      )
+      .collection(collectionId)
+      .describe()
+    return description?.encryption ?? undefined
+  }
+
+  /**
+   * The `Collection` handle for a standard collection, invoked with the root
+   * capability -- used by the recipient operations (`initRecipients` /
+   * `addRecipient` / `removeRecipient`), which rewrite the Collection
+   * Description and so are full-tier only.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}
+   * @returns {Collection}
+   */
+  collectionHandle({ collectionId }: { collectionId: string }): Collection {
+    return this.was.space(this.spaceId).collection(collectionId)
+  }
+
+  /**
+   * The `Space` handle (root capability), needed by `removeRecipient` to revoke
+   * a reader's pull-axis zcap(s) via `space.revoke()`. Full-tier only.
+   *
+   * @returns {Space}
+   */
+  spaceHandle(): Space {
+    return this.was.space(this.spaceId)
   }
 
   async userExists() {

@@ -248,6 +248,17 @@ export const dashboardStyles = {
   deleteAccountDescription: {
     color: 'text.primary'
   },
+  sharedShareRow: {
+    gap: 0.5,
+    p: 1.5,
+    border: '1px solid',
+    borderColor: 'divider',
+    borderRadius: 2
+  },
+  sharedRecipientDid: {
+    fontFamily: 'monospace',
+    wordBreak: 'break-all' as const
+  },
   /**
    * Dashboard page — Credentials block
    */

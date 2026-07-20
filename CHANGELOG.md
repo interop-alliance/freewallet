@@ -1,5 +1,71 @@
 # History
 
+## Unreleased - TBD
+
+### Changed
+
+- Background WAS replication now pulls its change feed through the storage
+  client's `Collection.changes()` API instead of a hand-rolled query request.
+  The signed request is unchanged; only the pull path moved onto the typed
+  client. Writes continue to move stored bodies verbatim through the raw,
+  codec-bypassing request path.
+
+### Added
+
+- **App Connect: one-popup app login.** A relying party can now connect to the
+  wallet in a single CHAPI popup via the new `AppConnectQuery` request type
+  (alongside DID Authentication). The wallet finds the app-key credential for
+  the app and requesting origin -- or, on first run, mints one itself (32-byte
+  seed, seed-derived did:key, self-issued) and saves it to the credential
+  store under the same consent -- then delegates the requested collection
+  capabilities to the app key's DID and returns credential, grants, and a
+  wallet-provided first-run marker in one signed presentation. The consent
+  screen is a dedicated app-centric panel ("Connect {app}?") with the
+  collections-and-access preview; the origin binding is enforced wallet-side,
+  so a phishing origin can neither recover nor be handed another origin's
+  key. Approval records an app-connect Login entry in the wallet activity
+  log. Wallets that predate `AppConnectQuery` fail closed rather than
+  degrading into a partial generic flow. Pairs with the
+  `@interop/was-react` 0.2.0 release, whose one-popup Login With Wallet flow
+  requires this App Connect support.
+
+- Synced documents now carry the server-managed `createdBy` creator DID from the
+  change feed onto the local replica (present on live documents and tombstones,
+  absent when the server recorded no creator). The local synced-doc schema bumps
+  to version 1 to persist it, with a migration that leaves existing documents'
+  `createdBy` unset. The 412-conflict re-read path carries `createdBy` too, so
+  a document assembled from a push conflict keeps its attribution.
+
+- **Multi-recipient sharing of encrypted collections.** An encrypted collection
+  (`private-credentials`, `wallet-activity`) can now be readable by additional
+  readers besides its owner, without exposing the vault key. Each collection
+  carries per-collection key epochs, with the owner's vault key always a
+  standing recipient; reads tolerate resources written before the first epoch
+  indefinitely, so nothing already stored is stranded. Removing a reader is one
+  action with two halves: it revokes that reader's storage authorization (the
+  server stops serving it the collection) and rotates the collection's key epoch
+  so resources written afterwards are unreadable to it. Data the reader already
+  fetched is not clawed back -- it may still hold copies of what it read before
+  removal.
+
+- The background-sync layer now carries each resource's key-epoch stamp so a
+  replica encrypts and decrypts under the right epoch. The synced-doc schema
+  bumps to version 2 to persist the stamp, with a migration that leaves existing
+  documents' stamp unset.
+
+- A "Shared collections" panel on the Settings page lists, per encrypted
+  collection, the readers it is currently shared with (their controller DID or
+  key id, and the grant's expiry) with a "Remove access" action behind a
+  confirmation dialog. Removing access requires a passphrase (full) session; a
+  restored session sees the list read-only with a re-login prompt.
+
+### Fixed
+
+- The replication push handler now compares bodies by JCS-canonicalized JSON,
+  so a key-order-only difference between structurally identical bodies is no
+  longer misread as a change (which could trigger a spurious conditional
+  write).
+
 ## 0.16.0 - 2026-07-19
 
 ### Added

@@ -180,7 +180,8 @@ describe('classifyRequest', () => {
     expect(profile).toEqual({
       didAuth: true,
       vcQueries: [],
-      zcapRequests: []
+      zcapRequests: [],
+      appConnect: null
     })
   })
 

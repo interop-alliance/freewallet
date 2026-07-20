@@ -32,6 +32,14 @@ import {
 } from '@/lib/sync/types.js'
 
 /**
+ * The request header the server reads the content write's key-epoch id from,
+ * stamping it onto the Resource's metadata (an absent header clears any prior
+ * stamp). Matches `@interop/was-client`'s internal `writeHeaders` emitter; not
+ * exported as a constant there, so it is spelled out here.
+ */
+const WAS_KEY_EPOCH_HEADER = 'WAS-Key-Epoch'
+
+/**
  * Extracts an HTTP status from a raw ky/ezcap error. `was.request()` rejects on
  * any non-2xx with `err.status` set (see `@interop/http-client`'s error
  * normaliser); this reads it defensively from either location.
@@ -89,6 +97,20 @@ export function createWasSyncPort({
   const resourcePath = (id: string) =>
     `${collectionPath}/${encodeURIComponent(id)}`
 
+  // The pull path rides the client's `Collection.changes()` feed API. The handle
+  // is bound to the same space + collection and (in the delegated tier) the same
+  // session `capability` the raw write paths use, so `changes()` produces the
+  // byte-identical signed `POST /space/:s/:c/query` (profile `changes`) the raw
+  // request did -- root invocation when no capability is supplied. Construction
+  // is I/O-free (the codec/feature probes are lazy thunks) and `changes()` never
+  // resolves the codec, so unlike `get()` it does not decrypt: it ships the
+  // stored bodies (plaintext or EDV envelope) verbatim, which is what this
+  // codec-bypassing port requires. Writes stay on the raw `request()` escape
+  // hatch so they too move bodies verbatim.
+  const changesCollection = was
+    .space(spaceId, { capability })
+    .collection(collectionId, { capability })
+
   /**
    * Builds the conditional-write headers from the port's precondition options.
    */
@@ -128,30 +150,34 @@ export function createWasSyncPort({
 
   return {
     async query({ checkpoint, limit }) {
-      const response = await was.request({
-        capability,
-        path: `${collectionPath}/query`,
-        method: 'POST',
-        json: {
-          profile: 'changes',
-          ...(checkpoint !== undefined && { checkpoint }),
-          limit
-        }
-      })
-      return response.data as {
-        documents: WireDoc[]
-        checkpoint: SyncCheckpoint | null
+      // `changes()` omits `checkpoint` from the request body when it is
+      // `undefined` (the first pull), matching the old raw request. Its wire
+      // documents (storage-core's `ChangeDocument`) are the same shape as
+      // `WireDoc`, only more loosely typed (`data: unknown`), and carry the
+      // server-managed `createdBy` and the opaque `epoch` key-epoch id through
+      // verbatim; the cast narrows the static type without touching the runtime
+      // objects.
+      const page = await changesCollection.changes({ checkpoint, limit })
+      return {
+        documents: page.documents as unknown as WireDoc[],
+        checkpoint: page.checkpoint as SyncCheckpoint | null
       }
     },
 
-    async putContent({ id, data, ifMatch, ifNoneMatch }) {
+    async putContent({ id, data, ifMatch, ifNoneMatch, epoch }) {
+      const headers = writeHeaders({ ifMatch, ifNoneMatch }) ?? {}
+      // Stamp the opaque key-epoch id the body was encrypted under; absent leaves
+      // the resource without an epoch stamp (server clears any prior one).
+      if (epoch !== undefined) {
+        headers[WAS_KEY_EPOCH_HEADER] = epoch
+      }
       await conditionalWrite(() =>
         was.request({
           capability,
           path: resourcePath(id),
           method: 'PUT',
           json: data as object,
-          headers: writeHeaders({ ifMatch, ifNoneMatch })
+          headers: Object.keys(headers).length > 0 ? headers : undefined
         })
       )
     },
@@ -217,9 +243,25 @@ export function createWasSyncPort({
           method: 'GET'
         })
         const metaBody = metaResponse.data as
-          { updatedAt?: string; custom?: Json } | undefined
+          | {
+              updatedAt?: string
+              createdBy?: string
+              epoch?: string
+              custom?: Json
+            }
+          | undefined
         if (metaBody?.updatedAt) {
           master.updatedAt = metaBody.updatedAt
+        }
+        // The same server-managed creator DID the change feed carries; reading
+        // it here keeps the conflict-assembler path at parity with a pull.
+        if (metaBody?.createdBy !== undefined) {
+          master.createdBy = metaBody.createdBy
+        }
+        // The opaque key-epoch id the resource was stamped with (a top-level
+        // metadata field), likewise carried so the conflict entry matches a pull.
+        if (metaBody?.epoch !== undefined) {
+          master.epoch = metaBody.epoch
         }
         const metaVersion = parseEtag(metaResponse.headers.get('etag'))
         if (metaVersion !== undefined) {

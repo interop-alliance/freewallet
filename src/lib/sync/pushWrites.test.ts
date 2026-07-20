@@ -20,6 +20,7 @@ type WriteCall =
       data: unknown
       ifMatch?: string
       ifNoneMatch?: boolean
+      epoch?: string
     }
   | { kind: 'deleteContent'; id: string; ifMatch?: string }
   | {
@@ -53,8 +54,8 @@ function fakePushPort(
     async query() {
       return { documents: [], checkpoint: null }
     },
-    async putContent({ id, data, ifMatch, ifNoneMatch }) {
-      writes.push({ kind: 'putContent', id, data, ifMatch, ifNoneMatch })
+    async putContent({ id, data, ifMatch, ifNoneMatch, epoch }) {
+      writes.push({ kind: 'putContent', id, data, ifMatch, ifNoneMatch, epoch })
       maybeConflict('putContent', id)
     },
     async deleteContent({ id, ifMatch }) {
@@ -187,6 +188,89 @@ describe('createPushHandler routing', () => {
     ])
   })
 
+  it('treats a key-order-only difference as unchanged (no write)', async () => {
+    const port = fakePushPort()
+    const push = createPushHandler(port)
+
+    await push([
+      {
+        assumedMasterState: newDoc({
+          version: 5,
+          metaVersion: 2,
+          data: { a: 1, b: 2 },
+          custom: { jwe: 'x', tag: 'y' }
+        }),
+        newDocumentState: newDoc({
+          version: 5,
+          metaVersion: 2,
+          data: { b: 2, a: 1 },
+          custom: { tag: 'y', jwe: 'x' }
+        })
+      }
+    ])
+
+    expect(port.writes).toEqual([])
+  })
+
+  it('passes the epoch through putContent on a create', async () => {
+    const port = fakePushPort()
+    const push = createPushHandler(port)
+
+    await push([
+      {
+        newDocumentState: newDoc({ id: 'r1', data: { a: 1 }, epoch: 'epoch-1' })
+      }
+    ])
+
+    expect(port.writes).toEqual([
+      {
+        kind: 'putContent',
+        id: 'r1',
+        data: { a: 1 },
+        epoch: 'epoch-1',
+        ifNoneMatch: true
+      }
+    ])
+  })
+
+  it('passes the epoch through putContent on an update', async () => {
+    const port = fakePushPort()
+    const push = createPushHandler(port)
+
+    await push([
+      {
+        assumedMasterState: newDoc({ version: 5, data: { a: 1 } }),
+        newDocumentState: newDoc({
+          version: 5,
+          data: { a: 2 },
+          epoch: 'epoch-2'
+        })
+      }
+    ])
+
+    expect(port.writes).toEqual([
+      {
+        kind: 'putContent',
+        id: 'r1',
+        data: { a: 2 },
+        epoch: 'epoch-2',
+        ifMatch: formatEtag(5)
+      }
+    ])
+  })
+
+  it('passes no epoch through putContent for a pre-epoch resource', async () => {
+    const port = fakePushPort()
+    const push = createPushHandler(port)
+
+    await push([{ newDocumentState: newDoc({ id: 'r1', data: { a: 1 } }) }])
+
+    expect(port.writes).toHaveLength(1)
+    const write = port.writes[0]!
+    expect(write.kind).toBe('putContent')
+    expect('epoch' in write && write.epoch !== undefined).toBe(false)
+  })
+
   it('deletes with If-Match "<version>" and skips any metadata write', async () => {
     const port = fakePushPort()
     const push = createPushHandler(port)
@@ -299,6 +383,64 @@ describe('createPushHandler conflicts', () => {
       version: 3,
       metaVersion: 6,
       custom: { jwe: 'srv' },
+      _deleted: false
+    })
+  })
+
+  it('carries createdBy into the assembled conflict', async () => {
+    const master: MasterState = {
+      version: 9,
+      updatedAt: '2026-02-02T00:00:00Z',
+      deleted: false,
+      createdBy: 'did:key:z6MkCreator',
+      data: { a: 99 }
+    }
+    const port = fakePushPort({
+      conflictOn: { kind: 'putContent', id: 'r1' },
+      master
+    })
+    const push = createPushHandler(port)
+
+    const conflicts = await push([
+      { newDocumentState: newDoc({ id: 'r1', data: { a: 1 } }) }
+    ])
+
+    expect(conflicts[0]).toMatchObject({
+      id: 'r1',
+      version: 9,
+      createdBy: 'did:key:z6MkCreator',
+      _deleted: false
+    })
+  })
+
+  it('carries the epoch into the assembled conflict', async () => {
+    const master: MasterState = {
+      version: 9,
+      updatedAt: '2026-02-02T00:00:00Z',
+      deleted: false,
+      epoch: 'epoch-srv',
+      data: { a: 99 }
+    }
+    const port = fakePushPort({
+      conflictOn: { kind: 'putContent', id: 'r1' },
+      master
+    })
+    const push = createPushHandler(port)
+
+    const conflicts = await push([
+      {
+        newDocumentState: newDoc({
+          id: 'r1',
+          data: { a: 1 },
+          epoch: 'epoch-mine'
+        })
+      }
+    ])
+
+    expect(conflicts[0]).toMatchObject({
+      id: 'r1',
+      version: 9,
+      epoch: 'epoch-srv',
       _deleted: false
     })
   })

@@ -52,15 +52,17 @@ export const REQUIRE_PASSPHRASE_FOR_VAULT =
 
 // Lifetime of the capabilities delegated to a relying party when a user
 // approves a "Login with Wallet" zcap request (`src/lib/walletRequest/
-// processZcaps.ts`). Default 30 days: the WAS server has no Space-side
-// revocation endpoint, so expiry is the sole limiter on RP grants.
+// processZcaps.ts`). Default 30 days: expiry bounds every RP grant. The WAS
+// server now also has a Space-scoped revocation endpoint, so a grant can be
+// retired before its expiry -- the recorded zcap ids are the hook for that.
 export const RP_ZCAP_TTL_MS =
   (Number(env.VITE_RP_ZCAP_TTL_HOURS) || 720) * 60 * 60 * 1000
 
 // Lifetime of a *write* capability delegated to a relying party (a grant on an
 // RP-provisioned collection whose actions go beyond GET/HEAD). Default 7 days:
 // deliberately shorter than the read-only TTL, since a stolen write grant can
-// mutate RP data and there is no Space-side revocation endpoint.
+// mutate RP data (a leaked grant can also be revoked before expiry via the
+// Space-scoped revocation endpoint).
 export const RP_ZCAP_WRITE_TTL_MS =
   (Number(env.VITE_RP_ZCAP_WRITE_TTL_HOURS) || 168) * 60 * 60 * 1000
 

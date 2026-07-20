@@ -10,7 +10,10 @@ import { afterEach, describe, it, expect } from 'vitest'
 import { createRxDatabase, type RxDatabase } from 'rxdb/plugins/core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { createWasReplication } from './wasReplication'
-import { syncedDocSchema } from './syncedDocSchema'
+import {
+  syncedDocMigrationStrategies,
+  syncedDocSchema
+} from './syncedDocSchema'
 import { formatEtag } from './pushWrites'
 import {
   WasSyncConflictError,
@@ -28,7 +31,13 @@ import {
 class FakeWasServer {
   private docs = new Map<
     string,
-    { version: number; updatedAt: string; deleted: boolean; data?: Json }
+    {
+      version: number
+      updatedAt: string
+      deleted: boolean
+      data?: Json
+      epoch?: string
+    }
   >()
   private tick = 0
 
@@ -38,12 +47,13 @@ class FakeWasServer {
   }
 
   /** Directly seed a document as if another client had written it. */
-  seed(id: string, data: Json): void {
+  seed(id: string, data: Json, epoch?: string): void {
     this.docs.set(id, {
       version: 1,
       updatedAt: this.nextUpdatedAt(),
       deleted: false,
-      data
+      data,
+      ...(epoch !== undefined && { epoch })
     })
   }
 
@@ -54,6 +64,10 @@ class FakeWasServer {
 
   dataFor(id: string): Json | undefined {
     return this.docs.get(id)?.data
+  }
+
+  epochFor(id: string): string | undefined {
+    return this.docs.get(id)?.epoch
   }
 
   port(): WasSyncPort {
@@ -80,6 +94,7 @@ class FakeWasServer {
           _deleted: doc.deleted,
           updatedAt: doc.updatedAt,
           version: doc.version,
+          ...(doc.epoch !== undefined && !doc.deleted && { epoch: doc.epoch }),
           ...(doc.data !== undefined && !doc.deleted && { data: doc.data })
         }))
         const last = page[page.length - 1]
@@ -89,7 +104,7 @@ class FakeWasServer {
         return { documents, checkpoint: nextCheckpoint }
       },
 
-      putContent: async ({ id, data, ifMatch, ifNoneMatch }) => {
+      putContent: async ({ id, data, ifMatch, ifNoneMatch, epoch }) => {
         const existing = this.docs.get(id)
         const live = existing && !existing.deleted
         if (ifNoneMatch && live) {
@@ -101,11 +116,15 @@ class FakeWasServer {
         ) {
           throw new WasSyncConflictError()
         }
+        // The port implements `WasSyncPort` directly, so the `epoch` param stands
+        // in for the `WAS-Key-Epoch` header the real server stamps (absent leaves
+        // no stamp).
         this.docs.set(id, {
           version: (existing?.version ?? 0) + 1,
           updatedAt: this.nextUpdatedAt(),
           deleted: false,
-          data
+          data,
+          ...(epoch !== undefined && { epoch })
         })
       },
 
@@ -138,7 +157,8 @@ class FakeWasServer {
           version: doc.version,
           updatedAt: doc.updatedAt,
           deleted: false,
-          data: doc.data
+          data: doc.data,
+          ...(doc.epoch !== undefined && { epoch: doc.epoch })
         }
       }
     }
@@ -161,7 +181,10 @@ async function openCollection() {
     multiInstance: false
   })
   const { synced } = await db.addCollections({
-    synced: { schema: syncedDocSchema() }
+    synced: {
+      schema: syncedDocSchema(),
+      migrationStrategies: syncedDocMigrationStrategies()
+    }
   })
   return synced
 }
@@ -222,6 +245,65 @@ describe('WAS replication (RxDB + fake server)', () => {
 
     const doc = await collection.findOne('cid-remote').exec()
     expect(doc?.toJSON().data).toEqual({ from: 'server' })
+
+    await replication.cancel()
+  })
+
+  it('round-trips the key-epoch id: a local epoch-stamped doc pushes and pulls back with it intact', async () => {
+    const collection = await openCollection()
+    const server = new FakeWasServer()
+    const replication = createWasReplication({
+      rxCollection: collection,
+      wasPort: server.port(),
+      replicationIdentifier: 'test-epoch-roundtrip'
+    })
+    await replication.awaitInitialReplication()
+
+    await collection.insert({
+      id: 'cid-epoch',
+      updatedAt: '000000000001',
+      version: 0,
+      epoch: 'epoch-1',
+      data: { hello: 'world' }
+    })
+
+    // Push carries the epoch to the server (its `WAS-Key-Epoch` stamp).
+    await eventually(
+      () => server.epochFor('cid-epoch') === 'epoch-1',
+      () => replication.reSync()
+    )
+    expect(server.dataFor('cid-epoch')).toEqual({ hello: 'world' })
+
+    // ...and the epoch pulls back down the feed onto the local document.
+    await eventually(
+      async () => {
+        const current = await collection.findOne('cid-epoch').exec()
+        return current?.toJSON().epoch === 'epoch-1'
+      },
+      () => replication.reSync()
+    )
+    const doc = await collection.findOne('cid-epoch').exec()
+    expect(doc?.toJSON().epoch).toBe('epoch-1')
+  })
+
+  it('replicates an epoch-stamped opaque envelope verbatim with no cipher (locked vault still syncs)', async () => {
+    const collection = await openCollection()
+    const server = new FakeWasServer()
+    // An opaque EDV-style envelope the replicating reader cannot decrypt: the
+    // sync layer never touches keys, so it moves the body and its epoch verbatim.
+    const envelope: Json = { jwe: { ciphertext: 'opaque', protected: 'hdr' } }
+    server.seed('cid-sealed', envelope, 'epoch-7')
+
+    const replication = createWasReplication({
+      rxCollection: collection,
+      wasPort: server.port(),
+      replicationIdentifier: 'test-epoch-pull'
+    })
+    await replication.awaitInitialReplication()
+
+    const doc = await collection.findOne('cid-sealed').exec()
+    expect(doc?.toJSON().data).toEqual(envelope)
+    expect(doc?.toJSON().epoch).toBe('epoch-7')
 
     await replication.cancel()
   })

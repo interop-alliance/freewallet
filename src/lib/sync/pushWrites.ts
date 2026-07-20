@@ -26,6 +26,7 @@
  * gain on immutable content-addressed collections.
  */
 import type { WithDeleted } from 'rxdb/plugins/core'
+import { canonicalize as jcsCanonicalize } from 'json-canonicalize'
 import type { Json, MasterState, SyncedDoc, WasSyncPort } from './types.js'
 import { WasSyncConflictError } from './types.js'
 
@@ -41,19 +42,17 @@ export function formatEtag(revision: number): string {
 }
 
 /**
- * Structural equality over two opaque bodies, by canonical-free JSON string.
- * Used only to decide whether the content or the metadata half changed and thus
- * which endpoint(s) to write. Content-addressed collections never mutate `data`
- * for a given id (so the content half only fires on create/delete), and a real
- * metadata edit re-encrypts to fresh bytes, so this coarse comparison is
- * sufficient for routing.
+ * Structural equality over two opaque bodies, by JCS-canonicalized JSON string,
+ * so a key-order-only difference between two structurally identical bodies is
+ * not misread as a change. Used only to decide whether the content or the
+ * metadata half changed and thus which endpoint(s) to write.
  *
  * @param left {Json | undefined}
  * @param right {Json | undefined}
  * @returns {boolean}
  */
 function bodiesEqual(left: Json | undefined, right: Json | undefined): boolean {
-  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null)
+  return jcsCanonicalize(left ?? null) === jcsCanonicalize(right ?? null)
 }
 
 /**
@@ -100,6 +99,12 @@ async function assembleConflict({
   }
   if (master.metaVersion !== undefined) {
     conflict.metaVersion = master.metaVersion
+  }
+  if (master.createdBy !== undefined) {
+    conflict.createdBy = master.createdBy
+  }
+  if (master.epoch !== undefined) {
+    conflict.epoch = master.epoch
   }
   if (master.custom !== undefined) {
     conflict.custom = master.custom
@@ -151,6 +156,11 @@ async function pushRow({
       await port.putContent({
         id,
         data: newDocumentState.data ?? null,
+        // The opaque key-epoch id the body was encrypted under, moved verbatim;
+        // absent on a pre-epoch resource (and so leaves no server stamp).
+        ...(newDocumentState.epoch !== undefined && {
+          epoch: newDocumentState.epoch
+        }),
         ...(isCreate
           ? { ifNoneMatch: true }
           : assumedVersion !== undefined && {

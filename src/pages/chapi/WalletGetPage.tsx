@@ -13,6 +13,12 @@
  *   delegated to the site's DID and embedded in the response VP.
  *
  * A single Continue button approves everything shown; Cancel responds `null`.
+ *
+ * An App Connect request (`profile.appConnect`) replaces the three generic
+ * sections with a dedicated app-centric panel: "Connect {app}?", first-run vs
+ * returning copy, and the requested collections + access -- one Connect
+ * button approves the whole thing (match-or-mint the app key, delegate the
+ * grants to its DID, respond in a single round).
  */
 import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
@@ -43,6 +49,7 @@ import { chapiStyles } from '@/styles/appStyles'
 import type { Session } from '@/types/auth'
 import type { StoredCredential } from '@/types/credential'
 import {
+  appConnectZcapRequests,
   classifyRequest,
   credentialQueriesOf,
   deliverPresentation,
@@ -65,8 +72,10 @@ import {
   type IVPRQuery,
   type IZcap,
   type ResolvedGrant,
-  type WalletRequestProfile
+  type WalletRequestProfile,
+  type WalletResponse
 } from '@/lib/walletRequest'
+import { appKeySubjectDid, findAppKeyCredential } from '@/lib/appKey'
 import { ZcapGrantsPanel } from './ZcapGrantsPanel'
 import { CHAPILoginForm } from './CHAPILoginForm'
 import { SavedSessionNotice } from './SavedSessionNotice'
@@ -106,7 +115,8 @@ const RP_ZCAP_WRITE_TTL_DAYS = Math.round(
 const EMPTY_PROFILE: WalletRequestProfile = {
   didAuth: false,
   vcQueries: [],
-  zcapRequests: []
+  zcapRequests: [],
+  appConnect: null
 }
 
 /**
@@ -173,6 +183,9 @@ export function WalletGetPage() {
   >([])
   const [selectedCids, setSelectedCids] = useState<Set<string>>(new Set())
   const [resolvedGrants, setResolvedGrants] = useState<ResolvedGrant[]>([])
+  // App Connect: whether no stored app key matched at login time (the consent
+  // copy differs); the authoritative match-or-mint happens at approve time.
+  const [appKeyFirstRun, setAppKeyFirstRun] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
   // First-party storage factory from the Storage Access API flow (see
   // SavedSessionNotice); a full login persists its delegated session
@@ -302,11 +315,48 @@ export function WalletGetPage() {
       // no-WAS wallet cannot fulfill it. Surface it before the consent screen
       // via the same predicate `processZcaps` guards on (which the eventual
       // delegation would otherwise raise as `ZcapUnavailableError`), so the
-      // block does not appear only after the user clicks Continue.
-      if (profile.zcapRequests.length > 0 && !hasZcapStorage(loggedIn)) {
+      // block does not appear only after the user clicks Continue. An App
+      // Connect request's capability queries delegate the same way.
+      const wantsGrants =
+        profile.zcapRequests.length > 0 ||
+        (profile.appConnect?.capabilityQueries.length ?? 0) > 0
+      if (wantsGrants && !hasZcapStorage(loggedIn)) {
         setSession(loggedIn)
         setBlockReason('zcapUnavailable')
         setPageState('blocked')
+        return
+      }
+
+      // App Connect: look up the stored app key for this app + origin, for
+      // the first-run vs returning consent copy and the grants preview. The
+      // approve-time processing repeats the lookup authoritatively.
+      if (profile.appConnect) {
+        const existing = findAppKeyCredential({
+          credentials: stored,
+          credentialType: profile.appConnect.app.credentialType,
+          origin: requestOrigin
+        })
+        setAppKeyFirstRun(!existing)
+        if (
+          profile.appConnect.capabilityQueries.length > 0 &&
+          loggedIn.storage.spaceUrl
+        ) {
+          setResolvedGrants(
+            resolveGrants({
+              zcapRequests: appConnectZcapRequests({
+                capabilityQueries: profile.appConnect.capabilityQueries,
+                // Resolution never reads the controller; on first run the
+                // app-key DID does not exist yet.
+                controller: existing
+                  ? (appKeySubjectDid(existing.vc) ?? '')
+                  : ''
+              }),
+              spaceUrl: loggedIn.storage.spaceUrl
+            })
+          )
+        }
+        setSession(loggedIn)
+        setPageState('selecting')
         return
       }
 
@@ -389,6 +439,7 @@ export function WalletGetPage() {
 
     let verifiablePresentation
     let grantedZcaps: IZcap[]
+    let appConnectResult: WalletResponse['appConnect']
     try {
       const response = await processRequest({
         request,
@@ -398,6 +449,7 @@ export function WalletGetPage() {
       })
       verifiablePresentation = response.verifiablePresentation
       grantedZcaps = response.zcaps ?? []
+      appConnectResult = response.appConnect
     } catch (err) {
       // A remote Space that vanished between consent and submit surfaces the
       // same typed error the login-time preflight guards against; map it to the
@@ -450,17 +502,27 @@ export function WalletGetPage() {
           : null
       )
     )
-    recordLoginHistory(grantedZcaps)
+    recordLoginHistory(grantedZcaps, appConnectResult)
   }
 
   /**
    * Fire-and-forget Login-activity record when the request granted storage
-   * capabilities or authenticated the user's DID. Records the capabilities
-   * `processRequest` actually delegated (threaded out alongside the VP), rather
-   * than reading them back off the composed VP's embedded `zcap` array.
+   * capabilities, connected an app, or authenticated the user's DID. Records
+   * the capabilities `processRequest` actually delegated (threaded out
+   * alongside the VP), rather than reading them back off the composed VP's
+   * embedded `zcap` array; for App Connect, also the app name and whether the
+   * app key was minted on this connect.
    */
-  function recordLoginHistory(zcaps: IZcap[]) {
-    if (!session || (!profile.didAuth && profile.zcapRequests.length === 0)) {
+  function recordLoginHistory(
+    zcaps: IZcap[],
+    appConnectResult?: WalletResponse['appConnect']
+  ) {
+    if (
+      !session ||
+      (!profile.didAuth &&
+        profile.zcapRequests.length === 0 &&
+        !profile.appConnect)
+    ) {
       return
     }
     const grants = zcaps.map(zcap => {
@@ -478,7 +540,18 @@ export function WalletGetPage() {
       }
     })
     void session.storage
-      .addHistoryLogin({ user: session.user, origin: requestOrigin, grants })
+      .addHistoryLogin({
+        user: session.user,
+        origin: requestOrigin,
+        grants,
+        appConnect:
+          appConnectResult && profile.appConnect
+            ? {
+                name: profile.appConnect.app.name,
+                firstRun: appConnectResult.firstRun
+              }
+            : undefined
+      })
       .catch((err: unknown) => {
         console.warn('Could not record the login history entry:', err)
       })
@@ -508,16 +581,20 @@ export function WalletGetPage() {
   }
 
   const didAuthOnly = isDidAuthOnly(profile)
+  const appConnect = profile.appConnect
   // With no DID Auth to sign, no credentials picked, and no satisfiable grant,
   // Continue would compose nothing (processRequest returns `{}`) -- keep it
   // disabled so the only way out of an empty consent screen is Cancel, which
-  // answers both CHAPI and any open exchange.
+  // answers both CHAPI and any open exchange. An App Connect response always
+  // carries the app-key credential, so it always has something to send.
   const nothingToShare =
+    !appConnect &&
     !profile.didAuth &&
     selectedCids.size === 0 &&
     !resolvedGrants.some(({ target }) => target.satisfiable)
-  const title =
-    profile.zcapRequests.length > 0
+  const title = appConnect
+    ? t('chapi.get.appConnect.title', { appName: appConnect.app.name })
+    : profile.zcapRequests.length > 0
       ? t('chapi.get.loginTitle')
       : didAuthOnly
         ? t('chapi.get.didAuthTitle')
@@ -566,7 +643,46 @@ export function WalletGetPage() {
           </>
         )}
 
-        {pageState === 'selecting' && (
+        {pageState === 'selecting' && appConnect && (
+          <Stack spacing={2}>
+            <Typography variant="body2">
+              {t(
+                appKeyFirstRun
+                  ? 'chapi.get.appConnect.firstRun'
+                  : 'chapi.get.appConnect.returning',
+                { appName: appConnect.app.name }
+              )}
+            </Typography>
+
+            {resolvedGrants.length > 0 && (
+              <ZcapGrantsPanel
+                grants={resolvedGrants}
+                ttlDays={RP_ZCAP_TTL_DAYS}
+                writeTtlDays={RP_ZCAP_WRITE_TTL_DAYS}
+                hideRecipient
+              />
+            )}
+
+            <Stack direction="row" spacing={2}>
+              <Button
+                variant="contained"
+                sx={{ textTransform: 'none' }}
+                onClick={respondAndClose}
+              >
+                {t('chapi.get.appConnect.connect')}
+              </Button>
+              <Button
+                variant="outlined"
+                sx={{ textTransform: 'none' }}
+                onClick={handleCancel}
+              >
+                {t('common.cancel')}
+              </Button>
+            </Stack>
+          </Stack>
+        )}
+
+        {pageState === 'selecting' && !appConnect && (
           <Stack spacing={2}>
             {profile.didAuth && (
               <Typography variant="body2" color="text.secondary">
@@ -663,7 +779,13 @@ export function WalletGetPage() {
         {pageState === 'done' && (
           <Box sx={chapiStyles.doneMessage}>
             <CircularProgress size={20} />
-            <Typography variant="body2">{t('chapi.get.sharing')}</Typography>
+            <Typography variant="body2">
+              {t(
+                appConnect
+                  ? 'chapi.get.appConnect.connecting'
+                  : 'chapi.get.sharing'
+              )}
+            </Typography>
           </Box>
         )}
       </Box>

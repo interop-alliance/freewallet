@@ -19,8 +19,12 @@ import type {
  * tombstones, which carry no `data`) and the metadata body under `custom`.
  * `metaVersion` / `custom` are present only once metadata has been written for
  * the resource, and are simply absent otherwise (forward-compatible with a
- * server that does not yet surface them on the feed). `_deleted` becomes RxDB's
- * native deleted flag.
+ * server that does not yet surface them on the feed). The server-managed
+ * `createdBy` creator DID is carried across on both live documents and
+ * tombstones (it rides the feed on a delete too), and is simply absent when the
+ * server recorded no creator. The opaque `epoch` key-epoch id is carried across
+ * likewise, and is simply absent for a pre-epoch resource. `_deleted` becomes
+ * RxDB's native deleted flag.
  *
  * @param doc {WireDoc}
  * @returns {WithDeleted<SyncedDoc>}
@@ -31,6 +35,12 @@ export function wireDocToRxDoc(doc: WireDoc): WithDeleted<SyncedDoc> {
     updatedAt: doc.updatedAt,
     version: doc.version,
     _deleted: doc._deleted
+  }
+  if (doc.createdBy !== undefined) {
+    rxDoc.createdBy = doc.createdBy
+  }
+  if (doc.epoch !== undefined) {
+    rxDoc.epoch = doc.epoch
   }
   if (doc.data !== undefined) {
     rxDoc.data = doc.data

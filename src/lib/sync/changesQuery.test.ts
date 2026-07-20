@@ -88,6 +88,86 @@ describe('wireDocToRxDoc', () => {
     expect('data' in rx).toBe(false)
     expect('custom' in rx).toBe(false)
   })
+
+  it('carries the server-managed createdBy on a live document', () => {
+    const doc: WireDoc = {
+      id: 'abc',
+      _deleted: false,
+      updatedAt: '2026-01-01T00:00:00Z',
+      version: 3,
+      createdBy: 'did:key:z6MkCreator',
+      data: { hello: 'world' }
+    }
+    expect(wireDocToRxDoc(doc)).toEqual({
+      id: 'abc',
+      updatedAt: '2026-01-01T00:00:00Z',
+      version: 3,
+      createdBy: 'did:key:z6MkCreator',
+      data: { hello: 'world' },
+      _deleted: false
+    })
+  })
+
+  it('carries the server-managed createdBy on a tombstone', () => {
+    const doc: WireDoc = {
+      id: 'gone',
+      _deleted: true,
+      updatedAt: '2026-01-02T00:00:00Z',
+      version: 4,
+      createdBy: 'did:key:z6MkCreator'
+    }
+    const rx = wireDocToRxDoc(doc)
+    expect(rx).toEqual({
+      id: 'gone',
+      updatedAt: '2026-01-02T00:00:00Z',
+      version: 4,
+      createdBy: 'did:key:z6MkCreator',
+      _deleted: true
+    })
+    // The attribution survives the delete even with no content body.
+    expect('data' in rx).toBe(false)
+  })
+
+  it('omits createdBy when the server recorded no creator', () => {
+    const doc: WireDoc = {
+      id: 'abc',
+      _deleted: false,
+      updatedAt: '2026-01-01T00:00:00Z',
+      version: 3,
+      data: { hello: 'world' }
+    }
+    expect('createdBy' in wireDocToRxDoc(doc)).toBe(false)
+  })
+
+  it('carries the opaque epoch key-epoch id when present', () => {
+    const doc: WireDoc = {
+      id: 'abc',
+      _deleted: false,
+      updatedAt: '2026-01-01T00:00:00Z',
+      version: 3,
+      epoch: 'epoch-1',
+      data: { hello: 'world' }
+    }
+    expect(wireDocToRxDoc(doc)).toEqual({
+      id: 'abc',
+      updatedAt: '2026-01-01T00:00:00Z',
+      version: 3,
+      epoch: 'epoch-1',
+      data: { hello: 'world' },
+      _deleted: false
+    })
+  })
+
+  it('omits epoch for a pre-epoch resource', () => {
+    const doc: WireDoc = {
+      id: 'abc',
+      _deleted: false,
+      updatedAt: '2026-01-01T00:00:00Z',
+      version: 3,
+      data: { hello: 'world' }
+    }
+    expect('epoch' in wireDocToRxDoc(doc)).toBe(false)
+  })
 })
 
 describe('createPullHandler', () => {

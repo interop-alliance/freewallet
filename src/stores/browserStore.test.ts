@@ -12,7 +12,7 @@ import type { User } from '@/types/auth'
 import { cidFrom } from '@/lib/cidFrom'
 import type { Json } from '@/lib/sync'
 import { BrowserStore } from './browserStore'
-import type { DocCipher } from './edvDocCipher'
+import { UnknownEpochError, type DocCipher } from './edvDocCipher'
 import { StorageManager } from './storageManager'
 import type { WASRemoteStore } from './wasRemoteStore'
 
@@ -496,6 +496,163 @@ describe('BrowserStore (encrypted collections)', () => {
       expect(rows).toHaveLength(1)
       expect(await localStore.listCredentials()).toHaveLength(1)
     })
+  })
+})
+
+/**
+ * A fake cipher that stamps a fixed `epoch` on every encrypt result, mimicking
+ * a multi-recipient cipher writing under a current key epoch.
+ */
+function makeEpochCipher(epoch: string): DocCipher {
+  return {
+    async encrypt({ data }: { data: Json }) {
+      fakeCipherCounter += 1
+      const id = `z6EpochEnvelope${fakeCipherCounter}`
+      return {
+        id,
+        envelope: {
+          id,
+          sequence: 0,
+          jwe: { ciphertext: JSON.stringify(data) }
+        } as Json,
+        epoch
+      }
+    },
+    async decrypt({ envelope }: { envelope: Json }) {
+      const { ciphertext } = (envelope as { jwe: { ciphertext: string } }).jwe
+      return JSON.parse(ciphertext) as Json
+    }
+  }
+}
+
+/**
+ * A fake cipher whose `decrypt` always throws `UnknownEpochError` -- standing
+ * in for a row stamped with a key epoch this cipher's cached marker has never
+ * seen (a rekey emits no change-feed entry). `encrypt` still produces a normal
+ * fake envelope, so a caller can seed rows with it.
+ */
+function makeUnknownEpochCipher(): DocCipher {
+  return {
+    async encrypt({ data }: { data: Json }) {
+      fakeCipherCounter += 1
+      const id = `z6UnknownEnvelope${fakeCipherCounter}`
+      return {
+        id,
+        envelope: {
+          id,
+          sequence: 0,
+          jwe: { ciphertext: JSON.stringify(data) }
+        } as Json
+      }
+    },
+    async decrypt({ envelope }: { envelope: Json }) {
+      const kids =
+        (
+          envelope as { jwe?: { recipients?: { header?: { kid?: string } }[] } }
+        )?.jwe?.recipients?.map(recipient => recipient.header?.kid ?? '') ?? []
+      throw new UnknownEpochError({ collectionId: 'private-credentials', kids })
+    }
+  }
+}
+
+describe('BrowserStore (key epochs)', () => {
+  it('stores the epoch the cipher stamped on the row', async () => {
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        privateCredentials: makeEpochCipher('did:key:z6EpochOne'),
+        walletActivity: makeEpochCipher('did:key:z6EpochOne')
+      }
+    })
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+
+    await localStore.addCredential({ cid, credential })
+
+    const rows = await localStore
+      .rxCollection('privateCredentials')
+      .find()
+      .exec()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].toMutableJSON().epoch).toBe('did:key:z6EpochOne')
+
+    // A history write carries its epoch too.
+    await localStore.addHistoryItem({
+      resourceId: 'act-1',
+      activity: { id: 'act-1', summary: 'one' }
+    })
+    const activityRows = await localStore
+      .rxCollection('walletActivity')
+      .find()
+      .exec()
+    expect(activityRows[0].toMutableJSON().epoch).toBe('did:key:z6EpochOne')
+  })
+
+  it('counts an unknown-epoch row separately from undecryptable and skips it', async () => {
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        privateCredentials: makeUnknownEpochCipher(),
+        walletActivity: makeUnknownEpochCipher()
+      }
+    })
+    const credential = makeCredential('Alice')
+    await localStore.rxCollection('privateCredentials').insert({
+      id: 'z6Unknown',
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: {
+        id: 'z6Unknown',
+        sequence: 0,
+        jwe: { ciphertext: JSON.stringify(credential) }
+      } as Json
+    })
+
+    const listed = await localStore.listCredentials()
+
+    // The row is skipped, counted as unknown-epoch (fresh data behind a stale
+    // marker), and NOT as undecryptable garbage.
+    expect(listed).toHaveLength(0)
+    expect(localStore.unknownEpochCredentials).toBe(1)
+    expect(localStore.undecryptableCredentials).toBe(0)
+    // It is not purged either (purge only clears true undecryptables).
+    expect(await localStore.purgeUndecryptableCredentials()).toBe(0)
+    expect(
+      await localStore.rxCollection('privateCredentials').find().exec()
+    ).toHaveLength(1)
+  })
+
+  it('setCiphers swaps the injected cipher for a subsequent read', async () => {
+    // Start with a cipher that cannot route the row's epoch.
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        privateCredentials: makeUnknownEpochCipher(),
+        walletActivity: makeUnknownEpochCipher()
+      }
+    })
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+    await localStore.rxCollection('privateCredentials').insert({
+      id: 'z6Swap',
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: {
+        id: 'z6Swap',
+        sequence: 0,
+        jwe: { ciphertext: JSON.stringify(credential) }
+      } as Json
+    })
+
+    // Under the stale cipher the row is invisible (unknown epoch).
+    expect(await localStore.listCredentials()).toHaveLength(0)
+    expect(localStore.unknownEpochCredentials).toBe(1)
+
+    // Swap in a cipher that decrypts it; the same row now reads.
+    localStore.setCiphers({
+      privateCredentials: makeFakeCipher(),
+      walletActivity: makeFakeCipher()
+    })
+    const listed = await localStore.listCredentials()
+    expect(listed).toEqual([{ cid, vc: credential }])
+    expect(localStore.unknownEpochCredentials).toBe(0)
   })
 })
 

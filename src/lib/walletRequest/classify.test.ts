@@ -114,8 +114,110 @@ describe('queriesOf', () => {
     expect(classifyRequest({})).toEqual({
       didAuth: false,
       vcQueries: [],
-      zcapRequests: []
+      zcapRequests: [],
+      appConnect: null
     })
+  })
+})
+
+describe('appConnectRequestOf (via classifyRequest)', () => {
+  const app = {
+    name: 'Text Editor',
+    credentialType: 'TextEditorAppKey',
+    vocabBase: 'urn:text-editor:vocab#'
+  }
+  const capabilityQuery = {
+    referenceId: 'text-editor-document',
+    allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
+    invocationTarget: {
+      type: 'urn:was:collection',
+      name: 'text-editor-document'
+    }
+  }
+
+  it('classifies an App Connect request with DID Auth', () => {
+    const profile = classifyRequest({
+      query: [
+        { type: 'DIDAuthentication', acceptedMethods: [{ method: 'key' }] },
+        { type: 'AppConnectQuery', app, capabilityQuery: [capabilityQuery] }
+      ]
+    })
+    expect(profile.didAuth).toBe(true)
+    expect(profile.appConnect).toEqual({
+      app,
+      capabilityQueries: [capabilityQuery]
+    })
+    expect(profile.vcQueries).toEqual([])
+    expect(profile.zcapRequests).toEqual([])
+  })
+
+  it('normalizes a single (non-array) capabilityQuery', () => {
+    const profile = classifyRequest({
+      query: [{ type: 'AppConnectQuery', app, capabilityQuery }]
+    })
+    expect(profile.appConnect?.capabilityQueries).toEqual([capabilityQuery])
+  })
+
+  it('classifies an absent capabilityQuery as no grants requested', () => {
+    const profile = classifyRequest({
+      query: [{ type: 'AppConnectQuery', app }]
+    })
+    expect(profile.appConnect?.capabilityQueries).toEqual([])
+  })
+
+  it('rejects mixing with QueryByExample', () => {
+    expect(() =>
+      classifyRequest({
+        query: [
+          { type: 'AppConnectQuery', app },
+          { type: 'QueryByExample', credentialQuery: { example: {} } }
+        ]
+      })
+    ).toThrow(/cannot be combined/)
+  })
+
+  it('rejects mixing with a standalone capability query', () => {
+    expect(() =>
+      classifyRequest({
+        query: [
+          { type: 'AppConnectQuery', app },
+          {
+            type: 'AuthorizationCapabilityQuery',
+            capabilityQuery: {
+              controller: 'did:key:z6Mk...',
+              ...capabilityQuery
+            }
+          }
+        ]
+      })
+    ).toThrow(/cannot be combined/)
+  })
+
+  it('rejects more than one AppConnectQuery', () => {
+    expect(() =>
+      classifyRequest({
+        query: [
+          { type: 'AppConnectQuery', app },
+          { type: 'AppConnectQuery', app }
+        ]
+      })
+    ).toThrow(/More than one AppConnectQuery/)
+  })
+
+  it('rejects a missing app block', () => {
+    expect(() =>
+      classifyRequest({ query: [{ type: 'AppConnectQuery' } as never] })
+    ).toThrow(/missing its app name/)
+  })
+
+  it('rejects a malformed capabilityQuery entry', () => {
+    expect(() =>
+      classifyRequest({
+        query: [
+          { type: 'AppConnectQuery', app, capabilityQuery: ['nope'] as never }
+        ]
+      })
+    ).toThrow(/malformed capabilityQuery/)
   })
 })
 

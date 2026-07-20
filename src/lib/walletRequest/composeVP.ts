@@ -36,6 +36,7 @@ export const documentLoader = securityLoader({
 type PresentationWithZcaps = IVerifiablePresentation & {
   '@context': string | Array<string | object>
   zcap?: IZcap[]
+  appConnect?: { firstRun: boolean }
 }
 
 /**
@@ -49,6 +50,18 @@ type PresentationWithZcaps = IVerifiablePresentation & {
 const ZCAP_TERM_CONTEXT = {
   '@protected': true,
   zcap: { '@id': 'urn:freewallet:vocab#zcap', '@container': '@set' }
+} as const
+
+/**
+ * The `appConnect` term definition appended to the VP `@context` when an App
+ * Connect response marker is embedded. The member is a JSON literal
+ * (`@type: '@json'`) so its `firstRun` boolean canonicalizes as one opaque
+ * value; embedding happens before signing, so the DIDAuth proof covers the
+ * marker the same way it covers the grants.
+ */
+const APP_CONNECT_TERM_CONTEXT = {
+  '@protected': true,
+  appConnect: { '@id': 'urn:freewallet:vocab#appConnect', '@type': '@json' }
 } as const
 
 /**
@@ -66,6 +79,24 @@ function embedZcaps(presentation: PresentationWithZcaps, zcaps: IZcap[]): void {
 }
 
 /**
+ * Embeds the App Connect response marker (the wallet-provided `firstRun`
+ * signal) on the presentation and adds the `appConnect` term to its
+ * `@context`.
+ */
+function embedAppConnect(
+  presentation: PresentationWithZcaps,
+  appConnect: { firstRun: boolean } | undefined
+): void {
+  if (!appConnect) {
+    return
+  }
+  const base = presentation['@context']
+  const contextArray = Array.isArray(base) ? base : [base]
+  presentation['@context'] = [...contextArray, APP_CONNECT_TERM_CONTEXT]
+  presentation.appConnect = appConnect
+}
+
+/**
  * Creates a Verifiable Presentation for the requester.
  *
  * @param options {object}
@@ -80,6 +111,8 @@ function embedZcaps(presentation: PresentationWithZcaps, zcaps: IZcap[]): void {
  *   the wallet default (Ed25519Signature2020) when absent.
  * @param [options.zcaps] {IZcap[]} - Delegated capabilities to embed as the
  *   VP's `zcap` array (before signing, so a DIDAuth proof covers them).
+ * @param [options.appConnect] {{ firstRun: boolean }} - App Connect response
+ *   marker to embed (before signing, like the grants).
  * @returns {Promise<IVerifiablePresentation>}
  */
 export async function composeVP({
@@ -89,7 +122,8 @@ export async function composeVP({
   domain,
   didAuthRequested,
   cryptosuite,
-  zcaps = []
+  zcaps = [],
+  appConnect
 }: {
   session: Session
   selectedVCs?: IVerifiableCredential[]
@@ -98,6 +132,7 @@ export async function composeVP({
   didAuthRequested: boolean
   cryptosuite?: string
   zcaps?: IZcap[]
+  appConnect?: { firstRun: boolean }
 }): Promise<IVerifiablePresentation> {
   if (!didAuthRequested && selectedVCs.length === 0 && zcaps.length === 0) {
     throw new Error(
@@ -118,6 +153,7 @@ export async function composeVP({
       version: 1.0
     }) as PresentationWithZcaps
     embedZcaps(presentation, zcaps)
+    embedAppConnect(presentation, appConnect)
     return presentation
   }
 
@@ -156,8 +192,10 @@ export async function composeVP({
 
   // Embed the grants before signing so the authentication proof covers them
   // (D1). The entries additionally self-authenticate via their own delegation
-  // proofs and carry their own `@context`.
+  // proofs and carry their own `@context`. The App Connect marker is embedded
+  // the same way, for the same reason.
   embedZcaps(presentation, zcaps)
+  embedAppConnect(presentation, appConnect)
 
   return (await vc.signPresentation({
     presentation,

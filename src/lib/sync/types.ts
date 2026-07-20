@@ -7,8 +7,11 @@
  * `was-rxdb-replication` library later; all WAS access is injected through the
  * {@link WasSyncPort} seam rather than importing `@interop/was-client` directly.
  *
- * The wire contract follows the was-teaching-server `changes` feed and its V2
- * encrypted-metadata profile: a synced document carries both a content revision
+ * The wire contract is the WAS spec's `changes` query profile (the spec
+ * defines the document / checkpoint shapes and, under Conditional Requests,
+ * the ETag/412 push preconditions; the wire types are `ChangeDocument` /
+ * `ChangesPage` / `ChangesCheckpoint` from `@interop/storage-core`) plus its
+ * V2 encrypted-metadata profile: a synced document carries both a content revision
  * (`version` / `data`) and an independently-versioned metadata sub-resource
  * (`metaVersion` / `custom`). A metadata-only edit re-surfaces the resource with
  * a bumped `updatedAt` / `metaVersion` but unchanged `version` / `data`. The
@@ -46,6 +49,16 @@ export interface SyncCheckpoint {
  * user-writable metadata body is under `custom`. A tombstone carries
  * `_deleted: true` with no `data`. `metaVersion` / `custom` are present only
  * once metadata has been written for the resource.
+ *
+ * `createdBy` is the server-managed `did:key` DID of whoever created the
+ * resource. It is read-only (the server ignores any `createdBy` a client sends),
+ * absent when no creator was recorded, and rides the feed on tombstones too, so
+ * a delete replicates with its attribution intact.
+ *
+ * `epoch` is the key-epoch id the resource's envelope was encrypted under. It is
+ * absent for a pre-epoch resource (encrypted directly to the vault key) and is
+ * opaque to the sync layer -- it rides the feed verbatim so a replicating reader
+ * can pick the right epoch key without a `/meta` fetch per resource.
  */
 export interface WireDoc {
   id: string
@@ -53,6 +66,8 @@ export interface WireDoc {
   updatedAt: string
   version: number
   metaVersion?: number
+  createdBy?: string
+  epoch?: string
   data?: Json
   custom?: Json
 }
@@ -64,12 +79,19 @@ export interface WireDoc {
  * bodies stay nested (`data` for content, `custom` for metadata) to avoid field
  * collisions. `_deleted` is managed by RxDB via `deletedField` and so is not
  * part of this "clean" shape (handlers work with RxDB's `WithDeleted<SyncedDoc>`).
+ * `createdBy` is the server-managed creator `did:key` DID carried down from the
+ * feed (absent when the server recorded no creator); it is persisted on the
+ * schema at `version: 1`. `epoch` is the key-epoch id the resource's envelope was
+ * encrypted under (absent = pre-epoch, encrypted directly to the vault key);
+ * opaque to the sync layer and persisted on the schema at `version: 2`.
  */
 export interface SyncedDoc {
   id: string
   updatedAt: string
   version: number
   metaVersion?: number
+  createdBy?: string
+  epoch?: string
   data?: Json
   custom?: Json
 }
@@ -78,12 +100,21 @@ export interface SyncedDoc {
  * The current master state of a single resource, as read back for the 412
  * conflict path. `deleted` distinguishes a tombstone from a live resource;
  * `metaVersion` / `custom` are present only once metadata has been written.
+ * `createdBy` is the same server-managed creator DID the feed carries (read
+ * from the resource's metadata), so a document landing via the conflict
+ * assembler keeps its attribution just like one landing via a pull. `epoch` is
+ * the key-epoch id the resource's envelope was encrypted under (absent =
+ * pre-epoch, encrypted directly to the vault key), read from the resource's
+ * metadata so the conflict assembler keeps it at parity with a pull; opaque to
+ * the sync layer.
  */
 export interface MasterState {
   version: number
   updatedAt: string
   deleted: boolean
   metaVersion?: number
+  createdBy?: string
+  epoch?: string
   data?: Json
   custom?: Json
 }
@@ -119,13 +150,16 @@ export interface WasSyncPort {
   /**
    * Conditionally writes the content body verbatim (`PUT /:id`). Pass
    * `ifNoneMatch: true` for a create-if-absent, or `ifMatch` (a quoted ETag over
-   * the content `version`) for an update-if-unchanged.
+   * the content `version`) for an update-if-unchanged. `epoch` is the opaque
+   * key-epoch id the body was encrypted under, stamped on the resource by the
+   * server (absent leaves the resource with no epoch stamp).
    *
    * @param options {object}
    * @param options.id {string}
    * @param options.data {Json}
    * @param [options.ifMatch] {string}
    * @param [options.ifNoneMatch] {boolean}
+   * @param [options.epoch] {string}
    * @returns {Promise<void>}
    */
   putContent(options: {
@@ -133,6 +167,7 @@ export interface WasSyncPort {
     data: Json
     ifMatch?: string
     ifNoneMatch?: boolean
+    epoch?: string
   }): Promise<void>
 
   /**

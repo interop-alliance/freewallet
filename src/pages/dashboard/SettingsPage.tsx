@@ -50,6 +50,7 @@ import {
 } from '@/lib/passkey'
 import { deletePasskeySafetyNotice } from '@/lib/sessionKey'
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
+import { SharedCollectionsPanel } from '@/components/SharedCollectionsPanel'
 import { dashboardStyles } from '@/styles/appStyles'
 import { useEffect, useRef, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
@@ -1262,6 +1263,13 @@ export function SettingsPage() {
             </Typography>
           )}
         </Stack>
+
+        {session && (
+          <>
+            <Divider />
+            <SharedCollectionsPanel session={session} />
+          </>
+        )}
 
         <Divider />
 

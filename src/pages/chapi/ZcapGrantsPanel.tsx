@@ -47,11 +47,15 @@ function targetLabel(
 export function ZcapGrantsPanel({
   grants,
   ttlDays,
-  writeTtlDays
+  writeTtlDays,
+  hideRecipient = false
 }: {
   grants: ResolvedGrant[]
   ttlDays: number
   writeTtlDays: number
+  // App Connect consent hides the recipient DID rows: the recipient is the
+  // app's own (possibly not-yet-minted) key, not a DID the user could vet.
+  hideRecipient?: boolean
 }) {
   const { t } = useTranslation()
 
@@ -82,24 +86,28 @@ export function ZcapGrantsPanel({
               </Typography>
             )}
 
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ display: 'block', mb: 0.5 }}
-            >
-              {t('chapi.get.zcapRecipient')}
-            </Typography>
-            <Typography
-              variant="caption"
-              component="div"
-              sx={{
-                fontFamily: 'monospace',
-                wordBreak: 'break-all',
-                mb: 0.5
-              }}
-            >
-              {descriptor.controller}
-            </Typography>
+            {!hideRecipient && (
+              <>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block', mb: 0.5 }}
+                >
+                  {t('chapi.get.zcapRecipient')}
+                </Typography>
+                <Typography
+                  variant="caption"
+                  component="div"
+                  sx={{
+                    fontFamily: 'monospace',
+                    wordBreak: 'break-all',
+                    mb: 0.5
+                  }}
+                >
+                  {descriptor.controller}
+                </Typography>
+              </>
+            )}
 
             {satisfiable ? (
               <>

@@ -6,6 +6,7 @@
  * `exchanges.ts#processRequest` (zcap and exchanger-POST branches dropped).
  */
 import type { Session } from '@/types/auth'
+import { processAppConnect } from './appConnect'
 import { classifyRequest, queriesOf } from './classify'
 import { composeVP } from './composeVP'
 import { negotiateCryptosuite } from './presentationSuite'
@@ -85,7 +86,7 @@ export async function processRequest({
   credentialRequestOrigin?: string
   selectedVCs?: IVerifiableCredential[]
 }): Promise<WalletResponse> {
-  const { didAuth, zcapRequests } = classifyRequest(request)
+  const { didAuth, zcapRequests, appConnect } = classifyRequest(request)
   const queries = queriesOf(request)
   const { challenge, domain } = request
   // Honor any cryptosuite the verifier asks for (VCALM `acceptedCryptosuites`).
@@ -102,6 +103,24 @@ export async function processRequest({
       `DID Auth domain "${domain}" does not match request origin ` +
         `"${credentialRequestOrigin}".`
     )
+  }
+
+  // An App Connect request takes its own single-round branch: match-or-mint
+  // the app key, delegate to its subject DID, one composed response. The
+  // requesting origin is what the app key is bound to, so it is required.
+  if (appConnect) {
+    if (!credentialRequestOrigin) {
+      throw new Error('An App Connect request requires a requesting origin.')
+    }
+    return processAppConnect({
+      appConnect,
+      session,
+      origin: credentialRequestOrigin,
+      challenge,
+      domain,
+      didAuthRequested: didAuth,
+      cryptosuite
+    })
   }
 
   // Delegate the approved capabilities first, then embed them in the VP.
