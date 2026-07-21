@@ -1,6 +1,6 @@
 # History
 
-## Unreleased - TBD
+## 0.18.0 - 2026-07-20
 
 ### Added
 
