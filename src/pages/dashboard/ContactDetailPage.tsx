@@ -38,18 +38,10 @@ export function ContactDetailPage() {
           </Stack>
 
           <Stack direction="row" spacing={1.5} sx={contactDetailStyles.actions}>
-            <Button
-              variant="outlined"
-              disabled
-              sx={contactDetailStyles.actionButton}
-            >
+            <Button variant="outlined" disabled>
               {t('common.edit')}
             </Button>
-            <Button
-              variant="outlined"
-              disabled
-              sx={contactDetailStyles.actionButton}
-            >
+            <Button variant="outlined" disabled>
               {t('common.message')}
             </Button>
           </Stack>

@@ -1,4 +1,8 @@
 import type React from 'react'
+import { credentialDetailStyles } from './credentialStyles'
+
+// Shared folder accent color (used by folder and collection icons)
+const folderAccentColor = '#f4b400'
 
 export const authStyles = {
   page: {
@@ -80,7 +84,6 @@ export const authStyles = {
   },
   passkeyButton: {
     width: 240,
-    textTransform: 'none',
     py: 1,
     alignSelf: 'center'
   },
@@ -110,7 +113,6 @@ export const authStyles = {
   },
   actionButton: {
     width: 180,
-    textTransform: 'none',
     py: 1,
     alignSelf: 'center'
   },
@@ -134,7 +136,6 @@ export const authStyles = {
   signupBackButton: {
     width: 'auto',
     minWidth: 100,
-    textTransform: 'none',
     py: 1,
     alignSelf: 'center'
   },
@@ -181,14 +182,10 @@ export const dashboardStyles = {
     }
   },
   navItemText: {
-    '& .MuiTypography-root': {
-      fontWeight: 500
-    }
+    fontWeight: 500
   },
   navSectionTitle: {
-    '& .MuiTypography-root': {
-      fontWeight: 600
-    }
+    fontWeight: 600
   },
   navSectionTitleButton: {
     mt: 1.5,
@@ -233,27 +230,8 @@ export const dashboardStyles = {
     alignItems: 'center',
     gap: 3
   },
-  deleteAccountButton: {
-    textTransform: 'none',
-    px: 4,
-    py: 1.5,
-    borderRadius: 2,
-    backgroundColor: '#d79393',
-    color: '#1f1f1f',
-    border: '2px solid #2f2f2f',
-    '&:hover': {
-      backgroundColor: '#ce8686'
-    }
-  },
   deleteAccountDescription: {
     color: 'text.primary'
-  },
-  sharedShareRow: {
-    gap: 0.5,
-    p: 1.5,
-    border: '1px solid',
-    borderColor: 'divider',
-    borderRadius: 2
   },
   sharedRecipientDid: {
     fontFamily: 'monospace',
@@ -288,7 +266,6 @@ export const dashboardStyles = {
     fontWeight: 600
   },
   syncButton: {
-    textTransform: 'none',
     borderRadius: 2,
     px: 1.5,
     py: 0.5
@@ -328,7 +305,6 @@ export const dashboardStyles = {
     flexWrap: 'wrap'
   },
   addCredentialLink: {
-    textTransform: 'none',
     borderRadius: 2,
     px: 2.5,
     py: 1
@@ -342,7 +318,6 @@ export const dashboardStyles = {
   },
   addCredentialButton: {
     alignSelf: 'flex-start',
-    textTransform: 'none',
     px: 4,
     py: 1,
     borderRadius: 2
@@ -445,14 +420,13 @@ export const chapiStyles = {
     gap: 2
   },
   originChip: {
-    display: 'inline-block',
-    bgcolor: 'action.hover',
-    px: 1,
-    py: 0.25,
-    borderRadius: 1,
-    fontSize: '0.8rem',
-    wordBreak: 'break-all' as const,
-    fontFamily: 'monospace'
+    fontFamily: 'monospace',
+    height: 'auto',
+    '& .MuiChip-label': {
+      whiteSpace: 'normal',
+      wordBreak: 'break-all' as const,
+      py: 0.375
+    }
   },
   credentialList: {
     display: 'flex',
@@ -460,19 +434,9 @@ export const chapiStyles = {
     gap: 1
   },
   credentialRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 1,
-    p: 1.5,
     border: 1,
     borderColor: 'divider',
     borderRadius: 2
-  },
-  credentialInfo: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 0.25
   },
   credentialSummary: {
     p: 2,
@@ -486,26 +450,17 @@ export const chapiStyles = {
     gap: 1.5
   },
   sourceToggle: {
-    textTransform: 'none' as const,
     color: 'text.secondary',
     px: 0,
     minWidth: 0,
     justifyContent: 'flex-start'
   },
   sourceCodeBlock: {
-    m: 0,
+    ...credentialDetailStyles.codeBlock,
     mt: 1,
     p: 1.5,
-    borderRadius: 2,
-    backgroundColor: '#111',
-    color: '#e5e7eb',
-    overflowX: 'auto',
     fontSize: 12,
-    lineHeight: 1.6,
-    whiteSpace: 'pre-wrap' as const,
-    wordBreak: 'break-all' as const,
-    maxHeight: '40vh',
-    overflowY: 'auto'
+    maxHeight: '40vh'
   }
 } as const
 
@@ -515,7 +470,7 @@ export const docsStyles = {
     mt: 2,
     '& table': { borderCollapse: 'collapse', width: '100%', my: 2 },
     '& th, & td': {
-      border: '1px solid',
+      border: 1,
       borderColor: 'divider',
       px: 2,
       py: 1,
@@ -560,7 +515,6 @@ export const historyStyles = {
     gap: 1
   },
   viewSourceButton: {
-    textTransform: 'none' as const,
     minWidth: 'auto',
     px: 1
   }
@@ -635,38 +589,6 @@ export const storageStyles = {
   quotaLimitedSummary: {
     fontVariantNumeric: 'tabular-nums'
   },
-  quotaStatusBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 0.5,
-    px: 1.25,
-    py: 0.375,
-    borderRadius: 999,
-    border: '1px solid',
-    flexShrink: 0
-  },
-  quotaStatusBadgeLabel: {
-    fontWeight: 700,
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase',
-    lineHeight: 1.2
-  },
-  quotaBadgeOk: {
-    color: 'success.main',
-    borderColor: 'success.main'
-  },
-  quotaBadgeWarning: {
-    color: 'warning.main',
-    borderColor: 'warning.main'
-  },
-  quotaBadgeError: {
-    color: 'error.main',
-    borderColor: 'error.main'
-  },
-  quotaBadgeUnlimited: {
-    color: 'success.main',
-    borderColor: 'success.main'
-  },
   quotaUnlimitedSymbol: {
     fontWeight: 700,
     fontSize: '0.875rem',
@@ -706,7 +628,6 @@ export const storageStyles = {
    * Reusable button sizing tokens, kept here to standardize toolbar actions.
    */
   buttonTextLeft: {
-    textTransform: 'none',
     justifyContent: 'flex-start',
     textAlign: 'left'
   },
@@ -761,7 +682,7 @@ export const storageStyles = {
   folderIcon: {
     position: 'relative',
     fontSize: 28,
-    color: '#f4b400',
+    color: folderAccentColor,
     display: 'flex',
     alignItems: 'center',
     flexShrink: 0
@@ -859,7 +780,6 @@ export const storageStyles = {
   },
   backToStorageButton: {
     alignSelf: 'flex-start',
-    textTransform: 'none',
     px: 0,
     minHeight: 0
   },
@@ -868,7 +788,7 @@ export const storageStyles = {
   },
   contentsTitleIcon: {
     fontSize: 32,
-    color: '#f4b400',
+    color: folderAccentColor,
     display: 'flex',
     alignItems: 'center'
   },
@@ -888,12 +808,6 @@ export const storageStyles = {
   /**
    * File/resource table.
    */
-  resourceTableContainer: {
-    border: 1,
-    borderColor: 'divider',
-    borderRadius: 2,
-    overflow: 'hidden'
-  },
   resourceTable: {
     minWidth: 540
   },
@@ -1029,7 +943,6 @@ export const storageStyles = {
     justifyContent: { xs: 'flex-start', sm: 'flex-end' }
   },
   vcPreviewActionButton: {
-    textTransform: 'none',
     whiteSpace: 'nowrap'
   }
 } as const
@@ -1057,9 +970,6 @@ export const contactDetailStyles = {
   },
   actions: {
     mt: 3
-  },
-  actionButton: {
-    textTransform: 'none'
   }
 } as const
 

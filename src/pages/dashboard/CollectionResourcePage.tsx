@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { MdArrowBack, MdDeleteOutline, MdDownload } from 'react-icons/md'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
+import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { JsonHighlight } from '@/components/JsonHighlight'
 import { DeleteCredentialDialog } from '@/components/credentialDetails/DeleteCredentialDialog'
 import { useCredentialDelete } from '@/hooks/useCredentialDelete'
@@ -261,16 +262,10 @@ export function CollectionResourcePage() {
           {t('storage.backToCollection')}
         </Button>
 
-        {isLoading && (
-          <Typography variant="body1" sx={storageStyles.statusText}>
-            {t('storage.loadingResource')}
-          </Typography>
-        )}
+        {isLoading && <LoadingSpinner />}
 
         {!isLoading && errorKey && (
-          <Typography variant="body1" sx={storageStyles.errorText}>
-            {t(errorKey)}
-          </Typography>
+          <Alert severity="error">{t(errorKey)}</Alert>
         )}
 
         {!isLoading && !errorKey && resource && vc && (
@@ -365,10 +360,10 @@ export function CollectionResourcePage() {
                 }}
                 sx={{ mb: 1 }}
               >
-                <ToggleButton value="decrypted" sx={{ textTransform: 'none' }}>
+                <ToggleButton value="decrypted">
                   {t('storage.viewDecrypted')}
                 </ToggleButton>
-                <ToggleButton value="envelope" sx={{ textTransform: 'none' }}>
+                <ToggleButton value="envelope">
                   {t('storage.viewEnvelope')}
                 </ToggleButton>
               </ToggleButtonGroup>

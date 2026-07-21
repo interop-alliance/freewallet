@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
-import Typography from '@mui/material/Typography'
 import { useParams, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
+import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { CredentialDetail } from '@/components/credentialDetails/CredentialDetail'
 import { DeleteCredentialDialog } from '@/components/credentialDetails/DeleteCredentialDialog'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -111,9 +111,7 @@ export function CredentialDetailPage() {
         ) : loadError ? (
           <Alert severity="error">{t('credential.loadError')}</Alert>
         ) : (
-          <Typography variant="h5" color="text.secondary">
-            {t('credential.loading')}
-          </Typography>
+          <LoadingSpinner />
         )}
       </Box>
 

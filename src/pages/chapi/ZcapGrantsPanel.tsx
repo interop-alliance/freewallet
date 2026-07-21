@@ -37,19 +37,12 @@ function targetLabel(
     return (
       <>
         {t('chapi.get.zcapTarget.collection')}{' '}
-        <Box
+        <Chip
           component="span"
-          sx={{
-            fontFamily: 'monospace',
-            bgcolor: 'action.hover',
-            px: 0.75,
-            py: 0.25,
-            borderRadius: 1,
-            wordBreak: 'break-all'
-          }}
-        >
-          {target.collectionId}
-        </Box>
+          size="small"
+          label={target.collectionId}
+          sx={{ fontFamily: 'monospace' }}
+        />
       </>
     )
   }
@@ -134,7 +127,7 @@ export function ZcapGrantsPanel({
 
             {satisfiable ? (
               <>
-                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                <Typography variant="subtitle2">
                   {targetLabel(grant, t)}
                 </Typography>
 

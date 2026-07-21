@@ -8,6 +8,7 @@ import TimelineConnector from '@mui/lab/TimelineConnector'
 import TimelineContent from '@mui/lab/TimelineContent'
 import TimelineDot from '@mui/lab/TimelineDot'
 import Dialog from '@mui/material/Dialog'
+import DialogTitle from '@mui/material/DialogTitle'
 import DialogContent from '@mui/material/DialogContent'
 import IconButton from '@mui/material/IconButton'
 import { useAuthStore } from '@/stores/authStore'
@@ -117,12 +118,13 @@ export function HistoryPage() {
         maxWidth="md"
         fullWidth
         scroll="paper"
+        aria-labelledby="history-source-dialog-title"
         slotProps={{ paper: { sx: infoBoxStyles.paper } }}
       >
-        <Box sx={infoBoxStyles.header}>
-          <Typography variant="h6" sx={infoBoxStyles.title}>
+        <DialogTitle id="history-source-dialog-title" sx={infoBoxStyles.header}>
+          <Box component="span" sx={infoBoxStyles.title}>
             {t('history.dialogTitle')}
-          </Typography>
+          </Box>
           <IconButton
             onClick={() => setSourceOpen(false)}
             size="small"
@@ -130,7 +132,7 @@ export function HistoryPage() {
           >
             <MdClose />
           </IconButton>
-        </Box>
+        </DialogTitle>
 
         <DialogContent sx={infoBoxStyles.content}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>

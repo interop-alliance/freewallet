@@ -19,6 +19,7 @@
  */
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
+import Card from '@mui/material/Card'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -200,9 +201,15 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
                   </Typography>
                 ) : (
                   shares.map(share => (
-                    <Stack
+                    <Card
                       key={share.recipientId}
-                      sx={dashboardStyles.sharedShareRow}
+                      variant="outlined"
+                      sx={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 0.5,
+                        p: 1.5
+                      }}
                     >
                       <Typography
                         variant="body2"
@@ -225,7 +232,6 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
                         size="small"
                         color="error"
                         sx={{
-                          textTransform: 'none',
                           borderRadius: 2,
                           alignSelf: 'flex-start'
                         }}
@@ -239,7 +245,7 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
                       >
                         {t('settings.sharedRemove')}
                       </Button>
-                    </Stack>
+                    </Card>
                   ))
                 )}
               </Stack>
@@ -271,17 +277,14 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
           <Button
             onClick={() => setRemoveDialogOpen(false)}
             disabled={removing}
-            sx={{ textTransform: 'none' }}
           >
             {t('common.cancel')}
           </Button>
           <Button
             variant="contained"
-            disableElevation
             color="error"
             onClick={handleRemoveAccess}
             disabled={removing}
-            sx={{ textTransform: 'none' }}
           >
             {removing
               ? t('settings.sharedRemoving')

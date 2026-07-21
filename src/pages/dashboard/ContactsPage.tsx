@@ -20,7 +20,7 @@ export function ContactsPage() {
       <Button
         variant="outlined"
         disabled
-        sx={{ mt: 3, textTransform: 'none', borderRadius: 2, px: 2.5, py: 1 }}
+        sx={{ mt: 3, borderRadius: 2, px: 2.5, py: 1 }}
       >
         {t('contacts.addContacts')}
       </Button>
@@ -55,18 +55,10 @@ export function ContactsPage() {
             </CardActionArea>
 
             <Stack direction="row" spacing={1} sx={{ px: 2, pb: 2 }}>
-              <Button
-                variant="outlined"
-                disabled
-                sx={{ textTransform: 'none' }}
-              >
+              <Button variant="outlined" disabled>
                 {t('common.edit')}
               </Button>
-              <Button
-                variant="outlined"
-                disabled
-                sx={{ textTransform: 'none' }}
-              >
+              <Button variant="outlined" disabled>
                 {t('common.message')}
               </Button>
             </Stack>

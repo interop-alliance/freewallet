@@ -79,20 +79,23 @@ export function AcceptCredentialsPage() {
         })
       }
       if (importSummary) {
-        window.alert(
-          t('storage.importSuccess', {
+        showToast({
+          message: t('storage.importSuccess', {
             ...importSummary,
             credentialsNote: t('storage.importCredentialsNote', {
               count: credentials.length
             })
-          })
-        )
-      }
-      showToast({
-        message: t('acceptCredentials.stored', {
-          count: uniqueCredentials.length
+          }),
+          severity: 'success'
         })
-      })
+      } else {
+        showToast({
+          message: t('acceptCredentials.stored', {
+            count: uniqueCredentials.length
+          }),
+          severity: 'success'
+        })
+      }
       navigate('/dashboard')
     } catch (err) {
       console.error('Error storing credentials:', err)
@@ -150,10 +153,10 @@ export function AcceptCredentialsPage() {
         <Button
           variant="contained"
           onClick={handleAcceptAll}
-          disabled={saving}
+          loading={saving}
           sx={dashboardStyles.addCredentialButton}
         >
-          {saving ? t('common.saving') : t('acceptCredentials.acceptAll')}
+          {t('acceptCredentials.acceptAll')}
         </Button>
         <Button
           variant="outlined"

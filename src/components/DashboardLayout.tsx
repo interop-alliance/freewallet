@@ -95,7 +95,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
             >
               <ListItemText
                 primary={t(item.labelKey)}
-                sx={dashboardStyles.navItemText}
+                slotProps={{ primary: { sx: dashboardStyles.navItemText } }}
               />
             </ListItemButton>
           ))}
@@ -108,7 +108,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
           >
             <ListItemText
               primary={t('nav.settings')}
-              sx={dashboardStyles.navSectionTitle}
+              slotProps={{ primary: { sx: dashboardStyles.navSectionTitle } }}
             />
           </ListItemButton>
 

@@ -1,6 +1,7 @@
 import { useRef, useState, type DragEvent } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import ButtonBase from '@mui/material/ButtonBase'
 import Typography from '@mui/material/Typography'
 import { MdUploadFile } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
@@ -90,21 +91,14 @@ export function CredentialJsonUploadPanel({
           event.target.value = ''
         }}
       />
-      <Box
+      <ButtonBase
+        component="div"
         onClick={pickFiles}
-        onKeyDown={event => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            pickFiles()
-          }
-        }}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
-        role="button"
-        tabIndex={disabled ? -1 : 0}
-        aria-disabled={disabled}
+        disabled={disabled}
         aria-label={t('addCredential.upload.dropHint')}
         sx={credentialJsonUploadStyles.panel(dragOver, disabled)}
       >
@@ -135,7 +129,7 @@ export function CredentialJsonUploadPanel({
             {t('addCredential.upload.browse')}
           </Button>
         </Box>
-      </Box>
+      </ButtonBase>
     </>
   )
 }

@@ -7,6 +7,7 @@ import Typography from '@mui/material/Typography'
 import { useLocation, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
+import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { IssuerAvatar } from '@/components/credentialDetails/IssuerAvatar'
 import { IssuerInfo } from '@/components/credentialDetails/IssuerInfo'
 import { useAuthStore } from '@/stores/authStore'
@@ -239,15 +240,13 @@ export function IssuerDetailPage() {
         {loadError ? (
           <Alert severity="error">{t('credential.loadError')}</Alert>
         ) : !vc ? (
-          <Typography variant="body1" color="text.secondary">
-            {t('credential.loading')}
-          </Typography>
+          <LoadingSpinner />
         ) : (
           <Stack spacing={2}>
             {urlsDisabled && !registryLoading && (
-              <Typography variant="body2" color="warning.main">
+              <Alert severity="warning">
                 {t('issuer.linksDisabledWarning')}
-              </Typography>
+              </Alert>
             )}
 
             {matchingIssuers.length > 0 ? (

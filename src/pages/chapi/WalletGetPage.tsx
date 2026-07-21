@@ -21,10 +21,16 @@
  * delegate the grants to its DID, respond in a single round).
  */
 import { useEffect, useRef, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
+import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
+import List from '@mui/material/List'
+import ListItem from '@mui/material/ListItem'
+import ListItemButton from '@mui/material/ListItemButton'
+import ListItemText from '@mui/material/ListItemText'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { loadOnce } from 'credential-handler-polyfill'
@@ -685,12 +691,18 @@ export function WalletGetPage() {
               <Typography variant="body2" color="text.secondary">
                 {t('chapi.get.appConnect.originLabel')}
               </Typography>
-              <Typography sx={chapiStyles.originChip}>
-                {requestOrigin}
-              </Typography>
+              <Chip
+                size="small"
+                label={requestOrigin}
+                sx={chapiStyles.originChip}
+              />
             </Stack>
           ) : (
-            <Typography sx={chapiStyles.originChip}>{requestOrigin}</Typography>
+            <Chip
+              size="small"
+              label={requestOrigin}
+              sx={chapiStyles.originChip}
+            />
           )}
           {appConnect && appManifest?.description && (
             <Typography
@@ -709,12 +721,10 @@ export function WalletGetPage() {
 
         {pageState === 'blocked' && blockReason && (
           <Stack spacing={2}>
-            <Typography variant="body2" color="error.main">
-              {t(BLOCK_MESSAGE_KEY[blockReason])}
-            </Typography>
+            <Alert severity="error">{t(BLOCK_MESSAGE_KEY[blockReason])}</Alert>
             <Button
               variant="outlined"
-              sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+              sx={{ alignSelf: 'flex-start' }}
               onClick={handleCancel}
             >
               {t('common.cancel')}
@@ -754,18 +764,10 @@ export function WalletGetPage() {
             )}
 
             <Stack direction="row" spacing={2}>
-              <Button
-                variant="contained"
-                sx={{ textTransform: 'none' }}
-                onClick={respondAndClose}
-              >
+              <Button variant="contained" onClick={respondAndClose}>
                 {t('chapi.get.appConnect.connect')}
               </Button>
-              <Button
-                variant="outlined"
-                sx={{ textTransform: 'none' }}
-                onClick={handleCancel}
-              >
+              <Button variant="outlined" onClick={handleCancel}>
                 {t('common.cancel')}
               </Button>
             </Stack>
@@ -790,7 +792,7 @@ export function WalletGetPage() {
                     {t('chapi.get.noMatches')}
                   </Typography>
                 ) : (
-                  <Box sx={chapiStyles.credentialList}>
+                  <List disablePadding sx={chapiStyles.credentialList}>
                     {displayedCredentials.map(credential => {
                       const { cid, vc } = credential
                       const login = isLoginCredential(credential)
@@ -800,40 +802,40 @@ export function WalletGetPage() {
                           })
                         : credentialTitle(vc)
                       return (
-                        <Box
+                        <ListItem
                           key={cid}
-                          sx={{
-                            ...chapiStyles.credentialRow,
-                            cursor: 'pointer'
-                          }}
-                          onClick={() => toggleSelected(cid)}
+                          disablePadding
+                          sx={chapiStyles.credentialRow}
+                          secondaryAction={
+                            <Checkbox
+                              edge="end"
+                              tabIndex={-1}
+                              disableRipple
+                              checked={selectedCids.has(cid)}
+                              onChange={() => toggleSelected(cid)}
+                            />
+                          }
                         >
-                          <Box sx={chapiStyles.credentialInfo}>
-                            <Typography
-                              variant="body2"
-                              sx={{ fontWeight: 500 }}
-                            >
-                              {primary}
-                            </Typography>
-                            {!login && (
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                              >
-                                {issuerName(vc)}
-                              </Typography>
-                            )}
-                          </Box>
-                          <Checkbox
-                            edge="end"
-                            checked={selectedCids.has(cid)}
-                            onChange={() => toggleSelected(cid)}
-                            onClick={event => event.stopPropagation()}
-                          />
-                        </Box>
+                          <ListItemButton
+                            dense
+                            sx={{ borderRadius: 2 }}
+                            onClick={() => toggleSelected(cid)}
+                          >
+                            <ListItemText
+                              primary={primary}
+                              secondary={login ? undefined : issuerName(vc)}
+                              slotProps={{
+                                primary: {
+                                  variant: 'subtitle2'
+                                },
+                                secondary: { variant: 'caption' }
+                              }}
+                            />
+                          </ListItemButton>
+                        </ListItem>
                       )
                     })}
-                  </Box>
+                  </List>
                 )}
               </Stack>
             )}
@@ -849,17 +851,12 @@ export function WalletGetPage() {
             <Stack direction="row" spacing={2}>
               <Button
                 variant="contained"
-                sx={{ textTransform: 'none' }}
                 onClick={respondAndClose}
                 disabled={nothingToShare}
               >
                 {t('common.continue')}
               </Button>
-              <Button
-                variant="outlined"
-                sx={{ textTransform: 'none' }}
-                onClick={handleCancel}
-              >
+              <Button variant="outlined" onClick={handleCancel}>
                 {t('common.cancel')}
               </Button>
             </Stack>

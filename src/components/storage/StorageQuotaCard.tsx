@@ -2,6 +2,7 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   Divider,
   LinearProgress,
   Paper,
@@ -25,12 +26,13 @@ interface StorageQuotaCardProps {
   onRetry?: () => void
 }
 
-const STATE_BADGE_TONE: Record<BackendState, (typeof sx)[keyof typeof sx]> = {
-  ok: sx.quotaBadgeOk,
-  'near-limit': sx.quotaBadgeWarning,
-  'over-quota': sx.quotaBadgeError,
-  unreachable: sx.quotaBadgeError
-}
+const STATE_BADGE_COLOR: Record<BackendState, 'success' | 'warning' | 'error'> =
+  {
+    ok: 'success',
+    'near-limit': 'warning',
+    'over-quota': 'error',
+    unreachable: 'error'
+  }
 
 const STATE_BADGE_KEY: Record<BackendState, string> = {
   ok: 'storage.quota.stateOk',
@@ -133,22 +135,17 @@ function QuotaReadyContent({ quota }: { quota: StorageQuotaView }) {
           )}
         </Box>
         {quota.isUnlimited && (
-          <Box sx={[sx.quotaStatusBadge, sx.quotaBadgeUnlimited]}>
-            <Typography
-              component="span"
-              variant="caption"
-              sx={sx.quotaUnlimitedSymbol}
-            >
-              ∞
-            </Typography>
-            <Typography
-              component="span"
-              variant="caption"
-              sx={sx.quotaStatusBadgeLabel}
-            >
-              {t('storage.quota.unlimited')}
-            </Typography>
-          </Box>
+          <Chip
+            size="small"
+            variant="outlined"
+            color="success"
+            icon={
+              <Box component="span" sx={sx.quotaUnlimitedSymbol} aria-hidden>
+                ∞
+              </Box>
+            }
+            label={t('storage.quota.unlimited')}
+          />
         )}
       </Stack>
 
@@ -196,18 +193,17 @@ export function StorageQuotaCard({ status, onRetry }: StorageQuotaCardProps) {
           </Typography>
         </Stack>
         {headerState && (
-          <Box sx={[sx.quotaStatusBadge, STATE_BADGE_TONE[headerState]]}>
-            {status.kind === 'ready' && status.quota.state === 'ok' && (
-              <MdCheckCircle size={14} />
-            )}
-            <Typography
-              component="span"
-              variant="caption"
-              sx={sx.quotaStatusBadgeLabel}
-            >
-              {t(STATE_BADGE_KEY[headerState])}
-            </Typography>
-          </Box>
+          <Chip
+            size="small"
+            variant="outlined"
+            color={STATE_BADGE_COLOR[headerState]}
+            icon={
+              status.kind === 'ready' && status.quota.state === 'ok' ? (
+                <MdCheckCircle size={14} />
+              ) : undefined
+            }
+            label={t(STATE_BADGE_KEY[headerState])}
+          />
         )}
       </Stack>
 

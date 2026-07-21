@@ -18,6 +18,7 @@ import {
   asRecord,
   resolvePersonFullName
 } from '@/lib/viewMappers/displayFieldsHelpers'
+import { credentialDetailStyles } from '@/styles/credentialStyles'
 import type { UseVerificationReturn } from '@/hooks/useVerification'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { useTranslation } from 'react-i18next'
@@ -57,9 +58,7 @@ function CheckRow({
           <MdCancel size={18} />
         )}
       </Box>
-      <Typography variant="body2" sx={{ fontWeight: 500 }}>
-        {label}
-      </Typography>
+      <Typography variant="subtitle2">{label}</Typography>
     </Box>
   )
 }
@@ -89,7 +88,7 @@ export function ResumeCredentialCard({
   const { result, loading } = verification
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: '10px', overflow: 'hidden' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden' }}>
       <Box
         sx={{
           display: 'flex',
@@ -160,7 +159,7 @@ export function ResumeCredentialCard({
           size="small"
           variant="text"
           onClick={onToggleRaw}
-          sx={{ textTransform: 'none', color: 'text.secondary', px: 0 }}
+          sx={{ color: 'text.secondary', px: 0 }}
         >
           {showRaw ? t('credential.hideJson') : t('credential.viewSource')}
         </Button>
@@ -168,19 +167,8 @@ export function ResumeCredentialCard({
           <JsonHighlight
             code={rawJson}
             sx={{
+              ...credentialDetailStyles.codeBlock,
               mt: 1,
-              p: { xs: 1.5, sm: 2 },
-              borderRadius: 2,
-              backgroundColor: '#111',
-              color: '#e5e7eb',
-              overflowX: 'auto',
-              fontSize: { xs: 12, sm: 13 },
-              lineHeight: 1.6,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-all',
-              maxHeight: '60vh',
-              overflowY: 'auto',
-              m: 0,
               mb: 1
             }}
           />

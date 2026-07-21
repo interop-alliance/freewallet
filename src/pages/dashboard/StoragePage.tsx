@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Paper from '@mui/material/Paper'
+import Skeleton from '@mui/material/Skeleton'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
@@ -10,12 +12,30 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { CollectionsOverview } from '@/components/storage/StorageBrowser'
 import { StorageQuotaCard } from '@/components/storage/StorageQuotaCard'
 import { useAuthStore } from '@/stores/authStore'
+import { showToast } from '@/stores/toastStore'
 import { storageStyles } from '@/styles/appStyles'
 import type { StorageCollection } from '@/lib/storage'
 import { quotaViewFromReport, writesRestricted } from '@/lib/storageQuota'
 import type { StorageQuotaStatus } from '@/types/storageQuota'
 import type { ImportSpaceSummary } from '@/stores/storageManager'
 import { parseImportTarFile } from '@/lib/import'
+
+/**
+ * Visually-hidden style for the file input wrapped by the import Button
+ * (`component="label"`); keeps the native input accessible while the Button
+ * provides the visible affordance.
+ */
+const visuallyHiddenInput: React.CSSProperties = {
+  clip: 'rect(0 0 0 0)',
+  clipPath: 'inset(50%)',
+  height: 1,
+  overflow: 'hidden',
+  position: 'absolute',
+  bottom: 0,
+  left: 0,
+  whiteSpace: 'nowrap',
+  width: 1
+}
 
 type SaveFilePicker = (options?: {
   suggestedName?: string
@@ -40,7 +60,6 @@ export const StoragePage = () => {
   const [quotaStatus, setQuotaStatus] = useState<StorageQuotaStatus>({
     kind: 'loading'
   })
-  const importInputRef = useRef<HTMLInputElement>(null)
   const hasRemoteStorage = Boolean(session?.storage?.hasRemoteStorage)
 
   const loadQuota = useCallback(async () => {
@@ -173,15 +192,9 @@ export const StoragePage = () => {
         return
       }
       console.error('Failed to export space:', error)
-      window.alert(t('storage.exportError'))
+      showToast({ message: t('storage.exportError'), severity: 'error' })
     } finally {
       setIsExporting(false)
-    }
-  }
-
-  const handleImportClick = () => {
-    if (!isImporting) {
-      importInputRef.current?.click()
     }
   }
 
@@ -224,20 +237,27 @@ export const StoragePage = () => {
         : ''
 
       if (spaceSummary) {
-        window.alert(
-          t('storage.importSuccess', { ...spaceSummary, credentialsNote })
-        )
+        showToast({
+          message: t('storage.importSuccess', {
+            ...spaceSummary,
+            credentialsNote
+          }),
+          severity: 'success'
+        })
         return
       }
 
       if (hasCredentials) {
-        window.alert(
-          t('storage.importCredentialsOnly', { count: credentials.length })
-        )
+        showToast({
+          message: t('storage.importCredentialsOnly', {
+            count: credentials.length
+          }),
+          severity: 'success'
+        })
       }
     } catch (error) {
       console.error('Failed to import space:', error)
-      window.alert(t('storage.importError'))
+      showToast({ message: t('storage.importError'), severity: 'error' })
     } finally {
       setIsImporting(false)
     }
@@ -266,33 +286,34 @@ export const StoragePage = () => {
             <Button
               variant="contained"
               onClick={handleExportSpace}
-              disabled={isExporting || !hasRemoteStorage}
+              loading={isExporting}
+              disabled={!hasRemoteStorage}
               sx={[
                 storageStyles.buttonTextLeft,
                 storageStyles.buttonSize.topAction
               ]}
             >
-              {isExporting ? t('storage.exporting') : t('storage.exportSpace')}
+              {t('storage.exportSpace')}
             </Button>
             <Button
               variant="outlined"
-              onClick={handleImportClick}
-              disabled={isImporting || importBlocked}
+              component="label"
+              loading={isImporting}
+              disabled={importBlocked}
               sx={[
                 storageStyles.buttonTextLeft,
                 storageStyles.buttonSize.topAction
               ]}
             >
-              {isImporting ? t('storage.importing') : t('storage.importSpace')}
+              {t('storage.importSpace')}
+              <input
+                type="file"
+                accept={'.tar,application/x-tar'}
+                style={visuallyHiddenInput}
+                onChange={handleImportFile}
+              />
             </Button>
           </Stack>
-          <input
-            ref={importInputRef}
-            type="file"
-            accept={'.tar,application/x-tar'}
-            hidden
-            onChange={handleImportFile}
-          />
         </Stack>
       </Paper>
 
@@ -302,15 +323,13 @@ export const StoragePage = () => {
 
       <Box sx={storageStyles.collectionsWrap}>
         {hasRemoteStorage && isLoadingCollections && (
-          <Typography variant="body1" sx={storageStyles.statusText}>
-            {t('storage.loadingCollections')}
-          </Typography>
+          <Stack spacing={1.5} aria-busy="true">
+            {[0, 1, 2].map(row => (
+              <Skeleton key={row} variant="rounded" height={72} />
+            ))}
+          </Stack>
         )}
-        {collectionsError && (
-          <Typography variant="body1" sx={storageStyles.errorText}>
-            {collectionsError}
-          </Typography>
-        )}
+        {collectionsError && <Alert severity="error">{collectionsError}</Alert>}
         {hasRemoteStorage && !isLoadingCollections && !collectionsError && (
           <CollectionsOverview
             collections={visibleCollections}

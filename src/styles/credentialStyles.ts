@@ -7,8 +7,8 @@ export const credentialDetailStyles = {
   codeBlock: {
     p: { xs: 1.5, sm: 2, md: 2.5 },
     borderRadius: 2,
-    backgroundColor: '#111',
-    color: '#e5e7eb',
+    backgroundColor: 'grey.900',
+    color: 'grey.100',
     overflowX: 'auto',
     fontSize: { xs: 12, sm: 13, md: 14 },
     lineHeight: 1.6,
@@ -23,7 +23,7 @@ export const credentialDetailStyles = {
 export const credentialDetailCardStyles = {
   card: {
     position: 'relative',
-    borderRadius: '10px',
+    borderRadius: 3,
     boxShadow: '0px 15px 30px rgba(6,16,36,0.13)',
     overflow: 'hidden'
   },
@@ -62,7 +62,6 @@ export const credentialDetailCardStyles = {
     order: { md: 1 }
   },
   shareButton: {
-    textTransform: 'none' as const,
     whiteSpace: 'nowrap' as const,
     color: 'text.secondary',
     borderColor: 'divider',
@@ -73,7 +72,6 @@ export const credentialDetailCardStyles = {
     }
   },
   shareActiveButton: {
-    textTransform: 'none' as const,
     whiteSpace: 'nowrap' as const,
     color: 'primary.main',
     borderColor: 'primary.main',
@@ -84,7 +82,6 @@ export const credentialDetailCardStyles = {
     }
   },
   deleteButton: {
-    textTransform: 'none' as const,
     whiteSpace: 'nowrap' as const,
     color: 'text.secondary',
     borderColor: 'divider',
@@ -208,7 +205,6 @@ export const credentialDetailCardStyles = {
     }
   },
   rawToggle: {
-    textTransform: 'none' as const,
     color: 'text.secondary'
   },
   alignmentName: {
@@ -250,58 +246,6 @@ export const credentialDetailCardStyles = {
     fontWeight: 700,
     fontSize: '0.875rem',
     lineHeight: 1
-  },
-  vpStatusBadge: {
-    display: 'inline-flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 0.375,
-    px: 0.75,
-    py: 0.125,
-    borderRadius: 999,
-    backgroundColor: 'action.hover'
-  },
-  vpStatusBadgeOk: {
-    backgroundColor: 'success.light',
-    color: 'success.dark',
-    '& .MuiTypography-root': { color: 'success.dark' }
-  },
-  vpStatusBadgeError: {
-    backgroundColor: 'error.light',
-    color: 'error.dark',
-    '& .MuiTypography-root': { color: 'black' }
-  },
-  vpStatusBadgeWarning: {
-    backgroundColor: 'warning.light',
-    color: 'warning.dark',
-    '& .MuiTypography-root': { color: 'warning.dark' }
-  },
-  vpStatusSpinner: {
-    flexShrink: 0
-  },
-  vpStatusIconWrap: {
-    display: 'flex',
-    lineHeight: 0
-  },
-  vpStatusWarningCircle: {
-    width: 14,
-    height: 14,
-    borderRadius: '50%',
-    bgcolor: 'warning.main',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0
-  },
-  vpStatusWarningMark: {
-    color: 'common.black',
-    fontWeight: 700,
-    fontSize: '0.625rem',
-    lineHeight: 1
-  },
-  vpStatusBadgeLabel: {
-    fontWeight: 700,
-    fontSize: '0.625rem'
   },
   vpCard: {
     px: { xs: 2, md: 3 },
@@ -438,8 +382,7 @@ export const issuerInfoStyles = {
     mt: 0.5
   },
   detailButton: {
-    mt: 1,
-    textTransform: 'none'
+    mt: 1
   }
 } as const
 

@@ -1,5 +1,7 @@
 import Alert from '@mui/material/Alert'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Card from '@mui/material/Card'
 import Chip from '@mui/material/Chip'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
@@ -13,7 +15,7 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
-import { MdContentCopy, MdEdit } from 'react-icons/md'
+import { MdCheck, MdClose, MdContentCopy, MdEdit } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
 import { base64urlnopad } from '@scure/base'
 import type { IZcap } from '@interop/data-integrity-core'
@@ -52,7 +54,7 @@ import { deletePasskeySafetyNotice } from '@/lib/sessionKey'
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
 import { SharedCollectionsPanel } from '@/components/SharedCollectionsPanel'
 import { dashboardStyles } from '@/styles/appStyles'
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import {
@@ -77,6 +79,44 @@ const SYNC_CHIP_COLOR: Record<
   syncing: 'info',
   synced: 'success',
   error: 'error'
+}
+
+/**
+ * A single label/value settings row: a fixed-width label column and a value
+ * column, laid out on a two-column grid (stacking on narrow screens) so the
+ * labels align without hand-tuned widths.
+ */
+function SettingRow({
+  label,
+  children
+}: {
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <Box
+      sx={{
+        display: 'grid',
+        gridTemplateColumns: { xs: '1fr', sm: '200px 1fr' },
+        alignItems: 'center',
+        columnGap: 2,
+        rowGap: 0.5
+      }}
+    >
+      <Typography variant="body2">{label}</Typography>
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          flexWrap: 'wrap',
+          minWidth: 0
+        }}
+      >
+        {children}
+      </Box>
+    </Box>
+  )
 }
 
 export function SettingsPage() {
@@ -778,7 +818,6 @@ export function SettingsPage() {
             variant="outlined"
             size="small"
             sx={{
-              textTransform: 'none',
               borderRadius: 2,
               whiteSpace: 'nowrap'
             }}
@@ -798,16 +837,14 @@ export function SettingsPage() {
         <Stack direction="row" sx={dashboardStyles.settingsRow}>
           <Button
             variant="contained"
-            disableElevation
-            sx={dashboardStyles.deleteAccountButton}
+            color="error"
             disabled={!canDeleteAccount}
             onClick={openDeleteDialog}
           >
             {t('settings.deleteAccount')}
           </Button>
           <Typography
-            variant="h5"
-            component="p"
+            variant="body1"
             sx={dashboardStyles.deleteAccountDescription}
           >
             {t('settings.deleteAccountHint')}
@@ -849,12 +886,12 @@ export function SettingsPage() {
                 />
                 <Button
                   variant="contained"
-                  disableElevation
-                  sx={{ textTransform: 'none', mt: 0.25 }}
-                  disabled={handleSaving || handle.trim() === savedHandle}
+                  sx={{ mt: 0.25 }}
+                  loading={handleSaving}
+                  disabled={handle.trim() === savedHandle}
                   onClick={handleSaveHandle}
                 >
-                  {handleSaving ? t('common.saving') : t('common.save')}
+                  {t('common.save')}
                 </Button>
               </Stack>
               {handleSaved && (
@@ -921,22 +958,29 @@ export function SettingsPage() {
                             ? 'success.main'
                             : 'text.secondary'
                         }
+                        sx={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 0.5
+                        }}
                       >
-                        {addPassphraseLengthPassed ? '✓' : '✗'}{' '}
+                        {addPassphraseLengthPassed ? (
+                          <MdCheck aria-hidden />
+                        ) : (
+                          <MdClose aria-hidden />
+                        )}{' '}
                         {t('auth.signup.minChars', {
                           count: PASSWORD_RULES.minlength
                         })}
                       </Typography>
                       <Button
                         variant="contained"
-                        disableElevation
-                        sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
-                        disabled={addingPassphrase || !addPassphraseValid}
+                        sx={{ alignSelf: 'flex-start' }}
+                        loading={addingPassphrase}
+                        disabled={!addPassphraseValid}
                         onClick={handleAddPassphrase}
                       >
-                        {addingPassphrase
-                          ? t('settings.addingPassphrase')
-                          : t('settings.addPassphrase')}
+                        {t('settings.addPassphrase')}
                       </Button>
                       {addPassphraseSuccess && (
                         <Typography variant="body2" color="success.main">
@@ -1004,16 +1048,24 @@ export function SettingsPage() {
                         ? 'success.main'
                         : 'text.secondary'
                     }
+                    sx={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 0.5
+                    }}
                   >
-                    {newPassphraseLengthPassed ? '✓' : '✗'}{' '}
+                    {newPassphraseLengthPassed ? (
+                      <MdCheck aria-hidden />
+                    ) : (
+                      <MdClose aria-hidden />
+                    )}{' '}
                     {t('auth.signup.minChars', {
                       count: PASSWORD_RULES.minlength
                     })}
                   </Typography>
                   <Button
                     variant="contained"
-                    disableElevation
-                    sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
+                    sx={{ alignSelf: 'flex-start' }}
                     disabled={
                       changingPassphrase ||
                       oldPassphrase.length === 0 ||
@@ -1084,14 +1136,14 @@ export function SettingsPage() {
                             ? t('settings.passkeySyncAvailable')
                             : t('settings.passkeySyncNone')
                         return (
-                          <Stack
+                          <Card
                             key={entry.credentialId}
+                            variant="outlined"
                             sx={{
+                              display: 'flex',
+                              flexDirection: 'column',
                               gap: 0.5,
-                              p: 1.5,
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 2
+                              p: 1.5
                             }}
                           >
                             <Stack
@@ -1115,22 +1167,15 @@ export function SettingsPage() {
                                   />
                                   <Button
                                     variant="contained"
-                                    disableElevation
                                     size="small"
-                                    sx={{ textTransform: 'none' }}
-                                    disabled={
-                                      labelSaving ||
-                                      labelDraft.trim().length === 0
-                                    }
+                                    loading={labelSaving}
+                                    disabled={labelDraft.trim().length === 0}
                                     onClick={() => handleSaveLabel(entry)}
                                   >
-                                    {labelSaving
-                                      ? t('common.saving')
-                                      : t('common.save')}
+                                    {t('common.save')}
                                   </Button>
                                   <Button
                                     size="small"
-                                    sx={{ textTransform: 'none' }}
                                     disabled={labelSaving}
                                     onClick={() => setEditingCredentialId(null)}
                                   >
@@ -1177,7 +1222,6 @@ export function SettingsPage() {
                               size="small"
                               color="error"
                               sx={{
-                                textTransform: 'none',
                                 borderRadius: 2,
                                 alignSelf: 'flex-start'
                               }}
@@ -1186,7 +1230,7 @@ export function SettingsPage() {
                             >
                               {t('settings.passkeyRemove')}
                             </Button>
-                          </Stack>
+                          </Card>
                         )
                       })}
                     </Stack>
@@ -1205,14 +1249,10 @@ export function SettingsPage() {
                   )}
                   <Button
                     variant="contained"
-                    disableElevation
-                    sx={{ textTransform: 'none' }}
-                    disabled={addingPasskey}
+                    loading={addingPasskey}
                     onClick={handleAddPasskey}
                   >
-                    {addingPasskey
-                      ? t('settings.addingPasskey')
-                      : t('settings.addPasskey')}
+                    {t('settings.addPasskey')}
                   </Button>
                   {passkeyError && (
                     <Alert severity="error">
@@ -1241,20 +1281,13 @@ export function SettingsPage() {
             SYNCED_COLLECTIONS.map(({ id }) => {
               const status = syncStatuses[id] ?? 'idle'
               return (
-                <Stack
-                  key={id}
-                  direction="row"
-                  sx={{ alignItems: 'center', gap: 2 }}
-                >
-                  <Typography variant="body2" sx={{ minWidth: 200 }}>
-                    {id}
-                  </Typography>
+                <SettingRow key={id} label={id}>
                   <Chip
                     size="small"
                     color={SYNC_CHIP_COLOR[status]}
                     label={t(`settings.syncStatus.${status}`)}
                   />
-                </Stack>
+                </SettingRow>
               )
             })
           ) : (
@@ -1276,10 +1309,7 @@ export function SettingsPage() {
         <Stack sx={{ gap: 1 }}>
           <Typography variant="h6">{t('settings.kmsSection')}</Typography>
           {kmsConfigured ? (
-            <Stack direction="row" sx={{ alignItems: 'center', gap: 2 }}>
-              <Typography variant="body2" sx={{ minWidth: 200 }}>
-                {t('settings.keystore')}
-              </Typography>
+            <SettingRow label={t('settings.keystore')}>
               <Chip
                 size="small"
                 color={keystoreId ? 'success' : 'error'}
@@ -1298,20 +1328,14 @@ export function SettingsPage() {
                   {keystoreId}
                 </Typography>
               )}
-            </Stack>
+            </SettingRow>
           ) : (
             <Typography variant="body2" color="text.secondary">
               {t('settings.kmsNone')}
             </Typography>
           )}
           {kmsConfigured && (
-            <Stack
-              direction="row"
-              sx={{ alignItems: 'center', gap: 2, flexWrap: 'wrap' }}
-            >
-              <Typography variant="body2" sx={{ minWidth: 200 }}>
-                {t('settings.publishedDid')}
-              </Typography>
+            <SettingRow label={t('settings.publishedDid')}>
               <Chip
                 size="small"
                 color={publishedDid ? 'success' : 'default'}
@@ -1343,16 +1367,10 @@ export function SettingsPage() {
                   )}
                 </Stack>
               )}
-            </Stack>
+            </SettingRow>
           )}
           {kmsConfigured && (
-            <Stack
-              direction="row"
-              sx={{ alignItems: 'center', gap: 2, flexWrap: 'wrap' }}
-            >
-              <Typography variant="body2" sx={{ minWidth: 200 }}>
-                {t('settings.publishedDidWebvh')}
-              </Typography>
+            <SettingRow label={t('settings.publishedDidWebvh')}>
               <Chip
                 size="small"
                 color={publishedDidWebvh ? 'success' : 'default'}
@@ -1403,7 +1421,7 @@ export function SettingsPage() {
                   )}
                 </Stack>
               )}
-            </Stack>
+            </SettingRow>
           )}
           {kmsConfigured && publishedDidWebvh && (
             <Stack sx={{ gap: 0.5, mt: 1 }}>
@@ -1411,7 +1429,7 @@ export function SettingsPage() {
                 <Button
                   variant="outlined"
                   size="small"
-                  sx={{ textTransform: 'none', borderRadius: 2 }}
+                  sx={{ borderRadius: 2 }}
                   disabled={!canRotate || rotating}
                   onClick={() => {
                     setRotateDone(false)
@@ -1480,23 +1498,17 @@ export function SettingsPage() {
             <Button
               onClick={() => setDeleteDialogOpen(false)}
               disabled={deleting}
-              sx={{ textTransform: 'none' }}
             >
               {t('common.cancel')}
             </Button>
             <Button
               variant="contained"
-              disableElevation
               color="error"
               onClick={handleDeleteAccount}
-              disabled={
-                deleting || (!session?.isGuest && deletePassphrase.length === 0)
-              }
-              sx={{ textTransform: 'none' }}
+              loading={deleting}
+              disabled={!session?.isGuest && deletePassphrase.length === 0}
             >
-              {deleting
-                ? t('settings.deleting')
-                : t('settings.deleteConfirmAction')}
+              {t('settings.deleteConfirmAction')}
             </Button>
           </DialogActions>
         </Dialog>
@@ -1527,17 +1539,14 @@ export function SettingsPage() {
             <Button
               onClick={() => setRemoveDialogOpen(false)}
               disabled={removing}
-              sx={{ textTransform: 'none' }}
             >
               {t('common.cancel')}
             </Button>
             <Button
               variant="contained"
-              disableElevation
               color="error"
               onClick={handleRemovePasskey}
               disabled={removing}
-              sx={{ textTransform: 'none' }}
             >
               {removing
                 ? t('settings.passkeyRemoving')
@@ -1554,18 +1563,10 @@ export function SettingsPage() {
             </DialogContentText>
           </DialogContent>
           <DialogActions>
-            <Button
-              onClick={() => resolvePrfRetry(false)}
-              sx={{ textTransform: 'none' }}
-            >
+            <Button onClick={() => resolvePrfRetry(false)}>
               {t('settings.passkeyRetryCancel')}
             </Button>
-            <Button
-              variant="contained"
-              disableElevation
-              onClick={() => resolvePrfRetry(true)}
-              sx={{ textTransform: 'none' }}
-            >
+            <Button variant="contained" onClick={() => resolvePrfRetry(true)}>
               {t('settings.passkeyRetryConfirm')}
             </Button>
           </DialogActions>
@@ -1582,18 +1583,10 @@ export function SettingsPage() {
             </DialogContentText>
           </DialogContent>
           <DialogActions>
-            <Button
-              onClick={() => setRotateDialogOpen(false)}
-              sx={{ textTransform: 'none' }}
-            >
+            <Button onClick={() => setRotateDialogOpen(false)}>
               {t('common.cancel')}
             </Button>
-            <Button
-              variant="contained"
-              disableElevation
-              onClick={handleRotate}
-              sx={{ textTransform: 'none' }}
-            >
+            <Button variant="contained" onClick={handleRotate}>
               {t('settings.rotateConfirmAction')}
             </Button>
           </DialogActions>

@@ -9,6 +9,7 @@ import DialogContentText from '@mui/material/DialogContentText'
 import DialogTitle from '@mui/material/DialogTitle'
 import IconButton from '@mui/material/IconButton'
 import Paper from '@mui/material/Paper'
+import Skeleton from '@mui/material/Skeleton'
 import Stack from '@mui/material/Stack'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
@@ -381,15 +382,15 @@ export function CollectionContentsPage() {
           )}
 
           {isLoading && (
-            <Typography variant="body1" sx={storageStyles.statusText}>
-              {t('storage.loadingResources')}
-            </Typography>
+            <Stack spacing={1.5} aria-busy="true">
+              {[0, 1, 2, 3].map(row => (
+                <Skeleton key={row} variant="rounded" height={56} />
+              ))}
+            </Stack>
           )}
 
           {!isLoading && errorKey && (
-            <Typography variant="body1" sx={storageStyles.errorText}>
-              {t(errorKey)}
-            </Typography>
+            <Alert severity="error">{t(errorKey)}</Alert>
           )}
 
           {!isLoading && !errorKey && collection && resources.length === 0 && (
@@ -496,10 +497,10 @@ export function CollectionContentsPage() {
                 }}
                 sx={{ flexShrink: 0 }}
               >
-                <ToggleButton value="decrypted" sx={{ textTransform: 'none' }}>
+                <ToggleButton value="decrypted">
                   {t('storage.viewDecrypted')}
                 </ToggleButton>
-                <ToggleButton value="envelope" sx={{ textTransform: 'none' }}>
+                <ToggleButton value="envelope">
                   {t('storage.viewEnvelope')}
                 </ToggleButton>
               </ToggleButtonGroup>
@@ -510,7 +511,7 @@ export function CollectionContentsPage() {
                 variant="outlined"
                 startIcon={<MdDownload />}
                 onClick={handleDownloadResource}
-                sx={{ flexShrink: 0, textTransform: 'none' }}
+                sx={{ flexShrink: 0 }}
                 aria-label={t('storage.download')}
               >
                 {t('storage.download')}
@@ -523,7 +524,7 @@ export function CollectionContentsPage() {
               onClick={() => {
                 void handleCopySnippet()
               }}
-              sx={{ flexShrink: 0, textTransform: 'none' }}
+              sx={{ flexShrink: 0 }}
               aria-label={t('storage.copySnippet')}
             >
               {snippetCopied ? t('storage.copied') : t('storage.copySnippet')}
@@ -537,7 +538,7 @@ export function CollectionContentsPage() {
               <MdClose />
             </IconButton>
           </DialogTitle>
-          <DialogContent dividers sx={{ bgcolor: '#0b0f14' }}>
+          <DialogContent dividers sx={{ bgcolor: 'grey.900' }}>
             <JsonHighlight
               code={snippetText}
               sx={credentialDetailStyles.codeBlock}

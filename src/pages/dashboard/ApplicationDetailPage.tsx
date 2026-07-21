@@ -13,6 +13,7 @@ import { MdArrowBack } from 'react-icons/md'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Card from '@mui/material/Card'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -214,9 +215,15 @@ export function ApplicationDetailPage() {
             ) : (
               <Stack sx={{ gap: 1, mt: 1 }}>
                 {app.grants.map((grant, index) => (
-                  <Stack
+                  <Card
                     key={grant.id || index}
-                    sx={dashboardStyles.sharedShareRow}
+                    variant="outlined"
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 0.5,
+                      p: 1.5
+                    }}
                   >
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
                       {grantTargetLabel(grant.target)}
@@ -256,7 +263,7 @@ export function ApplicationDetailPage() {
                             })}
                       </Typography>
                     )}
-                  </Stack>
+                  </Card>
                 ))}
               </Stack>
             )}
@@ -274,7 +281,7 @@ export function ApplicationDetailPage() {
             <Button
               variant="outlined"
               color="error"
-              sx={{ textTransform: 'none', borderRadius: 2 }}
+              sx={{ borderRadius: 2 }}
               disabled={!canRevoke}
               onClick={() => {
                 setRevokeError(false)
@@ -310,21 +317,16 @@ export function ApplicationDetailPage() {
           <Button
             onClick={() => setRevokeDialogOpen(false)}
             disabled={revoking}
-            sx={{ textTransform: 'none' }}
           >
             {t('common.cancel')}
           </Button>
           <Button
             variant="contained"
-            disableElevation
             color="error"
             onClick={handleRevoke}
-            disabled={revoking}
-            sx={{ textTransform: 'none' }}
+            loading={revoking}
           >
-            {revoking
-              ? t('applications.revoking')
-              : t('applications.revokeConfirmAction')}
+            {t('applications.revokeConfirmAction')}
           </Button>
         </DialogActions>
       </Dialog>

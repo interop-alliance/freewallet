@@ -1,8 +1,8 @@
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
-import CircularProgress from '@mui/material/CircularProgress'
 import Link from '@mui/material/Link'
 import { FiKey } from 'react-icons/fi'
 import TextField from '@mui/material/TextField'
@@ -170,11 +170,7 @@ export function LoginPage() {
                 sx={authStyles.authCardForm}
               >
                 {errorKey === 'auth.errors.storageUnreachable' ? (
-                  <Typography
-                    variant="body1"
-                    color="error"
-                    sx={authStyles.userMessage}
-                  >
+                  <Alert severity="error" sx={authStyles.userMessage}>
                     <Trans
                       i18nKey="auth.errors.storageUnreachable"
                       components={{
@@ -187,24 +183,16 @@ export function LoginPage() {
                         )
                       }}
                     />
-                  </Typography>
+                  </Alert>
                 ) : errorKey ? (
-                  <Typography
-                    variant="body1"
-                    color="error"
-                    sx={authStyles.userMessage}
-                  >
+                  <Alert severity="error" sx={authStyles.userMessage}>
                     {t(errorKey)}
-                  </Typography>
+                  </Alert>
                 ) : (
                   bannerText && (
-                    <Typography
-                      variant="body1"
-                      color="error"
-                      sx={authStyles.userMessage}
-                    >
+                    <Alert severity="error" sx={authStyles.userMessage}>
                       {bannerText}
-                    </Typography>
+                    </Alert>
                   )
                 )}
 
@@ -216,6 +204,7 @@ export function LoginPage() {
                   {t('auth.login.passphraseLabel')}
                 </Typography>
                 <TextField
+                  id="login-passphrase"
                   name="login-passphrase"
                   type="password"
                   autoComplete="current-password"
@@ -225,12 +214,8 @@ export function LoginPage() {
                 <Button
                   variant="contained"
                   type="submit"
-                  disabled={isSubmitting || isPasskeySubmitting}
-                  startIcon={
-                    isSubmitting ? (
-                      <CircularProgress size={18} color="inherit" />
-                    ) : undefined
-                  }
+                  loading={isSubmitting}
+                  disabled={isPasskeySubmitting}
                   sx={authStyles.actionButton}
                 >
                   {t('auth.login.submit')}
@@ -258,14 +243,10 @@ export function LoginPage() {
                 <Button
                   variant="contained"
                   onClick={handlePasskeyLogin}
-                  disabled={isSubmitting || isPasskeySubmitting}
-                  startIcon={
-                    isPasskeySubmitting ? (
-                      <CircularProgress size={18} color="inherit" />
-                    ) : (
-                      <FiKey />
-                    )
-                  }
+                  loading={isPasskeySubmitting}
+                  loadingPosition="start"
+                  disabled={isSubmitting}
+                  startIcon={<FiKey />}
                   sx={authStyles.passkeyButton}
                 >
                   {t('auth.login.passkey')}

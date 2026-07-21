@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  Alert,
   Box,
   Button,
   Card,
   CardContent,
-  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -20,7 +20,7 @@ import {
   useMediaQuery,
   useTheme
 } from '@mui/material'
-import { FiCheckCircle, FiKey } from 'react-icons/fi'
+import { FiCheck, FiCheckCircle, FiKey, FiX } from 'react-icons/fi'
 import { SiGoogledrive } from 'react-icons/si'
 import {
   Link as RouterLink,
@@ -367,7 +367,7 @@ export function SignupPage() {
         </Typography>
 
         {errorKey === 'auth.errors.storageUnreachable' ? (
-          <Typography variant="body1" color="error" sx={authStyles.userMessage}>
+          <Alert severity="error" sx={authStyles.userMessage}>
             <Trans
               i18nKey="auth.errors.storageUnreachable"
               components={{
@@ -380,20 +380,16 @@ export function SignupPage() {
                 )
               }}
             />
-          </Typography>
+          </Alert>
         ) : errorKey ? (
-          <Typography variant="body1" color="error" sx={authStyles.userMessage}>
+          <Alert severity="error" sx={authStyles.userMessage}>
             {t(errorKey)}
-          </Typography>
+          </Alert>
         ) : (
           bannerText && (
-            <Typography
-              variant="body1"
-              color="error"
-              sx={authStyles.userMessage}
-            >
+            <Alert severity="error" sx={authStyles.userMessage}>
               {bannerText}
-            </Typography>
+            </Alert>
           )
         )}
         <Box sx={authStyles.signupStepperWrap}>
@@ -627,12 +623,7 @@ export function SignupPage() {
               <Button
                 variant="contained"
                 type="submit"
-                disabled={isSubmitting}
-                startIcon={
-                  isSubmitting ? (
-                    <CircularProgress size={18} color="inherit" />
-                  ) : undefined
-                }
+                loading={isSubmitting}
                 sx={authStyles.actionButton}
               >
                 {t('auth.signup.createWallet')}
@@ -649,18 +640,10 @@ export function SignupPage() {
             </DialogContentText>
           </DialogContent>
           <DialogActions>
-            <Button
-              onClick={() => resolvePrfRetry(false)}
-              sx={{ textTransform: 'none' }}
-            >
+            <Button onClick={() => resolvePrfRetry(false)}>
               {t('settings.passkeyRetryCancel')}
             </Button>
-            <Button
-              variant="contained"
-              disableElevation
-              onClick={() => resolvePrfRetry(true)}
-              sx={{ textTransform: 'none' }}
-            >
+            <Button variant="contained" onClick={() => resolvePrfRetry(true)}>
               {t('settings.passkeyRetryConfirm')}
             </Button>
           </DialogActions>
@@ -675,8 +658,9 @@ function RuleIndicator({ passed, label }: { passed: boolean; label: string }) {
     <Typography
       variant="body2"
       color={passed ? 'success.main' : 'text.secondary'}
+      sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}
     >
-      {passed ? '\u2713' : '\u2717'} {label}
+      {passed ? <FiCheck aria-hidden /> : <FiX aria-hidden />} {label}
     </Typography>
   )
 }

@@ -52,10 +52,11 @@ export function CHAPILoginForm({ onSubmit, error }: CHAPILoginFormProps) {
       <Button
         type="submit"
         variant="contained"
-        disabled={loading || !passphrase}
-        sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+        loading={loading}
+        disabled={!passphrase}
+        sx={{ alignSelf: 'flex-start' }}
       >
-        {loading ? t('common.verifying') : t('common.continue')}
+        {t('common.continue')}
       </Button>
     </Box>
   )

@@ -1,6 +1,9 @@
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import CircularProgress from '@mui/material/CircularProgress'
+import List from '@mui/material/List'
+import ListItem from '@mui/material/ListItem'
+import ListItemText from '@mui/material/ListItemText'
 import Typography from '@mui/material/Typography'
 import { FaGhost } from 'react-icons/fa'
 import { useTranslation } from 'react-i18next'
@@ -71,32 +74,33 @@ export function GuestLoginPage() {
           {t('auth.guest.heading')}
         </Typography>
 
-        <ul>
-          <Typography variant="h5" component="li">
-            {t('auth.guest.bulletRandom')}
-          </Typography>
-          <Typography variant="h5" component="li">
-            {t('auth.guest.bulletEphemeral')}
-          </Typography>
-        </ul>
+        <List dense sx={{ listStyleType: 'disc', pl: 4 }}>
+          <ListItem disableGutters sx={{ display: 'list-item', px: 0 }}>
+            <ListItemText
+              primary={t('auth.guest.bulletRandom')}
+              slotProps={{ primary: { variant: 'h5' } }}
+            />
+          </ListItem>
+          <ListItem disableGutters sx={{ display: 'list-item', px: 0 }}>
+            <ListItemText
+              primary={t('auth.guest.bulletEphemeral')}
+              slotProps={{ primary: { variant: 'h5' } }}
+            />
+          </ListItem>
+        </List>
 
         {setupError && (
-          <Typography variant="body1" color="error" sx={authStyles.userMessage}>
+          <Alert severity="error" sx={authStyles.userMessage}>
             {t('auth.errors.setupFailed')}
-          </Typography>
+          </Alert>
         )}
 
         <Button
           variant="contained"
           type="submit"
-          disabled={isSubmitting}
-          startIcon={
-            isSubmitting ? (
-              <CircularProgress size={18} color="inherit" />
-            ) : (
-              <FaGhost />
-            )
-          }
+          loading={isSubmitting}
+          loadingPosition="start"
+          startIcon={<FaGhost />}
           sx={authStyles.actionButton}
         >
           {t('auth.guest.submit')}

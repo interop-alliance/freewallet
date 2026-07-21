@@ -136,11 +136,7 @@ export function ScanCredentialQrDialog({
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ pb: 1 }}>
-        <Typography variant="h6" component="span">
-          {t('dashboard.scanQr.title')}
-        </Typography>
-      </DialogTitle>
+      <DialogTitle sx={{ pb: 1 }}>{t('dashboard.scanQr.title')}</DialogTitle>
       <DialogContent sx={{ pt: 0 }}>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           {t('dashboard.scanQr.hint')}

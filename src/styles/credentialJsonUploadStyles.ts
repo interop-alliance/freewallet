@@ -4,6 +4,7 @@ export const credentialJsonUploadStyles = {
   panel: (dragOver: boolean, disabled: boolean) => ({
     p: { xs: 3, sm: 4 },
     minHeight: 200,
+    width: '100%',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -50,21 +51,8 @@ export const credentialJsonUploadStyles = {
   },
   browseButton: {
     mt: 0.5,
-    textTransform: 'none',
     fontWeight: 600,
     px: 4,
     borderRadius: 2
-  },
-  orUploadDivider: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 2,
-    color: 'text.secondary',
-    '&::before, &::after': {
-      content: '""',
-      flex: 1,
-      borderBottom: '1px solid',
-      borderColor: 'divider'
-    }
   }
 }

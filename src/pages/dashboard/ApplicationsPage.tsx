@@ -149,9 +149,14 @@ export function ApplicationsPage() {
           ) : (
             <List disablePadding>
               {apps.map(app => (
-                <ListItem key={app.cid} disablePadding divider>
+                <ListItem
+                  key={app.cid}
+                  disablePadding
+                  divider
+                  sx={dashboardStyles.applicationsAppCard}
+                >
                   <ListItemButton
-                    sx={dashboardStyles.applicationsAppCard}
+                    sx={{ p: 0.5, minWidth: 0, borderRadius: 1 }}
                     onClick={() => navigate(`/applications/${app.cid}`)}
                   >
                     <Stack sx={{ gap: 0.5, minWidth: 0 }}>
@@ -168,31 +173,29 @@ export function ApplicationsPage() {
                         {t('applications.origin')} {app.origin}
                       </Typography>
                     </Stack>
-                    <Stack sx={dashboardStyles.applicationsAppMeta}>
-                      <Typography variant="body2" color="text.secondary">
-                        {app.connectedAt
-                          ? t('applications.connectedOn', {
-                              date: new Date(
-                                app.connectedAt
-                              ).toLocaleDateString(i18n.language, DATE_FMT)
-                            })
-                          : t('applications.connectedDateUnknown')}
-                      </Typography>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        color="error"
-                        sx={{ textTransform: 'none', borderRadius: 2 }}
-                        disabled={!canRevoke}
-                        onClick={event => {
-                          event.stopPropagation()
-                          openRevokeDialog(app)
-                        }}
-                      >
-                        {t('applications.revoke')}
-                      </Button>
-                    </Stack>
                   </ListItemButton>
+                  <Stack sx={dashboardStyles.applicationsAppMeta}>
+                    <Typography variant="body2" color="text.secondary">
+                      {app.connectedAt
+                        ? t('applications.connectedOn', {
+                            date: new Date(app.connectedAt).toLocaleDateString(
+                              i18n.language,
+                              DATE_FMT
+                            )
+                          })
+                        : t('applications.connectedDateUnknown')}
+                    </Typography>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      color="error"
+                      sx={{ borderRadius: 2 }}
+                      disabled={!canRevoke}
+                      onClick={() => openRevokeDialog(app)}
+                    >
+                      {t('applications.revoke')}
+                    </Button>
+                  </Stack>
                 </ListItem>
               ))}
             </List>
@@ -225,21 +228,16 @@ export function ApplicationsPage() {
           <Button
             onClick={() => setRevokeDialogOpen(false)}
             disabled={revoking}
-            sx={{ textTransform: 'none' }}
           >
             {t('common.cancel')}
           </Button>
           <Button
             variant="contained"
-            disableElevation
             color="error"
             onClick={handleRevoke}
-            disabled={revoking}
-            sx={{ textTransform: 'none' }}
+            loading={revoking}
           >
-            {revoking
-              ? t('applications.revoking')
-              : t('applications.revokeConfirmAction')}
+            {t('applications.revokeConfirmAction')}
           </Button>
         </DialogActions>
       </Dialog>

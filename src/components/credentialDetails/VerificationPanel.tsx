@@ -1,6 +1,6 @@
-import { Box, CircularProgress, Divider, Typography } from '@mui/material'
+import { Box, Chip, CircularProgress, Divider, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
-import { MdCancel, MdCheckCircle } from 'react-icons/md'
+import { MdCancel, MdCheckCircle, MdWarning } from 'react-icons/md'
 import type { UseVerificationReturn } from '@/hooks/useVerification'
 import { formatDateTime } from '@/lib/viewMappers/formatDate'
 import {
@@ -180,74 +180,57 @@ export function VerificationStatusBadge({
 
   if (loading) {
     return (
-      <Box sx={sx.vpStatusBadge} aria-live="polite">
-        <CircularProgress size={10} sx={sx.vpStatusSpinner} />
-        <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
-          {t('verification.badgeVerifying')}
-        </Typography>
-      </Box>
+      <Chip
+        size="small"
+        aria-live="polite"
+        icon={<CircularProgress size={12} />}
+        label={t('verification.badgeVerifying')}
+      />
     )
   }
 
   if (notVerified) {
     return (
-      <Box
-        sx={{ ...sx.vpStatusBadge, ...sx.vpStatusBadgeError }}
+      <Chip
+        size="small"
+        color="error"
         aria-live="polite"
-      >
-        <Box sx={sx.vpStatusIconWrap} aria-hidden>
-          <MdCancel size={11} />
-        </Box>
-        <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
-          {t('verification.badgeNotVerified')}
-        </Typography>
-      </Box>
+        icon={<MdCancel size={14} />}
+        label={t('verification.badgeNotVerified')}
+      />
     )
   }
 
   if (warning) {
     return (
-      <Box
-        sx={{ ...sx.vpStatusBadge, ...sx.vpStatusBadgeWarning }}
+      <Chip
+        size="small"
+        color="warning"
         aria-live="polite"
-      >
-        <Box sx={sx.vpStatusWarningCircle} aria-hidden>
-          <Typography component="span" sx={sx.vpStatusWarningMark}>
-            !
-          </Typography>
-        </Box>
-        <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
-          {t('verification.badgeWarning')}
-        </Typography>
-      </Box>
+        icon={<MdWarning size={14} />}
+        label={t('verification.badgeWarning')}
+      />
     )
   }
 
   if (verified) {
     return (
-      <Box
-        sx={{ ...sx.vpStatusBadge, ...sx.vpStatusBadgeOk }}
+      <Chip
+        size="small"
+        color="success"
         aria-live="polite"
-      >
-        <Box sx={sx.vpStatusIconWrap} aria-hidden>
-          <MdCheckCircle size={11} />
-        </Box>
-        <Typography variant="body2" sx={sx.vpStatusBadgeLabel}>
-          {t('verification.badgeVerified')}
-        </Typography>
-      </Box>
+        icon={<MdCheckCircle size={14} />}
+        label={t('verification.badgeVerified')}
+      />
     )
   }
 
   return (
-    <Box sx={sx.vpStatusBadge} aria-live="polite">
-      <Typography
-        variant="body2"
-        sx={sx.vpStatusBadgeLabel}
-        color="text.secondary"
-      >
-        {t('verification.badgePending')}
-      </Typography>
-    </Box>
+    <Chip
+      size="small"
+      variant="outlined"
+      aria-live="polite"
+      label={t('verification.badgePending')}
+    />
   )
 }

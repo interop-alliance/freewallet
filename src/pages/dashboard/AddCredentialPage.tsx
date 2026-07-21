@@ -1,8 +1,9 @@
 import { useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
+import Divider from '@mui/material/Divider'
 import TextField from '@mui/material/TextField'
 import Button from '@mui/material/Button'
-import Typography from '@mui/material/Typography'
 import Stack from '@mui/material/Stack'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -12,7 +13,6 @@ import { resolveCredentialsFromJsonFiles } from '@/lib/resolveCredentialJsonFile
 import { resolveCredentialsInput } from '@/lib/resolveCredentialsInput'
 import { resolveCredentialsInputErrorMessage } from '@/lib/resolveCredentialsInputErrorMessage'
 import { dashboardStyles } from '@/styles/appStyles'
-import { credentialJsonUploadStyles } from '@/styles/credentialJsonUploadStyles'
 
 export function AddCredentialPage() {
   const { t } = useTranslation()
@@ -57,11 +57,7 @@ export function AddCredentialPage() {
   return (
     <DashboardLayout title={t('addCredential.title')}>
       <Box sx={dashboardStyles.addCredentialForm}>
-        {error ? (
-          <Typography variant="body2" color="error">
-            {error}
-          </Typography>
-        ) : null}
+        {error ? <Alert severity="error">{error}</Alert> : null}
 
         <TextField
           multiline
@@ -83,10 +79,10 @@ export function AddCredentialPage() {
           <Button
             variant="outlined"
             onClick={handleAdd}
-            disabled={loading}
+            loading={loading}
             sx={dashboardStyles.addCredentialButton}
           >
-            {loading ? t('common.loading') : t('addCredential.add')}
+            {t('addCredential.add')}
           </Button>
           <Button
             variant="outlined"
@@ -98,13 +94,7 @@ export function AddCredentialPage() {
           </Button>
         </Stack>
 
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          sx={credentialJsonUploadStyles.orUploadDivider}
-        >
-          {t('addCredential.upload.orUpload')}
-        </Typography>
+        <Divider>{t('addCredential.upload.orUpload')}</Divider>
 
         <CredentialJsonUploadPanel onFiles={handleFiles} disabled={loading} />
       </Box>

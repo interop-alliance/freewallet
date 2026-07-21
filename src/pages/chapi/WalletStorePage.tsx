@@ -11,6 +11,7 @@
  * CHAPI response; an inline offer gets the stored presentation echoed back.
  */
 import { useEffect, useRef, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
@@ -375,12 +376,10 @@ export function WalletStorePage() {
 
         {pageState === 'failed' && (
           <Stack spacing={2}>
-            <Typography variant="body2" color="error.main">
-              {initError}
-            </Typography>
+            <Alert severity="error">{initError}</Alert>
             <Button
               variant="outlined"
-              sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+              sx={{ alignSelf: 'flex-start' }}
               onClick={handleCancel}
             >
               {t('common.cancel')}
@@ -402,15 +401,13 @@ export function WalletStorePage() {
             <Typography variant="body2" color="text.secondary">
               {t('common.type')}
             </Typography>
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+            <Typography variant="subtitle2">
               {credentialTitle(offeredVc)}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               {t('common.issuer')}
             </Typography>
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              {issuerName(offeredVc)}
-            </Typography>
+            <Typography variant="subtitle2">{issuerName(offeredVc)}</Typography>
           </Box>
         ))}
 
@@ -423,15 +420,10 @@ export function WalletStorePage() {
 
         {pageState === 'confirming' && (
           <Stack spacing={2}>
-            {storeError && (
-              <Typography variant="body2" color="error.main">
-                {storeError}
-              </Typography>
-            )}
+            {storeError && <Alert severity="error">{storeError}</Alert>}
             <Stack direction="row" spacing={2}>
               <Button
                 variant="contained"
-                sx={{ textTransform: 'none' }}
                 onClick={handleConfirm}
                 disabled={storing}
               >
@@ -439,7 +431,6 @@ export function WalletStorePage() {
               </Button>
               <Button
                 variant="outlined"
-                sx={{ textTransform: 'none' }}
                 onClick={handleCancel}
                 disabled={storing}
               >
@@ -452,12 +443,12 @@ export function WalletStorePage() {
 
         {pageState === 'stored' && (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-            <Typography variant="body2" color="success.main">
+            <Alert severity="success">
               {t('chapi.store.storedSuccess', { count: vcs.length })}
-            </Typography>
+            </Alert>
             <Button
               variant="contained"
-              sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+              sx={{ alignSelf: 'flex-start' }}
               onClick={handleDone}
             >
               {t('common.done')}

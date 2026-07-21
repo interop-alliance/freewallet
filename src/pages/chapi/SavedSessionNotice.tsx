@@ -21,6 +21,7 @@
  * will find it.
  */
 import { useEffect, useRef, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Typography from '@mui/material/Typography'
@@ -126,7 +127,7 @@ export function SavedSessionNotice({
         <Button
           variant="outlined"
           size="small"
-          sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+          sx={{ alignSelf: 'flex-start' }}
           onClick={() => void attempt({ silent: false })}
         >
           {t('chapi.savedSession.button')}
@@ -138,9 +139,9 @@ export function SavedSessionNotice({
         </Typography>
       )}
       {state === 'restored' && (
-        <Typography variant="body2" color="success.main">
+        <Alert severity="success">
           {t('chapi.savedSession.restored', { identity })}
-        </Typography>
+        </Alert>
       )}
       {state === 'none' && (
         <Typography variant="body2" color="text.secondary">
@@ -148,9 +149,7 @@ export function SavedSessionNotice({
         </Typography>
       )}
       {state === 'unavailable' && (
-        <Typography variant="body2" color="text.secondary">
-          {t('chapi.savedSession.unavailable')}
-        </Typography>
+        <Alert severity="warning">{t('chapi.savedSession.unavailable')}</Alert>
       )}
     </Box>
   )

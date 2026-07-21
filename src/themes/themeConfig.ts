@@ -135,13 +135,24 @@ export function buildMuiThemeOptions(
     components: {
       ...definition.muiComponents,
       MuiButton: {
+        defaultProps: {
+          disableElevation: true
+        },
         styleOverrides: {
           ...themeButtonOverrides,
           root: {
             whiteSpace: 'nowrap',
+            textTransform: 'none',
             ...(typeof themeButtonOverrides?.root === 'object'
               ? themeButtonOverrides.root
               : {})
+          }
+        }
+      },
+      MuiToggleButton: {
+        styleOverrides: {
+          root: {
+            textTransform: 'none'
           }
         }
       }

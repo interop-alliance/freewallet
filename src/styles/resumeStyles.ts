@@ -3,6 +3,16 @@ import { credentialDetailCardStyles } from '@/styles/credentialStyles'
 
 const markdownBase = credentialDetailCardStyles.markdownBody
 
+/**
+ * The resume preview is a deliberate print-style, light-only surface: it fixes
+ * its own typeface and link color rather than following the app theme. The font
+ * family is set once on the root `page` container and inherited by every
+ * descendant (see the `& *` rule below); the link color is named here so it is
+ * defined in a single place.
+ */
+const RESUME_FONT = 'Arial, sans-serif'
+const RESUME_LINK_COLOR = '#007bff'
+
 export type ResumeStylesMap = {
   page: SxProps<Theme>
   header: SxProps<Theme>
@@ -37,13 +47,17 @@ export const resumeStyles: ResumeStylesMap = {
     width: '100%',
     mx: 'auto',
     bgcolor: '#fff',
-    border: '1px solid',
+    border: 1,
     borderColor: 'divider',
     borderRadius: 2,
     overflow: 'hidden',
     position: 'relative' as const,
     display: 'flex',
-    flexDirection: 'column' as const
+    flexDirection: 'column' as const,
+    fontFamily: RESUME_FONT,
+    // Force every descendant onto the resume typeface, overriding the font
+    // family each MUI Typography variant would otherwise apply.
+    '& *': { fontFamily: 'inherit' }
   },
   header: {
     backgroundColor: '#F5F5F5',
@@ -68,14 +82,12 @@ export const resumeStyles: ResumeStylesMap = {
     fontWeight: 600,
     color: '#000',
     fontSize: { xs: '1.5rem', sm: '1.75rem' },
-    lineHeight: 1,
-    fontFamily: 'Arial, sans-serif'
+    lineHeight: 1
   },
   city: {
     fontWeight: 400,
     color: '#666',
-    fontSize: '1.05rem',
-    fontFamily: 'Arial, sans-serif'
+    fontSize: '1.05rem'
   },
   contactRow: {
     display: 'flex',
@@ -84,10 +96,9 @@ export const resumeStyles: ResumeStylesMap = {
     alignItems: 'center'
   },
   contactLink: {
-    color: '#007bff',
+    color: RESUME_LINK_COLOR,
     fontSize: '15px',
-    fontWeight: 400,
-    fontFamily: 'Arial, sans-serif'
+    fontWeight: 400
   },
   contactSeparator: {
     color: '#666',
@@ -109,7 +120,6 @@ export const resumeStyles: ResumeStylesMap = {
     fontSize: '16px',
     lineHeight: 1.2,
     color: '#111',
-    fontFamily: 'Arial, sans-serif',
     borderBottom: '1.5px solid',
     borderColor: 'divider'
   },
@@ -117,7 +127,6 @@ export const resumeStyles: ResumeStylesMap = {
     ...markdownBase,
     color: '#000',
     fontSize: '14px',
-    fontFamily: 'Arial, sans-serif',
     lineHeight: 1.4
   },
   itemBlock: {
@@ -125,33 +134,27 @@ export const resumeStyles: ResumeStylesMap = {
   },
   experienceTitle: {
     fontWeight: 700,
-    fontSize: '16px',
-    fontFamily: 'Arial, sans-serif'
+    fontSize: '16px'
   },
   experienceMeta: {
     fontSize: '14px',
-    fontFamily: 'Arial, sans-serif',
     color: '#000'
   },
   experienceDuration: {
     fontSize: '14px',
-    fontFamily: 'Arial, sans-serif',
     color: '#000',
     mb: 0.5
   },
   experienceMarkdown: {
     ...markdownBase,
     fontSize: '14px',
-    fontFamily: 'Arial, sans-serif',
     lineHeight: 1.4
   },
   educationTitle: {
     fontWeight: 700,
-    fontSize: '15px',
-    fontFamily: 'Arial, sans-serif'
+    fontSize: '15px'
   },
   educationDates: {
-    fontFamily: 'Arial, sans-serif',
     fontSize: '15px'
   },
   educationMarkdown: {
@@ -165,7 +168,6 @@ export const resumeStyles: ResumeStylesMap = {
   skillItem: {
     fontWeight: 400,
     fontSize: '16px',
-    fontFamily: 'Arial, sans-serif',
     mb: 1,
     display: 'list-item' as const
   },
@@ -174,12 +176,10 @@ export const resumeStyles: ResumeStylesMap = {
   },
   affiliationTitle: {
     fontWeight: 700,
-    fontSize: '16px',
-    fontFamily: 'Arial, sans-serif'
+    fontSize: '16px'
   },
   affiliationDuration: {
     fontSize: '16px',
-    fontFamily: 'Arial, sans-serif',
     fontWeight: 400,
     color: '#000'
   }

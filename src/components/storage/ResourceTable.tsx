@@ -1,5 +1,6 @@
 import {
   Box,
+  Card,
   Chip,
   Table,
   TableBody,
@@ -38,7 +39,11 @@ export function ResourceTable({
   const { t, i18n } = useTranslation()
 
   return (
-    <TableContainer sx={storageStyles.resourceTableContainer}>
+    <TableContainer
+      component={Card}
+      variant="outlined"
+      sx={{ overflow: 'hidden' }}
+    >
       <Table
         size="small"
         aria-label={ariaLabel ?? t('storage.resourcesTableLabel')}
