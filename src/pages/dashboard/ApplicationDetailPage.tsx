@@ -7,8 +7,9 @@
  * list (the toast survives the navigation).
  */
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import { MdArrowBack } from 'react-icons/md'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -24,7 +25,7 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
-import { dashboardStyles } from '@/styles/appStyles'
+import { dashboardStyles, storageStyles } from '@/styles/appStyles'
 import {
   listConnectedApps,
   revokeAppAccess,
@@ -138,7 +139,22 @@ export function ApplicationDetailPage() {
   }
 
   return (
-    <DashboardLayout title={t('applications.detailTitle')}>
+    <DashboardLayout
+      title={
+        app
+          ? t('applications.detailTitle', { name: app.name })
+          : t('applications.title')
+      }
+    >
+      <Button
+        component={RouterLink}
+        to="/applications"
+        startIcon={<MdArrowBack />}
+        sx={storageStyles.backToStorageButton}
+        variant="text"
+      >
+        {t('applications.back')}
+      </Button>
       {loading ? (
         <LoadingSpinner />
       ) : notFound || !app ? (
@@ -146,35 +162,32 @@ export function ApplicationDetailPage() {
           <Typography color="text.secondary">
             {t('applications.notFound')}
           </Typography>
-          <Button
-            variant="outlined"
-            sx={{
-              textTransform: 'none',
-              borderRadius: 2,
-              alignSelf: 'flex-start'
-            }}
-            onClick={() => navigate('/applications')}
-          >
-            {t('applications.back')}
-          </Button>
         </Stack>
       ) : (
         <Stack sx={{ gap: 2, mt: 1 }}>
-          <Box>
-            <Typography variant="h6">{app.name}</Typography>
+          <Stack
+            direction="row"
+            sx={{ gap: 1, alignItems: 'baseline', flexWrap: 'wrap' }}
+          >
+            <Typography variant="subtitle2" color="text.secondary">
+              {t('applications.origin')}
+            </Typography>
             <Typography variant="body2" sx={dashboardStyles.sharedRecipientDid}>
               {app.origin}
             </Typography>
-          </Box>
+          </Stack>
 
-          <Box>
+          <Stack
+            direction="row"
+            sx={{ gap: 1, alignItems: 'baseline', flexWrap: 'wrap' }}
+          >
             <Typography variant="subtitle2" color="text.secondary">
               {t('applications.subjectDid')}
             </Typography>
             <Typography variant="body2" sx={dashboardStyles.sharedRecipientDid}>
               {app.subjectDid}
             </Typography>
-          </Box>
+          </Stack>
 
           <Box>
             <Typography variant="subtitle2" color="text.secondary">
@@ -258,13 +271,6 @@ export function ApplicationDetailPage() {
           )}
 
           <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap' }}>
-            <Button
-              variant="outlined"
-              sx={{ textTransform: 'none', borderRadius: 2 }}
-              onClick={() => navigate('/applications')}
-            >
-              {t('applications.back')}
-            </Button>
             <Button
               variant="outlined"
               color="error"

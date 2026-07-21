@@ -1,7 +1,8 @@
 /**
  * The Applications settings section: lists the apps connected through the App
  * Connect flow (one per self-issued app-key credential), each with its origin
- * and connected date, plus actions to view details or revoke access. Revoking
+ * and connected date. Clicking a card opens the app detail page; a button on
+ * the card revokes access. Revoking
  * removes the app-key credential and records the revocation; it needs a full
  * (passphrase) session with an unlocked vault, since the app key lives in an
  * encrypted collection and the revocation writes an activity entry. The
@@ -124,10 +125,6 @@ export function ApplicationsPage() {
 
   return (
     <DashboardLayout title={t('applications.title')}>
-      <Typography variant="body2" color="text.secondary">
-        {t('applications.subtitle')}
-      </Typography>
-
       {loading ? (
         <LoadingSpinner />
       ) : (
@@ -148,43 +145,43 @@ export function ApplicationsPage() {
             </Typography>
           ) : (
             apps.map(app => (
-              <Stack key={app.cid} sx={dashboardStyles.sharedShareRow}>
-                <Typography variant="subtitle2">{app.name}</Typography>
-                <Typography
-                  variant="body2"
-                  sx={dashboardStyles.sharedRecipientDid}
-                >
-                  {app.origin}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {app.connectedAt
-                    ? t('applications.connectedOn', {
-                        date: new Date(app.connectedAt).toLocaleDateString(
-                          i18n.language,
-                          DATE_FMT
-                        )
-                      })
-                    : t('applications.connectedDateUnknown')}
-                </Typography>
-                <Stack
-                  direction="row"
-                  sx={{ gap: 1, mt: 0.5, flexWrap: 'wrap' }}
-                >
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    sx={{ textTransform: 'none', borderRadius: 2 }}
-                    onClick={() => navigate(`/applications/${app.cid}`)}
+              <Stack
+                key={app.cid}
+                sx={dashboardStyles.applicationsAppCard}
+                onClick={() => navigate(`/applications/${app.cid}`)}
+              >
+                <Stack sx={{ gap: 0.5, minWidth: 0 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                    {app.name}
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={dashboardStyles.sharedRecipientDid}
                   >
-                    {t('applications.details')}
-                  </Button>
+                    {t('applications.origin')} {app.origin}
+                  </Typography>
+                </Stack>
+                <Stack sx={dashboardStyles.applicationsAppMeta}>
+                  <Typography variant="body2" color="text.secondary">
+                    {app.connectedAt
+                      ? t('applications.connectedOn', {
+                          date: new Date(app.connectedAt).toLocaleDateString(
+                            i18n.language,
+                            DATE_FMT
+                          )
+                        })
+                      : t('applications.connectedDateUnknown')}
+                  </Typography>
                   <Button
                     variant="outlined"
                     size="small"
                     color="error"
                     sx={{ textTransform: 'none', borderRadius: 2 }}
                     disabled={!canRevoke}
-                    onClick={() => openRevokeDialog(app)}
+                    onClick={event => {
+                      event.stopPropagation()
+                      openRevokeDialog(app)
+                    }}
                   >
                     {t('applications.revoke')}
                   </Button>

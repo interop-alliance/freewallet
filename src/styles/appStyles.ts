@@ -259,6 +259,27 @@ export const dashboardStyles = {
     fontFamily: 'monospace',
     wordBreak: 'break-all' as const
   },
+  applicationsAppCard: {
+    flexDirection: { xs: 'column', sm: 'row' },
+    alignItems: { sm: 'center' },
+    justifyContent: 'space-between',
+    gap: 1,
+    p: 1.5,
+    border: '1px solid',
+    borderColor: 'divider',
+    borderRadius: 2,
+    cursor: 'pointer',
+    '&:hover': {
+      backgroundColor: 'action.hover'
+    }
+  },
+  applicationsAppMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    flexWrap: 'wrap' as const,
+    flexShrink: 0
+  },
   /**
    * Dashboard page — Credentials block
    */
