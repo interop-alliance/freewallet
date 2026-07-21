@@ -217,6 +217,19 @@ export const dashboardStyles = {
     width: 28,
     height: 28
   },
+  /**
+   * App bar: labeled language/theme controls
+   */
+  navControlGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 0.75
+  },
+  navControlLabel: {
+    color: 'text.secondary',
+    fontSize: '0.6875rem',
+    whiteSpace: 'nowrap'
+  },
   main: {
     flexGrow: 1,
     p: { xs: 3, md: 6 }

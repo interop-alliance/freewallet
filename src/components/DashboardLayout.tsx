@@ -10,6 +10,7 @@ import ListItemText from '@mui/material/ListItemText'
 import Toolbar from '@mui/material/Toolbar'
 import Typography from '@mui/material/Typography'
 import { LanguageSelector } from '@/components/LanguageSelector'
+import { ThemeModeToggle } from '@/components/ThemeModeToggle'
 import { ThemePicker } from '@/components/ThemePicker'
 import { Toast } from '@/components/Toast'
 import { dashboardStyles } from '@/styles/appStyles'
@@ -67,8 +68,19 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
             {t('common.brand')}
           </Typography>
           <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-            <LanguageSelector showLabel={false} />
-            <ThemePicker showLabel={false} />
+            <Stack sx={dashboardStyles.navControlGroup}>
+              <Typography component="span" sx={dashboardStyles.navControlLabel}>
+                {t('common.language')}:
+              </Typography>
+              <LanguageSelector showLabel={false} />
+            </Stack>
+            <Stack sx={dashboardStyles.navControlGroup}>
+              <Typography component="span" sx={dashboardStyles.navControlLabel}>
+                {t('common.theme')}:
+              </Typography>
+              <ThemePicker showLabel={false} />
+            </Stack>
+            <ThemeModeToggle />
             {session ? (
               <Button variant="outlined" onClick={handleLogout}>
                 {t('common.logOut')}

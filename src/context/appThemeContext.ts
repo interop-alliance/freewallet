@@ -1,9 +1,11 @@
 import { createContext, useContext } from 'react'
-import type { AppThemeId } from '@/themes/appTheme'
+import type { AppThemeId, ThemeMode } from '@/themes/appTheme'
 
 export type AppThemeContextValue = {
   themeId: AppThemeId
   setThemeId: (themeId: AppThemeId) => void
+  mode: ThemeMode
+  toggleMode: () => void
 }
 
 export const AppThemeContext = createContext<AppThemeContextValue | null>(null)

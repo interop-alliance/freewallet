@@ -2,6 +2,8 @@
   "common": {
     "language": "Idioma",
     "theme": "Tema",
+    "switchToDarkMode": "Cambiar a modo oscuro",
+    "switchToLightMode": "Cambiar a modo claro",
     "themes": {
       "default": "Predeterminado",
       "west-coast": "West Coast"
