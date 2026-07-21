@@ -17,7 +17,10 @@
  * payload -- the handler falls back to keeping the remote master, which is
  * exactly RxDB's default and therefore always converges.
  */
-import { remotePayloadWins, type ContactHeadPayload } from '@interop/social-core'
+import {
+  remotePayloadWins,
+  type ContactHeadPayload
+} from '@interop/social-core'
 import type { RxConflictHandler } from 'rxdb/plugins/core'
 import { deepEqual } from 'rxdb/plugins/utils'
 import type { SyncedDoc } from '@/lib/sync'
@@ -78,7 +81,11 @@ export function createContactsConflictHandler({
       if (!realMasterState._deleted && !newDocumentState._deleted) {
         const remoteHead = await headOf(realMasterState.data)
         const localHead = await headOf(newDocumentState.data)
-        if (remoteHead && localHead && !remotePayloadWins(remoteHead, localHead)) {
+        if (
+          remoteHead &&
+          localHead &&
+          !remotePayloadWins(remoteHead, localHead)
+        ) {
           return newDocumentState
         }
       }

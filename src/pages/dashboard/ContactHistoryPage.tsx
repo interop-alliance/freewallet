@@ -36,8 +36,15 @@ export function ContactHistoryPage() {
         return
       }
       try {
+        // The route param is the row id; revisions are keyed by the LOGICAL
+        // contact id inside the head payload (they differ for mobile-authored
+        // contacts), so resolve through the stored contact first.
+        const stored = await session.storage.loadContact({ id: contactId })
+        if (!stored) {
+          return
+        }
         const items = await session.storage.listContactRevisions({
-          id: contactId
+          contactId: stored.contactId
         })
         if (!cancelled) {
           setRevisions(items)

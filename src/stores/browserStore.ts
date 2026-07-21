@@ -772,6 +772,9 @@ export class BrowserStore {
     const entries = await this._contactEntries()
     return entries.map(({ rowId, head }) => ({
       id: rowId,
+      // Legacy heads written before the row-id / contact-id split carry no
+      // usable distinction; fall back to the row id for those.
+      contactId: head.contactId ?? rowId,
       contact: head.contact,
       updatedAt: head.updatedAt
     }))
@@ -793,6 +796,7 @@ export class BrowserStore {
     return entry
       ? {
           id: entry.rowId,
+          contactId: entry.head.contactId ?? entry.rowId,
           contact: entry.head.contact,
           updatedAt: entry.head.updatedAt
         }
@@ -803,6 +807,11 @@ export class BrowserStore {
    * Adds a contact to the local `contacts` collection under a freshly minted,
    * stable row id -- unlike credentials, this id is NOT content-derived, so
    * a later edit can rewrite the same row in place ({@link updateContact}).
+   *
+   * The row id and the head payload's `contactId` are minted separately,
+   * matching Freewallet mobile (resource `syncId` vs local `_id`): the row id
+   * is transport-level addressing, `contactId` is the logical identity that
+   * every `contacts-history` revision refers to.
    *
    * @param options {object}
    * @param options.contact {ContactData}
@@ -817,9 +826,10 @@ export class BrowserStore {
     deviceId: string
   }): Promise<StoredContact> {
     const id = uuidv7()
+    const contactId = uuidv7()
     const updatedAt = new Date().toISOString()
     const head: ContactHeadPayload = {
-      contactId: id,
+      contactId,
       updatedAt,
       deviceId,
       contact
@@ -829,13 +839,18 @@ export class BrowserStore {
       ? (await cipher.encrypt({ data: head as unknown as Json })).envelope
       : (head as unknown as Json)
     await this._insertDoc({ logicalKey: 'contacts', id, data: body })
-    return { id, contact, updatedAt }
+    return { id, contactId, contact, updatedAt }
   }
 
   /**
    * Rewrites a contact's row in place under its existing id, re-encrypting
    * the whole head payload (fresh JWE nonce, so the envelope bytes always
-   * change even for a no-op save).
+   * change even for a no-op save). The logical `contactId` sealed in the
+   * existing head is preserved verbatim -- it is the identity every revision
+   * (on every replica) refers to, and it differs from the row id for
+   * mobile-authored contacts. Throws when the existing head is unreachable
+   * (missing row, undecryptable envelope): rewriting it blind would sever the
+   * contact from its history.
    *
    * @param options {object}
    * @param options.id {string}
@@ -852,9 +867,27 @@ export class BrowserStore {
     contact: ContactHeadPayload['contact']
     deviceId: string
   }): Promise<StoredContact> {
+    const doc = await this.rxCollection('contacts').findOne(id).exec()
+    if (!doc) {
+      throw new Error(`No local "contacts" row "${id}" to update.`)
+    }
+    const { data } = doc.toMutableJSON()
+    const cipherForRead = this._ciphers?.contacts
+    let existingHead: ContactHeadPayload
+    if (isEncryptedEnvelope(data)) {
+      if (!cipherForRead) {
+        throw new Error(`Cannot update contact "${id}": vault is locked.`)
+      }
+      existingHead = (await cipherForRead.decrypt({
+        envelope: data!
+      })) as unknown as ContactHeadPayload
+    } else {
+      existingHead = data as unknown as ContactHeadPayload
+    }
+    const contactId = existingHead.contactId ?? id
     const updatedAt = new Date().toISOString()
     const head: ContactHeadPayload = {
-      contactId: id,
+      contactId,
       updatedAt,
       deviceId,
       contact
@@ -864,7 +897,7 @@ export class BrowserStore {
       ? (await cipher.encrypt({ data: head as unknown as Json })).envelope
       : (head as unknown as Json)
     await this._updateDoc({ logicalKey: 'contacts', id, data: body })
-    return { id, contact, updatedAt }
+    return { id, contactId, contact, updatedAt }
   }
 
   /**

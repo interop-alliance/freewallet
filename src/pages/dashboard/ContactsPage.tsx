@@ -72,7 +72,11 @@ export function ContactsPage() {
               sx={{ p: 2 }}
             >
               <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
-                <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+                <Stack
+                  direction="row"
+                  spacing={2}
+                  sx={{ alignItems: 'center' }}
+                >
                   <Avatar sx={{ width: 56, height: 56, fontWeight: 600 }}>
                     {initialsFor(contact.displayName)}
                   </Avatar>

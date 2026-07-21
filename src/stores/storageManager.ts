@@ -1994,7 +1994,7 @@ export class StorageManager {
     const deviceId = getOrCreateDeviceId()
     const stored = await this._localStore.addContact({ contact, deviceId })
     await this._recordContactRevision({
-      contactId: stored.id,
+      contactId: stored.contactId,
       action: 'create',
       snapshot: contact,
       deviceId
@@ -2025,7 +2025,7 @@ export class StorageManager {
       deviceId
     })
     await this._recordContactRevision({
-      contactId: id,
+      contactId: stored.contactId,
       action: 'update',
       snapshot: contact,
       deviceId
@@ -2047,7 +2047,7 @@ export class StorageManager {
     await this._localStore.deleteContact({ id })
     if (existing) {
       await this._recordContactRevision({
-        contactId: id,
+        contactId: existing.contactId,
         action: 'delete',
         snapshot: existing.contact,
         deviceId: getOrCreateDeviceId()
@@ -2096,20 +2096,23 @@ export class StorageManager {
   }
 
   /**
-   * Lists a contact's revision history, most recent first.
+   * Lists a contact's revision history, most recent first. Keyed by the
+   * LOGICAL contact id (`StoredContact.contactId`, the id inside the head
+   * payload that every replica's revisions refer to), not the row id --
+   * for mobile-authored contacts the two differ.
    *
    * @param options {object}
-   * @param options.id {string}
+   * @param options.contactId {string}
    * @returns {Promise<Array<ContactRevisionPayload>>}
    */
   async listContactRevisions({
-    id
+    contactId
   }: {
-    id: string
+    contactId: string
   }): Promise<Array<ContactRevisionPayload>> {
     if (this._vaultLocked) {
       return []
     }
-    return await this._localStore.listContactRevisions({ contactId: id })
+    return await this._localStore.listContactRevisions({ contactId })
   }
 }

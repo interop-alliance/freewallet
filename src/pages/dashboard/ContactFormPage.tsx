@@ -8,7 +8,7 @@ import Typography from '@mui/material/Typography'
 import { MdAddCircleOutline, MdRemoveCircleOutline } from 'react-icons/md'
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import type { ContactData } from '@interop/social-core'
+import { normalizeLabel, type ContactData } from '@interop/social-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
@@ -112,13 +112,15 @@ export function ContactFormPage() {
       phoneNumbers: phoneNumbers
         .filter(row => row.value.trim())
         .map(row => ({
-          label: row.label.trim() || 'other',
+          // Shared normalization (lowercase, 'other' fallback) so web and
+          // mobile store byte-identical labels.
+          label: normalizeLabel(row.label),
           number: row.value.trim()
         })),
       emailAddresses: emailAddresses
         .filter(row => row.value.trim())
         .map(row => ({
-          label: row.label.trim() || 'other',
+          label: normalizeLabel(row.label),
           email: row.value.trim()
         })),
       note: note.trim() || undefined

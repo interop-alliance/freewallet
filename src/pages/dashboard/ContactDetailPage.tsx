@@ -237,7 +237,10 @@ export function ContactDetailPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+      >
         <DialogTitle>{t('contact.deleteDialog.title')}</DialogTitle>
         <DialogContent>
           <DialogContentText>
@@ -245,7 +248,10 @@ export function ContactDetailPage() {
           </DialogContentText>
         </DialogContent>
         <DialogActions sx={{ gap: 1, px: 3, pb: 2 }}>
-          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>
+          <Button
+            onClick={() => setDeleteDialogOpen(false)}
+            disabled={deleting}
+          >
             {t('common.cancel')}
           </Button>
           <Button
