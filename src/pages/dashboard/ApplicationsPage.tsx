@@ -11,7 +11,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import { MdChevronRight } from 'react-icons/md'
 import Alert from '@mui/material/Alert'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
@@ -147,12 +149,11 @@ export function ApplicationsPage() {
               {t('applications.empty')}
             </Typography>
           ) : (
-            <List disablePadding>
+            <List disablePadding sx={dashboardStyles.applicationsList}>
               {apps.map(app => (
                 <ListItem
                   key={app.cid}
                   disablePadding
-                  divider
                   sx={dashboardStyles.applicationsAppCard}
                 >
                   <ListItemButton
@@ -173,6 +174,12 @@ export function ApplicationsPage() {
                         {t('applications.origin')} {app.origin}
                       </Typography>
                     </Stack>
+                    <Box
+                      sx={dashboardStyles.applicationsRowChevron}
+                      aria-hidden
+                    >
+                      <MdChevronRight />
+                    </Box>
                   </ListItemButton>
                   <Stack sx={dashboardStyles.applicationsAppMeta}>
                     <Typography variant="body2" color="text.secondary">

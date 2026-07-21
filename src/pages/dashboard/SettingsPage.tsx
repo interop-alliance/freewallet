@@ -1429,7 +1429,7 @@ export function SettingsPage() {
                 <Button
                   variant="outlined"
                   size="small"
-                  sx={{ borderRadius: 2 }}
+                  sx={{ borderRadius: 2, px: 2, py: 1 }}
                   disabled={!canRotate || rotating}
                   onClick={() => {
                     setRotateDone(false)

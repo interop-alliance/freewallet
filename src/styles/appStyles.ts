@@ -237,12 +237,28 @@ export const dashboardStyles = {
     fontFamily: 'monospace',
     wordBreak: 'break-all' as const
   },
+  applicationsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1
+  },
   applicationsAppCard: {
     flexDirection: { xs: 'column', sm: 'row' },
     alignItems: { xs: 'flex-start', sm: 'center' },
     justifyContent: 'space-between',
     gap: 1,
-    p: 1.5
+    p: 1.5,
+    border: 1,
+    borderColor: 'divider',
+    borderRadius: 2
+  },
+  applicationsRowChevron: {
+    display: 'flex',
+    alignItems: 'center',
+    fontSize: 22,
+    color: 'text.secondary',
+    flexShrink: 0,
+    ml: 'auto'
   },
   applicationsAppMeta: {
     flexDirection: 'row',
@@ -643,7 +659,10 @@ export const storageStyles = {
     maxWidth: 1200
   },
   collectionsList: {
-    width: '100%'
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1
   },
   collectionGroupHeading: {
     fontWeight: 600,
@@ -662,13 +681,24 @@ export const storageStyles = {
   folderCard: {
     px: 2,
     py: 1.5,
-    gap: 2
+    gap: 2,
+    border: 1,
+    borderColor: 'divider',
+    borderRadius: 2
   },
   systemFolderCard: {
     px: 2,
     py: 1.5,
     gap: 2,
-    bgcolor: 'action.hover'
+    border: 1,
+    borderColor: 'divider',
+    borderRadius: 2,
+    bgcolor: 'action.hover',
+    // resting bg already sits on action.hover, so the default hover tint
+    // would be invisible on these rows
+    '&:hover': {
+      bgcolor: 'action.selected'
+    }
   },
   folderCardHeader: {
     alignItems: 'center',
@@ -759,6 +789,13 @@ export const storageStyles = {
     color: 'text.secondary',
     flexShrink: 0,
     ml: 'auto'
+  },
+  folderChevron: {
+    display: 'flex',
+    alignItems: 'center',
+    fontSize: 22,
+    color: 'text.secondary',
+    flexShrink: 0
   },
   folderUsage: {
     color: 'text.secondary',

@@ -8,7 +8,12 @@ import {
 } from '@mui/material'
 import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { MdFolder, MdFolderOpen, MdSettings } from 'react-icons/md'
+import {
+  MdChevronRight,
+  MdFolder,
+  MdFolderOpen,
+  MdSettings
+} from 'react-icons/md'
 import type { StorageCollection } from '@/lib/storage'
 import { formatBytes } from '@/lib/formatBytes'
 import { storageStyles } from '@/styles/appStyles'
@@ -134,7 +139,7 @@ function CollectionFolderCard({
   const targetPath = `/storage/collections/${encodeURIComponent(collection.id)}`
 
   return (
-    <ListItem disablePadding divider>
+    <ListItem disablePadding>
       <ListItemButton
         component={RouterLink}
         to={targetPath}
@@ -207,6 +212,9 @@ function CollectionFolderCard({
             {formatBytes(usageBytes)}
           </Typography>
         )}
+        <Box sx={storageStyles.folderChevron} aria-hidden>
+          <MdChevronRight />
+        </Box>
       </ListItemButton>
     </ListItem>
   )
