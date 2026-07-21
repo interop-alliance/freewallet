@@ -1,5 +1,22 @@
 # History
 
+## Unreleased - TBD
+
+### Added
+
+- **Applications settings section.** A new Applications page lists the apps
+  connected through App Connect, one per stored app-key credential, with each
+  app's origin and connected date. An App Details view shows the app's identity
+  DID and the storage access it was granted (targets, allowed actions, and
+  expiry). Both offer a Revoke App Access action that revokes the app's storage
+  grants on the server (via the Space-scoped revocation endpoint), then removes
+  the app key and records the revocation; revoking requires a full (passphrase)
+  session with an unlocked vault. Grants are revoked before the key is deleted,
+  so a network failure leaves the connection intact to retry. App Connect
+  approvals now persist the full delegated capabilities (not just a display
+  summary) so they can be revoked later; connections made before this change
+  have no revocable grant and lapse on their own expiry.
+
 ## 0.17.1 - 2026-07-20
 
 ### Changed

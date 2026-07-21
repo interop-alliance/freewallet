@@ -217,7 +217,9 @@ export function appKeySubjectDid(
  * @param credential {IVerifiableCredential}
  * @returns {string | undefined}
  */
-function appKeyOrigin(credential: IVerifiableCredential): string | undefined {
+export function appKeyOrigin(
+  credential: IVerifiableCredential
+): string | undefined {
   const subject = credential.credentialSubject as
     { origin?: unknown } | undefined
   return subject && typeof subject.origin === 'string'

@@ -30,6 +30,7 @@ const primaryNavItems = [
 ] as const
 
 const settingsNavItems = [
+  { labelKey: 'nav.applications', to: '/applications' },
   { labelKey: 'nav.storage', to: '/storage' },
   { labelKey: 'nav.history', to: '/history' }
 ] as const

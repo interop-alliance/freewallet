@@ -28,7 +28,11 @@ import type {
 } from '@interop/data-integrity-core'
 import { generateZcapUri, type ZcapClient } from '@interop/ezcap'
 import type { RxCollection } from 'rxdb/plugins/core'
-import type { CollectionEncryption, IDelegatedZcap } from '@interop/was-client'
+import {
+  ValidationError,
+  type CollectionEncryption,
+  type IDelegatedZcap
+} from '@interop/was-client'
 import {
   addRecipient,
   initRecipients,
@@ -1305,7 +1309,9 @@ export class StorageManager {
    * @param options.user {User}
    * @param options.origin {string}   the relying party's origin
    * @param options.grants {Array<{ id: string; target: string;
-   *   allowedActions: string[]; expires: string }>}
+   *   allowedActions: string[]; expires: string; zcap?: IZcap }>}   each grant
+   *   carries its display summary plus, when available, the full delegated
+   *   capability document (`zcap`) kept verbatim so it can be revoked later
    * @param [options.appConnect] {{ name: string; firstRun: boolean }}   set
    *   for an App Connect login: the app's display name and whether the app
    *   key was minted on this connect (first run) or matched (returning)
@@ -1324,6 +1330,7 @@ export class StorageManager {
       target: string
       allowedActions: string[]
       expires: string
+      zcap?: IZcap
     }>
     appConnect?: { name: string; firstRun: boolean }
   }) {
@@ -1345,6 +1352,187 @@ export class StorageManager {
         created: new Date().toISOString()
       }
     })
+  }
+
+  /**
+   * Records (in the `wallet-activity` collection) a Revoke activity: the user
+   * revoked a connected app's access, retiring its app-key credential and its
+   * storage grants. The recorded origin and app name are the audit trail for
+   * the Applications settings section; the deletion of the app-key credential
+   * itself is a separate credential activity.
+   *
+   * @param options {object}
+   * @param options.user {User}
+   * @param options.origin {string}   the connected app's origin
+   * @param options.name {string}   the connected app's display name
+   * @param [options.cid] {string}   the retired app-key credential's cid
+   * @param [options.revoked] {number}   how many storage grants were revoked
+   * @param [options.skipped] {number}   how many grants needed no revocation
+   *   (legacy summary-only records, already-expired, or already-revoked)
+   * @returns {Promise<void>}
+   */
+  async addHistoryAppRevoke({
+    user,
+    origin,
+    name,
+    cid,
+    revoked,
+    skipped
+  }: {
+    user: User
+    origin: string
+    name: string
+    cid?: string
+    revoked?: number
+    skipped?: number
+  }) {
+    const resourceId = uuidv7()
+    const summary =
+      typeof revoked === 'number'
+        ? `Revoked ${name} (${origin}) app access: ${revoked} grant(s) ` +
+          `revoked${skipped ? `, ${skipped} skipped` : ''}.`
+        : `Revoked ${name} (${origin}) app access.`
+    await this._addHistoryItem({
+      resourceId,
+      activity: {
+        id: resourceId,
+        type: ['Revoke'],
+        summary,
+        actor: { email: user.email },
+        object: { origin, appConnect: { name }, cid, revoked, skipped },
+        created: new Date().toISOString()
+      }
+    })
+  }
+
+  /**
+   * Revokes the storage grants a connected app received through App Connect.
+   * Scans the `Login` activities for App Connect records matching the app's
+   * `origin`, collects the full delegated capabilities recorded on them that
+   * were delegated to the app's `subjectDid`, and revokes each one via the
+   * Space's root capability (the Space controller can revoke anything it
+   * delegated). The app never receives decryption key material, so unlike a
+   * collection un-share this rotates no epoch and touches no recipient roster.
+   *
+   * Best-effort per capability: an already-revoked, expired, or foreign zcap
+   * makes the server throw `ValidationError`, which is swallowed (counted as
+   * skipped) so revoking twice is a no-op; any other failure (e.g. the server
+   * unreachable) propagates so the caller can retry rather than silently drop
+   * the credential. Legacy records that stored only a display summary (no full
+   * zcap) are nothing to revoke -- expiry is their backstop -- and count as
+   * skipped. A no-op returning zero counts when no remote store is configured.
+   *
+   * @param options {object}
+   * @param options.origin {string}   the connected app's origin
+   * @param options.subjectDid {string}   the app-key credential's subject DID,
+   *   the controller the grants were delegated to
+   * @returns {Promise<{ revoked: number; skipped: number }>}
+   */
+  async revokeAppGrants({
+    origin,
+    subjectDid
+  }: {
+    origin: string
+    subjectDid: string
+  }): Promise<{ revoked: number; skipped: number }> {
+    const remote = this._remoteStore
+    if (!remote) {
+      return { revoked: 0, skipped: 0 }
+    }
+    const { zcaps, skipped: nonRevocable } = await this._recordedAppGrantZcaps({
+      origin,
+      subjectDid
+    })
+    const space = remote.spaceHandle()
+    let revoked = 0
+    let skipped = nonRevocable
+    for (const zcap of zcaps) {
+      try {
+        await space.revoke(zcap)
+        revoked += 1
+      } catch (err) {
+        if (err instanceof ValidationError) {
+          // Already revoked, expired, or foreign -- treat as a no-op.
+          skipped += 1
+          continue
+        }
+        throw err
+      }
+    }
+    return { revoked, skipped }
+  }
+
+  /**
+   * The full delegated zcaps recorded for a connected app, scanned from the
+   * App Connect `Login` history activities: those on a Login for `origin` whose
+   * recorded `zcap` was delegated to `subjectDid` and has not already expired.
+   * Deduplicated by capability id. `skipped` counts the entries that carry no
+   * revocable capability (legacy summary-only records, a different controller,
+   * or an already-expired grant).
+   *
+   * @param options {object}
+   * @param options.origin {string}
+   * @param options.subjectDid {string}
+   * @returns {Promise<{ zcaps: IDelegatedZcap[]; skipped: number }>}
+   */
+  private async _recordedAppGrantZcaps({
+    origin,
+    subjectDid
+  }: {
+    origin: string
+    subjectDid: string
+  }): Promise<{ zcaps: IDelegatedZcap[]; skipped: number }> {
+    const items = await this.listHistoryItems()
+    const zcaps: IDelegatedZcap[] = []
+    const seen = new Set<string>()
+    const now = Date.now()
+    let skipped = 0
+    for (const { doc } of items) {
+      if (!doc.type?.includes('Login')) {
+        continue
+      }
+      const object = doc.object as
+        { origin?: string; appConnect?: unknown; zcaps?: unknown } | undefined
+      if (!object || object.origin !== origin || !object.appConnect) {
+        continue
+      }
+      if (!Array.isArray(object.zcaps)) {
+        continue
+      }
+      for (const entry of object.zcaps) {
+        const record = (entry ?? {}) as { expires?: string; zcap?: IZcap }
+        const zcap = record.zcap
+        // A legacy summary-only entry has no revocable capability; expiry is
+        // the backstop.
+        if (!zcap || !('parentCapability' in zcap)) {
+          skipped += 1
+          continue
+        }
+        // Only revoke capabilities delegated to this app's key.
+        const controllers = Array.isArray(zcap.controller)
+          ? zcap.controller
+          : [zcap.controller]
+        if (!controllers.includes(subjectDid)) {
+          skipped += 1
+          continue
+        }
+        if (seen.has(zcap.id)) {
+          continue
+        }
+        seen.add(zcap.id)
+        const expiresAt = zcap.expires
+          ? new Date(zcap.expires).getTime()
+          : record.expires
+            ? new Date(record.expires).getTime()
+            : 0
+        if (expiresAt && expiresAt <= now) {
+          skipped += 1
+          continue
+        }
+        zcaps.push(zcap)
+      }
+    }
+    return { zcaps, skipped }
   }
 
   /**

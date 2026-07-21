@@ -321,9 +321,8 @@ export async function restoreDelegatedSession({
 /**
  * Ends the persisted session: revokes the keystore session zcap on the KMS
  * (best-effort -- the server may be unreachable; the zcaps also expire on
- * their own) and always deletes the local records and session key. The WAS
- * server has no revocation endpoint yet, so the Space-side zcaps rely on
- * expiry.
+ * their own) and always deletes the local records and session key. The
+ * Space-side session zcaps are not revoked here and rely on expiry.
  *
  * @param options {object}
  * @param [options.session] {Session}   the active session, when logging out

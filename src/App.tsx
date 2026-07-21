@@ -62,6 +62,16 @@ const CollectionResourcePage = lazy(() =>
     default: m.CollectionResourcePage
   }))
 )
+const ApplicationsPage = lazy(() =>
+  import('@/pages/dashboard/ApplicationsPage').then(m => ({
+    default: m.ApplicationsPage
+  }))
+)
+const ApplicationDetailPage = lazy(() =>
+  import('@/pages/dashboard/ApplicationDetailPage').then(m => ({
+    default: m.ApplicationDetailPage
+  }))
+)
 const HistoryPage = lazy(() =>
   import('@/pages/dashboard/HistoryPage').then(m => ({
     default: m.HistoryPage
@@ -126,6 +136,11 @@ function App() {
             element={<CollectionResourcePage />}
           />
           <Route path="/contacts/:contactId" element={<ContactDetailPage />} />
+          <Route path="/applications" element={<ApplicationsPage />} />
+          <Route
+            path="/applications/:cid"
+            element={<ApplicationDetailPage />}
+          />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/credential/:cid" element={<CredentialDetailPage />} />

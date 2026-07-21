@@ -560,7 +560,11 @@ export function WalletGetPage() {
           : allowedAction
             ? [allowedAction]
             : [],
-        expires: 'expires' in zcap ? zcap.expires : ''
+        expires: 'expires' in zcap ? zcap.expires : '',
+        // The full delegated capability, kept verbatim alongside the display
+        // summary: the WAS revocation endpoint needs the capability document
+        // itself, so a later App Connect revocation can retire this grant.
+        zcap
       }
     })
     void session.storage
@@ -639,17 +643,16 @@ export function WalletGetPage() {
             <Stack
               direction="row"
               spacing={1}
-              alignItems="center"
-              sx={{ mt: 0.5 }}
+              sx={{ mt: 0.5, alignItems: 'center' }}
             >
-              {appManifest?.iconUrl && (
+              {appManifest?.iconUrl ? (
                 <Box
                   component="img"
                   src={appManifest.iconUrl}
                   alt=""
                   sx={{ width: 32, height: 32, borderRadius: 1 }}
                 />
-              )}
+              ) : null}
               <Typography variant="body1" sx={{ fontWeight: 500 }}>
                 {appConnect.app.name}
               </Typography>

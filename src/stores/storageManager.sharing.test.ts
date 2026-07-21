@@ -23,8 +23,10 @@ import type {
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import {
   PreconditionFailedError,
+  ValidationError,
   type Collection,
   type CollectionEncryption,
+  type IZcap,
   type Space
 } from '@interop/was-client'
 import { initRecipients, removeRecipient } from '@interop/was-client/edv'
@@ -423,6 +425,258 @@ describe('StorageManager.unshareCollection', () => {
     expect(shares).toHaveLength(1)
     expect(shares[0].recipientId).toBe(reader.keyAgreementKey.id)
     expect(shares[0].controller).toBe('did:key:z6MkReader')
+  })
+})
+
+describe('StorageManager.revokeAppGrants', () => {
+  const APP_ORIGIN = 'https://app.example'
+  const APP_SUBJECT = 'did:key:z6MkAppSubject'
+
+  /**
+   * A minimal delegated zcap document (enough to satisfy the revocation scan:
+   * a `parentCapability` marks it delegated, a `controller` binds it to the app
+   * key, and `expires` gates the already-expired skip).
+   */
+  function delegatedZcap({
+    id,
+    controller = APP_SUBJECT,
+    expires
+  }: {
+    id: string
+    controller?: string
+    expires: string
+  }): IZcap {
+    return {
+      '@context': ['https://w3id.org/zcap/v1'],
+      id,
+      parentCapability: 'urn:zcap:root:https%3A%2F%2Fwas.example%2Fspace%2Fx',
+      controller,
+      invocationTarget: 'https://was.example/space/x/private-credentials',
+      allowedAction: ['GET', 'HEAD'],
+      expires,
+      proof: {} as unknown
+    } as unknown as IZcap
+  }
+
+  /**
+   * A remote store whose `spaceHandle().revoke` is the supplied recorder, over
+   * the shared CAS-backed collections (unused by revocation but present for a
+   * well-formed store).
+   */
+  function makeRevokeRemote(
+    revoke: (zcap: unknown) => Promise<void>
+  ): WASRemoteStore {
+    const collections = new Map<string, ReturnType<typeof makeFakeCollection>>()
+    const space = { revoke } as unknown as Space
+    return {
+      spaceId: 's-space',
+      spaceUrl: 'https://was.example/space/s-space',
+      collectionHandle({ collectionId }: { collectionId: string }) {
+        let entry = collections.get(collectionId)
+        if (!entry) {
+          entry = makeFakeCollection(collectionId)
+          collections.set(collectionId, entry)
+        }
+        return entry.collection
+      },
+      spaceHandle() {
+        return space
+      }
+    } as unknown as WASRemoteStore
+  }
+
+  async function seedLogin(
+    storage: StorageManager,
+    user: User,
+    grants: Array<{
+      id: string
+      target: string
+      allowedActions: string[]
+      expires: string
+      zcap?: IZcap
+    }>
+  ) {
+    await storage.addHistoryLogin({
+      user,
+      origin: APP_ORIGIN,
+      grants,
+      appConnect: { name: 'Example App', firstRun: true }
+    })
+  }
+
+  it('revokes the active grant and skips expired and legacy entries', async () => {
+    const owner = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore, user } = await initLocalStore(ciphers)
+    const revoked: unknown[] = []
+    const remoteStore = makeRevokeRemote(async zcap => {
+      revoked.push(zcap)
+    })
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+    const past = new Date(Date.now() - 1_000_000).toISOString()
+
+    await seedLogin(storage, user, [
+      {
+        id: 'g-active',
+        target: 'https://was.example/space/x/private-credentials',
+        allowedActions: ['GET', 'HEAD'],
+        expires: future,
+        zcap: delegatedZcap({ id: 'z-active', expires: future })
+      },
+      {
+        id: 'g-expired',
+        target: 'https://was.example/space/x/wallet-activity',
+        allowedActions: ['GET'],
+        expires: past,
+        zcap: delegatedZcap({ id: 'z-expired', expires: past })
+      },
+      {
+        id: 'g-legacy',
+        target: 'https://was.example/space/x/public-credentials',
+        allowedActions: ['GET'],
+        expires: future
+      }
+    ])
+
+    const outcome = await storage.revokeAppGrants({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT
+    })
+
+    expect(outcome).toEqual({ revoked: 1, skipped: 2 })
+    expect(revoked).toHaveLength(1)
+    expect((revoked[0] as { id: string }).id).toBe('z-active')
+  })
+
+  it('skips grants delegated to a different controller', async () => {
+    const owner = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore, user } = await initLocalStore(ciphers)
+    const revoked: unknown[] = []
+    const remoteStore = makeRevokeRemote(async zcap => {
+      revoked.push(zcap)
+    })
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+
+    await seedLogin(storage, user, [
+      {
+        id: 'g-other',
+        target: 'https://was.example/space/x/private-credentials',
+        allowedActions: ['GET'],
+        expires: future,
+        zcap: delegatedZcap({
+          id: 'z-other',
+          controller: 'did:key:z6MkSomeoneElse',
+          expires: future
+        })
+      }
+    ])
+
+    const outcome = await storage.revokeAppGrants({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT
+    })
+
+    expect(outcome).toEqual({ revoked: 0, skipped: 1 })
+    expect(revoked).toHaveLength(0)
+  })
+
+  it('swallows ValidationError from an already-revoked grant', async () => {
+    const owner = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore, user } = await initLocalStore(ciphers)
+    const remoteStore = makeRevokeRemote(async () => {
+      throw new ValidationError('already revoked')
+    })
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+
+    await seedLogin(storage, user, [
+      {
+        id: 'g-active',
+        target: 'https://was.example/space/x/private-credentials',
+        allowedActions: ['GET'],
+        expires: future,
+        zcap: delegatedZcap({ id: 'z-active', expires: future })
+      }
+    ])
+
+    const outcome = await storage.revokeAppGrants({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT
+    })
+
+    expect(outcome).toEqual({ revoked: 0, skipped: 1 })
+  })
+
+  it('propagates a non-ValidationError revoke failure', async () => {
+    const owner = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore, user } = await initLocalStore(ciphers)
+    const remoteStore = makeRevokeRemote(async () => {
+      throw new Error('server unreachable')
+    })
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+
+    await seedLogin(storage, user, [
+      {
+        id: 'g-active',
+        target: 'https://was.example/space/x/private-credentials',
+        allowedActions: ['GET'],
+        expires: future,
+        zcap: delegatedZcap({ id: 'z-active', expires: future })
+      }
+    ])
+
+    await expect(
+      storage.revokeAppGrants({ origin: APP_ORIGIN, subjectDid: APP_SUBJECT })
+    ).rejects.toThrow('server unreachable')
+  })
+
+  it('is a no-op when no remote store is configured', async () => {
+    const owner = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      localStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+
+    const outcome = await storage.revokeAppGrants({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT
+    })
+
+    expect(outcome).toEqual({ revoked: 0, skipped: 0 })
   })
 })
 
