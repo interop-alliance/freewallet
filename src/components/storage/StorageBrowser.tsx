@@ -130,7 +130,7 @@ function CollectionFolderCard({
     <Card
       role="listitem"
       variant="outlined"
-      sx={storageStyles.folderCard}
+      sx={muted ? storageStyles.systemFolderCard : storageStyles.folderCard}
       aria-label={displayName}
     >
       <CardActionArea

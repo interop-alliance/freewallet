@@ -516,6 +516,23 @@ export function WalletGetPage() {
       }
     }
 
+    // The Login activity is the durable record App Connect revocation re-reads
+    // the zcap documents from, so it must be persisted BEFORE the CHAPI
+    // response: responding tears the popup down, which aborts an in-flight
+    // write and would leave the granted capabilities with no revocation hook.
+    try {
+      await recordLoginHistory(grantedZcaps, appConnectResult)
+    } catch (err) {
+      console.error('Could not record the login history entry:', err)
+      if (grantedZcaps.length > 0) {
+        // Fail closed: the site never receives the capability documents, so
+        // the already-signed delegations stay inert rather than unrevocable.
+        setBlockReason('processFailed')
+        setPageState('blocked')
+        return
+      }
+    }
+
     chapiEvent.respondWith(
       Promise.resolve(
         verifiablePresentation
@@ -526,21 +543,22 @@ export function WalletGetPage() {
           : null
       )
     )
-    recordLoginHistory(grantedZcaps, appConnectResult)
   }
 
   /**
-   * Fire-and-forget Login-activity record when the request granted storage
-   * capabilities, connected an app, or authenticated the user's DID. Records
-   * the capabilities `processRequest` actually delegated (threaded out
-   * alongside the VP), rather than reading them back off the composed VP's
-   * embedded `zcap` array; for App Connect, also the app name and whether the
-   * app key was minted on this connect.
+   * Records the Login activity when the request granted storage capabilities,
+   * connected an app, or authenticated the user's DID -- the capabilities
+   * `processRequest` actually delegated (threaded out alongside the VP),
+   * rather than read back off the composed VP's embedded `zcap` array; for App
+   * Connect, also the app name and whether the app key was minted on this
+   * connect. Awaited before the CHAPI response goes out (see
+   * `respondAndClose`); a failure propagates to the caller, which fails closed
+   * when capabilities were granted.
    */
-  function recordLoginHistory(
+  async function recordLoginHistory(
     zcaps: IZcap[],
     appConnectResult?: WalletResponse['appConnect']
-  ) {
+  ): Promise<void> {
     if (
       !session ||
       (!profile.didAuth &&
@@ -567,22 +585,18 @@ export function WalletGetPage() {
         zcap
       }
     })
-    void session.storage
-      .addHistoryLogin({
-        user: session.user,
-        origin: requestOrigin,
-        grants,
-        appConnect:
-          appConnectResult && profile.appConnect
-            ? {
-                name: profile.appConnect.app.name,
-                firstRun: appConnectResult.firstRun
-              }
-            : undefined
-      })
-      .catch((err: unknown) => {
-        console.warn('Could not record the login history entry:', err)
-      })
+    await session.storage.addHistoryLogin({
+      user: session.user,
+      origin: requestOrigin,
+      grants,
+      appConnect:
+        appConnectResult && profile.appConnect
+          ? {
+              name: profile.appConnect.app.name,
+              firstRun: appConnectResult.firstRun
+            }
+          : undefined
+    })
   }
 
   /**
@@ -653,12 +667,30 @@ export function WalletGetPage() {
                   sx={{ width: 32, height: 32, borderRadius: 1 }}
                 />
               ) : null}
+              <Typography variant="body2" color="text.secondary">
+                {t('chapi.get.appConnect.nameLabel')}
+              </Typography>
               <Typography variant="body1" sx={{ fontWeight: 500 }}>
                 {appConnect.app.name}
               </Typography>
             </Stack>
           )}
-          <Typography sx={chapiStyles.originChip}>{requestOrigin}</Typography>
+          {appConnect ? (
+            <Stack
+              direction="row"
+              spacing={1}
+              sx={{ mt: 0.5, alignItems: 'center' }}
+            >
+              <Typography variant="body2" color="text.secondary">
+                {t('chapi.get.appConnect.originLabel')}
+              </Typography>
+              <Typography sx={chapiStyles.originChip}>
+                {requestOrigin}
+              </Typography>
+            </Stack>
+          ) : (
+            <Typography sx={chapiStyles.originChip}>{requestOrigin}</Typography>
+          )}
           {appConnect && appManifest?.description && (
             <Typography
               variant="caption"

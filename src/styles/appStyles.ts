@@ -766,6 +766,14 @@ export const storageStyles = {
       borderColor: 'text.primary'
     }
   },
+  systemFolderCard: {
+    borderRadius: 2,
+    transition: 'border-color 120ms ease, box-shadow 120ms ease',
+    bgcolor: 'action.hover',
+    '&:hover': {
+      borderColor: 'text.primary'
+    }
+  },
   folderCardAction: {
     px: 2,
     py: 1.5,

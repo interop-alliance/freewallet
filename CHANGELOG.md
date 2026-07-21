@@ -1,5 +1,11 @@
 # History
 
+## 0.18.1 - TBD
+
+### Fixed
+
+- - Fix Application revocation action (await behavior).
+
 ## 0.18.0 - 2026-07-20
 
 ### Added

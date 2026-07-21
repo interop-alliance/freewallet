@@ -525,6 +525,8 @@
       "zcapRevokeNote": "(you will be able to revoke access any time from wallet Settings)",
       "appConnect": {
         "title": "Connect {{appName}} to storage?",
+        "nameLabel": "Name:",
+        "originLabel": "Origin:",
         "zcapHeading": "This app is asking for storage access:",
         "firstRun": "{{appName}} will keep an app key in your wallet so you can open your data on other devices.",
         "returning": "{{appName}} wants to use the app key saved in your wallet.",

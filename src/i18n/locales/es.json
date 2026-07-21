@@ -525,6 +525,8 @@
       "zcapRevokeNote": "(podrá revocar el acceso en cualquier momento desde la Configuración de la billetera)",
       "appConnect": {
         "title": "¿Conectar {{appName}} al almacenamiento?",
+        "nameLabel": "Nombre:",
+        "originLabel": "Origen:",
         "zcapHeading": "Esta aplicación solicita acceso al almacenamiento:",
         "firstRun": "{{appName}} guardará una clave de aplicación en su billetera para que pueda abrir sus datos en otros dispositivos.",
         "returning": "{{appName}} quiere usar la clave de aplicación guardada en su billetera.",

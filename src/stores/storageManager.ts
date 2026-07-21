@@ -1065,14 +1065,16 @@ export class StorageManager {
   /**
    * Writes one activity to the local `wallet-activity` collection -- the
    * shared tail of every `addHistory*` method. With the vault locked (a
-   * restored delegated session) the entry is skipped: the collection is
-   * encrypted and there is no cipher, and losing a log line beats failing
-   * the action that produced it.
+   * restored delegated session) the entry is skipped and `false` returned:
+   * the collection is encrypted and there is no cipher, and for a plain log
+   * line losing it beats failing the action that produced it. Callers whose
+   * activity doubles as a durable record (the Login activity's revocable
+   * grants) check the return value and escalate.
    *
    * @param options {object}
    * @param options.resourceId {string}
    * @param options.activity {WalletActivity}
-   * @returns {Promise<void>}
+   * @returns {Promise<boolean>}   whether the entry was persisted
    */
   private async _addHistoryItem({
     resourceId,
@@ -1080,16 +1082,17 @@ export class StorageManager {
   }: {
     resourceId: string
     activity: WalletActivity
-  }) {
+  }): Promise<boolean> {
     if (this._vaultLocked) {
       console.warn('Vault locked; skipping wallet-activity entry.')
-      return
+      return false
     }
     if (this._effectiveRemoteDirect) {
       await this._addHistoryItemRemote({ activity })
-      return
+      return true
     }
     await this._localStore.addHistoryItem({ resourceId, activity })
+    return true
   }
 
   /**
@@ -1303,7 +1306,9 @@ export class StorageManager {
    * logged in to a relying party via "Login with Wallet", granting the listed
    * capabilities. The recorded zcap ids are the hook for a revocation UI: the
    * WAS server now exposes a Space-scoped revocation endpoint, so a grant can
-   * be retired before its expiry.
+   * be retired before its expiry. Throws when grants were delegated but the
+   * entry could not be persisted (vault locked), so the caller can fail
+   * closed instead of handing out unrevocable capabilities.
    *
    * @param options {object}
    * @param options.user {User}
@@ -1339,7 +1344,7 @@ export class StorageManager {
       ? `Connected ${appConnect.name} (${origin}) to wallet` +
         `${appConnect.firstRun ? ', minting a new app key' : ''}.`
       : `Logged in to ${origin} with wallet.`
-    await this._addHistoryItem({
+    const persisted = await this._addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -1352,6 +1357,15 @@ export class StorageManager {
         created: new Date().toISOString()
       }
     })
+    // A skipped Login entry that carried grants is a failure, not a lost log
+    // line: the recorded zcap documents are the only revocation hook for the
+    // delegated capabilities.
+    if (!persisted && grants.length > 0) {
+      throw new Error(
+        'Vault locked: could not record the granted capabilities, which ' +
+          'would leave them unrevocable.'
+      )
+    }
   }
 
   /**
