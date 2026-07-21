@@ -1,5 +1,11 @@
 # History
 
+## 0.19.0 - 2026-07-21
+
+### Added
+
+- Add Contacts management, based on Freewallet Mobile's contacts sync.
+
 ## 0.18.1 - 2026-07-21
 
 ### Changed
