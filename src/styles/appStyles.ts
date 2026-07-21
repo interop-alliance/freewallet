@@ -641,60 +641,6 @@ export const storageStyles = {
     borderRadius: 999,
     backgroundColor: 'action.hover'
   },
-  quotaCollectionList: {
-    pt: 0.25
-  },
-  quotaCollectionRow: {
-    alignItems: 'center',
-    gap: 1.25,
-    minHeight: 28
-  },
-  quotaCollectionIcon: {
-    display: 'flex',
-    alignItems: 'center',
-    lineHeight: 0,
-    color: 'text.secondary',
-    flexShrink: 0
-  },
-  quotaCollectionName: {
-    color: 'text.secondary',
-    flex: '0 1 auto',
-    minWidth: 0,
-    fontSize: '0.8125rem',
-    maxWidth: '46%'
-  },
-  quotaCollectionValueWrap: {
-    flex: 1,
-    minWidth: 0,
-    display: 'flex',
-    alignItems: 'baseline',
-    justifyContent: 'flex-end',
-    gap: 0.375,
-    fontVariantNumeric: 'tabular-nums',
-    whiteSpace: 'nowrap'
-  },
-  quotaCollectionValueAmount: {
-    fontWeight: 700,
-    fontSize: '1.125rem',
-    lineHeight: 1,
-    letterSpacing: '-0.02em',
-    color: 'text.primary'
-  },
-  quotaCollectionValueUnit: {
-    fontWeight: 600,
-    fontSize: '0.875rem',
-    color: 'text.secondary'
-  },
-  quotaCollectionValueOf: {
-    mx: 0.25,
-    fontSize: '0.8125rem',
-    color: 'text.disabled'
-  },
-  quotaCollectionValueCapacity: {
-    fontWeight: 500,
-    fontSize: '0.875rem',
-    color: 'text.secondary'
-  },
   quotaMeasuredRow: {
     alignItems: 'center',
     pt: 0.5
@@ -848,6 +794,12 @@ export const storageStyles = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap'
   },
+  folderId: {
+    fontFamily: 'monospace',
+    fontSize: '0.8em',
+    fontWeight: 400,
+    color: 'text.secondary'
+  },
   folderMeta: {
     color: 'text.secondary'
   },
@@ -855,6 +807,13 @@ export const storageStyles = {
     color: 'text.secondary',
     flexShrink: 0,
     ml: 'auto'
+  },
+  folderUsage: {
+    color: 'text.secondary',
+    flexShrink: 0,
+    minWidth: 64,
+    textAlign: 'right',
+    fontVariantNumeric: 'tabular-nums'
   },
 
   /**

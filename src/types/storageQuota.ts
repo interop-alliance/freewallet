@@ -26,10 +26,3 @@ export type StorageQuotaStatus =
   | { kind: 'unavailable' }
   | { kind: 'error' }
   | { kind: 'ready'; quota: StorageQuotaView }
-
-export type CollectionQuotaRow = {
-  id: string
-  name: string
-  usageBytes: number
-  capacityBytes?: number
-}

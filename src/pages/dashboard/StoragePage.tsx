@@ -264,17 +264,6 @@ export const StoragePage = () => {
           </Stack>
           <Stack direction="row" spacing={1.5}>
             <Button
-              variant="outlined"
-              onClick={handleImportClick}
-              disabled={isImporting || importBlocked}
-              sx={[
-                storageStyles.buttonTextLeft,
-                storageStyles.buttonSize.topAction
-              ]}
-            >
-              {isImporting ? t('storage.importing') : t('storage.importSpace')}
-            </Button>
-            <Button
               variant="contained"
               onClick={handleExportSpace}
               disabled={isExporting || !hasRemoteStorage}
@@ -284,6 +273,17 @@ export const StoragePage = () => {
               ]}
             >
               {isExporting ? t('storage.exporting') : t('storage.exportSpace')}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handleImportClick}
+              disabled={isImporting || importBlocked}
+              sx={[
+                storageStyles.buttonTextLeft,
+                storageStyles.buttonSize.topAction
+              ]}
+            >
+              {isImporting ? t('storage.importing') : t('storage.importSpace')}
             </Button>
           </Stack>
           <input
@@ -297,11 +297,7 @@ export const StoragePage = () => {
       </Paper>
 
       {hasRemoteStorage && (
-        <StorageQuotaCard
-          status={quotaStatus}
-          collections={visibleCollections}
-          onRetry={handleRetryQuota}
-        />
+        <StorageQuotaCard status={quotaStatus} onRetry={handleRetryQuota} />
       )}
 
       <Box sx={storageStyles.collectionsWrap}>
@@ -316,7 +312,14 @@ export const StoragePage = () => {
           </Typography>
         )}
         {hasRemoteStorage && !isLoadingCollections && !collectionsError && (
-          <CollectionsOverview collections={visibleCollections} />
+          <CollectionsOverview
+            collections={visibleCollections}
+            usageByCollection={
+              quotaStatus.kind === 'ready'
+                ? quotaStatus.quota.usageByCollection
+                : undefined
+            }
+          />
         )}
       </Box>
     </DashboardLayout>

@@ -48,12 +48,6 @@ const ENCRYPTED_COLLECTIONS = WALLET_STANDARD_COLLECTIONS.filter(
   ({ encryption }) => encryption
 )
 
-// Maps an encrypted collection's logical key to its localized display-name key.
-const COLLECTION_NAME_KEY: Record<string, string> = {
-  privateCredentials: 'settings.sharedCollectionPrivateCredentials',
-  walletActivity: 'settings.sharedCollectionWalletActivity'
-}
-
 /**
  * Renders the shared-collections settings section for the current session.
  *
@@ -192,9 +186,11 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
               {t('settings.sharedRequiresFullSession')}
             </Typography>
           )}
-          {ENCRYPTED_COLLECTIONS.map(({ key, id }) => {
+          {ENCRYPTED_COLLECTIONS.map(({ id, name }) => {
             const shares = sharesByCollection[id] ?? []
-            const collectionName = t(COLLECTION_NAME_KEY[key] ?? '')
+            const collectionName = t(`storage.collectionNames.${id}`, {
+              defaultValue: name
+            })
             return (
               <Stack key={id} sx={{ gap: 1, mt: 1 }}>
                 <Typography variant="subtitle2">{collectionName}</Typography>

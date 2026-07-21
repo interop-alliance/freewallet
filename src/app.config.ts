@@ -95,7 +95,7 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
   {
     key: 'publicCredentials',
     id: 'public-credentials',
-    name: 'Publicly Shared Verifiable Credentials',
+    name: 'Verifiable Credentials (Publicly Shared)',
     isPublic: true
   },
   {

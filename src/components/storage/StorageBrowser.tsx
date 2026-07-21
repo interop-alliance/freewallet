@@ -3,6 +3,7 @@ import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { MdFolder, MdFolderOpen } from 'react-icons/md'
 import type { StorageCollection } from '@/lib/storage'
+import { formatBytes } from '@/lib/formatBytes'
 import { storageStyles } from '@/styles/appStyles'
 import { getCollectionDisplayName, groupCollections } from './displayUtils'
 import { PublicAccessIcon } from './PublicAccessIcon'
@@ -11,12 +12,12 @@ import { StorageEmptyState } from './EmptyState'
 
 interface CollectionsOverviewProps {
   collections: StorageCollection[]
-  backendName?: string
+  usageByCollection?: Map<string, number>
 }
 
 export function CollectionsOverview({
   collections,
-  backendName
+  usageByCollection
 }: CollectionsOverviewProps) {
   const { t } = useTranslation()
 
@@ -30,28 +31,27 @@ export function CollectionsOverview({
     )
   }
 
-  const resolvedBackend = backendName ?? t('storage.collectionBackend')
-  const { contents, app, system } = groupCollections({ collections })
+  const { contents, app, system } = groupCollections({ collections, t })
 
   return (
     <Stack spacing={3}>
       <CollectionGroup
         title={t('storage.groupWalletContents')}
         collections={contents}
-        backendName={resolvedBackend}
+        usageByCollection={usageByCollection}
       />
       {app.length > 0 && (
         <CollectionGroup
           title={t('storage.groupAppCollections')}
           description={t('storage.groupAppCollectionsDescription')}
           collections={app}
-          backendName={resolvedBackend}
+          usageByCollection={usageByCollection}
         />
       )}
       <CollectionGroup
         title={t('storage.groupSystemCollections')}
         collections={system}
-        backendName={resolvedBackend}
+        usageByCollection={usageByCollection}
         muted
       />
     </Stack>
@@ -67,13 +67,13 @@ function CollectionGroup({
   title,
   description,
   collections,
-  backendName,
+  usageByCollection,
   muted = false
 }: {
   title: string
   description?: string
   collections: StorageCollection[]
-  backendName: string
+  usageByCollection?: Map<string, number>
   muted?: boolean
 }) {
   if (collections.length === 0) {
@@ -101,7 +101,7 @@ function CollectionGroup({
           <CollectionFolderCard
             key={collection.id}
             collection={collection}
-            backendName={backendName}
+            usageBytes={usageByCollection?.get(collection.id)}
             muted={muted}
           />
         ))}
@@ -112,17 +112,17 @@ function CollectionGroup({
 
 interface CollectionFolderCardProps {
   collection: StorageCollection
-  backendName: string
+  usageBytes?: number
   muted?: boolean
 }
 
 function CollectionFolderCard({
   collection,
-  backendName,
+  usageBytes,
   muted = false
 }: CollectionFolderCardProps) {
   const { t } = useTranslation()
-  const displayName = getCollectionDisplayName(collection)
+  const displayName = getCollectionDisplayName(collection, t)
   const total = collection.totalItems ?? 0
   const targetPath = `/storage/collections/${encodeURIComponent(collection.id)}`
 
@@ -156,26 +156,32 @@ function CollectionFolderCard({
               }
             >
               {displayName}
-            </Typography>
-            <Typography
-              variant="caption"
-              sx={storageStyles.folderMeta}
-              component="div"
-            >
-              {backendName}
-              {collection.isPublic && (
-                <Box component="span" sx={storageStyles.folderMetaPublic}>
-                  {' · '}
-                  <PublicAccessIcon />
-                </Box>
-              )}
-              {collection.isEncrypted && (
-                <Box component="span" sx={storageStyles.folderMetaEncrypted}>
-                  {' · '}
-                  <EncryptedAccessIcon />
+              {displayName !== collection.id && (
+                <Box component="code" sx={storageStyles.folderId}>
+                  {' '}
+                  ({collection.id})
                 </Box>
               )}
             </Typography>
+            {(collection.isPublic || collection.isEncrypted) && (
+              <Typography
+                variant="caption"
+                sx={storageStyles.folderMeta}
+                component="div"
+              >
+                {collection.isPublic && (
+                  <Box component="span" sx={storageStyles.folderMetaPublic}>
+                    <PublicAccessIcon />
+                  </Box>
+                )}
+                {collection.isEncrypted && (
+                  <Box component="span" sx={storageStyles.folderMetaEncrypted}>
+                    {collection.isPublic && ' · '}
+                    <EncryptedAccessIcon />
+                  </Box>
+                )}
+              </Typography>
+            )}
           </Stack>
         </Stack>
         <Typography
@@ -185,6 +191,15 @@ function CollectionFolderCard({
         >
           {t('storage.resourceCount', { count: total })}
         </Typography>
+        {usageBytes != null && (
+          <Typography
+            variant="body2"
+            component="span"
+            sx={storageStyles.folderUsage}
+          >
+            {formatBytes(usageBytes)}
+          </Typography>
+        )}
       </CardActionArea>
     </Card>
   )

@@ -2,9 +2,27 @@
 
 ## 0.18.1 - TBD
 
+### Changed
+
+- Storage screen: moved per-collection usage out of the Storage usage card and
+  onto the Collection cards themselves (shown next to each resource count). The
+  usage card now shows only the overall backend usage, the measured timestamp,
+  and the max upload size.
+- Storage screen: collection cards now show the collection id (in code style)
+  next to the display name, each collection category sorts alphabetically by
+  display name, and the redundant "Default (WAS)" backend line is gone (also
+  from the collection contents page subtitle).
+- Renamed the public credentials collection to "Verifiable Credentials
+  (Publicly Shared)"; wallet-provisioned collections now display their
+  canonical name even on spaces provisioned under an older name, and those
+  names are now localized (en/es).
+- Storage screen: the Export button now comes first, and the import/export
+  actions are relabeled "Export (Backup) Space Contents" and "Import (Load)
+  from Backup".
+
 ### Fixed
 
-- - Fix Application revocation action (await behavior).
+- Fix Application revocation action (await behavior).
 
 ## 0.18.0 - 2026-07-20
 

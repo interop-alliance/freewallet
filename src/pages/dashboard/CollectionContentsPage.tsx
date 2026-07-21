@@ -297,7 +297,7 @@ export function CollectionContentsPage() {
     if (!collection) {
       return t('storage.collectionContentsTitle')
     }
-    return getCollectionDisplayName(collection)
+    return getCollectionDisplayName(collection, t)
   }, [collection, t])
 
   const subtitle = useMemo(() => {
@@ -305,7 +305,6 @@ export function CollectionContentsPage() {
       return ''
     }
     return t('storage.collectionContentsDescription', {
-      backend: t('storage.collectionBackend'),
       count: collection.totalItems ?? resources.length
     })
   }, [collection, resources.length, t])

@@ -11,19 +11,8 @@ import {
 } from '@mui/material'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
-import type { IconType } from 'react-icons'
-import {
-  MdAccessTime,
-  MdBadge,
-  MdCheckCircle,
-  MdFolder,
-  MdShare,
-  MdStorage,
-  MdTimeline
-} from 'react-icons/md'
+import { MdAccessTime, MdCheckCircle, MdStorage } from 'react-icons/md'
 import { formatBytes, formatBytesParts } from '@/lib/formatBytes'
-import { buildCollectionQuotaRows } from '@/lib/storageQuota'
-import type { StorageCollection } from '@/lib/storage'
 import type {
   BackendState,
   StorageQuotaStatus,
@@ -33,14 +22,7 @@ import { storageStyles as sx } from '@/styles/appStyles'
 
 interface StorageQuotaCardProps {
   status: StorageQuotaStatus
-  collections?: StorageCollection[]
   onRetry?: () => void
-}
-
-const COLLECTION_ICONS: Record<string, IconType> = {
-  'private-credentials': MdBadge,
-  'wallet-activity': MdTimeline,
-  'public-credentials': MdShare
 }
 
 const STATE_BADGE_TONE: Record<BackendState, (typeof sx)[keyof typeof sx]> = {
@@ -98,15 +80,8 @@ function formatLimitedSummary(t: TFunction, quota: StorageQuotaView): string {
   return t('storage.quota.limitedSummary', { used, capacity })
 }
 
-function QuotaReadyContent({
-  quota,
-  collections
-}: {
-  quota: StorageQuotaView
-  collections: StorageCollection[]
-}) {
+function QuotaReadyContent({ quota }: { quota: StorageQuotaView }) {
   const { t, i18n } = useTranslation()
-  const collectionRows = buildCollectionQuotaRows(quota, collections)
   const { amount, unit } = formatBytesParts(quota.usageBytes)
   const heroMeta = usageHeroMeta(t, unit)
   const measuredLabel = formatMeasuredLabel(t, i18n.language, quota.measuredAt)
@@ -177,60 +152,6 @@ function QuotaReadyContent({
         )}
       </Stack>
 
-      {collectionRows.length > 0 && (
-        <Stack spacing={1.25} sx={sx.quotaCollectionList}>
-          {collectionRows.map(row => {
-            const Icon = COLLECTION_ICONS[row.id] ?? MdFolder
-            const { amount: rowAmount, unit: rowUnit } = formatBytesParts(
-              row.usageBytes
-            )
-
-            return (
-              <Stack key={row.id} direction="row" sx={sx.quotaCollectionRow}>
-                <Box sx={sx.quotaCollectionIcon} aria-hidden>
-                  <Icon size={18} />
-                </Box>
-                <Typography variant="body2" sx={sx.quotaCollectionName}>
-                  {row.name}
-                </Typography>
-                <Box sx={sx.quotaCollectionValueWrap}>
-                  <Typography
-                    component="span"
-                    sx={sx.quotaCollectionValueAmount}
-                  >
-                    {rowAmount}
-                  </Typography>
-                  {rowUnit && (
-                    <Typography
-                      component="span"
-                      sx={sx.quotaCollectionValueUnit}
-                    >
-                      {rowUnit}
-                    </Typography>
-                  )}
-                  {!quota.isUnlimited && row.capacityBytes != null && (
-                    <>
-                      <Typography
-                        component="span"
-                        sx={sx.quotaCollectionValueOf}
-                      >
-                        {t('storage.quota.of')}
-                      </Typography>
-                      <Typography
-                        component="span"
-                        sx={sx.quotaCollectionValueCapacity}
-                      >
-                        {formatBytes(row.capacityBytes)}
-                      </Typography>
-                    </>
-                  )}
-                </Box>
-              </Stack>
-            )
-          })}
-        </Stack>
-      )}
-
       <Stack direction="row" spacing={0.75} sx={sx.quotaMeasuredRow}>
         <Box sx={sx.quotaMeasuredIcon} aria-hidden>
           <MdAccessTime size={14} />
@@ -251,11 +172,7 @@ function QuotaReadyContent({
   )
 }
 
-export function StorageQuotaCard({
-  status,
-  collections = [],
-  onRetry
-}: StorageQuotaCardProps) {
+export function StorageQuotaCard({ status, onRetry }: StorageQuotaCardProps) {
   const { t } = useTranslation()
 
   if (status.kind === 'unavailable') {
@@ -301,8 +218,6 @@ export function StorageQuotaCard({
           <Skeleton variant="text" width="40%" />
           <Skeleton variant="text" width="25%" height={40} />
           <Skeleton variant="text" width="100%" height={28} />
-          <Skeleton variant="text" width="100%" height={28} />
-          <Skeleton variant="text" width="100%" height={28} />
         </Stack>
       )}
 
@@ -319,9 +234,7 @@ export function StorageQuotaCard({
         </Stack>
       )}
 
-      {status.kind === 'ready' && (
-        <QuotaReadyContent quota={status.quota} collections={collections} />
-      )}
+      {status.kind === 'ready' && <QuotaReadyContent quota={status.quota} />}
     </Paper>
   )
 }

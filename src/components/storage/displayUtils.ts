@@ -20,45 +20,54 @@ const SYSTEM_COLLECTION_IDS = [
   UNLOCK_METHODS_COLLECTION.id
 ]
 
+// The wallet's canonical (untranslated) names for the collections it
+// provisions itself, used as the fallback for the localized
+// `storage.collectionNames.<id>` keys. Preferred over the server-stored name
+// so a rename here takes effect on existing spaces too (the stored name is
+// set once at provisioning).
+const CANONICAL_COLLECTION_NAMES = new Map<string, string>([
+  ...WALLET_STANDARD_COLLECTIONS.map(
+    ({ id, name }) => [id, name] as [string, string]
+  ),
+  [ID_COLLECTION.id, ID_COLLECTION.name],
+  [UNLOCK_METHODS_COLLECTION.id, UNLOCK_METHODS_COLLECTION.name]
+])
+
 /**
- * Splits the listed collections into the Storage page's three display groups.
- * Group-internal order is the declaration order above for the known wallet
- * collections, and display-name order for application collections (anything
- * whose id the wallet does not recognize is, by definition, externally
- * registered).
+ * Splits the listed collections into the Storage page's three display groups,
+ * each sorted alphabetically by display name (anything whose id the wallet
+ * does not recognize is, by definition, externally registered and lands in the
+ * application group).
  *
  * @param options {object}
  * @param options.collections {StorageCollection[]}
+ * @param options.t {TFunction}
  * @returns {{contents, app, system}} The three groups, each possibly empty.
  */
 export function groupCollections({
-  collections
+  collections,
+  t
 }: {
   collections: StorageCollection[]
+  t: TFunction
 }): {
   contents: StorageCollection[]
   app: StorageCollection[]
   system: StorageCollection[]
 } {
-  const byId = new Map(
-    collections.map(collection => [collection.id, collection])
-  )
+  const byDisplayName = (left: StorageCollection, right: StorageCollection) =>
+    getCollectionDisplayName(left, t).localeCompare(
+      getCollectionDisplayName(right, t)
+    )
   const known = (ids: string[]) =>
-    ids.flatMap(id => {
-      const collection = byId.get(id)
-      return collection ? [collection] : []
-    })
+    collections.filter(({ id }) => ids.includes(id)).sort(byDisplayName)
   const app = collections
     .filter(
       ({ id }) =>
         !CONTENTS_COLLECTION_IDS.includes(id) &&
         !SYSTEM_COLLECTION_IDS.includes(id)
     )
-    .sort((left, right) =>
-      getCollectionDisplayName(left).localeCompare(
-        getCollectionDisplayName(right)
-      )
-    )
+    .sort(byDisplayName)
   return {
     contents: known(CONTENTS_COLLECTION_IDS),
     app,
@@ -67,8 +76,15 @@ export function groupCollections({
 }
 
 export function getCollectionDisplayName(
-  collection: StorageCollection
+  collection: StorageCollection,
+  t: TFunction
 ): string {
+  const canonical = CANONICAL_COLLECTION_NAMES.get(collection.id)
+  if (canonical) {
+    return t(`storage.collectionNames.${collection.id}`, {
+      defaultValue: canonical
+    })
+  }
   if (collection.name && collection.name.trim().length > 0) {
     return collection.name
   }
