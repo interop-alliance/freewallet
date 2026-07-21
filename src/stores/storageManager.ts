@@ -47,6 +47,7 @@ import {
   WALLET_STANDARD_COLLECTIONS,
   WAS_SERVER_URL
 } from '@/app.config'
+import { getOrCreateDeviceId } from '@/lib/deviceId'
 import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
 import { ensureDidWebvh, type DidWebKeyMapV2 } from '@/lib/didWebvh'
 import {
@@ -60,6 +61,7 @@ import type { Json, SyncedDoc } from '@/lib/sync'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
 import type { FetchedCollectionResource } from '@/lib/storageResource'
 import type { StoredCredential } from '@/types/credential'
+import type { StoredContact } from '@/types/contact'
 import { BrowserStore } from '@/stores/browserStore'
 import {
   WASRemoteStore,
@@ -982,13 +984,6 @@ export class StorageManager {
       throw new Error('Provisioning a collection requires remote storage.')
     }
     await this._remoteStore.ensureCollection({ id, name, isPublic })
-  }
-
-  async deleteCollection({ id }: { id: string }): Promise<void> {
-    if (!this._remoteStore) {
-      throw new Error('Deleting a collection requires remote storage.')
-    }
-    await this._remoteStore.deleteCollection({ id })
   }
 
   async deleteCollection({ id }: { id: string }): Promise<void> {

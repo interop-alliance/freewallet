@@ -18,6 +18,10 @@
  * collapse any duplicate rows the same way.
  */
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
+import type {
+  ContactHeadPayload,
+  ContactRevisionPayload
+} from '@interop/social-core'
 import {
   createRxDatabase,
   type RxCollection,
@@ -25,6 +29,7 @@ import {
   type RxStorage
 } from 'rxdb/plugins/core'
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
+import { uuidv7 } from 'uuidv7'
 import type { User } from '@/types/auth'
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 import { bufferToBase64Url, cidFrom, digestHash } from '@/lib/cidFrom'
@@ -40,6 +45,7 @@ import {
   type DocCipher
 } from '@/stores/edvDocCipher'
 import type { StoredCredential } from '@/types/credential'
+import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'
 
 /**
@@ -230,6 +236,35 @@ export class BrowserStore {
       ...(epoch !== undefined && { epoch }),
       data
     })
+  }
+
+  /**
+   * Rewrites an existing synced-doc row's body in place -- the mutable
+   * counterpart of {@link _insertDoc}, used only by the `contacts` head
+   * document (every other collection is content-addressed and never updated).
+   * Throws if the row does not exist; the caller (`updateContact`) always
+   * targets a row it just read.
+   *
+   * @param options {object}
+   * @param options.logicalKey {string}
+   * @param options.id {string}
+   * @param options.data {Json}
+   * @returns {Promise<void>}
+   */
+  private async _updateDoc({
+    logicalKey,
+    id,
+    data
+  }: {
+    logicalKey: string
+    id: string
+    data: Json
+  }) {
+    const doc = await this.rxCollection(logicalKey).findOne(id).exec()
+    if (!doc) {
+      throw new Error(`No local "${logicalKey}" row "${id}" to update.`)
+    }
+    await doc.incrementalPatch({ updatedAt: new Date().toISOString(), data })
   }
 
   /**
@@ -678,6 +713,235 @@ export class BrowserStore {
     this._undecryptableHistory = undecryptable
     this._unknownEpochHistory = unknownEpoch
     return items
+  }
+
+  /**
+   * Reads every live `contacts` row, decrypting envelope rows and passing
+   * legacy plaintext rows through. Unlike credentials, a contact's row id is
+   * NOT content-derived -- it is a stable id minted at creation
+   * ({@link addContact}) -- so this simply reflects the current row set
+   * (`_updateDoc` rewrites a row's body in place rather than replacing the
+   * row), no cid-based dedupe needed.
+   *
+   * A row whose envelope will not decrypt under the current KAK is skipped
+   * (logged), same tolerant pattern as `_credentialEntries`.
+   *
+   * @returns {Promise<Array<{ rowId: string; head: ContactHeadPayload }>>}
+   */
+  private async _contactEntries(): Promise<
+    Array<{ rowId: string; head: ContactHeadPayload }>
+  > {
+    const docs = await this.rxCollection('contacts')
+      .find({ sort: [{ updatedAt: 'asc' }] })
+      .exec()
+    const cipher = this._ciphers?.contacts
+    const entries: Array<{ rowId: string; head: ContactHeadPayload }> = []
+    for (const doc of docs) {
+      const { id, data } = doc.toMutableJSON()
+      if (cipher && isEncryptedEnvelope(data)) {
+        try {
+          const head = (await cipher.decrypt({
+            envelope: data!
+          })) as unknown as ContactHeadPayload
+          entries.push({ rowId: id, head })
+        } catch (err) {
+          console.warn(`Skipping undecryptable contacts row "${id}":`, err)
+        }
+      } else {
+        entries.push({ rowId: id, head: data as unknown as ContactHeadPayload })
+      }
+    }
+    return entries
+  }
+
+  /**
+   * Lists the stored contacts, oldest first.
+   *
+   * @returns {Promise<Array<StoredContact>>}
+   */
+  async listContacts(): Promise<Array<StoredContact>> {
+    const entries = await this._contactEntries()
+    return entries.map(({ rowId, head }) => ({
+      id: rowId,
+      contact: head.contact,
+      updatedAt: head.updatedAt
+    }))
+  }
+
+  /**
+   * @param options {object}
+   * @param options.id {string}
+   * @returns {Promise<StoredContact | undefined>}
+   */
+  async loadContact({
+    id
+  }: {
+    id: string
+  }): Promise<StoredContact | undefined> {
+    const entry = (await this._contactEntries()).find(
+      ({ rowId }) => rowId === id
+    )
+    return entry
+      ? {
+          id: entry.rowId,
+          contact: entry.head.contact,
+          updatedAt: entry.head.updatedAt
+        }
+      : undefined
+  }
+
+  /**
+   * Adds a contact to the local `contacts` collection under a freshly minted,
+   * stable row id -- unlike credentials, this id is NOT content-derived, so
+   * a later edit can rewrite the same row in place ({@link updateContact}).
+   *
+   * @param options {object}
+   * @param options.contact {ContactData}
+   * @param options.deviceId {string}
+   * @returns {Promise<StoredContact>}
+   */
+  async addContact({
+    contact,
+    deviceId
+  }: {
+    contact: ContactHeadPayload['contact']
+    deviceId: string
+  }): Promise<StoredContact> {
+    const id = uuidv7()
+    const updatedAt = new Date().toISOString()
+    const head: ContactHeadPayload = {
+      contactId: id,
+      updatedAt,
+      deviceId,
+      contact
+    }
+    const cipher = this._ciphers?.contacts
+    const body = cipher
+      ? (await cipher.encrypt({ data: head as unknown as Json })).envelope
+      : (head as unknown as Json)
+    await this._insertDoc({ logicalKey: 'contacts', id, data: body })
+    return { id, contact, updatedAt }
+  }
+
+  /**
+   * Rewrites a contact's row in place under its existing id, re-encrypting
+   * the whole head payload (fresh JWE nonce, so the envelope bytes always
+   * change even for a no-op save).
+   *
+   * @param options {object}
+   * @param options.id {string}
+   * @param options.contact {ContactData}
+   * @param options.deviceId {string}
+   * @returns {Promise<StoredContact>}
+   */
+  async updateContact({
+    id,
+    contact,
+    deviceId
+  }: {
+    id: string
+    contact: ContactHeadPayload['contact']
+    deviceId: string
+  }): Promise<StoredContact> {
+    const updatedAt = new Date().toISOString()
+    const head: ContactHeadPayload = {
+      contactId: id,
+      updatedAt,
+      deviceId,
+      contact
+    }
+    const cipher = this._ciphers?.contacts
+    const body = cipher
+      ? (await cipher.encrypt({ data: head as unknown as Json })).envelope
+      : (head as unknown as Json)
+    await this._updateDoc({ logicalKey: 'contacts', id, data: body })
+    return { id, contact, updatedAt }
+  }
+
+  /**
+   * Removes a contact's row (a soft delete; replication pushes the tombstone).
+   *
+   * @param options {object}
+   * @param options.id {string}
+   * @returns {Promise<void>}
+   */
+  async deleteContact({ id }: { id: string }): Promise<void> {
+    const doc = await this.rxCollection('contacts').findOne(id).exec()
+    if (doc) {
+      await doc.remove()
+    }
+  }
+
+  /**
+   * Appends an entry to the local `contacts-history` log -- content-addressed
+   * and append-only, exactly like `wallet-activity`. Called once per contact
+   * mutation (create/update/delete) so the edit log mirrors Freewallet
+   * mobile's `contact_revisions` table.
+   *
+   * @param options {object}
+   * @param options.revision {ContactRevisionPayload}
+   * @returns {Promise<void>}
+   */
+  async addContactRevision({
+    revision
+  }: {
+    revision: ContactRevisionPayload
+  }): Promise<void> {
+    const cipher = this._ciphers?.contactsHistory
+    if (!cipher) {
+      await this._insertDoc({
+        logicalKey: 'contactsHistory',
+        id: uuidv7(),
+        data: revision as unknown as Json
+      })
+      return
+    }
+    const { id, envelope } = await cipher.encrypt({
+      data: revision as unknown as Json
+    })
+    await this._insertDoc({ logicalKey: 'contactsHistory', id, data: envelope })
+  }
+
+  /**
+   * Lists a single contact's revision history, most recent first.
+   *
+   * @param options {object}
+   * @param options.contactId {string}
+   * @returns {Promise<Array<ContactRevisionPayload>>}
+   */
+  async listContactRevisions({
+    contactId
+  }: {
+    contactId: string
+  }): Promise<Array<ContactRevisionPayload>> {
+    const docs = await this.rxCollection('contactsHistory')
+      .find({ sort: [{ updatedAt: 'desc' }] })
+      .exec()
+    const cipher = this._ciphers?.contactsHistory
+    const revisions: ContactRevisionPayload[] = []
+    for (const doc of docs) {
+      const { id, data } = doc.toMutableJSON()
+      let revision: ContactRevisionPayload
+      if (cipher && isEncryptedEnvelope(data)) {
+        try {
+          revision = (await cipher.decrypt({
+            envelope: data!
+          })) as unknown as ContactRevisionPayload
+        } catch (err) {
+          console.warn(
+            `Skipping undecryptable contacts-history row "${id}":`,
+            err
+          )
+          continue
+        }
+      } else {
+        revision = data as unknown as ContactRevisionPayload
+      }
+      if (revision.contactId === contactId) {
+        revisions.push(revision)
+      }
+    }
+    return revisions
   }
 
   /**

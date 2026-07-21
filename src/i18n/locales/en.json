@@ -26,6 +26,7 @@
     "copy": "Copy",
     "copied": "Copied!",
     "edit": "Edit",
+    "delete": "Delete",
     "message": "Message",
     "sync": "Sync",
     "activity": "Activity",
@@ -270,10 +271,55 @@
   },
   "contacts": {
     "title": "Contacts",
-    "addContacts": "Add Contacts"
+    "addContacts": "Add Contacts",
+    "empty": "No contacts yet."
   },
   "contactDetail": {
     "title": "Contact details"
+  },
+  "contact": {
+    "loadError": "Could not load your contacts. Please try again.",
+    "deleteError": "Could not delete this contact. Please try again.",
+    "deleted": "Contact deleted.",
+    "history": "History",
+    "sections": {
+      "details": "Details",
+      "phone": "Phone",
+      "email": "Email",
+      "note": "Note"
+    },
+    "deleteDialog": {
+      "title": "Delete this contact?",
+      "message": "This will permanently remove the contact from your wallet."
+    }
+  },
+  "contactForm": {
+    "addTitle": "Add contact",
+    "editTitle": "Edit contact",
+    "displayName": "Display name",
+    "firstName": "First name",
+    "lastName": "Last name",
+    "organization": "Organization",
+    "label": "Label",
+    "phoneNumber": "Number",
+    "emailAddress": "Email",
+    "note": "Note",
+    "addRow": "Add {{field}}",
+    "removeRow": "Remove",
+    "errors": {
+      "nameRequired": "Please enter a name.",
+      "saveFailed": "Could not save this contact. Please try again."
+    }
+  },
+  "contactHistory": {
+    "title": "Contact history",
+    "empty": "No history yet.",
+    "actions": {
+      "create": "Created",
+      "update": "Updated",
+      "delete": "Deleted",
+      "restore": "Restored"
+    }
   },
   "history": {
     "title": "History",

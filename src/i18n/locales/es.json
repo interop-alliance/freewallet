@@ -26,6 +26,7 @@
     "copy": "Copiar",
     "copied": "¡Copiado!",
     "edit": "Editar",
+    "delete": "Eliminar",
     "message": "Mensaje",
     "sync": "Sincronizar",
     "activity": "Actividad",
@@ -270,10 +271,55 @@
   },
   "contacts": {
     "title": "Contactos",
-    "addContacts": "Añadir contactos"
+    "addContacts": "Añadir contactos",
+    "empty": "Todavía no hay contactos."
   },
   "contactDetail": {
     "title": "Detalle del contacto"
+  },
+  "contact": {
+    "loadError": "No se pudieron cargar tus contactos. Inténtalo de nuevo.",
+    "deleteError": "No se pudo eliminar este contacto. Inténtalo de nuevo.",
+    "deleted": "Contacto eliminado.",
+    "history": "Historial",
+    "sections": {
+      "details": "Detalles",
+      "phone": "Teléfono",
+      "email": "Correo electrónico",
+      "note": "Nota"
+    },
+    "deleteDialog": {
+      "title": "¿Eliminar este contacto?",
+      "message": "Esto eliminará permanentemente el contacto de tu billetera."
+    }
+  },
+  "contactForm": {
+    "addTitle": "Añadir contacto",
+    "editTitle": "Editar contacto",
+    "displayName": "Nombre para mostrar",
+    "firstName": "Nombre",
+    "lastName": "Apellido",
+    "organization": "Organización",
+    "label": "Etiqueta",
+    "phoneNumber": "Número",
+    "emailAddress": "Correo electrónico",
+    "note": "Nota",
+    "addRow": "Añadir {{field}}",
+    "removeRow": "Eliminar",
+    "errors": {
+      "nameRequired": "Introduce un nombre.",
+      "saveFailed": "No se pudo guardar este contacto. Inténtalo de nuevo."
+    }
+  },
+  "contactHistory": {
+    "title": "Historial del contacto",
+    "empty": "Todavía no hay historial.",
+    "actions": {
+      "create": "Creado",
+      "update": "Actualizado",
+      "delete": "Eliminado",
+      "restore": "Restaurado"
+    }
   },
   "history": {
     "title": "Historial",

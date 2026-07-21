@@ -1010,6 +1010,38 @@ export const contactDetailStyles = {
   }
 } as const
 
+export const contactFormStyles = {
+  form: {
+    mt: 3,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    maxWidth: 520
+  },
+  rowsSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1
+  },
+  rowGroup: {
+    alignItems: 'center'
+  },
+  labelInput: {
+    width: 140,
+    flexShrink: 0
+  },
+  addRowButton: {
+    alignSelf: 'flex-start',
+    textTransform: 'none'
+  },
+  saveButton: {
+    textTransform: 'none',
+    px: 4,
+    py: 1,
+    borderRadius: 2
+  }
+} as const
+
 export const notFoundStyles = {
   page: {
     minHeight: '100dvh',

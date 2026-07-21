@@ -47,6 +47,16 @@ const ContactDetailPage = lazy(() =>
     default: m.ContactDetailPage
   }))
 )
+const ContactFormPage = lazy(() =>
+  import('@/pages/dashboard/ContactFormPage').then(m => ({
+    default: m.ContactFormPage
+  }))
+)
+const ContactHistoryPage = lazy(() =>
+  import('@/pages/dashboard/ContactHistoryPage').then(m => ({
+    default: m.ContactHistoryPage
+  }))
+)
 const StoragePage = lazy(() =>
   import('@/pages/dashboard/StoragePage').then(m => ({
     default: m.StoragePage
@@ -126,6 +136,7 @@ function App() {
         <Route element={<ProtectedRoute />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/contacts" element={<ContactsPage />} />
+          <Route path="/contacts/new" element={<ContactFormPage />} />
           <Route path="/storage" element={<StoragePage />} />
           <Route
             path="/storage/collections/:collectionId"

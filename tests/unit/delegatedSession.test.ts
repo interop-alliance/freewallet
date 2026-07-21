@@ -127,8 +127,8 @@ describe('persistDelegatedSession', () => {
 
     await persistDelegatedSession({ session })
 
-    // One space read + three standard collections + one keystore.
-    expect(delegate).toHaveBeenCalledTimes(5)
+    // One space read + five standard collections + one keystore.
+    expect(delegate).toHaveBeenCalledTimes(7)
     expect(delegate).toHaveBeenCalledWith(
       expect.objectContaining({
         invocationTarget: SPACE_URL,
@@ -162,7 +162,9 @@ describe('persistDelegatedSession', () => {
         collectionCapabilities: expect.objectContaining({
           'private-credentials': expect.anything(),
           'public-credentials': expect.anything(),
-          'wallet-activity': expect.anything()
+          'wallet-activity': expect.anything(),
+          contacts: expect.anything(),
+          'contacts-history': expect.anything()
         })
       })
     })

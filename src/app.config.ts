@@ -3,6 +3,10 @@
  * constants.
  */
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
+import {
+  CONTACTS_COLLECTION,
+  CONTACTS_HISTORY_COLLECTION
+} from '@interop/social-core'
 
 const env = import.meta.env
 
@@ -103,6 +107,21 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
     id: 'wallet-activity',
     name: 'Wallet Activity Log',
     encryption: { scheme: 'edv' }
+  },
+  // Ids come from `@interop/social-core` (not hardcoded) so this collection
+  // matches Freewallet mobile's byte-for-byte -- a disagreement here would
+  // split writes into separate collections that never converge.
+  {
+    key: 'contacts',
+    id: CONTACTS_COLLECTION,
+    name: 'Contacts',
+    encryption: { scheme: 'edv' }
+  },
+  {
+    key: 'contactsHistory',
+    id: CONTACTS_HISTORY_COLLECTION,
+    name: 'Contacts History',
+    encryption: { scheme: 'edv' }
   }
 ]
 
@@ -110,10 +129,16 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
 // collection, projected down to the (key, id) pair the collection-agnostic
 // adapter needs. Every WALLET_STANDARD_COLLECTIONS entry syncs -- the `id`
 // collection (below) is deliberately kept out of that list and so out of this
-// one. All synced collections are immutable per item and content-addressed --
+// one. Most synced collections are immutable per item and content-addressed --
 // `public-credentials` plaintext (keyed by credential cid), the encrypted ones
-// as EDV envelopes (keyed by a hash of the JWE ciphertext); the adapter ships
-// the stored bodies verbatim either way.
+// as EDV envelopes (keyed by a hash of the JWE ciphertext) -- and the adapter
+// ships the stored bodies verbatim either way. `contacts` is the one mutable
+// exception: a stable, randomly-derived row id whose body is genuinely
+// overwritten in place (see `CONTACTS_COLLECTION_SPEC` in
+// `@interop/social-core`), matching Freewallet mobile's SQLite head-document
+// row. The push handler already supports an in-place content update
+// generically (see `pushWrites.ts`); `contacts-history` stays content-addressed
+// and immutable, same as `wallet-activity`.
 export const SYNCED_COLLECTIONS: Array<{ key: string; id: string }> =
   WALLET_STANDARD_COLLECTIONS.map(({ key, id }) => ({ key, id }))
 /**
