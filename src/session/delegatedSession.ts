@@ -260,6 +260,20 @@ export async function restoreDelegatedSession({
     await clearPersistedSession({ idb })
     return null
   }
+  // The record must hold a write zcap for every standard collection this
+  // build syncs. A record minted before a collection was added would
+  // otherwise restore fine and then wedge that collection's push replication:
+  // the capability lookup falls back to the read-only Space zcap, the server
+  // rejects every write, and RxDB retries until the record's TTL runs out.
+  // Fail closed instead -- clearing the record costs one fresh login, which
+  // re-mints the full set.
+  const missingCollectionCapability = WALLET_STANDARD_COLLECTIONS.some(
+    ({ id }) => !record.collectionCapabilities?.[id]
+  )
+  if (missingCollectionCapability) {
+    await clearPersistedSession({ idb })
+    return null
+  }
 
   const zcapClient = new ZcapClient({
     SuiteClass: Ed25519Signature2020,

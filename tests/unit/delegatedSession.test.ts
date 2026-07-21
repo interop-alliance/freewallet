@@ -85,8 +85,14 @@ function persistedRecord(
     sessionDid: SESSION_DID,
     expires: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     spaceReadCapability: { id: 'urn:zcap:space-read' } as unknown as IZcap,
+    // Restore refuses a record missing any standard collection's zcap, so the
+    // fixture carries the full set.
     collectionCapabilities: {
-      'private-credentials': { id: 'urn:zcap:pc' } as unknown as IZcap
+      'private-credentials': { id: 'urn:zcap:pc' } as unknown as IZcap,
+      'public-credentials': { id: 'urn:zcap:pubc' } as unknown as IZcap,
+      'wallet-activity': { id: 'urn:zcap:wa' } as unknown as IZcap,
+      contacts: { id: 'urn:zcap:contacts' } as unknown as IZcap,
+      'contacts-history': { id: 'urn:zcap:ch' } as unknown as IZcap
     },
     keystoreId: KEYSTORE_ID,
     keystoreCapability: { id: 'urn:zcap:keystore' } as unknown as IZcap,
@@ -351,6 +357,21 @@ describe('restoreDelegatedSession', () => {
   it('clears and refuses a record whose session did does not match the key', async () => {
     vi.mocked(sessionKey.loadSessionRecord).mockResolvedValue(
       persistedRecord({ sessionDid: 'did:key:z6MkSomeOtherKey' })
+    )
+
+    expect(await restoreDelegatedSession()).toBeNull()
+    expect(sessionKey.clearPersistedSession).toHaveBeenCalled()
+  })
+
+  it('clears and refuses a record missing a standard collection zcap', async () => {
+    // A record minted by a build that synced fewer collections (e.g.
+    // pre-contacts): restoring it would wedge the missing collection's push
+    // replication behind the read-only Space fallback, so restore fails
+    // closed to a fresh login instead.
+    const { contacts: _dropped, ...staleCapabilities } =
+      persistedRecord().collectionCapabilities
+    vi.mocked(sessionKey.loadSessionRecord).mockResolvedValue(
+      persistedRecord({ collectionCapabilities: staleCapabilities })
     )
 
     expect(await restoreDelegatedSession()).toBeNull()
