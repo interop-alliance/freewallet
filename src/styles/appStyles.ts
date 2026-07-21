@@ -225,7 +225,7 @@ export const dashboardStyles = {
     p: { xs: 3, md: 6 }
   },
   title: {
-    fontWeight: 500
+    fontWeight: 600
   },
   settingsRow: {
     flexDirection: 'row',
@@ -261,17 +261,10 @@ export const dashboardStyles = {
   },
   applicationsAppCard: {
     flexDirection: { xs: 'column', sm: 'row' },
-    alignItems: { sm: 'center' },
+    alignItems: { xs: 'flex-start', sm: 'center' },
     justifyContent: 'space-between',
     gap: 1,
-    p: 1.5,
-    border: '1px solid',
-    borderColor: 'divider',
-    borderRadius: 2,
-    cursor: 'pointer',
-    '&:hover': {
-      backgroundColor: 'action.hover'
-    }
+    p: 1.5
   },
   applicationsAppMeta: {
     flexDirection: 'row',
@@ -729,9 +722,6 @@ export const storageStyles = {
     maxWidth: 1200
   },
   collectionsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 1,
     width: '100%'
   },
   collectionGroupHeading: {
@@ -749,29 +739,15 @@ export const storageStyles = {
     mb: 1
   },
   folderCard: {
-    borderRadius: 2,
-    transition: 'border-color 120ms ease, box-shadow 120ms ease',
-    '&:hover': {
-      borderColor: 'text.primary'
-    }
-  },
-  systemFolderCard: {
-    borderRadius: 2,
-    transition: 'border-color 120ms ease, box-shadow 120ms ease',
-    bgcolor: 'action.hover',
-    '&:hover': {
-      borderColor: 'text.primary'
-    }
-  },
-  folderCardAction: {
     px: 2,
     py: 1.5,
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
+    gap: 2
+  },
+  systemFolderCard: {
+    px: 2,
+    py: 1.5,
     gap: 2,
-    width: '100%',
-    justifyContent: 'flex-start'
+    bgcolor: 'action.hover'
   },
   folderCardHeader: {
     alignItems: 'center',

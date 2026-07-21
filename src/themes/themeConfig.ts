@@ -24,9 +24,10 @@ export type ThemeDefinition = {
 }
 
 const WEST_COAST_FONT =
-  '"Helvetica Neue", Helvetica, Inter, system-ui, sans-serif'
+  '"Helvetica Neue", Helvetica, "Inter Variable", Inter, system-ui, sans-serif'
 
-const DEFAULT_FONT = '"Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+const DEFAULT_FONT =
+  '"Inter Variable", "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
 
 export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   default: {

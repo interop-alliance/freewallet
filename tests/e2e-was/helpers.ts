@@ -41,7 +41,7 @@ export async function goToHistory(page: Page) {
   await page.getByRole('link', { name: 'History' }).click()
   await expect(page).toHaveURL(/#\/history/)
   await expect(
-    page.getByRole('heading', { name: 'History', level: 3 })
+    page.getByRole('heading', { name: 'History', level: 1 })
   ).toBeVisible()
 }
 

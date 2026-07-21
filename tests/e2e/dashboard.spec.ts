@@ -21,7 +21,7 @@ test.describe('Dashboard page', () => {
 
     test('shows "Freewallet Dashboard" title', async ({ page }) => {
       await expect(
-        page.getByRole('heading', { name: 'Freewallet Dashboard', level: 3 })
+        page.getByRole('heading', { name: 'Freewallet Dashboard', level: 1 })
       ).toBeVisible()
     })
 

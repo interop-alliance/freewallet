@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { HashRouter } from 'react-router'
+import '@fontsource-variable/inter'
 import '@/i18n'
 import { InfoBoxProvider } from '@/context/InfoBoxProvider'
 import { FreewalletThemeProvider } from '@/components/FreewalletThemeProvider'

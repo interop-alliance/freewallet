@@ -154,7 +154,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
             {t('session.lockedVault')}
           </Alert>
         )}
-        <Typography variant="h3" component="h3" sx={dashboardStyles.title}>
+        <Typography variant="h4" component="h1" sx={dashboardStyles.title}>
           {title}
         </Typography>
         {children}

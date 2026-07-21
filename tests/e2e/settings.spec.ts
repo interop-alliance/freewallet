@@ -19,7 +19,7 @@ test.describe('Settings page', () => {
 
     test('shows "Settings" title', async ({ page }) => {
       await expect(
-        page.getByRole('heading', { name: 'Settings', level: 3 })
+        page.getByRole('heading', { name: 'Settings', level: 1 })
       ).toBeVisible()
     })
 
@@ -41,7 +41,7 @@ test.describe('Settings page', () => {
       await page.getByRole('link', { name: 'Dashboard' }).click()
       await expect(page).toHaveURL(/#\/dashboard/)
       await expect(
-        page.getByRole('heading', { name: 'Freewallet Dashboard', level: 3 })
+        page.getByRole('heading', { name: 'Freewallet Dashboard', level: 1 })
       ).toBeVisible()
     })
   })

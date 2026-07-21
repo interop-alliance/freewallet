@@ -1,4 +1,11 @@
-import { Box, Card, CardActionArea, Stack, Typography } from '@mui/material'
+import {
+  Box,
+  List,
+  ListItem,
+  ListItemButton,
+  Stack,
+  Typography
+} from '@mui/material'
 import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { MdFolder, MdFolderOpen, MdSettings } from 'react-icons/md'
@@ -96,7 +103,7 @@ function CollectionGroup({
           {description}
         </Typography>
       )}
-      <Box sx={storageStyles.collectionsList} role="list">
+      <List disablePadding sx={storageStyles.collectionsList}>
         {collections.map(collection => (
           <CollectionFolderCard
             key={collection.id}
@@ -105,7 +112,7 @@ function CollectionGroup({
             muted={muted}
           />
         ))}
-      </Box>
+      </List>
     </Box>
   )
 }
@@ -127,16 +134,11 @@ function CollectionFolderCard({
   const targetPath = `/storage/collections/${encodeURIComponent(collection.id)}`
 
   return (
-    <Card
-      role="listitem"
-      variant="outlined"
-      sx={muted ? storageStyles.systemFolderCard : storageStyles.folderCard}
-      aria-label={displayName}
-    >
-      <CardActionArea
+    <ListItem disablePadding divider>
+      <ListItemButton
         component={RouterLink}
         to={targetPath}
-        sx={storageStyles.folderCardAction}
+        sx={muted ? storageStyles.systemFolderCard : storageStyles.folderCard}
       >
         <Stack
           direction="row"
@@ -205,7 +207,7 @@ function CollectionFolderCard({
             {formatBytes(usageBytes)}
           </Typography>
         )}
-      </CardActionArea>
-    </Card>
+      </ListItemButton>
+    </ListItem>
   )
 }
