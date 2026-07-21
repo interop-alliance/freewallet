@@ -39,6 +39,7 @@ import {
   type Json,
   type SyncedDoc
 } from '@/lib/sync'
+import { createContactsConflictHandler } from '@/stores/contactsConflictHandler'
 import {
   isEncryptedEnvelope,
   UnknownEpochError,
@@ -166,13 +167,21 @@ export class BrowserStore {
       multiInstance: false
     })
     // One local collection per standard wallet collection, all on the generic
-    // synced-doc schema.
+    // synced-doc schema. `contacts` -- the one mutable, overwritten-in-place
+    // collection -- gets the shared last-write-wins conflict handler; the
+    // content-addressed collections can never write-write conflict, so they
+    // keep RxDB's default.
     const collectionsConfig = Object.fromEntries(
       WALLET_STANDARD_COLLECTIONS.map(({ key }) => [
         key,
         {
           schema: syncedDocSchema(),
-          migrationStrategies: syncedDocMigrationStrategies()
+          migrationStrategies: syncedDocMigrationStrategies(),
+          ...(key === 'contacts' && {
+            conflictHandler: createContactsConflictHandler({
+              getCipher: () => this._ciphers?.contacts
+            })
+          })
         }
       ])
     )

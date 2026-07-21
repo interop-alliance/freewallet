@@ -29,6 +29,12 @@ export function ContactFormPage() {
   const [saving, setSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
+  // The full loaded ContactData when editing. buildContact() spreads it under
+  // the form-bound fields so everything the form does not surface (nativeId,
+  // middleName, prefix/suffix, jobTitle, department, postalAddresses,
+  // imAddresses, urlAddresses, birthday, isStarred, ...) survives a save
+  // instead of being silently stripped from the head payload.
+  const [existingContact, setExistingContact] = useState<ContactData>()
   const [displayName, setDisplayName] = useState('')
   const [givenName, setGivenName] = useState('')
   const [familyName, setFamilyName] = useState('')
@@ -54,6 +60,7 @@ export function ContactFormPage() {
           return
         }
         const { contact } = stored
+        setExistingContact(contact)
         setDisplayName(contact.displayName)
         setGivenName(contact.givenName ?? '')
         setFamilyName(contact.familyName ?? '')
@@ -94,6 +101,10 @@ export function ContactFormPage() {
     const trimmedName =
       displayName.trim() || `${givenName.trim()} ${familyName.trim()}`.trim()
     return {
+      // Carry over every field the form does not edit (extended
+      // @interop/social-core fields and nativeId); the form-bound fields below
+      // override, with `undefined` clearing a field the user emptied.
+      ...existingContact,
       displayName: trimmedName,
       givenName: givenName.trim() || undefined,
       familyName: familyName.trim() || undefined,
