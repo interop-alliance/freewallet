@@ -1,7 +1,7 @@
 import { Box, Card, CardActionArea, Stack, Typography } from '@mui/material'
 import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { MdFolder, MdFolderOpen } from 'react-icons/md'
+import { MdFolder, MdFolderOpen, MdSettings } from 'react-icons/md'
 import type { StorageCollection } from '@/lib/storage'
 import { formatBytes } from '@/lib/formatBytes'
 import { storageStyles } from '@/styles/appStyles'
@@ -145,6 +145,11 @@ function CollectionFolderCard({
         >
           <Box sx={storageStyles.folderIcon} aria-hidden>
             <MdFolder />
+            {muted && (
+              <Box component="span" sx={storageStyles.systemFolderIconBadge}>
+                <MdSettings />
+              </Box>
+            )}
           </Box>
           <Stack spacing={0.25} sx={storageStyles.folderCardBody}>
             <Typography

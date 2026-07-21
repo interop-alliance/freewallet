@@ -740,11 +740,23 @@ export const storageStyles = {
     flexGrow: 1
   },
   folderIcon: {
+    position: 'relative',
     fontSize: 28,
     color: '#f4b400',
     display: 'flex',
     alignItems: 'center',
     flexShrink: 0
+  },
+  // small gear badge overlaid on the folder icon of system collection cards
+  systemFolderIconBadge: {
+    position: 'absolute',
+    right: -4,
+    bottom: 0,
+    display: 'flex',
+    fontSize: 14,
+    color: 'text.secondary',
+    backgroundColor: 'background.paper',
+    borderRadius: '50%'
   },
   publicAccessMeta: {
     display: 'inline-flex',
