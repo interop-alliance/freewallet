@@ -37,6 +37,7 @@
     "@interop/ezcap": "^7.4.1",
     "@interop/http-client": "^1.0.4",
     "@interop/security-document-loader": "^9.4.4",
+    "@interop/social-core": "^0.1.1",
     "@interop/storage-core": "^0.3.7",
     "@interop/vc": "^11.0.5",
     "@interop/verifier-core": "^3.3.1",

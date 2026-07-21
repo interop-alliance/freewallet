@@ -27,6 +27,7 @@ import type {
   IZcap
 } from '@interop/data-integrity-core'
 import { generateZcapUri, type ZcapClient } from '@interop/ezcap'
+import type { ContactData, ContactRevisionPayload } from '@interop/social-core'
 import type { RxCollection } from 'rxdb/plugins/core'
 import {
   ValidationError,
@@ -1945,5 +1946,170 @@ export class StorageManager {
       recipientId,
       ...labels.get(recipientId)
     }))
+  }
+
+  /**
+   * Lists the stored contacts. Empty with the vault locked, same as
+   * {@link listCredentials}.
+   *
+   * @returns {Promise<Array<StoredContact>>}
+   */
+  async listContacts(): Promise<Array<StoredContact>> {
+    if (this._vaultLocked) {
+      return []
+    }
+    return await this._localStore.listContacts()
+  }
+
+  /**
+   * @param options {object}
+   * @param options.id {string}
+   * @returns {Promise<StoredContact | undefined>}
+   */
+  async loadContact({
+    id
+  }: {
+    id: string
+  }): Promise<StoredContact | undefined> {
+    if (this._vaultLocked) {
+      return undefined
+    }
+    return await this._localStore.loadContact({ id })
+  }
+
+  /**
+   * Adds a contact and appends its `create` revision to `contacts-history`
+   * (best-effort: the contact is already durably stored either way).
+   *
+   * @param options {object}
+   * @param options.contact {ContactData}
+   * @returns {Promise<StoredContact>}
+   */
+  async addContact({
+    contact
+  }: {
+    contact: ContactData
+  }): Promise<StoredContact> {
+    this._requireUnlockedVault()
+    const deviceId = getOrCreateDeviceId()
+    const stored = await this._localStore.addContact({ contact, deviceId })
+    await this._recordContactRevision({
+      contactId: stored.id,
+      action: 'create',
+      snapshot: contact,
+      deviceId
+    })
+    return stored
+  }
+
+  /**
+   * Rewrites a contact's row in place and appends its `update` revision.
+   *
+   * @param options {object}
+   * @param options.id {string}
+   * @param options.contact {ContactData}
+   * @returns {Promise<StoredContact>}
+   */
+  async updateContact({
+    id,
+    contact
+  }: {
+    id: string
+    contact: ContactData
+  }): Promise<StoredContact> {
+    this._requireUnlockedVault()
+    const deviceId = getOrCreateDeviceId()
+    const stored = await this._localStore.updateContact({
+      id,
+      contact,
+      deviceId
+    })
+    await this._recordContactRevision({
+      contactId: id,
+      action: 'update',
+      snapshot: contact,
+      deviceId
+    })
+    return stored
+  }
+
+  /**
+   * Deletes a contact and appends a `delete` revision carrying its last known
+   * snapshot (read before the row is removed).
+   *
+   * @param options {object}
+   * @param options.id {string}
+   * @returns {Promise<void>}
+   */
+  async deleteContact({ id }: { id: string }): Promise<void> {
+    this._requireUnlockedVault()
+    const existing = await this._localStore.loadContact({ id })
+    await this._localStore.deleteContact({ id })
+    if (existing) {
+      await this._recordContactRevision({
+        contactId: id,
+        action: 'delete',
+        snapshot: existing.contact,
+        deviceId: getOrCreateDeviceId()
+      })
+    }
+  }
+
+  /**
+   * Best-effort revision write shared by `addContact`/`updateContact`/
+   * `deleteContact`: the contact mutation itself has already landed, so a
+   * failure here (e.g. a transient encryption hiccup) is logged rather than
+   * thrown -- losing one history line beats reporting the whole save/delete
+   * as failed.
+   *
+   * @param options {object}
+   * @param options.contactId {string}
+   * @param options.action {ContactRevisionPayload['action']}
+   * @param options.snapshot {ContactData}
+   * @param options.deviceId {string}
+   * @returns {Promise<void>}
+   */
+  private async _recordContactRevision({
+    contactId,
+    action,
+    snapshot,
+    deviceId
+  }: {
+    contactId: string
+    action: ContactRevisionPayload['action']
+    snapshot: ContactData
+    deviceId: string
+  }): Promise<void> {
+    try {
+      await this._localStore.addContactRevision({
+        revision: {
+          contactId,
+          action,
+          timestamp: new Date().toISOString(),
+          deviceId,
+          snapshot
+        }
+      })
+    } catch (err) {
+      console.warn(`Could not record the contact-${action} revision:`, err)
+    }
+  }
+
+  /**
+   * Lists a contact's revision history, most recent first.
+   *
+   * @param options {object}
+   * @param options.id {string}
+   * @returns {Promise<Array<ContactRevisionPayload>>}
+   */
+  async listContactRevisions({
+    id
+  }: {
+    id: string
+  }): Promise<Array<ContactRevisionPayload>> {
+    if (this._vaultLocked) {
+      return []
+    }
+    return await this._localStore.listContactRevisions({ contactId: id })
   }
 }

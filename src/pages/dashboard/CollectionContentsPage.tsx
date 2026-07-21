@@ -51,7 +51,6 @@ import {
   getCollectionDisplayName,
   getResourceDisplayName
 } from '@/components/storage/displayUtils'
-import { ID_COLLECTION, WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 
 export function CollectionContentsPage() {
   const { t } = useTranslation()

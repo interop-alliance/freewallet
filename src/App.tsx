@@ -147,6 +147,14 @@ function App() {
             element={<CollectionResourcePage />}
           />
           <Route path="/contacts/:contactId" element={<ContactDetailPage />} />
+          <Route
+            path="/contacts/:contactId/edit"
+            element={<ContactFormPage />}
+          />
+          <Route
+            path="/contacts/:contactId/history"
+            element={<ContactHistoryPage />}
+          />
           <Route path="/applications" element={<ApplicationsPage />} />
           <Route
             path="/applications/:cid"
