@@ -6,8 +6,7 @@ import Typography from '@mui/material/Typography'
 import { FaGhost } from 'react-icons/fa'
 import { Trans, useTranslation } from 'react-i18next'
 import { Link as RouterLink } from 'react-router'
-import { LanguageSelector } from '@/components/LanguageSelector'
-import { ThemePicker } from '@/components/ThemePicker'
+import { AuthPageHeader } from '@/components/AuthPageHeader'
 import { useAppTheme } from '@/context/appThemeContext'
 import { landingStyles } from '@/styles/landingStyles'
 import { WAS_SERVER_URL } from '@/app.config'
@@ -20,7 +19,9 @@ export function LandingPage() {
     <Box component="main" className="fw-page" sx={landingStyles.main}>
       <div className="fw-glow-top" aria-hidden />
 
-      <Box className="fw-frame" sx={{ width: '100%' }}>
+      <AuthPageHeader />
+
+      <Box className="fw-frame" sx={landingStyles.frame}>
         <Box
           className="fw-frame-inner fw-frame-narrow"
           sx={{
@@ -38,11 +39,6 @@ export function LandingPage() {
                   : undefined
               }
             >
-              <Box sx={landingStyles.languageBar}>
-                <LanguageSelector />
-                <ThemePicker />
-              </Box>
-
               <Typography variant="h2" component="h1" sx={landingStyles.title}>
                 <span className="fw-grad-text">{t('landing.title')}</span>
               </Typography>

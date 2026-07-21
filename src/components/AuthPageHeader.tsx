@@ -22,7 +22,12 @@ export function AuthPageHeader() {
   const { t } = useTranslation()
 
   return (
-    <AppBar position="static" color="default" elevation={1}>
+    <AppBar
+      position="static"
+      color="default"
+      elevation={1}
+      sx={{ position: 'relative', zIndex: 2 }}
+    >
       <Toolbar>
         <Box
           component={RouterLink}

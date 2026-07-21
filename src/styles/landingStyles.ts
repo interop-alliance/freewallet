@@ -2,20 +2,17 @@ export const landingStyles = {
   main: {
     minHeight: '100dvh',
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    px: 2
+    flexDirection: 'column'
   },
   /**
-   * Sits at the top of the hero column, above headings (aligned end = right in LTR).
+   * Hero frame below the app bar: top-aligned, horizontally centered. The
+   * West Coast theme's own `.fw-frame` padding overrides these paddings.
    */
-  languageBar: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 1.5,
+  frame: {
     width: '100%',
-    mb: 2
+    px: 2,
+    pt: { xs: 6, sm: 10 },
+    pb: 6
   },
   content: {
     textAlign: 'center',
