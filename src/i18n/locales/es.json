@@ -148,7 +148,8 @@
     "subtitle": "es una aplicación web de código abierto y especificaciones abiertas para gestionar <vcs>credenciales verificables</vcs>, <dids>DIDs</dids> y <keys>claves</keys>.",
     "logIn": "Iniciar sesión",
     "signUp": "Registrarse",
-    "guestMode": "Modo invitado"
+    "guestMode": "Modo invitado",
+    "wasServerWarning": "Advertencia: la variable de entorno WAS_SERVER_URL no está configurada; no se puede conectar al almacenamiento."
   },
   "auth": {
     "errors": {
@@ -494,6 +495,8 @@
     "loginFailed": "No se pudo iniciar sesión. Inténtelo de nuevo.",
     "loginPrompt": "Introduzca la frase de contraseña de su billetera para continuar:",
     "passphrasePlaceholder": "Frase de contraseña",
+    "viewRequestSource": "Ver el código fuente de la solicitud",
+    "hideRequestSource": "Ocultar el código fuente de la solicitud",
     "get": {
       "title": "Compartir una credencial",
       "requestedBy": "Solicitado por",

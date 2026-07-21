@@ -470,6 +470,28 @@ export const chapiStyles = {
     display: 'flex',
     alignItems: 'center',
     gap: 1.5
+  },
+  sourceToggle: {
+    textTransform: 'none' as const,
+    color: 'text.secondary',
+    px: 0,
+    minWidth: 0,
+    justifyContent: 'flex-start'
+  },
+  sourceCodeBlock: {
+    m: 0,
+    mt: 1,
+    p: 1.5,
+    borderRadius: 2,
+    backgroundColor: '#111',
+    color: '#e5e7eb',
+    overflowX: 'auto',
+    fontSize: 12,
+    lineHeight: 1.6,
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-all' as const,
+    maxHeight: '40vh',
+    overflowY: 'auto'
   }
 } as const
 

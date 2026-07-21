@@ -78,6 +78,7 @@ import {
 import { appKeySubjectDid, findAppKeyCredential } from '@/lib/appKey'
 import { fetchAppManifest, type AppManifestInfo } from '@/lib/appManifest'
 import { ZcapGrantsPanel } from './ZcapGrantsPanel'
+import { RequestSourcePanel } from './RequestSourcePanel'
 import { CHAPILoginForm } from './CHAPILoginForm'
 import { SavedSessionNotice } from './SavedSessionNotice'
 import { useTranslation } from 'react-i18next'
@@ -864,6 +865,8 @@ export function WalletGetPage() {
             </Stack>
           </Stack>
         )}
+
+        {pageState === 'selecting' && <RequestSourcePanel source={request} />}
 
         {pageState === 'done' && (
           <Box sx={chapiStyles.doneMessage}>

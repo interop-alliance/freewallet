@@ -63,6 +63,15 @@ export const landingStyles = {
     py: 1.25
   },
   /**
+   * Build-config warning shown below the hero card (e.g. missing WAS server).
+   */
+  configWarning: {
+    color: 'error.main',
+    mt: 3,
+    width: '100%',
+    textAlign: 'center'
+  },
+  /**
    * Guest Mode CTA: base button sizing + guest emphasis
    */
   guestModeButton: {

@@ -44,6 +44,7 @@ import {
   type CHAPIStoreEvent,
   type IVPRDetails
 } from '@/lib/walletRequest'
+import { RequestSourcePanel } from './RequestSourcePanel'
 import { CHAPILoginForm } from './CHAPILoginForm'
 import { SavedSessionNotice } from './SavedSessionNotice'
 import { useTranslation } from 'react-i18next'
@@ -445,6 +446,7 @@ export function WalletStorePage() {
                 {t('common.cancel')}
               </Button>
             </Stack>
+            <RequestSourcePanel source={vp} />
           </Stack>
         )}
 

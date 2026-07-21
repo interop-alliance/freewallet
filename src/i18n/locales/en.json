@@ -148,7 +148,8 @@
     "subtitle": "is an open source, open specs web app for managing <vcs>Verifiable Credentials</vcs>, <dids>DIDs</dids>, and <keys>keys</keys>.",
     "logIn": "Log in",
     "signUp": "Sign Up",
-    "guestMode": "Guest Mode"
+    "guestMode": "Guest Mode",
+    "wasServerWarning": "Warning: WAS_SERVER_URL environment variable not set, cannot connect to storage."
   },
   "auth": {
     "errors": {
@@ -494,6 +495,8 @@
     "loginFailed": "Could not log in. Please try again.",
     "loginPrompt": "Enter your wallet passphrase to continue:",
     "passphrasePlaceholder": "Passphrase",
+    "viewRequestSource": "View request source code",
+    "hideRequestSource": "Hide request source code",
     "get": {
       "title": "Share a credential",
       "requestedBy": "Requested by",
