@@ -220,8 +220,8 @@ async function initLocalStore(
 }
 
 /**
- * A full-tier profile: the owner's vault keys, a stub delegation signer, and a
- * truthy `keyAgent` (the full-tier marker the share/unshare guards check).
+ * An owner profile: the vault keys, a stub delegation signer, and a truthy
+ * `keyAgent` (the root key the share/unshare guards require for delegation).
  */
 function makeProfile(
   owner: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver },

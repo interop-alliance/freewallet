@@ -9,12 +9,11 @@
  * `did:web:<host>:space:<spaceId>:id` resolves to
  * `https://<host>/space/<spaceId>/id/did.json`.
  */
-import { AsymmetricKey, KmsClient } from '@interop/webkms-client'
 import type { KeystoreAgent } from '@interop/webkms-client'
 import type { ISigner } from '@interop/data-integrity-core'
 import type { Session } from '@/types/auth'
 import { DID_DOCUMENT_RESOURCE, DID_KEYS_RESOURCE } from '@/app.config'
-import { getKmsSignFunction, kmsSignFunction } from '@/lib/kms'
+import { getKmsSignFunction } from '@/lib/kms'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
 /**
@@ -52,9 +51,9 @@ export interface DidWebKey {
 }
 
 /**
- * The key-id map persisted as `keys.json` (and cached in the delegated session
- * record): the durable mapping from DID relationship to KMS key, since the KMS
- * protocol has no list-keys endpoint and key ids are server-generated.
+ * The key-id map persisted as `keys.json`: the durable mapping from DID
+ * relationship to KMS key, since the KMS protocol has no list-keys endpoint
+ * and key ids are server-generated.
  */
 export interface DidWebKeyMap {
   authentication: DidWebKey
@@ -289,10 +288,7 @@ function signerFromKey({
  * the did:web is not provisioned or the session cannot reach the key. Its
  * `id` is the verification-method id (`keys.authentication.vmId`), so a proof
  * signed with it names the right `verificationMethod` with no special-casing.
- *
- * - `full` tier: the root key invokes the keystore's root capability.
- * - `delegated` tier: the browser session key invokes the persisted keystore
- *   `sign` capability (the Track E pieces) -- no passphrase needed.
+ * The root key invokes the keystore's root capability.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -303,14 +299,12 @@ export async function kmsAuthenticationSigner({
 }: {
   session: Session
 }): Promise<ISigner | undefined> {
-  const { didWeb, keystoreAgent, keystoreId, keystoreCapability, zcapClient } =
-    session.profile
+  const { didWeb, keystoreAgent } = session.profile
   if (!didWeb) {
     return undefined
   }
   const { vmId, kmsKeyId } = didWeb.keys.authentication
 
-  // Full tier: root key controls the keystore.
   if (keystoreAgent) {
     const sign = await getKmsSignFunction({
       keystoreAgent,
@@ -318,23 +312,6 @@ export async function kmsAuthenticationSigner({
       kmsKeyId
     })
     return signerFromKey({ sign, vmId })
-  }
-
-  // Delegated tier: sign with the session key over the persisted keystore
-  // `sign` capability. The capability targets the authentication key's own
-  // `kmsId` (webkms-client invokes at the capability's `invocationTarget`,
-  // with no client-side attenuation); it is assigned after construction
-  // because the constructor rejects a `capability` option.
-  if (keystoreId && keystoreCapability && zcapClient.invocationSigner) {
-    const key = new AsymmetricKey({
-      id: vmId,
-      kmsId: kmsKeyId,
-      type: ED25519_VM_TYPE,
-      invocationSigner: zcapClient.invocationSigner,
-      kmsClient: new KmsClient({ keystoreId })
-    })
-    key.capability = keystoreCapability
-    return signerFromKey({ sign: kmsSignFunction({ key }), vmId })
   }
 
   return undefined

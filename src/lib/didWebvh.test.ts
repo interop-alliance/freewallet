@@ -6,7 +6,7 @@
  * rotation ceremony depends on. Driven by an in-memory Ed25519 keystore fake
  * (no KMS, no WAS server).
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import type { KeystoreAgent } from '@interop/webkms-client'
 import {
   createDID,
@@ -34,7 +34,6 @@ import {
   presentationSuiteFor,
   EDDSA_RDFC_2022
 } from '@/lib/walletRequest/presentationSuite'
-import { loadSessionRecord, saveSessionRecord } from '@/lib/sessionKey'
 import {
   DID_DOCUMENT_RESOURCE,
   DID_KEYS_RESOURCE,
@@ -42,19 +41,6 @@ import {
 } from '@/app.config'
 import type { Session } from '@/types/auth'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
-
-// jsdom provides no IndexedDB, and the persisted-session cache refresh
-// (`refreshPersistedDidWebvh`) reads/writes it. Stub the record helpers: the
-// default no-record case is a no-op refresh, and individual tests override
-// `loadSessionRecord` to assert the didWebvh cache patch.
-vi.mock('@/lib/sessionKey', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/lib/sessionKey')>()
-  return {
-    ...actual,
-    loadSessionRecord: vi.fn(async () => null),
-    saveSessionRecord: vi.fn(async () => {})
-  }
-})
 
 const WAS_URL = 'http://localhost:8080'
 const SPACE_ID = 'space-abc'
@@ -889,7 +875,7 @@ describe('updateDID sparse semantics (rotation pin)', () => {
 describe('rotateWebvhUpdateKey', () => {
   /**
    * Wraps a `webvhFakes` bundle as the minimal Session the ceremony reads: a
-   * full-tier profile (root keystore agent) and a storage facade exposing the
+   * profile with the root keystore agent and a storage facade exposing the
    * remote store.
    */
   function rotationSession(fakes: ReturnType<typeof webvhFakes>): Session {
@@ -925,12 +911,6 @@ describe('rotateWebvhUpdateKey', () => {
       logText: seed.log(),
       kms: seed.kms
     })
-    // A stored record so the ceremony patches (not re-mints) the didWebvh cache.
-    vi.mocked(loadSessionRecord).mockResolvedValueOnce({
-      didWebvh: undefined
-    } as never)
-    vi.mocked(saveSessionRecord).mockClear()
-
     const session = rotationSession(fakes)
     const rotated = await rotateWebvhUpdateKey({ session })
 
@@ -961,12 +941,9 @@ describe('rotateWebvhUpdateKey', () => {
     expect(rotated.retiredKeys).toContainEqual(published.updateKey)
     expect(rotated.pendingStagedKey).toBeUndefined()
 
-    // Caches refreshed: the in-memory profile and the persisted record.
+    // In-memory profile cache refreshed.
     expect(session.profile.didWebvh?.did).toBe(published.did)
     expect(session.profile.didWebvh?.updateKey).toEqual(rotated.updateKey)
-    expect(vi.mocked(saveSessionRecord)).toHaveBeenCalledWith({
-      record: { didWebvh: session.profile.didWebvh }
-    })
   })
 
   it('diverged-state guard: stagedKey.nextKeyHash not committed in the log throws before any write', async () => {
@@ -990,20 +967,20 @@ describe('rotateWebvhUpdateKey', () => {
     expect(fakes.puts).toEqual([])
   })
 
-  it('full-tier backstop: a delegated session (no keystore agent) throws', async () => {
+  it('backstop: a session with no keystore agent throws', async () => {
     const { seed, published } = await seedPublishedLog()
     const fakes = webvhFakes({
       webvh: published,
       logText: seed.log(),
       kms: seed.kms
     })
-    const delegated = {
+    const noKeystore = {
       profile: {},
       storage: { remoteStore: fakes.remoteStore }
     } as unknown as Session
 
-    await expect(rotateWebvhUpdateKey({ session: delegated })).rejects.toThrow(
-      /full session/
+    await expect(rotateWebvhUpdateKey({ session: noKeystore })).rejects.toThrow(
+      /keystore agent/
     )
     expect(fakes.puts).toEqual([])
   })

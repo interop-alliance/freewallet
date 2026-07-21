@@ -24,36 +24,6 @@ export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
 export const KMS_SERVER_URL =
   env.VITE_KMS_SERVER_URL ||
   (WAS_SERVER_URL ? `${WAS_SERVER_URL}/kms` : undefined)
-// Lifetime of the delegated session zcaps minted at login (refresh-surviving
-// sessions, `src/session/delegatedSession.ts`). After this the restored
-// session's capabilities stop verifying and a fresh login is required.
-export const SESSION_ZCAP_TTL_MS =
-  (env.VITE_SESSION_ZCAP_TTL_HOURS
-    ? Number(env.VITE_SESSION_ZCAP_TTL_HOURS)
-    : 24) *
-  60 *
-  60 *
-  1000
-
-// Lifetime of the session vault envelope persisted at full login -- the vault
-// KAK wrapped under a non-extractable AES-GCM key (`src/session/vault.ts`),
-// which lets a restored (`delegated` tier) session unlock the vault without
-// the passphrase. Deliberately independent of the zcap TTL: the vault can
-// re-lock while the restored session (sync, plaintext reads) keeps working.
-export const SESSION_VAULT_TTL_MS =
-  (env.VITE_SESSION_VAULT_TTL_HOURS
-    ? Number(env.VITE_SESSION_VAULT_TTL_HOURS)
-    : 24) *
-  60 *
-  60 *
-  1000
-
-// Opt-out switch for the session vault envelope: when exactly 'true', the
-// vault KAK is never persisted in any form and restored sessions always
-// require a passphrase re-login to unlock the vault.
-export const REQUIRE_PASSPHRASE_FOR_VAULT =
-  env.VITE_REQUIRE_PASSPHRASE_FOR_VAULT === 'true'
-
 // Lifetime of the capabilities delegated to a relying party when a user
 // approves a "Login with Wallet" zcap request (`src/lib/walletRequest/
 // processZcaps.ts`). Default 30 days: expiry bounds every RP grant. The WAS
@@ -145,11 +115,10 @@ export const SYNCED_COLLECTIONS: Array<{ key: string; id: string }> =
  * The `id` collection: a standard-on-the-server collection that holds the
  * user's published DID document (`did.json`) and its key-id map
  * (`keys.json`). Deliberately kept out of WALLET_STANDARD_COLLECTIONS -- it
- * gets no local RxDB replica, no background replication, and no
- * per-collection session zcap. Provisioned (full tier only) alongside the
- * standard collections; the DID document is made world-readable at the
- * resource level (a `PublicCanRead` policy on `did.json`), while the key-id
- * map stays capability-only.
+ * gets no local RxDB replica and no background replication. Provisioned
+ * alongside the standard collections; the DID document is made world-readable
+ * at the resource level (a `PublicCanRead` policy on `did.json`), while the
+ * key-id map stays capability-only.
  *
  * The path segments name the collection that holds the DID document, so the
  * did:web id is `did:web:<host>:space:<spaceId>:id` and resolves to

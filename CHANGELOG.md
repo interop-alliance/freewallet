@@ -1,5 +1,14 @@
 # History
 
+## Unreleased - TBD
+
+### Removed
+
+- Removed refresh-surviving delegated sessions and the vault-lock mechanism;
+  reloading the browser now requires logging in again. Dropped the
+  `VITE_SESSION_ZCAP_TTL_HOURS`, `VITE_SESSION_VAULT_TTL_HOURS`, and
+  `VITE_REQUIRE_PASSPHRASE_FOR_VAULT` environment variables.
+
 ## 0.19.0 - 2026-07-21
 
 ### Added

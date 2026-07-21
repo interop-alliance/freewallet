@@ -5,7 +5,6 @@ import {
   expectCollectionUsage,
   expectQuotaCard,
   goToStorage,
-  quotaCard,
   signupViaWizard
 } from './helpers'
 
@@ -38,18 +37,18 @@ test.describe('Storage quota', () => {
     await goToStorage(page)
     await expectQuotaCard(page)
 
-    // Scope to the quota card: these names also appear in the collections
-    // browser, and "Verifiable Credentials" is a substring of "Publicly Shared
-    // Verifiable Credentials", so match exactly within the card.
-    const card = quotaCard(page)
+    // Per-collection usage renders as rows in the collections browser below the
+    // aggregate card. Target each collection by its storage-path href, which is
+    // unambiguous (matching display names by text is not: "Verifiable
+    // Credentials" is a prefix of "Verifiable Credentials (Publicly Shared)").
     await expect(
-      card.getByText('Verifiable Credentials', { exact: true })
+      page.locator('a[href$="/storage/collections/private-credentials"]')
     ).toBeVisible()
     await expect(
-      card.getByText('Wallet Activity Log', { exact: true })
+      page.locator('a[href$="/storage/collections/wallet-activity"]')
     ).toBeVisible()
     await expect(
-      card.getByText('Publicly Shared Verifiable Credentials', { exact: true })
+      page.locator('a[href$="/storage/collections/public-credentials"]')
     ).toBeVisible()
   })
 
@@ -60,8 +59,10 @@ test.describe('Storage quota', () => {
     await goToStorage(page)
     await expectQuotaCard(page)
 
+    // The loading-capable MUI Button renders nested elements that both expose
+    // the button role and the same accessible name, so scope to the first.
     await expect(
-      page.getByRole('button', { name: 'Import space' })
+      page.getByRole('button', { name: 'Import (Load) from Backup' }).first()
     ).toBeEnabled()
   })
 
@@ -73,7 +74,7 @@ test.describe('Storage quota', () => {
     await goToStorage(page)
     await expectQuotaCard(page)
 
-    await expectCollectionUsage(page, 'Verifiable Credentials', NONZERO_USAGE)
+    await expectCollectionUsage(page, 'private-credentials', NONZERO_USAGE)
   })
 
   test('updates wallet activity usage after deleting a credential', async ({
@@ -85,6 +86,6 @@ test.describe('Storage quota', () => {
     await goToStorage(page)
     await expectQuotaCard(page)
 
-    await expectCollectionUsage(page, 'Wallet Activity Log', NONZERO_USAGE)
+    await expectCollectionUsage(page, 'wallet-activity', NONZERO_USAGE)
   })
 })

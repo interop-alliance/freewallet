@@ -37,8 +37,8 @@ export async function agentsFromSeed({ seed }: { seed: Uint8Array }) {
   const zcapClient = new ZcapClient({
     SuiteClass: Ed25519Signature2020,
     invocationSigner: signer,
-    // The root key also signs delegations: the session zcaps minted at login
-    // (src/session/delegatedSession.ts) and any future sharing grants.
+    // The root key also signs delegations: sharing grants and App Connect
+    // capability grants.
     delegationSigner: signer
   })
 
@@ -88,8 +88,7 @@ export async function initGuestSession() {
  * an already-derived 32-byte data seed. This is the shared core behind the
  * keyring path (`loginWithPassphrase`, `SignupPage`) and the guest bootstrap:
  * everything downstream of "data seed in hand" -- KMS keystore provisioning,
- * storage clients, the `full` tier stamp -- is identical regardless of how the
- * seed was obtained.
+ * storage clients -- is identical regardless of how the seed was obtained.
  *
  * For non-guest sessions the seed is carried on `profile.dataSeed` (so Settings
  * can re-bind the passphrase); guests skip it (a guest identity is ephemeral
@@ -183,7 +182,7 @@ export async function initSessionFromSeed({
   // the session below references the same profile.
   profile.keystoreAgent = keystoreAgent
 
-  const session = { user, profile, storage, isGuest, tier: 'full' } as Session
+  const session = { user, profile, storage, isGuest } as Session
 
   // Fold collection provisioning into the session-creation seam: fire (do not
   // await) `ensureUserCollections` and expose it as `session.storageReady`, so

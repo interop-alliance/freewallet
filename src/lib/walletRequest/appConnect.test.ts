@@ -28,7 +28,7 @@ const CAPABILITY_QUERY = {
 }
 
 /**
- * A minimal full-tier session whose storage records added credentials and
+ * A minimal session whose storage records added credentials and
  * lists a caller-provided set. The keyAgent signs the DIDAuth proof.
  */
 async function fakeSession({
@@ -44,7 +44,6 @@ async function fakeSession({
   const session = {
     user: { id: keyAgent.id },
     profile: { keyAgent },
-    tier: 'full',
     storage: {
       listCredentials: async () => stored,
       addCredential: async (entry: unknown) => {

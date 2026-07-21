@@ -2,11 +2,8 @@
  * The Applications settings section: lists the apps connected through the App
  * Connect flow (one per self-issued app-key credential), each with its origin
  * and connected date. Clicking a row opens the app detail page; a button on
- * the row revokes access. Revoking
- * removes the app-key credential and records the revocation; it needs a full
- * (passphrase) session with an unlocked vault, since the app key lives in an
- * encrypted collection and the revocation writes an activity entry. The
- * delegated tier or a locked vault sees the list read-only with a hint.
+ * the row revokes access. Revoking removes the app-key credential and records
+ * the revocation.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -41,10 +38,6 @@ export function ApplicationsPage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const session = useAuthStore(state => state.session)
-  const vaultLocked = session?.storage.vaultLocked ?? true
-  // Revoking retires an encrypted credential and writes an activity entry, so
-  // it needs a full-tier session with an unlocked vault.
-  const canRevoke = session?.tier === 'full' && !vaultLocked
 
   const [apps, setApps] = useState<ConnectedApp[]>([])
   const [loading, setLoading] = useState(true)
@@ -137,13 +130,6 @@ export function ApplicationsPage() {
           {loadError && (
             <Alert severity="warning">{t('applications.loadError')}</Alert>
           )}
-          {!canRevoke && (
-            <Typography variant="body2" color="text.secondary">
-              {vaultLocked
-                ? t('applications.revokeVaultLocked')
-                : t('applications.revokeRequiresFullSession')}
-            </Typography>
-          )}
           {apps.length === 0 ? (
             <Typography color="text.secondary">
               {t('applications.empty')}
@@ -197,7 +183,6 @@ export function ApplicationsPage() {
                       size="small"
                       color="error"
                       sx={{ borderRadius: 2 }}
-                      disabled={!canRevoke}
                       onClick={() => openRevokeDialog(app)}
                     >
                       {t('applications.revoke')}

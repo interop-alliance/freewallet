@@ -9,9 +9,7 @@
  * afterwards are unreadable to the removed reader) and revokes its storage
  * authorization (so the server stops serving it ciphertext). Neither half claws
  * back data the reader already fetched -- the confirmation dialog says so
- * plainly. Un-sharing rewrites the Collection Description and revokes with the
- * root key, so it needs a full (passphrase) session; the delegated tier sees
- * the list read-only with a re-login prompt.
+ * plainly.
  *
  * There is deliberately no "add share" flow here: how an app publishes its
  * recipient key is an open design question, so this panel only lists and
@@ -59,11 +57,6 @@ const ENCRYPTED_COLLECTIONS = WALLET_STANDARD_COLLECTIONS.filter(
 export function SharedCollectionsPanel({ session }: { session: Session }) {
   const { t, i18n } = useTranslation()
   const hasRemoteStorage = session.storage.hasRemoteStorage
-  const vaultLocked = session.storage.vaultLocked
-  // Un-sharing rewrites the Collection Description and revokes zcaps with the
-  // root key, so it needs a full (passphrase) session -- the delegated tier's
-  // read-only Space zcaps cannot rotate the epoch.
-  const canManageShares = session.tier === 'full'
 
   const [sharesByCollection, setSharesByCollection] = useState<
     Record<string, CollectionShare[]>
@@ -95,10 +88,9 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
   }, [session])
 
   // Load the rosters on mount. Skipped without a remote store (nothing is
-  // shared) or with a locked vault (the owner key can't be resolved to filter
-  // itself out of the roster, so the list is unreliable).
+  // shared).
   useEffect(() => {
-    if (!hasRemoteStorage || vaultLocked) {
+    if (!hasRemoteStorage) {
       return
     }
     let cancelled = false
@@ -120,7 +112,7 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
     return () => {
       cancelled = true
     }
-  }, [fetchShares, hasRemoteStorage, vaultLocked])
+  }, [fetchShares, hasRemoteStorage])
 
   const openRemoveDialog = (target: {
     collectionId: string
@@ -173,19 +165,10 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
         <Typography variant="body2" color="text.secondary">
           {t('settings.sharedRequiresRemote')}
         </Typography>
-      ) : vaultLocked ? (
-        <Typography variant="body2" color="text.secondary">
-          {t('settings.sharedVaultLocked')}
-        </Typography>
       ) : (
         <>
           {loadError && (
             <Alert severity="warning">{t('settings.sharedLoadError')}</Alert>
-          )}
-          {!canManageShares && (
-            <Typography variant="body2" color="text.secondary">
-              {t('settings.sharedRequiresFullSession')}
-            </Typography>
           )}
           {ENCRYPTED_COLLECTIONS.map(({ id, name }) => {
             const shares = sharesByCollection[id] ?? []
@@ -235,7 +218,6 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
                           borderRadius: 2,
                           alignSelf: 'flex-start'
                         }}
-                        disabled={!canManageShares}
                         onClick={() =>
                           openRemoveDialog({
                             collectionId: id,

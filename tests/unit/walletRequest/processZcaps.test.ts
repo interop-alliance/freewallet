@@ -92,7 +92,7 @@ const foreignDetail: ICapabilityQueryDetail = {
 }
 
 /**
- * A full-tier session whose `keyAgent` really signs (for the round-trip VP
+ * A session whose `keyAgent` really signs (for the round-trip VP
  * test), but whose `zcapClient.delegate` and `storage.ensureCollection` are
  * stubbed -- delegation and provisioning hit the WAS server in production.
  */
@@ -162,8 +162,7 @@ beforeAll(async () => {
   session = {
     user: { id: keyAgent.id },
     profile: { keyAgent, zcapClient },
-    storage,
-    tier: 'full'
+    storage
   } as unknown as Session
 })
 

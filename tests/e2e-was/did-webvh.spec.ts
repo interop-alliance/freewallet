@@ -25,7 +25,7 @@ import { readLogFromString, resolveDIDFromLog } from '@interop/did-method-webvh'
  * The live `StorageManager`, published on `window.__E2E_STORAGE__` by the auth
  * store in non-production builds. Space export / import (and the whole-`id`-
  * collection delete this round-trip needs) are ZCap-signed operations that only
- * the in-memory full-tier session can authorize, so the test drives them here
+ * the in-memory session can authorize, so the test drives them here
  * rather than through `page.request`.
  */
 type E2EStorage = {
@@ -225,7 +225,7 @@ test('a Space export/import round-trip preserves did.jsonl byte-exact and world-
   const resolvedBefore = await resolveDIDFromLog(readLogFromString(logBefore))
   expect(resolvedBefore.meta.error).toBeUndefined()
 
-  // --- Export the whole Space through the live (full-tier, ZCap-signed)
+  // --- Export the whole Space through the live (ZCap-signed)
   //     client, reading the tar stream to bytes in-page. `showSaveFilePicker`
   //     (the UI's sink) is absent in headless Chromium, so bypass the button
   //     and call the StorageManager directly via the test seam.

@@ -2,22 +2,17 @@
 /**
  * Unit tests for the shared CHAPI popup login sequence
  * (`src/session/completePopupLogin.ts`): remote-direct keyring resolve, the
- * account-not-found guard, fire-and-forget delegated-session persistence
- * through the first-party handle, and the error mapping both popup pages
- * apply. `loginWithPassphrase` / `persistDelegatedSession` (network + IndexedDB)
- * and the storage-error classifier are stubbed.
+ * account-not-found guard, and the error mapping both popup pages apply.
+ * `loginWithPassphrase` (network + IndexedDB) and the storage-error
+ * classifier are stubbed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/auth'
 
 vi.mock('@/session/initSession', () => ({ loginWithPassphrase: vi.fn() }))
-vi.mock('@/session/delegatedSession', () => ({
-  persistDelegatedSession: vi.fn()
-}))
 vi.mock('@/lib/storageErrors', () => ({ isStorageUnreachable: vi.fn() }))
 
 import { loginWithPassphrase } from '@/session/initSession'
-import { persistDelegatedSession } from '@/session/delegatedSession'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import {
   completePopupLogin,
@@ -28,7 +23,6 @@ const PASSPHRASE = 'correct horse battery staple'
 const fakeSession = { user: { id: 'did:key:z6MkUser' } } as unknown as Session
 
 beforeEach(() => {
-  vi.mocked(persistDelegatedSession).mockResolvedValue(undefined)
   vi.mocked(isStorageUnreachable).mockReturnValue(false)
 })
 
@@ -38,31 +32,7 @@ afterEach(() => {
 })
 
 describe('completePopupLogin', () => {
-  it('returns the session and logs in remote-direct via the first-party handle', async () => {
-    vi.mocked(loginWithPassphrase).mockResolvedValue({
-      session: fakeSession,
-      userExists: true
-    })
-    const firstPartyIdb = {} as IDBFactory
-
-    const result = await completePopupLogin({
-      passphrase: PASSPHRASE,
-      firstPartyIdb
-    })
-
-    expect(result).toEqual({ session: fakeSession })
-    expect(loginWithPassphrase).toHaveBeenCalledWith({
-      passphrase: PASSPHRASE,
-      idb: firstPartyIdb,
-      remoteDirectStorage: true
-    })
-    expect(persistDelegatedSession).toHaveBeenCalledWith({
-      session: fakeSession,
-      idb: firstPartyIdb
-    })
-  })
-
-  it('does not persist a delegated session without a first-party handle', async () => {
+  it('returns the session and logs in remote-direct', async () => {
     vi.mocked(loginWithPassphrase).mockResolvedValue({
       session: fakeSession,
       userExists: true
@@ -73,10 +43,8 @@ describe('completePopupLogin', () => {
     expect(result).toEqual({ session: fakeSession })
     expect(loginWithPassphrase).toHaveBeenCalledWith({
       passphrase: PASSPHRASE,
-      idb: undefined,
       remoteDirectStorage: true
     })
-    expect(persistDelegatedSession).not.toHaveBeenCalled()
   })
 
   it('maps a keyring miss to the account-not-found key', async () => {
@@ -88,7 +56,6 @@ describe('completePopupLogin', () => {
     const result = await completePopupLogin({ passphrase: PASSPHRASE })
 
     expect(result).toEqual({ errorKey: 'chapi.accountNotFound' })
-    expect(persistDelegatedSession).not.toHaveBeenCalled()
   })
 
   it('maps a half-finished signup (userExists false) to account-not-found', async () => {

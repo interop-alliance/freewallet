@@ -44,8 +44,6 @@ import {
 import { multibaseOf } from '@/lib/didWeb'
 import type { DidWebKey, DidWebKeyMap } from '@/lib/didWeb'
 import { getKmsSignFunction } from '@/lib/kms'
-import { loadSessionRecord, saveSessionRecord } from '@/lib/sessionKey'
-import type { PersistedSessionRecord } from '@/session/delegatedSession'
 import type { Session } from '@/types/auth'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
@@ -695,36 +693,6 @@ export async function repairKeyBindings({
 }
 
 /**
- * Refreshes the persisted delegated-session record's `didWebvh` cache in place,
- * so a later `restoreDelegatedSession` reports the rotated update-key refs.
- * Rotation changes no session zcap and must not extend the session's TTL, so
- * this patches only the record's `didWebvh` field rather than re-minting the
- * whole record via `persistDelegatedSession`. A no-op when no record is stored
- * (a guest or never-persisted session has none) and best-effort otherwise: a
- * refresh failure never rolls back a rotation the server already accepted.
- *
- * @param options {object}
- * @param options.didWebvh {PersistedSessionRecord['didWebvh']}   the new refs
- * @returns {Promise<void>}
- */
-async function refreshPersistedDidWebvh({
-  didWebvh
-}: {
-  didWebvh: PersistedSessionRecord['didWebvh']
-}): Promise<void> {
-  try {
-    const record = (await loadSessionRecord()) as PersistedSessionRecord | null
-    if (!record) {
-      return
-    }
-    record.didWebvh = didWebvh
-    await saveSessionRecord({ record })
-  } catch (err) {
-    console.warn('did:webvh: session-record cache refresh failed:', err)
-  }
-}
-
-/**
  * Finalizes a rotation ceremony's keys.json roles (the shared tail of a fresh
  * rotation and a torn-finalize recovery): `updateKey <- stagedKey`,
  * `stagedKey <- newStaged`, the old `updateKey` appended to `retiredKeys`, and
@@ -766,13 +734,11 @@ async function finalizeRotatedRoles({
   }
   await writeKeysJson({ remoteStore, didWebKeys, webvh: finalized })
 
-  const cache = {
+  session.profile.didWebvh = {
     did,
     updateKey: finalized.updateKey,
     stagedKey: finalized.stagedKey
   }
-  session.profile.didWebvh = cache
-  await refreshPersistedDidWebvh({ didWebvh: cache })
   return finalized
 }
 
@@ -780,9 +746,9 @@ async function finalizeRotatedRoles({
  * Rotates the did:webvh log's update key (decision 7's user-triggered ceremony,
  * Settings page). The current staged key is revealed to sign its own activation
  * and become the sole active update key, a freshly generated staged key is
- * committed as the new `nextKeyHashes`, and keys.json roles roll forward. Full
- * tier only: the update key lives in the root-controlled keystore (decision 2 --
- * no session-key path), and extending the append-only log needs the root zcap on
+ * committed as the new `nextKeyHashes`, and keys.json roles roll forward. The
+ * update key lives in the root-controlled keystore (decision 2 -- no
+ * session-key path), and extending the append-only log needs the root zcap on
  * the `id` collection.
  *
  * Crash-recovery matrix (both kmsKeyIds are recorded at every intermediate
@@ -795,7 +761,7 @@ async function finalizeRotatedRoles({
  * | pending set, log advanced     | staged/newStaged commit| torn finalize: roles only  |
  *
  * @param options {object}
- * @param options.session {Session}   a full-tier session (root keystore agent)
+ * @param options.session {Session}   a session with the root keystore agent
  * @returns {Promise<DidWebvhBlock>}   the finalized webvh block
  */
 export async function rotateWebvhUpdateKey({
@@ -803,13 +769,12 @@ export async function rotateWebvhUpdateKey({
 }: {
   session: Session
 }): Promise<DidWebvhBlock> {
-  // Full-tier backstop (the Settings action also gates on the tier).
   const { keystoreAgent } = session.profile
   const remoteStore = session.storage.remoteStore
   if (!keystoreAgent) {
     throw new Error(
-      'Rotating the did:webvh update key requires a full session -- the ' +
-        'root-controlled keystore agent is absent in the delegated tier.'
+      'Rotating the did:webvh update key requires the root-controlled ' +
+        'keystore agent.'
     )
   }
   if (!remoteStore) {

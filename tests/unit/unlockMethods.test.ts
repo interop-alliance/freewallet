@@ -151,7 +151,7 @@ function createFakeIdb(): IDBFactory {
 }
 
 /**
- * Builds a full-tier `Session` stand-in carrying a real (deterministic) vault
+ * Builds a `Session` stand-in carrying a real (deterministic) vault
  * KAK + resolver -- so the EDV cipher can genuinely wrap and unwrap -- plus the
  * data controller / Space id the registry addresses. The `zcapClient` is inert:
  * every remote helper is mocked, so its value is never dereferenced.
@@ -179,8 +179,7 @@ async function makeSession(): Promise<Session> {
     user: { id: DATA_CONTROLLER },
     profile: { keyAgreementKey, keyResolver, zcapClient: {} },
     storage: { spaceId: DATA_SPACE_ID },
-    isGuest: false,
-    tier: 'full'
+    isGuest: false
   } as unknown as Session
 }
 
@@ -237,7 +236,7 @@ function passkeyEntry({
 }
 
 /**
- * A full-tier session whose profile names a passphrase unlock method (so
+ * A session whose profile names a passphrase unlock method (so
  * `backfillPassphraseUnlockMethod` acts on it).
  *
  * @param options {object}

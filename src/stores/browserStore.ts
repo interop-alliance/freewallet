@@ -63,10 +63,9 @@ export class BrowserStore {
   private _ciphers?: Record<string, DocCipher>
   // Count of rows the most recent list read had to skip because their envelope
   // would not decrypt under the current vault KAK (corrupted, replicated
-  // verbatim from another identity, or written under a mismatched KAK). A
-  // locked vault -- no cipher at all -- is a different, fail-closed case and is
-  // not counted here. Surfaced so the pages can warn the user without any one
-  // bad row bricking the whole list.
+  // verbatim from another identity, or written under a mismatched KAK).
+  // Surfaced so the pages can warn the user without any one bad row bricking
+  // the whole list.
   private _undecryptableCredentials = 0
   private _undecryptableHistory = 0
   // Count of rows the most recent list read had to skip because their envelope
@@ -279,8 +278,7 @@ export class BrowserStore {
   /**
    * The count of `private-credentials` rows the most recent
    * {@link listCredentials} call had to skip because their envelope would not
-   * decrypt under the current vault KAK. Zero when the vault is locked (that
-   * path returns nothing rather than attempting to decrypt).
+   * decrypt under the current vault KAK.
    *
    * @returns {number}
    */
@@ -526,10 +524,8 @@ export class BrowserStore {
   /**
    * Removes every `private-credentials` row whose envelope will not decrypt
    * under the current vault KAK, so a user can clear rows that can never be
-   * shown (corrupted, or written under a mismatched KAK). Requires an unlocked
-   * vault: with the vault locked there is no cipher and nothing is treated as
-   * undecryptable (fail closed -- locked rows are left intact). Returns the
-   * number of rows removed.
+   * shown (corrupted, or written under a mismatched KAK). Returns the number
+   * of rows removed.
    *
    * @returns {Promise<number>}
    */
@@ -876,7 +872,9 @@ export class BrowserStore {
     let existingHead: ContactHeadPayload
     if (isEncryptedEnvelope(data)) {
       if (!cipherForRead) {
-        throw new Error(`Cannot update contact "${id}": vault is locked.`)
+        throw new Error(
+          `Cannot update contact "${id}": the contacts cipher is unavailable.`
+        )
       }
       existingHead = (await cipherForRead.decrypt({
         envelope: data!
@@ -1007,7 +1005,7 @@ export class BrowserStore {
    * row can remain, so a persistent per-`dbPrefix` marker (localStorage, guarded
    * for the non-browser test/SSR environments) short-circuits the full-collection
    * scan that would otherwise materialize every encrypted row on every later
-   * login and unlocked-vault restore.
+   * login.
    *
    * @returns {Promise<void>}
    */

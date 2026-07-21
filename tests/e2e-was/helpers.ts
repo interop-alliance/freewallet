@@ -70,15 +70,17 @@ export function quotaCard(page: Page): Locator {
 
 export async function expectCollectionUsage(
   page: Page,
-  collectionName: string,
+  collectionId: string,
   usagePattern: RegExp
 ) {
-  // Walk from the (unique, within the card) exact collection-name label up to
-  // its row, which also carries the usage amount. The amount and unit render as
-  // adjacent spans with no separating space (e.g. "24.0KB").
-  const row = quotaCard(page)
-    .getByText(collectionName, { exact: true })
-    .locator('xpath=..')
+  // Per-collection usage renders on each collection's row in the collections
+  // browser (the "Wallet Contents" / "Wallet System Collections" lists), not in
+  // the aggregate "Storage usage" card. Target the row by its storage-path href
+  // -- deterministic, and it sidesteps the "Verifiable Credentials" /
+  // "Verifiable Credentials (Publicly Shared)" name-prefix clash. The row link
+  // carries the usage amount (amount and unit render as adjacent spans with no
+  // separating space, e.g. "24.0KB").
+  const row = page.locator(`a[href$="/storage/collections/${collectionId}"]`)
   await expect(row).toContainText(usagePattern)
 }
 

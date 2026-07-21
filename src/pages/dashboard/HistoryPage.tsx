@@ -121,7 +121,11 @@ export function HistoryPage() {
         aria-labelledby="history-source-dialog-title"
         slotProps={{ paper: { sx: infoBoxStyles.paper } }}
       >
-        <DialogTitle id="history-source-dialog-title" sx={infoBoxStyles.header}>
+        <DialogTitle
+          component="h6"
+          id="history-source-dialog-title"
+          sx={infoBoxStyles.header}
+        >
           <Box component="span" sx={infoBoxStyles.title}>
             {t('history.dialogTitle')}
           </Box>

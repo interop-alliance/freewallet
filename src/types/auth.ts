@@ -49,13 +49,6 @@ export interface User {
  * Cryptographic identity bundle for a logged-in user: the key agent that holds
  * the Ed25519 key pair and the ZCap client that signs HTTP requests with it.
  * In-memory only; never persisted.
- *
- * In the `delegated` session tier (a refresh-restored session,
- * `src/session/delegatedSession.ts`) `zcapClient` signs with the browser
- * session key and invokes the persisted delegated zcaps; `keyAgreementKey` /
- * `keyResolver` are present only when the session vault envelope
- * (`src/session/vault.ts`) yielded the vault KAK. The root `keyAgent` always
- * requires a fresh login.
  */
 export interface ControllerProfile {
   keyAgent?: ICapabilityAgent
@@ -70,39 +63,27 @@ export interface ControllerProfile {
   // KMS server (KMS_SERVER_URL). Absent for guests, when no KMS server is
   // configured, or when keystore provisioning failed at login.
   keystoreAgent?: KeystoreAgent
-  // The keystore id, when known without a keystore agent (the delegated tier
-  // restores it from the persisted session record for display).
-  keystoreId?: string
-  // The delegated `sign` capability on the keystore, restored from the
-  // persisted record in the `delegated` tier. Paired with the browser session
-  // key, it lets a restored session sign with the KMS-held keys (e.g. DIDAuth)
-  // without the passphrase. Absent in the `full` tier (the root key invokes
-  // the keystore's root capability directly).
-  keystoreCapability?: IZcap
   // The user's published did:web DID and its key-id map, present once
-  // provisioning has succeeded (`full` tier) or been restored from the
-  // persisted record (`delegated` tier). Absent for guests, without a
-  // KMS/WAS server, or when provisioning failed.
+  // provisioning has succeeded. Absent for guests, without a KMS/WAS server,
+  // or when provisioning failed.
   didWeb?: { did: string; keys: DidWebKeyMap }
   // The user's published did:webvh DID and its update-key refs (Phase 2),
-  // present once the log has been published (`full` tier) or restored from the
-  // persisted record (`delegated` tier). Key refs only, never secrets. Absent
-  // when the did:webvh flag is off, without a KMS/WAS server, or when
+  // present once the log has been published. Key refs only, never secrets.
+  // Absent when the did:webvh flag is off, without a KMS/WAS server, or when
   // provisioning failed -- everything degrades to did:web behavior.
   didWebvh?: {
     did: string
     updateKey: WebvhUpdateKey
     stagedKey: WebvhStagedKey
   }
-  // The 32-byte data seed behind `keyAgent`, held in memory in the `full` tier
-  // so Settings can re-bind the passphrase (keyring v2). Never persisted.
+  // The 32-byte data seed behind `keyAgent`, held in memory so Settings can
+  // re-bind the passphrase (keyring v2). Never persisted.
   dataSeed?: Uint8Array
-  // Which unlock method produced this full session, and the management zcap it
-  // delegated to the data identity at bind time. In-memory only, `full` tier
-  // only, never persisted (the PersistedSessionRecord stays method-agnostic):
-  // it lets Settings backfill the unlock-methods registry (recording the
-  // passphrase entry's unlock Space and its management capability) without
-  // re-prompting for the secret.
+  // Which unlock method produced this session, and the management zcap it
+  // delegated to the data identity at bind time. In-memory only, never
+  // persisted: it lets Settings backfill the unlock-methods registry
+  // (recording the passphrase entry's unlock Space and its management
+  // capability) without re-prompting for the secret.
   unlockMethod?: {
     type: 'passphrase' | 'passkey'
     unlockSpaceId: string
@@ -122,17 +103,14 @@ export type AuthLocationState = {
 /**
  * Full in-memory session for a logged-in user. Holds identity (user),
  * cryptographic credentials (profile), and the active storage backend
- * (storage). Discarded on page refresh -- though a `full` session leaves
- * behind delegated zcaps that let `restoreDelegatedSession()` reconstitute
- * a restricted `delegated` session on the next load.
+ * (storage). Discarded on page refresh -- a refresh logs the user out.
  */
 export interface Session {
   user: User
   profile: ControllerProfile
   storage: StorageManager
   // Resolves once the session's collections have been provisioned/opened by
-  // the session-creation seam (`initSessionFromSeed` for a fresh login,
-  // `restoreDelegatedSession` for a restored one). It is fired -- not awaited
+  // the session-creation seam (`initSessionFromSeed`). It is fired -- not awaited
   // -- inside session creation, so hot post-login reads (the CHAPI popup's
   // credential list) can run concurrently with provisioning; callers that need
   // provisioning finished `await session.storageReady`. Absent on the
@@ -141,10 +119,4 @@ export interface Session {
   storageReady?: Promise<void>
   expires?: string // ISO date string, matches Auth.js convention
   isGuest: boolean
-  // `full`: passphrase-derived root key present (fresh login). `delegated`:
-  // restored from persisted zcaps + the browser session key; no root key, and
-  // the vault unlocks only if the session vault envelope yielded the KAK
-  // (fail closed -- otherwise encrypted collections stay locked until
-  // re-login). Gate UI on `storage.vaultLocked`, not on the tier.
-  tier: 'full' | 'delegated'
 }

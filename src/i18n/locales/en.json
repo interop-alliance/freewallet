@@ -50,7 +50,6 @@
     "deletePassphraseIncorrect": "That passphrase is incorrect.",
     "deleting": "Deleting…",
     "deleteError": "Could not delete your account data. Please try again.",
-    "deleteRequiresFullSession": "Log in with your passphrase to delete your account.",
     "about": "About",
     "version": "Freewallet version {{version}}",
     "syncSection": "Sync",
@@ -73,7 +72,6 @@
     "rotateUpdateKey": "Rotate update key",
     "rotating": "Rotating…",
     "rotateUpdateKeyHint": "Reveals the staged key and commits a fresh one. Appends an entry to the public DID log.",
-    "rotateRequiresFullSession": "Log in with your passphrase to rotate the update key.",
     "rotateConfirmTitle": "Rotate the did:webvh update key?",
     "rotateConfirmMessage": "This appends a new entry to your public, append-only DID log: the staged update key is revealed and activated, and a fresh staged key is committed. This cannot be undone.",
     "rotateConfirmAction": "Rotate",
@@ -83,7 +81,6 @@
     "handleLabel": "Preferred username",
     "handleHint": "The username sites see when you log in with your wallet. Stored as a self-issued credential; leave blank to unset.",
     "handleSaved": "Login handle saved.",
-    "handleRequiresFullSession": "Log in with your passphrase to set a login handle.",
     "passphraseSection": "Passphrase",
     "changePassphrase": "Change passphrase",
     "currentPassphrase": "Current passphrase",
@@ -132,9 +129,7 @@
     "sharedSection": "Shared collections",
     "sharedSectionHint": "Encrypted collections you have shared with other readers. Removing access rotates the collection's encryption key so data written afterwards stays private.",
     "sharedRequiresRemote": "No remote storage is configured, so there is nothing to share.",
-    "sharedVaultLocked": "Your vault is locked. Log in with your passphrase to view and manage shared collections.",
     "sharedLoadError": "Could not load your shared collections. Please try again.",
-    "sharedRequiresFullSession": "Log in with your passphrase to change what is shared.",
     "sharedNothingForCollection": "Nothing is shared.",
     "sharedExpires": "Access expires {{date}}",
     "sharedExpiryUnknown": "No expiry recorded",
@@ -223,8 +218,6 @@
     "connectedOn": "Connected {{date}}",
     "connectedDateUnknown": "Connection date unknown",
     "revoke": "Revoke App Access",
-    "revokeRequiresFullSession": "Log in with your passphrase to revoke app access.",
-    "revokeVaultLocked": "Your vault is locked. Log in with your passphrase to revoke app access.",
     "detailTitle": "App detail: {{name}}",
     "connected": "Connected",
     "origin": "Origin:",
@@ -431,7 +424,6 @@
     "resumeTitle": "Resume",
     "loading": "Loading credential…",
     "loadError": "Could not load this credential. Please try again.",
-    "lockedVault": "This credential is in your locked vault. Log in with your passphrase to view it.",
     "deleteError": "Could not delete this credential. Please try again.",
     "deleted": "Credential deleted.",
     "deletedWithPublic": "Credential and its public link deleted.",
@@ -532,10 +524,6 @@
   "logout": {
     "message": "Logging out…"
   },
-  "session": {
-    "lockedVault": "Your session was restored, but your credentials vault is locked. Log in with your passphrase to unlock it.",
-    "unlock": "Log in"
-  },
   "chapi": {
     "accountNotFound": "Account not found. Please create your wallet from the main app first.",
     "storageUnreachable": "Could not reach the storage server. Please try again in a moment.",
@@ -592,13 +580,6 @@
       "authenticating": "Authenticating with the issuer...",
       "storedSuccess": "{{count}} credentials stored successfully.",
       "storedSuccess_one": "Credential stored successfully."
-    },
-    "savedSession": {
-      "button": "Use saved login",
-      "checking": "Checking for a saved login...",
-      "restored": "Signed in as {{identity}}. Enter your passphrase to unlock your credentials.",
-      "none": "No saved login found in this browser.",
-      "unavailable": "Saved login is not available in this browser."
     }
   },
   "verification": {

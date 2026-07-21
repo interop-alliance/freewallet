@@ -969,25 +969,6 @@ describe('StorageManager (remote-direct popup mode)', () => {
     expect(collections.get('walletActivity')!.size).toBe(1)
   })
 
-  it('returns [] and throws on writes when the vault is locked', async () => {
-    const ciphers = encryptedCiphers()
-    const { localStore, user } = await initLocalStore({ ciphers })
-    const { remoteStore } = makeFakeRemoteStore()
-    const storage = new StorageManager({
-      localStore,
-      remoteStore,
-      ciphers,
-      remoteDirect: true,
-      vaultLocked: true
-    })
-    const credential = makeCredential('Alice')
-
-    expect(await storage.listCredentials()).toEqual([])
-    await expect(storage.addCredential({ credential, user })).rejects.toThrow(
-      /locked/
-    )
-  })
-
   it('falls back to the local store when no remote store is configured', async () => {
     const ciphers = encryptedCiphers()
     const { localStore, user } = await initLocalStore({ ciphers })

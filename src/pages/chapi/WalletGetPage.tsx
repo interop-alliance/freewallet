@@ -86,7 +86,6 @@ import { fetchAppManifest, type AppManifestInfo } from '@/lib/appManifest'
 import { ZcapGrantsPanel } from './ZcapGrantsPanel'
 import { RequestSourcePanel } from './RequestSourcePanel'
 import { CHAPILoginForm } from './CHAPILoginForm'
-import { SavedSessionNotice } from './SavedSessionNotice'
 import { useTranslation } from 'react-i18next'
 
 type PageState =
@@ -198,10 +197,6 @@ export function WalletGetPage() {
   // fetched in the background for the consent screen; display-only garnish.
   const [appManifest, setAppManifest] = useState<AppManifestInfo | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
-  // First-party storage factory from the Storage Access API flow (see
-  // SavedSessionNotice); a full login persists its delegated session
-  // through it so the next popup visit auto-recognizes the user.
-  const [firstPartyIdb, setFirstPartyIdb] = useState<IDBFactory | null>(null)
   const initialized = useRef(false)
 
   useEffect(() => {
@@ -309,10 +304,9 @@ export function WalletGetPage() {
   async function handleLogin(passphrase: string) {
     setLoginError(null)
     // The shared popup login sequence (keyring resolve in remote-direct mode,
-    // account-not-found guard, delegated-session persistence, error mapping)
-    // lives in completePopupLogin; only the credential-selection work below is
-    // page-specific.
-    const result = await completePopupLogin({ passphrase, firstPartyIdb })
+    // account-not-found guard, error mapping) lives in completePopupLogin; only
+    // the credential-selection work below is page-specific.
+    const result = await completePopupLogin({ passphrase })
     if ('errorKey' in result) {
       setLoginError(t(result.errorKey))
       return
@@ -421,23 +415,6 @@ export function WalletGetPage() {
       setPageState('selecting')
     } catch (err) {
       setLoginError(t(mapPopupLoginError(err)))
-    }
-  }
-
-  /**
-   * Handles a saved (delegated) session recognized by SavedSessionNotice. A
-   * delegated session holds no root key (though the session vault envelope
-   * may have unlocked its vault), so this fast path deliberately covers only
-   * a DID-Auth-*only* request, and only when a KMS-backed did:web is
-   * provisioned (the `authentication` key signs without the passphrase). In
-   * that case we skip straight to the consent screen; otherwise recognition is
-   * cosmetic and the passphrase form stays. Extending the fast path to VC
-   * sharing over an unlocked vault is a deliberate non-goal for now.
-   */
-  function handleRestoredSession(restored: Session) {
-    if (isDidAuthOnly(profile) && restored.profile.didWeb) {
-      setSession(restored)
-      setPageState('selecting')
     }
   }
 
@@ -733,13 +710,7 @@ export function WalletGetPage() {
         )}
 
         {pageState === 'awaiting-login' && (
-          <>
-            <SavedSessionNotice
-              onFirstPartyStorage={setFirstPartyIdb}
-              onRestore={handleRestoredSession}
-            />
-            <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
-          </>
+          <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
         )}
 
         {pageState === 'selecting' && appConnect && (

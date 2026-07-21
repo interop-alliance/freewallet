@@ -104,13 +104,13 @@ describe('issueLoginCredential', () => {
     expect(result.verified).toBe(true)
   })
 
-  it('throws without a full (passphrase) session', async () => {
-    const delegated = {
+  it('throws without a passphrase (root key) session', async () => {
+    const noKeyAgent = {
       user: { id: session.user.id },
       profile: {}
     } as unknown as Session
     await expect(
-      issueLoginCredential({ session: delegated, username: 'alice' })
+      issueLoginCredential({ session: noKeyAgent, username: 'alice' })
     ).rejects.toThrow(/full \(passphrase\) session/)
   })
 })

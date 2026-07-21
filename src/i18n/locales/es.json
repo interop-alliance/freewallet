@@ -50,7 +50,6 @@
     "deletePassphraseIncorrect": "Esa frase de contraseña es incorrecta.",
     "deleting": "Eliminando…",
     "deleteError": "No se pudieron eliminar los datos de su cuenta. Inténtelo de nuevo.",
-    "deleteRequiresFullSession": "Inicie sesión con su frase de contraseña para eliminar su cuenta.",
     "about": "Acerca de",
     "version": "Freewallet versión {{version}}",
     "syncSection": "Sincronización",
@@ -73,7 +72,6 @@
     "rotateUpdateKey": "Rotar clave de actualización",
     "rotating": "Rotando…",
     "rotateUpdateKeyHint": "Revela la clave preparada y confirma una nueva. Añade una entrada al registro público del DID.",
-    "rotateRequiresFullSession": "Inicie sesión con su frase de contraseña para rotar la clave de actualización.",
     "rotateConfirmTitle": "¿Rotar la clave de actualización did:webvh?",
     "rotateConfirmMessage": "Esto añade una nueva entrada a su registro de DID público y de solo anexión: la clave de actualización preparada se revela y se activa, y se confirma una nueva clave preparada. Esta acción no se puede deshacer.",
     "rotateConfirmAction": "Rotar",
@@ -83,7 +81,6 @@
     "handleLabel": "Nombre de usuario preferido",
     "handleHint": "El nombre de usuario que ven los sitios cuando inicia sesión con su billetera. Se guarda como una credencial autoemitida; déjelo en blanco para quitarlo.",
     "handleSaved": "Identificador de inicio de sesión guardado.",
-    "handleRequiresFullSession": "Inicie sesión con su frase de contraseña para establecer un identificador de inicio de sesión.",
     "passphraseSection": "Frase de contraseña",
     "changePassphrase": "Cambiar frase de contraseña",
     "currentPassphrase": "Frase de contraseña actual",
@@ -132,9 +129,7 @@
     "sharedSection": "Colecciones compartidas",
     "sharedSectionHint": "Colecciones cifradas que ha compartido con otros lectores. Quitar el acceso rota la clave de cifrado de la colección para que los datos escritos después permanezcan privados.",
     "sharedRequiresRemote": "No hay almacenamiento remoto configurado, por lo que no hay nada que compartir.",
-    "sharedVaultLocked": "Su bóveda está bloqueada. Inicie sesión con su frase de contraseña para ver y administrar las colecciones compartidas.",
     "sharedLoadError": "No se pudieron cargar sus colecciones compartidas. Inténtelo de nuevo.",
-    "sharedRequiresFullSession": "Inicie sesión con su frase de contraseña para cambiar lo que se comparte.",
     "sharedNothingForCollection": "No se comparte nada.",
     "sharedExpires": "El acceso vence el {{date}}",
     "sharedExpiryUnknown": "Sin fecha de vencimiento registrada",
@@ -223,8 +218,6 @@
     "connectedOn": "Conectada el {{date}}",
     "connectedDateUnknown": "Fecha de conexión desconocida",
     "revoke": "Revocar acceso de la aplicación",
-    "revokeRequiresFullSession": "Inicie sesión con su frase de contraseña para revocar el acceso de la aplicación.",
-    "revokeVaultLocked": "Su bóveda está bloqueada. Inicie sesión con su frase de contraseña para revocar el acceso de la aplicación.",
     "detailTitle": "Detalle de la aplicación: {{name}}",
     "connected": "Conectada",
     "origin": "Origen:",
@@ -431,7 +424,6 @@
     "resumeTitle": "Currículum",
     "loading": "Cargando credencial…",
     "loadError": "No se pudo cargar esta credencial. Inténtelo de nuevo.",
-    "lockedVault": "Esta credencial está en su bóveda bloqueada. Inicie sesión con su frase de contraseña para verla.",
     "deleteError": "No se pudo eliminar esta credencial. Inténtelo de nuevo.",
     "deleted": "Credencial eliminada.",
     "deletedWithPublic": "Se eliminaron la credencial y su enlace público.",
@@ -532,10 +524,6 @@
   "logout": {
     "message": "Cerrando sesión…"
   },
-  "session": {
-    "lockedVault": "Se restauró su sesión, pero la bóveda de credenciales está bloqueada. Inicie sesión con su frase de contraseña para desbloquearla.",
-    "unlock": "Iniciar sesión"
-  },
   "chapi": {
     "accountNotFound": "Cuenta no encontrada. Cree su billetera en la aplicación principal primero.",
     "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Inténtelo de nuevo en un momento.",
@@ -592,13 +580,6 @@
       "authenticating": "Autenticando con el emisor...",
       "storedSuccess": "{{count}} credenciales almacenadas correctamente.",
       "storedSuccess_one": "Credencial almacenada correctamente."
-    },
-    "savedSession": {
-      "button": "Usar sesión guardada",
-      "checking": "Buscando una sesión guardada...",
-      "restored": "Sesión iniciada como {{identity}}. Introduzca su frase de contraseña para desbloquear sus credenciales.",
-      "none": "No se encontró ninguna sesión guardada en este navegador.",
-      "unavailable": "La sesión guardada no está disponible en este navegador."
     }
   },
   "verification": {

@@ -132,14 +132,6 @@ export function SettingsPage() {
     useState(false)
   const [deleting, setDeleting] = useState(false)
   const hasRemoteStorage = !!session?.storage?.hasRemoteStorage
-  // Deleting the account issues a Space DELETE, which only the root key (the
-  // Space controller) can sign -- the delegated tier's zcaps are read-only on
-  // the Space, so the wipe would always be rejected by the server.
-  const canDeleteAccount = session?.tier === 'full'
-  // Login handle: a self-issued LoginCredential's preferredUsername. Editable
-  // only with a full (passphrase) session -- the delegated tier has no signer
-  // and a locked vault, so it cannot issue or read the credential.
-  const canEditHandle = session?.tier === 'full'
   const [handle, setHandle] = useState('')
   const [savedHandle, setSavedHandle] = useState('')
   const [handleSaving, setHandleSaving] = useState(false)
@@ -148,7 +140,7 @@ export function SettingsPage() {
   useEffect(() => {
     let cancelled = false
     async function loadHandle() {
-      if (!session || !canEditHandle) {
+      if (!session) {
         return
       }
       try {
@@ -167,7 +159,7 @@ export function SettingsPage() {
     return () => {
       cancelled = true
     }
-  }, [session, canEditHandle])
+  }, [session])
 
   const handleSaveHandle = async () => {
     if (!session) {
@@ -187,11 +179,9 @@ export function SettingsPage() {
   }
   // Passphrase keyring (keyring v2) state. The whole section is shown for
   // non-guest sessions; changing the passphrase re-binds the data seed under a
-  // new unlock identity, so it needs the full (passphrase) tier where the seed
-  // is in memory.
+  // new unlock identity, so it needs the data seed in memory.
   const keyringSectionVisible = !session?.isGuest
-  const canChangePassphrase =
-    session?.tier === 'full' && !!session?.profile?.dataSeed
+  const canChangePassphrase = !!session?.profile?.dataSeed
   const [oldPassphrase, setOldPassphrase] = useState('')
   const [newPassphrase, setNewPassphrase] = useState('')
   const [newPassphraseScore, setNewPassphraseScore] = useState(0)
@@ -286,10 +276,9 @@ export function SettingsPage() {
   }
   // Passkeys (keyring v2 unlock methods). The section is shown only where
   // WebAuthn exists; adding a passkey binds the in-memory data seed under the
-  // passkey's PRF-derived unlock identity, so it needs the full (passphrase)
-  // tier where the seed is present.
+  // passkey's PRF-derived unlock identity, so it needs the seed present.
   const passkeysSupported = passkeySupported()
-  const canAddPasskey = session?.tier === 'full' && !!session?.profile?.dataSeed
+  const canAddPasskey = !!session?.profile?.dataSeed
   const [addingPasskey, setAddingPasskey] = useState(false)
   const [passkeyError, setPasskeyError] = useState<
     'duplicate' | 'unsupported' | 'failed' | null
@@ -340,10 +329,7 @@ export function SettingsPage() {
     !!unlockRegistry &&
     !hasPassphraseEntry &&
     session?.profile?.unlockMethod?.type !== 'passphrase'
-  const canAddPassphrase =
-    knownNoPassphrase &&
-    session?.tier === 'full' &&
-    !!session?.profile?.dataSeed
+  const canAddPassphrase = knownNoPassphrase && !!session?.profile?.dataSeed
 
   // Refreshes the registry from the source of truth after a mutation (not the
   // cancellable mount load below).
@@ -672,12 +658,9 @@ export function SettingsPage() {
   // KMS keystore state: a keystore is provisioned at login whenever a KMS
   // server is configured for a non-guest session (see initSession.ts).
   const kmsConfigured = !!KMS_SERVER_URL && !session?.isGuest
-  // A restored (delegated) session carries the keystore id from the
-  // persisted record rather than a keystore agent.
-  const keystoreId =
-    session?.profile?.keystoreAgent?.keystoreId ?? session?.profile?.keystoreId
-  // The published did:web DID (present in both tiers once provisioned) and the
-  // world-readable URL its document resolves to.
+  const keystoreId = session?.profile?.keystoreAgent?.keystoreId
+  // The published did:web DID (present once provisioned) and the world-readable
+  // URL its document resolves to.
   const publishedDid = session?.profile?.didWeb?.did
   const publishedDidUrl = session?.storage.publishedDidUrl
   // The published did:webvh DID (Phase 2) and the world-readable URL its log
@@ -688,9 +671,6 @@ export function SettingsPage() {
   const publishedDidWebvhLogUrl = publishedDidWebvh
     ? getFileUrl(publishedDidWebvh)
     : undefined
-  // Rotating the update key extends the append-only log with the root zcap, so
-  // it needs a full (passphrase) session -- the delegated tier has no root key.
-  const canRotate = session?.tier === 'full'
   const { copied: copiedDidWebvh, copy: copyDidWebvh } = useCopyToClipboard({
     onError: (err: unknown) => {
       console.error('Could not copy the did:webvh id:', err)
@@ -799,9 +779,7 @@ export function SettingsPage() {
           console.warn('Could not delete the passkey-safety notice:', err)
         }
       }
-      // (d) End the persisted delegated session (session key, zcaps, vault
-      // envelope) so the next load cannot restore a live session for the
-      // deleted identity, then (e) hard-reload to the landing page.
+      // (d) Clear the session, then (e) hard-reload to the landing page.
       await logout()
       window.location.href = '/'
     } finally {
@@ -835,12 +813,7 @@ export function SettingsPage() {
         <Divider />
 
         <Stack direction="row" sx={dashboardStyles.settingsRow}>
-          <Button
-            variant="contained"
-            color="error"
-            disabled={!canDeleteAccount}
-            onClick={openDeleteDialog}
-          >
+          <Button variant="contained" color="error" onClick={openDeleteDialog}>
             {t('settings.deleteAccount')}
           </Button>
           <Typography
@@ -850,12 +823,6 @@ export function SettingsPage() {
             {t('settings.deleteAccountHint')}
           </Typography>
         </Stack>
-
-        {!canDeleteAccount && (
-          <Typography variant="body2" color="text.secondary">
-            {t('settings.deleteRequiresFullSession')}
-          </Typography>
-        )}
 
         {deleteError && (
           <Alert severity="error">{t('settings.deleteError')}</Alert>
@@ -868,41 +835,33 @@ export function SettingsPage() {
           <Typography variant="body2" color="text.secondary">
             {t('settings.handleHint')}
           </Typography>
-          {canEditHandle ? (
-            <>
-              <Stack
-                direction="row"
-                sx={{ alignItems: 'flex-start', gap: 2, mt: 1 }}
-              >
-                <TextField
-                  size="small"
-                  label={t('settings.handleLabel')}
-                  value={handle}
-                  onChange={event => {
-                    setHandle(event.target.value)
-                    setHandleSaved(false)
-                  }}
-                  sx={{ minWidth: 260 }}
-                />
-                <Button
-                  variant="contained"
-                  sx={{ mt: 0.25 }}
-                  loading={handleSaving}
-                  disabled={handle.trim() === savedHandle}
-                  onClick={handleSaveHandle}
-                >
-                  {t('common.save')}
-                </Button>
-              </Stack>
-              {handleSaved && (
-                <Typography variant="body2" color="success.main">
-                  {t('settings.handleSaved')}
-                </Typography>
-              )}
-            </>
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              {t('settings.handleRequiresFullSession')}
+          <Stack
+            direction="row"
+            sx={{ alignItems: 'flex-start', gap: 2, mt: 1 }}
+          >
+            <TextField
+              size="small"
+              label={t('settings.handleLabel')}
+              value={handle}
+              onChange={event => {
+                setHandle(event.target.value)
+                setHandleSaved(false)
+              }}
+              sx={{ minWidth: 260 }}
+            />
+            <Button
+              variant="contained"
+              sx={{ mt: 0.25 }}
+              loading={handleSaving}
+              disabled={handle.trim() === savedHandle}
+              onClick={handleSaveHandle}
+            >
+              {t('common.save')}
+            </Button>
+          </Stack>
+          {handleSaved && (
+            <Typography variant="body2" color="success.main">
+              {t('settings.handleSaved')}
             </Typography>
           )}
         </Stack>
@@ -1430,7 +1389,7 @@ export function SettingsPage() {
                   variant="outlined"
                   size="small"
                   sx={{ borderRadius: 2, px: 2, py: 1 }}
-                  disabled={!canRotate || rotating}
+                  disabled={rotating}
                   onClick={() => {
                     setRotateDone(false)
                     setRotateError(false)
@@ -1445,11 +1404,6 @@ export function SettingsPage() {
                   {t('settings.rotateUpdateKeyHint')}
                 </Typography>
               </Stack>
-              {!canRotate && (
-                <Typography variant="body2" color="text.secondary">
-                  {t('settings.rotateRequiresFullSession')}
-                </Typography>
-              )}
               {rotateDone && (
                 <Typography variant="body2" color="success.main">
                   {t('settings.rotateSuccess')}

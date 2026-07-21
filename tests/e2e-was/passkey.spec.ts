@@ -209,10 +209,10 @@ async function logout(page: Page): Promise<void> {
 /**
  * Deletes every IndexedDB database for the origin: the RxDB wallet database
  * (`<prefix>-wallet-db`) and the `freewallet-session` database that holds the
- * session key, persisted delegated session, and keyring cache. Simulates a fresh
- * device that still carries the synced passkey (which lives in the authenticator,
- * not page storage). Best-effort per database: a blocked delete still resolves,
- * and a following reload closes the connection that blocked it.
+ * keyring cache and passkey-safety notice. Simulates a fresh device that still
+ * carries the synced passkey (which lives in the authenticator, not page
+ * storage). Best-effort per database: a blocked delete still resolves, and a
+ * following reload closes the connection that blocked it.
  *
  * @param page {Page}
  * @returns {Promise<void>}
@@ -295,7 +295,7 @@ test.describe('Passkey unlock', () => {
     const cdp = await enableWebAuthn(page)
     const firstAuthenticator = await addAuthenticator(cdp, { hasPrf: true })
 
-    // A passkey signup is a full-tier session, so Settings can manage passkeys.
+    // A passkey signup logs in with the root key, so Settings can manage passkeys.
     await passkeySignup(page, { email: passkeyEmail(testInfo) })
     await expect(
       page.getByRole('link', { name: 'Your First Credential' })

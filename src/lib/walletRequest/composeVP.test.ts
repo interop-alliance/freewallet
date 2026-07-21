@@ -22,8 +22,7 @@ beforeAll(async () => {
   })
   session = {
     user: { id: keyAgent.id },
-    profile: { keyAgent },
-    tier: 'full'
+    profile: { keyAgent }
   } as unknown as Session
 })
 

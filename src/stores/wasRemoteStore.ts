@@ -69,18 +69,6 @@ interface ParsedWasPath {
 }
 
 /**
- * The delegated zcaps a restored (`delegated` tier) session invokes instead
- * of root capabilities: a GET/HEAD capability on the Space URL (covers reads
- * anywhere under the Space via target attenuation) and a read/write
- * capability per standard collection, keyed by WAS collection id. Absent in
- * the full tier, where the root key invokes root capabilities directly.
- */
-export interface SessionCapabilities {
-  spaceRead: IZcap
-  collections: Record<string, IZcap>
-}
-
-/**
  * @see https://digitalcredentials.github.io/wallet-attached-storage-spec/
  * @see https://github.com/interop-alliance/zcap-developer-guide
  */
@@ -92,20 +80,17 @@ export class WASRemoteStore {
 
   public spaceUrl: string
   public collections?: ICollectionsSet
-  private _sessionCapabilities?: SessionCapabilities
 
   constructor({
     storageServerUrl,
     zcapClient,
     spaceId,
-    controller,
-    sessionCapabilities
+    controller
   }: {
     storageServerUrl: string
     zcapClient: ZcapClient
     spaceId: string
     controller: string
-    sessionCapabilities?: SessionCapabilities
   }) {
     this.storageServerUrl = storageServerUrl
     this.was = new WasClient({
@@ -119,38 +104,6 @@ export class WASRemoteStore {
     this.spaceId = spaceId
     this.controller = controller
     this.spaceUrl = new URL(`/space/${spaceId}`, storageServerUrl).toString()
-    this._sessionCapabilities = sessionCapabilities
-  }
-
-  /**
-   * The capability to attach to a request in the delegated tier (`undefined`
-   * in the full tier, where handles invoke root capabilities). Writes into a
-   * standard collection use its read/write capability; everything else uses
-   * the Space read capability -- a write it cannot authorize is then denied
-   * by the server, which is the intended failure mode.
-   *
-   * @param options {object}
-   * @param [options.collectionId] {string}
-   * @param [options.write] {boolean}
-   * @returns {IZcap | undefined}
-   */
-  sessionCapabilityFor({
-    collectionId,
-    write = false
-  }: {
-    collectionId?: string
-    write?: boolean
-  } = {}): IZcap | undefined {
-    if (!this._sessionCapabilities) {
-      return undefined
-    }
-    if (write && collectionId) {
-      return (
-        this._sessionCapabilities.collections[collectionId] ??
-        this._sessionCapabilities.spaceRead
-      )
-    }
-    return this._sessionCapabilities.spaceRead
   }
 
   /**
@@ -201,9 +154,7 @@ export class WASRemoteStore {
     if (!collectionId) {
       throw new Error(`Not a WAS collection URL: "${url}".`)
     }
-    return this.was
-      .space(spaceId, this._handleOptions({ spaceId, collectionId }))
-      .collection(collectionId)
+    return this.was.space(spaceId).collection(collectionId)
   }
 
   /**
@@ -220,49 +171,17 @@ export class WASRemoteStore {
    * the override is a no-op there.
    *
    * @param url {string}
-   * @param [options] {object}
-   * @param [options.write] {boolean}   the handle will be used to write
    * @returns {Resource}
    */
-  private _resourceFromUrl(
-    url: string,
-    { write = false }: { write?: boolean } = {}
-  ): Resource {
+  private _resourceFromUrl(url: string): Resource {
     const { spaceId, collectionId, resourceId } = this._parsePath(url)
     if (!collectionId || !resourceId) {
       throw new Error(`Not a WAS resource URL: "${url}".`)
     }
     return this.was
-      .space(spaceId, this._handleOptions({ spaceId, collectionId, write }))
+      .space(spaceId)
       .collection(collectionId)
       .resource(resourceId, { encryption: 'plaintext' })
-  }
-
-  /**
-   * Handle options for a target within this store's own Space: carries the
-   * matching session capability in the delegated tier, nothing otherwise
-   * (root invocations, or a foreign Space this store holds no zcaps for).
-   *
-   * @param options {object}
-   * @param options.spaceId {string}   the target's Space id (from its URL)
-   * @param [options.collectionId] {string}
-   * @param [options.write] {boolean}
-   * @returns {{ capability?: IZcap }}
-   */
-  private _handleOptions({
-    spaceId,
-    collectionId,
-    write = false
-  }: {
-    spaceId: string
-    collectionId?: string
-    write?: boolean
-  }): { capability?: IZcap } {
-    if (spaceId !== this.spaceId) {
-      return {}
-    }
-    const capability = this.sessionCapabilityFor({ collectionId, write })
-    return capability ? { capability } : {}
   }
 
   /**
@@ -287,11 +206,9 @@ export class WASRemoteStore {
   /**
    * Reads a standard collection's `encryption` marker (the widened
    * `CollectionEncryption` with its `epochs` / `currentEpoch` roster), or
-   * `undefined` when the collection is plaintext or has no marker. Attaches the
-   * session capability so a restored (`delegated` tier) session -- whose Space
-   * read zcap covers the description GET -- can read it too. Network errors
-   * throw through: callers treat a marker fetch as best-effort and fall back to
-   * a cached copy.
+   * `undefined` when the collection is plaintext or has no marker. Network
+   * errors throw through: callers treat a marker fetch as best-effort and fall
+   * back to a cached copy.
    *
    * @param options {object}
    * @param options.collectionId {string}   the WAS collection id (e.g.
@@ -304,10 +221,7 @@ export class WASRemoteStore {
     collectionId: string
   }): Promise<CollectionEncryption | undefined> {
     const description = await this.was
-      .space(
-        this.spaceId,
-        this._handleOptions({ spaceId: this.spaceId, collectionId })
-      )
+      .space(this.spaceId)
       .collection(collectionId)
       .describe()
     return description?.encryption ?? undefined
@@ -317,7 +231,7 @@ export class WASRemoteStore {
    * The `Collection` handle for a standard collection, invoked with the root
    * capability -- used by the recipient operations (`initRecipients` /
    * `addRecipient` / `removeRecipient`), which rewrite the Collection
-   * Description and so are full-tier only.
+   * Description.
    *
    * @param options {object}
    * @param options.collectionId {string}
@@ -329,7 +243,7 @@ export class WASRemoteStore {
 
   /**
    * The `Space` handle (root capability), needed by `removeRecipient` to revoke
-   * a reader's pull-axis zcap(s) via `space.revoke()`. Full-tier only.
+   * a reader's pull-axis zcap(s) via `space.revoke()`.
    *
    * @returns {Space}
    */
@@ -339,26 +253,10 @@ export class WASRemoteStore {
 
   async userExists() {
     // describe() returns null on a 404 (not-found or unauthorized).
-    return (
-      (await this.was
-        .space(this.spaceId, this._handleOptions({ spaceId: this.spaceId }))
-        .describe()) !== null
-    )
+    return (await this.was.space(this.spaceId).describe()) !== null
   }
 
   async ensureUserCollections({ user }: { user: User }) {
-    // A delegated session never (re)configures the Space or its collections
-    // -- the full session that delegated it already provisioned everything
-    // (and the session capabilities could not authorize the writes anyway).
-    // Just rebuild the collection-URL map.
-    if (this._sessionCapabilities) {
-      const collections: ICollectionsSet = new Map()
-      for (const { key, id } of WALLET_STANDARD_COLLECTIONS) {
-        collections.set(key, this._collectionBaseUrl(id))
-      }
-      this.collections = collections
-      return
-    }
     const space = this.was.space(this.spaceId)
 
     // Create (upsert) the Space for this user on the remote storage server.
@@ -443,20 +341,12 @@ export class WASRemoteStore {
 
   /**
    * Returns a `Resource` handle for a resource in this Space's `id` collection,
-   * invoked with the root capability. Full-tier only: a delegated session
-   * holds no capability over the `id` collection (by design -- the DID
-   * document changes only at key ceremonies, which need the root key).
+   * invoked with the root capability.
    *
    * @param resourceId {string}
    * @returns {Resource}
    */
   private _idResource(resourceId: string): Resource {
-    if (this._sessionCapabilities) {
-      throw new Error(
-        'A delegated session cannot access the `id` collection; log in with ' +
-          'the passphrase.'
-      )
-    }
     return this.was
       .space(this.spaceId)
       .collection(ID_COLLECTION.id)
@@ -567,9 +457,7 @@ export class WASRemoteStore {
    * authorization (writes stay capability-only). Policy endpoints are
    * capability-only on the server, so only the wallet -- holding the space
    * root -- can set it. This is the `ensureUserCollections` pattern minus the
-   * encryption marker. Full-tier only: a delegated session holds no
-   * capability to (re)configure the Space, and only a fresh passphrase login
-   * provisions on the RP's behalf.
+   * encryption marker.
    *
    * @param options {object}
    * @param options.id {string}   the WAS collection id (validated by the caller)
@@ -587,12 +475,6 @@ export class WASRemoteStore {
     name?: string
     isPublic?: boolean
   }): Promise<string> {
-    if (this._sessionCapabilities) {
-      throw new Error(
-        'A delegated session cannot provision collections; log in with the ' +
-          'passphrase.'
-      )
-    }
     try {
       const collection = this.was.space(this.spaceId).collection(id)
       // `force`: this provisioning upsert runs with the root capability, so
@@ -699,7 +581,7 @@ export class WASRemoteStore {
   }: {
     relativeUrl: string
   }): Promise<void> {
-    await this._resourceFromUrl(relativeUrl, { write: true }).delete()
+    await this._resourceFromUrl(relativeUrl).delete()
   }
 
   async fetchCollectionResource(
@@ -743,9 +625,7 @@ export class WASRemoteStore {
   async listCollections(): Promise<Array<StorageCollection>> {
     let listing
     try {
-      listing = await this.was
-        .space(this.spaceId, this._handleOptions({ spaceId: this.spaceId }))
-        .collections()
+      listing = await this.was.space(this.spaceId).collections()
     } catch (err) {
       console.error('Error listing collections:', err)
       throw new Error('Failed to list remote storage collections.', {
@@ -810,10 +690,7 @@ export class WASRemoteStore {
     let listing
     try {
       listing = await this.was
-        .space(
-          this.spaceId,
-          this._handleOptions({ spaceId: this.spaceId, collectionId })
-        )
+        .space(this.spaceId)
         .collection(collectionId)
         .list()
     } catch (err) {
@@ -852,7 +729,6 @@ export class WASRemoteStore {
     const collectionId = this._collectionId(logicalKey)
     try {
       const response = await this.was.request({
-        capability: this.sessionCapabilityFor({ collectionId }),
         path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
           resourceId
         )}`,
@@ -895,7 +771,6 @@ export class WASRemoteStore {
     const collectionId = this._collectionId(logicalKey)
     try {
       await this.was.request({
-        capability: this.sessionCapabilityFor({ collectionId, write: true }),
         path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
           resourceId
         )}`,
@@ -926,8 +801,7 @@ export class WASRemoteStore {
     try {
       const response = await this.was.request({
         path: `/space/${this.spaceId}/quotas?include=collections`,
-        method: 'GET',
-        capability: this.sessionCapabilityFor()
+        method: 'GET'
       })
 
       return response.data as SpaceQuotaReport
@@ -951,13 +825,10 @@ export class WASRemoteStore {
       // Use the raw request escape hatch rather than `space.export()`: the
       // handle helper buffers the whole tar archive into memory, whereas the
       // raw `HttpResponse` exposes a `body` stream we can pipe straight to disk.
-      // In the delegated tier this fails server-side: export is a POST and
-      // the session capabilities are read-only outside the collections.
       response = await this.was.request({
         path: `/space/${this.spaceId}/export`,
         method: 'POST',
-        headers: { accept: 'application/x-tar' },
-        capability: this.sessionCapabilityFor()
+        headers: { accept: 'application/x-tar' }
       })
     } catch (err) {
       console.error('Error exporting space:', err)
@@ -992,9 +863,9 @@ export class WASRemoteStore {
  * separate from the wallet data Space, so these are standalone functions rather
  * than `WASRemoteStore` methods (the store is bound to the data identity). Each
  * builds its own `WasClient` over the unlock agent's `zcapClient`, whose
- * invocation signer is the unlock root key (full-tier root invocation, no
- * capability attached -- the same posture the data Space uses in the full
- * tier). The one resource is a plaintext JSON document (its keyring payload is
+ * invocation signer is the unlock root key (root invocation, no capability
+ * attached -- the same posture the data Space uses). The one resource is a
+ * plaintext JSON document (its keyring payload is
  * already ciphertext), so no encryption provider is wired in -- and the
  * read/write handles pass the explicit `{ encryption: 'plaintext' }` override.
  * The override is load-bearing: without it, the client decides plaintext vs

@@ -38,23 +38,14 @@ async function signup(page: Page, testInfo: TestInfo) {
 /**
  * Hosted did:web DID e2e (Track F, Phase 1). Runs against the app in remote
  * mode backed by the local was-teaching-server (whose `/kms` facet is the
- * default KMS). Covers three things:
+ * default KMS). Covers two things:
  *
  * 1. Signing up provisions and publishes a did:web document as a world-readable
  *    WAS resource, while the sibling key-id map stays capability-only.
- * 2. A full-tier CHAPI DIDAuth request is signed by the KMS-held
- *    `authentication` key, and the VP's holder / verificationMethod resolve
- *    against the published `did.json`.
- * 3. A refresh-restored (delegated) session completes a DIDAuth-only request in
- *    a cross-site CHAPI popup with NO passphrase -- the payoff of moving DIDAuth
- *    onto a KMS-held key.
+ * 2. A CHAPI DIDAuth request is signed by the KMS-held `authentication` key,
+ *    and the VP's holder / verificationMethod resolve against the published
+ *    `did.json`.
  */
-
-const APP_PORT = 5274
-const WALLET = `http://localhost:${APP_PORT}`
-const HARNESS_URL =
-  `http://127.0.0.1:${APP_PORT}/embed-harness.html?src=` +
-  encodeURIComponent(`${WALLET}/#/wallet/get`)
 
 interface GetEventConfig {
   origin: string
@@ -65,16 +56,10 @@ interface GetEventConfig {
 
 /**
  * Injects a canned CHAPI get event whose `respondWith` records the response on
- * `window.__E2E_CHAPI_RESPONSE__`. Context-scoped so it also runs inside the
- * cross-site wallet iframe (test 3).
+ * `window.__E2E_CHAPI_RESPONSE__`.
  */
-async function injectGetEvent(
-  scope: Page,
-  config: GetEventConfig,
-  { contextWide = false }: { contextWide?: boolean } = {}
-) {
-  const target = contextWide ? scope.context() : scope
-  await target.addInitScript((cfg: GetEventConfig) => {
+async function injectGetEvent(scope: Page, config: GetEventConfig) {
+  await scope.addInitScript((cfg: GetEventConfig) => {
     const win = window as unknown as {
       __E2E_CHAPI_GET_EVENT__?: unknown
       __E2E_CHAPI_RESPONSE__?: { value: unknown }
@@ -122,53 +107,7 @@ function readResponse(scope: Page | Frame) {
   )
 }
 
-/**
- * Waits until the delegated-session record has landed in the wallet origin's
- * first-party IndexedDB (persistDelegatedSession runs fire-and-forget after
- * login). Polls without ever creating the database.
- */
-async function waitForPersistedSession(page: Page) {
-  await page.waitForFunction(async () => {
-    const databases = await indexedDB.databases()
-    if (!databases.some(db => db.name === 'freewallet-session')) {
-      return false
-    }
-    return await new Promise<boolean>(resolve => {
-      const request = indexedDB.open('freewallet-session', 1)
-      request.onerror = () => resolve(false)
-      request.onsuccess = () => {
-        const db = request.result
-        try {
-          const get = db
-            .transaction('session', 'readonly')
-            .objectStore('session')
-            .get('record')
-          get.onsuccess = () => {
-            db.close()
-            resolve(get.result != null)
-          }
-          get.onerror = () => {
-            db.close()
-            resolve(false)
-          }
-        } catch {
-          db.close()
-          resolve(false)
-        }
-      }
-    })
-  })
-}
-
-function walletFrame(page: Page): Frame {
-  const frame = page
-    .frames()
-    .find(candidate => candidate.url().startsWith(WALLET))
-  expect(frame, 'the harness must embed the wallet').toBeTruthy()
-  return frame!
-}
-
-test('signup publishes a did:web document and a full-tier DIDAuth VP is signed by the KMS key', async ({
+test('signup publishes a did:web document and a DIDAuth VP is signed by the KMS key', async ({
   page
 }, testInfo) => {
   // Real KMS key generation + lazy dictionary loads against one teaching
@@ -251,73 +190,4 @@ test('signup publishes a did:web document and a full-tier DIDAuth VP is signed b
   expect(payload.data.proof.challenge).toBe(challenge)
   expect(payload.data.proof.verificationMethod).toContain(`${doc.id}#`)
   expect(doc.authentication).toContain(payload.data.proof.verificationMethod)
-})
-
-test('a restored delegated session completes DIDAuth in a popup with no passphrase', async ({
-  page,
-  context
-}, testInfo) => {
-  test.slow()
-  // The user already clicked "Allow" on Chrome's storage-access prompt.
-  await context.grantPermissions(['storage-access'])
-
-  const origin = 'https://verifier.example'
-  const challenge = `chal-${Date.now()}-w${testInfo.workerIndex}`
-
-  // 1. Top-level signup on the wallet origin provisions did:web and persists
-  //    the delegated session (with its did:web key map) first-party. The CHAPI
-  //    event is injected only afterwards, so its init script never runs on the
-  //    signup page.
-  await signup(page, testInfo)
-  await waitForPersistedSession(page)
-
-  await injectGetEvent(
-    page,
-    {
-      origin,
-      query: [{ type: 'DIDAuthentication' }],
-      challenge,
-      domain: 'verifier.example'
-    },
-    { contextWide: true }
-  )
-
-  // 2. Load /wallet/get as a third-party iframe under a cross-site top level.
-  await page.goto(HARNESS_URL)
-  const frame = walletFrame(page)
-
-  // 3. The saved login is recognized (silently, or after the button); because
-  //    the request is DIDAuth-only and a did:web is provisioned, the popup goes
-  //    straight to the consent screen -- no passphrase form is used.
-  const consent = frame.getByText(/is requesting DID Authentication/)
-  const useSaved = frame.getByRole('button', { name: 'Use saved login' })
-  await expect(consent.or(useSaved)).toBeVisible({ timeout: 15_000 })
-  if (!(await consent.isVisible())) {
-    // The silent restore can complete between the visibility check and the
-    // click, unmounting the button in favor of the consent screen -- race
-    // the click against that outcome rather than insisting on the button.
-    await Promise.race([
-      useSaved.click().catch(() => undefined),
-      consent.waitFor({ state: 'visible', timeout: 15_000 })
-    ])
-  }
-  await expect(consent).toBeVisible({ timeout: 15_000 })
-
-  // 4. Approve; the VP comes back signed by the KMS key, no passphrase entered.
-  await frame.getByRole('button', { name: 'Continue', exact: true }).click()
-  await expect
-    .poll(async () => (await readResponse(frame)) !== undefined, {
-      timeout: 20_000
-    })
-    .toBe(true)
-
-  const payload = ((await readResponse(frame)) as { value: DidAuthPayload })
-    .value
-  expect(payload.dataType).toBe('VerifiablePresentation')
-  expect(payload.data.holder).toMatch(/^did:web:/)
-  expect(payload.data.proof.proofPurpose).toBe('authentication')
-  expect(payload.data.proof.challenge).toBe(challenge)
-  expect(payload.data.proof.verificationMethod).toContain(
-    `${payload.data.holder}#`
-  )
 })

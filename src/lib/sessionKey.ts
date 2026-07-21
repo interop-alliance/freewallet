@@ -1,33 +1,22 @@
 /**
- * The browser session key: a non-extractable WebCrypto Ed25519
- * key pair persisted in its own IndexedDB database (deliberately separate
- * from the RxDB wallet database, so it survives wallet-storage decisions
- * independently and is shared across tabs). The private key can be *used*
- * by an open page but never exported -- the delegated zcaps persisted
- * alongside it are inert anywhere this key is absent.
- *
- * The key pair signs capability invocations only; it never delegates
- * (delegation proofs are signed by the root key at login, see
- * `src/session/delegatedSession.ts`).
+ * The `freewallet-session` IndexedDB database: a local, per-browser store
+ * (deliberately separate from the RxDB wallet database, so it survives
+ * wallet-storage decisions independently and is shared across tabs) holding
+ * the caches that ordinary login relies on -- the keyring cache (offline /
+ * no-WAS seed unwrap), the unlock-methods registry cache, and the
+ * passkey-safety notices. None of it is secret on its own: the keyring and
+ * unlock-methods records are ciphertext, inert without the passphrase-derived
+ * key, and the passkey-safety notice is a local UI reminder.
  */
-import { Ed25519VerificationKey } from '@interop/ed25519-verification-key'
-import type { ISigner } from '@interop/data-integrity-core'
-
 const SESSION_DB_NAME = 'freewallet-session'
 const SESSION_STORE = 'session'
-const KEY_PAIR_RECORD = 'key-pair'
-const SESSION_RECORD = 'record'
-const VAULT_KEY_RECORD = 'vault-key'
-const VAULT_ENVELOPE_RECORD = 'vault-envelope'
 
 /**
  * Every function below takes an optional `idb` (an `IDBFactory`), defaulting
  * to the global `indexedDB`. In a top-level document those are the same
- * thing; in a third-party iframe (the CHAPI popup) the global factory is the
- * PARTITIONED bucket, and callers pass the first-party factory obtained from
- * the Storage Access API instead (`requestFirstPartyStorage()` in
- * `src/lib/storageAccess.ts`) to reach the session persisted by the
- * top-level wallet.
+ * thing; in a third-party iframe (the CHAPI popup) the global factory is a
+ * PARTITIONED bucket that never sees the caches written by the top-level
+ * wallet.
  */
 
 /**
@@ -76,9 +65,8 @@ async function withSessionStore(
  * object store within a single transaction on one open connection, resolving
  * to their results in order. Batching this way avoids repeating the
  * openSessionDb() handshake (and the version check it carries) once per
- * operation -- the page-load restore, the login-time envelope save, and
- * logout each touch several records that would otherwise be serial
- * open/close cycles.
+ * operation. `withSessionStore` (the single-operation helper) is a thin
+ * wrapper over this.
  *
  * @param mode {IDBTransactionMode}
  * @param operations {Array<(store: IDBObjectStore) => IDBRequest>}
@@ -107,218 +95,6 @@ async function withSessionStoreBatch(
   } finally {
     db.close()
   }
-}
-
-/**
- * Loads the persisted session key pair, or generates and persists a new
- * non-extractable one on first use. WebCrypto `CryptoKey` objects survive
- * IndexedDB round-trips via the structured clone algorithm without the key
- * material ever being visible to script.
- *
- * @param [options] {object}
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<CryptoKeyPair>}
- */
-export async function getOrCreateSessionKeyPair({
-  idb
-}: {
-  idb?: IDBFactory
-} = {}): Promise<CryptoKeyPair> {
-  const existing = await loadSessionKeyPair({ idb })
-  if (existing) {
-    return existing
-  }
-  // `extractable: false` -- the private key is usable but not exportable.
-  // Ed25519 in WebCrypto is available in all evergreen browsers.
-  const keyPair = (await crypto.subtle.generateKey('Ed25519', false, [
-    'sign',
-    'verify'
-  ])) as CryptoKeyPair
-  await withSessionStore(
-    'readwrite',
-    store => store.put(keyPair, KEY_PAIR_RECORD),
-    idb
-  )
-  return keyPair
-}
-
-/**
- * Loads the persisted session key pair, or `null` if none exists.
- *
- * @param [options] {object}
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<CryptoKeyPair | null>}
- */
-export async function loadSessionKeyPair({
-  idb
-}: {
-  idb?: IDBFactory
-} = {}): Promise<CryptoKeyPair | null> {
-  const stored = await withSessionStore(
-    'readonly',
-    store => store.get(KEY_PAIR_RECORD),
-    idb
-  )
-  return (stored as CryptoKeyPair | undefined) ?? null
-}
-
-/**
- * Saves the persisted-session record (delegated zcaps and their context;
- * see `PersistedSessionRecord` in `src/session/delegatedSession.ts`).
- *
- * @param options {object}
- * @param options.record {unknown}
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
- */
-export async function saveSessionRecord({
-  record,
-  idb
-}: {
-  record: unknown
-  idb?: IDBFactory
-}): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store => store.put(record, SESSION_RECORD),
-    idb
-  )
-}
-
-/**
- * Loads the persisted-session record, or `null` if none exists.
- *
- * @param [options] {object}
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<unknown | null>}
- */
-export async function loadSessionRecord({
-  idb
-}: {
-  idb?: IDBFactory
-} = {}): Promise<unknown | null> {
-  const stored = await withSessionStore(
-    'readonly',
-    store => store.get(SESSION_RECORD),
-    idb
-  )
-  return stored ?? null
-}
-
-/**
- * Saves the session vault envelope pair: the non-extractable AES-GCM
- * wrapping key (a WebCrypto `CryptoKey`, structured-cloned like the session
- * key pair) and the wrapped vault-KAK envelope it decrypts (see
- * `src/session/vault.ts`). Overwrites any previous pair -- every full login
- * mints a fresh wrapping key.
- *
- * @param options {object}
- * @param options.wrappingKey {CryptoKey}
- * @param options.envelope {unknown}
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
- */
-export async function saveVaultEnvelope({
-  wrappingKey,
-  envelope,
-  idb
-}: {
-  wrappingKey: CryptoKey
-  envelope: unknown
-  idb?: IDBFactory
-}): Promise<void> {
-  await withSessionStoreBatch(
-    'readwrite',
-    [
-      store => store.put(wrappingKey, VAULT_KEY_RECORD),
-      store => store.put(envelope, VAULT_ENVELOPE_RECORD)
-    ],
-    idb
-  )
-}
-
-/**
- * Loads the session vault envelope pair, or `null` when either half is
- * missing (an envelope without its wrapping key -- or vice versa -- is
- * useless).
- *
- * @param [options] {object}
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<{ wrappingKey: CryptoKey, envelope: unknown } | null>}
- */
-export async function loadVaultEnvelope({
-  idb
-}: {
-  idb?: IDBFactory
-} = {}): Promise<{ wrappingKey: CryptoKey; envelope: unknown } | null> {
-  const [wrappingKey, envelope] = (await withSessionStoreBatch(
-    'readonly',
-    [
-      store => store.get(VAULT_KEY_RECORD),
-      store => store.get(VAULT_ENVELOPE_RECORD)
-    ],
-    idb
-  )) as [CryptoKey | undefined, unknown]
-  if (!wrappingKey || envelope === undefined || envelope === null) {
-    return null
-  }
-  return { wrappingKey, envelope }
-}
-
-/**
- * Deletes the session vault envelope pair (both the wrapping key and the
- * envelope). Called when the envelope turns out to be unusable (fail closed)
- * and as part of clearing the persisted session.
- *
- * @param [options] {object}
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
- */
-export async function deleteVaultEnvelope({
-  idb
-}: {
-  idb?: IDBFactory
-} = {}): Promise<void> {
-  await withSessionStoreBatch(
-    'readwrite',
-    [
-      store => store.delete(VAULT_ENVELOPE_RECORD),
-      store => store.delete(VAULT_KEY_RECORD)
-    ],
-    idb
-  )
-}
-
-/**
- * Deletes the persisted session: the record, the key pair, and the vault
- * envelope. Called on logout -- the next login mints a fresh session key.
- * The keyring cache entries (see `saveKeyringCache`) are deliberately left
- * intact so that offline / no-WAS logins keep working across a logout;
- * when a WAS server is configured their offline use is bounded by the
- * keyring cache TTL.
- *
- * @param [options] {object}
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
- */
-export async function clearPersistedSession({
-  idb
-}: {
-  idb?: IDBFactory
-} = {}): Promise<void> {
-  // The record, the key pair, and the vault envelope pair (its wrapping key
-  // and envelope) all clear in a single transaction rather than four serial
-  // open/close cycles.
-  await withSessionStoreBatch(
-    'readwrite',
-    [
-      store => store.delete(SESSION_RECORD),
-      store => store.delete(KEY_PAIR_RECORD),
-      store => store.delete(VAULT_ENVELOPE_RECORD),
-      store => store.delete(VAULT_KEY_RECORD)
-    ],
-    idb
-  )
 }
 
 /**
@@ -618,63 +394,4 @@ export async function deletePasskeySafetyNotice({
     store => store.delete(passkeySafetyKey(controller)),
     idb
   )
-}
-
-/**
- * Computes the session key's did:key DID from its (always-exportable) public
- * key: export as JWK, re-encode as the multicodec/multibase fingerprint.
- *
- * @param options {object}
- * @param options.publicKey {CryptoKey}
- * @returns {Promise<{ did: string, verificationMethodId: string }>}
- */
-export async function sessionKeyDid({
-  publicKey
-}: {
-  publicKey: CryptoKey
-}): Promise<{ did: string; verificationMethodId: string }> {
-  const publicKeyJwk = (await crypto.subtle.exportKey('jwk', publicKey)) as {
-    kty: 'OKP'
-    crv: 'Ed25519'
-    x: string
-  }
-  const verificationKey = await Ed25519VerificationKey.fromJsonWebKey({
-    type: 'JsonWebKey',
-    publicKeyJwk
-  })
-  const fingerprint = verificationKey.fingerprint()
-  const did = `did:key:${fingerprint}`
-  return { did, verificationMethodId: `${did}#${fingerprint}` }
-}
-
-/**
- * Wraps the session key pair as the pluggable signer the zcap stack expects
- * (`{ id, sign({ data }) }`). Signing happens inside WebCrypto; the private
- * key never surfaces.
- *
- * @param options {object}
- * @param options.keyPair {CryptoKeyPair}
- * @returns {Promise<{ signer: ISigner, did: string }>}
- */
-export async function sessionKeySigner({
-  keyPair
-}: {
-  keyPair: CryptoKeyPair
-}): Promise<{ signer: ISigner; did: string }> {
-  const { did, verificationMethodId } = await sessionKeyDid({
-    publicKey: keyPair.publicKey
-  })
-  const signer: ISigner = {
-    id: verificationMethodId,
-    algorithm: 'Ed25519',
-    async sign({ data }: { data: Uint8Array }) {
-      const signature = await crypto.subtle.sign(
-        'Ed25519',
-        keyPair.privateKey,
-        data as BufferSource
-      )
-      return new Uint8Array(signature)
-    }
-  }
-  return { signer, did }
 }

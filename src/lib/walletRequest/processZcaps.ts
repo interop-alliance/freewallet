@@ -7,7 +7,7 @@
  * unsatisfiable by construction.
  *
  * Two attenuation caps hold every grant read-only unless the RP owns the
- * target, the same reasoning as `src/session/delegatedSession.ts`:
+ * target:
  *
  * - whole-Space grants are stripped to read-only (a Space-wide write would
  *   permit rewriting the Space Description, i.e. controller takeover);
@@ -142,19 +142,6 @@ export class ZcapUnavailableError extends Error {
   constructor(message = 'This wallet has no remote storage to delegate.') {
     super(message)
     this.name = 'ZcapUnavailableError'
-  }
-}
-
-/**
- * Raised when delegation is attempted without the full-tier signer (a restored
- * delegated session cannot delegate by design).
- */
-export class ZcapRequiresFullSessionError extends Error {
-  constructor(
-    message = 'Delegating capabilities requires a full (passphrase) session.'
-  ) {
-    super(message)
-    this.name = 'ZcapRequiresFullSessionError'
   }
 }
 
@@ -378,9 +365,9 @@ export function resolveGrants({
  * Delegates capabilities to the relying parties named in the requests, on the
  * consent-approved path. Provisions any missing RP collection first, then
  * delegates each satisfiable grant rooted at the user's Space root capability.
- * Requires a full-tier session with a remote Space. Unsatisfiable grants are
- * skipped (they never reach a delegation). Returns the delegated capabilities,
- * in request order.
+ * Requires a session with a remote Space. Unsatisfiable grants are skipped
+ * (they never reach a delegation). Returns the delegated capabilities, in
+ * request order.
  *
  * @param options {object}
  * @param options.zcapRequests {ICapabilityQueryDetail[]}
@@ -404,9 +391,6 @@ export async function processZcaps({
 }): Promise<IZcap[]> {
   if (!hasZcapStorage(session)) {
     throw new ZcapUnavailableError()
-  }
-  if (session.tier !== 'full' || !session.profile.keyAgent) {
-    throw new ZcapRequiresFullSessionError()
   }
 
   // `hasZcapStorage` above guarantees a resolved `spaceUrl`.

@@ -18,7 +18,6 @@
  * encrypted fork here.
  */
 import type { WasClient } from '@interop/was-client'
-import type { IZcap } from '@interop/data-integrity-core'
 // Deep import (bypassing the `@/lib/sync` barrel) so this eagerly loaded
 // module does not drag the barrel's RxDB replication machinery into the
 // entry chunk; the heavy adapter is loaded on demand by the SyncController.
@@ -77,39 +76,31 @@ function parseEtag(etag: string | null): number | undefined {
  * @param options.was {WasClient}       the session client (holds the signer)
  * @param options.spaceId {string}
  * @param options.collectionId {string}   the WAS collection id (e.g. `public-credentials`)
- * @param [options.capability] {IZcap}   the delegated session capability for
- *   this collection (a restored `delegated` tier session); absent in the full
- *   tier, where requests invoke root capabilities
  * @returns {WasSyncPort}
  */
 export function createWasSyncPort({
   was,
   spaceId,
-  collectionId,
-  capability
+  collectionId
 }: {
   was: WasClient
   spaceId: string
   collectionId: string
-  capability?: IZcap
 }): WasSyncPort {
   const collectionPath = `/space/${spaceId}/${collectionId}`
   const resourcePath = (id: string) =>
     `${collectionPath}/${encodeURIComponent(id)}`
 
   // The pull path rides the client's `Collection.changes()` feed API. The handle
-  // is bound to the same space + collection and (in the delegated tier) the same
-  // session `capability` the raw write paths use, so `changes()` produces the
-  // byte-identical signed `POST /space/:s/:c/query` (profile `changes`) the raw
-  // request did -- root invocation when no capability is supplied. Construction
+  // is bound to the same space + collection the raw write paths use, so
+  // `changes()` produces the byte-identical signed `POST /space/:s/:c/query`
+  // (profile `changes`) the raw request did -- a root invocation. Construction
   // is I/O-free (the codec/feature probes are lazy thunks) and `changes()` never
   // resolves the codec, so unlike `get()` it does not decrypt: it ships the
   // stored bodies (plaintext or EDV envelope) verbatim, which is what this
   // codec-bypassing port requires. Writes stay on the raw `request()` escape
   // hatch so they too move bodies verbatim.
-  const changesCollection = was
-    .space(spaceId, { capability })
-    .collection(collectionId, { capability })
+  const changesCollection = was.space(spaceId).collection(collectionId)
 
   /**
    * Builds the conditional-write headers from the port's precondition options.
@@ -173,7 +164,6 @@ export function createWasSyncPort({
       }
       await conditionalWrite(() =>
         was.request({
-          capability,
           path: resourcePath(id),
           method: 'PUT',
           json: data as object,
@@ -185,7 +175,6 @@ export function createWasSyncPort({
     async deleteContent({ id, ifMatch }) {
       await conditionalWrite(() =>
         was.request({
-          capability,
           path: resourcePath(id),
           method: 'DELETE',
           headers: writeHeaders({ ifMatch })
@@ -196,7 +185,6 @@ export function createWasSyncPort({
     async putMeta({ id, custom, ifMatch, ifNoneMatch }) {
       await conditionalWrite(() =>
         was.request({
-          capability,
           path: `${resourcePath(id)}/meta`,
           method: 'PUT',
           json: { custom },
@@ -212,7 +200,6 @@ export function createWasSyncPort({
       let contentResponse
       try {
         contentResponse = await was.request({
-          capability,
           path: resourcePath(id),
           method: 'GET'
         })
@@ -238,7 +225,6 @@ export function createWasSyncPort({
       // `metaVersion` ETag (absent until metadata has been written).
       try {
         const metaResponse = await was.request({
-          capability,
           path: `${resourcePath(id)}/meta`,
           method: 'GET'
         })

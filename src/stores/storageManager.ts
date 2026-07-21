@@ -26,7 +26,7 @@ import type {
   IVerifiableCredential,
   IZcap
 } from '@interop/data-integrity-core'
-import { generateZcapUri, type ZcapClient } from '@interop/ezcap'
+import { generateZcapUri } from '@interop/ezcap'
 import type { ContactData, ContactRevisionPayload } from '@interop/social-core'
 import type { RxCollection } from 'rxdb/plugins/core'
 import {
@@ -64,10 +64,7 @@ import type { FetchedCollectionResource } from '@/lib/storageResource'
 import type { StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import { BrowserStore } from '@/stores/browserStore'
-import {
-  WASRemoteStore,
-  type SessionCapabilities
-} from '@/stores/wasRemoteStore'
+import { WASRemoteStore } from '@/stores/wasRemoteStore'
 import { uuidv7 } from 'uuidv7'
 
 /**
@@ -179,7 +176,6 @@ function writeCachedMarker({
 export class StorageManager {
   private _localStore: BrowserStore
   private _remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
-  private _vaultLocked: boolean
   // The per-collection document ciphers (same set handed to the local store),
   // kept here for remote-direct mode's own encrypt/decrypt at the WAS seam.
   private _ciphers?: Record<string, DocCipher>
@@ -187,8 +183,7 @@ export class StorageManager {
   // collections instead of the local BrowserStore (the CHAPI popup path).
   private _remoteDirect: boolean
   // The vault key material, kept so ciphers can be rebuilt after a marker
-  // refresh (an unknown-epoch read) without re-plumbing the profile. Absent
-  // for a locked vault / no cipher.
+  // refresh (an unknown-epoch read) without re-plumbing the profile.
   private _vaultKeys?: {
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
@@ -205,7 +200,6 @@ export class StorageManager {
   constructor({
     localStore,
     remoteStore,
-    vaultLocked = false,
     ciphers,
     remoteDirect = false,
     vaultKeys,
@@ -213,7 +207,6 @@ export class StorageManager {
   }: {
     localStore: BrowserStore
     remoteStore?: WASRemoteStore
-    vaultLocked?: boolean
     ciphers?: Record<string, DocCipher>
     remoteDirect?: boolean
     vaultKeys?: {
@@ -224,7 +217,6 @@ export class StorageManager {
   }) {
     this._localStore = localStore
     this._remoteStore = remoteStore
-    this._vaultLocked = vaultLocked
     this._ciphers = ciphers
     this._remoteDirect = remoteDirect
     this._vaultKeys = vaultKeys
@@ -247,27 +239,6 @@ export class StorageManager {
    */
   get remoteDirectActive(): boolean {
     return this._effectiveRemoteDirect
-  }
-
-  /**
-   * Whether the encrypted collections are locked: true in a restored
-   * (`delegated` tier) session whose vault KAK could not be recovered from
-   * the session vault envelope (fail closed -- absent, expired, or unusable
-   * envelopes all lock). Locked reads return nothing rather than raw
-   * envelopes; locked writes throw rather than store plaintext into an
-   * encrypted collection.
-   */
-  get vaultLocked(): boolean {
-    return this._vaultLocked
-  }
-
-  private _requireUnlockedVault(): void {
-    if (this._vaultLocked) {
-      throw new Error(
-        'The vault is locked in a restored session; log in with the ' +
-          'passphrase to unlock it.'
-      )
-    }
   }
 
   /**
@@ -330,21 +301,6 @@ export class StorageManager {
    */
   localCollection(logicalKey: string): RxCollection<SyncedDoc> {
     return this._localStore.rxCollection(logicalKey)
-  }
-
-  /**
-   * The delegated session capability for writes to a WAS collection, or
-   * `undefined` in the full tier (root invocations). The sync controller
-   * attaches this to the sync port's requests.
-   *
-   * @param collectionId {string}   the WAS collection id (e.g. `wallet-activity`)
-   * @returns {IZcap | undefined}
-   */
-  collectionCapability(collectionId: string): IZcap | undefined {
-    return this._remoteStore?.sessionCapabilityFor({
-      collectionId,
-      write: true
-    })
   }
 
   /**
@@ -439,7 +395,7 @@ export class StorageManager {
   /**
    * Rebuilds the per-collection ciphers from the current markers and the held
    * vault keys, then swaps them into the local store (and this facade). No-op
-   * without vault keys (a locked vault has no ciphers to rebuild).
+   * without vault keys.
    *
    * @returns {Promise<void>}
    */
@@ -517,8 +473,7 @@ export class StorageManager {
     // encrypts just as well; it is merely unrecoverable after logout, like the
     // rest of a guest session) plus any multi-recipient marker. The local store
     // holds EDV envelopes for these collections and replication ships them
-    // verbatim. (Restored delegated sessions initialize via
-    // `initDelegatedStorageClients` instead.)
+    // verbatim.
     const ciphers = await StorageManager._buildCiphers({
       keyAgreementKey,
       keyResolver,
@@ -545,70 +500,6 @@ export class StorageManager {
   }
 
   /**
-   * Initializes storage for a restored (`delegated` tier) session: the remote
-   * store invokes the persisted delegated capabilities instead of root
-   * capabilities. When the session vault envelope yielded the vault KAK
-   * (`vaultKeys`), the local store opens with the document ciphers and the
-   * vault is unlocked exactly as in a full session; without it the local
-   * store opens cipher-less and the vault stays locked -- encrypted
-   * collections are unreadable and unwritable until re-login, while envelope
-   * replication still works (it moves opaque stored bodies verbatim and never
-   * needs keys).
-   *
-   * @param options {object}
-   * @param options.user {User}
-   * @param options.zcapClient {ZcapClient}   signs with the session key
-   * @param options.spaceId {string}
-   * @param options.sessionCapabilities {SessionCapabilities}
-   * @param [options.vaultKeys] {object}   the vault KAK and its resolver,
-   *   recovered from the session vault envelope (absent = locked vault)
-   * @returns {Promise<{ storage: StorageManager }>}
-   */
-  static async initDelegatedStorageClients({
-    user,
-    zcapClient,
-    spaceId,
-    sessionCapabilities,
-    vaultKeys
-  }: {
-    user: User
-    zcapClient: ZcapClient
-    spaceId: string
-    sessionCapabilities: SessionCapabilities
-    vaultKeys?: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
-  }) {
-    if (!WAS_SERVER_URL) {
-      throw new Error('A delegated session requires a remote WAS server.')
-    }
-    const remoteStore = new WASRemoteStore({
-      storageServerUrl: WAS_SERVER_URL,
-      zcapClient,
-      spaceId,
-      controller: user.id,
-      sessionCapabilities
-    })
-    // Markers only matter when ciphers are built (an unlocked vault). The
-    // session's Space read zcap covers the description GET, so a shared
-    // collection still encrypts under its current epoch in the delegated tier.
-    const markers = vaultKeys
-      ? await StorageManager._acquireMarkers({ remoteStore })
-      : {}
-    const ciphers = vaultKeys
-      ? await StorageManager._buildCiphers({ ...vaultKeys, markers })
-      : undefined
-    const { localStore } = await BrowserStore.initClient({ user, ciphers })
-    const storage = new StorageManager({
-      localStore,
-      remoteStore,
-      vaultLocked: !vaultKeys,
-      ciphers,
-      vaultKeys,
-      markers
-    })
-    return { storage }
-  }
-
-  /**
    * Stores a credential and, when a row was actually inserted (a re-add of a
    * stored credential is a no-op), records its Create history entry. Routes to
    * the remote WAS `private-credentials` collection in effective remote-direct
@@ -626,7 +517,6 @@ export class StorageManager {
     credential: IVerifiableCredential
     user: User
   }) {
-    this._requireUnlockedVault()
     // The credential's content cid is its page-facing identity (idempotence,
     // routes, history); the store encrypts the VC into an EDV envelope keyed by
     // a content-derived envelope-hash id. Locally this envelope replicates to
@@ -649,9 +539,6 @@ export class StorageManager {
   }
 
   async listCredentials(): Promise<Array<StoredCredential>> {
-    if (this._vaultLocked) {
-      return []
-    }
     if (this._effectiveRemoteDirect) {
       const entries = await this._remoteCredentialEntries()
       const seen = new Set<string>()
@@ -688,9 +575,6 @@ export class StorageManager {
   }: {
     cid: string
   }): Promise<IVerifiableCredential | undefined> {
-    if (this._vaultLocked) {
-      return undefined
-    }
     if (this._effectiveRemoteDirect) {
       const entries = await this._remoteCredentialEntries()
       return entries.find(entry => entry.cid === cid)?.vc
@@ -785,7 +669,7 @@ export class StorageManager {
     if (!cipher) {
       throw new Error(
         'Remote-direct credential storage requires the private-credentials ' +
-          'cipher (an unlocked vault).'
+          'cipher.'
       )
     }
     const entries = await this._remoteCredentialEntries()
@@ -811,9 +695,8 @@ export class StorageManager {
    * The count of local `private-credentials` rows the most recent
    * {@link listCredentials} read had to skip because their envelope would not
    * decrypt under the current vault KAK (corrupted, or written under a
-   * mismatched KAK). Zero when the vault is locked (that read returns nothing).
-   * Surfaced so the dashboard can warn the user without one bad row bricking
-   * the list.
+   * mismatched KAK). Surfaced so the dashboard can warn the user without one
+   * bad row bricking the list.
    *
    * @returns {number}
    */
@@ -824,15 +707,11 @@ export class StorageManager {
   /**
    * Removes the local `private-credentials` rows that could not be decrypted,
    * so the user can clear rows that can never be shown. Returns the number of
-   * rows removed. No-op with the vault locked (nothing is undecryptable there;
-   * locked rows are left intact).
+   * rows removed.
    *
    * @returns {Promise<number>}
    */
   async purgeUndecryptableCredentials(): Promise<number> {
-    if (this._vaultLocked) {
-      return 0
-    }
     return await this._localStore.purgeUndecryptableCredentials()
   }
 
@@ -963,7 +842,7 @@ export class StorageManager {
    * Provisions an arbitrary plaintext collection on the remote WAS Space, for
    * a relying party's delegated capability. No local counterpart -- RP
    * collections are the RP's data, reached only over its zcap. Requires a
-   * remote backend (full tier). With `isPublic`, the collection also gets a
+   * remote backend. With `isPublic`, the collection also gets a
    * collection-level world-readable (PublicCanRead) policy.
    *
    * @param options {object}
@@ -1014,12 +893,11 @@ export class StorageManager {
     await this._localStore.migratePublicCredentialCids()
     if (this._remoteStore) {
       await this._remoteStore.ensureUserCollections({ user })
-      // Provision and publish the user's did:web DID (full tier only -- a
-      // delegated session holds no keystore agent and restores `didWeb` from
-      // its record instead). Runs here, after the Space and `id` collection
+      // Provision and publish the user's did:web DID (only when a keystore
+      // agent is present). Runs here, after the Space and `id` collection
       // exist. Non-fatal like keystore provisioning: a KMS/WAS hiccup must not
       // fail login; the settings page surfaces the unprovisioned state, and
-      // the idempotent flow resumes on the next full login.
+      // the idempotent flow resumes on the next login.
       if (profile?.keystoreAgent) {
         try {
           const did = didWebFromSpace({
@@ -1067,17 +945,12 @@ export class StorageManager {
 
   /**
    * Writes one activity to the local `wallet-activity` collection -- the
-   * shared tail of every `addHistory*` method. With the vault locked (a
-   * restored delegated session) the entry is skipped and `false` returned:
-   * the collection is encrypted and there is no cipher, and for a plain log
-   * line losing it beats failing the action that produced it. Callers whose
-   * activity doubles as a durable record (the Login activity's revocable
-   * grants) check the return value and escalate.
+   * shared tail of every `addHistory*` method.
    *
    * @param options {object}
    * @param options.resourceId {string}
    * @param options.activity {WalletActivity}
-   * @returns {Promise<boolean>}   whether the entry was persisted
+   * @returns {Promise<void>}
    */
   private async _addHistoryItem({
     resourceId,
@@ -1085,17 +958,12 @@ export class StorageManager {
   }: {
     resourceId: string
     activity: WalletActivity
-  }): Promise<boolean> {
-    if (this._vaultLocked) {
-      console.warn('Vault locked; skipping wallet-activity entry.')
-      return false
-    }
+  }): Promise<void> {
     if (this._effectiveRemoteDirect) {
       await this._addHistoryItemRemote({ activity })
-      return true
+      return
     }
     await this._localStore.addHistoryItem({ resourceId, activity })
-    return true
   }
 
   /**
@@ -1117,8 +985,7 @@ export class StorageManager {
     const cipher = this._ciphers?.walletActivity
     if (!cipher) {
       throw new Error(
-        'Remote-direct history storage requires the wallet-activity cipher ' +
-          '(an unlocked vault).'
+        'Remote-direct history storage requires the wallet-activity cipher.'
       )
     }
     const { id, envelope } = await cipher.encrypt({ data: activity as Json })
@@ -1309,9 +1176,7 @@ export class StorageManager {
    * logged in to a relying party via "Login with Wallet", granting the listed
    * capabilities. The recorded zcap ids are the hook for a revocation UI: the
    * WAS server now exposes a Space-scoped revocation endpoint, so a grant can
-   * be retired before its expiry. Throws when grants were delegated but the
-   * entry could not be persisted (vault locked), so the caller can fail
-   * closed instead of handing out unrevocable capabilities.
+   * be retired before its expiry.
    *
    * @param options {object}
    * @param options.user {User}
@@ -1347,7 +1212,7 @@ export class StorageManager {
       ? `Connected ${appConnect.name} (${origin}) to wallet` +
         `${appConnect.firstRun ? ', minting a new app key' : ''}.`
       : `Logged in to ${origin} with wallet.`
-    const persisted = await this._addHistoryItem({
+    await this._addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -1360,15 +1225,6 @@ export class StorageManager {
         created: new Date().toISOString()
       }
     })
-    // A skipped Login entry that carried grants is a failure, not a lost log
-    // line: the recorded zcap documents are the only revocation hook for the
-    // delegated capabilities.
-    if (!persisted && grants.length > 0) {
-      throw new Error(
-        'Vault locked: could not record the granted capabilities, which ' +
-          'would leave them unrevocable.'
-      )
-    }
   }
 
   /**
@@ -1614,9 +1470,6 @@ export class StorageManager {
   async listHistoryItems(): Promise<
     Array<{ id: string; doc: WalletActivity }>
   > {
-    if (this._vaultLocked) {
-      return []
-    }
     const items = await this._localStore.listHistoryItems()
     if (
       this._localStore.unknownEpochHistory > 0 &&
@@ -1637,7 +1490,7 @@ export class StorageManager {
    * doing BOTH halves of a share as one procedure: the read axis (an epoch-key
    * recipient entry, so the reader can decrypt) and the pull axis (a read-only
    * Collection zcap delegated to the grantee, so the server serves it
-   * ciphertext). Requires a full-tier session (the root key delegates and the
+   * ciphertext). Requires a passphrase session (the root key delegates and the
    * recipient operations rewrite the Collection Description) with an unlocked
    * vault and a remote store.
    *
@@ -1650,7 +1503,7 @@ export class StorageManager {
    * swapped into the local ciphers.
    *
    * @param options {object}
-   * @param options.profile {ControllerProfile}   the full-tier session profile
+   * @param options.profile {ControllerProfile}   the passphrase session profile
    *   (root `zcapClient` + vault KAK)
    * @param options.user {User}   recorded as the share activity's actor
    * @param options.collectionId {string}   the WAS collection id to share
@@ -1682,12 +1535,10 @@ export class StorageManager {
     }
     const { keyAgreementKey, keyResolver, zcapClient } = profile
     if (!keyAgreementKey || !keyResolver) {
-      throw new Error('Sharing a collection requires an unlocked vault.')
+      throw new Error('Sharing a collection requires the vault key material.')
     }
     if (!profile.keyAgent) {
-      throw new Error(
-        'Sharing a collection requires a full (passphrase) session.'
-      )
+      throw new Error('Sharing a collection requires a passphrase session.')
     }
 
     // Read axis: mint the first epoch (lazy first-share) or escrow the reader
@@ -1759,7 +1610,7 @@ export class StorageManager {
    * `removeRecipient`: it rotates the epoch to the remaining current-epoch
    * roster (the read axis; prospective) THEN revokes the recorded zcap(s) (the
    * pull axis; immediate). freewallet never exposes a rotate-only or
-   * revoke-only path. Requires a full-tier session with a remote store.
+   * revoke-only path. Requires a passphrase session with a remote store.
    *
    * Every zcap recorded for this `(collectionId, recipientId)` is looked up
    * from the `CollectionShare` history activities and passed to `revoke`; an
@@ -1768,7 +1619,7 @@ export class StorageManager {
    * the rotated marker is cached and swapped into the local ciphers.
    *
    * @param options {object}
-   * @param options.profile {ControllerProfile}   the full-tier session profile
+   * @param options.profile {ControllerProfile}   the passphrase session profile
    * @param options.user {User}   recorded as the unshare activity's actor
    * @param options.collectionId {string}
    * @param options.recipientId {string}   the removed reader's key-agreement
@@ -1792,12 +1643,10 @@ export class StorageManager {
     }
     const { keyAgreementKey, keyResolver } = profile
     if (!keyAgreementKey || !keyResolver) {
-      throw new Error('Unsharing a collection requires an unlocked vault.')
+      throw new Error('Unsharing a collection requires the vault key material.')
     }
     if (!profile.keyAgent) {
-      throw new Error(
-        'Unsharing a collection requires a full (passphrase) session.'
-      )
+      throw new Error('Unsharing a collection requires a passphrase session.')
     }
 
     // Gather every zcap recorded for this recipient, to revoke as the pull-axis
@@ -1949,15 +1798,11 @@ export class StorageManager {
   }
 
   /**
-   * Lists the stored contacts. Empty with the vault locked, same as
-   * {@link listCredentials}.
+   * Lists the stored contacts.
    *
    * @returns {Promise<Array<StoredContact>>}
    */
   async listContacts(): Promise<Array<StoredContact>> {
-    if (this._vaultLocked) {
-      return []
-    }
     return await this._localStore.listContacts()
   }
 
@@ -1971,9 +1816,6 @@ export class StorageManager {
   }: {
     id: string
   }): Promise<StoredContact | undefined> {
-    if (this._vaultLocked) {
-      return undefined
-    }
     return await this._localStore.loadContact({ id })
   }
 
@@ -1990,7 +1832,6 @@ export class StorageManager {
   }: {
     contact: ContactData
   }): Promise<StoredContact> {
-    this._requireUnlockedVault()
     const deviceId = getOrCreateDeviceId()
     const stored = await this._localStore.addContact({ contact, deviceId })
     await this._recordContactRevision({
@@ -2017,7 +1858,6 @@ export class StorageManager {
     id: string
     contact: ContactData
   }): Promise<StoredContact> {
-    this._requireUnlockedVault()
     const deviceId = getOrCreateDeviceId()
     const stored = await this._localStore.updateContact({
       id,
@@ -2042,7 +1882,6 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async deleteContact({ id }: { id: string }): Promise<void> {
-    this._requireUnlockedVault()
     const existing = await this._localStore.loadContact({ id })
     await this._localStore.deleteContact({ id })
     if (existing) {
@@ -2110,9 +1949,6 @@ export class StorageManager {
   }: {
     contactId: string
   }): Promise<Array<ContactRevisionPayload>> {
-    if (this._vaultLocked) {
-      return []
-    }
     return await this._localStore.listContactRevisions({ contactId })
   }
 }

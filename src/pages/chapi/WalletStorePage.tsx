@@ -47,7 +47,6 @@ import {
 } from '@/lib/walletRequest'
 import { RequestSourcePanel } from './RequestSourcePanel'
 import { CHAPILoginForm } from './CHAPILoginForm'
-import { SavedSessionNotice } from './SavedSessionNotice'
 import { useTranslation } from 'react-i18next'
 
 type PageState =
@@ -108,10 +107,6 @@ export function WalletStorePage() {
   const [initError, setInitError] = useState<string | null>(null)
   const [storeError, setStoreError] = useState<string | null>(null)
   const [storing, setStoring] = useState(false)
-  // First-party storage factory from the Storage Access API flow (see
-  // SavedSessionNotice); a full login persists its delegated session
-  // through it so the next popup visit auto-recognizes the user.
-  const [firstPartyIdb, setFirstPartyIdb] = useState<IDBFactory | null>(null)
   const initialized = useRef(false)
 
   useEffect(() => {
@@ -208,10 +203,9 @@ export function WalletStorePage() {
   async function handleLogin(passphrase: string) {
     setLoginError(null)
     // The shared popup login sequence (keyring resolve in remote-direct mode,
-    // account-not-found guard, delegated-session persistence, error mapping)
-    // lives in completePopupLogin; only the offer-handling work below is
-    // page-specific.
-    const result = await completePopupLogin({ passphrase, firstPartyIdb })
+    // account-not-found guard, error mapping) lives in completePopupLogin; only
+    // the offer-handling work below is page-specific.
+    const result = await completePopupLogin({ passphrase })
     if ('errorKey' in result) {
       setLoginError(t(result.errorKey))
       return
@@ -412,10 +406,7 @@ export function WalletStorePage() {
         ))}
 
         {pageState === 'awaiting-login' && (
-          <>
-            <SavedSessionNotice onFirstPartyStorage={setFirstPartyIdb} />
-            <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
-          </>
+          <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
         )}
 
         {pageState === 'confirming' && (

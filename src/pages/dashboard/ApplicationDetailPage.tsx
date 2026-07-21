@@ -61,8 +61,6 @@ export function ApplicationDetailPage() {
   const navigate = useNavigate()
   const { cid } = useParams()
   const session = useAuthStore(state => state.session)
-  const vaultLocked = session?.storage.vaultLocked ?? true
-  const canRevoke = session?.tier === 'full' && !vaultLocked
 
   const [app, setApp] = useState<ConnectedApp | null>(null)
   // Captured once when the app loads, so grant expiry is evaluated against a
@@ -269,20 +267,11 @@ export function ApplicationDetailPage() {
             )}
           </Box>
 
-          {!canRevoke && (
-            <Typography variant="body2" color="text.secondary">
-              {vaultLocked
-                ? t('applications.revokeVaultLocked')
-                : t('applications.revokeRequiresFullSession')}
-            </Typography>
-          )}
-
           <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap' }}>
             <Button
               variant="outlined"
               color="error"
               sx={{ borderRadius: 2 }}
-              disabled={!canRevoke}
               onClick={() => {
                 setRevokeError(false)
                 setRevokeDialogOpen(true)

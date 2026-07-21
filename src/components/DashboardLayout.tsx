@@ -1,4 +1,3 @@
-import Alert from '@mui/material/Alert'
 import AppBar from '@mui/material/AppBar'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -145,27 +144,6 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
 
       <Box component="main" sx={dashboardStyles.main}>
         <Toolbar />
-        {/* A restored (delegated) session whose vault KAK could not be
-            recovered from the session vault envelope has locked encrypted
-            collections until the user logs back in. */}
-        {session?.storage.vaultLocked && (
-          <Alert
-            severity="info"
-            sx={{ mb: 2 }}
-            action={
-              <Button
-                color="inherit"
-                size="small"
-                component={RouterLink}
-                to="/login"
-              >
-                {t('session.unlock')}
-              </Button>
-            }
-          >
-            {t('session.lockedVault')}
-          </Alert>
-        )}
         <Typography variant="h4" component="h1" sx={dashboardStyles.title}>
           {title}
         </Typography>

@@ -2,8 +2,8 @@
 /**
  * Unit tests for the session bootstrap (`src/session/initSession.ts`):
  * seed-to-identity derivation via CapabilityAgent, the zcap-agent and
- * key-material wiring on the profile, guest vs regular sessions, the `full`
- * tier stamp, `userExists` reporting, and KMS keystore provisioning (wired
+ * key-material wiring on the profile, guest vs regular sessions,
+ * `userExists` reporting, and KMS keystore provisioning (wired
  * when configured, non-fatal on failure). The network-touching boundaries --
  * `StorageManager.initStorageClients` (IndexedDB + WAS) and `ensureKeystore`
  * (WebKMS) -- are stubbed; the CapabilityAgent / ZcapClient / key-agreement
@@ -151,9 +151,8 @@ describe('initSessionFromSeed', () => {
     expect(second.session.user.id).toBe(first.session.user.id)
   })
 
-  it('stamps a fresh login as the `full` tier and not a guest', async () => {
+  it('stamps a fresh login as not a guest', async () => {
     const { session } = await initSessionFromSeed({ seed: randomSeed() })
-    expect(session.tier).toBe('full')
     expect(session.isGuest).toBe(false)
   })
 
@@ -246,7 +245,6 @@ describe('initSessionFromSeed', () => {
       const { session } = await initSessionFromSeed({ seed: randomSeed() })
 
       expect(session.profile.keystoreAgent).toBeUndefined()
-      expect(session.tier).toBe('full')
       expect(warnSpy).toHaveBeenCalledWith(
         'KMS keystore provisioning failed:',
         expect.any(Error)
@@ -267,7 +265,6 @@ describe('initGuestSession', () => {
     const { session } = await initGuestSession()
 
     expect(session.isGuest).toBe(true)
-    expect(session.tier).toBe('full')
     expect(session.user.email).toBe('guest@example.com')
     expect(ensureKeystore).not.toHaveBeenCalled()
     expect(StorageManager.initStorageClients).toHaveBeenCalledWith(
