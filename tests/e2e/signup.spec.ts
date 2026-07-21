@@ -11,10 +11,10 @@ test.describe('Sign up page', () => {
 
   test('shows app name and "Sign up" heading', async ({ page }) => {
     await expect(
-      page.getByRole('heading', { name: 'Freewallet', level: 1 })
+      page.getByRole('heading', { name: 'Freewallet', level: 6 })
     ).toBeVisible()
     await expect(
-      page.getByRole('heading', { name: 'Sign up', level: 2 })
+      page.getByRole('heading', { name: 'Sign up', level: 1 })
     ).toBeVisible()
   })
 

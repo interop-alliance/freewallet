@@ -12,10 +12,10 @@ test.describe('Guest login page', () => {
 
   test('shows app name and "Guest Mode Login" heading', async ({ page }) => {
     await expect(
-      page.getByRole('heading', { name: 'Freewallet', level: 1 })
+      page.getByRole('heading', { name: 'Freewallet', level: 6 })
     ).toBeVisible()
     await expect(
-      page.getByRole('heading', { name: 'Guest Mode Login', level: 2 })
+      page.getByRole('heading', { name: 'Guest Mode Login', level: 1 })
     ).toBeVisible()
   })
 

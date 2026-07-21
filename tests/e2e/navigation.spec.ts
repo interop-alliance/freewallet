@@ -21,7 +21,7 @@ test.describe('Landing page', () => {
     await page.getByRole('link', { name: 'Log in' }).click()
     await expect(page).toHaveURL(/#\/login/)
     await expect(
-      page.getByRole('heading', { name: 'Log in', level: 2 })
+      page.getByRole('heading', { name: 'Log in', level: 1 })
     ).toBeVisible()
   })
 
@@ -30,7 +30,7 @@ test.describe('Landing page', () => {
     await page.getByRole('link', { name: 'Sign Up' }).click()
     await expect(page).toHaveURL(/#\/signup/)
     await expect(
-      page.getByRole('heading', { name: 'Sign up', level: 2 })
+      page.getByRole('heading', { name: 'Sign up', level: 1 })
     ).toBeVisible()
   })
 
@@ -41,7 +41,7 @@ test.describe('Landing page', () => {
     await page.getByRole('link', { name: 'Guest Mode' }).click()
     await expect(page).toHaveURL(/#\/guest-login/)
     await expect(
-      page.getByRole('heading', { name: 'Guest Mode Login', level: 2 })
+      page.getByRole('heading', { name: 'Guest Mode Login', level: 1 })
     ).toBeVisible()
   })
 })

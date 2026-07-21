@@ -8,8 +8,7 @@ import Typography from '@mui/material/Typography'
 import { FaGhost } from 'react-icons/fa'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
-import { LanguageSelector } from '@/components/LanguageSelector'
-import { ThemePicker } from '@/components/ThemePicker'
+import { AuthPageHeader } from '@/components/AuthPageHeader'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
@@ -59,52 +58,52 @@ export function GuestLoginPage() {
 
   return (
     <Box component="main" className="fw-page" sx={authStyles.page}>
-      <Box component="form" onSubmit={handleGuestLogin} sx={authStyles.content}>
-        <Box sx={authStyles.languageBar}>
-          <LanguageSelector />
-          <ThemePicker />
-        </Box>
-        <Typography variant="h2" component="h1" sx={authStyles.title}>
-          {t('landing.title')}
-        </Typography>
-        <Typography variant="h3" component="h2" sx={authStyles.title}>
-          <Box component="span" sx={authStyles.guestIcon}>
-            <FaGhost />
-          </Box>
-          {t('auth.guest.heading')}
-        </Typography>
-
-        <List dense sx={{ listStyleType: 'disc', pl: 4 }}>
-          <ListItem disableGutters sx={{ display: 'list-item', px: 0 }}>
-            <ListItemText
-              primary={t('auth.guest.bulletRandom')}
-              slotProps={{ primary: { variant: 'h5' } }}
-            />
-          </ListItem>
-          <ListItem disableGutters sx={{ display: 'list-item', px: 0 }}>
-            <ListItemText
-              primary={t('auth.guest.bulletEphemeral')}
-              slotProps={{ primary: { variant: 'h5' } }}
-            />
-          </ListItem>
-        </List>
-
-        {setupError && (
-          <Alert severity="error" sx={authStyles.userMessage}>
-            {t('auth.errors.setupFailed')}
-          </Alert>
-        )}
-
-        <Button
-          variant="contained"
-          type="submit"
-          loading={isSubmitting}
-          loadingPosition="start"
-          startIcon={<FaGhost />}
-          sx={authStyles.actionButton}
+      <AuthPageHeader />
+      <Box sx={authStyles.pageContent}>
+        <Box
+          component="form"
+          onSubmit={handleGuestLogin}
+          sx={authStyles.content}
         >
-          {t('auth.guest.submit')}
-        </Button>
+          <Typography variant="h4" component="h1" sx={authStyles.title}>
+            <Box component="span" sx={authStyles.guestIcon}>
+              <FaGhost />
+            </Box>
+            {t('auth.guest.heading')}
+          </Typography>
+
+          <List dense sx={{ listStyleType: 'disc', pl: 4 }}>
+            <ListItem disableGutters sx={{ display: 'list-item', px: 0 }}>
+              <ListItemText
+                primary={t('auth.guest.bulletRandom')}
+                slotProps={{ primary: { variant: 'h5' } }}
+              />
+            </ListItem>
+            <ListItem disableGutters sx={{ display: 'list-item', px: 0 }}>
+              <ListItemText
+                primary={t('auth.guest.bulletEphemeral')}
+                slotProps={{ primary: { variant: 'h5' } }}
+              />
+            </ListItem>
+          </List>
+
+          {setupError && (
+            <Alert severity="error" sx={authStyles.userMessage}>
+              {t('auth.errors.setupFailed')}
+            </Alert>
+          )}
+
+          <Button
+            variant="contained"
+            type="submit"
+            loading={isSubmitting}
+            loadingPosition="start"
+            startIcon={<FaGhost />}
+            sx={authStyles.actionButton}
+          >
+            {t('auth.guest.submit')}
+          </Button>
+        </Box>
       </Box>
     </Box>
   )

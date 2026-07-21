@@ -30,8 +30,7 @@ import {
 } from 'react-router'
 import { Trans, useTranslation } from 'react-i18next'
 import { base64urlnopad } from '@scure/base'
-import { LanguageSelector } from '@/components/LanguageSelector'
-import { ThemePicker } from '@/components/ThemePicker'
+import { AuthPageHeader } from '@/components/AuthPageHeader'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
@@ -354,15 +353,9 @@ export function SignupPage() {
 
   return (
     <Box component="main" className="fw-page" sx={authStyles.page}>
-      <Box component="form" onSubmit={handleSignup} sx={authStyles.wideContent}>
-        <Box sx={authStyles.languageBar}>
-          <LanguageSelector />
-          <ThemePicker />
-        </Box>
-        <Typography variant="h2" component="h1" sx={authStyles.title}>
-          {t('landing.title')}
-        </Typography>
-        <Typography variant="h3" component="h2" sx={authStyles.title}>
+      <AuthPageHeader />
+      <Box component="form" onSubmit={handleSignup} sx={authStyles.pageContent}>
+        <Typography variant="h4" component="h1" sx={authStyles.title}>
           {t('auth.signup.heading')}
         </Typography>
 
@@ -409,7 +402,7 @@ export function SignupPage() {
 
         {activeStep === 0 && (
           <>
-            <Typography variant="h4" component="h2" sx={authStyles.title}>
+            <Typography variant="h5" component="h2" sx={authStyles.title}>
               {t('auth.signup.loginSecurity')}
             </Typography>
             <Box sx={authStyles.cardsRow}>
@@ -499,17 +492,19 @@ export function SignupPage() {
               sx={authStyles.authFooterText}
             >
               {t('auth.signup.hasWallet')}{' '}
-              <Link component={RouterLink} to="/login" underline="always">
-                {t('auth.signup.logInLink')}
-              </Link>
-              .
+              <Box component="span" sx={{ whiteSpace: 'nowrap' }}>
+                <Link component={RouterLink} to="/login" underline="always">
+                  {t('auth.signup.logInLink')}
+                </Link>
+                .
+              </Box>
             </Typography>
           </>
         )}
 
         {activeStep === 1 && (
           <>
-            <Typography variant="h4" component="h2" sx={authStyles.title}>
+            <Typography variant="h5" component="h2" sx={authStyles.title}>
               {t('auth.signup.emailHeading')}
             </Typography>
             <Typography
@@ -561,7 +556,7 @@ export function SignupPage() {
 
         {activeStep === 2 && (
           <>
-            <Typography variant="h4" component="h2" sx={authStyles.title}>
+            <Typography variant="h5" component="h2" sx={authStyles.title}>
               {t('auth.signup.storageHeading')}
             </Typography>
 

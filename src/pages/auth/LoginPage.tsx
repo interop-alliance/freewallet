@@ -9,8 +9,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { Trans, useTranslation } from 'react-i18next'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
-import { LanguageSelector } from '@/components/LanguageSelector'
-import { ThemePicker } from '@/components/ThemePicker'
+import { AuthPageHeader } from '@/components/AuthPageHeader'
 import { authStyles } from '@/styles/appStyles'
 import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
@@ -147,16 +146,9 @@ export function LoginPage() {
 
   return (
     <Box component="main" className="fw-page" sx={authStyles.page}>
-      <Box sx={authStyles.pageColumn}>
-        <Box sx={authStyles.languageBar}>
-          <LanguageSelector />
-          <ThemePicker />
-        </Box>
-        <Typography variant="h2" component="h1" sx={authStyles.title}>
-          {t('landing.title')}
-        </Typography>
-
-        <Typography variant="h4" component="h2" sx={authStyles.title}>
+      <AuthPageHeader />
+      <Box sx={authStyles.pageContent}>
+        <Typography variant="h4" component="h1" sx={authStyles.title}>
           {t('auth.login.heading')}
         </Typography>
 
@@ -227,10 +219,16 @@ export function LoginPage() {
                   sx={authStyles.authFooterText}
                 >
                   {t('auth.login.noWallet')}{' '}
-                  <Link component={RouterLink} to="/signup" underline="always">
-                    {t('auth.login.signUpLink')}
-                  </Link>
-                  .
+                  <Box component="span" sx={{ whiteSpace: 'nowrap' }}>
+                    <Link
+                      component={RouterLink}
+                      to="/signup"
+                      underline="always"
+                    >
+                      {t('auth.login.signUpLink')}
+                    </Link>
+                    .
+                  </Box>
                 </Typography>
               </Box>
             </CardContent>

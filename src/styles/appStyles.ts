@@ -8,27 +8,21 @@ export const authStyles = {
   page: {
     minHeight: '100dvh',
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    px: 2
+    flexDirection: 'column'
   },
-  pageColumn: {
+  /**
+   * Content area below the app bar: top-aligned, horizontally centered.
+   */
+  pageContent: {
+    flex: 1,
+    width: '100%',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: 4,
-    width: '100%'
-  },
-  /**
-   * Top of auth column; language + theme switchers aligned end (right in LTR).
-   */
-  languageBar: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 1.5,
-    width: '100%',
-    mb: 1
+    gap: 3,
+    px: 2,
+    pt: { xs: 4, sm: 6 },
+    pb: 6
   },
   content: {
     width: '100%',
@@ -36,13 +30,6 @@ export const authStyles = {
     display: 'flex',
     flexDirection: 'column',
     gap: 2.5
-  },
-  wideContent: {
-    width: '100%',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 2.5,
-    alignItems: 'center'
   },
   cardsRow: {
     display: 'flex',
