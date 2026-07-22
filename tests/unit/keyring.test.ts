@@ -24,7 +24,7 @@ import type {
 } from '@interop/data-integrity-core'
 import { WasError } from '@interop/was-client'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
-import { createEdvDocCipher } from '@/stores/edvDocCipher'
+import { createEdvDocCipher } from '@interop/was-client/edv'
 import { loadKeyringCache } from '@/lib/sessionKey'
 import {
   KEYRING_CACHE_TTL_MS,

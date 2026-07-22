@@ -18,7 +18,7 @@
  *   `putSyncedResource` / `deleteSyncedResource`).
  *
  * Both backends encrypt/decrypt through the SAME per-collection {@link DocCipher}
- * instances the session built (`src/stores/edvDocCipher.ts`): the content-derived
+ * instances the session built (`@interop/was-client/edv`): the content-derived
  * envelope-hash id and the key-epoch stamp come from `cipher.encrypt`, so a
  * remote-direct write reproduces verbatim what background replication would have
  * pushed (the raw EDV envelope under its content-derived id, created with
@@ -31,13 +31,13 @@
  */
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type { ContactData, ContactRevisionPayload } from '@interop/social-core'
-import { cidFrom } from '@/lib/cidFrom'
+import { cidFrom } from '@interop/was-client/sync'
 import type { Json } from '@/lib/sync'
 import {
   isEncryptedEnvelope,
   UnknownEpochError,
   type DocCipher
-} from '@/stores/edvDocCipher'
+} from '@interop/was-client/edv'
 import type { StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'

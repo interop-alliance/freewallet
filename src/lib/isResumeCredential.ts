@@ -1,7 +1,6 @@
-import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import { getSubject } from '@/lib/viewMappers/getSubject'
-
-export function isResumeCredential(vc: IVerifiableCredential): boolean {
-  const subject = getSubject(vc)
-  return subject.type === 'Resume'
-}
+/**
+ * Resume-credential predicate moved to `@interop/wallet-core/display` (the
+ * merged, vc-typed matcher: case-insensitive substring over the subject
+ * `type`). Re-exported here so existing importers are unaffected.
+ */
+export { isResumeCredential } from '@interop/wallet-core/display'

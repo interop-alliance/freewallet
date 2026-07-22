@@ -45,6 +45,9 @@ import {
   type CHAPIStoreEvent,
   type IVPRDetails
 } from '@/lib/walletRequest'
+// The exchange client's request param is the shared (spec) VPR shape, narrower
+// than Freewallet's local `IVPRDetails` (widened with the App Connect query).
+import type { IVPRDetails as ISpecVPRDetails } from '@interop/wallet-core/request'
 import { RequestSourcePanel } from './RequestSourcePanel'
 import { CHAPILoginForm } from './CHAPILoginForm'
 import { useTranslation } from 'react-i18next'
@@ -255,7 +258,7 @@ export function WalletStorePage() {
         JSON.stringify(verifiablePresentation, null, 2)
       )
       const offeredVp = await collectIssuedPresentation({
-        request,
+        request: request as ISpecVPRDetails,
         exchangeUrl,
         verifiablePresentation
       })

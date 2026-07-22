@@ -32,7 +32,8 @@ import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
 import { uuidv7 } from 'uuidv7'
 import type { User } from '@/types/auth'
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
-import { bufferToBase64Url, cidFrom, digestHash } from '@/lib/cidFrom'
+import { cidFrom } from '@interop/was-client/sync'
+import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
 import {
   syncedDocMigrationStrategies,
   syncedDocSchema,
@@ -44,7 +45,7 @@ import {
   isEncryptedEnvelope,
   UnknownEpochError,
   type DocCipher
-} from '@/stores/edvDocCipher'
+} from '@interop/was-client/edv'
 import type { StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'

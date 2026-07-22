@@ -6,8 +6,7 @@ import {
   credentialsOf,
   queriesOf
 } from './classify'
-import type { CHAPIStoreEvent } from './classify'
-import type { IQueryByExample } from './types'
+import type { CHAPIStoreEvent, IQueryByExample } from './types'
 
 const BARE_VC = {
   '@context': ['https://www.w3.org/ns/credentials/v2'],

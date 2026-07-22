@@ -196,7 +196,7 @@ export function resolveInvocationTarget({
   descriptor,
   spaceUrl
 }: {
-  descriptor: string | { type: string; name?: string }
+  descriptor: string | { type?: string; name?: string }
   spaceUrl: string
 }): ResolvedTarget {
   if (typeof descriptor === 'string') {
@@ -298,12 +298,15 @@ export function resolveInvocationTarget({
  * @returns {string[]}
  */
 function normalizeActions(
-  allowedAction: string | string[] | undefined
+  allowedAction: string | object | Array<string | object> | undefined
 ): string[] {
   if (allowedAction === undefined) {
     return [...DEFAULT_ACTIONS]
   }
-  return Array.isArray(allowedAction) ? [...allowedAction] : [allowedAction]
+  const actions = Array.isArray(allowedAction) ? allowedAction : [allowedAction]
+  return actions.map(action =>
+    typeof action === 'string' ? action : String(action)
+  )
 }
 
 /**

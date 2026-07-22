@@ -43,7 +43,7 @@ import {
   type PasskeyRegistration
 } from '@/lib/passkey'
 import { bindUnlockSecret, deleteUnlockMethod } from '@/session/keyring'
-import { createEdvDocCipher } from '@/stores/edvDocCipher'
+import { createEdvDocCipher } from '@interop/was-client/edv'
 import {
   deleteKeyringCache,
   deleteUnlockMethodsCache,

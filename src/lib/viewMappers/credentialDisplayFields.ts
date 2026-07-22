@@ -1,68 +1,7 @@
-import type {
-  IAchievement,
-  IVerifiableCredential
-} from '@interop/data-integrity-core'
-import type { CredentialDisplayFields } from '@/types/credential'
-import { getExpirationDateIso } from '@/lib/viewMappers/formatDate'
-import { getSubject } from '@/lib/viewMappers/getSubject'
-import {
-  asRecord,
-  extractIssuedTo,
-  achievementsList,
-  skillsList,
-  getSkillImage,
-  getEvidenceImage,
-  normalizeAlignments,
-  getAchievementImage,
-  getAchievementType,
-  buildCredentialDescription,
-  buildCriteria,
-  credentialNameFrom
-} from '@/lib/viewMappers/displayFieldsHelpers'
-export function getDisplayFields(
-  verifiableCredential: IVerifiableCredential
-): CredentialDisplayFields {
-  const commonFields = {
-    issuedTo: extractIssuedTo(verifiableCredential),
-    expirationDate: getExpirationDateIso(verifiableCredential) ?? ''
-  }
-
-  const subject = asRecord(getSubject(verifiableCredential))
-  if (!subject) {
-    return {
-      ...commonFields,
-      credentialName: credentialNameFrom(verifiableCredential, {}),
-      credentialDescription: '',
-      criteria: '',
-      achievementImage: '',
-      achievementType: '',
-      alignments: []
-    }
-  }
-
-  const achievements = achievementsList(subject)
-  const primaryAchievement = achievements[0] as IAchievement | undefined
-  const skills = skillsList(subject)
-  const alignments = achievements.flatMap(achievement =>
-    normalizeAlignments((achievement as { alignment?: unknown }).alignment)
-  )
-  const evidenceRaw = (verifiableCredential as Record<string, unknown>).evidence
-  const evidence = Array.isArray(evidenceRaw)
-    ? evidenceRaw
-    : evidenceRaw
-      ? [evidenceRaw]
-      : []
-
-  return {
-    ...commonFields,
-    credentialName: credentialNameFrom(verifiableCredential, subject),
-    credentialDescription: buildCredentialDescription(subject, achievements),
-    criteria: buildCriteria(subject, achievements),
-    achievementImage:
-      getAchievementImage(primaryAchievement) ||
-      getSkillImage(skills) ||
-      getEvidenceImage(evidence),
-    achievementType: getAchievementType(primaryAchievement),
-    alignments
-  }
-}
+/**
+ * The aggregate credential display projection (`getDisplayFields`) moved to
+ * `@interop/wallet-core/display`; re-exported here so existing importers are
+ * unaffected. The library returns raw ISO dates (the raw-values seam); the
+ * `expirationDate` field is a raw ISO string, formatted at the UI layer.
+ */
+export { getDisplayFields } from '@interop/wallet-core/display'

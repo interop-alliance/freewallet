@@ -7,6 +7,11 @@ import {
   CONTACTS_COLLECTION,
   CONTACTS_HISTORY_COLLECTION
 } from '@interop/social-core'
+import {
+  PRIVATE_CREDENTIALS_COLLECTION_SPEC,
+  PUBLIC_CREDENTIALS_COLLECTION_SPEC,
+  WALLET_ACTIVITY_COLLECTION_SPEC
+} from '@interop/wallet-core/space'
 
 const env = import.meta.env
 
@@ -60,23 +65,35 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
   // encrypted and supply its own keys). Set-once / immutable on the server.
   encryption?: { scheme: 'edv' }
 }> = [
+  // Collection ids and their public/encryption config come from
+  // `@interop/wallet-core/space` so this list matches Freewallet mobile's Space
+  // layout byte-for-byte. The RxDB `key` and the friendly display `name` are
+  // local (the library spec does not carry them); the local `encryption`
+  // marker's `{ scheme: 'edv' }` object is derived from the spec's `'edv'` /
+  // `'plaintext'` encryption string.
   {
     key: 'privateCredentials',
-    id: 'private-credentials',
+    id: PRIVATE_CREDENTIALS_COLLECTION_SPEC.collectionId,
     name: 'Verifiable Credentials',
-    encryption: { scheme: 'edv' }
+    encryption:
+      PRIVATE_CREDENTIALS_COLLECTION_SPEC.encryption === 'edv'
+        ? { scheme: 'edv' }
+        : undefined
   },
   {
     key: 'publicCredentials',
-    id: 'public-credentials',
+    id: PUBLIC_CREDENTIALS_COLLECTION_SPEC.collectionId,
     name: 'Verifiable Credentials (Publicly Shared)',
-    isPublic: true
+    isPublic: PUBLIC_CREDENTIALS_COLLECTION_SPEC.isPublic
   },
   {
     key: 'walletActivity',
-    id: 'wallet-activity',
+    id: WALLET_ACTIVITY_COLLECTION_SPEC.collectionId,
     name: 'Wallet Activity Log',
-    encryption: { scheme: 'edv' }
+    encryption:
+      WALLET_ACTIVITY_COLLECTION_SPEC.encryption === 'edv'
+        ? { scheme: 'edv' }
+        : undefined
   },
   // Ids come from `@interop/social-core` (not hardcoded) so this collection
   // matches Freewallet mobile's byte-for-byte -- a disagreement here would

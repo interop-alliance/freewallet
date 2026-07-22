@@ -29,7 +29,7 @@ import { getResourceDisplayName } from '@/components/storage/displayUtils'
 import { PublicAccessIcon } from '@/components/storage/PublicAccessIcon'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
-import { cidFrom } from '@/lib/cidFrom'
+import { cidFrom } from '@interop/was-client/sync'
 import { downloadBlob } from '@/lib/downloadBlob'
 
 export function CollectionResourcePage() {
@@ -60,7 +60,28 @@ export function CollectionResourcePage() {
   )
   const [isLoading, setIsLoading] = useState(true)
   const [errorKey, setErrorKey] = useState<string | null>(null)
-  const [credentialCid, setCredentialCid] = useState<string | null>(null)
+
+  const vc = useMemo(() => {
+    if (payload?.kind !== 'json') {
+      return null
+    }
+    return payload.data as IVerifiableCredential
+  }, [payload])
+
+  // The content-addressed cid is a pure, synchronous hash of the decrypted VC,
+  // so it derives straight from `vc` rather than living in state behind an
+  // effect.
+  const credentialCid = useMemo<string | null>(() => {
+    if (!vc) {
+      return null
+    }
+    try {
+      return cidFrom({ doc: vc as object })
+    } catch (err: unknown) {
+      console.error('Error computing credential CID:', err)
+      return null
+    }
+  }, [vc])
 
   const collectionPath = collectionId
     ? `/storage/collections/${encodeURIComponent(collectionId)}`
@@ -170,38 +191,6 @@ export function CollectionResourcePage() {
       cancelled = true
     }
   }, [storage, collectionId, resourceId])
-
-  const vc = useMemo(() => {
-    if (payload?.kind !== 'json') {
-      return null
-    }
-    return payload.data as IVerifiableCredential
-  }, [payload])
-
-  const [previousVc, setPreviousVc] = useState(vc)
-  if (previousVc !== vc) {
-    setPreviousVc(vc)
-    setCredentialCid(null)
-  }
-
-  useEffect(() => {
-    if (!vc) {
-      return
-    }
-    let cancelled = false
-    void cidFrom({ doc: vc as object })
-      .then(cid => {
-        if (!cancelled) {
-          setCredentialCid(cid)
-        }
-      })
-      .catch((err: unknown) => {
-        console.error('Error computing credential CID:', err)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [vc])
 
   const jsonText = useMemo(() => {
     if (payload?.kind !== 'json') {

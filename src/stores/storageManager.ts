@@ -44,7 +44,7 @@ import {
   type RecipientPublicKey
 } from '@interop/was-client/edv'
 import type { ControllerProfile, User } from '@/types/auth'
-import { cidFrom } from '@/lib/cidFrom'
+import { cidFrom } from '@interop/was-client/sync'
 import {
   ENABLE_DID_WEBVH,
   RP_ZCAP_TTL_MS,
@@ -59,7 +59,7 @@ import {
   isEncryptedEnvelope,
   ownerRecipient,
   type DocCipher
-} from '@/stores/edvDocCipher'
+} from '@interop/was-client/edv'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import type { Json, SyncedDoc } from '@/lib/sync'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
@@ -72,23 +72,25 @@ import {
   RemoteDirectStore,
   type SyncedCollectionStore
 } from '@/stores/remoteDirectStore'
-import { UnknownEpochError } from '@/stores/edvDocCipher'
+import { UnknownEpochError } from '@interop/was-client/edv'
 import { uuidv7 } from 'uuidv7'
+import {
+  ACTIVITY_TYPE,
+  addHistoryNewAccount as buildHistoryNewAccount,
+  addHistorySpaceCreated as buildHistorySpaceCreated,
+  addHistoryCredentialCreated as buildHistoryCredentialCreated,
+  addHistoryCredentialDeleted as buildHistoryCredentialDeleted,
+  addHistoryCredentialShared as buildHistoryCredentialShared,
+  addHistoryCredentialUnshared as buildHistoryCredentialUnshared,
+  addHistoryLogin as buildHistoryLogin,
+  addHistoryAppRevoke as buildHistoryAppRevoke,
+  type WalletActivity
+} from '@interop/wallet-core/space'
 
-/**
- * A wallet-activity log entry stored in the `wallet-activity` collection.
- * Modelled on ActivityStreams: a typed action carrying a human-readable
- * summary and a creation timestamp. All fields are optional because the
- * payload originates from the storage server and isn't schema-validated here.
- */
-export interface WalletActivity {
-  id?: string
-  type?: string[]
-  summary?: string
-  actor?: unknown
-  object?: unknown
-  created?: string
-}
+// The `wallet-activity` wire shape now lives in `@interop/wallet-core/space`
+// (shared with Freewallet mobile). Re-exported here so existing importers keep
+// resolving it from `@/stores/storageManager`.
+export type { WalletActivity }
 
 export type ImportSpaceSummary = {
   collectionsCreated: number
@@ -966,18 +968,14 @@ export class StorageManager {
    * the bootstrap did:key DID.
    */
   async addHistoryNewAccount({ user }: { user: User }) {
+    // A locally-minted, time-monotonic `uuidv7` is injected as the activity id
+    // (rather than the builder's random default) so it doubles as the record's
+    // resource id: on the guest / offline path that id is the RxDB primary key,
+    // and its monotonicity keeps history ordering stable when two writes share
+    // an `updatedAt` millisecond. Every `addHistory*` wrapper below does the same.
     const resourceId = uuidv7()
-    await this.#addHistoryItem({
-      resourceId,
-      activity: {
-        id: resourceId,
-        type: ['Create'],
-        summary: 'Account Sign Up. did:key DID generated.',
-        actor: { email: user.email },
-        object: user.id,
-        created: new Date().toISOString()
-      }
-    })
+    const activity = buildHistoryNewAccount({ user, id: resourceId })
+    await this.#addHistoryItem({ resourceId, activity })
   }
 
   /**
@@ -986,9 +984,8 @@ export class StorageManager {
    * configured, the remote Space).
    */
   async addHistorySpaceCreated({ user }: { user: User }) {
-    const resourceId = uuidv7()
     const remote = this.#remoteStore
-    const objects = remote
+    const object = remote
       ? [
           { type: ['Space'], id: remote.spaceUrl },
           ...WALLET_STANDARD_COLLECTIONS.map(({ key }) => ({
@@ -1000,56 +997,14 @@ export class StorageManager {
           type: ['Collection'],
           id
         }))
-    await this.#addHistoryItem({
-      resourceId,
-      activity: {
-        id: resourceId,
-        type: ['Create'],
-        summary: remote
-          ? 'Account space created on remote storage server, collections initialized.'
-          : 'Wallet collections initialized in local storage.',
-        actor: user.id,
-        object: objects,
-        created: new Date().toISOString()
-      }
-    })
-  }
-
-  /**
-   * Records (in the `wallet-activity` collection) a single credential activity.
-   * Backs the four `addHistoryCredential*` wrappers, which differ only in the
-   * activity type and the summary verb.
-   *
-   * @param options {object}
-   * @param options.cid {string} - CID of the credential (used as history object id).
-   * @param options.user {User} - Session user object (used to record history object actor).
-   * @param options.type {string} - the activity type, e.g. 'Create' | 'Delete'.
-   * @param options.verb {string} - the summary verb, e.g. 'created' | 'deleted'.
-   * @returns {Promise<void>}
-   */
-  async #addCredentialActivity({
-    cid,
-    user,
-    type,
-    verb
-  }: {
-    cid: string
-    user: User
-    type: string
-    verb: string
-  }) {
     const resourceId = uuidv7()
-    await this.#addHistoryItem({
-      resourceId,
-      activity: {
-        id: resourceId,
-        type: [type],
-        summary: `Credential ${verb}: ${cid}`,
-        actor: { email: user.email },
-        object: cid,
-        created: new Date().toISOString()
-      }
+    const activity = buildHistorySpaceCreated({
+      actor: user.id,
+      object,
+      remote: !!remote,
+      id: resourceId
     })
+    await this.#addHistoryItem({ resourceId, activity })
   }
 
   /**
@@ -1067,12 +1022,13 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    await this.#addCredentialActivity({
+    const resourceId = uuidv7()
+    const activity = buildHistoryCredentialCreated({
       cid,
       user,
-      type: 'Create',
-      verb: 'created'
+      id: resourceId
     })
+    await this.#addHistoryItem({ resourceId, activity })
   }
 
   /**
@@ -1090,12 +1046,13 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    await this.#addCredentialActivity({
+    const resourceId = uuidv7()
+    const activity = buildHistoryCredentialDeleted({
       cid,
       user,
-      type: 'Delete',
-      verb: 'deleted'
+      id: resourceId
     })
+    await this.#addHistoryItem({ resourceId, activity })
   }
 
   /**
@@ -1106,12 +1063,9 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async addHistoryCredentialShared({ cid, user }: { cid: string; user: User }) {
-    await this.#addCredentialActivity({
-      cid,
-      user,
-      type: 'Share',
-      verb: 'shared'
-    })
+    const resourceId = uuidv7()
+    const activity = buildHistoryCredentialShared({ cid, user, id: resourceId })
+    await this.#addHistoryItem({ resourceId, activity })
   }
 
   /**
@@ -1128,12 +1082,13 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    await this.#addCredentialActivity({
+    const resourceId = uuidv7()
+    const activity = buildHistoryCredentialUnshared({
       cid,
       user,
-      type: 'Unshare',
-      verb: 'unshared'
+      id: resourceId
     })
+    await this.#addHistoryItem({ resourceId, activity })
   }
 
   /**
@@ -1173,23 +1128,14 @@ export class StorageManager {
     appConnect?: { name: string; firstRun: boolean }
   }) {
     const resourceId = uuidv7()
-    const summary = appConnect
-      ? `Connected ${appConnect.name} (${origin}) to wallet` +
-        `${appConnect.firstRun ? ', minting a new app key' : ''}.`
-      : `Logged in to ${origin} with wallet.`
-    await this.#addHistoryItem({
-      resourceId,
-      activity: {
-        id: resourceId,
-        type: ['Login'],
-        summary,
-        actor: { email: user.email },
-        object: appConnect
-          ? { origin, zcaps: grants, appConnect }
-          : { origin, zcaps: grants },
-        created: new Date().toISOString()
-      }
+    const activity = buildHistoryLogin({
+      user,
+      origin,
+      grants,
+      appConnect,
+      id: resourceId
     })
+    await this.#addHistoryItem({ resourceId, activity })
   }
 
   /**
@@ -1225,22 +1171,16 @@ export class StorageManager {
     skipped?: number
   }) {
     const resourceId = uuidv7()
-    const summary =
-      typeof revoked === 'number'
-        ? `Revoked ${name} (${origin}) app access: ${revoked} grant(s) ` +
-          `revoked${skipped ? `, ${skipped} skipped` : ''}.`
-        : `Revoked ${name} (${origin}) app access.`
-    await this.#addHistoryItem({
-      resourceId,
-      activity: {
-        id: resourceId,
-        type: ['Revoke'],
-        summary,
-        actor: { email: user.email },
-        object: { origin, appConnect: { name }, cid, revoked, skipped },
-        created: new Date().toISOString()
-      }
+    const activity = buildHistoryAppRevoke({
+      user,
+      origin,
+      name,
+      cid,
+      revoked,
+      skipped,
+      id: resourceId
     })
+    await this.#addHistoryItem({ resourceId, activity })
   }
 
   /**
@@ -1548,7 +1488,7 @@ export class StorageManager {
       resourceId,
       activity: {
         id: resourceId,
-        type: ['CollectionShare'],
+        type: [ACTIVITY_TYPE.CollectionShare],
         summary: `Shared collection "${collectionId}" with ${controller}.`,
         actor: { email: user.email },
         object: {
@@ -1636,7 +1576,7 @@ export class StorageManager {
       resourceId,
       activity: {
         id: resourceId,
-        type: ['CollectionUnshare'],
+        type: [ACTIVITY_TYPE.CollectionUnshare],
         summary: `Stopped sharing collection "${collectionId}".`,
         actor: { email: user.email },
         object: { collectionId, recipientId },

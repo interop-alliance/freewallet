@@ -29,6 +29,7 @@ import {
   type Space
 } from '@interop/was-client'
 import { createEdvEncryption } from '@interop/was-client/edv'
+import { publicCredentialUrl as buildPublicCredentialUrl } from '@interop/wallet-core/space'
 import type { ControllerProfile, User } from '@/types/auth'
 import {
   DID_DOCUMENT_RESOURCE,
@@ -39,7 +40,6 @@ import {
   UNLOCK_METHODS_RESOURCE,
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
-import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
 // Deep import (bypassing the `@/lib/sync` barrel) so this eagerly loaded module
 // does not drag the barrel's RxDB replication machinery into the entry chunk.
 import type { Json } from '@/lib/sync/types.js'
@@ -50,7 +50,12 @@ import {
   isTextLikeContentType
 } from '@/lib/storageResource'
 import type { ImportSpaceSummary } from '@/stores/storageManager'
-import { errorStatus, WAS_KEY_EPOCH_HEADER } from '@/stores/wasSyncPort'
+import {
+  deriveSpaceId,
+  ensureSpaceAndCollection,
+  errorStatus,
+  WAS_KEY_EPOCH_HEADER
+} from '@interop/was-client/sync'
 
 /**
  * Map from logical collection name to its WAS base URL.
@@ -256,51 +261,36 @@ export class WASRemoteStore {
     return (await this.was.space(this.spaceId).describe()) !== null
   }
 
-  async ensureUserCollections({ user }: { user: User }) {
-    const space = this.was.space(this.spaceId)
-
-    // Create (upsert) the Space for this user on the remote storage server.
-    try {
-      await space.configure({
-        name: 'Freewallet Space',
-        controller: this.controller
-      })
-    } catch (err) {
-      console.error('Error creating space:', err)
-      throw new Error(
-        `Error creating space for user "${user.id}" at "${this.spaceUrl}".`,
-        { cause: err }
-      )
-    }
-
-    // Space created, now create the standard collections plus the `id`
-    // collection. Each collection's own configure-then-setPublic ordering
-    // stays sequential within its chain, but the independent chains -- which
-    // depend only on the Space already existing -- run concurrently under a
-    // single Promise.all, collapsing what was a series of signed round trips
-    // into one batch on every full login (including each CHAPI popup). A
-    // rejected chain surfaces as Promise.all's first rejection; as with the
-    // former serial loop, chains that already completed leave their
+  async ensureUserCollections({ user: _user }: { user: User }) {
+    // Each collection is provisioned through the library's generic
+    // `ensureSpaceAndCollection`, which idempotently upserts the Space (with
+    // this wallet's `Freewallet Space` name and controller) and then configures
+    // the collection: an `'edv'` collection declares the set-once encryption
+    // marker (a late declaration on a pre-marker collection is allowed, so a
+    // re-run upgrades it in place), a `'plaintext'` collection is a marker-less
+    // `force` upsert (running with the root capability, a 404 from the pre-merge
+    // describe really means absent), and a public collection additionally gets a
+    // collection-level world-read grant. The app-specific roster and its
+    // per-collection config (id, encryption opt-in, public flag) stay here in
+    // WALLET_STANDARD_COLLECTIONS; the helper owns only the generic sequence.
+    //
+    // The independent chains -- each depending only on the Space existing -- run
+    // concurrently under a single Promise.all. A rejected chain surfaces as
+    // Promise.all's first rejection; chains that already completed leave their
     // provisioning in place (partial provisioning was possible before too).
     const collections: ICollectionsSet = new Map()
     const provisionStandardCollections = WALLET_STANDARD_COLLECTIONS.map(
-      async ({ key, id, name, isPublic, encryption }) => {
+      async ({ key, id, isPublic, encryption }) => {
         try {
-          const collection = space.collection(id)
-          // Declare the encryption marker only for collections that opt in
-          // (private-credentials, wallet-activity); the others stay plaintext.
-          // The marker's scheme is set-once on the server, but a late
-          // declaration on a pre-marker collection is allowed, so re-running
-          // this against an existing Space upgrades it in place. `force` lets
-          // the plaintext upsert create a fresh collection: this runs with the
-          // root capability, so a 404 from the pre-merge describe really means
-          // absent, not unreadable (was-client >= 0.13 fails closed otherwise).
-          await collection.configure(
-            encryption ? { name, encryption } : { name, force: true }
-          )
-          if (isPublic) {
-            await collection.setPublic()
-          }
+          await ensureSpaceAndCollection({
+            was: this.was,
+            spaceId: this.spaceId,
+            controllerDid: this.controller,
+            collectionId: id,
+            encryption: encryption ? 'edv' : 'plaintext',
+            ...(isPublic !== undefined && { isPublic }),
+            spaceName: 'Freewallet Space'
+          })
         } catch (err) {
           console.error(`Error creating collection "${id}":`, err)
           throw new Error(
@@ -318,11 +308,13 @@ export class WASRemoteStore {
     // DID document is published per-resource by `setIdResourcePublic`).
     const provisionIdCollection = (async () => {
       try {
-        // `force`: same root-capability reasoning as the standard collections
-        // above -- a 404 here means the collection does not exist yet.
-        await space.collection(ID_COLLECTION.id).configure({
-          name: ID_COLLECTION.name,
-          force: true
+        await ensureSpaceAndCollection({
+          was: this.was,
+          spaceId: this.spaceId,
+          controllerDid: this.controller,
+          collectionId: ID_COLLECTION.id,
+          encryption: 'plaintext',
+          spaceName: 'Freewallet Space'
         })
       } catch (err) {
         console.error(`Error creating collection "${ID_COLLECTION.id}":`, err)
@@ -540,7 +532,7 @@ export class WASRemoteStore {
     profile: ControllerProfile
   }) {
     const controller = profile.keyAgent?.id || user.id
-    const spaceId = bufferToBase64Url(await digestHash(controller))
+    const spaceId = deriveSpaceId(controller)
     const remoteStore = new WASRemoteStore({
       storageServerUrl,
       zcapClient: profile.zcapClient,
@@ -662,11 +654,11 @@ export class WASRemoteStore {
    * @returns {string}
    */
   publicCredentialUrl(cid: string): string {
-    const collectionId = this.#collectionId('publicCredentials')
-    return new URL(
-      `/space/${this.spaceId}/${collectionId}/${cid}`,
-      this.storageServerUrl
-    ).toString()
+    return buildPublicCredentialUrl({
+      serverUrl: this.storageServerUrl,
+      spaceId: this.spaceId,
+      cid
+    })
   }
 
   /**
@@ -754,7 +746,7 @@ export class WASRemoteStore {
    * thrown.
    *
    * When `epoch` is given, it is stamped as the `WAS-Key-Epoch` header exactly
-   * as background replication does (`wasSyncPort`'s `putContent`), so a
+   * as background replication does (the sync port's `putContent`), so a
    * remote-direct write records the key epoch its envelope was encrypted under.
    *
    * @param options {object}

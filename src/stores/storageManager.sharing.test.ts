@@ -32,14 +32,14 @@ import {
 import { initRecipients, removeRecipient } from '@interop/was-client/edv'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { ControllerProfile, User } from '@/types/auth'
-import { cidFrom } from '@/lib/cidFrom'
+import { cidFrom } from '@interop/was-client/sync'
 import type { Json } from '@/lib/sync'
 import { BrowserStore } from './browserStore'
 import {
   createEdvDocCipher,
   ownerRecipient,
   type DocCipher
-} from './edvDocCipher'
+} from '@interop/was-client/edv'
 import { StorageManager } from './storageManager'
 import type { WASRemoteStore } from './wasRemoteStore'
 

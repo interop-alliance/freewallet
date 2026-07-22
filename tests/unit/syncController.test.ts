@@ -26,7 +26,7 @@ vi.mock('@/app.config', () => ({
   ]
 }))
 
-vi.mock('@/stores/wasSyncPort', () => ({
+vi.mock('@interop/was-client/sync', () => ({
   createWasSyncPort: vi.fn(() => ({ fakePort: true }))
 }))
 
