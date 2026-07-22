@@ -29,8 +29,7 @@ import { isEncryptedEnvelope, type DocCipher } from '@/stores/edvDocCipher'
 /**
  * @param options {object}
  * @param options.getCipher {() => DocCipher | undefined}   lazy accessor for
- *   the `contacts` document cipher (undefined while the vault is locked or for
- *   a plaintext store)
+ *   the `contacts` document cipher (undefined for a plaintext store)
  * @returns {RxConflictHandler<SyncedDoc>}
  */
 export function createContactsConflictHandler({

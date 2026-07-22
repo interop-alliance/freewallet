@@ -138,9 +138,9 @@ export function useVerification(
       setResult(entry.result)
       setIssuerRegistry(entry.issuerRegistry)
       setLastCheckedAt(new Date(entry.checkedAt))
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e))
-      setError(err)
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err))
+      setError(error)
       setResult(null)
       setIssuerRegistry(null)
       setLastCheckedAt(new Date())
@@ -178,12 +178,12 @@ export function useVerification(
         setResult(entry.result)
         setIssuerRegistry(entry.issuerRegistry)
         setLastCheckedAt(new Date(entry.checkedAt))
-      } catch (e) {
+      } catch (err) {
         if (cancelled) {
           return
         }
-        const err = e instanceof Error ? e : new Error(String(e))
-        setError(err)
+        const error = err instanceof Error ? err : new Error(String(err))
+        setError(error)
         setResult(null)
         setIssuerRegistry(null)
         setLastCheckedAt(new Date())

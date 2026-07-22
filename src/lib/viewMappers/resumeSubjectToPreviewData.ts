@@ -56,7 +56,7 @@ function formatRange(start?: string, end?: string): string | undefined {
   }
   const endLabel = end?.trim() || 'Present'
   if (start?.trim()) {
-    return `${start.trim()} — ${endLabel}`
+    return `${start.trim()} - ${endLabel}`
   }
   return endLabel
 }

@@ -50,7 +50,7 @@ import {
   isTextLikeContentType
 } from '@/lib/storageResource'
 import type { ImportSpaceSummary } from '@/stores/storageManager'
-import { errorStatus } from '@/stores/wasSyncPort'
+import { errorStatus, WAS_KEY_EPOCH_HEADER } from '@/stores/wasSyncPort'
 
 /**
  * Map from logical collection name to its WAS base URL.
@@ -753,22 +753,34 @@ export class WASRemoteStore {
    * content-derived id collided) and is reported as not-created rather than
    * thrown.
    *
+   * When `epoch` is given, it is stamped as the `WAS-Key-Epoch` header exactly
+   * as background replication does (`wasSyncPort`'s `putContent`), so a
+   * remote-direct write records the key epoch its envelope was encrypted under.
+   *
    * @param options {object}
    * @param options.logicalKey {string}
    * @param options.resourceId {string}   the content-derived envelope-hash id
    * @param options.body {Json}   the raw EDV envelope (or plaintext document)
+   * @param [options.epoch] {string}   the opaque key-epoch id the envelope was
+   *   encrypted under; absent for a plaintext or pre-epoch write
    * @returns {Promise<{ created: boolean }>}
    */
   async putSyncedResource({
     logicalKey,
     resourceId,
-    body
+    body,
+    epoch
   }: {
     logicalKey: string
     resourceId: string
     body: Json
+    epoch?: string
   }): Promise<{ created: boolean }> {
     const collectionId = this.#collectionId(logicalKey)
+    const headers: Record<string, string> = { 'if-none-match': '*' }
+    if (epoch !== undefined) {
+      headers[WAS_KEY_EPOCH_HEADER] = epoch
+    }
     try {
       await this.was.request({
         path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
@@ -776,12 +788,46 @@ export class WASRemoteStore {
         )}`,
         method: 'PUT',
         json: body as object,
-        headers: { 'if-none-match': '*' }
+        headers
       })
       return { created: true }
     } catch (err) {
       if (errorStatus(err) === 412) {
         return { created: false }
+      }
+      throw err
+    }
+  }
+
+  /**
+   * Deletes one resource of a standard synced collection, via the raw
+   * `was.request()` escape hatch. A missing resource (`404`) is treated as
+   * already-deleted (idempotent). Used by the remote-direct popup backend to
+   * remove a credential or a revoked public link.
+   *
+   * @param options {object}
+   * @param options.logicalKey {string}
+   * @param options.resourceId {string}
+   * @returns {Promise<void>}
+   */
+  async deleteSyncedResource({
+    logicalKey,
+    resourceId
+  }: {
+    logicalKey: string
+    resourceId: string
+  }): Promise<void> {
+    const collectionId = this.#collectionId(logicalKey)
+    try {
+      await this.was.request({
+        path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
+          resourceId
+        )}`,
+        method: 'DELETE'
+      })
+    } catch (err) {
+      if (errorStatus(err) === 404) {
+        return
       }
       throw err
     }
@@ -893,6 +939,115 @@ function unlockSpaceClient({
 }
 
 /**
+ * Ensures a plaintext collection exists in a Space (upsert -- idempotent),
+ * running with the invoking client's root capability so `force` lets the upsert
+ * treat a 404 from the pre-merge describe as genuinely absent rather than
+ * unreadable. Shared by the keyring and unlock-methods collection provisioning.
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}
+ * @param options.spaceId {string}
+ * @param options.collectionId {string}
+ * @param options.name {string}
+ * @returns {Promise<void>}
+ */
+async function ensurePlaintextCollection({
+  storageServerUrl,
+  zcapClient,
+  spaceId,
+  collectionId,
+  name
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+  spaceId: string
+  collectionId: string
+  name: string
+}): Promise<void> {
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  await was
+    .space(spaceId)
+    .collection(collectionId)
+    .configure({ name, force: true })
+}
+
+/**
+ * Reads a single plaintext JSON record from a Space collection, or `null` when
+ * it does not exist yet (a missing Space, collection, or resource all surface
+ * as a 404-shaped `null` from `resource.get()`). A network / unreachable error
+ * propagates, so callers can distinguish "no record" from "could not check".
+ * The explicit `plaintext` override is load-bearing (see {@link unlockSpaceClient}).
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}
+ * @param options.spaceId {string}
+ * @param options.collectionId {string}
+ * @param options.resourceId {string}
+ * @returns {Promise<unknown | null>}
+ */
+async function getPlaintextRecord({
+  storageServerUrl,
+  zcapClient,
+  spaceId,
+  collectionId,
+  resourceId
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+  spaceId: string
+  collectionId: string
+  resourceId: string
+}): Promise<unknown | null> {
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  const result = await was
+    .space(spaceId)
+    .collection(collectionId, { encryption: 'plaintext' })
+    .resource(resourceId)
+    .get()
+  return result === null ? null : result
+}
+
+/**
+ * Writes (upserts) a single plaintext JSON record into a Space collection.
+ * Serialized to bytes with an explicit `application/json` content-type
+ * (mirroring `putIdResource`).
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}
+ * @param options.spaceId {string}
+ * @param options.collectionId {string}
+ * @param options.resourceId {string}
+ * @param options.record {object}
+ * @returns {Promise<void>}
+ */
+async function putPlaintextRecord({
+  storageServerUrl,
+  zcapClient,
+  spaceId,
+  collectionId,
+  resourceId,
+  record
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+  spaceId: string
+  collectionId: string
+  resourceId: string
+  record: object
+}): Promise<void> {
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  const body = new TextEncoder().encode(JSON.stringify(record))
+  await was
+    .space(spaceId)
+    .collection(collectionId, { encryption: 'plaintext' })
+    .resource(resourceId)
+    .put(body, { contentType: 'application/json' })
+}
+
+/**
  * Ensures the unlock Space and its single `keyring` collection exist
  * (upsert -- idempotent). Runs with the unlock root capability, so `force`
  * lets the collection upsert treat a 404 from the pre-merge describe as
@@ -917,18 +1072,20 @@ export async function ensureUnlockSpace({
   controller: string
 }): Promise<void> {
   const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  const space = was.space(spaceId)
-  await space.configure({ name: 'Freewallet Keyring', controller })
-  await space
-    .collection(KEYRING_COLLECTION.id)
-    .configure({ name: KEYRING_COLLECTION.name, force: true })
+  await was.space(spaceId).configure({ name: 'Freewallet Keyring', controller })
+  await ensurePlaintextCollection({
+    storageServerUrl,
+    zcapClient,
+    spaceId,
+    collectionId: KEYRING_COLLECTION.id,
+    name: KEYRING_COLLECTION.name
+  })
 }
 
 /**
  * Reads the keyring record from the unlock Space, or returns `null` when it
- * does not exist yet (a missing Space, collection, or resource all surface as
- * a 404-shaped `null` from `resource.get()`). A network / unreachable error
- * propagates, so callers can distinguish "no keyring" from "could not check".
+ * does not exist yet. A network / unreachable error propagates, so callers can
+ * distinguish "no keyring" from "could not check".
  *
  * @param options {object}
  * @param options.storageServerUrl {string}
@@ -945,19 +1102,17 @@ export async function getUnlockKeyring({
   zcapClient: ZcapClient
   spaceId: string
 }): Promise<unknown | null> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  const result = await was
-    .space(spaceId)
-    .collection(KEYRING_COLLECTION.id, { encryption: 'plaintext' })
-    .resource(KEYRING_RESOURCE)
-    .get()
-  return result === null ? null : result
+  return getPlaintextRecord({
+    storageServerUrl,
+    zcapClient,
+    spaceId,
+    collectionId: KEYRING_COLLECTION.id,
+    resourceId: KEYRING_RESOURCE
+  })
 }
 
 /**
- * Writes (upserts) the keyring record into the unlock Space as a JSON
- * document. Serialized to bytes with an explicit `application/json`
- * content-type (mirroring `putIdResource`).
+ * Writes (upserts) the keyring record into the unlock Space as a JSON document.
  *
  * @param options {object}
  * @param options.storageServerUrl {string}
@@ -977,13 +1132,14 @@ export async function putUnlockKeyring({
   spaceId: string
   record: object
 }): Promise<void> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  const body = new TextEncoder().encode(JSON.stringify(record))
-  await was
-    .space(spaceId)
-    .collection(KEYRING_COLLECTION.id, { encryption: 'plaintext' })
-    .resource(KEYRING_RESOURCE)
-    .put(body, { contentType: 'application/json' })
+  await putPlaintextRecord({
+    storageServerUrl,
+    zcapClient,
+    spaceId,
+    collectionId: KEYRING_COLLECTION.id,
+    resourceId: KEYRING_RESOURCE,
+    record
+  })
 }
 
 /**
@@ -1077,18 +1233,18 @@ export async function ensureUnlockMethodsCollection({
   zcapClient: ZcapClient
   spaceId: string
 }): Promise<void> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  await was
-    .space(spaceId)
-    .collection(UNLOCK_METHODS_COLLECTION.id)
-    .configure({ name: UNLOCK_METHODS_COLLECTION.name, force: true })
+  await ensurePlaintextCollection({
+    storageServerUrl,
+    zcapClient,
+    spaceId,
+    collectionId: UNLOCK_METHODS_COLLECTION.id,
+    name: UNLOCK_METHODS_COLLECTION.name
+  })
 }
 
 /**
  * Reads the unlock-methods registry record from the data Space, or returns
- * `null` when it does not exist yet (a missing collection or resource surfaces
- * as a 404-shaped `null` from `resource.get()`). A network / unreachable error
- * propagates.
+ * `null` when it does not exist yet. A network / unreachable error propagates.
  *
  * @param options {object}
  * @param options.storageServerUrl {string}
@@ -1105,19 +1261,18 @@ export async function getUnlockMethodsRecord({
   zcapClient: ZcapClient
   spaceId: string
 }): Promise<unknown | null> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  const result = await was
-    .space(spaceId)
-    .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
-    .resource(UNLOCK_METHODS_RESOURCE)
-    .get()
-  return result === null ? null : result
+  return getPlaintextRecord({
+    storageServerUrl,
+    zcapClient,
+    spaceId,
+    collectionId: UNLOCK_METHODS_COLLECTION.id,
+    resourceId: UNLOCK_METHODS_RESOURCE
+  })
 }
 
 /**
  * Writes (upserts) the unlock-methods registry record into the data Space as a
- * JSON document. Serialized to bytes with an explicit `application/json`
- * content-type (mirroring `putUnlockKeyring`).
+ * JSON document.
  *
  * @param options {object}
  * @param options.storageServerUrl {string}
@@ -1137,11 +1292,12 @@ export async function putUnlockMethodsRecord({
   spaceId: string
   record: object
 }): Promise<void> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  const body = new TextEncoder().encode(JSON.stringify(record))
-  await was
-    .space(spaceId)
-    .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
-    .resource(UNLOCK_METHODS_RESOURCE)
-    .put(body, { contentType: 'application/json' })
+  await putPlaintextRecord({
+    storageServerUrl,
+    zcapClient,
+    spaceId,
+    collectionId: UNLOCK_METHODS_COLLECTION.id,
+    resourceId: UNLOCK_METHODS_RESOURCE,
+    record
+  })
 }

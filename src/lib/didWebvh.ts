@@ -1,6 +1,6 @@
 /**
  * did:webvh hosting: provisions and publishes a hash-chained, self-certifying
- * did:webvh DID log alongside the Phase 1 did:web document, in the same `id`
+ * did:webvh DID log alongside the did:web document, in the same `id`
  * collection of the user's WAS Space, with the log's update key held in the
  * user's WebKMS keystore.
  *
@@ -9,7 +9,7 @@
  * `did:webvh:<scid>:<host>:space:<spaceId>:id` resolves to
  * `https://<host>/space/<spaceId>/id/did.jsonl`. Adopting the parallel
  * `webDoc` (`did:web:` projection with `alsoKnownAs` cross-links) as the new
- * `did.json` makes the log the single source of truth from Phase 2 onward.
+ * `did.json` makes the log the single source of truth.
  *
  * All protocol logic lives in `@interop/did-method-webvh`; this module is the
  * WebKMS <-> library glue: a `Signer` bridge over a KMS `AsymmetricKey`, the
@@ -263,8 +263,8 @@ function assembleWebvhVerificationMethods({
 
 /**
  * Wraps a KMS `AsymmetricKey` fetched by kmsKeyId as a raw-bytes signer for the
- * webvh log. Full tier only: the update key is never reachable by the session
- * key (decision 2), so this needs the root-controlled keystore agent.
+ * webvh log. The update key lives in the root-controlled keystore, so signing
+ * goes through the keystore agent.
  *
  * @param options {object}
  * @param options.keystoreAgent {KeystoreAgent}
@@ -404,7 +404,7 @@ async function writeKeysJson({
 /**
  * Idempotently provisions and publishes the user's did:webvh DID log, run
  * directly after {@link ensureDidWeb} from `StorageManager.ensureUserCollections`
- * (full tier, non-fatal). Implements decision 6's steps and the torn-state
+ * (non-fatal). Implements decision 6's steps and the torn-state
  * matrix:
  *
  * | keys.json.webvh | did.jsonl | action                                      |

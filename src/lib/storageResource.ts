@@ -4,6 +4,8 @@
  * callers branch on how to render or save content without inspecting raw
  * Content-Type strings themselves.
  */
+import { typeArray } from '@/lib/vcShape'
+
 export type FetchedCollectionResource =
   | { kind: 'json'; data: unknown }
   | { kind: 'text'; text: string }
@@ -36,11 +38,5 @@ export function isVerifiableCredentialData(data: unknown): boolean {
     return false
   }
   const type = (data as Record<string, unknown>).type
-  if (typeof type === 'string') {
-    return type === 'VerifiableCredential'
-  }
-  if (Array.isArray(type)) {
-    return type.some(entry => entry === 'VerifiableCredential')
-  }
-  return false
+  return typeArray(type).includes('VerifiableCredential')
 }

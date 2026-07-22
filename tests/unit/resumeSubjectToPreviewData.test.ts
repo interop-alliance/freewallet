@@ -60,7 +60,7 @@ describe('resumeSubjectToPreviewData', () => {
         id: 'exp-0',
         title: 'Mathematician',
         company: 'Analytical Society',
-        duration: '1842 — 1843',
+        duration: '1842 - 1843',
         description: 'Wrote the first algorithm'
       }
     ])
@@ -69,7 +69,7 @@ describe('resumeSubjectToPreviewData', () => {
       {
         id: 'edu-0',
         title: 'BSc in Mathematics, Home Tutoring',
-        dates: '1830 — 1835',
+        dates: '1830 - 1835',
         description: undefined
       }
     ])
@@ -114,7 +114,7 @@ describe('resumeSubjectToPreviewData', () => {
         id: 'exp-0',
         title: 'Role',
         company: undefined,
-        duration: '2020 — Present',
+        duration: '2020 - Present',
         description: undefined
       }
     ])

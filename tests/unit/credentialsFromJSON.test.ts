@@ -92,14 +92,13 @@ describe('credentialsFromJSON', () => {
     )
   })
 
-  it('throws when the credential type is a bare string rather than an array', () => {
-    // `hasType` only recognizes an array-valued `type`, so a string type is
-    // treated as a non-credential and rejected.
+  it('decodes a credential whose type is a bare string rather than an array', () => {
+    // The VC data model allows `type` to be a single string; `hasType`
+    // normalizes it, so a string-typed VC is accepted like an array-typed one.
     const stringType = { ...minimalVc, type: 'VerifiableCredential' }
 
-    expect(() => credentialsFromJSON(JSON.stringify(stringType))).toThrow(
-      'Could not decode Verifiable Credential(s) from the JSON.'
-    )
+    const result = credentialsFromJSON(JSON.stringify(stringType))
+    expect(result).toEqual([stringType])
   })
 
   it('throws on malformed JSON input', () => {

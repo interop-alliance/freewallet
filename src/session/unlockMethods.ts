@@ -31,13 +31,18 @@ import type {
 } from '@interop/data-integrity-core'
 import { base64urlnopad } from '@scure/base'
 import {
+  DATE_FMT,
   PASSKEY_KDF,
   UNLOCK_METHODS_COLLECTION,
   WAS_SERVER_URL
 } from '@/app.config'
 import type { Session } from '@/types/auth'
-import { assertPasskeyPrf } from '@/lib/passkey'
-import { deleteUnlockMethod } from '@/session/keyring'
+import {
+  assertPasskeyPrf,
+  registerPasskey,
+  type PasskeyRegistration
+} from '@/lib/passkey'
+import { bindUnlockSecret, deleteUnlockMethod } from '@/session/keyring'
 import { createEdvDocCipher } from '@/stores/edvDocCipher'
 import {
   deleteKeyringCache,
@@ -107,9 +112,9 @@ export interface UnlockMethodsRecord {
 const STORED_RECORD_VERSION = 1
 
 /**
- * Resolves the session's vault key material for wrap/unwrap, throwing when the
- * vault is locked (no KAK). The registry is a full-tier flow, so this is
- * expected to be present.
+ * Resolves the session's vault key material for wrap/unwrap. The vault KAK is
+ * present for the life of every session, so these keys are expected to resolve;
+ * the guard throws only defensively.
  *
  * @param session {Session}
  * @returns {{ keyAgreementKey: IKeyAgreementKey, keyResolver: IKeyResolver }}
@@ -229,12 +234,10 @@ async function unwrapRecord({
  * written yet. When a WAS server is configured the remote copy in the data
  * Space is the source of truth: it is read first, refreshes the local cache on
  * a hit, and drops the cache on a 404-shaped miss. A remote read failure
- * rethrows (this minimal phase runs only full-tier and online). With no WAS
- * server the cache is the only copy.
+ * rethrows. With no WAS server the cache is the only copy.
  *
  * @param options {object}
- * @param options.session {Session}   a full-tier session (root zcapClient +
- *   unlocked vault)
+ * @param options.session {Session}
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<UnlockMethodsRecord | null>}
  */
@@ -287,8 +290,7 @@ export async function getUnlockMethods({
  * record there with the root zcapClient. Always refreshes the local cache.
  *
  * @param options {object}
- * @param options.session {Session}   a full-tier session (root zcapClient +
- *   unlocked vault)
+ * @param options.session {Session}
  * @param options.record {UnlockMethodsRecord}
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
@@ -411,8 +413,7 @@ export function canRevokeWithoutCeremony(entry: UnlockMethod): boolean {
  * delete, so only the cache and the registry entry are cleaned up.
  *
  * @param options {object}
- * @param options.session {Session}   a full-tier session (root zcapClient +
- *   unlocked vault)
+ * @param options.session {Session}
  * @param options.entry {UnlockMethod}   the method to retire
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
@@ -453,7 +454,7 @@ export async function revokeUnlockMethod({
  * passkey -- `revokeUnlockMethod` covers that case.
  *
  * @param options {object}
- * @param options.session {Session}   a full-tier session (unlocked vault)
+ * @param options.session {Session}
  * @param options.entry {PasskeyUnlockMethod}   the passkey to retire
  * @param [options.idb] {IDBFactory}
  * @param [options.signal] {AbortSignal}   aborts the WebAuthn ceremony
@@ -486,9 +487,9 @@ export async function revokeUnlockMethodByCeremony({
  * and management zcap -- created at first passphrase login, updated after a
  * passphrase change made elsewhere, and completed once the profile carries a
  * management capability the stored entry lacks. Any other session (a passkey
- * login, a locked vault) writes nothing -- but still returns the existing
+ * login) writes nothing -- but still returns the existing
  * registry when it can be read, so callers (the Settings passkeys section)
- * can use this as their load-plus-backfill entry point for every session.
+ * can use this as their load-plus-backfill entry point for any session.
  *
  * The registry is created only when `createIfMissing` is set (a fresh 16-byte
  * userHandle is minted): the lazy-creation points are first passkey
@@ -498,7 +499,7 @@ export async function revokeUnlockMethodByCeremony({
  * handle (call sites fire-and-forget with a `console.warn`).
  *
  * @param options {object}
- * @param options.session {Session}   a full-tier session
+ * @param options.session {Session}
  * @param [options.idb] {IDBFactory}
  * @param [options.createIfMissing] {boolean}   mint the registry when absent;
  *   default false
@@ -570,4 +571,89 @@ export async function backfillPassphraseUnlockMethod({
   const nextRecord: UnlockMethodsRecord = { ...record, methods }
   await putUnlockMethods({ session, record: nextRecord, idb })
   return nextRecord
+}
+
+/**
+ * Enrolls a new passkey as an unlock method: runs the WebAuthn registration
+ * ceremony, binds the data seed under the passkey's PRF-derived unlock identity,
+ * and assembles the registry entry describing the passkey. The caller is
+ * responsible for persisting the returned entry in the registry (and, at signup,
+ * for provisioning the data Space first). Shared by the signup and Settings
+ * "add a passkey" flows.
+ *
+ * `delegateManagementTo` drives the entry's optional `manageCapability`: when a
+ * data did:key is given (and a WAS server is configured) the bind delegates
+ * GET/DELETE on the new unlock Space to it, and the entry carries the resulting
+ * capability so the passkey can later be revoked tap-free; otherwise the entry
+ * omits it.
+ *
+ * @param options {object}
+ * @param options.seed {Uint8Array}   the data seed to bind under the passkey
+ * @param options.controller {string}   the data did:key
+ * @param options.userHandle {Uint8Array}   the account's WebAuthn user handle
+ * @param options.userName {string}   the WebAuthn user name shown in pickers
+ * @param options.locale {string}   active i18n language for the entry's date label
+ * @param options.promptForPrfRetry {() => boolean | Promise<boolean>}   PRF-retry
+ *   consent callback (see `registerPasskey`)
+ * @param [options.email] {string}   account email, carried in the wrapped record
+ * @param [options.excludeCredentialIds] {Uint8Array[]}   authenticators already
+ *   holding a passkey for this wallet, excluded from the ceremony
+ * @param [options.delegateManagementTo] {string}   a data did:key to delegate the
+ *   unlock Space management zcap to
+ * @returns {Promise<{ registration: PasskeyRegistration, entry: PasskeyUnlockMethod }>}
+ */
+export async function enrollPasskey({
+  seed,
+  controller,
+  userHandle,
+  userName,
+  locale,
+  promptForPrfRetry,
+  email,
+  excludeCredentialIds,
+  delegateManagementTo
+}: {
+  seed: Uint8Array
+  controller: string
+  userHandle: Uint8Array
+  userName: string
+  locale: string
+  promptForPrfRetry: () => boolean | Promise<boolean>
+  email?: string
+  excludeCredentialIds?: Uint8Array[]
+  delegateManagementTo?: string
+}): Promise<{ registration: PasskeyRegistration; entry: PasskeyUnlockMethod }> {
+  const registration = await registerPasskey({
+    userHandle,
+    userName,
+    excludeCredentialIds,
+    promptForPrfRetry
+  })
+
+  // Bind the data seed under the passkey's PRF-derived unlock identity -- this
+  // is what makes the passkey able to log in. Delegating management to the data
+  // did:key lets the passkey later be revoked without a tap on the (possibly
+  // lost) authenticator.
+  const { unlockSpaceId, manageCapability } = await bindUnlockSecret({
+    seed,
+    controller,
+    secret: registration.prfOutput,
+    kdf: PASSKEY_KDF,
+    email,
+    delegateManagementTo
+  })
+
+  const now = new Date()
+  const entry: PasskeyUnlockMethod = {
+    type: 'passkey',
+    label: `Passkey created ${now.toLocaleDateString(locale, DATE_FMT)}`,
+    createdAt: now.toISOString(),
+    credentialId: base64urlnopad.encode(registration.credentialId),
+    transports: registration.transports,
+    backupEligibility: registration.backupEligibility,
+    backupState: registration.backupState,
+    unlockSpaceId,
+    ...(manageCapability ? { manageCapability } : {})
+  }
+  return { registration, entry }
 }

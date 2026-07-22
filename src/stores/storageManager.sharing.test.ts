@@ -119,6 +119,11 @@ function makeFakeRemote(): {
   remoteStore: WASRemoteStore
   revoked: unknown[]
   collection(collectionId: string): ReturnType<typeof makeFakeCollection>
+  seedResource(options: {
+    logicalKey: string
+    resourceId: string
+    body: Json
+  }): void
 } {
   const spaceId = 's-space'
   const spaceUrl = 'https://was.example/space/s-space'
@@ -131,6 +136,23 @@ function makeFakeRemote(): {
       collections.set(collectionId, entry)
     }
     return entry
+  }
+  // The raw synced-resource bodies keyed by logical collection key -- what the
+  // remote-direct backend reads/writes over `listSyncedResources` etc.
+  const logicalToId: Record<string, string> = {
+    privateCredentials: 'private-credentials',
+    walletActivity: 'wallet-activity',
+    publicCredentials: 'public-credentials'
+  }
+  const resources = new Map<string, Map<string, Json>>()
+  const resourcesFor = (logicalKey: string): Map<string, Json> => {
+    const id = logicalToId[logicalKey] ?? logicalKey
+    let map = resources.get(id)
+    if (!map) {
+      map = new Map<string, Json>()
+      resources.set(id, map)
+    }
+    return map
   }
   const space = {
     async revoke(zcap: unknown) {
@@ -148,9 +170,60 @@ function makeFakeRemote(): {
     },
     spaceHandle() {
       return space
+    },
+    async listSyncedResources({ logicalKey }: { logicalKey: string }) {
+      return [...resourcesFor(logicalKey).keys()].map(id => ({
+        id,
+        url: `/space/${spaceId}/${logicalToId[logicalKey] ?? logicalKey}/${id}`
+      }))
+    },
+    async getSyncedResource({
+      logicalKey,
+      resourceId
+    }: {
+      logicalKey: string
+      resourceId: string
+    }) {
+      return resourcesFor(logicalKey).get(resourceId)
+    },
+    async putSyncedResource({
+      logicalKey,
+      resourceId,
+      body
+    }: {
+      logicalKey: string
+      resourceId: string
+      body: Json
+    }) {
+      const map = resourcesFor(logicalKey)
+      if (map.has(resourceId)) {
+        return { created: false }
+      }
+      map.set(resourceId, body)
+      return { created: true }
+    },
+    async deleteSyncedResource({
+      logicalKey,
+      resourceId
+    }: {
+      logicalKey: string
+      resourceId: string
+    }) {
+      resourcesFor(logicalKey).delete(resourceId)
     }
   } as unknown as WASRemoteStore
-  return { remoteStore, revoked, collection }
+  const seedResource = ({
+    logicalKey,
+    resourceId,
+    body
+  }: {
+    logicalKey: string
+    resourceId: string
+    body: Json
+  }) => {
+    resourcesFor(logicalKey).set(resourceId, body)
+  }
+  return { remoteStore, revoked, collection, seedResource }
 }
 
 /**
@@ -747,6 +820,69 @@ describe('StorageManager unknown-epoch refresh', () => {
 
     // listCredentials transparently refreshes the marker from the fake remote,
     // rebuilds the cipher, and returns the credential.
+    const listed = await storage.listCredentials()
+    expect(listed).toEqual([{ cid, vc: credential }])
+  })
+
+  it('remote-direct: refreshes the marker and returns a fresh-epoch credential', async () => {
+    const owner = await generateKey()
+    const extra = await generateKey()
+    const { remoteStore, seedResource } = makeFakeRemote()
+
+    const collectionHandle = remoteStore.collectionHandle({
+      collectionId: 'private-credentials'
+    })
+    const marker1 = await initRecipients({
+      collection: collectionHandle,
+      recipients: [
+        ownerRecipient({ keyAgreementKey: owner.keyAgreementKey }),
+        ownerRecipient({ keyAgreementKey: extra.keyAgreementKey })
+      ]
+    })
+
+    // The remote-direct popup backend builds ciphers from the STALE marker 1.
+    const ciphers = await buildCiphers(owner, {
+      'private-credentials': marker1
+    })
+    const { localStore } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      remoteDirect: true,
+      vaultKeys: owner,
+      markers: { 'private-credentials': marker1 }
+    })
+
+    // A rekey rotates the collection to epoch 2 (owner alone).
+    const marker2 = await removeRecipient({
+      collection: collectionHandle,
+      space: remoteStore.spaceHandle(),
+      recipientId: extra.keyAgreementKey.id!,
+      revoke: []
+    })
+
+    // A credential lands in the remote collection under epoch 2, which the
+    // stale epoch-1 cipher cannot route.
+    const epoch2Cipher = await createEdvDocCipher({
+      keyAgreementKey: owner.keyAgreementKey,
+      keyResolver: owner.keyResolver,
+      collectionId: 'private-credentials',
+      encryption: marker2
+    })
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+    const { id, envelope } = await epoch2Cipher.encrypt({
+      data: credential as unknown as Json
+    })
+    seedResource({
+      logicalKey: 'privateCredentials',
+      resourceId: id,
+      body: envelope
+    })
+
+    // The remote-direct listCredentials refreshes the marker, rebuilds the
+    // backend's cipher via setCiphers, and re-reads -- returning the fresh row.
     const listed = await storage.listCredentials()
     expect(listed).toEqual([{ cid, vc: credential }])
   })

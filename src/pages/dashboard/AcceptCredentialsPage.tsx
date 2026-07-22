@@ -51,11 +51,11 @@ export function AcceptCredentialsPage() {
     setSaving(true)
     setStoreError(false)
     try {
-      // Dedupe the incoming batch by content cid up front: the same VC appearing
-      // twice would otherwise be stored as two distinct EDV envelope rows (JWE
-      // encryption is nondeterministic, so each gets a different content-derived
-      // row id) plus two history entries, since the store-level dedupe scan is
-      // per-cid. Deduping here also avoids a redundant cidFrom recompute per item.
+      // Dedupe the incoming batch by content cid up front purely as an
+      // optimization: `addCredential` is idempotent by content cid on its own
+      // (its in-memory cid index no-ops a re-add regardless of batching), so this
+      // just avoids a redundant encrypt per repeated VC and keeps the "stored"
+      // toast count accurate.
       const uniqueCredentials: IVerifiableCredential[] = []
       const seenCids = new Set<string>()
       for (const credential of credentials) {
@@ -66,9 +66,6 @@ export function AcceptCredentialsPage() {
         seenCids.add(cid)
         uniqueCredentials.push(credential)
       }
-      // Store sequentially so each store-level dedupe scan sees the prior
-      // inserts; a concurrent Promise.all would run every scan before any insert
-      // landed, defeating the store's own dedupe for repeats across the batch.
       for (const credential of uniqueCredentials) {
         console.log('Storing credential:', credentialTitle(credential))
         // addCredential records the credential-created history entry itself,

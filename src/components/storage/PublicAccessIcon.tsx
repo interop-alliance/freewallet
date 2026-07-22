@@ -4,7 +4,10 @@ import { MdPublic } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
 import { storageStyles } from '@/styles/appStyles'
 
-/** Icon + label for use on a metadata/subtitle line (e.g. "Default (WAS) · Public Readable"). */
+/**
+ * Icon + label for use on a metadata/subtitle line (e.g. "Default (WAS) ·
+ * Public Readable").
+ */
 export function PublicAccessIcon() {
   const { t } = useTranslation()
   const label = t('storage.publicAccess')

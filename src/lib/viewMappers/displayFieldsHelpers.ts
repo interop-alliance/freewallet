@@ -4,6 +4,7 @@ import type {
   IAchievement
 } from '@interop/data-integrity-core'
 import { getSubject } from '@/lib/viewMappers/getSubject'
+import { typeArray } from '@/lib/vcShape'
 
 export type SubjectRecord = Record<string, unknown>
 
@@ -179,9 +180,7 @@ export function credentialNameFrom(
     return hasCredentialName
   }
 
-  const vcTypes = Array.isArray(verifiableCredential.type)
-    ? verifiableCredential.type
-    : [verifiableCredential.type]
+  const vcTypes = typeArray(verifiableCredential.type)
   if (vcTypes.includes('SkillClaimCredential')) {
     return 'Skill Claim'
   }

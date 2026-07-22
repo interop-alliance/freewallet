@@ -14,6 +14,7 @@ import type { Json } from '@/lib/sync'
 import { BrowserStore } from './browserStore'
 import { UnknownEpochError, type DocCipher } from './edvDocCipher'
 import { StorageManager } from './storageManager'
+import { RemoteDirectStore } from './remoteDirectStore'
 import type { WASRemoteStore } from './wasRemoteStore'
 
 /**
@@ -83,6 +84,33 @@ async function initLocalStore({
   await localStore.ensureUserCollections({ user })
   openStores.push(localStore)
   return { localStore, user }
+}
+
+/**
+ * A fake DocCipher whose every encrypt surfaces a fixed `epoch` id (mimicking a
+ * multi-recipient cipher writing under the marker's `currentEpoch`), so a test
+ * can assert the remote-direct write stamped it as `WAS-Key-Epoch`.
+ */
+function makeFakeEpochCipher(epoch: string): DocCipher {
+  return {
+    async encrypt({ data }: { data: Json }) {
+      fakeCipherCounter += 1
+      const id = `z6FakeEnvelope${fakeCipherCounter}`
+      return {
+        id,
+        envelope: {
+          id,
+          sequence: 0,
+          jwe: { ciphertext: JSON.stringify(data) }
+        } as Json,
+        epoch
+      }
+    },
+    async decrypt({ envelope }: { envelope: Json }) {
+      const { ciphertext } = (envelope as { jwe: { ciphertext: string } }).jwe
+      return JSON.parse(ciphertext) as Json
+    }
+  }
 }
 
 /**
@@ -244,6 +272,42 @@ describe('BrowserStore (encrypted collections)', () => {
       .exec()
     expect(rows).toHaveLength(1)
     expect(await localStore.listCredentials()).toHaveLength(1)
+  })
+
+  it('is idempotent across a batch with no prior list, and reports inserted-ness', async () => {
+    const { localStore } = await initLocalStore({ ciphers: encryptedCiphers() })
+    // A batch of three distinct credentials with two repeats interleaved,
+    // stored with no intervening list call -- the cid index (not a per-insert
+    // decrypt-scan) must still no-op every repeat.
+    const [alice, bob, carol] = ['Alice', 'Bob', 'Carol'].map(makeCredential)
+    const order = [alice, bob, alice, carol, bob, carol]
+    const inserted: boolean[] = []
+    for (const credential of order) {
+      const cid = await cidFrom({ doc: credential })
+      inserted.push(await localStore.addCredential({ cid, credential }))
+    }
+
+    // Only the first sighting of each cid inserts.
+    expect(inserted).toEqual([true, true, false, true, false, false])
+    expect(
+      await localStore.rxCollection('privateCredentials').find().exec()
+    ).toHaveLength(3)
+    expect(await localStore.listCredentials()).toHaveLength(3)
+  })
+
+  it('re-inserts after a delete (cid index is maintained on removal)', async () => {
+    const { localStore } = await initLocalStore({ ciphers: encryptedCiphers() })
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+
+    expect(await localStore.addCredential({ cid, credential })).toBe(true)
+    await localStore.deleteCredential({ cid })
+    // After the delete the index no longer holds the cid, so a re-add is a
+    // genuine insert, not a false dedupe.
+    expect(await localStore.addCredential({ cid, credential })).toBe(true)
+    expect(await localStore.listCredentials()).toEqual([
+      { cid, vc: credential }
+    ])
   })
 
   it('collapses duplicate envelope rows on list and deletes them all by cid', async () => {
@@ -656,6 +720,83 @@ describe('BrowserStore (key epochs)', () => {
   })
 })
 
+describe('BrowserStore (contacts encryption)', () => {
+  it('stamps the key epoch on contact and revision writes (add + update)', async () => {
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        contacts: makeEpochCipher('did:key:z6EpochOne'),
+        contactsHistory: makeEpochCipher('did:key:z6EpochOne')
+      }
+    })
+
+    const stored = await localStore.addContact({
+      contact: { givenName: 'Bob' } as never,
+      deviceId: 'device-1'
+    })
+    const contactRow = (await localStore
+      .rxCollection('contacts')
+      .findOne(stored.id)
+      .exec())!.toMutableJSON()
+    // Previously the contact writers dropped the epoch; it is now stamped.
+    expect(contactRow.epoch).toBe('did:key:z6EpochOne')
+    expect((contactRow.data as { jwe?: unknown }).jwe).toBeDefined()
+
+    // An in-place edit re-stamps the epoch (the row keeps its stable id).
+    await localStore.updateContact({
+      id: stored.id,
+      contact: { givenName: 'Bobby' } as never,
+      deviceId: 'device-1'
+    })
+    const updatedRow = (await localStore
+      .rxCollection('contacts')
+      .findOne(stored.id)
+      .exec())!.toMutableJSON()
+    expect(updatedRow.epoch).toBe('did:key:z6EpochOne')
+    expect((await localStore.loadContact({ id: stored.id }))!.contact).toEqual({
+      givenName: 'Bobby'
+    })
+
+    await localStore.addContactRevision({
+      revision: {
+        contactId: stored.contactId,
+        action: 'create',
+        snapshot: { givenName: 'Bob' }
+      } as never
+    })
+    const revisionRow = (
+      await localStore.rxCollection('contactsHistory').find().exec()
+    )[0].toMutableJSON()
+    expect(revisionRow.epoch).toBe('did:key:z6EpochOne')
+    const revisions = await localStore.listContactRevisions({
+      contactId: stored.contactId
+    })
+    expect(revisions).toHaveLength(1)
+  })
+
+  it('tolerates an unknown-epoch contact row rather than throwing', async () => {
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        contacts: makeUnknownEpochCipher(),
+        contactsHistory: makeUnknownEpochCipher()
+      }
+    })
+    await localStore.rxCollection('contacts').insert({
+      id: 'z6UnknownContact',
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: {
+        id: 'z6UnknownContact',
+        sequence: 0,
+        jwe: { ciphertext: JSON.stringify({ contactId: 'c1' }) }
+      } as Json
+    })
+
+    // The unified read skeleton skips the unroutable row (it is not garbage),
+    // so the list read succeeds with the row simply omitted.
+    expect(await localStore.listContacts()).toHaveLength(0)
+  })
+})
+
 describe('migratePublicCredentialCids', () => {
   it('re-keys a row stored under the pre-fix cid, preserving updatedAt', async () => {
     const { localStore } = await initLocalStore()
@@ -747,6 +888,48 @@ describe('migratePublicCredentialCids', () => {
       .exec()
     expect(rows).toHaveLength(1)
     expect(rows[0].toMutableJSON().id).toBe(cid)
+  })
+
+  it('short-circuits on a later login via the per-dbPrefix marker', async () => {
+    // Install a minimal localStorage (absent in the node test env) so the gate
+    // is exercised, then restore it after.
+    const backing = new Map<string, string>()
+    const fakeLocalStorage = {
+      getItem: (key: string) => backing.get(key) ?? null,
+      setItem: (key: string, value: string) => backing.set(key, value)
+    }
+    const globalObject = globalThis as { localStorage?: unknown }
+    const previous = globalObject.localStorage
+    globalObject.localStorage = fakeLocalStorage
+    try {
+      const { localStore } = await initLocalStore()
+      // First run sets the marker.
+      await localStore.migratePublicCredentialCids()
+
+      // A mis-keyed row inserted after the marker is set is NOT re-keyed: the
+      // gate short-circuits the scan, exactly like migrateLocalPlaintextDocs.
+      const credential = makeCredential('Alice')
+      const cid = await cidFrom({ doc: credential })
+      await localStore.rxCollection('publicCredentials').insert({
+        id: 'z6PreFixWrongCid',
+        updatedAt: new Date().toISOString(),
+        version: 0,
+        data: credential as unknown as Json
+      })
+
+      await localStore.migratePublicCredentialCids()
+
+      expect(await localStore.hasPublicCredential({ cid })).toBe(false)
+      expect(
+        await localStore.hasPublicCredential({ cid: 'z6PreFixWrongCid' })
+      ).toBe(true)
+    } finally {
+      if (previous === undefined) {
+        delete globalObject.localStorage
+      } else {
+        globalObject.localStorage = previous
+      }
+    }
   })
 })
 
@@ -870,16 +1053,19 @@ describe('StorageManager (local-first facade)', () => {
 /**
  * An in-memory stand-in for the remote WAS standard collections: one map of
  * resource-id to raw stored body per logical collection, exposing the same
- * `listSyncedResources` / `getSyncedResource` / `putSyncedResource` surface the
- * StorageManager's remote-direct path calls. `putSyncedResource` honors the
- * create-if-absent contract (a second write to an existing id reports
- * `created: false`).
+ * `listSyncedResources` / `getSyncedResource` / `putSyncedResource` /
+ * `deleteSyncedResource` surface the remote-direct backend calls.
+ * `putSyncedResource` honors the create-if-absent contract (a second write to
+ * an existing id reports `created: false`) and records any `WAS-Key-Epoch`
+ * stamp under `epochs`, so a test can assert a remote-direct write carried it.
  */
 function makeFakeRemoteStore(): {
   remoteStore: WASRemoteStore
   collections: Map<string, Map<string, Json>>
+  epochs: Map<string, Map<string, string | undefined>>
 } {
   const collections = new Map<string, Map<string, Json>>()
+  const epochs = new Map<string, Map<string, string | undefined>>()
   const collectionFor = (logicalKey: string): Map<string, Json> => {
     let collection = collections.get(logicalKey)
     if (!collection) {
@@ -887,6 +1073,14 @@ function makeFakeRemoteStore(): {
       collections.set(logicalKey, collection)
     }
     return collection
+  }
+  const epochsFor = (logicalKey: string): Map<string, string | undefined> => {
+    let map = epochs.get(logicalKey)
+    if (!map) {
+      map = new Map<string, string | undefined>()
+      epochs.set(logicalKey, map)
+    }
+    return map
   }
   const remoteStore = {
     async listSyncedResources({ logicalKey }: { logicalKey: string }) {
@@ -907,21 +1101,34 @@ function makeFakeRemoteStore(): {
     async putSyncedResource({
       logicalKey,
       resourceId,
-      body
+      body,
+      epoch
     }: {
       logicalKey: string
       resourceId: string
       body: Json
+      epoch?: string
     }) {
       const collection = collectionFor(logicalKey)
       if (collection.has(resourceId)) {
         return { created: false }
       }
       collection.set(resourceId, body)
+      epochsFor(logicalKey).set(resourceId, epoch)
       return { created: true }
+    },
+    async deleteSyncedResource({
+      logicalKey,
+      resourceId
+    }: {
+      logicalKey: string
+      resourceId: string
+    }) {
+      collectionFor(logicalKey).delete(resourceId)
+      epochsFor(logicalKey).delete(resourceId)
     }
   } as unknown as WASRemoteStore
-  return { remoteStore, collections }
+  return { remoteStore, collections, epochs }
 }
 
 describe('StorageManager (remote-direct popup mode)', () => {
@@ -986,5 +1193,151 @@ describe('StorageManager (remote-direct popup mode)', () => {
     expect(await storage.listCredentials()).toEqual([{ cid, vc: credential }])
     // The write landed in the local store, not any remote surface.
     expect(await localStore.listCredentials()).toHaveLength(1)
+  })
+
+  it('stamps the WAS-Key-Epoch on the remote-direct credential and history writes', async () => {
+    const ciphers = {
+      privateCredentials: makeFakeEpochCipher('epoch-cred'),
+      walletActivity: makeFakeEpochCipher('epoch-hist')
+    }
+    const { localStore, user } = await initLocalStore({ ciphers })
+    const { remoteStore, collections, epochs } = makeFakeRemoteStore()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      remoteDirect: true
+    })
+
+    await storage.addCredential({ credential: makeCredential('Alice'), user })
+
+    // The single written resource in each collection carries its cipher's epoch.
+    const [credRow] = [...collections.get('privateCredentials')!.keys()]
+    expect(epochs.get('privateCredentials')!.get(credRow)).toBe('epoch-cred')
+    const [histRow] = [...collections.get('walletActivity')!.keys()]
+    expect(epochs.get('walletActivity')!.get(histRow)).toBe('epoch-hist')
+  })
+
+  it('routes deleteCredential to the remote backend (not the empty local store)', async () => {
+    const ciphers = encryptedCiphers()
+    const { localStore, user } = await initLocalStore({ ciphers })
+    const { remoteStore, collections } = makeFakeRemoteStore()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      remoteDirect: true
+    })
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+
+    await storage.addCredential({ credential, user })
+    expect(collections.get('privateCredentials')!.size).toBe(1)
+
+    await storage.deleteCredential({ cid })
+
+    // The remote row is gone; nothing ever touched the local partitioned store.
+    expect(collections.get('privateCredentials')!.size).toBe(0)
+    expect(await storage.listCredentials()).toHaveLength(0)
+  })
+})
+
+describe('RemoteDirectStore', () => {
+  it('counts an unknown-epoch row separately and re-reads it after a cipher swap', async () => {
+    const { remoteStore, collections } = makeFakeRemoteStore()
+    // Seed one envelope resource in the remote private-credentials collection.
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+    const good = makeFakeCipher()
+    const { id, envelope } = await good.encrypt({
+      data: credential as unknown as Json
+    })
+    collections.set('privateCredentials', new Map([[id, envelope]]))
+
+    // A cipher that cannot route the envelope's epoch (a stale marker).
+    const stale: DocCipher = {
+      async encrypt() {
+        throw new Error('unused')
+      },
+      async decrypt() {
+        throw new UnknownEpochError({
+          collectionId: 'private-credentials',
+          kids: ['z6MkUnknownEpochKey']
+        })
+      }
+    }
+    const store = new RemoteDirectStore({
+      remoteStore,
+      ciphers: { privateCredentials: stale, walletActivity: makeFakeCipher() }
+    })
+
+    // The unknown-epoch row is skipped (not undecryptable) and counted apart.
+    expect(await store.listCredentials()).toHaveLength(0)
+    expect(store.unknownEpochCredentials).toBe(1)
+    expect(store.undecryptableCredentials).toBe(0)
+
+    // A marker refresh swaps in a cipher that can decrypt it; the row re-reads.
+    store.setCiphers({
+      privateCredentials: good,
+      walletActivity: makeFakeCipher()
+    })
+    expect(await store.listCredentials()).toEqual([{ cid, vc: credential }])
+    expect(store.unknownEpochCredentials).toBe(0)
+  })
+
+  it('dedupes adds against the session cache without re-listing per item', async () => {
+    const { remoteStore } = makeFakeRemoteStore()
+    let lists = 0
+    const spied = {
+      ...remoteStore,
+      async listSyncedResources(options: { logicalKey: string }) {
+        lists += 1
+        return remoteStore.listSyncedResources(options)
+      }
+    } as unknown as WASRemoteStore
+    const store = new RemoteDirectStore({
+      remoteStore: spied,
+      ciphers: {
+        privateCredentials: makeFakeCipher(),
+        walletActivity: makeFakeCipher()
+      }
+    })
+
+    const first = makeCredential('Alice')
+    const second = makeCredential('Bob')
+    expect(
+      await store.addCredential({
+        cid: await cidFrom({ doc: first }),
+        credential: first
+      })
+    ).toBe(true)
+    expect(
+      await store.addCredential({
+        cid: await cidFrom({ doc: second }),
+        credential: second
+      })
+    ).toBe(true)
+    // The re-add dedupes against the incrementally maintained cache.
+    expect(
+      await store.addCredential({
+        cid: await cidFrom({ doc: first }),
+        credential: first
+      })
+    ).toBe(false)
+
+    // The collection was scanned once (the first add), not once per item.
+    expect(lists).toBe(1)
+  })
+
+  it('rejects contact operations rather than hitting the partitioned store', async () => {
+    const { remoteStore } = makeFakeRemoteStore()
+    const store = new RemoteDirectStore({
+      remoteStore,
+      ciphers: {
+        privateCredentials: makeFakeCipher(),
+        walletActivity: makeFakeCipher()
+      }
+    })
+    await expect(store.listContacts()).rejects.toThrow(/not available/)
   })
 })

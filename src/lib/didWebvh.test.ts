@@ -517,7 +517,9 @@ describe('ensureDidWebvh torn-state matrix', () => {
 })
 
 describe('repairKeyBindings', () => {
-  /** Publishes a full Space (Phase 1 keys listed, log + did.json public). */
+  /**
+   * Publishes a full Space (did:web keys listed, log + did.json public).
+   */
   async function publishedSpace() {
     const seed = webvhFakes()
     listPhase1Keys(seed.kms)

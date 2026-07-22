@@ -249,26 +249,29 @@ export function WalletGetPage() {
       setRequestReason(reasonFrom(queries))
       setProfile(requestProfile)
 
-      // When DID Auth is involved the wallet must sign, so reject up front the
-      // two cases it can never satisfy: an unsupported DID method, and a domain
-      // that does not match the channel origin (VCALM domain-binding). An
-      // exchange-sourced VPR names the verifier's own origin as its `domain`,
-      // never the (possibly third-party) host the exchange runs on, so the
-      // check is the same either way.
-      if (requestProfile.didAuth) {
-        if (!didAuthMethodSupported(queries)) {
-          setBlockReason('unsupported')
-          setPageState('blocked')
-          return
-        }
-        if (
-          details.domain &&
-          !domainMatchesOrigin({ domain: details.domain, origin })
-        ) {
-          setBlockReason('domainMismatch')
-          setPageState('blocked')
-          return
-        }
+      // When DID Auth is involved the wallet must sign, so reject up front an
+      // unsupported DID method it can never satisfy. An exchange-sourced VPR
+      // names the verifier's own origin as its `domain`, never the (possibly
+      // third-party) host the exchange runs on, so this stays the same either
+      // way.
+      if (requestProfile.didAuth && !didAuthMethodSupported(queries)) {
+        setBlockReason('unsupported')
+        setPageState('blocked')
+        return
+      }
+      // A domain that does not match the channel origin (VCALM domain-binding)
+      // can never be satisfied, so reject it before consent. This applies to
+      // any request carrying a `domain`, not only DID-Auth ones: a VPR can pin
+      // a foreign domain without a DIDAuthentication query, and it deserves the
+      // specific domain-mismatch message rather than a generic processing
+      // failure surfaced later.
+      if (
+        details.domain &&
+        !domainMatchesOrigin({ domain: details.domain, origin })
+      ) {
+        setBlockReason('domainMismatch')
+        setPageState('blocked')
+        return
       }
 
       setPageState('awaiting-login')
@@ -313,28 +316,20 @@ export function WalletGetPage() {
     }
     const loggedIn = result.session
     try {
-      // Session creation fired `ensureUserCollections` (remote provisioning +
-      // did:web round trips) as `session.storageReady`; it and the credential
-      // list have no data dependency in remote-direct mode: the standard
-      // collections are guaranteed to exist by account signup (a popup login
-      // requires an existing account, and signup provisions them), so the list
-      // read cannot 404 on a missing collection. Await both together so the
-      // consent screen is not gated on provisioning round trips it does not
-      // need. In a pathological half-provisioned state the concurrent read can
-      // surface an error here -- an accepted trade-off for not re-serializing.
-      // When remote-direct routing is NOT in effect (guest / no-WAS fallback),
-      // the read targets the local collections `storageReady` initializes, so
-      // it must wait for them -- a fast, local-only wait.
-      let stored: StoredCredential[]
-      if (loggedIn.storage.remoteDirectActive) {
-        ;[, stored] = await Promise.all([
-          loggedIn.storageReady,
-          loggedIn.storage.listCredentials()
-        ])
-      } else {
-        await loggedIn.storageReady
-        stored = await loggedIn.storage.listCredentials()
-      }
+      // `storage.ready()` resolves when the active backend can serve reads: the
+      // local collections being open (guest / no-WAS fallback -- a fast,
+      // local-only wait), or nothing at all in the popup's remote-direct mode
+      // (reads hit the remote collections directly). Full provisioning (remote
+      // Space, did:web) runs as `session.storageReady` in the background; await
+      // it too, so the list overlaps those round trips rather than gating on
+      // them and a provisioning failure surfaces here rather than as an
+      // unhandled rejection. In a pathological half-provisioned state the
+      // concurrent read can surface an error here -- an accepted trade-off.
+      await loggedIn.storage.ready()
+      const [, stored] = await Promise.all([
+        loggedIn.storageReady,
+        loggedIn.storage.listCredentials()
+      ])
 
       // A zcap request needs a remote Space to delegate against; a guest or a
       // no-WAS wallet cannot fulfill it. Surface it before the consent screen
@@ -431,10 +426,12 @@ export function WalletGetPage() {
   }
 
   /**
-   * Composes and returns the response VP (selected VCs plus any delegated
-   * grants), delivering it over the CHAPI channel -- and, when the request came
-   * from a VC API exchange, POSTing it to the exchange as well -- then recording
-   * a Login activity when capabilities were granted.
+   * Composes the response VP (selected VCs plus any delegated grants), records
+   * the Login activity when capabilities were granted, and only then delivers
+   * the VP externally -- POSTing it to the VC API exchange when the request
+   * came from one, and returning it over the CHAPI channel. History/zcap
+   * persistence precedes every external delivery so the relying party can never
+   * hold live delegated capabilities that lack a revocation hook.
    */
   async function respondAndClose() {
     if (!chapiEvent || !session || !request) {
@@ -472,6 +469,29 @@ export function WalletGetPage() {
       return
     }
 
+    // The Login activity is the durable record App Connect revocation re-reads
+    // the zcap documents from, so it must be persisted BEFORE any external
+    // delivery -- both the exchange POST below and the CHAPI response hand the
+    // relying party the VP with its embedded, already-signed `zcap` array, so
+    // the revocation hook has to exist first. Persisting last would let a
+    // delivered grant outlive a failed (or torn-down) history write with no way
+    // to revoke it from the sharing panel.
+    try {
+      await recordLoginHistory(grantedZcaps, appConnectResult)
+    } catch (err) {
+      console.error('Could not record the login history entry:', err)
+      if (grantedZcaps.length > 0) {
+        // Fail closed: nothing is delivered, so the already-signed delegations
+        // stay inert rather than unrevocable. (Conversely, a history write that
+        // lands but is followed by a failed exchange POST leaves only a phantom
+        // entry -- cleanable from the sharing panel -- which is the more
+        // recoverable failure of the two.)
+        setBlockReason('processFailed')
+        setPageState('blocked')
+        return
+      }
+    }
+
     // The exchange, not the CHAPI channel, is the verifier's system of record
     // for a VC API request, so a failed delivery is a failed response: report
     // it rather than handing the site a presentation it never received. An
@@ -500,23 +520,6 @@ export function WalletGetPage() {
       }
     }
 
-    // The Login activity is the durable record App Connect revocation re-reads
-    // the zcap documents from, so it must be persisted BEFORE the CHAPI
-    // response: responding tears the popup down, which aborts an in-flight
-    // write and would leave the granted capabilities with no revocation hook.
-    try {
-      await recordLoginHistory(grantedZcaps, appConnectResult)
-    } catch (err) {
-      console.error('Could not record the login history entry:', err)
-      if (grantedZcaps.length > 0) {
-        // Fail closed: the site never receives the capability documents, so
-        // the already-signed delegations stay inert rather than unrevocable.
-        setBlockReason('processFailed')
-        setPageState('blocked')
-        return
-      }
-    }
-
     chapiEvent.respondWith(
       Promise.resolve(
         verifiablePresentation
@@ -535,7 +538,8 @@ export function WalletGetPage() {
    * `processRequest` actually delegated (threaded out alongside the VP),
    * rather than read back off the composed VP's embedded `zcap` array; for App
    * Connect, also the app name and whether the app key was minted on this
-   * connect. Awaited before the CHAPI response goes out (see
+   * connect. Awaited before any external delivery -- the exchange POST and the
+   * CHAPI response both leave the site holding the grants (see
    * `respondAndClose`); a failure propagates to the caller, which fails closed
    * when capabilities were granted.
    */

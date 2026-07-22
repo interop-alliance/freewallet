@@ -47,6 +47,7 @@ import type {
   IKeyResolver,
   IZcap
 } from '@interop/data-integrity-core'
+import { base64urlnopad } from '@scure/base'
 import {
   KEYRING_CACHE_TTL_MS,
   KEYRING_COLLECTION,
@@ -154,26 +155,6 @@ async function delegateUnlockManagement({
     allowedActions: ['GET', 'DELETE'],
     expires: new Date(Date.now() + UNLOCK_MANAGE_ZCAP_TTL_MS)
   })
-}
-
-/**
- * Decodes an (optionally unpadded) base64url string back to raw bytes. The
- * repo's encoder (`bufferToBase64Url`) strips padding, so re-pad before atob.
- *
- * @param value {string}
- * @returns {Uint8Array}
- */
-function base64UrlToBytes(value: string): Uint8Array {
-  let normalized = value.replace(/-/g, '+').replace(/_/g, '/')
-  while (normalized.length % 4 !== 0) {
-    normalized += '='
-  }
-  const binary = atob(normalized)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index++) {
-    bytes[index] = binary.charCodeAt(index)
-  }
-  return bytes
 }
 
 /**
@@ -376,7 +357,7 @@ async function unwrapSeed({
   if (typeof plaintext.seed !== 'string') {
     throw new Error('Keyring record is missing a seed.')
   }
-  const seed = base64UrlToBytes(plaintext.seed)
+  const seed = base64urlnopad.decode(plaintext.seed)
   if (seed.length !== 32) {
     throw new Error('Keyring record seed is not 32 bytes.')
   }
@@ -406,6 +387,50 @@ export class KeyringRecordUnusableError extends Error {
     super(`Unusable keyring record.${detail}`)
     this.name = 'KeyringRecordUnusableError'
     this.cause = cause
+  }
+}
+
+/**
+ * Reads a loaded cache entry: unwraps its record and, on success, assembles
+ * the fetch result. On any failure it warns and evicts the unusable cache
+ * entry, then returns `null` -- each caller decides what an eviction means
+ * (the no-remote path treats it as "no account" and returns null; the offline
+ * fallback treats it as "could not check" and rethrows the network error that
+ * sent it to the cache).
+ *
+ * @param options {object}
+ * @param options.cached {{ record: unknown }}   the loaded cache entry
+ * @param options.unlock {Awaited<ReturnType<typeof deriveUnlockIdentity>>}
+ * @param options.mintManageCapability {boolean}
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<KeyringFetchResult | null>}
+ */
+async function readCachedRecord({
+  cached,
+  unlock,
+  mintManageCapability,
+  idb
+}: {
+  cached: { record: unknown }
+  unlock: Awaited<ReturnType<typeof deriveUnlockIdentity>>
+  mintManageCapability: boolean
+  idb?: IDBFactory
+}): Promise<KeyringFetchResult | null> {
+  try {
+    const unwrapped = await unwrapSeed({
+      record: cached.record,
+      keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+      keyResolver: unlock.keyResolver
+    })
+    return await buildFetchResult({
+      found: unwrapped,
+      unlock,
+      mintManageCapability
+    })
+  } catch (err) {
+    console.warn('Discarding an unusable cached keyring record:', err)
+    await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
+    return null
   }
 }
 
@@ -468,22 +493,14 @@ export async function fetchKeyringSeed({
     if (!cached) {
       return null
     }
-    try {
-      const unwrapped = await unwrapSeed({
-        record: cached.record,
-        keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-        keyResolver: unlock.keyResolver
-      })
-      return await buildFetchResult({
-        found: unwrapped,
-        unlock,
-        mintManageCapability
-      })
-    } catch (err) {
-      console.warn('Discarding an unusable cached keyring record:', err)
-      await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
-      return null
-    }
+    // An unusable cache entry (warned + evicted inside the helper) means "no
+    // account" here, since the cache is the keyring's only copy.
+    return await readCachedRecord({
+      cached,
+      unlock,
+      mintManageCapability,
+      idb
+    })
   }
 
   let record: unknown
@@ -506,22 +523,19 @@ export async function fetchKeyringSeed({
     ) {
       throw err
     }
-    try {
-      const unwrapped = await unwrapSeed({
-        record: cached.record,
-        keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-        keyResolver: unlock.keyResolver
-      })
-      return await buildFetchResult({
-        found: unwrapped,
-        unlock,
-        mintManageCapability
-      })
-    } catch (unwrapErr) {
-      console.warn('Discarding an unusable cached keyring record:', unwrapErr)
-      await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
+    // An unusable cache entry (warned + evicted inside the helper) means
+    // "could not check" here: rethrow the original network error rather than
+    // misread it as "no account".
+    const result = await readCachedRecord({
+      cached,
+      unlock,
+      mintManageCapability,
+      idb
+    })
+    if (!result) {
       throw err
     }
+    return result
   }
 
   if (!record) {

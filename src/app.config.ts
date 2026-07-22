@@ -130,7 +130,7 @@ export const DID_DOCUMENT_RESOURCE = 'did.json'
 // The (non-public) key-id map: verification method to KMS key id. The recovery
 // anchor -- written before `did.json` so a torn provisioning resumes from it.
 export const DID_KEYS_RESOURCE = 'keys.json'
-// The world-readable did:webvh history log (Phase 2), a raw JSON-Lines string
+// The world-readable did:webvh history log, a raw JSON-Lines string
 // served as `text/jsonl`: one log entry per line, each a full DID-document
 // snapshot in a hash chain. Sibling of `did.json` in the same `id` collection;
 // `did:webvh:<scid>:<host>:space:<spaceId>:id` resolves to
@@ -138,7 +138,7 @@ export const DID_KEYS_RESOURCE = 'keys.json'
 export const DID_LOG_RESOURCE = 'did.jsonl'
 
 // Whether to provision and publish the user's did:webvh DID log alongside the
-// did:web document (Phase 2). An opt-out flag: default `true` (freewallet acts
+// did:web document. An opt-out flag: default `true` (freewallet acts
 // as a did:webvh demo platform, publishing the log out of the box), disabled
 // only when `VITE_ENABLE_DID_WEBVH` is exactly the string `'false'`.
 export const ENABLE_DID_WEBVH = env.VITE_ENABLE_DID_WEBVH !== 'false'

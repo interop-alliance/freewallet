@@ -34,10 +34,10 @@ import { AuthPageHeader } from '@/components/AuthPageHeader'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
-import { bindPassphrase, bindUnlockSecret } from '@/session/keyring'
+import { bindPassphrase } from '@/session/keyring'
 import {
+  enrollPasskey,
   putUnlockMethods,
-  type PasskeyUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
 import { provisionNewWallet } from '@/session/provisionNewWallet'
@@ -45,13 +45,12 @@ import { isStorageUnreachable } from '@/lib/storageErrors'
 import {
   PasskeyCancelledError,
   PasskeyPrfUnsupportedError,
-  passkeySupported,
-  registerPasskey
+  passkeySupported
 } from '@/lib/passkey'
 import { savePasskeySafetyNotice } from '@/lib/sessionKey'
 import { useAuthStore } from '@/stores/authStore'
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
-import { DATE_FMT, PASSKEY_KDF, PASSWORD_RULES } from '@/app.config'
+import { DATE_FMT, PASSWORD_RULES } from '@/app.config'
 import { registerWallet } from '@/lib/registerWallet'
 import type { AuthLocationState } from '@/types/auth'
 
@@ -146,33 +145,28 @@ export function SignupPage() {
           provisionStorage: false
         })
 
-        // Register the passkey. A brand-new wallet has no authenticator
-        // credentials yet, so there is nothing to exclude.
+        // Register the passkey and bind its PRF output to the data seed BEFORE
+        // creating the data Space: an account whose keyring failed to publish
+        // must not be created, and binding first means a failed signup leaves no
+        // orphaned data Space behind. A brand-new wallet has no authenticator
+        // credentials yet, so there is nothing to exclude. Delegating this
+        // passkey's unlock Space management zcap to the data identity keeps a
+        // lost passkey revocable tap-free from Settings.
         const userHandle = crypto.getRandomValues(new Uint8Array(16))
         const userName =
           email ||
           `Freewallet ${new Date().toLocaleDateString(i18n.language, DATE_FMT)}`
-        const registration = await registerPasskey({
-          userHandle,
-          userName,
-          promptForPrfRetry
-        })
-
-        // Bind the passkey's PRF output to the data seed BEFORE creating the
-        // data Space: an account whose keyring failed to publish must not be
-        // created, and binding first means a failed signup leaves no orphaned
-        // data Space behind.
-        const { unlockSpaceId, manageCapability } = await bindUnlockSecret({
+        const { registration, entry } = await enrollPasskey({
           seed,
           controller: session.user.id,
-          secret: registration.prfOutput,
-          kdf: PASSKEY_KDF,
+          userHandle,
+          userName,
+          locale: i18n.language,
           // Carried inside the wrapped record so any unlock method recovers the
           // account email.
           email: email || undefined,
-          // Delegate this passkey's unlock Space management zcap to the data
-          // identity, so a lost passkey stays revocable tap-free from Settings.
-          delegateManagementTo: session.user.id
+          delegateManagementTo: session.user.id,
+          promptForPrfRetry
         })
 
         // Provision collections, record the initial history, and seed the
@@ -183,21 +177,6 @@ export function SignupPage() {
         // data Space, which `provisionNewWallet` just created, so this must run
         // after provisioning (`putUnlockMethods` needs the Space to exist).
         // Non-fatal -- the passkey already logs in.
-        const now = new Date()
-        const entry: PasskeyUnlockMethod = {
-          type: 'passkey',
-          label: `Passkey created ${now.toLocaleDateString(
-            i18n.language,
-            DATE_FMT
-          )}`,
-          createdAt: now.toISOString(),
-          credentialId: base64urlnopad.encode(registration.credentialId),
-          transports: registration.transports,
-          backupEligibility: registration.backupEligibility,
-          backupState: registration.backupState,
-          unlockSpaceId,
-          ...(manageCapability ? { manageCapability } : {})
-        }
         const record: UnlockMethodsRecord = {
           version: 1,
           userHandle: base64urlnopad.encode(userHandle),

@@ -46,7 +46,9 @@ class FakeWasServer {
     return String(this.tick).padStart(12, '0')
   }
 
-  /** Directly seed a document as if another client had written it. */
+  /**
+   * Directly seed a document as if another client had written it.
+   */
   seed(id: string, data: Json, epoch?: string): void {
     this.docs.set(id, {
       version: 1,

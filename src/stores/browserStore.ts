@@ -77,24 +77,36 @@ export class BrowserStore {
   // caller can refresh the marker and re-read.
   #unknownEpochCredentials = 0
   #unknownEpochHistory = 0
-  // Session-lifetime decrypt caches, keyed by RxDB row id. Every credential
-  // operation (list, load-one, delete, add's dedupe scan) otherwise re-decrypts
-  // the whole collection and re-derives `cidFrom` per row; these memoize the
-  // decrypted content identity so a row is decrypted at most once per session.
-  // The key is safe: a row id is the content-derived hash of the JWE
-  // ciphertext, so it maps to exactly one plaintext under ANY cipher that can
-  // decrypt it -- an envelope's content, and therefore its content-derived id,
-  // is fixed once written. `setCiphers` may swap the injected ciphers (after a
-  // marker refresh or a share), but that only widens which rows decrypt; it
-  // never changes the plaintext a given row id yields, so the cached entries
-  // stay valid across a swap. Entries are dropped when their row is removed and
-  // both caches are cleared on teardown; an insert needs no invalidation
-  // because a new envelope always carries a fresh, previously-unseen id.
-  #credentialCache = new Map<
-    string,
-    { cid: string; vc: IVerifiableCredential }
-  >()
-  #historyCache = new Map<string, WalletActivity>()
+  // Session-lifetime decrypt cache, keyed first by logical collection key and
+  // then by RxDB row id, holding each envelope row's decrypted plaintext so a
+  // row is decrypted at most once per session. Every read (list, load-one,
+  // delete's collapse scan, add's dedupe) otherwise re-decrypts the whole
+  // collection; this memoizes the plaintext. The key is safe: a row id is the
+  // content-derived hash of the JWE ciphertext, so it maps to exactly one
+  // plaintext under ANY cipher that can decrypt it -- an envelope's content, and
+  // therefore its content-derived id, is fixed once written. `setCiphers` may
+  // swap the injected ciphers (after a marker refresh or a share), but that only
+  // widens which rows decrypt; it never changes the plaintext a given row id
+  // yields, so the cached entries stay valid across a swap. Entries are dropped
+  // when their row is removed and the cache is cleared on teardown; an insert
+  // needs no invalidation because a new envelope always carries a fresh,
+  // previously-unseen id.
+  #decryptCache = new Map<string, Map<string, Json>>()
+  // The content cid of each decrypted `private-credentials` envelope row, keyed
+  // by row id, so `#credentialEntries` need not re-run `cidFrom` per read. Valid
+  // across a `setCiphers` swap for the same reason as `#decryptCache` (a row id
+  // maps to one plaintext, hence one cid); dropped with its row.
+  #credentialCidByRow = new Map<string, string>()
+  // In-memory content cid -> live-row-ids index over the encrypted
+  // `private-credentials` collection: the authority `addCredential` consults to
+  // stay idempotent by content cid without a full decrypt-scan per insert (see
+  // `addCredential`). Rebuilt from a full scan by `#credentialEntries` (so every
+  // list/load/delete refreshes it) and maintained incrementally on add/delete.
+  #credentialCidIndex = new Map<string, Set<string>>()
+  // Whether `#credentialCidIndex` reflects a full scan of the live collection
+  // this session. Reset by `setCiphers` (a wider cipher can reveal rows the last
+  // scan skipped as unknown-epoch), forcing the next `addCredential` to rebuild.
+  #credentialsIndexed = false
 
   constructor({
     dbPrefix,
@@ -257,22 +269,202 @@ export class BrowserStore {
    * @param options.logicalKey {string}
    * @param options.id {string}
    * @param options.data {Json}
+   * @param [options.epoch] {string}   the key-epoch id the re-encrypted body was
+   *   written under, re-stamped on the row so replication pushes the current
+   *   `WAS-Key-Epoch`; absent for a plaintext write
    * @returns {Promise<void>}
    */
   async #updateDoc({
     logicalKey,
     id,
-    data
+    data,
+    epoch
   }: {
     logicalKey: string
     id: string
     data: Json
+    epoch?: string
   }) {
     const doc = await this.rxCollection(logicalKey).findOne(id).exec()
     if (!doc) {
       throw new Error(`No local "${logicalKey}" row "${id}" to update.`)
     }
-    await doc.incrementalPatch({ updatedAt: new Date().toISOString(), data })
+    await doc.incrementalPatch({
+      updatedAt: new Date().toISOString(),
+      ...(epoch !== undefined && { epoch }),
+      data
+    })
+  }
+
+  /**
+   * The session-lifetime decrypt cache (row id -> plaintext) for one collection,
+   * created on first use. See {@link _decryptCache}.
+   *
+   * @param logicalKey {string}
+   * @returns {Map<string, Json>}
+   */
+  #cacheFor(logicalKey: string): Map<string, Json> {
+    let cache = this.#decryptCache.get(logicalKey)
+    if (!cache) {
+      cache = new Map<string, Json>()
+      this.#decryptCache.set(logicalKey, cache)
+    }
+    return cache
+  }
+
+  /**
+   * The single decrypt-read skeleton shared by every collection: reads the live
+   * rows in the requested order, decrypting envelope rows (through the
+   * per-collection cache) and passing legacy plaintext rows through, and sorts
+   * each decrypt failure into one of two buckets so a caller stays tolerant of a
+   * single bad row rather than failing the whole read.
+   *
+   * A row whose envelope will not decrypt under the current KAK (corrupted,
+   * replicated verbatim from another identity, or written under a mismatched
+   * KAK) is collected in `undecryptableRowIds` -- purgeable garbage. A row whose
+   * envelope names an UNKNOWN key epoch ({@link UnknownEpochError}) is collected
+   * separately in `unknownEpochRowIds` and NOT cached: it is possibly-fresh data
+   * behind a stale marker, so a caller can refresh the marker (rebuild the cipher
+   * via {@link setCiphers}) and re-read rather than deleting it.
+   *
+   * `fromEnvelope` distinguishes a decrypted envelope row from a plaintext
+   * passthrough, which the credential caller needs (a plaintext row is keyed by
+   * its content cid, an envelope row's cid is recomputed from the plaintext).
+   *
+   * The decrypt cache is keyed by row id, which is sound only for the
+   * content-addressed collections (a row's content -- and thus its id -- is fixed
+   * once written). The one mutable collection (`contacts`, rewritten in place by
+   * an edit or a replication conflict merge under a stable row id) opts out with
+   * `cache: false`, since a row-id-keyed entry would go stale after an in-place
+   * rewrite.
+   *
+   * @param options {object}
+   * @param options.logicalKey {string}
+   * @param options.sort {'asc' | 'desc'}   `updatedAt` order
+   * @param [options.cache] {boolean}   memoize decrypts by row id (default true);
+   *   pass false for a mutable, rewritten-in-place collection
+   * @returns {Promise<{ entries: Array<{ rowId: string; data: Json;
+   *   fromEnvelope: boolean }>; undecryptableRowIds: string[];
+   *   unknownEpochRowIds: string[] }>}
+   */
+  async #decryptedRows({
+    logicalKey,
+    sort,
+    cache = true
+  }: {
+    logicalKey: string
+    sort: 'asc' | 'desc'
+    cache?: boolean
+  }): Promise<{
+    entries: Array<{ rowId: string; data: Json; fromEnvelope: boolean }>
+    undecryptableRowIds: string[]
+    unknownEpochRowIds: string[]
+  }> {
+    const docs = await this.rxCollection(logicalKey)
+      .find({ sort: [{ updatedAt: sort }] })
+      .exec()
+    const cipher = this.#ciphers?.[logicalKey]
+    const decryptCache = cache ? this.#cacheFor(logicalKey) : undefined
+    const entries: Array<{ rowId: string; data: Json; fromEnvelope: boolean }> =
+      []
+    const undecryptableRowIds: string[] = []
+    const unknownEpochRowIds: string[] = []
+    for (const doc of docs) {
+      const { id, data } = doc.toMutableJSON()
+      if (cipher && isEncryptedEnvelope(data)) {
+        const cached = decryptCache?.get(id)
+        if (cached !== undefined) {
+          entries.push({ rowId: id, data: cached, fromEnvelope: true })
+          continue
+        }
+        try {
+          const plaintext = await cipher.decrypt({ envelope: data! })
+          decryptCache?.set(id, plaintext)
+          entries.push({ rowId: id, data: plaintext, fromEnvelope: true })
+        } catch (err) {
+          if (err instanceof UnknownEpochError) {
+            // Possibly-fresh data behind a stale marker: skip it (uncached) so a
+            // marker refresh can pick it up, never purge it.
+            console.warn(
+              `Skipping unknown-epoch "${logicalKey}" row "${id}":`,
+              err
+            )
+            unknownEpochRowIds.push(id)
+          } else {
+            console.warn(
+              `Skipping undecryptable "${logicalKey}" row "${id}":`,
+              err
+            )
+            undecryptableRowIds.push(id)
+          }
+        }
+      } else {
+        entries.push({ rowId: id, data: data as Json, fromEnvelope: false })
+      }
+    }
+    return { entries, undecryptableRowIds, unknownEpochRowIds }
+  }
+
+  /**
+   * Encrypts a document for one collection when that collection has a cipher,
+   * else passes it through as plaintext -- the single choose-cipher / encrypt /
+   * plaintext-fallback seam every writer shares. Returns the body to store
+   * (envelope or plaintext), the cipher-minted content id (only when encrypted),
+   * and the key-epoch id the write went under (only on a multi-recipient
+   * cipher).
+   *
+   * @param options {object}
+   * @param options.logicalKey {string}
+   * @param options.data {Json}
+   * @returns {Promise<{ body: Json; mintedId?: string; epoch?: string }>}
+   */
+  async #encrypt({
+    logicalKey,
+    data
+  }: {
+    logicalKey: string
+    data: Json
+  }): Promise<{ body: Json; mintedId?: string; epoch?: string }> {
+    const cipher = this.#ciphers?.[logicalKey]
+    if (!cipher) {
+      return { body: data }
+    }
+    const { id, envelope, epoch } = await cipher.encrypt({ data })
+    return { body: envelope, mintedId: id, epoch }
+  }
+
+  /**
+   * Inserts a document into one collection, folding cipher selection,
+   * encryption, and the key-epoch stamp (see {@link _encrypt}). The row id is
+   * the passed `id` unless `contentAddressed` is set AND the write encrypted, in
+   * which case the cipher's content-derived envelope-hash id keys the row (the
+   * append-only content-addressed collections) -- `id` then serves only as the
+   * plaintext-store key. A stable-id collection (`contacts`) leaves
+   * `contentAddressed` false so its row keeps the caller's stable id even when
+   * encrypted. Returns the row id actually written and the stamped epoch.
+   *
+   * @param options {object}
+   * @param options.logicalKey {string}
+   * @param options.id {string}
+   * @param options.data {Json}
+   * @param [options.contentAddressed] {boolean}
+   * @returns {Promise<{ rowId: string; epoch?: string }>}
+   */
+  async #insertEncrypted({
+    logicalKey,
+    id,
+    data,
+    contentAddressed = false
+  }: {
+    logicalKey: string
+    id: string
+    data: Json
+    contentAddressed?: boolean
+  }): Promise<{ rowId: string; epoch?: string }> {
+    const { body, mintedId, epoch } = await this.#encrypt({ logicalKey, data })
+    const rowId = contentAddressed && mintedId !== undefined ? mintedId : id
+    await this.#insertDoc({ logicalKey, id: rowId, data: body, epoch })
+    return { rowId, epoch }
   }
 
   /**
@@ -333,6 +525,11 @@ export class BrowserStore {
    */
   setCiphers(ciphers: Record<string, DocCipher>): void {
     this.#ciphers = ciphers
+    // A wider cipher set can reveal rows the last scan skipped as unknown-epoch,
+    // so the cid index is no longer known-complete; force the next
+    // `addCredential` to rebuild it. The decrypt caches stay valid (a row id
+    // maps to one plaintext under any cipher that can read it).
+    this.#credentialsIndexed = false
   }
 
   /**
@@ -364,53 +561,46 @@ export class BrowserStore {
     undecryptableRowIds: string[]
     unknownEpochRowIds: string[]
   }> {
-    const docs = await this.rxCollection('privateCredentials')
-      .find({ sort: [{ updatedAt: 'asc' }] })
-      .exec()
-    const cipher = this.#ciphers?.privateCredentials
-    const entries = []
-    const undecryptableRowIds: string[] = []
-    const unknownEpochRowIds: string[] = []
-    for (const doc of docs) {
-      const { id, data } = doc.toMutableJSON()
-      if (cipher && isEncryptedEnvelope(data)) {
-        const cached = this.#credentialCache.get(id)
-        if (cached) {
-          entries.push({ rowId: id, cid: cached.cid, vc: cached.vc })
-          continue
-        }
-        try {
-          const vc = (await cipher.decrypt({
-            envelope: data!
-          })) as unknown as IVerifiableCredential
-          const cid = await cidFrom({ doc: vc })
-          this.#credentialCache.set(id, { cid, vc })
-          entries.push({ rowId: id, cid, vc })
-        } catch (err) {
-          if (err instanceof UnknownEpochError) {
-            // Possibly-fresh data behind a stale marker: skip it (uncached) so
-            // a marker refresh can pick it up, never purge it.
-            console.warn(
-              `Skipping unknown-epoch private-credentials row "${id}":`,
-              err
-            )
-            unknownEpochRowIds.push(id)
-          } else {
-            console.warn(
-              `Skipping undecryptable private-credentials row "${id}":`,
-              err
-            )
-            undecryptableRowIds.push(id)
-          }
-        }
+    const {
+      entries: rows,
+      undecryptableRowIds,
+      unknownEpochRowIds
+    } = await this.#decryptedRows({
+      logicalKey: 'privateCredentials',
+      sort: 'asc'
+    })
+    const entries: Array<{
+      rowId: string
+      cid: string
+      vc: IVerifiableCredential
+    }> = []
+    // Rebuild the cid index from this full scan, so every list/load/delete
+    // refreshes the authority `addCredential` consults.
+    const cidIndex = new Map<string, Set<string>>()
+    for (const { rowId, data, fromEnvelope } of rows) {
+      const vc = data as unknown as IVerifiableCredential
+      let cid: string
+      if (fromEnvelope) {
+        // An envelope row's cid is recomputed from the decrypted VC (memoized
+        // per row id, since the envelope's plaintext -- and thus its cid -- is
+        // fixed once written).
+        cid =
+          this.#credentialCidByRow.get(rowId) ?? (await cidFrom({ doc: vc }))
+        this.#credentialCidByRow.set(rowId, cid)
       } else {
-        entries.push({
-          rowId: id,
-          cid: id,
-          vc: data as unknown as IVerifiableCredential
-        })
+        // A plaintext row IS keyed by its content cid.
+        cid = rowId
       }
+      let rowIds = cidIndex.get(cid)
+      if (!rowIds) {
+        rowIds = new Set<string>()
+        cidIndex.set(cid, rowIds)
+      }
+      rowIds.add(rowId)
+      entries.push({ rowId, cid, vc })
     }
+    this.#credentialCidIndex = cidIndex
+    this.#credentialsIndexed = true
     return { entries, undecryptableRowIds, unknownEpochRowIds }
   }
 
@@ -422,6 +612,25 @@ export class BrowserStore {
    * credential is a no-op), not by row id. Returns whether a row was actually
    * inserted (`false` when the credential was already present), so the caller
    * can gate credential-created history on a genuine insert.
+   *
+   * Idempotence is enforced through the in-memory `#credentialCidIndex`
+   * (cid -> live row ids), consulted in O(1) rather than by a full decrypt-scan
+   * per insert. The index is built once per session on first use (a single scan)
+   * and maintained incrementally on add/delete, so a batch import runs in O(N)
+   * decrypts, not O(N^2) -- and idempotence no longer depends on the caller
+   * pre-deduping the batch or storing sequentially.
+   *
+   * Design tradeoff: the index is in-memory, not a persisted row field. A
+   * plaintext cid on the encrypted row would be simplest but would replicate to
+   * the server and defeat the encrypted-at-rest model (the cid links a subject
+   * to a stored ciphertext); the index keeps the server seeing only opaque
+   * envelopes. Its cost is a narrow staleness window: a credential pulled by
+   * background replication AFTER the index was last built (any list/load/delete
+   * rebuilds it) but before a racing local `addCredential` of the same cid can
+   * yield a second envelope row for that VC. That is the already-tolerated
+   * "duplicate envelope rows for the same VC" case -- `listCredentials` collapses
+   * duplicates by cid and `deleteCredential` removes every row for a cid -- so it
+   * costs a redundant row, never a correctness failure.
    *
    * @param options {object}
    * @param options.cid {string}
@@ -453,19 +662,29 @@ export class BrowserStore {
       })
       return true
     }
-    const { entries } = await this.#credentialEntries()
-    if (entries.some(entry => entry.cid === cid)) {
+    // Ensure the cid index reflects a full scan of the live rows this session,
+    // then check it in O(1) instead of re-decrypting the whole collection.
+    if (!this.#credentialsIndexed) {
+      await this.#credentialEntries()
+    }
+    if (this.#credentialCidIndex.has(cid)) {
       return false
     }
-    const { id, envelope, epoch } = await cipher.encrypt({
-      data: credential as unknown as Json
-    })
-    await this.#insertDoc({
+    const { rowId } = await this.#insertEncrypted({
       logicalKey: 'privateCredentials',
-      id,
-      data: envelope,
-      epoch
+      id: cid,
+      data: credential as unknown as Json,
+      contentAddressed: true
     })
+    // Maintain the caches and index incrementally so the next insert in a batch
+    // sees this one without another scan, and a subsequent read need not decrypt
+    // this fresh row.
+    this.#cacheFor('privateCredentials').set(
+      rowId,
+      credential as unknown as Json
+    )
+    this.#credentialCidByRow.set(rowId, cid)
+    this.#credentialCidIndex.set(cid, new Set([rowId]))
     return true
   }
 
@@ -518,7 +737,20 @@ export class BrowserStore {
     if (doc) {
       await doc.remove()
     }
-    this.#credentialCache.delete(rowId)
+    this.#cacheFor('privateCredentials').delete(rowId)
+    // Drop the row from the cid index so a later re-add of the same credential
+    // is not wrongly treated as already present.
+    const cid = this.#credentialCidByRow.get(rowId)
+    if (cid !== undefined) {
+      this.#credentialCidByRow.delete(rowId)
+      const rowIds = this.#credentialCidIndex.get(cid)
+      if (rowIds) {
+        rowIds.delete(rowId)
+        if (rowIds.size === 0) {
+          this.#credentialCidIndex.delete(cid)
+        }
+      }
+    }
   }
 
   /**
@@ -630,23 +862,11 @@ export class BrowserStore {
     resourceId: string
     activity: WalletActivity
   }) {
-    const cipher = this.#ciphers?.walletActivity
-    if (!cipher) {
-      await this.#insertDoc({
-        logicalKey: 'walletActivity',
-        id: resourceId,
-        data: activity as Json
-      })
-      return
-    }
-    const { id, envelope, epoch } = await cipher.encrypt({
-      data: activity as Json
-    })
-    await this.#insertDoc({
+    await this.#insertEncrypted({
       logicalKey: 'walletActivity',
-      id,
-      data: envelope,
-      epoch
+      id: resourceId,
+      data: activity as Json,
+      contentAddressed: true
     })
   }
 
@@ -665,49 +885,14 @@ export class BrowserStore {
   async listHistoryItems(): Promise<
     Array<{ id: string; doc: WalletActivity }>
   > {
-    const docs = await this.rxCollection('walletActivity')
-      .find({ sort: [{ updatedAt: 'asc' }] })
-      .exec()
-    const cipher = this.#ciphers?.walletActivity
+    const { entries, undecryptableRowIds, unknownEpochRowIds } =
+      await this.#decryptedRows({ logicalKey: 'walletActivity', sort: 'asc' })
+    this.#undecryptableHistory = undecryptableRowIds.length
+    this.#unknownEpochHistory = unknownEpochRowIds.length
     const seen = new Set<string>()
     const items: Array<{ id: string; doc: WalletActivity }> = []
-    let undecryptable = 0
-    let unknownEpoch = 0
-    for (const rxDoc of docs) {
-      const { id: rowId, data } = rxDoc.toMutableJSON()
-      let activity: WalletActivity
-      if (cipher && isEncryptedEnvelope(data)) {
-        const cached = this.#historyCache.get(rowId)
-        if (cached) {
-          activity = cached
-        } else {
-          try {
-            activity = (await cipher.decrypt({
-              envelope: data!
-            })) as WalletActivity
-          } catch (err) {
-            if (err instanceof UnknownEpochError) {
-              // Possibly-fresh data behind a stale marker: skip it (uncached)
-              // for a marker refresh to pick up, do not treat as garbage.
-              console.warn(
-                `Skipping unknown-epoch wallet-activity row "${rowId}":`,
-                err
-              )
-              unknownEpoch += 1
-            } else {
-              console.warn(
-                `Skipping undecryptable wallet-activity row "${rowId}":`,
-                err
-              )
-              undecryptable += 1
-            }
-            continue
-          }
-          this.#historyCache.set(rowId, activity)
-        }
-      } else {
-        activity = data as WalletActivity
-      }
+    for (const { rowId, data } of entries) {
+      const activity = data as WalletActivity
       const id = activity.id ?? rowId
       if (seen.has(id)) {
         continue
@@ -715,8 +900,6 @@ export class BrowserStore {
       seen.add(id)
       items.push({ id, doc: activity })
     }
-    this.#undecryptableHistory = undecryptable
-    this.#unknownEpochHistory = unknownEpoch
     return items
   }
 
@@ -728,35 +911,25 @@ export class BrowserStore {
    * (`_updateDoc` rewrites a row's body in place rather than replacing the
    * row), no cid-based dedupe needed.
    *
-   * A row whose envelope will not decrypt under the current KAK is skipped
-   * (logged), same tolerant pattern as `_credentialEntries`.
+   * A row whose envelope will not decrypt under the current KAK is skipped, and
+   * an unknown-epoch row is skipped uncached for a marker refresh to pick up --
+   * the shared {@link _decryptedRows} tolerance (and its decrypt cache) that the
+   * credential and history reads use.
    *
    * @returns {Promise<Array<{ rowId: string; head: ContactHeadPayload }>>}
    */
   async #contactEntries(): Promise<
     Array<{ rowId: string; head: ContactHeadPayload }>
   > {
-    const docs = await this.rxCollection('contacts')
-      .find({ sort: [{ updatedAt: 'asc' }] })
-      .exec()
-    const cipher = this.#ciphers?.contacts
-    const entries: Array<{ rowId: string; head: ContactHeadPayload }> = []
-    for (const doc of docs) {
-      const { id, data } = doc.toMutableJSON()
-      if (cipher && isEncryptedEnvelope(data)) {
-        try {
-          const head = (await cipher.decrypt({
-            envelope: data!
-          })) as unknown as ContactHeadPayload
-          entries.push({ rowId: id, head })
-        } catch (err) {
-          console.warn(`Skipping undecryptable contacts row "${id}":`, err)
-        }
-      } else {
-        entries.push({ rowId: id, head: data as unknown as ContactHeadPayload })
-      }
-    }
-    return entries
+    const { entries } = await this.#decryptedRows({
+      logicalKey: 'contacts',
+      sort: 'asc',
+      cache: false
+    })
+    return entries.map(({ rowId, data }) => ({
+      rowId,
+      head: data as unknown as ContactHeadPayload
+    }))
   }
 
   /**
@@ -830,11 +1003,13 @@ export class BrowserStore {
       deviceId,
       contact
     }
-    const cipher = this.#ciphers?.contacts
-    const body = cipher
-      ? (await cipher.encrypt({ data: head as unknown as Json })).envelope
-      : (head as unknown as Json)
-    await this.#insertDoc({ logicalKey: 'contacts', id, data: body })
+    // `contacts` is stable-id (mutable, updated in place), so the row keeps this
+    // freshly minted id even when encrypted; `contentAddressed` stays false.
+    await this.#insertEncrypted({
+      logicalKey: 'contacts',
+      id,
+      data: head as unknown as Json
+    })
     return { id, contactId, contact, updatedAt }
   }
 
@@ -890,11 +1065,14 @@ export class BrowserStore {
       deviceId,
       contact
     }
-    const cipher = this.#ciphers?.contacts
-    const body = cipher
-      ? (await cipher.encrypt({ data: head as unknown as Json })).envelope
-      : (head as unknown as Json)
-    await this.#updateDoc({ logicalKey: 'contacts', id, data: body })
+    // Same choose-cipher / encrypt / epoch seam as the inserters, but written in
+    // place (a stable-id row): re-stamp the epoch so replication pushes the
+    // current `WAS-Key-Epoch` for the rewritten body.
+    const { body, epoch } = await this.#encrypt({
+      logicalKey: 'contacts',
+      data: head as unknown as Json
+    })
+    await this.#updateDoc({ logicalKey: 'contacts', id, data: body, epoch })
     return { id, contactId, contact, updatedAt }
   }
 
@@ -927,19 +1105,16 @@ export class BrowserStore {
   }: {
     revision: ContactRevisionPayload
   }): Promise<void> {
-    const cipher = this.#ciphers?.contactsHistory
-    if (!cipher) {
-      await this.#insertDoc({
-        logicalKey: 'contactsHistory',
-        id: uuidv7(),
-        data: revision as unknown as Json
-      })
-      return
-    }
-    const { id, envelope } = await cipher.encrypt({
-      data: revision as unknown as Json
+    // Content-addressed under encryption (the cipher's envelope-hash id keys the
+    // row); the passed `id` is only the plaintext-store key, so a plaintext
+    // revision gets a fresh uuid. The epoch is now stamped too (via
+    // {@link _insertEncrypted}), matching the other encrypted writers.
+    await this.#insertEncrypted({
+      logicalKey: 'contactsHistory',
+      id: uuidv7(),
+      data: revision as unknown as Json,
+      contentAddressed: true
     })
-    await this.#insertDoc({ logicalKey: 'contactsHistory', id, data: envelope })
   }
 
   /**
@@ -954,29 +1129,13 @@ export class BrowserStore {
   }: {
     contactId: string
   }): Promise<Array<ContactRevisionPayload>> {
-    const docs = await this.rxCollection('contactsHistory')
-      .find({ sort: [{ updatedAt: 'desc' }] })
-      .exec()
-    const cipher = this.#ciphers?.contactsHistory
+    const { entries } = await this.#decryptedRows({
+      logicalKey: 'contactsHistory',
+      sort: 'desc'
+    })
     const revisions: ContactRevisionPayload[] = []
-    for (const doc of docs) {
-      const { id, data } = doc.toMutableJSON()
-      let revision: ContactRevisionPayload
-      if (cipher && isEncryptedEnvelope(data)) {
-        try {
-          revision = (await cipher.decrypt({
-            envelope: data!
-          })) as unknown as ContactRevisionPayload
-        } catch (err) {
-          console.warn(
-            `Skipping undecryptable contacts-history row "${id}":`,
-            err
-          )
-          continue
-        }
-      } else {
-        revision = data as unknown as ContactRevisionPayload
-      }
+    for (const { data } of entries) {
+      const revision = data as unknown as ContactRevisionPayload
       if (revision.contactId === contactId) {
         revisions.push(revision)
       }
@@ -1051,13 +1210,23 @@ export class BrowserStore {
    * both propagate to the remote collection. Unlike the plaintext migration
    * there is no `version` gate: pulled rows must be re-keyed too, so the remote
    * old-cid resource gets tombstoned. Idempotent by construction (a correctly
-   * keyed row is skipped) and cheap (public rows are few and plaintext), so no
-   * marker gating. Note that any public link already shared to an old-cid
-   * resource stops resolving once its remote row is tombstoned.
+   * keyed row is skipped). Note that any public link already shared to an
+   * old-cid resource stops resolving once its remote row is tombstoned.
+   *
+   * Runs at most once per user: after the first pass no mis-keyed row can remain
+   * (the pre-fix formula is retired), so a persistent per-`dbPrefix` marker
+   * (localStorage, guarded for the non-browser test/SSR environments)
+   * short-circuits the full-collection `cidFrom` recompute that would otherwise
+   * run on every later login.
    *
    * @returns {Promise<void>}
    */
   async migratePublicCredentialCids() {
+    const markerKey = `freewallet:public-cids-migrated:${this.dbPrefix}`
+    const hasLocalStorage = typeof localStorage !== 'undefined'
+    if (hasLocalStorage && localStorage.getItem(markerKey)) {
+      return
+    }
     const collection = this.rxCollection('publicCredentials')
     const docs = await collection.find().exec()
     for (const doc of docs) {
@@ -1077,6 +1246,23 @@ export class BrowserStore {
       })
       await doc.remove()
     }
+    if (hasLocalStorage) {
+      localStorage.setItem(markerKey, new Date().toISOString())
+    }
+  }
+
+  /**
+   * Drops the session-lifetime decrypt cache and the credential cid index,
+   * called on teardown (close/wipe) so a later session never reads stale
+   * plaintext or a stale idempotency verdict.
+   *
+   * @returns {void}
+   */
+  #clearCaches(): void {
+    this.#decryptCache.clear()
+    this.#credentialCidByRow.clear()
+    this.#credentialCidIndex.clear()
+    this.#credentialsIndexed = false
   }
 
   /**
@@ -1087,8 +1273,7 @@ export class BrowserStore {
    * @returns {Promise<void>}
    */
   async wipeStorage() {
-    this.#credentialCache.clear()
-    this.#historyCache.clear()
+    this.#clearCaches()
     if (this.db) {
       await this.db.remove()
       this.db = undefined
@@ -1150,8 +1335,7 @@ export class BrowserStore {
    * @returns {Promise<void>}
    */
   async close() {
-    this.#credentialCache.clear()
-    this.#historyCache.clear()
+    this.#clearCaches()
     if (this.db) {
       await this.db.close()
       this.db = undefined

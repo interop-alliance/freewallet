@@ -42,16 +42,23 @@ export interface VerifyCredentialPayload {
   hasStatusError?: boolean
 }
 
-/** DCW five-step checklist; `expiry` / `status` alias ResumeCredentialCard fields. */
+/**
+ * DCW five-step checklist; `expiry` / `status` alias ResumeCredentialCard
+ * fields.
+ */
 export interface VerificationChecklist {
   supportedFormat: VerificationStep
   signature: VerificationStep
   issuer: VerificationStep
   revocation: VerificationStep
   expiration: VerificationStep
-  /** @deprecated Use `expiration`. */
+  /**
+   * @deprecated Use `expiration`.
+   */
   expiry: VerificationStep
-  /** @deprecated Use `revocation`. */
+  /**
+   * @deprecated Use `revocation`.
+   */
   status: VerificationStep
 }
 

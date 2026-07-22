@@ -1,8 +1,10 @@
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 
+import { typeArray } from '@/lib/vcShape'
+
 function hasType(data: unknown, typeName: string): boolean {
   const type = (data as { type?: unknown } | null | undefined)?.type
-  return Array.isArray(type) && type.includes(typeName)
+  return typeArray(type).includes(typeName)
 }
 
 function hasWrappedCredentials(data: unknown): data is {

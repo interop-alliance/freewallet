@@ -27,7 +27,9 @@ export const EDDSA_RDFC_2022 = 'eddsa-rdfc-2022'
  */
 const SUPPORTED_CRYPTOSUITES = [EDDSA_RDFC_2022]
 
-/** VC Data Model 2.0 context URL. */
+/**
+ * VC Data Model 2.0 context URL.
+ */
 const CREDENTIALS_CONTEXT_V2_URL = 'https://www.w3.org/ns/credentials/v2'
 
 /**

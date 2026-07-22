@@ -207,8 +207,8 @@ export function CollectionContentsPage() {
         setResourcePayload(body)
         setDecryptedData(decrypted ?? null)
         setResourceView(decrypted !== undefined ? 'decrypted' : 'envelope')
-      } catch (e) {
-        console.error('Failed to load resource:', e)
+      } catch (err) {
+        console.error('Failed to load resource:', err)
         setResourceError(t('storage.resourceLoadError'))
         setResourcePayload(null)
       } finally {

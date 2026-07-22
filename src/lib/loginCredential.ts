@@ -41,8 +41,8 @@ const VC_1_CONTEXT_URL = 'https://www.w3.org/2018/credentials/v1'
 
 /**
  * Issues (signs) a self-issued Login Credential for the given username. The
- * issuer and subject are both `session.user.id`. Requires a full (passphrase)
- * session -- the delegated tier holds no signing key.
+ * issuer and subject are both `session.user.id`, signed with the session's
+ * root key.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -56,11 +56,6 @@ export async function issueLoginCredential({
   session: Session
   username: string
 }): Promise<IVerifiableCredential> {
-  if (!session.profile.keyAgent) {
-    throw new Error(
-      'Issuing a Login Credential requires a full (passphrase) session.'
-    )
-  }
   const did = session.user.id
   const credential = {
     '@context': [VC_1_CONTEXT_URL, LOGIN_CREDENTIAL_CONTEXT],
@@ -72,7 +67,7 @@ export async function issueLoginCredential({
     }
   }
   const suite = new Ed25519Signature2020({
-    signer: session.profile.keyAgent.getSigner()
+    signer: session.profile.keyAgent!.getSigner()
   })
   return (await vc.issue({
     credential,

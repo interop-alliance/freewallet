@@ -2,6 +2,49 @@
 
 ## Unreleased - TBD
 
+### Fixed
+
+- CHAPI share flow now records the Login history entry (including granted
+  capability records) before delivering the presentation to a VC API exchange,
+  so a relying party can never end up holding delegated capabilities that are
+  missing from the sharing panel and unrevocable.
+- Credentials whose `type` is a plain string (spec-legal) are no longer
+  silently dropped by the import flow.
+- CHAPI popup sessions now recover credentials encrypted under a fresh key
+  epoch (after a rekey on another device) instead of silently omitting them,
+  and popup writes stamp the `WAS-Key-Epoch` header exactly like background
+  replication does.
+- The storage browser now refreshes key-epoch markers and retries when a
+  resource was encrypted under a newer epoch, instead of rendering the raw
+  encrypted envelope until re-login.
+- A VPR carrying a mismatched `domain` without a DIDAuthentication query now
+  fails preflight with the specific domain-mismatch message instead of a
+  generic processing error.
+- Logging in over an existing session (without visiting `/logout` first) now
+  closes the previous session's storage, preventing a leaked IndexedDB
+  connection that could block later database deletion.
+- Contact writes now stamp the key epoch on stored rows, so replicated contact
+  resources carry the correct `WAS-Key-Epoch` header.
+- Conflict documents assembled from a 412 response without a `/meta` document
+  no longer carry an empty `updatedAt` timestamp.
+
+### Changed
+
+- Replaced the CHAPI popup's remote-direct boolean fork in `StorageManager`
+  with a `SyncedCollectionStore` backend seam: a local-replica backend and a
+  remote-direct WAS backend selected once at construction, sharing the same
+  cipher, envelope-id, and epoch logic. All synced-collection operations
+  (including delete and public-link operations) now route uniformly through
+  the active backend, and pages await a uniform `ready()` contract instead of
+  branching on backend mode.
+- `addCredential` is now idempotent by content cid via an in-memory cid index,
+  removing the per-insert full-collection dedupe scan and making batch imports
+  safe without call-site pre-deduplication.
+- Login-path performance: per-collection epoch markers are fetched
+  concurrently, the public-credentials cid migration runs once per database
+  instead of on every login, and contact reads now use the shared decrypt
+  cache and distinguish unknown-epoch rows.
+
 ### Removed
 
 - Removed refresh-surviving delegated sessions and the vault-lock mechanism;

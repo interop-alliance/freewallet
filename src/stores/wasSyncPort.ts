@@ -36,7 +36,17 @@ import {
  * stamp). Matches `@interop/was-client`'s internal `writeHeaders` emitter; not
  * exported as a constant there, so it is spelled out here.
  */
-const WAS_KEY_EPOCH_HEADER = 'WAS-Key-Epoch'
+export const WAS_KEY_EPOCH_HEADER = 'WAS-Key-Epoch'
+
+/**
+ * The placeholder `updatedAt` for a `412`-conflict re-read whose resource has no
+ * `/meta` document yet (so its server-managed timestamp is unknown). An
+ * epoch-zero ISO string is a valid, sortable timestamp that sorts before every
+ * real one -- unlike an empty string, which is not a parseable date. The change
+ * feed remains the authority on ordering, so this only feeds the one-off
+ * conflict entry and is corrected on the next pull.
+ */
+const UNKNOWN_UPDATED_AT = new Date(0).toISOString()
 
 /**
  * Extracts an HTTP status from a raw ky/ezcap error. `was.request()` rejects on
@@ -212,10 +222,11 @@ export function createWasSyncPort({
 
       const master: MasterState = {
         version: parseEtag(contentResponse.headers.get('etag')) ?? 0,
-        // Filled from the `/meta` body's server-managed `updatedAt` below; the
-        // change feed remains the authority on ordering, so this only feeds the
-        // one-off conflict entry and is corrected on the next pull.
-        updatedAt: '',
+        // Overwritten from the `/meta` body's server-managed `updatedAt` below
+        // when present; when the resource has no metadata yet this epoch-zero
+        // fallback keeps a valid, sortable timestamp on the conflict entry (an
+        // empty string is not a parseable date).
+        updatedAt: UNKNOWN_UPDATED_AT,
         deleted: false,
         data: contentResponse.data as Json
       }

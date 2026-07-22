@@ -7,6 +7,7 @@ import type {
 } from '@/types/credential'
 import { getExpirationInstant } from '@/lib/viewMappers/formatDate'
 import { getVerifyLogFromPayload } from '@/lib/viewMappers/verifyLog'
+import { typeArray } from '@/lib/vcShape'
 
 const STEP_ID = {
   validSignature: 'valid_signature',
@@ -78,9 +79,9 @@ function supportedFormatStep(
   credential: IVerifiableCredential,
   t?: TFunction
 ): VerificationStep {
-  const hasKnownType =
-    Array.isArray(credential.type) &&
-    credential.type.some(type => SUPPORTED_CREDENTIAL_TYPES.includes(type))
+  const hasKnownType = typeArray(credential.type).some(type =>
+    SUPPORTED_CREDENTIAL_TYPES.includes(type)
+  )
 
   return step(
     hasKnownType,

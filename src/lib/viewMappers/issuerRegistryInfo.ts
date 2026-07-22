@@ -39,7 +39,9 @@ export function getRegistryNames(
   return [...new Set(names)]
 }
 
-/** Extracts issuer registry matches from a raw `verifyCredential` payload. */
+/**
+ * Extracts issuer registry matches from a raw `verifyCredential` payload.
+ */
 export function issuerRegistryInfoFromVerifyPayload(
   raw: Record<string, unknown> | null | undefined
 ): IssuerRegistryInfo | null {

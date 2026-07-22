@@ -31,6 +31,7 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()((set, get) => ({
   session: null,
   login: (session: Session) => {
+    const previous = get().session
     set({ session })
     publishStorageSeam(session)
     // Kick off background replication (no-op for guests / no remote replica).
@@ -41,7 +42,23 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     // keeps login non-blocking; `restart` serializes the stop-then-start
     // internally so the ordering holds. The controller self-manages its errors
     // and status.
-    void syncController.restart({ session })
+    //
+    // Switching accounts without an intervening /logout is reachable (/login has
+    // no logged-in redirect), so the replaced session's storage must be closed
+    // or its RxDB/IndexedDB connection would leak. Mirror logout's teardown
+    // order -- replication stopped before the database closes -- then restart
+    // for the new session. All fire-and-forget, so login stays non-blocking.
+    void (async () => {
+      if (previous && previous !== session) {
+        await syncController.stop()
+        try {
+          await previous.storage.close()
+        } catch (err) {
+          console.warn('Could not close the replaced session storage:', err)
+        }
+      }
+      await syncController.restart({ session })
+    })()
   },
   logout: async () => {
     await syncController.stop()

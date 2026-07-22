@@ -153,8 +153,8 @@ export function CollectionResourcePage() {
           decrypted !== undefined ? JSON.stringify(body.data, null, 2) : null
         )
         setSourceView('decrypted')
-      } catch (e) {
-        console.error('Failed to load collection resource:', e)
+      } catch (err) {
+        console.error('Failed to load collection resource:', err)
         if (!cancelled) {
           setErrorKey('storage.resourceLoadError')
         }

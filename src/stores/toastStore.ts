@@ -11,10 +11,14 @@ import { create } from 'zustand'
 export type ToastSeverity = 'success' | 'info' | 'warning' | 'error'
 
 export interface Toast {
-  /** Already-translated text -- callers pass `t(...)`, not a key. */
+  /**
+   * Already-translated text -- callers pass `t(...)`, not a key.
+   */
   message: string
   severity: ToastSeverity
-  /** Bumped per toast so two identical messages in a row still re-open. */
+  /**
+   * Bumped per toast so two identical messages in a row still re-open.
+   */
   id: number
 }
 

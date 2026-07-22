@@ -3,7 +3,10 @@ import type {
   VerificationResult
 } from '@/types/credential'
 
-/** Hard failures: bad signature, format, or revocation. Warnings: unknown issuer or expired. */
+/**
+ * Hard failures: bad signature, format, or revocation. Warnings: unknown
+ * issuer or expired.
+ */
 export function getVerificationAggregateStatus(
   result: VerificationResult | null
 ): VerificationAggregateStatus | null {

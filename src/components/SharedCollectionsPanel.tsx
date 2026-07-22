@@ -27,7 +27,8 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { DATE_FMT, WALLET_STANDARD_COLLECTIONS } from '@/app.config'
+import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
+import { formatDate } from '@/lib/viewMappers/formatDate'
 import { dashboardStyles } from '@/styles/appStyles'
 import { showToast } from '@/stores/toastStore'
 import type { Session } from '@/types/auth'
@@ -203,10 +204,10 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
                       <Typography variant="body2" color="text.secondary">
                         {share.expires
                           ? t('settings.sharedExpires', {
-                              date: new Date(share.expires).toLocaleDateString(
-                                i18n.language,
-                                DATE_FMT
-                              )
+                              date: formatDate({
+                                isoDate: share.expires,
+                                locale: i18n.language
+                              })
                             })
                           : t('settings.sharedExpiryUnknown')}
                       </Typography>

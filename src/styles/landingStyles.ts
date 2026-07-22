@@ -19,7 +19,10 @@ export const landingStyles = {
     maxWidth: 760,
     width: '100%'
   },
-  /** West Coast hero card inner inset — padding on a child so it isn't clipped/overridden. */
+  /**
+   * West Coast hero card inner inset -- padding on a child so it isn't
+   * clipped/overridden.
+   */
   westCoastHeroCardInner: {
     boxSizing: 'border-box',
     width: '100%',

@@ -17,7 +17,9 @@ import { create } from 'zustand'
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error'
 
 interface SyncStatusState {
-  /** Keyed by WAS collection id (e.g. `public-credentials`). */
+  /**
+   * Keyed by WAS collection id (e.g. `public-credentials`).
+   */
   statuses: Record<string, SyncStatus>
   setStatus: (collectionId: string, status: SyncStatus) => void
   reset: () => void

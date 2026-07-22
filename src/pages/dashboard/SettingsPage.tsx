@@ -15,7 +15,7 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
-import { MdCheck, MdClose, MdContentCopy, MdEdit } from 'react-icons/md'
+import { MdContentCopy, MdEdit } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
 import { base64urlnopad } from '@scure/base'
 import type { IZcap } from '@interop/data-integrity-core'
@@ -26,7 +26,6 @@ import { getFileUrl } from '@interop/did-method-webvh'
 import { rotateWebvhUpdateKey } from '@/lib/didWebvh'
 import {
   bindPassphrase,
-  bindUnlockSecret,
   changePassphrase,
   deleteKeyring,
   verifyPassphrase,
@@ -35,6 +34,7 @@ import {
 import {
   backfillPassphraseUnlockMethod,
   canRevokeWithoutCeremony,
+  enrollPasskey,
   getUnlockMethods,
   putUnlockMethods,
   revokeUnlockMethod,
@@ -47,11 +47,11 @@ import {
   PasskeyCancelledError,
   PasskeyDuplicateError,
   PasskeyPrfUnsupportedError,
-  passkeySupported,
-  registerPasskey
+  passkeySupported
 } from '@/lib/passkey'
 import { deletePasskeySafetyNotice } from '@/lib/sessionKey'
-import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
+import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
+import { formatDate } from '@/lib/viewMappers/formatDate'
 import { SharedCollectionsPanel } from '@/components/SharedCollectionsPanel'
 import { dashboardStyles } from '@/styles/appStyles'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
@@ -60,7 +60,6 @@ import { showToast } from '@/stores/toastStore'
 import {
   DATE_FMT,
   KMS_SERVER_URL,
-  PASSKEY_KDF,
   PASSWORD_RULES,
   SYNCED_COLLECTIONS
 } from '@/app.config'
@@ -397,40 +396,22 @@ export function SettingsPage() {
         session.user.email ??
         `Freewallet ${new Date().toLocaleDateString(i18n.language, DATE_FMT)}`
 
-      const registration = await registerPasskey({
+      // Run the ceremony, bind the data seed under the passkey's unlock
+      // identity, and build the registry entry. Delegating management to the
+      // data did:key lets Settings later revoke this passkey without a tap on
+      // the (possibly lost) authenticator.
+      const { entry } = await enrollPasskey({
+        seed,
+        controller: session.user.id,
         userHandle: base64urlnopad.decode(registry.userHandle),
         userName,
+        locale: i18n.language,
+        email: session.user.email,
         excludeCredentialIds,
+        delegateManagementTo: session.user.id,
         promptForPrfRetry
       })
 
-      // Bind the data seed under the passkey's PRF-derived unlock identity --
-      // this is what actually makes the passkey able to log in. Delegating
-      // management to the data did:key lets Settings later revoke this passkey
-      // without a tap on the (possibly lost) authenticator.
-      const { unlockSpaceId, manageCapability } = await bindUnlockSecret({
-        seed,
-        controller: session.user.id,
-        secret: registration.prfOutput,
-        kdf: PASSKEY_KDF,
-        email: session.user.email,
-        delegateManagementTo: session.user.id
-      })
-
-      const entry: PasskeyUnlockMethod = {
-        type: 'passkey',
-        label: `Passkey created ${new Date().toLocaleDateString(
-          i18n.language,
-          DATE_FMT
-        )}`,
-        createdAt: new Date().toISOString(),
-        credentialId: base64urlnopad.encode(registration.credentialId),
-        transports: registration.transports,
-        backupEligibility: registration.backupEligibility,
-        backupState: registration.backupState,
-        unlockSpaceId,
-        manageCapability
-      }
       const updated: UnlockMethodsRecord = {
         ...registry,
         methods: [...registry.methods, entry]
@@ -894,44 +875,10 @@ export function SettingsPage() {
                           setAddPassphraseError(false)
                         }}
                       />
-                      <PasswordStrengthMeter
+                      <PassphraseStrengthField
                         password={addPassphrase}
                         onChangeScore={setAddPassphraseScore}
-                        scoreWords={
-                          (t('auth.signup.passwordScores', {
-                            returnObjects: true
-                          }) as string[]) ?? [
-                            'Weak',
-                            'Weak',
-                            'Fair',
-                            'Strong',
-                            'Very strong'
-                          ]
-                        }
-                        shortScoreWord={t('auth.signup.passwordTooShort')}
                       />
-                      <Typography
-                        variant="body2"
-                        color={
-                          addPassphraseLengthPassed
-                            ? 'success.main'
-                            : 'text.secondary'
-                        }
-                        sx={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 0.5
-                        }}
-                      >
-                        {addPassphraseLengthPassed ? (
-                          <MdCheck aria-hidden />
-                        ) : (
-                          <MdClose aria-hidden />
-                        )}{' '}
-                        {t('auth.signup.minChars', {
-                          count: PASSWORD_RULES.minlength
-                        })}
-                      </Typography>
                       <Button
                         variant="contained"
                         sx={{ alignSelf: 'flex-start' }}
@@ -984,44 +931,10 @@ export function SettingsPage() {
                       setPassphraseChangeError(null)
                     }}
                   />
-                  <PasswordStrengthMeter
+                  <PassphraseStrengthField
                     password={newPassphrase}
                     onChangeScore={setNewPassphraseScore}
-                    scoreWords={
-                      (t('auth.signup.passwordScores', {
-                        returnObjects: true
-                      }) as string[]) ?? [
-                        'Weak',
-                        'Weak',
-                        'Fair',
-                        'Strong',
-                        'Very strong'
-                      ]
-                    }
-                    shortScoreWord={t('auth.signup.passwordTooShort')}
                   />
-                  <Typography
-                    variant="body2"
-                    color={
-                      newPassphraseLengthPassed
-                        ? 'success.main'
-                        : 'text.secondary'
-                    }
-                    sx={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 0.5
-                    }}
-                  >
-                    {newPassphraseLengthPassed ? (
-                      <MdCheck aria-hidden />
-                    ) : (
-                      <MdClose aria-hidden />
-                    )}{' '}
-                    {t('auth.signup.minChars', {
-                      count: PASSWORD_RULES.minlength
-                    })}
-                  </Typography>
                   <Button
                     variant="contained"
                     sx={{ alignSelf: 'flex-start' }}
@@ -1171,9 +1084,10 @@ export function SettingsPage() {
                             </Stack>
                             <Typography variant="body2" color="text.secondary">
                               {t('settings.passkeyCreatedOn', {
-                                date: new Date(
-                                  entry.createdAt
-                                ).toLocaleDateString(i18n.language, DATE_FMT)
+                                date: formatDate({
+                                  isoDate: entry.createdAt,
+                                  locale: i18n.language
+                                })
                               })}
                             </Typography>
                             <Button

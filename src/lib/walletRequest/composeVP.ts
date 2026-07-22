@@ -157,25 +157,20 @@ export async function composeVP({
     return presentation
   }
 
-  // Prefer the KMS-held did:web `authentication` key: the holder becomes the
-  // published did:web DID, and in a restored (`delegated` tier) session the
-  // browser session key invokes the persisted keystore `sign` capability, so
-  // DIDAuth needs no passphrase. Falls back to the passphrase-derived root
-  // key (holder = did:key) for guests, no-KMS deployments, and sessions where
-  // did:web provisioning has not (yet) succeeded.
+  // Prefer the KMS-held did:web `authentication` key when provisioned: the
+  // holder becomes the published did:web DID. Falls back to the
+  // passphrase-derived root key (holder = did:key) for guests, no-KMS
+  // deployments, and sessions where did:web provisioning has not (yet)
+  // succeeded. The root key is always present in an active session.
   const kmsSigner = await kmsAuthenticationSigner({ session })
   let signer
   let holder
   if (kmsSigner) {
     signer = kmsSigner
     holder = session.profile.didWeb!.did
-  } else if (session.profile.keyAgent) {
-    signer = session.profile.keyAgent.getSigner()
-    holder = session.user.id
   } else {
-    throw new Error(
-      'DID Auth requires a full (passphrase) session or a provisioned did:web.'
-    )
+    signer = session.profile.keyAgent!.getSigner()
+    holder = session.user.id
   }
   // Sign with the cryptosuite the verifier requested (via VCALM
   // `acceptedCryptosuites`), falling back to the wallet default. The suite

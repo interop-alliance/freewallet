@@ -35,19 +35,33 @@ export interface AppGrant {
  * matching App Connect Login activity.
  */
 export interface ConnectedApp {
-  /** The app-key credential's content cid; identifies the app for revocation. */
+  /**
+   * The app-key credential's content cid; identifies the app for revocation.
+   */
   cid: string
-  /** The raw display name (best-effort). */
+  /**
+   * The raw display name (best-effort).
+   */
   name: string
-  /** The CHAPI requesting origin the app key is bound to. */
+  /**
+   * The CHAPI requesting origin the app key is bound to.
+   */
   origin: string
-  /** The app-key credential's subject (self-issued) did:key. */
+  /**
+   * The app-key credential's subject (self-issued) did:key.
+   */
   subjectDid: string
-  /** When the app key was issued (the credential's `issuanceDate`). */
+  /**
+   * When the app key was issued (the credential's `issuanceDate`).
+   */
   connectedAt?: string
-  /** The storage grants recorded on the latest matching connect, if any. */
+  /**
+   * The storage grants recorded on the latest matching connect, if any.
+   */
   grants: AppGrant[]
-  /** The latest matching connect's timestamp, if a Login activity was found. */
+  /**
+   * The latest matching connect's timestamp, if a Login activity was found.
+   */
   lastConnectedAt?: string
 }
 

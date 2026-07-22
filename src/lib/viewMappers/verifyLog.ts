@@ -1,4 +1,6 @@
-/** Reads verification log lines from a raw `verifyCredential` payload. */
+/**
+ * Reads verification log lines from a raw `verifyCredential` payload.
+ */
 export function getVerifyLogFromPayload(raw: Record<string, unknown>) {
   const results = raw.results as
     Array<{ log?: Array<{ id: string }> }> | undefined

@@ -21,7 +21,7 @@ import DialogContentText from '@mui/material/DialogContentText'
 import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { DATE_FMT } from '@/app.config'
+import { formatDate } from '@/lib/viewMappers/formatDate'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
@@ -194,10 +194,10 @@ export function ApplicationDetailPage() {
             </Typography>
             <Typography variant="body2">
               {app.connectedAt
-                ? new Date(app.connectedAt).toLocaleDateString(
-                    i18n.language,
-                    DATE_FMT
-                  )
+                ? formatDate({
+                    isoDate: app.connectedAt,
+                    locale: i18n.language
+                  })
                 : t('applications.connectedDateUnknown')}
             </Typography>
           </Box>
@@ -248,16 +248,16 @@ export function ApplicationDetailPage() {
                       >
                         {grantExpired(grant)
                           ? t('applications.grantExpired', {
-                              date: new Date(grant.expires).toLocaleDateString(
-                                i18n.language,
-                                DATE_FMT
-                              )
+                              date: formatDate({
+                                isoDate: grant.expires,
+                                locale: i18n.language
+                              })
                             })
                           : t('applications.grantExpires', {
-                              date: new Date(grant.expires).toLocaleDateString(
-                                i18n.language,
-                                DATE_FMT
-                              )
+                              date: formatDate({
+                                isoDate: grant.expires,
+                                locale: i18n.language
+                              })
                             })}
                       </Typography>
                     )}

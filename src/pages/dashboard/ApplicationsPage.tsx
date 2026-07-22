@@ -22,7 +22,7 @@ import ListItem from '@mui/material/ListItem'
 import ListItemButton from '@mui/material/ListItemButton'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { DATE_FMT } from '@/app.config'
+import { formatDate } from '@/lib/viewMappers/formatDate'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
@@ -171,10 +171,10 @@ export function ApplicationsPage() {
                     <Typography variant="body2" color="text.secondary">
                       {app.connectedAt
                         ? t('applications.connectedOn', {
-                            date: new Date(app.connectedAt).toLocaleDateString(
-                              i18n.language,
-                              DATE_FMT
-                            )
+                            date: formatDate({
+                              isoDate: app.connectedAt,
+                              locale: i18n.language
+                            })
                           })
                         : t('applications.connectedDateUnknown')}
                     </Typography>
