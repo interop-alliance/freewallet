@@ -15,7 +15,9 @@ vi.mock('@interop/verifier-core', async importActual => {
   }
 })
 
-const { ProblemTypes } = await import('@interop/verifier-core')
+const { ProblemTypes, EXPIRED_PROBLEM_TYPE } = await import(
+  '@interop/verifier-core'
+)
 const { verifyCredential } = await import('@/lib/verify')
 
 const CREDENTIAL = {
@@ -108,7 +110,7 @@ describe('verify.ts adapter', () => {
           status: 'failure',
           problems: [
             {
-              type: 'urn:freewallet:problem:EXPIRED',
+              type: EXPIRED_PROBLEM_TYPE,
               title: 'Credential Expired',
               detail: 'Credential expired on 2020-01-01T00:00:00Z.'
             }
