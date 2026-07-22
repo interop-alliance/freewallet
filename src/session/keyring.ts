@@ -57,7 +57,7 @@ import {
 } from '@/app.config'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
 import { singleKeyResolver } from '@/lib/keyResolver'
-import { createEdvDocCipher } from '@/stores/edvDocCipher'
+import { createEdvDocCipher } from '@interop/was-client/edv'
 import {
   deleteKeyringCache,
   loadKeyringCache,

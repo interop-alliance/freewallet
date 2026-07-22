@@ -348,7 +348,11 @@ describe('WASRemoteStore.ensureCollection', () => {
 })
 
 describe('WASRemoteStore.ensureUserCollections', () => {
-  it('throws if space creation fails', async () => {
+  it('throws if provisioning fails', async () => {
+    // Provisioning now runs through the library's `ensureSpaceAndCollection`,
+    // which upserts the Space as the first step of each collection's chain; a
+    // failing `space.configure` therefore surfaces as a collection-provisioning
+    // error (the per-collection catch wrapping the library's own error).
     const store = storeWithStubbedClient({
       space: vi.fn().mockReturnValue({
         configure: vi.fn().mockRejectedValue(new Error('boom'))
@@ -359,6 +363,6 @@ describe('WASRemoteStore.ensureUserCollections', () => {
       store.ensureUserCollections({
         user: { id: 'user-id', email: 'user@example.test' } as unknown as User
       })
-    ).rejects.toThrow(/Error creating space/)
+    ).rejects.toThrow(/Error creating collection/)
   })
 })

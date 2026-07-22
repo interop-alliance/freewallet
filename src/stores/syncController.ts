@@ -28,8 +28,8 @@ import {
   WAS_SYNC_BATCH_SIZE,
   WAS_SYNC_RETRY_MS
 } from '@/app.config'
-import type { SyncCheckpoint, SyncedDoc } from '@/lib/sync'
-import { createWasSyncPort } from '@/stores/wasSyncPort'
+import type { SyncCheckpoint, SyncedDoc, WasSyncPort } from '@/lib/sync'
+import { createWasSyncPort } from '@interop/was-client/sync'
 import { useSyncStatusStore } from '@/stores/syncStatusStore'
 import type { Session } from '@/types/auth'
 
@@ -149,11 +149,14 @@ class SyncController {
         setStatus(id, 'idle')
         // The local end of replication IS the page-facing active replica.
         const rxCollection = session.storage.localCollection(key)
+        // The library port ships the opaque wire body typed as `unknown`; the
+        // driver's stricter `WasSyncPort` types it as `Json`. Bridge onto the
+        // stricter interface here (the body is moved verbatim either way).
         const wasPort = createWasSyncPort({
           was,
           spaceId,
           collectionId: id
-        })
+        }) as unknown as WasSyncPort
         const state = createWasReplication({
           rxCollection,
           wasPort,

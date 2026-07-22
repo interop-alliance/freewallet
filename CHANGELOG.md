@@ -30,7 +30,54 @@
 
 ### Changed
 
-- The credential expiration and issuer-details verification checks now come
+- The wallet-request / exchange-protocol logic now comes from
+  `@interop/wallet-core` (its `./request` subpath) instead of local copies:
+  VPR classification, cryptosuite negotiation, the VC API exchange client, the
+  QueryByExample matcher, and the VP compose / process pipeline. `composeVP` and
+  `processRequest` shrink to thin Freewallet wrappers -- `composeVP` resolves the
+  KMS did:web-vs-root signer and holder and enforces Freewallet's stricter
+  "domain required for DID Auth" rule; `processRequest` injects Freewallet's
+  `processZcaps` / App Connect processors. Signed presentation output is
+  unchanged (the shared compose path defaults its embedded-grant vocabulary base
+  IRI to `urn:freewallet:vocab#`). The App Connect protocol extension
+  (`AppConnectQuery` and its classification) stays app-side. The VPR message
+  vocabulary and the loose-shape helpers (`typeArray` / `issuerId` / `subjectId`)
+  now come from `@interop/data-integrity-core` (its `./vpr` and `./guards`
+  subpaths).
+- The VC display helpers now come from `@interop/wallet-core` (its `./display`
+  subpath) instead of local copies: credential title, issuer details, subject /
+  issued-to extraction, validity periods, OBv3 achievement / skill / alignment
+  helpers, the aggregate display projection, the verification-to-UI checklist,
+  and credential-input parsing. Date formatting, i18n, and the CORS-proxy fetch
+  stay app-side as thin wrappers (`formatDate` keeps `Intl`;
+  `mapVerificationToUi` builds the library's `labels` map from its `TFunction`;
+  `resolveCredentialsInput` injects `fetchFromURL`). As part of reconciling with
+  the mobile wallet's implementation, credential titles now emit type-specific
+  prefixes for a few credential types (e.g. `Employment: ...`,
+  `Volunteer: ...`, `Recommendation From ...`), and the resume-credential check
+  matches the subject `type` by case-insensitive substring rather than an exact
+  `'Resume'` match.
+- The wallet Space layout pieces now come from `@interop/wallet-core` (its
+  `./space` subpath) instead of local copies, so the browser wallet and
+  Freewallet mobile share one source of truth: the `private-credentials`,
+  `public-credentials`, and `wallet-activity` collection ids and their
+  public/encryption config are sourced from the library specs in
+  `WALLET_STANDARD_COLLECTIONS` (the RxDB `key` and friendly display `name`
+  stay app-side); the `WalletActivity` wire shape and the eight `addHistory*`
+  activity-payload builders are the library's, with `StorageManager` keeping
+  thin wrappers that preserve their signatures; and `publicCredentialUrl` is
+  derived by the library. The contacts collections still come from
+  `@interop/social-core`.
+- The WAS sync port, content-id derivation, EDV document cipher, space-id
+  derivation, and space/collection provisioning now come from
+  `@interop/was-client` (its `./sync` and `./edv` subpaths) instead of local
+  copies, removing `src/stores/wasSyncPort.ts`, `src/stores/edvDocCipher.ts`,
+  and the `cidFrom` derivation from `src/lib/cidFrom.ts` (its `digestHash` /
+  `bufferToBase64Url` byte helpers remain). `WASRemoteStore.ensureUserCollections`
+  now provisions each collection through the generic `ensureSpaceAndCollection`
+  helper, keeping the wallet's collection roster app-side. `contentCid` is now
+  synchronous, so the public-link and storage-browser cid derivations moved from
+  effects into `useMemo`.
   from `@interop/verifier-core` (via its `expirationSuite` and
   `createIssuerDetailsSuite` exports) instead of local copies, removing
   `src/lib/verifierSuites/`. The expired-credential problem type is now the

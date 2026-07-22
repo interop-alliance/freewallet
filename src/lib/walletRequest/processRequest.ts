@@ -1,64 +1,24 @@
 /**
- * Framework-agnostic request processing: turns a classified `IVprDetails` plus
- * the user's VC selection into a `WalletResponse` (a possibly-signed VP). The
- * response channel (CHAPI `respondWith`, a future exchange-URL POST) stays with
- * the caller -- this function only returns data. Trimmed from DCW's
- * `exchanges.ts#processRequest` (zcap and exchanger-POST branches dropped).
+ * Request processing wrapper. The framework-agnostic pipeline (classify,
+ * negotiate, delegate, compose) lives in `@interop/wallet-core/request`; this
+ * wrapper injects Freewallet's app-side side effects (`processZcaps`,
+ * `processAppConnect`) and enforces Freewallet's stricter DID Auth rule -- a
+ * `domain` is required whenever DID Authentication is requested (the shared
+ * layer requires only a `challenge`).
  */
-import type { Session } from '@/types/auth'
-import { processAppConnect } from './appConnect'
-import { classifyRequest, queriesOf } from './classify'
-import { composeVP } from './composeVP'
-import { negotiateCryptosuite } from './presentationSuite'
-import { processZcaps } from './processZcaps'
+import { processRequest as sharedProcessRequest } from '@interop/wallet-core/request'
 import type {
-  IVerifiableCredential,
-  IVPRDetails,
-  IZcap,
+  IVPRDetails as ISpecVPRDetails,
   WalletResponse
-} from './types'
+} from '@interop/wallet-core/request'
+import type { Session } from '@/types/auth'
+import { classifyRequest } from './classify'
+import { presentationSignerFor } from './composeVP'
+import { processAppConnect } from './appConnect'
+import { processZcaps } from './processZcaps'
+import type { IVerifiableCredential, IVPRDetails } from './types'
 
-/**
- * Extracts the host (`host:port`) from a value that may be a full URL or a bare
- * host / host:port. Returns undefined if it cannot be parsed.
- */
-function hostOf(value: string): string | undefined {
-  try {
-    const url = value.includes('://')
-      ? new URL(value)
-      : new URL(`https://${value}`)
-    return url.host
-  } catch (err) {
-    console.warn(`Could not parse host from "${value}":`, err)
-    return undefined
-  }
-}
-
-/**
- * Domain-binding check (VCALM §3.4.3 advisement): a DID-Auth `domain` MUST match
- * the channel the request arrived on, otherwise a dishonest verifier could relay
- * the challenge from another origin and replay the response.
- *
- * @param options {object}
- * @param options.domain {string} - The `domain` from the request.
- * @param [options.origin] {string} - The channel origin (for CHAPI,
- *   `event.credentialRequestOrigin`).
- * @returns {boolean}
- */
-export function domainMatchesOrigin({
-  domain,
-  origin
-}: {
-  domain: string
-  origin?: string
-}): boolean {
-  if (!origin) {
-    return false
-  }
-  const originHost = hostOf(origin)
-  const domainHost = hostOf(domain)
-  return !!originHost && originHost === domainHost
-}
+export { domainMatchesOrigin } from '@interop/wallet-core/request'
 
 /**
  * Processes a Verifiable Presentation Request and composes the wallet's
@@ -86,63 +46,52 @@ export async function processRequest({
   credentialRequestOrigin?: string
   selectedVCs?: IVerifiableCredential[]
 }): Promise<WalletResponse> {
-  const { didAuth, zcapRequests, appConnect } = classifyRequest(request)
-  const queries = queriesOf(request)
-  const { challenge, domain } = request
-  // Honor any cryptosuite the verifier asks for (VCALM `acceptedCryptosuites`).
-  const cryptosuite = negotiateCryptosuite(queries)
+  const { didAuth, appConnect } = classifyRequest(request)
 
-  // Security: never sign an authentication proof bound to a domain the request
-  // did not actually arrive from. Enforced whenever a `domain` is present,
-  // including a zcap-only request whose (unsigned) VP still names an origin.
-  if (
-    domain &&
-    !domainMatchesOrigin({ domain, origin: credentialRequestOrigin })
-  ) {
-    throw new Error(
-      `DID Auth domain "${domain}" does not match request origin ` +
-        `"${credentialRequestOrigin}".`
-    )
+  // Freewallet's stricter DID Auth rule: a `domain` is required whenever DID
+  // Authentication is requested (the shared layer requires only a `challenge`).
+  if (didAuth && !request.domain) {
+    throw new Error('Both "challenge" and "domain" are required for DID Auth.')
   }
 
-  // An App Connect request takes its own single-round branch: match-or-mint
-  // the app key, delegate to its subject DID, one composed response. The
-  // requesting origin is what the app key is bound to, so it is required.
-  if (appConnect) {
-    if (!credentialRequestOrigin) {
-      throw new Error('An App Connect request requires a requesting origin.')
-    }
-    return processAppConnect({
-      appConnect,
-      session,
-      origin: credentialRequestOrigin,
-      challenge,
-      domain,
-      didAuthRequested: didAuth,
-      cryptosuite
-    })
-  }
+  // The shared pipeline uses `presentationSigner` only on the non-App-Connect
+  // path; the App Connect branch resolves its own signer inside
+  // `processAppConnect`. Resolve the (possibly KMS-backed) did:web signer only
+  // when it will actually be used, so App Connect avoids a redundant KMS lookup.
+  const presentationSigner = appConnect
+    ? { signer: session.profile.keyAgent!.getSigner(), holder: session.user.id }
+    : await presentationSignerFor(session)
 
-  // Delegate the approved capabilities first, then embed them in the VP.
-  const zcaps: IZcap[] =
-    zcapRequests.length > 0 ? await processZcaps({ zcapRequests, session }) : []
-
-  if (!didAuth && selectedVCs.length === 0 && zcaps.length === 0) {
-    // Nothing to send: no DID Auth, no VCs, and no satisfiable grants.
-    return {}
-  }
-
-  const verifiablePresentation = await composeVP({
-    session,
+  return sharedProcessRequest({
+    // Freewallet widens `IVPRDetails.query` with the app-side `AppConnectQuery`;
+    // the shared pipeline reads the query set structurally.
+    request: request as ISpecVPRDetails,
+    presentationSigner,
     selectedVCs,
-    challenge,
-    domain,
-    didAuthRequested: didAuth,
-    cryptosuite,
-    zcaps
+    credentialRequestOrigin,
+    processors: {
+      processZcaps: ({ zcapRequests }) =>
+        processZcaps({ zcapRequests, session }),
+      // `appConnect` is non-null whenever this branch runs: the shared layer
+      // only invokes `processAppConnect` for a request carrying an
+      // `AppConnectQuery`, which `classifyRequest` above already parsed (or
+      // threw on) into `appConnect`.
+      processAppConnect: ({
+        origin,
+        challenge,
+        domain,
+        didAuthRequested,
+        cryptosuite
+      }) =>
+        processAppConnect({
+          appConnect: appConnect!,
+          session,
+          origin,
+          challenge,
+          domain,
+          didAuthRequested,
+          cryptosuite
+        })
+    }
   })
-  // Return the delegated capabilities alongside the VP so the caller can log
-  // exactly what was granted from these objects, rather than reading them back
-  // off the composed VP.
-  return { verifiablePresentation, zcaps }
 }

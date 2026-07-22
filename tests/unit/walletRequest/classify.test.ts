@@ -9,9 +9,11 @@ import {
   type CHAPIGetEvent,
   type CHAPIStoreEvent,
   type ICapabilityQueryDetail,
-  type IVPRDetails,
-  type IVPRQuery
+  type IVPRDetails
 } from '@/lib/walletRequest'
+// The spec query union (no App Connect member): these fixtures feed the shared
+// classify helpers, which take the spec union.
+import type { IVPRQuery } from '@interop/wallet-core/request'
 
 const noop = () => {}
 

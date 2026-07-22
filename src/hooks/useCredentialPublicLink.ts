@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { showToast } from '@/stores/toastStore'
-import { cidFrom } from '@/lib/cidFrom'
+import { cidFrom } from '@interop/was-client/sync'
 import type { Session } from '@/types/auth'
 import type { CredentialShareActions } from '@/types/credentialActions'
 
@@ -20,7 +20,6 @@ export function useCredentialPublicLink({
   session: Session | null
 }) {
   const { t } = useTranslation()
-  const [cid, setCid] = useState<string | null>(null)
   const [isShared, setIsShared] = useState(false)
   const [publicLink, setPublicLink] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -28,22 +27,17 @@ export function useCredentialPublicLink({
 
   const canShare = !!session?.storage.canShare
 
-  useEffect(() => {
+  // The cid is a pure, synchronous hash of the decrypted VC, so it derives
+  // straight from `credential` rather than living in state behind an effect.
+  const cid = useMemo<string | null>(() => {
     if (!credential) {
-      return
+      return null
     }
-    let cancelled = false
-    cidFrom({ doc: credential })
-      .then(contentCid => {
-        if (!cancelled) {
-          setCid(contentCid)
-        }
-      })
-      .catch((err: unknown) => {
-        console.error('Error computing credential cid:', err)
-      })
-    return () => {
-      cancelled = true
+    try {
+      return cidFrom({ doc: credential })
+    } catch (err: unknown) {
+      console.error('Error computing credential cid:', err)
+      return null
     }
   }, [credential])
 

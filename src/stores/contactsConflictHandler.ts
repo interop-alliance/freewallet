@@ -24,7 +24,7 @@ import {
 import type { RxConflictHandler } from 'rxdb/plugins/core'
 import { deepEqual } from 'rxdb/plugins/utils'
 import type { SyncedDoc } from '@/lib/sync'
-import { isEncryptedEnvelope, type DocCipher } from '@/stores/edvDocCipher'
+import { isEncryptedEnvelope, type DocCipher } from '@interop/was-client/edv'
 
 /**
  * @param options {object}

@@ -2,16 +2,20 @@
  * Shared types for the collection-agnostic WAS replication adapter.
  *
  * The adapter drives an RxDB `replicateRxCollection` state machine against a
- * remote WAS Collection's replication endpoints. It is deliberately free of any
- * React or Freewallet imports so it can be extracted to a standalone
- * `was-rxdb-replication` library later; all WAS access is injected through the
- * {@link WasSyncPort} seam rather than importing `@interop/was-client` directly.
+ * remote WAS Collection's replication endpoints. The wire model
+ * (`Json` / `SyncCheckpoint` / `MasterState`) and the 412/404 conflict signals
+ * (`WasSyncConflictError` / `WasSyncNotFoundError`) now come from
+ * `@interop/was-client/sync`, so the port implementation and this driver agree
+ * on one set of types and one error hierarchy.
  *
- * The wire contract is the WAS spec's `changes` query profile (the spec
- * defines the document / checkpoint shapes and, under Conditional Requests,
- * the ETag/412 push preconditions; the wire types are `ChangeDocument` /
- * `ChangesPage` / `ChangesCheckpoint` from `@interop/storage-core`) plus its
- * V2 encrypted-metadata profile: a synced document carries both a content revision
+ * `WireDoc`, `SyncedDoc`, and `WasSyncPort` stay defined here as the driver's
+ * own, stricter internal contract: the driver maps the opaque wire body into a
+ * typed RxDB document, so it types `data` / `custom` as {@link Json} rather than
+ * the library `ChangeDocument`'s `unknown`. The library port is bridged onto
+ * this stricter `WasSyncPort` at the one construction site (`SyncController`).
+ *
+ * The wire contract is the WAS spec's `changes` query profile plus its V2
+ * encrypted-metadata profile: a synced document carries both a content revision
  * (`version` / `data`) and an independently-versioned metadata sub-resource
  * (`metaVersion` / `custom`). A metadata-only edit re-surfaces the resource with
  * a bumped `updatedAt` / `metaVersion` but unchanged `version` / `data`. The
@@ -20,25 +24,17 @@
  * is the stored metadata body (an opaque envelope on an encrypted collection);
  * encrypt/decrypt stays a read/write-time concern above this layer.
  */
+import type {
+  Json,
+  SyncCheckpoint,
+  MasterState
+} from '@interop/was-client/sync'
 
-/**
- * A JSON value -- the opaque stored resource body the sync layer moves verbatim.
- * For a plaintext collection this is the user document; for an encrypted one it
- * is the EDV envelope. The adapter never inspects or transforms it.
- */
-export type Json =
-  null | boolean | number | string | Json[] | { [key: string]: Json }
-
-/**
- * The keyset position in the change feed: the `{ id, updatedAt }` of the last
- * document a pull returned. Passed back verbatim to resume, and used as the
- * RxDB replication checkpoint. `id` is the total-order tiebreaker within a
- * single `updatedAt`.
- */
-export interface SyncCheckpoint {
-  id: string
-  updatedAt: string
-}
+export type { Json, SyncCheckpoint, MasterState }
+export {
+  WasSyncConflictError,
+  WasSyncNotFoundError
+} from '@interop/was-client/sync'
 
 /**
  * One document as it travels on the `changes` feed wire
@@ -97,34 +93,12 @@ export interface SyncedDoc {
 }
 
 /**
- * The current master state of a single resource, as read back for the 412
- * conflict path. `deleted` distinguishes a tombstone from a live resource;
- * `metaVersion` / `custom` are present only once metadata has been written.
- * `createdBy` is the same server-managed creator DID the feed carries (read
- * from the resource's metadata), so a document landing via the conflict
- * assembler keeps its attribution just like one landing via a pull. `epoch` is
- * the key-epoch id the resource's envelope was encrypted under (absent =
- * pre-epoch, encrypted directly to the vault key), read from the resource's
- * metadata so the conflict assembler keeps it at parity with a pull; opaque to
- * the sync layer.
- */
-export interface MasterState {
-  version: number
-  updatedAt: string
-  deleted: boolean
-  metaVersion?: number
-  createdBy?: string
-  epoch?: string
-  data?: Json
-  custom?: Json
-}
-
-/**
- * The injected WAS-access seam. An adapter (the Freewallet-side
- * `wasSyncPort.ts`) implements this over `@interop/was-client`; the core module
- * depends only on this interface, never on `was-client` itself. Every method
- * moves the stored body verbatim -- no codec, no key handling -- so the same
- * port works for plaintext and encrypted collections alike.
+ * The injected WAS-access seam the driver depends on. `createWasSyncPort` from
+ * `@interop/was-client/sync` implements a structurally compatible port (its
+ * writes additionally return the server-acked `version`, which the driver
+ * ignores); it is bridged onto this stricter interface at the one construction
+ * site. Every method moves the stored body verbatim -- no codec, no key handling
+ * -- so the same port works for plaintext and encrypted collections alike.
  *
  * `putContent` / `deleteContent` / `putMeta` MUST throw
  * {@link WasSyncConflictError} when the server rejects a conditional write with
@@ -213,18 +187,4 @@ export interface WasSyncPort {
    * @returns {Promise<MasterState | null>}
    */
   get(options: { id: string }): Promise<MasterState | null>
-}
-
-/**
- * Thrown by a {@link WasSyncPort} implementation when a conditional write is
- * rejected with `412 precondition-failed` (a lost-update conflict, or a
- * create-if-absent whose target already exists). The core push handler catches
- * exactly this type to trigger the re-read-and-report-conflict path; any other
- * error propagates to RxDB for retry.
- */
-export class WasSyncConflictError extends Error {
-  constructor(message = 'WAS conditional write precondition failed.') {
-    super(message)
-    this.name = 'WasSyncConflictError'
-  }
 }

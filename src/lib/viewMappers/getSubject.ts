@@ -1,9 +1,6 @@
-import type { IVerifiableCredential } from '@interop/data-integrity-core'
-
 /**
- * First `credentialSubject` entry when the property is an array.
+ * First `credentialSubject` entry when the property is an array. Moved to
+ * `@interop/wallet-core/display`; re-exported here so existing importers are
+ * unaffected.
  */
-export function getSubject(vc: IVerifiableCredential) {
-  const sbj = vc.credentialSubject
-  return Array.isArray(sbj) ? sbj[0] : sbj
-}
+export { getSubject } from '@interop/wallet-core/display'

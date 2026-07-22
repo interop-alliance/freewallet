@@ -1,23 +1,20 @@
 /**
- * Content-addressed identifier helpers. A CID is a base64url-encoded SHA-256
- * hash of a JCS-canonicalized JSON document. CIDs serve as the primary key
- * for stored credentials (see StoredCredential in types/credential.ts) and as
- * the basis for the WAS spaceId.
+ * Byte-encoding helpers shared across the wallet. `digestHash` and
+ * `bufferToBase64Url` compose into the content-addressing and id derivation used
+ * for the WAS spaceId, the local `dbPrefix`, and stored resource ids.
+ *
+ * The content-id (CID) derivation itself -- `base64url(SHA-256(JCS(doc)))` --
+ * now lives in `@interop/was-client/sync` as `cidFrom` / `contentCid`; import it
+ * from there rather than re-deriving it here.
  */
-import { canonicalize as jcsCanonicalize } from 'json-canonicalize'
 import { base64urlnopad } from '@scure/base'
 
 /**
- * Create a CID (Content-addressed Identifier) from a given JSON object
- * @param doc {object}
- * @returns {string} base64url-encoded digest hash
+ * SHA-256 of a UTF-8 string, as a raw `ArrayBuffer`.
+ *
+ * @param original {string}
+ * @returns {Promise<ArrayBuffer>}
  */
-export async function cidFrom({ doc }: { doc: object }) {
-  const canonicalized = jcsCanonicalize(doc)
-  const hashBuffer = await digestHash(canonicalized)
-  return bufferToBase64Url(hashBuffer)
-}
-
 export async function digestHash(original: string) {
   // encode as (utf-8) Uint8Array
   const msgUint8 = new TextEncoder().encode(original)

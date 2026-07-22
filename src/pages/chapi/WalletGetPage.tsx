@@ -81,6 +81,10 @@ import {
   type WalletRequestProfile,
   type WalletResponse
 } from '@/lib/walletRequest'
+// The exchange client's request param is the shared (spec) VPR shape;
+// Freewallet's local `IVPRDetails` widens it with the app-side App Connect
+// query, so an exchange request is narrowed back to the shared shape here.
+import type { IVPRDetails as ISpecVPRDetails } from '@interop/wallet-core/request'
 import { appKeySubjectDid, findAppKeyCredential } from '@/lib/appKey'
 import { fetchAppManifest, type AppManifestInfo } from '@/lib/appManifest'
 import { ZcapGrantsPanel } from './ZcapGrantsPanel'
@@ -505,7 +509,7 @@ export function WalletGetPage() {
         // an unfinished, hence failed, delivery), the same logic
         // `collectIssuedPresentation` uses for the issuance direction.
         await deliverPresentation({
-          request,
+          request: request as ISpecVPRDetails,
           exchangeUrl,
           verifiablePresentation
         })
