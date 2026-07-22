@@ -30,6 +30,11 @@
 
 ### Changed
 
+- The credential expiration and issuer-details verification checks now come
+  from `@interop/verifier-core` (via its `expirationSuite` and
+  `createIssuerDetailsSuite` exports) instead of local copies, removing
+  `src/lib/verifierSuites/`. The expired-credential problem type is now the
+  standard `EXPIRED_PROBLEM_TYPE` URI from the same package.
 - Replaced the CHAPI popup's remote-direct boolean fork in `StorageManager`
   with a `SyncedCollectionStore` backend seam: a local-replica backend and a
   remote-direct WAS backend selected once at construction, sharing the same

@@ -57,8 +57,8 @@ importers:
         specifier: ^11.0.5
         version: 11.0.5
       '@interop/verifier-core':
-        specifier: ^3.3.1
-        version: 3.3.1
+        specifier: ^3.4.0
+        version: 3.4.0
       '@interop/was-client':
         specifier: ^0.17.0
         version: 0.17.0(@interop/jsonld-signatures@11.8.3)
@@ -550,10 +550,6 @@ packages:
     resolution: {integrity: sha512-Ey8LZZxGxi4KIelkAWDq/5CGk1za2FbPzaPZtT/HMfB8Tntt1AIzYCy2A7o5xRmKoMzPbgC6YqgX1FeJn93j2A==}
     engines: {node: '>=22'}
 
-  '@interop/did-web-resolver@6.2.4':
-    resolution: {integrity: sha512-5TusTWI4Fuxa3HRtT6vmD/jsAciJ2YZ6/hGjFgkkb9G3LMkdChOYyrlc0okNfu27FsS4WiR4SqXo3UFkJNEI0A==}
-    engines: {node: '>=24.0'}
-
   '@interop/did-web-resolver@6.3.0':
     resolution: {integrity: sha512-/P+5oxkpEvt4Xrh+BKz15KX/FMRrlcR//SzgBqwqaIeN6MyF2ceXe0AaZYIYDfxNhu5td3zYJ3i2BWFkNbJuAg==}
     engines: {node: '>=24.0'}
@@ -639,10 +635,6 @@ packages:
     resolution: {integrity: sha512-grTbvdh3j0DoHnGluBlKXrVGBnoUTUPh2LPc8AvfeoEVkHQrQXbtmcyJRZ2VGIDyJEkq30xV5rcr+EvmBrrepg==}
     engines: {node: '>=24.0'}
 
-  '@interop/security-document-loader@9.4.2':
-    resolution: {integrity: sha512-21iK50N42lsaLplPWKWPRtgLie6UDnKp5MXe+xTsnsUC0OuSaTuYGgKG4NGQEibL8pNm+VIn/Bwv5Ua15cTR/A==}
-    engines: {node: '>=24.0'}
-
   '@interop/security-document-loader@9.4.4':
     resolution: {integrity: sha512-oP6B3Z2L3Ocetabmlfdu1TQVd01FCHGxgKxeD42Kh4EdUPZOJDbihaa0/NH0WXHn/sNeoU/FV7FYDjTVVqX8oQ==}
     engines: {node: '>=24.0'}
@@ -663,8 +655,8 @@ packages:
     resolution: {integrity: sha512-x9FN3VB6T1gG/HvXSRFx2435DAOlUI1O2vodcjKFm7ZZooCACe60Jw2gcLFGk3/752Y7eD6tsAXyHvemB1ydYQ==}
     engines: {node: '>=24.0'}
 
-  '@interop/verifier-core@3.3.1':
-    resolution: {integrity: sha512-QvRM/VTVTG+9VpOnEd15Eklt/IwFc+XJHu7e0xJI4jKVwr43qxBwblWPeTvvM5AdfCkmIxzlvIXdnf62vO0ZUg==}
+  '@interop/verifier-core@3.4.0':
+    resolution: {integrity: sha512-8ohfFDbNrDmz7ynUxBwItF/m7/m7dTHVAePjZdqrxy6Qy9FmaCPB5k6I6TZP+i1az6yete9HWI/M54UAOLPXnA==}
     engines: {node: '>=24.0'}
 
   '@interop/was-client@0.17.0':
@@ -3854,16 +3846,6 @@ snapshots:
       '@scure/base': 2.2.0
       json-canonicalize: 2.0.0
 
-  '@interop/did-web-resolver@6.2.4':
-    dependencies:
-      '@interop/bnid': 6.0.2
-      '@interop/data-integrity-core': 8.3.0
-      '@interop/did-io': 4.1.0
-      '@interop/http-client': 1.0.4
-      did-context: 3.1.1
-    transitivePeerDependencies:
-      - react-native-get-random-values
-
   '@interop/did-web-resolver@6.3.0':
     dependencies:
       '@interop/bnid': 6.0.2
@@ -3983,33 +3965,6 @@ snapshots:
       '@stablelib/chacha': 2.0.1
       '@stablelib/chacha20poly1305': 2.0.1
 
-  '@interop/security-document-loader@9.4.2':
-    dependencies:
-      '@digitalbazaar/data-integrity-context': 2.0.1
-      '@digitalbazaar/multikey-context': 2.0.1
-      '@digitalbazaar/vc-bitstring-status-list-context': 1.1.0
-      '@digitalbazaar/vc-status-list-context': 3.1.1
-      '@digitalbazaar/zcap-context': 2.0.1
-      '@digitalcredentials/credentials-v2-context': 1.0.0
-      '@digitalcredentials/open-badges-context': 3.0.0
-      '@interop/data-integrity-core': 8.3.0
-      '@interop/did-io': 4.1.0
-      '@interop/did-method-key': 7.3.4
-      '@interop/did-web-resolver': 6.2.4
-      '@interop/ecdsa-multikey': 2.3.3
-      '@interop/ed25519-verification-key': 8.0.3
-      '@interop/http-client': 1.0.4
-      aes-key-wrapping-2019-context: 1.0.3
-      credentials-context: 2.0.0
-      did-context: 3.1.1
-      ed25519-signature-2020-context: 1.1.0
-      html-entities: 2.6.0
-      jsonld-document-loader: 2.3.0
-      sha256-hmac-key-2019-context: 1.0.3
-      x25519-key-agreement-2020-context: 1.0.0
-    transitivePeerDependencies:
-      - react-native-get-random-values
-
   '@interop/security-document-loader@9.4.4':
     dependencies:
       '@digitalbazaar/data-integrity-context': 2.0.1
@@ -4058,18 +4013,18 @@ snapshots:
       '@interop/jsonld-signatures': 11.8.3
       credentials-context: 2.0.0
 
-  '@interop/verifier-core@3.3.1':
+  '@interop/verifier-core@3.4.0':
     dependencies:
       '@interop/data-integrity-core': 8.3.0
       '@interop/data-integrity-proof': 3.4.2
       '@interop/did-io': 4.1.0
       '@interop/did-method-key': 7.3.4
-      '@interop/did-web-resolver': 6.2.4
+      '@interop/did-web-resolver': 6.3.0
       '@interop/ecdsa-signature': 2.0.5(@interop/jsonld-signatures@11.8.3)
       '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.3)
       '@interop/ed25519-verification-key': 8.0.3
       '@interop/jsonld-signatures': 11.8.3
-      '@interop/security-document-loader': 9.4.2
+      '@interop/security-document-loader': 9.4.4
       '@interop/vc': 11.0.5
       '@interop/vc-bitstring-status-list': 3.0.4
       ajv: 8.20.0

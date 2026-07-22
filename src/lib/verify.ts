@@ -8,16 +8,21 @@
  */
 import {
   verifyCredential as coreVerify,
-  ProblemTypes
+  ProblemTypes,
+  expirationSuite,
+  createIssuerDetailsSuite
 } from '@interop/verifier-core'
 import type {
   CredentialVerificationResult,
   CheckResult
 } from '@interop/verifier-core'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import { expirationSuite } from '@/lib/verifierSuites/expirationSuite'
-import { issuerDetailsSuite } from '@/lib/verifierSuites/issuerDetailsSuite'
+import { registryManager } from '@/lib/registryManager'
 import type { VerifyCredentialPayload } from '@/types/credential'
+
+const issuerDetailsSuite = createIssuerDetailsSuite({
+  lookupDid: (did: string) => registryManager.lookupDid(did)
+})
 
 const CredentialErrorTypes = {
   CouldNotBeVerified:

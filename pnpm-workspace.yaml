@@ -6,6 +6,7 @@ allowedDeprecatedVersions:
   defekt: '9.3.0'
 minimumReleaseAgeExclude:
   - '@interop/did-web-resolver@6.3.0'
+  - '@interop/verifier-core@3.4.0'
   - '@interop/security-document-loader@9.4.4'
   - '@interop/storage-core@0.3.7'
   - '@interop/was-client@0.17.0'
