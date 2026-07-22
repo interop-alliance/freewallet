@@ -23,19 +23,19 @@ const documentLoader = securityLoader({ fetchRemoteContexts: true }).build()
  * `deleteCredential`), keyed by a monotonically increasing pseudo-cid.
  */
 class FakeStorage {
-  private _items: StoredCredential[] = []
-  private _next = 0
+  #items: StoredCredential[] = []
+  #next = 0
 
   async listCredentials(): Promise<StoredCredential[]> {
-    return [...this._items]
+    return [...this.#items]
   }
 
   async addCredential({ credential }: { credential: IVerifiableCredential }) {
-    this._items.push({ cid: `cid-${this._next++}`, vc: credential })
+    this.#items.push({ cid: `cid-${this.#next++}`, vc: credential })
   }
 
   async deleteCredential({ cid }: { cid: string }) {
-    this._items = this._items.filter(item => item.cid !== cid)
+    this.#items = this.#items.filter(item => item.cid !== cid)
   }
 }
 

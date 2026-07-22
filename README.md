@@ -17,7 +17,9 @@
 
 See:
 
-- [Wallet Attached Storage Specification](https://digitalcredentials.github.io/wallet-attached-storage-spec/)
+- [Wallet Attached Storage Specification](https://w3c-ccg.github.io/wallet-attached-storage-spec/)
+- [ARCHITECTURE.md](ARCHITECTURE.md) -- layer map, session/auth flow, storage model, CHAPI and App Connect flows, glossary
+- [CONTRIBUTING.md](CONTRIBUTING.md) -- code style, JSDoc, comment, and error-handling conventions
 
 ### Supported Features
 
@@ -71,7 +73,7 @@ All are optional; the app runs without any set (local storage, no remote server)
 | Variable                       | Default                                    | Purpose                                                                                                                                                                                                                                                                              |
 | ------------------------------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `PORT`                         | _(Vite default)_                           | Used by Docker, Dokku, etc. Automatically handled by Vite.                                                                                                                                                                                                                           |
-| `VITE_WAS_SERVER_URL`          | _(none)_                                   | Remote [WAS](https://digitalcredentials.github.io/wallet-attached-storage-spec/) server URL. **Setting this attaches a remote replica: local collections replicate to it in the background.** If not provided, the app runs in a local-only mode (storing VCs in browser IndexedDB). |
+| `VITE_WAS_SERVER_URL`          | _(none)_                                   | Remote [WAS](https://w3c-ccg.github.io/wallet-attached-storage-spec/) server URL. **Setting this attaches a remote replica: local collections replicate to it in the background.** If not provided, the app runs in a local-only mode (storing VCs in browser IndexedDB). |
 | `VITE_KMS_SERVER_URL`          | `<WAS server>/kms`                         | WebKMS server URL. Set only when the KMS is hosted separately from the WAS server; no WAS server and no explicit value means no KMS.                                                                                                                                                 |
 | `VITE_KEYRING_CACHE_TTL_HOURS` | `168`                                      | Offline-fallback lifetime of the locally cached keyring record when a WAS server is configured (the remote copy is consulted first on every login). No effect in no-WAS deployments, where the cache is the keyring's only copy.                                                     |
 | `VITE_PASSKEY_RP_ID`           | _(none)_                                   | WebAuthn Relying Party ID for passkey ceremonies. When unset, the page origin's registrable domain applies. **Changing the origin or the RP ID orphans every registered passkey.**                                                                                                   |

@@ -49,14 +49,14 @@ interface CollectionReplication {
  * and shared; `start()`/`stop()` bracket a login/logout.
  */
 class SyncController {
-  private _replications: CollectionReplication[] = []
-  private _onlineHandler?: () => void
-  private _started = false
+  #replications: CollectionReplication[] = []
+  #onlineHandler?: () => void
+  #started = false
   // Serializes every lifecycle transition (start / stop / restart) onto a
   // single chain so overlapping login / logout calls can never interleave and
   // leave dangling replications or a stale `_started` flag. A start racing a
   // stop is thereby impossible: each runs to completion before the next begins.
-  private _queue: Promise<void> = Promise.resolve()
+  #queue: Promise<void> = Promise.resolve()
 
   /**
    * Serializes a lifecycle task after any in-flight one. Rejections are
@@ -67,9 +67,9 @@ class SyncController {
    * @param task {() => Promise<void>}
    * @returns {Promise<void>}
    */
-  private _enqueue(task: () => Promise<void>): Promise<void> {
-    const next = this._queue.then(task, task)
-    this._queue = next.catch(() => {})
+  #enqueue(task: () => Promise<void>): Promise<void> {
+    const next = this.#queue.then(task, task)
+    this.#queue = next.catch(() => {})
     return next
   }
 
@@ -83,7 +83,7 @@ class SyncController {
    * @returns {Promise<void>}
    */
   start({ session }: { session: Session }): Promise<void> {
-    return this._enqueue(() => this._start({ session }))
+    return this.#enqueue(() => this.#start({ session }))
   }
 
   /**
@@ -99,9 +99,9 @@ class SyncController {
    * @returns {Promise<void>}
    */
   restart({ session }: { session: Session }): Promise<void> {
-    return this._enqueue(async () => {
-      await this._stop()
-      await this._start({ session })
+    return this.#enqueue(async () => {
+      await this.#stop()
+      await this.#start({ session })
     })
   }
 
@@ -112,7 +112,7 @@ class SyncController {
    * @returns {Promise<void>}
    */
   stop(): Promise<void> {
-    return this._enqueue(() => this._stop())
+    return this.#enqueue(() => this.#stop())
   }
 
   /**
@@ -126,8 +126,8 @@ class SyncController {
    * @param options.session {Session}
    * @returns {Promise<void>}
    */
-  private async _start({ session }: { session: Session }): Promise<void> {
-    if (this._started) {
+  async #start({ session }: { session: Session }): Promise<void> {
+    if (this.#started) {
       return
     }
     // Guests never sync; a missing client/space means no remote replica.
@@ -136,7 +136,7 @@ class SyncController {
     if (session.isGuest || !WAS_SERVER_URL || !was || !spaceId) {
       return
     }
-    this._started = true
+    this.#started = true
 
     const setStatus = useSyncStatusStore.getState().setStatus
 
@@ -177,19 +177,19 @@ class SyncController {
             setStatus(id, 'error')
           })
         ]
-        this._replications.push({ state, subscriptions })
+        this.#replications.push({ state, subscriptions })
       }
 
       // The one genuinely useful reachability signal: on reconnect, resync
       // immediately rather than waiting out RxDB's backoff tick.
-      this._onlineHandler = () => this.reSync()
-      window.addEventListener('online', this._onlineHandler)
+      this.#onlineHandler = () => this.reSync()
+      window.addEventListener('online', this.#onlineHandler)
     } catch (err) {
       console.error('Failed to start sync controller:', err)
-      // Tear down any partial state cleanly. Call the internal `_stop()`
+      // Tear down any partial state cleanly. Call the internal `#stop()`
       // directly rather than the queueing `stop()`: we already hold the queue,
       // so enqueuing here would deadlock on our own in-flight task.
-      await this._stop()
+      await this.#stop()
     }
   }
 
@@ -202,7 +202,7 @@ class SyncController {
    * @returns {void}
    */
   reSync(): void {
-    for (const { state } of this._replications) {
+    for (const { state } of this.#replications) {
       state.reSync()
     }
   }
@@ -214,12 +214,12 @@ class SyncController {
    *
    * @returns {Promise<void>}
    */
-  private async _stop(): Promise<void> {
-    if (this._onlineHandler) {
-      window.removeEventListener('online', this._onlineHandler)
-      this._onlineHandler = undefined
+  async #stop(): Promise<void> {
+    if (this.#onlineHandler) {
+      window.removeEventListener('online', this.#onlineHandler)
+      this.#onlineHandler = undefined
     }
-    for (const { state, subscriptions } of this._replications) {
+    for (const { state, subscriptions } of this.#replications) {
       for (const subscription of subscriptions) {
         subscription.unsubscribe()
       }
@@ -229,9 +229,9 @@ class SyncController {
         console.error('Error cancelling replication:', err)
       }
     }
-    this._replications = []
+    this.#replications = []
     useSyncStatusStore.getState().reset()
-    this._started = false
+    this.#started = false
   }
 }
 

@@ -113,7 +113,7 @@ export class WASRemoteStore {
    * @param logicalKey {string} e.g. 'privateCredentials' | 'walletActivity'.
    * @returns {string}
    */
-  private _collectionId(logicalKey: string): string {
+  #collectionId(logicalKey: string): string {
     const def = WALLET_STANDARD_COLLECTIONS.find(
       entry => entry.key === logicalKey
     )
@@ -130,7 +130,7 @@ export class WASRemoteStore {
    * @param url {string}
    * @returns {ParsedWasPath}
    */
-  private _parsePath(url: string): ParsedWasPath {
+  #parsePath(url: string): ParsedWasPath {
     const { pathname } = new URL(url, this.storageServerUrl)
     const [root, spaceId, collectionId, resourceId] = pathname
       .split('/')
@@ -149,8 +149,8 @@ export class WASRemoteStore {
    * @param url {string}
    * @returns {Collection}
    */
-  private _collectionFromUrl(url: string): Collection {
-    const { spaceId, collectionId } = this._parsePath(url)
+  #collectionFromUrl(url: string): Collection {
+    const { spaceId, collectionId } = this.#parsePath(url)
     if (!collectionId) {
       throw new Error(`Not a WAS collection URL: "${url}".`)
     }
@@ -173,8 +173,8 @@ export class WASRemoteStore {
    * @param url {string}
    * @returns {Resource}
    */
-  private _resourceFromUrl(url: string): Resource {
-    const { spaceId, collectionId, resourceId } = this._parsePath(url)
+  #resourceFromUrl(url: string): Resource {
+    const { spaceId, collectionId, resourceId } = this.#parsePath(url)
     if (!collectionId || !resourceId) {
       throw new Error(`Not a WAS resource URL: "${url}".`)
     }
@@ -308,7 +308,7 @@ export class WASRemoteStore {
             { cause: err }
           )
         }
-        collections.set(key, this._collectionBaseUrl(id))
+        collections.set(key, this.#collectionBaseUrl(id))
       }
     )
 
@@ -346,7 +346,7 @@ export class WASRemoteStore {
    * @param resourceId {string}
    * @returns {Resource}
    */
-  private _idResource(resourceId: string): Resource {
+  #idResource(resourceId: string): Resource {
     return this.was
       .space(this.spaceId)
       .collection(ID_COLLECTION.id)
@@ -366,7 +366,7 @@ export class WASRemoteStore {
   }: {
     resourceId: string
   }): Promise<unknown> {
-    const result = await this._idResource(resourceId).get()
+    const result = await this.#idResource(resourceId).get()
     return result === null ? undefined : result
   }
 
@@ -396,7 +396,7 @@ export class WASRemoteStore {
     const serialized =
       typeof content === 'string' ? content : JSON.stringify(content)
     const body = new TextEncoder().encode(serialized)
-    await this._idResource(resourceId).put(body, { contentType })
+    await this.#idResource(resourceId).put(body, { contentType })
   }
 
   /**
@@ -414,7 +414,7 @@ export class WASRemoteStore {
   }: {
     resourceId: string
   }): Promise<string | undefined> {
-    const result = await this._idResource(resourceId).getText()
+    const result = await this.#idResource(resourceId).getText()
     return result === null ? undefined : result
   }
 
@@ -432,7 +432,7 @@ export class WASRemoteStore {
   }: {
     resourceId: string
   }): Promise<void> {
-    await this._idResource(resourceId).setPublic()
+    await this.#idResource(resourceId).setPublic()
   }
 
   /**
@@ -493,7 +493,7 @@ export class WASRemoteStore {
         { cause: err }
       )
     }
-    return this._collectionBaseUrl(id)
+    return this.#collectionBaseUrl(id)
   }
 
   /**
@@ -523,7 +523,7 @@ export class WASRemoteStore {
    * @param collectionId {string}
    * @returns {string}
    */
-  private _collectionBaseUrl(collectionId: string): string {
+  #collectionBaseUrl(collectionId: string): string {
     return new URL(
       `/space/${this.spaceId}/${collectionId}/`,
       this.storageServerUrl
@@ -559,7 +559,7 @@ export class WASRemoteStore {
     let collection
     let listing
     try {
-      collection = this._collectionFromUrl(collectionUrl)
+      collection = this.#collectionFromUrl(collectionUrl)
       listing = await collection.list()
     } catch (err) {
       console.error('Error listing collection resources:', err)
@@ -581,13 +581,13 @@ export class WASRemoteStore {
   }: {
     relativeUrl: string
   }): Promise<void> {
-    await this._resourceFromUrl(relativeUrl).delete()
+    await this.#resourceFromUrl(relativeUrl).delete()
   }
 
   async fetchCollectionResource(
     resource: StorageResource
   ): Promise<FetchedCollectionResource> {
-    const result = await this._resourceFromUrl(resource.url).get()
+    const result = await this.#resourceFromUrl(resource.url).get()
     if (result === null) {
       throw new Error('Failed to fetch storage resource (not found).')
     }
@@ -639,7 +639,7 @@ export class WASRemoteStore {
     // serial loop, so the N probes overlap instead of waiting one-by-one.
     return await Promise.all(
       items.map(async item => {
-        const handle = this._collectionFromUrl(item.url)
+        const handle = this.#collectionFromUrl(item.url)
         const [isPublic, description] = await Promise.all([
           handle.isPublic(),
           handle.describe()
@@ -662,7 +662,7 @@ export class WASRemoteStore {
    * @returns {string}
    */
   publicCredentialUrl(cid: string): string {
-    const collectionId = this._collectionId('publicCredentials')
+    const collectionId = this.#collectionId('publicCredentials')
     return new URL(
       `/space/${this.spaceId}/${collectionId}/${cid}`,
       this.storageServerUrl
@@ -686,7 +686,7 @@ export class WASRemoteStore {
   }: {
     logicalKey: string
   }): Promise<Array<{ id: string; url: string }>> {
-    const collectionId = this._collectionId(logicalKey)
+    const collectionId = this.#collectionId(logicalKey)
     let listing
     try {
       listing = await this.was
@@ -726,7 +726,7 @@ export class WASRemoteStore {
     logicalKey: string
     resourceId: string
   }): Promise<Json | undefined> {
-    const collectionId = this._collectionId(logicalKey)
+    const collectionId = this.#collectionId(logicalKey)
     try {
       const response = await this.was.request({
         path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
@@ -768,7 +768,7 @@ export class WASRemoteStore {
     resourceId: string
     body: Json
   }): Promise<{ created: boolean }> {
-    const collectionId = this._collectionId(logicalKey)
+    const collectionId = this.#collectionId(logicalKey)
     try {
       await this.was.request({
         path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(

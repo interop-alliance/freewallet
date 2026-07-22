@@ -58,16 +58,16 @@ import type { WalletActivity } from '@/stores/storageManager'
 export class BrowserStore {
   public dbPrefix: string
   public db?: RxDatabase
-  private _collections?: Record<string, RxCollection<SyncedDoc>>
-  private _storage: RxStorage<unknown, unknown>
-  private _ciphers?: Record<string, DocCipher>
+  #collections?: Record<string, RxCollection<SyncedDoc>>
+  #storage: RxStorage<unknown, unknown>
+  #ciphers?: Record<string, DocCipher>
   // Count of rows the most recent list read had to skip because their envelope
   // would not decrypt under the current vault KAK (corrupted, replicated
   // verbatim from another identity, or written under a mismatched KAK).
   // Surfaced so the pages can warn the user without any one bad row bricking
   // the whole list.
-  private _undecryptableCredentials = 0
-  private _undecryptableHistory = 0
+  #undecryptableCredentials = 0
+  #undecryptableHistory = 0
   // Count of rows the most recent list read had to skip because their envelope
   // named a key epoch this instance's cipher does not know
   // (UnknownEpochError). Unlike the undecryptable rows above, these are not
@@ -75,8 +75,8 @@ export class BrowserStore {
   // cached Collection Description has not caught up to (a rekey emits no change
   // feed entry). They are counted separately, skipped, and NOT cached, so a
   // caller can refresh the marker and re-read.
-  private _unknownEpochCredentials = 0
-  private _unknownEpochHistory = 0
+  #unknownEpochCredentials = 0
+  #unknownEpochHistory = 0
   // Session-lifetime decrypt caches, keyed by RxDB row id. Every credential
   // operation (list, load-one, delete, add's dedupe scan) otherwise re-decrypts
   // the whole collection and re-derives `cidFrom` per row; these memoize the
@@ -90,11 +90,11 @@ export class BrowserStore {
   // stay valid across a swap. Entries are dropped when their row is removed and
   // both caches are cleared on teardown; an insert needs no invalidation
   // because a new envelope always carries a fresh, previously-unseen id.
-  private _credentialCache = new Map<
+  #credentialCache = new Map<
     string,
     { cid: string; vc: IVerifiableCredential }
   >()
-  private _historyCache = new Map<string, WalletActivity>()
+  #historyCache = new Map<string, WalletActivity>()
 
   constructor({
     dbPrefix,
@@ -110,8 +110,8 @@ export class BrowserStore {
     ciphers?: Record<string, DocCipher>
   }) {
     this.dbPrefix = dbPrefix
-    this._storage = storage ?? getRxStorageDexie()
-    this._ciphers = ciphers
+    this.#storage = storage ?? getRxStorageDexie()
+    this.#ciphers = ciphers
   }
 
   /**
@@ -157,7 +157,7 @@ export class BrowserStore {
   async ensureUserCollections({ user }: { user: User }) {
     const db = await createRxDatabase({
       name: `${this.dbPrefix}-wallet-db`,
-      storage: this._storage,
+      storage: this.#storage,
       closeDuplicates: true,
       // Single-tab for the MVP: with `multiInstance` RxDB gates replication on
       // `waitForLeadership()`, which needs the leader-election plugin. Multi-tab
@@ -178,13 +178,13 @@ export class BrowserStore {
           migrationStrategies: syncedDocMigrationStrategies(),
           ...(key === 'contacts' && {
             conflictHandler: createContactsConflictHandler({
-              getCipher: () => this._ciphers?.contacts
+              getCipher: () => this.#ciphers?.contacts
             })
           })
         }
       ])
     )
-    this._collections = (await db.addCollections(
+    this.#collections = (await db.addCollections(
       collectionsConfig
     )) as unknown as Record<string, RxCollection<SyncedDoc>>
     this.db = db
@@ -200,7 +200,7 @@ export class BrowserStore {
    * @returns {RxCollection<SyncedDoc>}
    */
   rxCollection(logicalKey: string): RxCollection<SyncedDoc> {
-    const collection = this._collections?.[logicalKey]
+    const collection = this.#collections?.[logicalKey]
     if (!collection) {
       throw new Error(
         `Local collection "${logicalKey}" is not initialized. ` +
@@ -226,7 +226,7 @@ export class BrowserStore {
    *   `WAS-Key-Epoch` header; absent for a plaintext or pre-epoch write
    * @returns {Promise<void>}
    */
-  private async _insertDoc({
+  async #insertDoc({
     logicalKey,
     id,
     data,
@@ -259,7 +259,7 @@ export class BrowserStore {
    * @param options.data {Json}
    * @returns {Promise<void>}
    */
-  private async _updateDoc({
+  async #updateDoc({
     logicalKey,
     id,
     data
@@ -283,7 +283,7 @@ export class BrowserStore {
    * @returns {number}
    */
   get undecryptableCredentials(): number {
-    return this._undecryptableCredentials
+    return this.#undecryptableCredentials
   }
 
   /**
@@ -293,7 +293,7 @@ export class BrowserStore {
    * @returns {number}
    */
   get undecryptableHistory(): number {
-    return this._undecryptableHistory
+    return this.#undecryptableHistory
   }
 
   /**
@@ -307,7 +307,7 @@ export class BrowserStore {
    * @returns {number}
    */
   get unknownEpochCredentials(): number {
-    return this._unknownEpochCredentials
+    return this.#unknownEpochCredentials
   }
 
   /**
@@ -317,7 +317,7 @@ export class BrowserStore {
    * @returns {number}
    */
   get unknownEpochHistory(): number {
-    return this._unknownEpochHistory
+    return this.#unknownEpochHistory
   }
 
   /**
@@ -332,7 +332,7 @@ export class BrowserStore {
    * @returns {void}
    */
   setCiphers(ciphers: Record<string, DocCipher>): void {
-    this._ciphers = ciphers
+    this.#ciphers = ciphers
   }
 
   /**
@@ -359,7 +359,7 @@ export class BrowserStore {
    *   vc: IVerifiableCredential }>; undecryptableRowIds: string[];
    *   unknownEpochRowIds: string[] }>}
    */
-  private async _credentialEntries(): Promise<{
+  async #credentialEntries(): Promise<{
     entries: Array<{ rowId: string; cid: string; vc: IVerifiableCredential }>
     undecryptableRowIds: string[]
     unknownEpochRowIds: string[]
@@ -367,14 +367,14 @@ export class BrowserStore {
     const docs = await this.rxCollection('privateCredentials')
       .find({ sort: [{ updatedAt: 'asc' }] })
       .exec()
-    const cipher = this._ciphers?.privateCredentials
+    const cipher = this.#ciphers?.privateCredentials
     const entries = []
     const undecryptableRowIds: string[] = []
     const unknownEpochRowIds: string[] = []
     for (const doc of docs) {
       const { id, data } = doc.toMutableJSON()
       if (cipher && isEncryptedEnvelope(data)) {
-        const cached = this._credentialCache.get(id)
+        const cached = this.#credentialCache.get(id)
         if (cached) {
           entries.push({ rowId: id, cid: cached.cid, vc: cached.vc })
           continue
@@ -384,7 +384,7 @@ export class BrowserStore {
             envelope: data!
           })) as unknown as IVerifiableCredential
           const cid = await cidFrom({ doc: vc })
-          this._credentialCache.set(id, { cid, vc })
+          this.#credentialCache.set(id, { cid, vc })
           entries.push({ rowId: id, cid, vc })
         } catch (err) {
           if (err instanceof UnknownEpochError) {
@@ -435,7 +435,7 @@ export class BrowserStore {
     cid: string
     credential: IVerifiableCredential
   }): Promise<boolean> {
-    const cipher = this._ciphers?.privateCredentials
+    const cipher = this.#ciphers?.privateCredentials
     if (!cipher) {
       // Cipher-less (plaintext) store: the row is keyed by cid, so an existing
       // (live) row means an already-stored credential. Checking first derives
@@ -446,21 +446,21 @@ export class BrowserStore {
       if (existing) {
         return false
       }
-      await this._insertDoc({
+      await this.#insertDoc({
         logicalKey: 'privateCredentials',
         id: cid,
         data: credential as unknown as Json
       })
       return true
     }
-    const { entries } = await this._credentialEntries()
+    const { entries } = await this.#credentialEntries()
     if (entries.some(entry => entry.cid === cid)) {
       return false
     }
     const { id, envelope, epoch } = await cipher.encrypt({
       data: credential as unknown as Json
     })
-    await this._insertDoc({
+    await this.#insertDoc({
       logicalKey: 'privateCredentials',
       id,
       data: envelope,
@@ -475,7 +475,7 @@ export class BrowserStore {
    * @returns {Promise<IVerifiableCredential | undefined>}
    */
   async loadCredential({ cid }: { cid: string }) {
-    const { entries } = await this._credentialEntries()
+    const { entries } = await this.#credentialEntries()
     return entries.find(entry => entry.cid === cid)?.vc
   }
 
@@ -491,7 +491,7 @@ export class BrowserStore {
    * @returns {Promise<void>}
    */
   async deleteCredential({ cid }: { cid: string }) {
-    const { entries } = await this._credentialEntries()
+    const { entries } = await this.#credentialEntries()
     for (const entry of entries) {
       if (entry.cid !== cid) {
         continue
@@ -518,7 +518,7 @@ export class BrowserStore {
     if (doc) {
       await doc.remove()
     }
-    this._credentialCache.delete(rowId)
+    this.#credentialCache.delete(rowId)
   }
 
   /**
@@ -530,11 +530,11 @@ export class BrowserStore {
    * @returns {Promise<number>}
    */
   async purgeUndecryptableCredentials(): Promise<number> {
-    const { undecryptableRowIds } = await this._credentialEntries()
+    const { undecryptableRowIds } = await this.#credentialEntries()
     for (const rowId of undecryptableRowIds) {
       await this.deleteCredentialByRowId({ rowId })
     }
-    this._undecryptableCredentials = 0
+    this.#undecryptableCredentials = 0
     return undecryptableRowIds.length
   }
 
@@ -546,9 +546,9 @@ export class BrowserStore {
    */
   async listCredentials(): Promise<Array<StoredCredential>> {
     const { entries, undecryptableRowIds, unknownEpochRowIds } =
-      await this._credentialEntries()
-    this._undecryptableCredentials = undecryptableRowIds.length
-    this._unknownEpochCredentials = unknownEpochRowIds.length
+      await this.#credentialEntries()
+    this.#undecryptableCredentials = undecryptableRowIds.length
+    this.#unknownEpochCredentials = unknownEpochRowIds.length
     const seen = new Set<string>()
     const credentials: StoredCredential[] = []
     for (const { cid, vc } of entries) {
@@ -578,7 +578,7 @@ export class BrowserStore {
     cid: string
     credential: IVerifiableCredential
   }) {
-    await this._insertDoc({
+    await this.#insertDoc({
       logicalKey: 'publicCredentials',
       id: cid,
       data: credential as unknown as Json
@@ -630,9 +630,9 @@ export class BrowserStore {
     resourceId: string
     activity: WalletActivity
   }) {
-    const cipher = this._ciphers?.walletActivity
+    const cipher = this.#ciphers?.walletActivity
     if (!cipher) {
-      await this._insertDoc({
+      await this.#insertDoc({
         logicalKey: 'walletActivity',
         id: resourceId,
         data: activity as Json
@@ -642,7 +642,7 @@ export class BrowserStore {
     const { id, envelope, epoch } = await cipher.encrypt({
       data: activity as Json
     })
-    await this._insertDoc({
+    await this.#insertDoc({
       logicalKey: 'walletActivity',
       id,
       data: envelope,
@@ -668,7 +668,7 @@ export class BrowserStore {
     const docs = await this.rxCollection('walletActivity')
       .find({ sort: [{ updatedAt: 'asc' }] })
       .exec()
-    const cipher = this._ciphers?.walletActivity
+    const cipher = this.#ciphers?.walletActivity
     const seen = new Set<string>()
     const items: Array<{ id: string; doc: WalletActivity }> = []
     let undecryptable = 0
@@ -677,7 +677,7 @@ export class BrowserStore {
       const { id: rowId, data } = rxDoc.toMutableJSON()
       let activity: WalletActivity
       if (cipher && isEncryptedEnvelope(data)) {
-        const cached = this._historyCache.get(rowId)
+        const cached = this.#historyCache.get(rowId)
         if (cached) {
           activity = cached
         } else {
@@ -703,7 +703,7 @@ export class BrowserStore {
             }
             continue
           }
-          this._historyCache.set(rowId, activity)
+          this.#historyCache.set(rowId, activity)
         }
       } else {
         activity = data as WalletActivity
@@ -715,8 +715,8 @@ export class BrowserStore {
       seen.add(id)
       items.push({ id, doc: activity })
     }
-    this._undecryptableHistory = undecryptable
-    this._unknownEpochHistory = unknownEpoch
+    this.#undecryptableHistory = undecryptable
+    this.#unknownEpochHistory = unknownEpoch
     return items
   }
 
@@ -733,13 +733,13 @@ export class BrowserStore {
    *
    * @returns {Promise<Array<{ rowId: string; head: ContactHeadPayload }>>}
    */
-  private async _contactEntries(): Promise<
+  async #contactEntries(): Promise<
     Array<{ rowId: string; head: ContactHeadPayload }>
   > {
     const docs = await this.rxCollection('contacts')
       .find({ sort: [{ updatedAt: 'asc' }] })
       .exec()
-    const cipher = this._ciphers?.contacts
+    const cipher = this.#ciphers?.contacts
     const entries: Array<{ rowId: string; head: ContactHeadPayload }> = []
     for (const doc of docs) {
       const { id, data } = doc.toMutableJSON()
@@ -765,7 +765,7 @@ export class BrowserStore {
    * @returns {Promise<Array<StoredContact>>}
    */
   async listContacts(): Promise<Array<StoredContact>> {
-    const entries = await this._contactEntries()
+    const entries = await this.#contactEntries()
     return entries.map(({ rowId, head }) => ({
       id: rowId,
       // Legacy heads written before the row-id / contact-id split carry no
@@ -786,7 +786,7 @@ export class BrowserStore {
   }: {
     id: string
   }): Promise<StoredContact | undefined> {
-    const entry = (await this._contactEntries()).find(
+    const entry = (await this.#contactEntries()).find(
       ({ rowId }) => rowId === id
     )
     return entry
@@ -830,11 +830,11 @@ export class BrowserStore {
       deviceId,
       contact
     }
-    const cipher = this._ciphers?.contacts
+    const cipher = this.#ciphers?.contacts
     const body = cipher
       ? (await cipher.encrypt({ data: head as unknown as Json })).envelope
       : (head as unknown as Json)
-    await this._insertDoc({ logicalKey: 'contacts', id, data: body })
+    await this.#insertDoc({ logicalKey: 'contacts', id, data: body })
     return { id, contactId, contact, updatedAt }
   }
 
@@ -868,7 +868,7 @@ export class BrowserStore {
       throw new Error(`No local "contacts" row "${id}" to update.`)
     }
     const { data } = doc.toMutableJSON()
-    const cipherForRead = this._ciphers?.contacts
+    const cipherForRead = this.#ciphers?.contacts
     let existingHead: ContactHeadPayload
     if (isEncryptedEnvelope(data)) {
       if (!cipherForRead) {
@@ -890,11 +890,11 @@ export class BrowserStore {
       deviceId,
       contact
     }
-    const cipher = this._ciphers?.contacts
+    const cipher = this.#ciphers?.contacts
     const body = cipher
       ? (await cipher.encrypt({ data: head as unknown as Json })).envelope
       : (head as unknown as Json)
-    await this._updateDoc({ logicalKey: 'contacts', id, data: body })
+    await this.#updateDoc({ logicalKey: 'contacts', id, data: body })
     return { id, contactId, contact, updatedAt }
   }
 
@@ -927,9 +927,9 @@ export class BrowserStore {
   }: {
     revision: ContactRevisionPayload
   }): Promise<void> {
-    const cipher = this._ciphers?.contactsHistory
+    const cipher = this.#ciphers?.contactsHistory
     if (!cipher) {
-      await this._insertDoc({
+      await this.#insertDoc({
         logicalKey: 'contactsHistory',
         id: uuidv7(),
         data: revision as unknown as Json
@@ -939,7 +939,7 @@ export class BrowserStore {
     const { id, envelope } = await cipher.encrypt({
       data: revision as unknown as Json
     })
-    await this._insertDoc({ logicalKey: 'contactsHistory', id, data: envelope })
+    await this.#insertDoc({ logicalKey: 'contactsHistory', id, data: envelope })
   }
 
   /**
@@ -957,7 +957,7 @@ export class BrowserStore {
     const docs = await this.rxCollection('contactsHistory')
       .find({ sort: [{ updatedAt: 'desc' }] })
       .exec()
-    const cipher = this._ciphers?.contactsHistory
+    const cipher = this.#ciphers?.contactsHistory
     const revisions: ContactRevisionPayload[] = []
     for (const doc of docs) {
       const { id, data } = doc.toMutableJSON()
@@ -1015,7 +1015,7 @@ export class BrowserStore {
     if (hasLocalStorage && localStorage.getItem(markerKey)) {
       return
     }
-    for (const [logicalKey, cipher] of Object.entries(this._ciphers ?? {})) {
+    for (const [logicalKey, cipher] of Object.entries(this.#ciphers ?? {})) {
       const collection = this.rxCollection(logicalKey)
       const docs = await collection.find().exec()
       for (const doc of docs) {
@@ -1087,12 +1087,12 @@ export class BrowserStore {
    * @returns {Promise<void>}
    */
   async wipeStorage() {
-    this._credentialCache.clear()
-    this._historyCache.clear()
+    this.#credentialCache.clear()
+    this.#historyCache.clear()
     if (this.db) {
       await this.db.remove()
       this.db = undefined
-      this._collections = undefined
+      this.#collections = undefined
     }
     // Guarded: absent under the memory storage used in unit tests.
     if (typeof indexedDB !== 'undefined') {
@@ -1100,7 +1100,7 @@ export class BrowserStore {
       await Promise.all(
         databases
           .filter(db => db.name!.includes(this.dbPrefix))
-          .map(db => this._deleteDatabase(db.name!))
+          .map(db => this.#deleteDatabase(db.name!))
       )
     }
   }
@@ -1122,7 +1122,7 @@ export class BrowserStore {
    * @param name {string}
    * @returns {Promise<void>}
    */
-  private _deleteDatabase(name: string): Promise<void> {
+  #deleteDatabase(name: string): Promise<void> {
     return new Promise<void>(resolve => {
       const request = indexedDB.deleteDatabase(name)
       request.onsuccess = () => resolve()
@@ -1150,12 +1150,12 @@ export class BrowserStore {
    * @returns {Promise<void>}
    */
   async close() {
-    this._credentialCache.clear()
-    this._historyCache.clear()
+    this.#credentialCache.clear()
+    this.#historyCache.clear()
     if (this.db) {
       await this.db.close()
       this.db = undefined
-      this._collections = undefined
+      this.#collections = undefined
     }
   }
 }

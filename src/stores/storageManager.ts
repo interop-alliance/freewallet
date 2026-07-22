@@ -174,28 +174,28 @@ function writeCachedMarker({
  * optional remote WAS backend for replication and remote-only features.
  */
 export class StorageManager {
-  private _localStore: BrowserStore
-  private _remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
+  #localStore: BrowserStore
+  #remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
   // The per-collection document ciphers (same set handed to the local store),
   // kept here for remote-direct mode's own encrypt/decrypt at the WAS seam.
-  private _ciphers?: Record<string, DocCipher>
+  #ciphers?: Record<string, DocCipher>
   // Route credential + history operations straight to the remote WAS
   // collections instead of the local BrowserStore (the CHAPI popup path).
-  private _remoteDirect: boolean
+  #remoteDirect: boolean
   // The vault key material, kept so ciphers can be rebuilt after a marker
   // refresh (an unknown-epoch read) without re-plumbing the profile.
-  private _vaultKeys?: {
+  #vaultKeys?: {
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
   }
   // The last-known per-collection encryption markers, keyed by WAS collection
   // id, that the current ciphers were built from.
-  private _markers: Record<string, CollectionEncryption>
+  #markers: Record<string, CollectionEncryption>
   // WAS collection ids whose marker has already been refreshed once this
   // session in response to an unknown-epoch read, so a genuinely foreign
   // envelope cannot drive a refresh loop. Cleared whenever a share / unshare
   // installs a fresh marker.
-  private _markerRefreshed = new Set<string>()
+  #markerRefreshed = new Set<string>()
 
   constructor({
     localStore,
@@ -215,12 +215,12 @@ export class StorageManager {
     }
     markers?: Record<string, CollectionEncryption>
   }) {
-    this._localStore = localStore
-    this._remoteStore = remoteStore
-    this._ciphers = ciphers
-    this._remoteDirect = remoteDirect
-    this._vaultKeys = vaultKeys
-    this._markers = markers ?? {}
+    this.#localStore = localStore
+    this.#remoteStore = remoteStore
+    this.#ciphers = ciphers
+    this.#remoteDirect = remoteDirect
+    this.#vaultKeys = vaultKeys
+    this.#markers = markers ?? {}
   }
 
   /**
@@ -228,8 +228,8 @@ export class StorageManager {
    * meaningful when a remote store is configured (a guest / no-WAS session
    * always uses the local BrowserStore).
    */
-  private get _effectiveRemoteDirect(): boolean {
-    return this._remoteDirect && !!this._remoteStore
+  get #effectiveRemoteDirect(): boolean {
+    return this.#remoteDirect && !!this.#remoteStore
   }
 
   /**
@@ -238,7 +238,7 @@ export class StorageManager {
    * collections that `ensureUserCollections` initializes).
    */
   get remoteDirectActive(): boolean {
-    return this._effectiveRemoteDirect
+    return this.#effectiveRemoteDirect
   }
 
   /**
@@ -246,14 +246,14 @@ export class StorageManager {
    * instead of reaching into the backend directly.
    */
   get hasRemoteStorage(): boolean {
-    return !!this._remoteStore
+    return !!this.#remoteStore
   }
 
   /**
    * The remote Space id, or undefined when there is no remote backend.
    */
   get spaceId(): string | undefined {
-    return this._remoteStore?.spaceId
+    return this.#remoteStore?.spaceId
   }
 
   /**
@@ -262,14 +262,14 @@ export class StorageManager {
    * replicas (it signs with the same session key).
    */
   get wasClient(): WASRemoteStore['was'] | undefined {
-    return this._remoteStore?.was
+    return this.#remoteStore?.was
   }
 
   /**
    * The remote Space URL, or undefined when there is no remote backend.
    */
   get spaceUrl(): string | undefined {
-    return this._remoteStore?.spaceUrl
+    return this.#remoteStore?.spaceUrl
   }
 
   /**
@@ -278,7 +278,7 @@ export class StorageManager {
    * actually been published is a separate `profile.didWeb` check.)
    */
   get publishedDidUrl(): string | undefined {
-    return this._remoteStore?.didDocumentUrl()
+    return this.#remoteStore?.didDocumentUrl()
   }
 
   /**
@@ -288,7 +288,7 @@ export class StorageManager {
    * directly through it.
    */
   get remoteStore(): WASRemoteStore | undefined {
-    return this._remoteStore
+    return this.#remoteStore
   }
 
   /**
@@ -300,7 +300,7 @@ export class StorageManager {
    * @returns {RxCollection<SyncedDoc>}
    */
   localCollection(logicalKey: string): RxCollection<SyncedDoc> {
-    return this._localStore.rxCollection(logicalKey)
+    return this.#localStore.rxCollection(logicalKey)
   }
 
   /**
@@ -317,7 +317,7 @@ export class StorageManager {
    *   collection encryption markers, keyed by WAS collection id
    * @returns {Promise<Record<string, DocCipher>>}
    */
-  private static async _buildCiphers({
+  static async #buildCiphers({
     keyAgreementKey,
     keyResolver,
     markers
@@ -355,7 +355,7 @@ export class StorageManager {
    * @param [options.remoteStore] {WASRemoteStore}
    * @returns {Promise<Record<string, CollectionEncryption>>}
    */
-  private static async _acquireMarkers({
+  static async #acquireMarkers({
     remoteStore
   }: {
     remoteStore?: WASRemoteStore
@@ -399,17 +399,17 @@ export class StorageManager {
    *
    * @returns {Promise<void>}
    */
-  private async _rebuildCiphers(): Promise<void> {
-    if (!this._vaultKeys) {
+  async #rebuildCiphers(): Promise<void> {
+    if (!this.#vaultKeys) {
       return
     }
-    const ciphers = await StorageManager._buildCiphers({
-      keyAgreementKey: this._vaultKeys.keyAgreementKey,
-      keyResolver: this._vaultKeys.keyResolver,
-      markers: this._markers
+    const ciphers = await StorageManager.#buildCiphers({
+      keyAgreementKey: this.#vaultKeys.keyAgreementKey,
+      keyResolver: this.#vaultKeys.keyResolver,
+      markers: this.#markers
     })
-    this._ciphers = ciphers
-    this._localStore.setCiphers(ciphers)
+    this.#ciphers = ciphers
+    this.#localStore.setCiphers(ciphers)
   }
 
   /**
@@ -421,14 +421,14 @@ export class StorageManager {
    *
    * @returns {Promise<void>}
    */
-  private async _refreshMarkers(): Promise<void> {
-    if (!this._remoteStore || !this._vaultKeys) {
+  async #refreshMarkers(): Promise<void> {
+    if (!this.#remoteStore || !this.#vaultKeys) {
       return
     }
-    this._markers = await StorageManager._acquireMarkers({
-      remoteStore: this._remoteStore
+    this.#markers = await StorageManager.#acquireMarkers({
+      remoteStore: this.#remoteStore
     })
-    await this._rebuildCiphers()
+    await this.#rebuildCiphers()
   }
 
   static async initStorageClients({
@@ -466,7 +466,7 @@ export class StorageManager {
         profile
       }))
     }
-    const markers = await StorageManager._acquireMarkers({ remoteStore })
+    const markers = await StorageManager.#acquireMarkers({ remoteStore })
 
     // One document cipher per encrypted collection, built from the session's
     // passphrase-derived key material (guests included -- their random secret
@@ -474,7 +474,7 @@ export class StorageManager {
     // rest of a guest session) plus any multi-recipient marker. The local store
     // holds EDV envelopes for these collections and replication ships them
     // verbatim.
-    const ciphers = await StorageManager._buildCiphers({
+    const ciphers = await StorageManager.#buildCiphers({
       keyAgreementKey,
       keyResolver,
       markers
@@ -523,9 +523,9 @@ export class StorageManager {
     // the remote `private-credentials` collection; in remote-direct mode it is
     // written straight there.
     const cid = await cidFrom({ doc: credential })
-    const inserted = this._effectiveRemoteDirect
-      ? await this._addCredentialRemote({ cid, credential })
-      : await this._localStore.addCredential({ cid, credential })
+    const inserted = this.#effectiveRemoteDirect
+      ? await this.#addCredentialRemote({ cid, credential })
+      : await this.#localStore.addCredential({ cid, credential })
     if (inserted) {
       // Best-effort: the credential is already durably stored, and losing a
       // log line beats reporting the whole store as failed (in remote-direct
@@ -539,8 +539,8 @@ export class StorageManager {
   }
 
   async listCredentials(): Promise<Array<StoredCredential>> {
-    if (this._effectiveRemoteDirect) {
-      const entries = await this._remoteCredentialEntries()
+    if (this.#effectiveRemoteDirect) {
+      const entries = await this.#remoteCredentialEntries()
       const seen = new Set<string>()
       const credentials: StoredCredential[] = []
       for (const { cid, vc } of entries) {
@@ -552,20 +552,20 @@ export class StorageManager {
       }
       return credentials
     }
-    const credentials = await this._localStore.listCredentials()
+    const credentials = await this.#localStore.listCredentials()
     if (
-      this._localStore.unknownEpochCredentials > 0 &&
-      this._remoteStore &&
-      this._vaultKeys &&
-      !this._markerRefreshed.has('private-credentials')
+      this.#localStore.unknownEpochCredentials > 0 &&
+      this.#remoteStore &&
+      this.#vaultKeys &&
+      !this.#markerRefreshed.has('private-credentials')
     ) {
       // Unknown-epoch rows mean the local cipher may be built from a stale
       // marker (a rekey emits no change-feed entry). Refresh the marker once,
       // rebuild the ciphers, and re-read -- guarded so a genuinely foreign
       // envelope cannot loop.
-      this._markerRefreshed.add('private-credentials')
-      await this._refreshMarkers()
-      return await this._localStore.listCredentials()
+      this.#markerRefreshed.add('private-credentials')
+      await this.#refreshMarkers()
+      return await this.#localStore.listCredentials()
     }
     return credentials
   }
@@ -575,17 +575,17 @@ export class StorageManager {
   }: {
     cid: string
   }): Promise<IVerifiableCredential | undefined> {
-    if (this._effectiveRemoteDirect) {
-      const entries = await this._remoteCredentialEntries()
+    if (this.#effectiveRemoteDirect) {
+      const entries = await this.#remoteCredentialEntries()
       return entries.find(entry => entry.cid === cid)?.vc
     }
-    return await this._localStore.loadCredential({ cid })
+    return await this.#localStore.loadCredential({ cid })
   }
 
   /**
    * Reads every resource of the remote `private-credentials` collection and
    * resolves each to its content cid + decrypted VC, mirroring
-   * `BrowserStore._credentialEntries` (decrypt envelope rows, pass legacy
+   * `BrowserStore.#credentialEntries` (decrypt envelope rows, pass legacy
    * plaintext rows through keyed by their resource id). The per-resource GETs
    * run in parallel. Order is whatever the WAS listing returns (best-effort);
    * dedupe keys on the content cid, so ordering only affects which duplicate
@@ -594,11 +594,11 @@ export class StorageManager {
    * @returns {Promise<Array<{ resourceId: string; cid: string;
    *   vc: IVerifiableCredential }>>}
    */
-  private async _remoteCredentialEntries(): Promise<
+  async #remoteCredentialEntries(): Promise<
     Array<{ resourceId: string; cid: string; vc: IVerifiableCredential }>
   > {
-    const remote = this._remoteStore!
-    const cipher = this._ciphers?.privateCredentials
+    const remote = this.#remoteStore!
+    const cipher = this.#ciphers?.privateCredentials
     const resources = await remote.listSyncedResources({
       logicalKey: 'privateCredentials'
     })
@@ -658,28 +658,28 @@ export class StorageManager {
    * @param options.credential {IVerifiableCredential}
    * @returns {Promise<boolean>}
    */
-  private async _addCredentialRemote({
+  async #addCredentialRemote({
     cid,
     credential
   }: {
     cid: string
     credential: IVerifiableCredential
   }): Promise<boolean> {
-    const cipher = this._ciphers?.privateCredentials
+    const cipher = this.#ciphers?.privateCredentials
     if (!cipher) {
       throw new Error(
         'Remote-direct credential storage requires the private-credentials ' +
           'cipher.'
       )
     }
-    const entries = await this._remoteCredentialEntries()
+    const entries = await this.#remoteCredentialEntries()
     if (entries.some(entry => entry.cid === cid)) {
       return false
     }
     const { id, envelope } = await cipher.encrypt({
       data: credential as unknown as Json
     })
-    const { created } = await this._remoteStore!.putSyncedResource({
+    const { created } = await this.#remoteStore!.putSyncedResource({
       logicalKey: 'privateCredentials',
       resourceId: id,
       body: envelope
@@ -688,7 +688,7 @@ export class StorageManager {
   }
 
   async deleteCredential({ cid }: { cid: string }) {
-    await this._localStore.deleteCredential({ cid })
+    await this.#localStore.deleteCredential({ cid })
   }
 
   /**
@@ -701,7 +701,7 @@ export class StorageManager {
    * @returns {number}
    */
   get undecryptableCredentials(): number {
-    return this._localStore.undecryptableCredentials
+    return this.#localStore.undecryptableCredentials
   }
 
   /**
@@ -712,16 +712,16 @@ export class StorageManager {
    * @returns {Promise<number>}
    */
   async purgeUndecryptableCredentials(): Promise<number> {
-    return await this._localStore.purgeUndecryptableCredentials()
+    return await this.#localStore.purgeUndecryptableCredentials()
   }
 
   async wipeStorage() {
     // Remote first: if the remote wipe fails, the error surfaces while the
     // local data (and session) are still intact.
-    if (this._remoteStore) {
-      await this._remoteStore.wipeStorage()
+    if (this.#remoteStore) {
+      await this.#remoteStore.wipeStorage()
     }
-    await this._localStore.wipeStorage()
+    await this.#localStore.wipeStorage()
   }
 
   /**
@@ -730,21 +730,21 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async close() {
-    await this._localStore.close()
+    await this.#localStore.close()
   }
 
   async getSpaceQuotas(): Promise<SpaceQuotaReport | null> {
-    if (!this._remoteStore) {
+    if (!this.#remoteStore) {
       return null
     }
-    return await this._remoteStore.getSpaceQuotas()
+    return await this.#remoteStore.getSpaceQuotas()
   }
 
   async exportSpace(): Promise<ReadableStream<Uint8Array>> {
-    if (!this._remoteStore) {
+    if (!this.#remoteStore) {
       throw new Error('Remote storage is not configured for this session.')
     }
-    return await this._remoteStore.exportSpace()
+    return await this.#remoteStore.exportSpace()
   }
 
   async importSpace({
@@ -752,17 +752,17 @@ export class StorageManager {
   }: {
     tarFile: File
   }): Promise<ImportSpaceSummary> {
-    if (!this._remoteStore) {
+    if (!this.#remoteStore) {
       throw new Error('Remote storage is not configured for this session.')
     }
-    return await this._remoteStore.importSpace({ tarFile })
+    return await this.#remoteStore.importSpace({ tarFile })
   }
 
   async listCollections(): Promise<Array<StorageCollection>> {
-    if (!this._remoteStore) {
+    if (!this.#remoteStore) {
       return []
     }
-    return await this._remoteStore.listCollections()
+    return await this.#remoteStore.listCollections()
   }
 
   async listCollectionResources({
@@ -770,19 +770,19 @@ export class StorageManager {
   }: {
     collectionUrl: string
   }): Promise<Array<StorageResource>> {
-    if (!this._remoteStore) {
+    if (!this.#remoteStore) {
       return []
     }
-    return await this._remoteStore.listCollectionResources({ collectionUrl })
+    return await this.#remoteStore.listCollectionResources({ collectionUrl })
   }
 
   async fetchCollectionResource(
     resource: StorageResource
   ): Promise<FetchedCollectionResource> {
-    if (!this._remoteStore) {
+    if (!this.#remoteStore) {
       throw new Error('Remote storage is not configured for this session.')
     }
-    return await this._remoteStore.fetchCollectionResource(resource)
+    return await this.#remoteStore.fetchCollectionResource(resource)
   }
 
   /**
@@ -813,7 +813,7 @@ export class StorageManager {
     const entry = WALLET_STANDARD_COLLECTIONS.find(
       collection => collection.id === collectionId && collection.encryption
     )
-    const cipher = entry && this._ciphers?.[entry.key]
+    const cipher = entry && this.#ciphers?.[entry.key]
     if (!cipher) {
       return undefined
     }
@@ -830,10 +830,10 @@ export class StorageManager {
   }
 
   async deleteCollectionResource(resource: StorageResource): Promise<void> {
-    if (!this._remoteStore) {
+    if (!this.#remoteStore) {
       throw new Error('Remote storage is not configured for this session.')
     }
-    await this._remoteStore.deleteCollectionResource({
+    await this.#remoteStore.deleteCollectionResource({
       relativeUrl: resource.url
     })
   }
@@ -860,17 +860,17 @@ export class StorageManager {
     name?: string
     isPublic?: boolean
   }): Promise<void> {
-    if (!this._remoteStore) {
+    if (!this.#remoteStore) {
       throw new Error('Provisioning a collection requires remote storage.')
     }
-    await this._remoteStore.ensureCollection({ id, name, isPublic })
+    await this.#remoteStore.ensureCollection({ id, name, isPublic })
   }
 
   async deleteCollection({ id }: { id: string }): Promise<void> {
-    if (!this._remoteStore) {
+    if (!this.#remoteStore) {
       throw new Error('Deleting a collection requires remote storage.')
     }
-    await this._remoteStore.deleteCollection({ id })
+    await this.#remoteStore.deleteCollection({ id })
   }
 
   async ensureUserCollections({
@@ -880,19 +880,19 @@ export class StorageManager {
     user: User
     profile?: ControllerProfile
   }) {
-    await this._localStore.ensureUserCollections({ user })
+    await this.#localStore.ensureUserCollections({ user })
     // Re-key any plaintext rows a pre-encryption version of the app left in
     // the (now encrypted) local collections. Runs before login completes --
     // and so before background replication starts -- because the remote
     // collections reject plaintext pushes once their encryption marker is set.
-    await this._localStore.migrateLocalPlaintextDocs()
+    await this.#localStore.migrateLocalPlaintextDocs()
     // Re-key any `public-credentials` rows left under the pre-fix CID formula.
     // Runs regardless of vault state -- public rows are plaintext -- and before
     // replication so the tombstone and the re-keyed row reach the remote
     // collection.
-    await this._localStore.migratePublicCredentialCids()
-    if (this._remoteStore) {
-      await this._remoteStore.ensureUserCollections({ user })
+    await this.#localStore.migratePublicCredentialCids()
+    if (this.#remoteStore) {
+      await this.#remoteStore.ensureUserCollections({ user })
       // Provision and publish the user's did:web DID (only when a keystore
       // agent is present). Runs here, after the Space and `id` collection
       // exist. Non-fatal like keystore provisioning: a KMS/WAS hiccup must not
@@ -901,12 +901,12 @@ export class StorageManager {
       if (profile?.keystoreAgent) {
         try {
           const did = didWebFromSpace({
-            wasServerUrl: this._remoteStore.storageServerUrl,
-            spaceId: this._remoteStore.spaceId
+            wasServerUrl: this.#remoteStore.storageServerUrl,
+            spaceId: this.#remoteStore.spaceId
           })
           const keys = await ensureDidWeb({
             keystoreAgent: profile.keystoreAgent,
-            remoteStore: this._remoteStore,
+            remoteStore: this.#remoteStore,
             did
           })
           profile.didWeb = { did, keys }
@@ -924,9 +924,9 @@ export class StorageManager {
                 did: webvhDid
               } = await ensureDidWebvh({
                 keystoreAgent: profile.keystoreAgent,
-                remoteStore: this._remoteStore,
-                wasServerUrl: this._remoteStore.storageServerUrl,
-                spaceId: this._remoteStore.spaceId,
+                remoteStore: this.#remoteStore,
+                wasServerUrl: this.#remoteStore.storageServerUrl,
+                spaceId: this.#remoteStore.spaceId,
                 didWebKeys: keys as DidWebKeyMapV2
               })
               if (webvhDid) {
@@ -952,18 +952,18 @@ export class StorageManager {
    * @param options.activity {WalletActivity}
    * @returns {Promise<void>}
    */
-  private async _addHistoryItem({
+  async #addHistoryItem({
     resourceId,
     activity
   }: {
     resourceId: string
     activity: WalletActivity
   }): Promise<void> {
-    if (this._effectiveRemoteDirect) {
-      await this._addHistoryItemRemote({ activity })
+    if (this.#effectiveRemoteDirect) {
+      await this.#addHistoryItemRemote({ activity })
       return
     }
-    await this._localStore.addHistoryItem({ resourceId, activity })
+    await this.#localStore.addHistoryItem({ resourceId, activity })
   }
 
   /**
@@ -977,19 +977,19 @@ export class StorageManager {
    * @param options.activity {WalletActivity}
    * @returns {Promise<void>}
    */
-  private async _addHistoryItemRemote({
+  async #addHistoryItemRemote({
     activity
   }: {
     activity: WalletActivity
   }) {
-    const cipher = this._ciphers?.walletActivity
+    const cipher = this.#ciphers?.walletActivity
     if (!cipher) {
       throw new Error(
         'Remote-direct history storage requires the wallet-activity cipher.'
       )
     }
     const { id, envelope } = await cipher.encrypt({ data: activity as Json })
-    await this._remoteStore!.putSyncedResource({
+    await this.#remoteStore!.putSyncedResource({
       logicalKey: 'walletActivity',
       resourceId: id,
       body: envelope
@@ -1002,7 +1002,7 @@ export class StorageManager {
    */
   async addHistoryNewAccount({ user }: { user: User }) {
     const resourceId = uuidv7()
-    await this._addHistoryItem({
+    await this.#addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -1022,7 +1022,7 @@ export class StorageManager {
    */
   async addHistorySpaceCreated({ user }: { user: User }) {
     const resourceId = uuidv7()
-    const remote = this._remoteStore
+    const remote = this.#remoteStore
     const objects = remote
       ? [
           { type: ['Space'], id: remote.spaceUrl },
@@ -1035,7 +1035,7 @@ export class StorageManager {
           type: ['Collection'],
           id
         }))
-    await this._addHistoryItem({
+    await this.#addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -1062,7 +1062,7 @@ export class StorageManager {
    * @param options.verb {string} - the summary verb, e.g. 'created' | 'deleted'.
    * @returns {Promise<void>}
    */
-  private async _addCredentialActivity({
+  async #addCredentialActivity({
     cid,
     user,
     type,
@@ -1074,7 +1074,7 @@ export class StorageManager {
     verb: string
   }) {
     const resourceId = uuidv7()
-    await this._addHistoryItem({
+    await this.#addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -1102,7 +1102,7 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    await this._addCredentialActivity({
+    await this.#addCredentialActivity({
       cid,
       user,
       type: 'Create',
@@ -1125,7 +1125,7 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    await this._addCredentialActivity({
+    await this.#addCredentialActivity({
       cid,
       user,
       type: 'Delete',
@@ -1141,7 +1141,7 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async addHistoryCredentialShared({ cid, user }: { cid: string; user: User }) {
-    await this._addCredentialActivity({
+    await this.#addCredentialActivity({
       cid,
       user,
       type: 'Share',
@@ -1163,7 +1163,7 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    await this._addCredentialActivity({
+    await this.#addCredentialActivity({
       cid,
       user,
       type: 'Unshare',
@@ -1212,7 +1212,7 @@ export class StorageManager {
       ? `Connected ${appConnect.name} (${origin}) to wallet` +
         `${appConnect.firstRun ? ', minting a new app key' : ''}.`
       : `Logged in to ${origin} with wallet.`
-    await this._addHistoryItem({
+    await this.#addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -1265,7 +1265,7 @@ export class StorageManager {
         ? `Revoked ${name} (${origin}) app access: ${revoked} grant(s) ` +
           `revoked${skipped ? `, ${skipped} skipped` : ''}.`
         : `Revoked ${name} (${origin}) app access.`
-    await this._addHistoryItem({
+    await this.#addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -1308,11 +1308,11 @@ export class StorageManager {
     origin: string
     subjectDid: string
   }): Promise<{ revoked: number; skipped: number }> {
-    const remote = this._remoteStore
+    const remote = this.#remoteStore
     if (!remote) {
       return { revoked: 0, skipped: 0 }
     }
-    const { zcaps, skipped: nonRevocable } = await this._recordedAppGrantZcaps({
+    const { zcaps, skipped: nonRevocable } = await this.#recordedAppGrantZcaps({
       origin,
       subjectDid
     })
@@ -1348,7 +1348,7 @@ export class StorageManager {
    * @param options.subjectDid {string}
    * @returns {Promise<{ zcaps: IDelegatedZcap[]; skipped: number }>}
    */
-  private async _recordedAppGrantZcaps({
+  async #recordedAppGrantZcaps({
     origin,
     subjectDid
   }: {
@@ -1414,7 +1414,7 @@ export class StorageManager {
    * sharing requires a remote replica to be configured.
    */
   get canShare(): boolean {
-    return !!this._remoteStore
+    return !!this.#remoteStore
   }
 
   /**
@@ -1422,7 +1422,7 @@ export class StorageManager {
    * when there is no remote backend.
    */
   publicLinkUrl({ cid }: { cid: string }): string | undefined {
-    return this._remoteStore?.publicCredentialUrl(cid)
+    return this.#remoteStore?.publicCredentialUrl(cid)
   }
 
   /**
@@ -1440,12 +1440,12 @@ export class StorageManager {
   }: {
     credential: IVerifiableCredential
   }): Promise<string> {
-    if (!this._remoteStore) {
+    if (!this.#remoteStore) {
       throw new Error('Public links require remote storage.')
     }
     const cid = await cidFrom({ doc: credential })
-    await this._localStore.addPublicCredential({ cid, credential })
-    return this._remoteStore.publicCredentialUrl(cid)
+    await this.#localStore.addPublicCredential({ cid, credential })
+    return this.#remoteStore.publicCredentialUrl(cid)
   }
 
   /**
@@ -1457,11 +1457,11 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async removePublicLink({ cid }: { cid: string }): Promise<void> {
-    await this._localStore.removePublicCredential({ cid })
+    await this.#localStore.removePublicCredential({ cid })
   }
 
   async isShared({ cid }: { cid: string }): Promise<boolean> {
-    return await this._localStore.hasPublicCredential({ cid })
+    return await this.#localStore.hasPublicCredential({ cid })
   }
 
   /**
@@ -1470,17 +1470,17 @@ export class StorageManager {
   async listHistoryItems(): Promise<
     Array<{ id: string; doc: WalletActivity }>
   > {
-    const items = await this._localStore.listHistoryItems()
+    const items = await this.#localStore.listHistoryItems()
     if (
-      this._localStore.unknownEpochHistory > 0 &&
-      this._remoteStore &&
-      this._vaultKeys &&
-      !this._markerRefreshed.has('wallet-activity')
+      this.#localStore.unknownEpochHistory > 0 &&
+      this.#remoteStore &&
+      this.#vaultKeys &&
+      !this.#markerRefreshed.has('wallet-activity')
     ) {
       // Same stale-marker refresh as `listCredentials`, once per session.
-      this._markerRefreshed.add('wallet-activity')
-      await this._refreshMarkers()
-      return await this._localStore.listHistoryItems()
+      this.#markerRefreshed.add('wallet-activity')
+      await this.#refreshMarkers()
+      return await this.#localStore.listHistoryItems()
     }
     return items
   }
@@ -1529,7 +1529,7 @@ export class StorageManager {
     controller: string
     expires?: Date
   }): Promise<CollectionEncryption> {
-    const remote = this._remoteStore
+    const remote = this.#remoteStore
     if (!remote) {
       throw new Error('Sharing a collection requires remote storage.')
     }
@@ -1577,7 +1577,7 @@ export class StorageManager {
     // Record the share -- the full delegated zcap document is the revocation
     // hook `unshareCollection` reads back.
     const resourceId = uuidv7()
-    await this._addHistoryItem({
+    await this.#addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -1597,10 +1597,10 @@ export class StorageManager {
 
     // Update the marker cache and rebuild + swap the ciphers under it.
     writeCachedMarker({ spaceId: remote.spaceId, collectionId, marker })
-    this._markers = { ...this._markers, [collectionId]: marker }
-    this._markerRefreshed.clear()
-    this._vaultKeys = { keyAgreementKey, keyResolver }
-    await this._rebuildCiphers()
+    this.#markers = { ...this.#markers, [collectionId]: marker }
+    this.#markerRefreshed.clear()
+    this.#vaultKeys = { keyAgreementKey, keyResolver }
+    await this.#rebuildCiphers()
     return marker
   }
 
@@ -1637,7 +1637,7 @@ export class StorageManager {
     collectionId: string
     recipientId: string
   }): Promise<CollectionEncryption> {
-    const remote = this._remoteStore
+    const remote = this.#remoteStore
     if (!remote) {
       throw new Error('Unsharing a collection requires remote storage.')
     }
@@ -1651,7 +1651,7 @@ export class StorageManager {
 
     // Gather every zcap recorded for this recipient, to revoke as the pull-axis
     // half of the removal.
-    const revoke = await this._recordedShareZcaps({ collectionId, recipientId })
+    const revoke = await this.#recordedShareZcaps({ collectionId, recipientId })
     const marker = await removeRecipient({
       collection: remote.collectionHandle({ collectionId }),
       space: remote.spaceHandle(),
@@ -1660,7 +1660,7 @@ export class StorageManager {
     })
 
     const resourceId = uuidv7()
-    await this._addHistoryItem({
+    await this.#addHistoryItem({
       resourceId,
       activity: {
         id: resourceId,
@@ -1673,10 +1673,10 @@ export class StorageManager {
     })
 
     writeCachedMarker({ spaceId: remote.spaceId, collectionId, marker })
-    this._markers = { ...this._markers, [collectionId]: marker }
-    this._markerRefreshed.clear()
-    this._vaultKeys = { keyAgreementKey, keyResolver }
-    await this._rebuildCiphers()
+    this.#markers = { ...this.#markers, [collectionId]: marker }
+    this.#markerRefreshed.clear()
+    this.#vaultKeys = { keyAgreementKey, keyResolver }
+    await this.#rebuildCiphers()
     return marker
   }
 
@@ -1690,7 +1690,7 @@ export class StorageManager {
    * @param options.recipientId {string}
    * @returns {Promise<IDelegatedZcap[]>}
    */
-  private async _recordedShareZcaps({
+  async #recordedShareZcaps({
     collectionId,
     recipientId
   }: {
@@ -1741,8 +1741,8 @@ export class StorageManager {
   }): Promise<
     Array<{ recipientId: string; controller?: string; expires?: string }>
   > {
-    const remote = this._remoteStore
-    let marker: CollectionEncryption | undefined = this._markers[collectionId]
+    const remote = this.#remoteStore
+    let marker: CollectionEncryption | undefined = this.#markers[collectionId]
     if (!marker && remote) {
       try {
         marker = await remote.collectionEncryption({ collectionId })
@@ -1764,7 +1764,7 @@ export class StorageManager {
     }
     // The owner's own key-agreement key is recipient zero on every epoch; drop
     // it so the list is only the other readers.
-    const ownerKid = this._vaultKeys?.keyAgreementKey.id
+    const ownerKid = this.#vaultKeys?.keyAgreementKey.id
     const recipientIds = epoch.recipients
       .map(entry => entry.header.kid)
       .filter(kid => kid !== ownerKid)
@@ -1803,7 +1803,7 @@ export class StorageManager {
    * @returns {Promise<Array<StoredContact>>}
    */
   async listContacts(): Promise<Array<StoredContact>> {
-    return await this._localStore.listContacts()
+    return await this.#localStore.listContacts()
   }
 
   /**
@@ -1816,7 +1816,7 @@ export class StorageManager {
   }: {
     id: string
   }): Promise<StoredContact | undefined> {
-    return await this._localStore.loadContact({ id })
+    return await this.#localStore.loadContact({ id })
   }
 
   /**
@@ -1833,8 +1833,8 @@ export class StorageManager {
     contact: ContactData
   }): Promise<StoredContact> {
     const deviceId = getOrCreateDeviceId()
-    const stored = await this._localStore.addContact({ contact, deviceId })
-    await this._recordContactRevision({
+    const stored = await this.#localStore.addContact({ contact, deviceId })
+    await this.#recordContactRevision({
       contactId: stored.contactId,
       action: 'create',
       snapshot: contact,
@@ -1859,12 +1859,12 @@ export class StorageManager {
     contact: ContactData
   }): Promise<StoredContact> {
     const deviceId = getOrCreateDeviceId()
-    const stored = await this._localStore.updateContact({
+    const stored = await this.#localStore.updateContact({
       id,
       contact,
       deviceId
     })
-    await this._recordContactRevision({
+    await this.#recordContactRevision({
       contactId: stored.contactId,
       action: 'update',
       snapshot: contact,
@@ -1882,10 +1882,10 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async deleteContact({ id }: { id: string }): Promise<void> {
-    const existing = await this._localStore.loadContact({ id })
-    await this._localStore.deleteContact({ id })
+    const existing = await this.#localStore.loadContact({ id })
+    await this.#localStore.deleteContact({ id })
     if (existing) {
-      await this._recordContactRevision({
+      await this.#recordContactRevision({
         contactId: existing.contactId,
         action: 'delete',
         snapshot: existing.contact,
@@ -1908,7 +1908,7 @@ export class StorageManager {
    * @param options.deviceId {string}
    * @returns {Promise<void>}
    */
-  private async _recordContactRevision({
+  async #recordContactRevision({
     contactId,
     action,
     snapshot,
@@ -1920,7 +1920,7 @@ export class StorageManager {
     deviceId: string
   }): Promise<void> {
     try {
-      await this._localStore.addContactRevision({
+      await this.#localStore.addContactRevision({
         revision: {
           contactId,
           action,
@@ -1949,6 +1949,6 @@ export class StorageManager {
   }: {
     contactId: string
   }): Promise<Array<ContactRevisionPayload>> {
-    return await this._localStore.listContactRevisions({ contactId })
+    return await this.#localStore.listContactRevisions({ contactId })
   }
 }
