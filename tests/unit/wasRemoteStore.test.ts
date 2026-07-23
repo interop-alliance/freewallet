@@ -6,6 +6,17 @@ import { WASRemoteStore } from '../../src/stores/wasRemoteStore'
 import { bufferToBase64Url, digestHash } from '../../src/lib/cidFrom'
 import type { ControllerProfile, User } from '../../src/types/auth'
 
+// Stub only `ensureSpaceAndCollection` (the library's Space + Collection
+// upsert), keeping `deriveSpaceId` / `errorStatus` / the key-epoch header real
+// for the other tests in this file. This isolates `ensureUserCollections`'s own
+// per-collection config from real network/ezcap provisioning.
+vi.mock('@interop/was-client/sync', async importOriginal => {
+  const actual =
+    await importOriginal<typeof import('@interop/was-client/sync')>()
+  return { ...actual, ensureSpaceAndCollection: vi.fn() }
+})
+import { ensureSpaceAndCollection } from '@interop/was-client/sync'
+
 /**
  * Builds a WASRemoteStore whose `was` client has been replaced with a stub, so
  * tests exercise the store's handle navigation without real network/ezcap I/O.
@@ -383,21 +394,41 @@ describe('WASRemoteStore.ensureCollection', () => {
 })
 
 describe('WASRemoteStore.ensureUserCollections', () => {
-  it('throws if provisioning fails', async () => {
-    // Provisioning now runs through the library's `ensureSpaceAndCollection`,
-    // which upserts the Space as the first step of each collection's chain; a
-    // failing `space.configure` therefore surfaces as a collection-provisioning
-    // error (the per-collection catch wrapping the library's own error).
-    const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({
-        configure: vi.fn().mockRejectedValue(new Error('boom'))
-      })
-    })
+  const ensureMock = vi.mocked(ensureSpaceAndCollection)
+  const USER = { id: 'user-id', email: 'user@example.test' } as unknown as User
 
-    await expect(
-      store.ensureUserCollections({
-        user: { id: 'user-id', email: 'user@example.test' } as unknown as User
-      })
-    ).rejects.toThrow(/Error creating collection/)
+  it('throws if provisioning fails', async () => {
+    // Provisioning runs through the library's `ensureSpaceAndCollection`; a
+    // rejection surfaces as a per-collection provisioning error (the catch
+    // wrapping the library's own error).
+    ensureMock.mockReset()
+    ensureMock.mockRejectedValue(new Error('boom'))
+    const store = storeWithStubbedClient({})
+
+    await expect(store.ensureUserCollections({ user: USER })).rejects.toThrow(
+      /Error creating collection/
+    )
+  })
+
+  it('provisions id as collection-level public and key-map capability-only', async () => {
+    ensureMock.mockReset()
+    ensureMock.mockResolvedValue(undefined)
+    const store = storeWithStubbedClient({})
+
+    await store.ensureUserCollections({ user: USER })
+
+    const calls = ensureMock.mock.calls.map(([options]) => options)
+    const idCall = calls.find(({ collectionId }) => collectionId === 'id')
+    expect(idCall?.isPublic).toBe(true)
+    expect(idCall?.encryption).toBe('plaintext')
+    const keyMapCall = calls.find(
+      ({ collectionId }) => collectionId === 'key-map'
+    )
+    expect(keyMapCall?.isPublic).toBeUndefined()
+    expect(keyMapCall?.encryption).toBe('plaintext')
+    // The synced standard collections are provisioned alongside them.
+    expect(calls.map(({ collectionId }) => collectionId)).toContain(
+      'private-credentials'
+    )
   })
 })

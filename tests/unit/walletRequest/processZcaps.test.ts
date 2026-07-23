@@ -66,6 +66,14 @@ const idCollectionDetail: ICapabilityQueryDetail = {
   invocationTarget: { type: 'urn:was:collection', name: 'id' }
 }
 
+// A write request on the `key-map` collection (the private key-id map).
+const keyMapCollectionDetail: ICapabilityQueryDetail = {
+  referenceId: 'key-map-write',
+  allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE'],
+  controller: RP_DID,
+  invocationTarget: { type: 'urn:was:collection', name: 'key-map' }
+}
+
 // A write request on the DID document resource itself (plain URL).
 const didDocumentUrlDetail: ICapabilityQueryDetail = {
   referenceId: 'did-doc-write-url',
@@ -304,7 +312,8 @@ describe('resolveInvocationTarget', () => {
       'private-credentials',
       'public-credentials',
       'wallet-activity',
-      'id'
+      'id',
+      'key-map'
     ]) {
       expect(
         resolveInvocationTarget({
@@ -399,6 +408,18 @@ describe('resolveGrant action handling', () => {
     })
     expect(grant.target.collectionId).toBe('id')
     // Provisioned at login, like the standard collections.
+    expect(grant.target.needsProvisioning).toBe(false)
+    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+    expect(grant.write).toBe(false)
+  })
+
+  it('caps a key-map-collection write to read-only (descriptor form)', () => {
+    const grant = resolveGrant({
+      descriptor: keyMapCollectionDetail,
+      spaceUrl: SPACE_URL
+    })
+    expect(grant.target.collectionId).toBe('key-map')
+    // Provisioned at login, like the standard and `id` collections.
     expect(grant.target.needsProvisioning).toBe(false)
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
     expect(grant.write).toBe(false)

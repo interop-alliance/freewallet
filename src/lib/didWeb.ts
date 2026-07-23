@@ -7,12 +7,14 @@
  * public-read path, so hosting needs zero server changes: the DID's path
  * segments name the `id` collection that holds it --
  * `did:web:<host>:space:<spaceId>:id` resolves to
- * `https://<host>/space/<spaceId>/id/did.json`.
+ * `https://<host>/space/<spaceId>/id/did.json`. The `id` collection carries a
+ * collection-level `PublicCanRead` policy (set at provisioning), so every
+ * resource in it is world-readable without a per-resource grant.
  */
 import type { KeystoreAgent } from '@interop/webkms-client'
 import type { ISigner } from '@interop/data-integrity-core'
 import type { Session } from '@/types/auth'
-import { DID_DOCUMENT_RESOURCE, DID_KEYS_RESOURCE } from '@/app.config'
+import { DID_DOCUMENT_RESOURCE } from '@/app.config'
 import { getKmsSignFunction } from '@/lib/kms'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
@@ -51,9 +53,9 @@ export interface DidWebKey {
 }
 
 /**
- * The key-id map persisted as `keys.json`: the durable mapping from DID
- * relationship to KMS key, since the KMS protocol has no list-keys endpoint
- * and key ids are server-generated.
+ * The key-id map persisted as `keys.json` in the private `key-map` collection:
+ * the durable mapping from DID relationship to KMS key, since the KMS protocol
+ * has no list-keys endpoint and key ids are server-generated.
  */
 export interface DidWebKeyMap {
   authentication: DidWebKey
@@ -152,9 +154,11 @@ export function assembleDidDocument({
 }
 
 /**
- * Publishes `did.json` (as `application/did+json`) from a key map and makes it
- * world-readable. The shared tail of both the fresh-generate path and the
- * torn-resume path (keys.json present, did.json missing).
+ * Publishes `did.json` (as `application/did+json`) from a key map. It is
+ * world-readable via the `id` collection's collection-level `PublicCanRead`
+ * policy (set at provisioning), so no per-resource publication is needed. The
+ * shared tail of both the fresh-generate path and the torn-resume path
+ * (keys.json present, did.json missing).
  */
 async function publishDidDocument({
   remoteStore,
@@ -170,7 +174,6 @@ async function publishDidDocument({
     content: assembleDidDocument({ did, keys }),
     contentType: 'application/did+json'
   })
-  await remoteStore.setIdResourcePublic({ resourceId: DID_DOCUMENT_RESOURCE })
 }
 
 /**
@@ -203,6 +206,10 @@ async function generateDidKey({
  * writes `keys.json` (the recovery anchor) first, then publishes `did.json`.
  * A crash between steps resumes from `keys.json` on the next full login.
  *
+ * The key map lives in the private `key-map` collection, while the published
+ * artifacts (`did.json`, `did.jsonl`) live in the world-readable `id`
+ * collection.
+ *
  * @param options {object}
  * @param options.keystoreAgent {KeystoreAgent}
  * @param options.remoteStore {WASRemoteStore}
@@ -218,9 +225,7 @@ export async function ensureDidWeb({
   remoteStore: WASRemoteStore
   did: string
 }): Promise<DidWebKeyMap> {
-  const existing = await remoteStore.getIdResource({
-    resourceId: DID_KEYS_RESOURCE
-  })
+  const existing = await remoteStore.getKeyMap()
   if (isKeyMap(existing)) {
     // keys.json is the recovery anchor: the keys already exist. Confirm the
     // published document; republish it (from the same keys) if a torn earlier
@@ -253,10 +258,7 @@ export async function ensureDidWeb({
       category: 'keyAgreement'
     })
   }
-  await remoteStore.putIdResource({
-    resourceId: DID_KEYS_RESOURCE,
-    content: keys
-  })
+  await remoteStore.putKeyMap({ content: keys })
   await publishDidDocument({ remoteStore, did, keys })
   return keys
 }

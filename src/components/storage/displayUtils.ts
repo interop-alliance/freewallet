@@ -1,22 +1,30 @@
 import type { TFunction } from 'i18next'
+import { CONTACTS_COLLECTION } from '@interop/social-core'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import {
   ID_COLLECTION,
+  KEY_MAP_COLLECTION,
   KNOWN_EXTENSIONS,
   COMMON_CONTENT_TYPES,
   UNLOCK_METHODS_COLLECTION,
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
 
-// The Storage page's collection categories: the user's credential collections
-// first, then collections registered by connected applications/sites, then the
-// wallet's own plumbing (activity log, identity, unlock methods).
-const CONTENTS_COLLECTION_IDS = ['private-credentials', 'public-credentials']
+// The Storage page's collection categories: the user's credential and contact
+// collections first, then collections registered by connected
+// applications/sites, then the wallet's own plumbing (activity logs, identity,
+// unlock methods).
+const CONTENTS_COLLECTION_IDS = [
+  'private-credentials',
+  'public-credentials',
+  CONTACTS_COLLECTION
+]
 const SYSTEM_COLLECTION_IDS = [
   ...WALLET_STANDARD_COLLECTIONS.map(({ id }) => id).filter(
     id => !CONTENTS_COLLECTION_IDS.includes(id)
   ),
   ID_COLLECTION.id,
+  KEY_MAP_COLLECTION.id,
   UNLOCK_METHODS_COLLECTION.id
 ]
 
@@ -30,6 +38,7 @@ const CANONICAL_COLLECTION_NAMES = new Map<string, string>([
     ({ id, name }) => [id, name] as [string, string]
   ),
   [ID_COLLECTION.id, ID_COLLECTION.name],
+  [KEY_MAP_COLLECTION.id, KEY_MAP_COLLECTION.name],
   [UNLOCK_METHODS_COLLECTION.id, UNLOCK_METHODS_COLLECTION.name]
 ])
 

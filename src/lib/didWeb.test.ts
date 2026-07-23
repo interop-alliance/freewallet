@@ -103,9 +103,11 @@ describe('assembleDidDocument', () => {
 })
 
 /**
- * A fake WASRemoteStore recording writes and serving scripted `id`-collection
- * reads, plus a fake KeystoreAgent whose `generateKey` mints deterministic
- * per-category aliases (as the server's publicAliasTemplate expansion would).
+ * A fake WASRemoteStore recording writes and serving scripted reads: the key
+ * map from a separate `key-map` slot (`getKeyMap` / `putKeyMap`) and `did.json`
+ * from the `id` collection. Plus a fake KeystoreAgent whose `generateKey` mints
+ * deterministic per-category aliases (as the server's publicAliasTemplate
+ * expansion would).
  */
 function fakes({
   keys,
@@ -115,7 +117,6 @@ function fakes({
   didDoc?: object
 } = {}) {
   const puts: Array<{ resourceId: string; contentType?: string }> = []
-  const publicized: string[] = []
   let generated = 0
   const counters: Record<string, number> = {
     asymmetric: 0,
@@ -123,10 +124,16 @@ function fakes({
   }
 
   const remoteStore = {
+    async getKeyMap() {
+      return keys
+    },
+    async putKeyMap() {
+      // The key map is the `key-map` collection's single `keys.json` resource;
+      // record it under DID_KEYS_RESOURCE so write-ordering assertions read
+      // naturally (the recovery anchor written before did.json).
+      puts.push({ resourceId: DID_KEYS_RESOURCE, contentType: undefined })
+    },
     async getIdResource({ resourceId }: { resourceId: string }) {
-      if (resourceId === DID_KEYS_RESOURCE) {
-        return keys
-      }
       if (resourceId === DID_DOCUMENT_RESOURCE) {
         return didDoc
       }
@@ -141,9 +148,6 @@ function fakes({
       contentType?: string
     }) {
       puts.push({ resourceId, contentType })
-    },
-    async setIdResourcePublic({ resourceId }: { resourceId: string }) {
-      publicized.push(resourceId)
     }
   } as unknown as WASRemoteStore
 
@@ -167,7 +171,6 @@ function fakes({
     remoteStore,
     keystoreAgent,
     puts,
-    publicized,
     generatedCount: () => generated
   }
 }
@@ -185,30 +188,30 @@ describe('ensureDidWeb', () => {
   })
 
   it('torn state (keys.json present, did.json missing): republishes without regenerating', async () => {
-    const { remoteStore, keystoreAgent, puts, publicized, generatedCount } =
-      fakes({ keys: keyMap(), didDoc: undefined })
+    const { remoteStore, keystoreAgent, puts, generatedCount } = fakes({
+      keys: keyMap(),
+      didDoc: undefined
+    })
     const result = await ensureDidWeb({ keystoreAgent, remoteStore, did: DID })
     expect(result).toEqual(keyMap())
     expect(generatedCount()).toBe(0)
     expect(puts).toEqual([
       { resourceId: DID_DOCUMENT_RESOURCE, contentType: 'application/did+json' }
     ])
-    expect(publicized).toEqual([DID_DOCUMENT_RESOURCE])
   })
 
   it('fresh: generates three keys and writes keys.json before did.json', async () => {
-    const { remoteStore, keystoreAgent, puts, publicized, generatedCount } =
-      fakes()
+    const { remoteStore, keystoreAgent, puts, generatedCount } = fakes()
     const result = await ensureDidWeb({ keystoreAgent, remoteStore, did: DID })
     expect(generatedCount()).toBe(3)
     expect(result.authentication.vmId).toBe(`${DID}#z6MkGen1`)
     expect(result.assertionMethod.vmId).toBe(`${DID}#z6MkGen2`)
     expect(result.keyAgreement.vmId).toBe(`${DID}#z6LSGen1`)
-    // keys.json (the recovery anchor) is written first, then did.json.
+    // keys.json (the recovery anchor, in the key-map collection) is written
+    // first, then did.json.
     expect(puts.map(put => put.resourceId)).toEqual([
       DID_KEYS_RESOURCE,
       DID_DOCUMENT_RESOURCE
     ])
-    expect(publicized).toEqual([DID_DOCUMENT_RESOURCE])
   })
 })

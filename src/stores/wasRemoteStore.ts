@@ -33,7 +33,9 @@ import { publicCredentialUrl as buildPublicCredentialUrl } from '@interop/wallet
 import type { ControllerProfile, User } from '@/types/auth'
 import {
   DID_DOCUMENT_RESOURCE,
+  DID_KEYS_RESOURCE,
   ID_COLLECTION,
+  KEY_MAP_COLLECTION,
   KEYRING_COLLECTION,
   KEYRING_RESOURCE,
   UNLOCK_METHODS_COLLECTION,
@@ -275,13 +277,32 @@ export class WASRemoteStore {
     // stay here in WALLET_STANDARD_COLLECTIONS; the helper owns only the
     // generic sequence.
     //
-    // The independent chains -- each depending only on the Space existing -- run
-    // concurrently under a single Promise.all. A rejected chain surfaces as
-    // Promise.all's first rejection; chains that already completed leave their
-    // provisioning in place (partial provisioning was possible before too).
+    // The `id` and `key-map` collections are standard-on-the-server but not
+    // wallet-synced, so they live outside WALLET_STANDARD_COLLECTIONS (no RxDB
+    // `key`, no local replica, no collection map entry) and join the roster
+    // here: `id` holds only world-readable DID artifacts (`did.json`,
+    // `did.jsonl`) and gets a collection-level PublicCanRead policy; `key-map`
+    // holds the private key-id map and stays capability-only.
+    //
+    // All collections are independent -- each depends only on the Space
+    // existing -- and provision concurrently under a single Promise.all. A
+    // rejected chain surfaces as Promise.all's first rejection; chains that
+    // already completed leave their provisioning in place (partial provisioning
+    // was possible before too).
+    const roster: Array<{
+      key?: string
+      id: string
+      name: string
+      isPublic?: boolean
+      encryption?: { scheme: 'edv' }
+    }> = [
+      ...WALLET_STANDARD_COLLECTIONS,
+      { ...ID_COLLECTION, isPublic: true },
+      KEY_MAP_COLLECTION
+    ]
     const collections: ICollectionsSet = new Map()
-    const provisionStandardCollections = WALLET_STANDARD_COLLECTIONS.map(
-      async ({ key, id, name, isPublic, encryption }) => {
+    await Promise.all(
+      roster.map(async ({ key, id, name, isPublic, encryption }) => {
         try {
           await ensureSpaceAndCollection({
             was: this.was,
@@ -300,36 +321,11 @@ export class WASRemoteStore {
             { cause: err }
           )
         }
-        collections.set(key, this.#collectionBaseUrl(id))
-      }
+        if (key) {
+          collections.set(key, this.#collectionBaseUrl(id))
+        }
+      })
     )
-
-    // The `id` collection: standard-on-the-server but not wallet-synced, so it
-    // lives outside WALLET_STANDARD_COLLECTIONS and gets no local replica or
-    // collection map entry. Plaintext, no collection-level public grant (the
-    // DID document is published per-resource by `setIdResourcePublic`).
-    const provisionIdCollection = (async () => {
-      try {
-        await ensureSpaceAndCollection({
-          was: this.was,
-          spaceId: this.spaceId,
-          controllerDid: this.controller,
-          collectionId: ID_COLLECTION.id,
-          collectionName: ID_COLLECTION.name,
-          encryption: 'plaintext',
-          spaceName: 'Freewallet Space'
-        })
-      } catch (err) {
-        console.error(`Error creating collection "${ID_COLLECTION.id}":`, err)
-        throw new Error(
-          `Error creating collection "${ID_COLLECTION.id}" in space ` +
-            `"${this.spaceId}".`,
-          { cause: err }
-        )
-      }
-    })()
-
-    await Promise.all([...provisionStandardCollections, provisionIdCollection])
 
     this.collections = collections
   }
@@ -349,8 +345,48 @@ export class WASRemoteStore {
   }
 
   /**
-   * Reads a resource from the `id` collection, returning the parsed body or
-   * `undefined` when it is missing (the DID provisioning existence probe).
+   * Returns a `Resource` handle for the single `keys.json` resource in this
+   * Space's `key-map` collection, invoked with the root capability.
+   *
+   * @returns {Resource}
+   */
+  #keyMapResource(): Resource {
+    return this.was
+      .space(this.spaceId)
+      .collection(KEY_MAP_COLLECTION.id)
+      .resource(DID_KEYS_RESOURCE)
+  }
+
+  /**
+   * Reads the parsed key-id map (`key-map/keys.json`), or `undefined` when it
+   * is missing (the DID provisioning existence probe). The key map is the
+   * `key-map` collection's single resource, so there is no resource-id
+   * parameter.
+   *
+   * @returns {Promise<unknown>}
+   */
+  async getKeyMap(): Promise<unknown> {
+    const result = await this.#keyMapResource().get()
+    return result === null ? undefined : result
+  }
+
+  /**
+   * Writes (upserts) the key-id map into `key-map/keys.json`, JSON-serialized
+   * with an explicit `application/json` content type.
+   *
+   * @param options {object}
+   * @param options.content {object}   the key-id map body
+   * @returns {Promise<void>}
+   */
+  async putKeyMap({ content }: { content: object }): Promise<void> {
+    const body = new TextEncoder().encode(JSON.stringify(content))
+    await this.#keyMapResource().put(body, { contentType: 'application/json' })
+  }
+
+  /**
+   * Reads the `did.json` DID document from the `id` collection, returning the
+   * parsed body or `undefined` when it is missing (the DID provisioning
+   * existence probe).
    *
    * @param options {object}
    * @param options.resourceId {string}
@@ -411,23 +447,6 @@ export class WASRemoteStore {
   }): Promise<string | undefined> {
     const result = await this.#idResource(resourceId).getText()
     return result === null ? undefined : result
-  }
-
-  /**
-   * Makes a single resource in the `id` collection world-readable (a
-   * resource-level `PublicCanRead` policy). Used to publish `did.json` while
-   * the sibling `keys.json` stays capability-only.
-   *
-   * @param options {object}
-   * @param options.resourceId {string}
-   * @returns {Promise<void>}
-   */
-  async setIdResourcePublic({
-    resourceId
-  }: {
-    resourceId: string
-  }): Promise<void> {
-    await this.#idResource(resourceId).setPublic()
   }
 
   /**

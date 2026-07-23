@@ -310,8 +310,8 @@ export class StorageManager {
   /**
    * The remote WAS store, or undefined when there is no remote backend. Exposed
    * for the did:webvh rotation ceremony (`rotateWebvhUpdateKey`), which reads
-   * and rewrites the `id` collection's `did.jsonl` / `keys.json` / `did.json`
-   * directly through it.
+   * and rewrites the `id` collection's `did.jsonl` / `did.json` and the
+   * `key-map` collection's `keys.json` directly through it.
    */
   get remoteStore(): WASRemoteStore | undefined {
     return this.#remoteStore

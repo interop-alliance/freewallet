@@ -1,5 +1,17 @@
 # History
 
+## 0.21.0 - TBD
+
+### Changed
+
+- The private key-id map `keys.json` moved out of the `id` collection into its
+  own plaintext, capability-only `key-map` system collection. Spaces
+  provisioned by earlier versions are not migrated; re-provision (wipe and log
+  in again) to adopt the new layout.
+- The `Identity` (`id`) collection is now provisioned with a collection-level
+  `PublicCanRead` policy -- it holds only world-readable DID artifacts
+  (`did.json`, `did.jsonl`) -- replacing the previous per-resource publication.
+
 ## 0.20.0 - 2026-07-23
 
 ### Fixed

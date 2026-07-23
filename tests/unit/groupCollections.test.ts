@@ -35,17 +35,25 @@ describe('groupCollections', () => {
         collection('unlock-methods', 'Unlock Methods'),
         collection('alpha-app-data'),
         collection('id', 'Identity'),
-        collection('private-credentials', 'Verifiable Credentials')
+        collection('key-map', 'Key Map'),
+        collection('private-credentials', 'Verifiable Credentials'),
+        collection('contacts', 'Contacts'),
+        collection('contacts-history', 'Contacts History')
       ]
     })
 
+    // Sorted by display name: Contacts, then the two credential collections.
     expect(contents.map(({ id }) => id)).toEqual([
+      'contacts',
       'private-credentials',
       'public-credentials'
     ])
-    // Sorted by display name: Identity, Unlock Methods, Wallet Activity Log.
+    // Sorted by display name: Contacts History, Identity, Key Map, Unlock
+    // Methods, Wallet Activity Log.
     expect(system.map(({ id }) => id)).toEqual([
+      'contacts-history',
       'id',
+      'key-map',
       'unlock-methods',
       'wallet-activity'
     ])
