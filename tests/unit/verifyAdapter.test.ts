@@ -15,9 +15,8 @@ vi.mock('@interop/verifier-core', async importActual => {
   }
 })
 
-const { ProblemTypes, EXPIRED_PROBLEM_TYPE } = await import(
-  '@interop/verifier-core'
-)
+const { ProblemTypes, EXPIRED_PROBLEM_TYPE } =
+  await import('@interop/verifier-core')
 const { verifyCredential } = await import('@/lib/verify')
 
 const CREDENTIAL = {

@@ -56,7 +56,7 @@ import {
   WAS_SERVER_URL
 } from '@/app.config'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
-import { singleKeyResolver } from '@/lib/keyResolver'
+import { singleKeyResolver } from '@interop/wallet-core/identity'
 import { createEdvDocCipher } from '@interop/was-client/edv'
 import {
   deleteKeyringCache,

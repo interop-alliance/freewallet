@@ -34,11 +34,8 @@ vi.mock('@/stores/storageManager', () => ({
 
 import { ensureKeystore } from '@/lib/kms'
 import { StorageManager } from '@/stores/storageManager'
-import {
-  agentsFromSeed,
-  initGuestSession,
-  initSessionFromSeed
-} from '@/session/initSession'
+import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { initGuestSession, initSessionFromSeed } from '@/session/initSession'
 
 const KEYSTORE_ID = `${KMS_SERVER_URL}/keystores/z6QkKeystore`
 
@@ -116,10 +113,14 @@ describe('agentsFromSeed', () => {
       seed: randomSeed()
     })
     const resolved = await keyResolver({ id: keyAgreementKey.id })
+    // The library widens the KAK to IKeyAgreementKey (no `type` /
+    // `publicKeyMultibase` statically), so assert the resolved descriptor's
+    // concrete values instead: an X25519 2020 key whose fragment is its own
+    // public key multibase.
     expect(resolved).toMatchObject({
       id: keyAgreementKey.id,
-      type: keyAgreementKey.type,
-      publicKeyMultibase: keyAgreementKey.publicKeyMultibase
+      type: 'X25519KeyAgreementKey2020',
+      publicKeyMultibase: keyAgreementKey.id.split('#')[1]
     })
     await expect(keyResolver({ id: 'did:key:z6MkOther#x' })).rejects.toThrow(
       'Unknown key id'

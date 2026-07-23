@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Provisioned collections carry their friendly display names again
+  ("Verifiable Credentials", "Wallet Activity Log", etc.) via
+  `@interop/was-client@0.20.0`'s new `collectionName` option, instead of
+  falling back to the raw collection id.
 - CHAPI share flow now records the Login history entry (including granted
   capability records) before delivering the presentation to a VC API exchange,
   so a relying party can never end up holding delegated capabilities that are
@@ -30,6 +34,19 @@
 
 ### Changed
 
+- The storage browser's collection listing now reads each collection's
+  public/`PublicCanRead` status from the inline `public` flag on the List
+  Collections result (`@interop/storage-core@0.3.9`), dropping the
+  per-collection policy probe; a server that predates the flag still gets the
+  old probe as a fallback.
+- The data-identity derivation (`agentsFromSeed`) and the one-key resolver
+  factory (`singleKeyResolver`, deleted from `src/lib/keyResolver.ts`) now come
+  from `@interop/wallet-core/identity`. The derivation is byte-identical --
+  same bootstrap handle / key name, same did:key, ZcapClient, and X25519
+  key-agreement-key wiring -- so existing accounts derive the same identity;
+  the library pins it with fixture tests shared with the mobile wallet. The
+  keyring's unlock-identity derivation (distinct `'unlock'` handle) stays
+  app-side and keeps using the shared `singleKeyResolver`.
 - The wallet-request / exchange-protocol logic now comes from
   `@interop/wallet-core` (its `./request` subpath) instead of local copies:
   VPR classification, cryptosuite negotiation, the VC API exchange client, the
