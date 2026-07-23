@@ -350,6 +350,7 @@
       "public-credentials": "Verifiable Credentials (Publicly Shared)",
       "wallet-activity": "Wallet Activity Log",
       "id": "Identity",
+      "key-map": "Key Map",
       "unlock-methods": "Unlock Methods"
     },
     "groupWalletContents": "Wallet Contents",

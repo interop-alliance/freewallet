@@ -129,23 +129,34 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
 export const SYNCED_COLLECTIONS: Array<{ key: string; id: string }> =
   WALLET_STANDARD_COLLECTIONS.map(({ key, id }) => ({ key, id }))
 /**
- * The `id` collection: a standard-on-the-server collection that holds the
- * user's published DID document (`did.json`) and its key-id map
- * (`keys.json`). Deliberately kept out of WALLET_STANDARD_COLLECTIONS -- it
- * gets no local RxDB replica and no background replication. Provisioned
- * alongside the standard collections; the DID document is made world-readable
- * at the resource level (a `PublicCanRead` policy on `did.json`), while the
- * key-id map stays capability-only.
+ * The `id` collection: a standard-on-the-server collection that holds only the
+ * user's world-readable DID artifacts -- the published DID document
+ * (`did.json`) and the did:webvh history log (`did.jsonl`). Deliberately kept
+ * out of WALLET_STANDARD_COLLECTIONS -- it gets no local RxDB replica and no
+ * background replication. Provisioned alongside the standard collections with a
+ * collection-level `PublicCanRead` policy, so every resource in it is
+ * world-readable. The private key-id map lives in the separate `key-map`
+ * collection (`KEY_MAP_COLLECTION`), never here.
  *
  * The path segments name the collection that holds the DID document, so the
  * did:web id is `did:web:<host>:space:<spaceId>:id` and resolves to
  * `https://<host>/space/<spaceId>/id/did.json`.
  */
 export const ID_COLLECTION = { id: 'id', name: 'Identity' }
+/**
+ * The `key-map` collection: a plaintext, capability-only system collection
+ * holding the private key-id map (`keys.json`) alone. Like `ID_COLLECTION` it
+ * lives outside WALLET_STANDARD_COLLECTIONS -- no local RxDB replica, no
+ * background replication. Kept separate from `id` precisely so the `id`
+ * collection can be made collection-level public without ever exposing the key
+ * map: `keys.json` is never world-readable.
+ */
+export const KEY_MAP_COLLECTION = { id: 'key-map', name: 'Key Map' }
 // The world-readable DID document resource, served as `application/did+json`.
 export const DID_DOCUMENT_RESOURCE = 'did.json'
-// The (non-public) key-id map: verification method to KMS key id. The recovery
-// anchor -- written before `did.json` so a torn provisioning resumes from it.
+// The (non-public) key-id map: verification method to KMS key id. Lives in the
+// `key-map` collection. The recovery anchor -- written before `did.json` so a
+// torn provisioning resumes from it.
 export const DID_KEYS_RESOURCE = 'keys.json'
 // The world-readable did:webvh history log, a raw JSON-Lines string
 // served as `text/jsonl`: one log entry per line, each a full DID-document

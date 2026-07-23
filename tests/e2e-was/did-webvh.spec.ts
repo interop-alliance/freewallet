@@ -16,9 +16,10 @@ import { readLogFromString, resolveDIDFromLog } from '@interop/did-method-webvh'
  *    staged update key becomes active and the committed next-key hash rolls,
  *    while the did:web holder that DIDAuth presents is unchanged (decision 8).
  * 3. A Space export -> import round-trip preserves the hosted `did.jsonl` (and
- *    `did.json`) byte-exact and keeps their resource-level `PublicCanRead`: the
- *    re-imported log still `resolveDIDFromLog`-verifies (any re-serialization
- *    would break the JCS -> sha256 hash chain) and both stay world-readable.
+ *    `did.json`) byte-exact and keeps the `id` collection's collection-level
+ *    `PublicCanRead`: the re-imported log still `resolveDIDFromLog`-verifies
+ *    (any re-serialization would break the JCS -> sha256 hash chain) and both
+ *    stay world-readable.
  */
 
 /**
@@ -250,12 +251,17 @@ test('a Space export/import round-trip preserves did.jsonl byte-exact and world-
   //     Import merges and SKIPS ids that already exist -- and a per-resource
   //     delete only tombstones (which also blocks re-creation), so deleting the
   //     whole `id` collection (physically removed, no tombstones) is the clean
-  //     way to force import to re-create the collection, its resources, and
-  //     their resource-level `PublicCanRead` policies.
+  //     way to force import to re-create the collection, its resources, and the
+  //     collection-level `PublicCanRead` policy. The private `key-map`
+  //     collection (holding keys.json) is deleted alongside it.
   await page.evaluate(async () => {
     const storage = (window as unknown as { __E2E_STORAGE__: E2EStorage })
       .__E2E_STORAGE__
     await storage.wasClient!.space(storage.spaceId!).collection('id').delete()
+    await storage
+      .wasClient!.space(storage.spaceId!)
+      .collection('key-map')
+      .delete()
   })
   // Gone: an unauthenticated fetch now 404s.
   expect((await page.request.get(logUrl)).status()).toBe(404)
@@ -274,7 +280,8 @@ test('a Space export/import round-trip preserves did.jsonl byte-exact and world-
   expect(stats.resourcesCreated).toBeGreaterThan(0)
 
   // --- Policy round-trip: both DID resources are world-readable again (the
-  //     resource-level `PublicCanRead` survived export/import).
+  //     `id` collection's collection-level `PublicCanRead` survived
+  //     export/import).
   const logAfterRes = await page.request.get(logUrl)
   expect(logAfterRes.status()).toBe(200)
   const logAfter = await logAfterRes.text()

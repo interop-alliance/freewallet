@@ -350,6 +350,7 @@
       "public-credentials": "Credenciales verificables (compartidas públicamente)",
       "wallet-activity": "Registro de actividad de la billetera",
       "id": "Identidad",
+      "key-map": "Mapa de claves",
       "unlock-methods": "Métodos de desbloqueo"
     },
     "groupWalletContents": "Contenido de la billetera",

@@ -4,8 +4,9 @@
  * collection of the user's WAS Space, with the log's update key held in the
  * user's WebKMS keystore.
  *
- * The log (`did.jsonl`) is one more world-readable WAS Resource, so hosting
- * needs zero server changes:
+ * The log (`did.jsonl`) is one more WAS Resource in the world-readable `id`
+ * collection (which carries a collection-level `PublicCanRead` policy), so
+ * hosting needs zero server changes:
  * `did:webvh:<scid>:<host>:space:<spaceId>:id` resolves to
  * `https://<host>/space/<spaceId>/id/did.jsonl`. Adopting the parallel
  * `webDoc` (`did:web:` projection with `alsoKnownAs` cross-links) as the new
@@ -37,7 +38,6 @@ import type {
 import type { KeystoreAgent } from '@interop/webkms-client'
 import {
   DID_DOCUMENT_RESOURCE,
-  DID_KEYS_RESOURCE,
   DID_LOG_RESOURCE,
   ID_COLLECTION
 } from '@/app.config'
@@ -345,11 +345,12 @@ async function createWebvhLog({
 }
 
 /**
- * Publishes an already-created log: PUT `did.jsonl` (`text/jsonl`) -> public on
- * it -> PUT `did.json` from `webDoc` (`application/did+json`, adopting the
- * webvh projection per decision 5) -> public on it (idempotent for a Space
- * whose `did.json` is already public from Phase 1). The shared publish tail of
- * the fresh and resume paths.
+ * Publishes an already-created log: PUT `did.jsonl` (`text/jsonl`) -> PUT
+ * `did.json` from `webDoc` (`application/did+json`, adopting the webvh
+ * projection per decision 5). Both land in the `id` collection, whose
+ * collection-level `PublicCanRead` policy (set at provisioning) makes them
+ * world-readable, so the publish tail no longer sets per-resource policies. The
+ * shared publish tail of the fresh and resume paths.
  *
  * @param options {object}
  * @param options.remoteStore {WASRemoteStore}
@@ -371,13 +372,11 @@ async function publishWebvhLog({
     content: logToJsonlString(log),
     contentType: 'text/jsonl'
   })
-  await remoteStore.setIdResourcePublic({ resourceId: DID_LOG_RESOURCE })
   await remoteStore.putIdResource({
     resourceId: DID_DOCUMENT_RESOURCE,
     content: webDoc,
     contentType: 'application/did+json'
   })
-  await remoteStore.setIdResourcePublic({ resourceId: DID_DOCUMENT_RESOURCE })
 }
 
 /**
@@ -395,10 +394,7 @@ async function writeKeysJson({
   webvh: DidWebvhBlock
 }): Promise<void> {
   const content: DidWebKeyMapV2 = { ...didWebKeys, webvh }
-  await remoteStore.putIdResource({
-    resourceId: DID_KEYS_RESOURCE,
-    content
-  })
+  await remoteStore.putKeyMap({ content })
 }
 
 /**
@@ -685,10 +681,7 @@ export async function repairKeyBindings({
   }
 
   // (c) Persist the rebuilt anchor in one write.
-  await remoteStore.putIdResource({
-    resourceId: DID_KEYS_RESOURCE,
-    content: repaired
-  })
+  await remoteStore.putKeyMap({ content: repaired })
   return repaired
 }
 
@@ -785,9 +778,8 @@ export async function rotateWebvhUpdateKey({
 
   // Load the authoritative keys.json + log (never the in-memory profile cache
   // for a write ceremony) and verify the local view before extending it.
-  const didWebKeys = (await remoteStore.getIdResource({
-    resourceId: DID_KEYS_RESOURCE
-  })) as DidWebKeyMapV2 | undefined
+  const didWebKeys = (await remoteStore.getKeyMap()) as
+    DidWebKeyMapV2 | undefined
   const block = didWebKeys?.webvh
   if (!didWebKeys || !block) {
     throw new Error(

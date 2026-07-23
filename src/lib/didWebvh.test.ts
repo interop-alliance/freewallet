@@ -231,7 +231,6 @@ function webvhFakes({
     contentType?: string
     content: unknown
   }> = []
-  const publicized: string[] = []
   let currentLog = logText
   let currentDidDoc = didDoc
 
@@ -239,15 +238,27 @@ function webvhFakes({
     ...keyMap(),
     ...(webvh ? { webvh } : {})
   }
-  // The mutable keys.json the store serves back through getIdResource -- the
-  // rotation ceremony reads the authoritative keys.json rather than a cache.
+  // The mutable keys.json the store serves back through getKeyMap -- the key
+  // map lives in the `key-map` collection, and the rotation ceremony reads the
+  // authoritative keys.json rather than a cache.
   let currentKeys: DidWebKeyMapV2 = didWebKeys
 
   const remoteStore = {
+    async getKeyMap() {
+      return currentKeys
+    },
+    async putKeyMap({ content }: { content: object }) {
+      // The key map is the `key-map` collection's single `keys.json` resource;
+      // record it under DID_KEYS_RESOURCE so write-ordering assertions read
+      // naturally.
+      puts.push({
+        resourceId: DID_KEYS_RESOURCE,
+        contentType: undefined,
+        content
+      })
+      currentKeys = content as DidWebKeyMapV2
+    },
     async getIdResource({ resourceId }: { resourceId: string }) {
-      if (resourceId === DID_KEYS_RESOURCE) {
-        return currentKeys
-      }
       return resourceId === DID_DOCUMENT_RESOURCE ? currentDidDoc : undefined
     },
     async getIdResourceRaw({ resourceId }: { resourceId: string }) {
@@ -266,15 +277,9 @@ function webvhFakes({
       if (resourceId === DID_LOG_RESOURCE && typeof content === 'string') {
         currentLog = content
       }
-      if (resourceId === DID_KEYS_RESOURCE && typeof content === 'object') {
-        currentKeys = content as DidWebKeyMapV2
-      }
       if (resourceId === DID_DOCUMENT_RESOURCE && typeof content === 'object') {
         currentDidDoc = content
       }
-    },
-    async setIdResourcePublic({ resourceId }: { resourceId: string }) {
-      publicized.push(resourceId)
     },
     storageServerUrl: WAS_URL,
     spaceId: SPACE_ID
@@ -286,7 +291,6 @@ function webvhFakes({
     kms,
     didWebKeys,
     puts,
-    publicized,
     log: () => currentLog,
     keys: () => currentKeys,
     didDoc: () => currentDidDoc
@@ -339,9 +343,9 @@ describe('ensureDidWebvh torn-state matrix', () => {
     const final = fakes.puts[3].content as DidWebKeyMapV2
     expect(final.webvh?.did).toBe(block.did)
 
-    // did.jsonl (text/jsonl) then did.json made public.
+    // did.jsonl is written as text/jsonl (world-readable via the `id`
+    // collection's collection-level policy, so no per-resource publication).
     expect(fakes.puts[1].contentType).toBe('text/jsonl')
-    expect(fakes.publicized).toEqual([DID_LOG_RESOURCE, DID_DOCUMENT_RESOURCE])
 
     // The published log resolves and self-verifies.
     const resolved = await resolveDIDFromLog(readLogFromString(fakes.log()!))
@@ -449,7 +453,6 @@ describe('ensureDidWebvh torn-state matrix', () => {
 
     expect(block.did).toBe(published.did)
     expect(fakes.puts).toEqual([])
-    expect(fakes.publicized).toEqual([])
   })
 
   it('frozen log (no webvh, log present): repairs the bindings via List Keys', async () => {

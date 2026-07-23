@@ -115,7 +115,8 @@ test('signup publishes a did:web document and a DIDAuth VP is signed by the KMS 
   test.slow()
   const { passphrase } = await signup(page, testInfo)
 
-  // --- Provisioning: the DID document is published, keys.json is not. ---
+  // --- Provisioning: the DID document is published; keys.json lives in the
+  //     private `key-map` collection and is not public. ---
   await page.goto('/#/settings')
   await expect(page.getByText('Published DID', { exact: true })).toBeVisible()
   await expect(
@@ -149,9 +150,10 @@ test('signup publishes a did:web document and a DIDAuth VP is signed by the KMS 
   expect(vmIds).toContain(doc.authentication[0])
   expect(vmIds).toContain(doc.keyAgreement[0])
 
-  // The key-id map is not public: an unauthenticated GET is refused (WAS
-  // returns 404 for both not-found and unauthorized).
-  const keysUrl = didJsonUrl.replace('/did.json', '/keys.json')
+  // The key-id map lives alone in the private `key-map` collection and is not
+  // public: an unauthenticated GET is refused (WAS returns 404 for both
+  // not-found and unauthorized).
+  const keysUrl = didJsonUrl.replace('/id/did.json', '/key-map/keys.json')
   const keysRes = await page.request.get(keysUrl)
   expect([401, 403, 404]).toContain(keysRes.status())
 

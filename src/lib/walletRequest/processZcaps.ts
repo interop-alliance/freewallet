@@ -12,10 +12,11 @@
  * - whole-Space grants are stripped to read-only (a Space-wide write would
  *   permit rewriting the Space Description, i.e. controller takeover);
  * - grants on a protected wallet collection -- the standard collections
- *   (`private-credentials`, `public-credentials`, `wallet-activity`) and the
- *   `id` collection holding the user's published DID document -- are stripped
- *   to read-only too: an RP may read but never rewrite or delete the user's
- *   own credentials or published identity.
+ *   (`private-credentials`, `public-credentials`, `wallet-activity`), the `id`
+ *   collection holding the user's published DID artifacts, and the `key-map`
+ *   collection holding the private key-id map -- are stripped to read-only too:
+ *   an RP may read but never rewrite or delete the user's own credentials,
+ *   published identity, or key map.
  *
  * Only an RP-provisioned (non-protected) collection keeps its requested write
  * actions. The cap applies whether the target arrives as a descriptor object
@@ -39,6 +40,7 @@ import { generateZcapUri } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
 import {
   ID_COLLECTION,
+  KEY_MAP_COLLECTION,
   RP_ZCAP_TTL_MS,
   RP_ZCAP_WRITE_TTL_MS,
   WALLET_STANDARD_COLLECTIONS
@@ -55,8 +57,10 @@ const DEFAULT_ACTIONS = ['GET', 'HEAD']
  * The read-only action cap. A Space-wide write capability would permit
  * rewriting the Space Description (controller takeover), a write on a
  * standard wallet collection would let an RP rewrite or delete the user's own
- * credentials, and a write on the `id` collection would let an RP rewrite the
- * user's published DID document -- so all are always delegated read-only.
+ * credentials, a write on the `id` collection would let an RP rewrite the
+ * user's published DID document, and a write on the `key-map` collection would
+ * let an RP rewrite the private key-id map -- so all are always delegated
+ * read-only.
  */
 const READ_ONLY_ACTIONS = ['GET', 'HEAD']
 
@@ -76,8 +80,9 @@ function includesWrite(allowedActions: string[]): boolean {
 /**
  * Whether a resolved collection id names a protected wallet collection --
  * a standard collection (`private-credentials`, `public-credentials`,
- * `wallet-activity`) or the `id` collection holding the user's published DID
- * document -- which an RP may read but never write.
+ * `wallet-activity`), the `id` collection holding the user's published DID
+ * artifacts, or the `key-map` collection holding the private key-id map --
+ * which an RP may read but never write.
  *
  * @param collectionId {string | undefined}
  * @returns {boolean}
@@ -86,6 +91,7 @@ function isProtectedCollection(collectionId: string | undefined): boolean {
   return (
     !!collectionId &&
     (collectionId === ID_COLLECTION.id ||
+      collectionId === KEY_MAP_COLLECTION.id ||
       WALLET_STANDARD_COLLECTIONS.some(entry => entry.id === collectionId))
   )
 }
@@ -255,8 +261,12 @@ export function resolveInvocationTarget({
       satisfiable: true,
       invocationTarget: `${spaceUrl}/${name}`,
       wholeSpace: false,
-      // The `id` collection is provisioned at login, like the standard ones.
-      needsProvisioning: !standard && name !== ID_COLLECTION.id,
+      // The `id` and `key-map` collections are provisioned at login, like the
+      // standard ones.
+      needsProvisioning:
+        !standard &&
+        name !== ID_COLLECTION.id &&
+        name !== KEY_MAP_COLLECTION.id,
       collectionId: name,
       encrypted: !!standard?.encryption,
       isPublic: false
