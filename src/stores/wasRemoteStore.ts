@@ -271,8 +271,9 @@ export class WASRemoteStore {
     // `force` upsert (running with the root capability, a 404 from the pre-merge
     // describe really means absent), and a public collection additionally gets a
     // collection-level world-read grant. The app-specific roster and its
-    // per-collection config (id, encryption opt-in, public flag) stay here in
-    // WALLET_STANDARD_COLLECTIONS; the helper owns only the generic sequence.
+    // per-collection config (id, display name, encryption opt-in, public flag)
+    // stay here in WALLET_STANDARD_COLLECTIONS; the helper owns only the
+    // generic sequence.
     //
     // The independent chains -- each depending only on the Space existing -- run
     // concurrently under a single Promise.all. A rejected chain surfaces as
@@ -280,13 +281,14 @@ export class WASRemoteStore {
     // provisioning in place (partial provisioning was possible before too).
     const collections: ICollectionsSet = new Map()
     const provisionStandardCollections = WALLET_STANDARD_COLLECTIONS.map(
-      async ({ key, id, isPublic, encryption }) => {
+      async ({ key, id, name, isPublic, encryption }) => {
         try {
           await ensureSpaceAndCollection({
             was: this.was,
             spaceId: this.spaceId,
             controllerDid: this.controller,
             collectionId: id,
+            collectionName: name,
             encryption: encryption ? 'edv' : 'plaintext',
             ...(isPublic !== undefined && { isPublic }),
             spaceName: 'Freewallet Space'
@@ -313,6 +315,7 @@ export class WASRemoteStore {
           spaceId: this.spaceId,
           controllerDid: this.controller,
           collectionId: ID_COLLECTION.id,
+          collectionName: ID_COLLECTION.name,
           encryption: 'plaintext',
           spaceName: 'Freewallet Space'
         })
@@ -625,15 +628,17 @@ export class WASRemoteStore {
       })
     }
     const items = (listing?.items ?? []) as Array<StorageCollection>
-    // The listing's `CollectionSummary` carries no public flag (only id / url /
-    // name), so each collection's `PublicCanRead` status still needs its own
-    // policy describe. Fan those out under a single Promise.all rather than a
-    // serial loop, so the N probes overlap instead of waiting one-by-one.
+    // The listing's `CollectionSummary` surfaces the `PublicCanRead` status
+    // inline (`public`, present on every item when the server computes it), so
+    // no per-collection policy probe is needed. A server that predates the
+    // field omits it entirely; only then fall back to probing, fanned out
+    // under the same Promise.all as the description reads so the probes
+    // overlap instead of waiting one-by-one.
     return await Promise.all(
       items.map(async item => {
         const handle = this.#collectionFromUrl(item.url)
         const [isPublic, description] = await Promise.all([
-          handle.isPublic(),
+          item.public !== undefined ? item.public : handle.isPublic(),
           handle.describe()
         ])
         return {

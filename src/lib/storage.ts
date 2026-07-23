@@ -17,6 +17,13 @@ export type StorageCollection = {
   name?: string
   type?: string[]
   totalItems?: number
+  /**
+   * The wire `CollectionSummary`'s inline `PublicCanRead` flag. Present on
+   * every item when the server surfaces it; absent on a server that predates
+   * the field (the client then probes the policy itself). UI code reads the
+   * resolved `isPublic` instead.
+   */
+  public?: boolean
   isPublic?: boolean
   isEncrypted?: boolean
 }

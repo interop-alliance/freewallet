@@ -22,7 +22,42 @@ function storeWithStubbedClient(was: unknown): WASRemoteStore {
 }
 
 describe('WASRemoteStore.listCollections', () => {
-  it('returns collections with isPublic from collection.isPublic()', async () => {
+  it('uses the inline public flag without probing isPublic()', async () => {
+    const items = [
+      {
+        id: 'private-credentials',
+        url: '/space/space-id/private-credentials',
+        public: false
+      },
+      {
+        id: 'public-credentials',
+        url: '/space/space-id/public-credentials',
+        public: true
+      }
+    ]
+    const collections = vi.fn().mockResolvedValue({
+      url: '/space/space-id/collections/',
+      totalItems: 2,
+      items
+    })
+    const isPublic = vi.fn().mockResolvedValue(false)
+    const describeCollection = vi.fn().mockResolvedValue({})
+    const collection = vi
+      .fn()
+      .mockReturnValue({ isPublic, describe: describeCollection })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collections, collection })
+    })
+
+    await expect(store.listCollections()).resolves.toEqual([
+      { ...items[0], isPublic: false, isEncrypted: false },
+      { ...items[1], isPublic: true, isEncrypted: false }
+    ])
+    expect(isPublic).not.toHaveBeenCalled()
+    expect(describeCollection).toHaveBeenCalledTimes(2)
+  })
+
+  it('falls back to probing isPublic() when the listing omits the flag', async () => {
     const items = [
       { id: 'private-credentials', url: '/space/space-id/private-credentials' }
     ]

@@ -4,59 +4,14 @@
  * and initializes the StorageManager (local or remote depending on env vars).
  * The resulting Session object is stored in authStore.
  */
-import { CapabilityAgent } from '@interop/webkms-client'
-import { Ed25519Signature2020 } from '@interop/ed25519-signature'
-import { ZcapClient } from '@interop/ezcap'
-import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
-import type { IKeyAgreementKey } from '@interop/data-integrity-core'
+import { agentsFromSeed } from '@interop/wallet-core/identity'
 import type { ControllerProfile, Session, User } from '@/types/auth'
 import { KMS_SERVER_URL, PASSKEY_KDF } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
-import { singleKeyResolver } from '@/lib/keyResolver'
 import { assertPasskeyPrf } from '@/lib/passkey'
 import { StorageManager } from '@/stores/storageManager'
 import { fetchKeyringSeed, KeyringRecordUnusableError } from '@/session/keyring'
 import type { KeyringFetchResult } from '@/session/keyring'
-
-/**
- * Creates bootstrap CapabilityAgent and ZcapClient instances from an
- * already-derived 32-byte seed, plus the X25519 key agreement key used for
- * encrypted storage. These will be used to manage DIDs, sign zCaps, interface
- * with storage, etc. The seed enters `CapabilityAgent.fromSeed` under the
- * fixed `'bootstrap'` / `'boostrap-key'` names (the typo is load-bearing --
- * every account's data identity derives through these exact names, so they
- * can never change without stranding existing wallets).
- */
-export async function agentsFromSeed({ seed }: { seed: Uint8Array }) {
-  const keyAgent = await CapabilityAgent.fromSeed({
-    seed,
-    handle: 'bootstrap',
-    keyName: 'boostrap-key'
-  })
-  const signer = keyAgent.getSigner()
-  const zcapClient = new ZcapClient({
-    SuiteClass: Ed25519Signature2020,
-    invocationSigner: signer,
-    // The root key also signs delegations: sharing grants and App Connect
-    // capability grants.
-    delegationSigner: signer
-  })
-
-  // Derive an X25519 key agreement key (KAK) from the same Ed25519 key pair the
-  // CapabilityAgent already holds -- exactly what did:key's encryption key
-  // derivation does (the KAK is the Montgomery form of the signing key). This
-  // is deterministic: the same passphrase always yields the same KAK, so a
-  // returning user can decrypt their vault. The KAK lives under the same
-  // did:key DID as the user identity, making keyResolver / controller wiring
-  // trivial.
-  const keyAgreementKey =
-    X25519KeyAgreementKey2020.fromEd25519VerificationKey2020({
-      keyPair: keyAgent.getVerificationKeyPair()
-    })
-  const keyResolver = singleKeyResolver({ keyAgreementKey })
-
-  return { keyAgent, zcapClient, keyAgreementKey, keyResolver }
-}
 
 /**
  * Creates a random guest session.
@@ -160,9 +115,7 @@ export async function initSessionFromSeed({
   const profile: ControllerProfile = {
     keyAgent,
     zcapClient,
-    // `id` is always set on the KAK here (a controller was supplied at
-    // derivation), so it satisfies IKeyAgreementKey's required `id`.
-    keyAgreementKey: keyAgreementKey as IKeyAgreementKey,
+    keyAgreementKey,
     keyResolver
   }
   if (!isGuest) {
