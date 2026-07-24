@@ -9,10 +9,12 @@
  * credential: the credential supplies the origin, subject DID, and connected
  * date; the latest matching Login activity supplies the raw display name, the
  * grant summaries, and the last-connected timestamp. `revokeAppAccess` retires
- * an app: it revokes the app's storage grants on the WAS server, then removes
- * the app-key credential and records the revocation. The app never receives
- * decryption key material (only zcaps), so revocation is grant-only -- no key
- * or epoch rotation is involved.
+ * an app: for each app-provisioned encrypted collection it rotates the epoch to
+ * drop the app's recipient key (so the app cannot decrypt future writes) and
+ * revokes those pull-axis grants indivisibly, then revokes any remaining
+ * storage grants, then removes the app-key credential and records the
+ * revocation. The honest ceiling stands: ciphertext the app already fetched
+ * stays readable to it -- rotation protects only prospective writes.
  */
 import type { StorageManager } from '@/stores/storageManager'
 import type { User } from '@/types/auth'
@@ -232,13 +234,22 @@ export async function listConnectedApps({
 }
 
 /**
- * Revokes a connected app's access. Order matters: the storage grants are
- * revoked on the WAS server first, and only if that succeeds is the app-key
- * credential deleted and the revocation recorded. A network failure while
- * revoking therefore surfaces as an error and leaves the credential in place,
- * so the user can retry rather than being left with a deleted key whose grants
- * are still live. Per-capability no-ops (already revoked/expired) are swallowed
- * inside `revokeAppGrants`; only a genuine failure propagates.
+ * Revokes a connected app's access. Order matters: the key rotation and grant
+ * revocation happen on the WAS server first, and only if that succeeds is the
+ * app-key credential deleted and the revocation recorded. A network failure
+ * while revoking the grants therefore surfaces as an error and leaves the
+ * credential in place, so the user can retry rather than being left with a
+ * deleted key whose grants are still live.
+ *
+ * The key rotation runs first (`revokeAppCollectionRecipients`): for each
+ * app-provisioned encrypted collection it appends a fresh epoch without the
+ * app's key and revokes those collections' pull-axis grants indivisibly, so the
+ * app cannot decrypt anything written afterward. That rotation is best-effort
+ * per collection (a stuck collection is logged, not fatal). Then the remaining
+ * grants are revoked (`revokeAppGrants`, which tolerates the double-revocation
+ * of the already-rotated collections' grants). Per-capability no-ops (already
+ * revoked/expired) are swallowed inside those methods; only a genuine failure
+ * propagates.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
@@ -255,6 +266,13 @@ export async function revokeAppAccess({
   user: User
   app: ConnectedApp
 }): Promise<{ revoked: number; skipped: number }> {
+  // Rotate the epoch off the app for each app-provisioned encrypted collection
+  // (and revoke those collections' pull-axis grants) before anything else, so a
+  // revoked app cannot decrypt future writes.
+  await storage.revokeAppCollectionRecipients({
+    origin: app.origin,
+    subjectDid: app.subjectDid
+  })
   const outcome = await storage.revokeAppGrants({
     origin: app.origin,
     subjectDid: app.subjectDid

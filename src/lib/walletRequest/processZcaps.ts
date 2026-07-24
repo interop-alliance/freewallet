@@ -45,6 +45,7 @@ import {
   RP_ZCAP_WRITE_TTL_MS,
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
+import { deriveAppCollectionRecipient } from '@/lib/appCollectionRecipient'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 
 /**
@@ -389,18 +390,25 @@ export function resolveGrants({
  *   RP_ZCAP_TTL_MS
  * @param [options.writeTtlMs] {number}   write grant lifetime; defaults to
  *   RP_ZCAP_WRITE_TTL_MS (shorter than the read TTL)
+ * @param [options.appProvisioning] {{ seed: Uint8Array }}   present only on the
+ *   App Connect path: the app-key seed from which each newly-provisioned PRIVATE
+ *   collection is set up multi-recipient (vault KAK plus the app's deterministic
+ *   per-collection key) instead of plaintext. Public collections and
+ *   non-App-Connect flows provision plaintext as before.
  * @returns {Promise<IZcap[]>}
  */
 export async function processZcaps({
   zcapRequests,
   session,
   ttlMs = RP_ZCAP_TTL_MS,
-  writeTtlMs = RP_ZCAP_WRITE_TTL_MS
+  writeTtlMs = RP_ZCAP_WRITE_TTL_MS,
+  appProvisioning
 }: {
   zcapRequests: ICapabilityQueryDetail[]
   session: Session
   ttlMs?: number
   writeTtlMs?: number
+  appProvisioning?: { seed: Uint8Array }
 }): Promise<IZcap[]> {
   if (!hasZcapStorage(session)) {
     throw new ZcapUnavailableError()
@@ -422,13 +430,28 @@ export async function processZcaps({
       continue
     }
     if (target.needsProvisioning && target.collectionId) {
-      // A public-collection grant provisions plaintext plus a collection-level
-      // PublicCanRead policy; the wallet (holding the space root) sets the
-      // policy -- the RP's delegated zcap could not.
-      await session.storage.ensureCollection({
-        id: target.collectionId,
-        isPublic: target.isPublic
-      })
+      if (appProvisioning && !target.isPublic) {
+        // App Connect PRIVATE collection: provision multi-recipient EDV, with
+        // the user's vault KAK as recipient zero and the app's deterministic
+        // per-collection key alongside it, so both can read what the app writes.
+        const appRecipient = await deriveAppCollectionRecipient({
+          seed: appProvisioning.seed,
+          collectionId: target.collectionId
+        })
+        await session.storage.provisionAppCollection({
+          collectionId: target.collectionId,
+          appRecipient
+        })
+      } else {
+        // A public-collection grant provisions plaintext plus a collection-level
+        // PublicCanRead policy; the wallet (holding the space root) sets the
+        // policy -- the RP's delegated zcap could not. A non-App-Connect grant
+        // provisions a plaintext RP collection.
+        await session.storage.ensureCollection({
+          id: target.collectionId,
+          isPublic: target.isPublic
+        })
+      }
     }
     // Write grants live for the shorter write TTL; read-only grants for the
     // longer read TTL.

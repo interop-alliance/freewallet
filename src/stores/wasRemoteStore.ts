@@ -511,6 +511,67 @@ export class WASRemoteStore {
   }
 
   /**
+   * Ensures an App Connect app-provisioned collection exists AND is declared
+   * encrypted with the `'edv'` scheme, without ever clobbering an existing
+   * `encryption` marker (which may already carry a key-epoch roster). Reads the
+   * description first: a missing collection or one with no encryption block is
+   * configured with the bare `{ scheme: 'edv' }` marker (a fresh create or a
+   * late in-place declaration); a collection that already carries an encryption
+   * block is left untouched so its epochs survive. Returns the current
+   * encryption marker after ensuring the declaration -- `undefined` when the
+   * collection was just declared and has no epochs yet, or the existing marker
+   * (possibly with epochs) otherwise -- so the caller can decide whether to
+   * initialize or extend the recipient roster.
+   *
+   * @param options {object}
+   * @param options.id {string}   the WAS collection id
+   * @param [options.name] {string}   display name; defaults to the id
+   * @returns {Promise<CollectionEncryption | undefined>}
+   */
+  async ensureEncryptedCollection({
+    id,
+    name
+  }: {
+    id: string
+    name?: string
+  }): Promise<CollectionEncryption | undefined> {
+    const collection = this.was.space(this.spaceId).collection(id)
+    let current
+    try {
+      current = await collection.describe()
+    } catch (err) {
+      console.error(`Error describing collection "${id}":`, err)
+      throw new Error(
+        `Error describing collection "${id}" in space "${this.spaceId}".`,
+        { cause: err }
+      )
+    }
+    // Declare `'edv'` only when there is no encryption block to lose: a fresh
+    // create (current === null) or a plaintext collection getting a late
+    // in-place declaration. Never re-send `encryption` when a marker already
+    // exists -- `configure` merges the passed value forward, so a bare
+    // `{ scheme: 'edv' }` would drop an existing epoch roster.
+    if (!current || !current.encryption) {
+      try {
+        await collection.configure({
+          name: name ?? current?.name ?? id,
+          encryption: { scheme: 'edv' },
+          force: true
+        })
+      } catch (err) {
+        console.error(`Error declaring collection "${id}" encrypted:`, err)
+        throw new Error(
+          `Error declaring collection "${id}" encrypted in space ` +
+            `"${this.spaceId}".`,
+          { cause: err }
+        )
+      }
+      return undefined
+    }
+    return current.encryption
+  }
+
+  /**
    * Deletes an entire collection (and all resources within it) from this
    * user's Space. Idempotent.
    *

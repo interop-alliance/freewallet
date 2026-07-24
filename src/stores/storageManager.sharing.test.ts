@@ -165,6 +165,12 @@ function makeFakeRemote(): {
     async collectionEncryption({ collectionId }: { collectionId: string }) {
       return collection(collectionId).marker()
     },
+    async ensureEncryptedCollection({ id }: { id: string }) {
+      // The fake collection is declared `edv` from birth, so this mirrors the
+      // real method's "already encrypted" return: the current marker (with any
+      // epochs), never re-declaring.
+      return collection(id).marker()
+    },
     collectionHandle({ collectionId }: { collectionId: string }) {
       return collection(collectionId).collection
     },
@@ -750,6 +756,292 @@ describe('StorageManager.revokeAppGrants', () => {
     })
 
     expect(outcome).toEqual({ revoked: 0, skipped: 0 })
+  })
+})
+
+describe('StorageManager.provisionAppCollection', () => {
+  it('first provision mints an epoch with the owner and the app recipient', async () => {
+    const owner = await generateKey()
+    const app = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore } = await initLocalStore(ciphers)
+    const { remoteStore } = makeFakeRemote()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+
+    const marker = await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+    })
+
+    expect(marker.epochs).toHaveLength(1)
+    expect(currentEpochKids(marker)).toEqual(
+      expect.arrayContaining([owner.keyAgreementKey.id, app.keyAgreementKey.id])
+    )
+  })
+
+  it('a reconnect after revoke re-adds the app without a second epoch', async () => {
+    const owner = await generateKey()
+    const app = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore } = await initLocalStore(ciphers)
+    const { remoteStore } = makeFakeRemote()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+    const appRecipient = ownerRecipient({
+      keyAgreementKey: app.keyAgreementKey
+    })
+
+    const marker1 = await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient
+    })
+    // A revoke rotates the app off (owner alone on a fresh epoch).
+    await removeRecipient({
+      collection: remoteStore.collectionHandle({ collectionId: 'app-docs' }),
+      space: remoteStore.spaceHandle(),
+      recipientId: app.keyAgreementKey.id!,
+      revoke: []
+    })
+    // Reconnect: the app is escrowed back in (add, not a rotation, so the
+    // roster grows but the current epoch is the post-revoke one).
+    const marker2 = await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient
+    })
+
+    expect(marker1.currentEpoch).toBeDefined()
+    expect(currentEpochKids(marker2)).toEqual(
+      expect.arrayContaining([owner.keyAgreementKey.id, app.keyAgreementKey.id])
+    )
+  })
+
+  it('is a no-op when the app is already a recipient of the current epoch', async () => {
+    const owner = await generateKey()
+    const app = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore } = await initLocalStore(ciphers)
+    const { remoteStore, collection } = makeFakeRemote()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+    const appRecipient = ownerRecipient({
+      keyAgreementKey: app.keyAgreementKey
+    })
+
+    const marker1 = await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient
+    })
+    const marker2 = await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient
+    })
+
+    // No rotation, no new epoch: the marker is unchanged.
+    expect(marker2.currentEpoch).toBe(marker1.currentEpoch)
+    expect(collection('app-docs').marker().epochs).toHaveLength(1)
+  })
+})
+
+describe('StorageManager.revokeAppCollectionRecipients', () => {
+  const APP_ORIGIN = 'https://app.example'
+  const APP_SUBJECT = 'did:key:z6MkAppSubjectR'
+
+  function delegatedZcap({
+    id,
+    target,
+    expires
+  }: {
+    id: string
+    target: string
+    expires: string
+  }): IZcap {
+    return {
+      '@context': ['https://w3id.org/zcap/v1'],
+      id,
+      parentCapability: 'urn:zcap:root:https%3A%2F%2Fwas.example%2Fspace%2Fx',
+      controller: APP_SUBJECT,
+      invocationTarget: target,
+      allowedAction: ['GET', 'HEAD'],
+      expires,
+      proof: {} as unknown
+    } as unknown as IZcap
+  }
+
+  it('rotates the app off each app-provisioned collection and revokes its grant', async () => {
+    const owner = await generateKey()
+    const app = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore, user } = await initLocalStore(ciphers)
+    const { remoteStore, revoked } = makeFakeRemote()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+
+    await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+    })
+
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+    const target = 'https://was.example/space/s-space/app-docs'
+    await storage.addHistoryLogin({
+      user,
+      origin: APP_ORIGIN,
+      grants: [
+        {
+          id: 'g-app-docs',
+          target,
+          allowedActions: ['GET', 'HEAD'],
+          expires: future,
+          zcap: delegatedZcap({ id: 'z-app-docs', target, expires: future })
+        }
+      ],
+      appConnect: { name: 'Example App', firstRun: true }
+    })
+
+    const outcome = await storage.revokeAppCollectionRecipients({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT
+    })
+
+    expect(outcome).toEqual({ collections: 1, rotated: 1, failed: 0 })
+    // Read axis: the app is off the new current epoch; the owner remains.
+    const marker = await remoteStore.collectionEncryption({
+      collectionId: 'app-docs'
+    })
+    expect(currentEpochKids(marker!)).toEqual([owner.keyAgreementKey.id])
+    // Pull axis: the recorded grant was revoked.
+    expect((revoked as Array<{ id: string }>).map(zcap => zcap.id)).toContain(
+      'z-app-docs'
+    )
+  })
+
+  it('ignores grants on standard/protected collections', async () => {
+    const owner = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore, user } = await initLocalStore(ciphers)
+    const { remoteStore, revoked } = makeFakeRemote()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+    const target = 'https://was.example/space/s-space/private-credentials'
+    await storage.addHistoryLogin({
+      user,
+      origin: APP_ORIGIN,
+      grants: [
+        {
+          id: 'g-std',
+          target,
+          allowedActions: ['GET', 'HEAD'],
+          expires: future,
+          zcap: delegatedZcap({ id: 'z-std', target, expires: future })
+        }
+      ],
+      appConnect: { name: 'Example App', firstRun: true }
+    })
+
+    const outcome = await storage.revokeAppCollectionRecipients({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT
+    })
+
+    expect(outcome).toEqual({ collections: 0, rotated: 0, failed: 0 })
+    expect(revoked).toHaveLength(0)
+  })
+})
+
+describe('StorageManager.decryptCollectionResource (app collection)', () => {
+  it('decrypts an app-collection envelope with the vault KAK', async () => {
+    const owner = await generateKey()
+    const app = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore } = await initLocalStore(ciphers)
+    const { remoteStore } = makeFakeRemote()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+
+    const marker = await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+    })
+
+    // A document written under the current epoch (the owner is recipient zero,
+    // so a cipher built from the marker over the owner's keys can write it).
+    const ownerCipher = await createEdvDocCipher({
+      keyAgreementKey: owner.keyAgreementKey,
+      keyResolver: owner.keyResolver,
+      collectionId: 'app-docs',
+      encryption: marker
+    })
+    const doc = { title: 'App note', body: 'hello' }
+    const { envelope } = await ownerCipher.encrypt({
+      data: doc as unknown as Json
+    })
+
+    const decrypted = await storage.decryptCollectionResource({
+      collectionId: 'app-docs',
+      data: envelope
+    })
+    expect(decrypted).toEqual(doc)
+  })
+
+  it('returns undefined for an app collection with no epoch roster', async () => {
+    const owner = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore } = await initLocalStore(ciphers)
+    const { remoteStore } = makeFakeRemote()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+
+    // A well-formed EDV envelope shape, but the collection was never provisioned
+    // multi-recipient, so the wallet has nothing to decrypt it with.
+    const envelope = {
+      id: 'z-fake',
+      sequence: 0,
+      jwe: { recipients: [{ header: { kid: 'did:key:zStranger#zStranger' } }] }
+    } as unknown as Json
+
+    const decrypted = await storage.decryptCollectionResource({
+      collectionId: 'never-provisioned',
+      data: envelope
+    })
+    expect(decrypted).toBeUndefined()
   })
 })
 
