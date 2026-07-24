@@ -47,6 +47,8 @@ import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
 import {
   ENABLE_DID_WEBVH,
+  ID_COLLECTION,
+  KEY_MAP_COLLECTION,
   RP_ZCAP_TTL_MS,
   WALLET_STANDARD_COLLECTIONS,
   WAS_SERVER_URL
@@ -214,6 +216,15 @@ export class StorageManager {
   // envelope cannot drive a refresh loop. Cleared whenever a share / unshare
   // installs a fresh marker.
   #markerRefreshed = new Set<string>()
+  // Lazily-built per-collection ciphers for App Connect app-provisioned
+  // (non-standard) encrypted collections, keyed by WAS collection id. The
+  // wallet decrypts these as an ordinary recipient with its vault KAK (recipient
+  // zero), driven by the collection's fetched marker; built on first
+  // decrypt-read from the storage browser, invalidated when a rekey lands.
+  #appCiphers: Record<string, DocCipher> = {}
+  // The markers the `#appCiphers` entries were built from, keyed by WAS
+  // collection id -- the offline/lazy source for an app collection's cipher.
+  #appMarkers: Record<string, CollectionEncryption> = {}
 
   constructor({
     localStore,
@@ -779,7 +790,10 @@ export class StorageManager {
       collection => collection.id === collectionId && collection.encryption
     )
     if (!entry) {
-      return undefined
+      // A non-standard collection: an App Connect app-provisioned collection the
+      // wallet decrypts as an ordinary recipient (vault KAK = recipient zero),
+      // marker-driven from the fetched Collection Description.
+      return this.#decryptAppCollectionResource({ collectionId, data })
     }
     return this.#readWithEpochRefresh({
       collectionId,
@@ -807,6 +821,95 @@ export class StorageManager {
         }
       }
     })
+  }
+
+  /**
+   * Best-effort decrypt of an EDV envelope from a non-standard (App Connect
+   * app-provisioned) encrypted collection, using the session's vault KAK as an
+   * ordinary recipient (recipient zero). Lazily fetches the collection's
+   * `encryption` marker, builds and caches a per-collection `DocCipher` from it
+   * (only when the marker carries epochs -- a wallet with only its vault KAK can
+   * decrypt an app collection only once it is provisioned multi-recipient with
+   * the vault KAK as a recipient), and decrypts. On an `UnknownEpochError` (a
+   * rekey the cached marker has not caught up to) it re-fetches the marker,
+   * rebuilds the cipher, and retries once per session for that collection.
+   * Returns undefined on any failure (no vault keys / no remote store / no epoch
+   * marker / a decrypt error), letting the caller show the raw envelope.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id
+   * @param options.data {Json}   the fetched EDV envelope
+   * @returns {Promise<Json | undefined>}
+   */
+  async #decryptAppCollectionResource({
+    collectionId,
+    data
+  }: {
+    collectionId: string
+    data: Json
+  }): Promise<Json | undefined> {
+    const remote = this.#remoteStore
+    if (!remote || !this.#vaultKeys) {
+      return undefined
+    }
+    const { keyAgreementKey, keyResolver } = this.#vaultKeys
+
+    const attempt = async (
+      forceRefresh: boolean
+    ): Promise<{ value: Json | undefined; unknownEpoch: boolean }> => {
+      let cipher = this.#appCiphers[collectionId]
+      if (!cipher || forceRefresh) {
+        let marker = forceRefresh ? undefined : this.#appMarkers[collectionId]
+        if (!marker) {
+          try {
+            marker = await remote.collectionEncryption({ collectionId })
+          } catch (err) {
+            console.warn(
+              `Could not fetch the encryption marker for app collection ` +
+                `"${collectionId}":`,
+              err
+            )
+            marker = this.#appMarkers[collectionId]
+          }
+        }
+        if (!marker?.epochs || marker.epochs.length === 0) {
+          // No multi-recipient roster: the vault KAK is not (yet) a recipient,
+          // so there is nothing this session can decrypt.
+          return { value: undefined, unknownEpoch: false }
+        }
+        this.#appMarkers[collectionId] = marker
+        cipher = await createEdvDocCipher({
+          keyAgreementKey,
+          keyResolver,
+          collectionId,
+          encryption: marker
+        })
+        this.#appCiphers[collectionId] = cipher
+      }
+      try {
+        return {
+          value: await cipher.decrypt({ envelope: data }),
+          unknownEpoch: false
+        }
+      } catch (err) {
+        if (err instanceof UnknownEpochError) {
+          return { value: undefined, unknownEpoch: true }
+        }
+        console.warn(
+          `Could not decrypt resource envelope from app collection ` +
+            `"${collectionId}":`,
+          err
+        )
+        return { value: undefined, unknownEpoch: false }
+      }
+    }
+
+    const first = await attempt(false)
+    if (first.unknownEpoch && !this.#markerRefreshed.has(collectionId)) {
+      this.#markerRefreshed.add(collectionId)
+      return (await attempt(true)).value
+    }
+    return first.value
   }
 
   async deleteCollectionResource(resource: StorageResource): Promise<void> {
@@ -851,6 +954,91 @@ export class StorageManager {
       throw new Error('Deleting a collection requires remote storage.')
     }
     await this.#remoteStore.deleteCollection({ id })
+  }
+
+  /**
+   * Provisions an App Connect app-provisioned PRIVATE collection as a
+   * multi-recipient EDV collection: the user's vault KAK is always recipient
+   * zero (policy -- the user is a recipient of every encrypted collection in
+   * their own Space) alongside the app's deterministic per-collection key. The
+   * collection is ensured to exist and declared `'edv'` without clobbering an
+   * existing marker, then the epoch roster is brought to the desired state:
+   *
+   * - no epochs yet -> `initRecipients` with `[owner, appRecipient]`;
+   * - epochs exist but the app is absent (reconnect after revoke) ->
+   *   `addRecipient` escrows the app into every epoch;
+   * - epochs exist and the app is present -> no-op.
+   *
+   * The app never needs the vault KAK and the wallet never needs the app seed
+   * to remove it later (the roster kid is in the marker), so this is the only
+   * step that pairs the two recipients. Requires the vault key material and a
+   * remote store (an App Connect popup always has both).
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id to provision
+   * @param options.appRecipient {RecipientPublicKey}   the app's per-collection
+   *   public key-agreement key (its `id` is the recipient `kid`)
+   * @returns {Promise<CollectionEncryption>}   the current marker
+   */
+  async provisionAppCollection({
+    collectionId,
+    appRecipient
+  }: {
+    collectionId: string
+    appRecipient: RecipientPublicKey
+  }): Promise<CollectionEncryption> {
+    const remote = this.#remoteStore
+    if (!remote) {
+      throw new Error('Provisioning an app collection requires remote storage.')
+    }
+    if (!this.#vaultKeys) {
+      throw new Error(
+        'Provisioning an app collection requires the vault key material.'
+      )
+    }
+    const { keyAgreementKey } = this.#vaultKeys
+    const collection = remote.collectionHandle({ collectionId })
+    // Ensure the collection exists and is declared encrypted without dropping an
+    // existing epoch roster; the returned marker (with any epochs) drives the
+    // init-vs-add decision below.
+    const current = await remote.ensureEncryptedCollection({ id: collectionId })
+
+    let marker: CollectionEncryption
+    if (!current?.epochs || current.epochs.length === 0) {
+      // Lazy first provision: mint the first epoch with the owner as recipient
+      // zero plus the app's per-collection key.
+      marker = await initRecipients({
+        collection,
+        recipients: [ownerRecipient({ keyAgreementKey }), appRecipient]
+      })
+    } else {
+      const epoch = current.epochs.find(
+        entry => entry.id === current.currentEpoch
+      )
+      const present = !!epoch?.recipients.some(
+        entry => entry.header.kid === appRecipient.id
+      )
+      if (present) {
+        // The app already reads the current epoch: nothing to do.
+        return current
+      }
+      // Reconnect after a revoke rotated the epoch off the app: escrow the app
+      // back into every epoch (adds are cheap -- no rotation).
+      marker = await addRecipient({
+        collection,
+        recipient: appRecipient,
+        owner: { keyAgreementKey }
+      })
+    }
+
+    // Update the marker cache and the in-memory app-collection state, then drop
+    // any stale app cipher so the wallet's own next read rebuilds under the new
+    // marker (mirrors shareCollection's tail).
+    writeCachedMarker({ spaceId: remote.spaceId, collectionId, marker })
+    this.#appMarkers[collectionId] = marker
+    delete this.#appCiphers[collectionId]
+    this.#markerRefreshed.delete(collectionId)
+    return marker
   }
 
   /**
@@ -1242,6 +1430,157 @@ export class StorageManager {
       }
     }
     return { revoked, skipped }
+  }
+
+  /**
+   * The WAS collection id a grant zcap targets, when its `invocationTarget` is a
+   * collection (or a resource within one) directly under the given Space URL --
+   * the first path segment after `${spaceUrl}/`. Returns undefined for a
+   * whole-Space target or a foreign URL.
+   *
+   * @param options {object}
+   * @param options.invocationTarget {string}
+   * @param options.spaceUrl {string}
+   * @returns {string | undefined}
+   */
+  static #collectionIdFromTarget({
+    invocationTarget,
+    spaceUrl
+  }: {
+    invocationTarget: string
+    spaceUrl: string
+  }): string | undefined {
+    if (!invocationTarget.startsWith(`${spaceUrl}/`)) {
+      return undefined
+    }
+    const segment = invocationTarget.slice(spaceUrl.length + 1).split('/')[0]
+    return segment || undefined
+  }
+
+  /**
+   * Whether a collection id names a protected wallet collection (a standard
+   * collection, `id`, or `key-map`) -- never an app-provisioned one, so it is
+   * excluded from recipient-removal on revocation.
+   *
+   * @param collectionId {string}
+   * @returns {boolean}
+   */
+  static #isProtectedCollection(collectionId: string): boolean {
+    return (
+      collectionId === ID_COLLECTION.id ||
+      collectionId === KEY_MAP_COLLECTION.id ||
+      WALLET_STANDARD_COLLECTIONS.some(entry => entry.id === collectionId)
+    )
+  }
+
+  /**
+   * The key-rotation half of revoking a connected app's access: for each
+   * app-provisioned encrypted collection the app was granted, removes every
+   * non-owner recipient entry from the current epoch via was-client's
+   * `removeRecipient` (which rotates the epoch FIRST, then revokes the passed
+   * pull-axis zcaps -- indivisible), so a revoked app cannot decrypt future
+   * writes. The owner (the vault KAK) stays recipient zero; for these
+   * collections every non-owner entry is the app's, and removal needs no seed
+   * (the roster kid is in the marker), so it works even for an orphaned state.
+   *
+   * The candidate collections come from the recorded grant zcaps'
+   * `invocationTarget`s (standard / protected collections and whole-Space grants
+   * excluded); only those whose current-epoch roster still carries a non-owner
+   * entry are rotated. Best-effort per collection: a failure is logged and the
+   * rest proceed, so one stuck collection does not strand the whole revocation.
+   * A no-op (zero counts) without a remote store or vault keys. The honest
+   * ceiling stands: ciphertext the app already fetched stays readable to it.
+   *
+   * @param options {object}
+   * @param options.origin {string}   the connected app's origin
+   * @param options.subjectDid {string}   the app-key credential's subject DID
+   * @returns {Promise<{ collections: number; rotated: number; failed: number }>}
+   */
+  async revokeAppCollectionRecipients({
+    origin,
+    subjectDid
+  }: {
+    origin: string
+    subjectDid: string
+  }): Promise<{ collections: number; rotated: number; failed: number }> {
+    const remote = this.#remoteStore
+    if (!remote || !this.#vaultKeys) {
+      return { collections: 0, rotated: 0, failed: 0 }
+    }
+    const ownerKid = this.#vaultKeys.keyAgreementKey.id
+    const spaceUrl = remote.spaceUrl
+    const items = await this.listHistoryItems()
+    const { zcaps } = this.#recordedAppGrantZcaps({ origin, subjectDid, items })
+
+    // Group the pull-axis zcaps by the app-provisioned collection they target,
+    // dropping whole-Space and protected-collection grants.
+    const byCollection = new Map<string, IDelegatedZcap[]>()
+    for (const zcap of zcaps) {
+      const collectionId = StorageManager.#collectionIdFromTarget({
+        invocationTarget: zcap.invocationTarget,
+        spaceUrl
+      })
+      if (
+        !collectionId ||
+        StorageManager.#isProtectedCollection(collectionId)
+      ) {
+        continue
+      }
+      const existing = byCollection.get(collectionId)
+      if (existing) {
+        existing.push(zcap)
+      } else {
+        byCollection.set(collectionId, [zcap])
+      }
+    }
+
+    let rotated = 0
+    let failed = 0
+    for (const [collectionId, revoke] of byCollection) {
+      try {
+        const marker = await remote.collectionEncryption({ collectionId })
+        if (!marker?.epochs?.length || !marker.currentEpoch) {
+          continue
+        }
+        const epoch = marker.epochs.find(
+          entry => entry.id === marker.currentEpoch
+        )
+        if (!epoch) {
+          continue
+        }
+        const nonOwner = epoch.recipients
+          .map(entry => entry.header.kid)
+          .filter(kid => kid !== ownerKid)
+        if (nonOwner.length === 0) {
+          continue
+        }
+        for (const recipientId of nonOwner) {
+          const newMarker = await removeRecipient({
+            collection: remote.collectionHandle({ collectionId }),
+            space: remote.spaceHandle(),
+            recipientId,
+            revoke
+          })
+          writeCachedMarker({
+            spaceId: remote.spaceId,
+            collectionId,
+            marker: newMarker
+          })
+          this.#appMarkers[collectionId] = newMarker
+          delete this.#appCiphers[collectionId]
+          this.#markerRefreshed.delete(collectionId)
+        }
+        rotated += 1
+      } catch (err) {
+        console.warn(
+          `Could not rotate the epoch for app collection "${collectionId}" ` +
+            'during revocation:',
+          err
+        )
+        failed += 1
+      }
+    }
+    return { collections: byCollection.size, rotated, failed }
   }
 
   /**

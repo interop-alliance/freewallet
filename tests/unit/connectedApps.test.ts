@@ -100,6 +100,11 @@ function fakeStorage({
     listHistoryItems: vi.fn(async () => history),
     deleteCredential: vi.fn(async () => {}),
     addHistoryAppRevoke: vi.fn(async () => {}),
+    revokeAppCollectionRecipients: vi.fn(async () => ({
+      collections: 0,
+      rotated: 0,
+      failed: 0
+    })),
     revokeAppGrants: vi.fn(async () => ({ revoked: 1, skipped: 0 }))
   } as unknown as StorageManager
 }
@@ -195,6 +200,12 @@ describe('revokeAppAccess', () => {
     const outcome = await revokeAppAccess({ storage, user, app })
 
     expect(outcome).toEqual({ revoked: 1, skipped: 0 })
+    // The epoch rotation runs first, so a revoked app cannot decrypt future
+    // writes before its grants are even withdrawn.
+    expect(storage.revokeAppCollectionRecipients).toHaveBeenCalledWith({
+      origin: 'https://app.example',
+      subjectDid: APP_DID
+    })
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: APP_DID

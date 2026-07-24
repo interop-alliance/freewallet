@@ -217,6 +217,34 @@ the VP `@context`), all before signing so the DIDAuth proof covers them
 {app}?") in place of the three generic sections; approval also records an
 app-connect Login activity.
 
+**App-provisioned collection encryption (day-one policy).** When an App
+Connect `capabilityQuery` provisions a **private** (non-public) collection, the
+wallet does not leave it plaintext: it declares the collection EDV-encrypted
+and sets up a multi-recipient key-epoch roster in which **the user's vault KAK
+is always a recipient (recipient zero)** alongside the app's deterministic
+per-collection key. That per-collection key is derived from the app seed with
+`deriveCollectionKeys({ seed, collectionId })` (`@interop/wallet-core/identity`,
+the exact call was-react uses), so the app -- holding the seed -- and the wallet
+-- holding the vault KAK -- both read the collection, while the WAS server only
+ever stores ciphertext. Provisioning is idempotent: no epochs yet ->
+`initRecipients([owner, app])`; a reconnect after revoke -> `addRecipient(app)`;
+already present -> no-op. The wallet ensures the collection exists without
+clobbering an existing `encryption` marker, so an established epoch roster is
+never dropped. Public (`urn:was:public-collection`) grants stay plaintext and
+world-readable as before; only private app collections are encrypted. The
+policy is that **the user is always a recipient of an encrypted collection in
+their own Space** -- any future exception (an app collection the user is
+deliberately not a recipient of) must be an explicit, separate consent surface,
+never a silent default.
+
+Because the user is recipient zero, the wallet decrypts these collections in
+the storage browser as an ordinary recipient with its vault KAK, marker-driven
+from the fetched Collection Description (no seed at read time). Revoking a
+connected app rotates the epoch off the app's key for each such collection
+(`removeRecipient`, which rotates then revokes the pull-axis grants
+indivisibly), so a revoked app cannot decrypt future writes -- the honest
+ceiling being that ciphertext it already fetched stays readable to it.
+
 Security notes:
 
 - **Seed confidentiality**: the seed exists only in the wallet and the app

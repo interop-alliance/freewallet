@@ -107,6 +107,7 @@ const foreignDetail: ICapabilityQueryDetail = {
 let session: Session
 let delegated: Array<Record<string, unknown>>
 let ensureCalls: Array<{ id: string; isPublic?: boolean }>
+let provisionCalls: Array<{ collectionId: string; recipientId: string }>
 
 beforeAll(async () => {
   const keyAgent = await CapabilityAgent.fromSecret({
@@ -116,6 +117,7 @@ beforeAll(async () => {
   })
   delegated = []
   ensureCalls = []
+  provisionCalls = []
 
   const zcapClient = {
     async delegate({
@@ -164,6 +166,16 @@ beforeAll(async () => {
       isPublic?: boolean
     }) {
       ensureCalls.push({ id, isPublic })
+    },
+    async provisionAppCollection({
+      collectionId,
+      appRecipient
+    }: {
+      collectionId: string
+      appRecipient: { id: string }
+    }) {
+      provisionCalls.push({ collectionId, recipientId: appRecipient.id })
+      return { scheme: 'edv' }
     }
   }
 
@@ -505,6 +517,38 @@ describe('processZcaps', () => {
     const expiresMs = new Date(collectionZcap.expires).getTime()
     const expected = before + WRITE_TTL_MS
     expect(Math.abs(expiresMs - expected)).toBeLessThan(60 * 1000)
+  })
+
+  it('App Connect: provisions a private collection multi-recipient, a public one plaintext', async () => {
+    delegated.length = 0
+    ensureCalls.length = 0
+    provisionCalls.length = 0
+    const seed = new Uint8Array(32).fill(3)
+    await processZcaps({
+      zcapRequests: [collectionDetail, publicCollectionDetail],
+      session,
+      appProvisioning: { seed }
+    })
+
+    // The private collection routed through provisionAppCollection (with a
+    // derived recipient kid); the public one stayed plaintext via
+    // ensureCollection.
+    expect(provisionCalls).toHaveLength(1)
+    expect(provisionCalls[0].collectionId).toBe('example-app-data')
+    expect(provisionCalls[0].recipientId).toMatch(/^did:key:z.+#z.+/)
+    expect(ensureCalls).toEqual([{ id: 'example-app-public', isPublic: true }])
+  })
+
+  it('without appProvisioning, a private collection provisions plaintext', async () => {
+    delegated.length = 0
+    ensureCalls.length = 0
+    provisionCalls.length = 0
+    await processZcaps({
+      zcapRequests: [collectionDetail],
+      session
+    })
+    expect(provisionCalls).toHaveLength(0)
+    expect(ensureCalls).toEqual([{ id: 'example-app-data', isPublic: false }])
   })
 
   it('caps a standard-collection write to read-only when delegating', async () => {

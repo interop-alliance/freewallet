@@ -1,5 +1,24 @@
 # History
 
+## Unreleased - TBD
+
+### Added
+
+- Collections an app provisions through App Connect are now end-to-end
+  encrypted with the user as a recipient: a private collection an app requests
+  is set up multi-recipient, with the user's vault key alongside the app's own
+  per-collection key, so both can read it while the storage server only ever
+  holds ciphertext. The storage browser decrypts these collections and shows a
+  generic JSON view (with a decrypted/envelope toggle) for any non-credential
+  resource, in addition to the credential view.
+
+### Changed
+
+- Revoking a connected app now rotates the encryption key of every collection
+  it provisioned before withdrawing its access, so a revoked app cannot decrypt
+  anything written afterward. The revoke confirmation says so: the app may still
+  hold copies of data it already fetched.
+
 ## 0.21.0 - 2026-07-23
 
 ### Changed

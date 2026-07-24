@@ -211,6 +211,30 @@ export function appKeySubjectDid(
 }
 
 /**
+ * The 32-byte seed an app-key credential carries
+ * (`credentialSubject.seed`, base64url-no-pad), or undefined when it is absent
+ * or malformed. This is the client secret from which the app's per-collection
+ * key-agreement keys derive; the wallet holds it at consent time (freshly
+ * minted or matched) to provision the app's encrypted collections.
+ *
+ * @param credential {IVerifiableCredential}
+ * @returns {Uint8Array | undefined}
+ */
+export function appKeySeedBytes(
+  credential: IVerifiableCredential
+): Uint8Array | undefined {
+  const subject = credential.credentialSubject as { seed?: unknown } | undefined
+  if (!subject || typeof subject.seed !== 'string') {
+    return undefined
+  }
+  try {
+    return base64urlnopad.decode(subject.seed)
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * The origin (`credentialSubject.origin`) an app-key credential is bound to,
  * when present.
  *

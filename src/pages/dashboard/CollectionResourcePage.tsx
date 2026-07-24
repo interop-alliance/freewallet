@@ -9,13 +9,19 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { MdArrowBack, MdDeleteOutline, MdDownload } from 'react-icons/md'
+import {
+  MdArrowBack,
+  MdContentCopy,
+  MdDeleteOutline,
+  MdDownload
+} from 'react-icons/md'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { JsonHighlight } from '@/components/JsonHighlight'
 import { DeleteCredentialDialog } from '@/components/credentialDetails/DeleteCredentialDialog'
 import { useCredentialDelete } from '@/hooks/useCredentialDelete'
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { useAuthStore } from '@/stores/authStore'
 import { storageStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
@@ -61,8 +67,23 @@ export function CollectionResourcePage() {
   const [isLoading, setIsLoading] = useState(true)
   const [errorKey, setErrorKey] = useState<string | null>(null)
 
-  const vc = useMemo(() => {
-    if (payload?.kind !== 'json') {
+  const {
+    copied,
+    copy,
+    reset: resetCopied
+  } = useCopyToClipboard({
+    resetDelay: 2000,
+    fallbackToExecCommand: true,
+    onError: (err: unknown) => {
+      console.warn('Copy to clipboard failed:', err)
+    }
+  })
+
+  // A Verifiable Credential body renders the rich credential card; any other
+  // JSON (or text) body renders the generic viewer. `vc` is null in the latter
+  // case, which drives the branch.
+  const vc = useMemo<IVerifiableCredential | null>(() => {
+    if (payload?.kind !== 'json' || !isVerifiableCredentialData(payload.data)) {
       return null
     }
     return payload.data as IVerifiableCredential
@@ -112,6 +133,7 @@ export function CollectionResourcePage() {
 
       setIsLoading(true)
       setErrorKey(null)
+      resetCopied()
 
       try {
         const collections = await storage.listCollections()
@@ -147,9 +169,9 @@ export function CollectionResourcePage() {
           return
         }
 
-        // An encrypted-collection resource arrives as an EDV envelope; with
-        // an unlocked vault, recover the credential behind it and keep the
-        // envelope source around for the alternate view.
+        // An encrypted-collection resource arrives as an EDV envelope; with an
+        // unlocked vault, recover the document behind it and keep the envelope
+        // source around for the alternate view.
         const decrypted =
           body.kind === 'json'
             ? await storage.decryptCollectionResource({
@@ -160,20 +182,25 @@ export function CollectionResourcePage() {
         if (cancelled) {
           return
         }
-        const data = decrypted ?? (body.kind === 'json' ? body.data : null)
 
-        if (body.kind !== 'json' || !isVerifiableCredentialData(data)) {
-          setErrorKey('storage.resourceNotVerifiableCredential')
-          setPayload(null)
+        if (body.kind === 'json') {
+          const data = decrypted ?? body.data
+          setPayload({ kind: 'json', data })
+          setEnvelopeText(
+            decrypted !== undefined ? JSON.stringify(body.data, null, 2) : null
+          )
+          setSourceView('decrypted')
+          return
+        }
+        if (body.kind === 'text') {
+          setPayload({ kind: 'text', text: body.text })
           setEnvelopeText(null)
           return
         }
-
-        setPayload({ kind: 'json', data })
-        setEnvelopeText(
-          decrypted !== undefined ? JSON.stringify(body.data, null, 2) : null
-        )
-        setSourceView('decrypted')
+        // A binary body has no inline JSON/text rendering here.
+        setPayload(null)
+        setEnvelopeText(null)
+        setErrorKey('storage.resourceNotViewable')
       } catch (err) {
         console.error('Failed to load collection resource:', err)
         if (!cancelled) {
@@ -190,13 +217,16 @@ export function CollectionResourcePage() {
     return () => {
       cancelled = true
     }
-  }, [storage, collectionId, resourceId])
+  }, [storage, collectionId, resourceId, resetCopied])
 
   const jsonText = useMemo(() => {
-    if (payload?.kind !== 'json') {
-      return ''
+    if (payload?.kind === 'json') {
+      return JSON.stringify(payload.data, null, 2)
     }
-    return JSON.stringify(payload.data, null, 2)
+    if (payload?.kind === 'text') {
+      return payload.text
+    }
+    return ''
   }, [payload])
 
   const shownSourceText =
@@ -227,6 +257,13 @@ export function CollectionResourcePage() {
     downloadBlob({ blob, filename: `${resourceId}.json` })
   }, [shownSourceText, resourceId])
 
+  const handleCopy = useCallback(async () => {
+    if (!shownSourceText) {
+      return
+    }
+    await copy(shownSourceText)
+  }, [copy, shownSourceText])
+
   const handleDelete = useCallback(async () => {
     if (!credentialCid) {
       return
@@ -237,6 +274,25 @@ export function CollectionResourcePage() {
   const credentialDetailHref = credentialCid
     ? `/credential/${encodeURIComponent(credentialCid)}`
     : null
+
+  const sourceToggle = envelopeText !== null && (
+    <ToggleButtonGroup
+      size="small"
+      exclusive
+      value={sourceView}
+      onChange={(_event, view: 'decrypted' | 'envelope' | null) => {
+        if (view) {
+          setSourceView(view)
+        }
+      }}
+      sx={{ mb: 1 }}
+    >
+      <ToggleButton value="decrypted">
+        {t('storage.viewDecrypted')}
+      </ToggleButton>
+      <ToggleButton value="envelope">{t('storage.viewEnvelope')}</ToggleButton>
+    </ToggleButtonGroup>
+  )
 
   return (
     <DashboardLayout title={t('storage.title')}>
@@ -337,26 +393,69 @@ export function CollectionResourcePage() {
               </Stack>
             </Paper>
 
-            {envelopeText !== null && (
-              <ToggleButtonGroup
-                size="small"
-                exclusive
-                value={sourceView}
-                onChange={(_event, view: 'decrypted' | 'envelope' | null) => {
-                  if (view) {
-                    setSourceView(view)
-                  }
-                }}
-                sx={{ mb: 1 }}
+            {sourceToggle}
+            <JsonHighlight
+              code={shownSourceText}
+              sx={credentialDetailStyles.codeBlock}
+            />
+          </>
+        )}
+
+        {!isLoading && !errorKey && resource && !vc && payload && (
+          <>
+            <Typography
+              variant="h5"
+              component="h2"
+              sx={storageStyles.resourceDetailId}
+            >
+              {resource.id}
+            </Typography>
+
+            <Paper variant="outlined" sx={storageStyles.vcPreviewCard}>
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={2}
+                sx={storageStyles.vcPreviewCardInner}
               >
-                <ToggleButton value="decrypted">
-                  {t('storage.viewDecrypted')}
-                </ToggleButton>
-                <ToggleButton value="envelope">
-                  {t('storage.viewEnvelope')}
-                </ToggleButton>
-              </ToggleButtonGroup>
-            )}
+                <Box sx={storageStyles.vcPreviewMain}>
+                  <Typography variant="h6" sx={storageStyles.vcPreviewTitle}>
+                    {displayTitle}
+                  </Typography>
+                  {resource.isPublic && (
+                    <Box sx={storageStyles.vcPreviewPublicMeta}>
+                      <PublicAccessIcon />
+                    </Box>
+                  )}
+                </Box>
+
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  sx={storageStyles.vcPreviewActions}
+                >
+                  <Button
+                    variant="outlined"
+                    startIcon={<MdContentCopy />}
+                    onClick={() => {
+                      void handleCopy()
+                    }}
+                    sx={storageStyles.vcPreviewActionButton}
+                  >
+                    {copied ? t('storage.copied') : t('storage.copySnippet')}
+                  </Button>
+                  <Button
+                    variant="contained"
+                    startIcon={<MdDownload />}
+                    onClick={handleDownload}
+                    sx={storageStyles.vcPreviewActionButton}
+                  >
+                    {t('storage.download')}
+                  </Button>
+                </Stack>
+              </Stack>
+            </Paper>
+
+            {sourceToggle}
             <JsonHighlight
               code={shownSourceText}
               sx={credentialDetailStyles.codeBlock}
