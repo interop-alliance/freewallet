@@ -3,13 +3,10 @@
  *
  * These exercise the caching layer only, via the injectable importer, so the
  * real (heavy, CJS-interop-broken under jsdom) dictionary chunks are never
- * imported -- see the file-header note in PasswordStrengthMeter.tsx.
+ * imported -- see the file-header note in passwordScorer.ts.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  loadScorer,
-  __resetScorerCacheForTests
-} from '@/components/PasswordStrengthMeter'
+import { loadScorer, __resetScorerCacheForTests } from '@/lib/passwordScorer'
 
 describe('loadScorer', () => {
   beforeEach(() => {
