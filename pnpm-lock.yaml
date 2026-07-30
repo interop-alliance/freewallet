@@ -48,8 +48,8 @@ importers:
         specifier: ^9.4.4
         version: 9.4.4
       '@interop/social-core':
-        specifier: ^0.4.0
-        version: 0.4.0
+        specifier: ^0.5.0
+        version: 0.5.0
       '@interop/storage-core':
         specifier: ^0.3.9
         version: 0.3.9
@@ -642,8 +642,8 @@ packages:
     resolution: {integrity: sha512-oP6B3Z2L3Ocetabmlfdu1TQVd01FCHGxgKxeD42Kh4EdUPZOJDbihaa0/NH0WXHn/sNeoU/FV7FYDjTVVqX8oQ==}
     engines: {node: '>=24.0'}
 
-  '@interop/social-core@0.4.0':
-    resolution: {integrity: sha512-fBKzgtq5vzCQes000sOe5iQNqwhrNa8V7GrQCP0vnM02mQ7B9R4ReneJSVb0VMI+udK+0WoLWOnzEwqPfNAcHA==}
+  '@interop/social-core@0.5.0':
+    resolution: {integrity: sha512-GmxkxDJ1z/8aNsUz04CB1aZsnqvPlks30zVSN6OoVGOxSla9gulCwf5lJFoWQg9nm7aw4Cb798tPHR2k9P1XbQ==}
     engines: {node: '>=24.0'}
 
   '@interop/storage-core@0.3.9':
@@ -4019,7 +4019,7 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/social-core@0.4.0': {}
+  '@interop/social-core@0.5.0': {}
 
   '@interop/storage-core@0.3.9':
     dependencies:

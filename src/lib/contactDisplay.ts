@@ -25,11 +25,13 @@ export function secondaryLineFor(contact: ContactData): string {
   if (contact.organization) {
     return contact.organization
   }
-  if (contact.phoneNumbers.length > 0) {
-    return contact.phoneNumbers[0].number
+  const phoneNumbers = contact.phoneNumbers ?? []
+  if (phoneNumbers.length > 0) {
+    return phoneNumbers[0].number
   }
-  if (contact.emailAddresses.length > 0) {
-    return contact.emailAddresses[0].email
+  const emailAddresses = contact.emailAddresses ?? []
+  if (emailAddresses.length > 0) {
+    return emailAddresses[0].email
   }
   return ''
 }

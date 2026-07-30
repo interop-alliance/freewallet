@@ -86,7 +86,7 @@ export function ContactFormPage() {
         setOrganization(contact.organization ?? '')
         setNote(contact.note ?? '')
         setPhoneNumbers(
-          contact.phoneNumbers.map(p => ({
+          (contact.phoneNumbers ?? []).map(p => ({
             label: p.label,
             value: p.number,
             digits: p.digits,
@@ -95,7 +95,7 @@ export function ContactFormPage() {
           }))
         )
         setEmailAddresses(
-          contact.emailAddresses.map(e => ({
+          (contact.emailAddresses ?? []).map(e => ({
             label: e.label,
             value: e.email,
             id: e.id
