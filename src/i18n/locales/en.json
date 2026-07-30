@@ -279,6 +279,7 @@
       "details": "Details",
       "phone": "Phone",
       "email": "Email",
+      "dids": "DIDs",
       "note": "Note"
     },
     "deleteDialog": {
@@ -296,6 +297,7 @@
     "label": "Label",
     "phoneNumber": "Number",
     "emailAddress": "Email",
+    "did": "DID",
     "note": "Note",
     "addRow": "Add {{field}}",
     "removeRow": "Remove",

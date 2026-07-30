@@ -11,18 +11,22 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogContentText from '@mui/material/DialogContentText'
 import DialogTitle from '@mui/material/DialogTitle'
 import Divider from '@mui/material/Divider'
+import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
+import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
+import { MdContentCopy } from 'react-icons/md'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { initialsFor } from '@/lib/contactDisplay'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { contactDetailStyles } from '@/styles/appStyles'
-import type { ContactData } from '@interop/social-core'
+import { getDids, type ContactData } from '@interop/social-core'
 
 function FieldSection({
   label,
@@ -58,6 +62,65 @@ function FieldSection({
           <Typography variant="body2">{row.value}</Typography>
         </Stack>
       ))}
+    </Box>
+  )
+}
+
+function DidListSection({
+  dids,
+  t
+}: {
+  dids: string[]
+  t: (key: string) => string
+}) {
+  const { copied, copy } = useCopyToClipboard()
+  const [copiedDid, setCopiedDid] = useState<string | null>(null)
+
+  async function handleCopy(did: string) {
+    setCopiedDid(did)
+    await copy(did)
+  }
+
+  if (dids.length === 0) {
+    return null
+  }
+
+  return (
+    <Box sx={{ mt: 2 }}>
+      <Typography variant="overline" color="text.secondary">
+        {t('contact.sections.dids')}
+      </Typography>
+      <Stack component="ol" sx={contactDetailStyles.didList}>
+        {dids.map((did, index) => (
+          <Stack
+            key={did}
+            component="li"
+            direction="row"
+            sx={contactDetailStyles.didListItem}
+          >
+            <Typography variant="body2" sx={contactDetailStyles.didListIndex}>
+              {index + 1}.
+            </Typography>
+            <Typography variant="body2" sx={contactDetailStyles.didListValue}>
+              {did}
+            </Typography>
+            <Tooltip
+              title={copied && copiedDid === did ? t('common.copied') : t('common.copy')}
+            >
+              <IconButton
+                size="small"
+                onClick={() => {
+                  void handleCopy(did)
+                }}
+                aria-label={t('common.copy')}
+                sx={{ p: 0.25, flexShrink: 0 }}
+              >
+                <MdContentCopy size={15} />
+              </IconButton>
+            </Tooltip>
+          </Stack>
+        ))}
+      </Stack>
     </Box>
   )
 }
@@ -204,6 +267,7 @@ export function ContactDetailPage() {
               value: e.email
             }))}
           />
+          <DidListSection dids={getDids(contact)} t={t} />
           {contact.note && (
             <FieldSection
               label={t('contact.sections.note')}

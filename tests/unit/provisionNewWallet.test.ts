@@ -3,13 +3,17 @@
  * Unit tests for the new-wallet provisioning sequence
  * (`src/session/provisionNewWallet.ts`) shared by the signup and guest flows:
  * it provisions the collections, records the initial account + space-created
- * history, and seeds the welcome credential -- in that order, and without
- * double-logging the welcome credential's own created-history (which
- * `StorageManager.addCredential` records internally).
+ * history, seeds the default contacts, and seeds the welcome credential -- in
+ * that order, and without double-logging the welcome credential's own
+ * created-history (which `StorageManager.addCredential` records internally).
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/auth'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
+import {
+  interopAllianceTeamContact,
+  selfContact
+} from '@/fixtures/defaultContacts'
 import { provisionNewWallet } from '@/session/provisionNewWallet'
 
 /**
@@ -28,11 +32,17 @@ function sessionStub() {
     ensureUserCollections: vi.fn(track('ensureUserCollections')),
     addHistoryNewAccount: vi.fn(track('addHistoryNewAccount')),
     addHistorySpaceCreated: vi.fn(track('addHistorySpaceCreated')),
+    addContact: vi.fn(track('addContact')),
     addCredential: vi.fn(track('addCredential'))
   }
   const user = { id: 'did:key:z6MkNew', email: 'new@example.test' }
   const profile = { zcapClient: {} } as unknown as Session['profile']
-  const session = { user, profile, storage } as unknown as Session
+  const session = {
+    user,
+    profile,
+    storage,
+    isGuest: false
+  } as unknown as Session
   return { session, storage, user, profile, order }
 }
 
@@ -48,6 +58,16 @@ describe('provisionNewWallet', () => {
     })
     expect(storage.addHistoryNewAccount).toHaveBeenCalledWith({ user })
     expect(storage.addHistorySpaceCreated).toHaveBeenCalledWith({ user })
+    expect(storage.addContact).toHaveBeenCalledWith({
+      contact: interopAllianceTeamContact
+    })
+    expect(storage.addContact).toHaveBeenCalledWith({
+      contact: selfContact({
+        didWeb: profile.didWeb?.did,
+        didWebvh: profile.didWebvh?.did,
+        email: user.email
+      })
+    })
     expect(storage.addCredential).toHaveBeenCalledWith({
       credential: welcomeCredential,
       user
@@ -56,8 +76,29 @@ describe('provisionNewWallet', () => {
       'ensureUserCollections',
       'addHistoryNewAccount',
       'addHistorySpaceCreated',
+      'addContact',
+      'addContact',
       'addCredential'
     ])
+  })
+
+  it('omits the email from the self-contact for a guest session', async () => {
+    // A guest's `user.email` is the internal placeholder from
+    // `initGuestSession` ('guest@example.com'), never something the user
+    // typed, so it must not leak into the seeded self-contact.
+    const { session, storage, user, profile } = sessionStub()
+    session.isGuest = true
+    user.email = 'guest@example.com'
+
+    await provisionNewWallet({ session })
+
+    expect(storage.addContact).toHaveBeenCalledWith({
+      contact: selfContact({
+        didWeb: profile.didWeb?.did,
+        didWebvh: profile.didWebvh?.did,
+        email: undefined
+      })
+    })
   })
 
   it('does not separately record credential-created history (addCredential owns it)', async () => {
