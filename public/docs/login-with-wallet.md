@@ -67,17 +67,68 @@ describe the target abstractly and the wallet maps it onto its own Space
 - `{ "type": "urn:was:collection", "name": "<collection-id>" }` -- a named
   collection. `name` must match `^[a-z0-9][a-z0-9-]{0,63}$`. A new collection
   is provisioned plaintext and non-public (reachable only through your grant).
+- `{ "type": "urn:was:public-collection", "name": "<collection-id>" }` -- a
+  named collection provisioned plaintext with a world-readable policy: anyone
+  on the web can read it without a capability. Writes still require your grant.
+  Refused on any of the wallet's own collections -- an RP can never make the
+  user's existing data world-readable.
+- `{ "type": "urn:was:shared-collection", "name": "<collection-id>" }` -- read
+  **and decrypt** one of the wallet's own encrypted collections: your DID joins
+  the collection's key-epoch roster, so you see plaintext rather than
+  ciphertext. `name` must be one of the encrypted standard collections, your
+  `controller` must be an Ed25519 `did:key` (the decryption key is derived from
+  it, never carried in the request), and the grant is always read-only.
 - `{ "type": "urn:was:space" }` -- the whole Space. **Always granted
   read-only** (`GET`/`HEAD`); a Space-wide write would allow controller
   takeover.
-- a **plain URL string** -- satisfied only if it falls under the user's own
-  Space URL; any other URL is refused.
+- a **plain URL string** -- satisfied only if it parses as a URL on the same
+  origin as the user's Space and resolves to a path inside it. A query string
+  or fragment, a path that escapes the Space, or a first path segment that is
+  not a valid collection id all make the grant unsatisfiable; the target is not
+  rewritten to make it fit. The Space URL itself (with or without a trailing
+  slash) is a whole-Space grant; otherwise the first path segment names the
+  collection, and the grant is capped exactly as the equivalent descriptor
+  form would be.
+
+An unknown descriptor `type` is unsatisfiable, so a wallet that predates a
+descriptor refuses visibly rather than degrading into something weaker.
 
 `controller` is **your** DID (the RP's) -- the only party that can later invoke
-the grant. `allowedAction` defaults to `["GET", "HEAD"]` when omitted (never
-"inherit all"). Two of the wallet's standard collections
-(`private-credentials`, `wallet-activity`) are encrypted at rest; a grant on
-them exposes only ciphertext (the wallet's vault key never leaves the wallet).
+the grant. Two of the wallet's standard collections (`private-credentials`,
+`wallet-activity`) are encrypted at rest; an ordinary grant on them exposes
+only ciphertext (the wallet's vault key never leaves the wallet) -- decryption
+is what `urn:was:shared-collection` adds.
+
+### `allowedAction` and the action ceilings
+
+`allowedAction` is a subset of the closed WAS action vocabulary: `GET`, `POST`,
+`PUT`, `DELETE`, plus `HEAD`, which the wallet mints alongside `GET` in every
+read grant (the spec authorizes a `HEAD` request as a `GET`). Anything else --
+an unrecognized verb, a non-string entry -- is **dropped**, not passed through.
+Omitting `allowedAction` defaults to `["GET", "HEAD"]`, never "inherit all".
+
+What survives is then intersected with a ceiling fixed by the class of target
+you asked for:
+
+| Target                                                 | Ceiling                                |
+| ------------------------------------------------------ | -------------------------------------- |
+| whole Space (`urn:was:space`)                          | `GET`, `HEAD`                          |
+| a wallet collection (standard, `id`, `key-map`)        | `GET`, `HEAD`                          |
+| a share (`urn:was:shared-collection`)                  | `GET`, `HEAD`                          |
+| a public collection (`urn:was:public-collection`)      | `GET`, `HEAD`, `POST`                  |
+| your own provisioned collection (`urn:was:collection`) | `GET`, `HEAD`, `POST`, `PUT`, `DELETE` |
+
+A public collection is **add-only** on purpose: it is plaintext and
+world-readable, so a write there is publication under the user's identity and
+irreversible in practice (retracting removes the link, not the copies already
+fetched). You can add to what you published; you cannot rewrite or retract it.
+
+If nothing is left after dropping unknown verbs and applying the ceiling, the
+grant is **refused** -- shown to the user as "cannot fulfill" and absent from
+the response -- rather than downgraded to a read grant you did not ask for. So
+request the actions you actually need, and expect a target-appropriate subset
+back: check each returned capability's `allowedAction` rather than assuming you
+got what you asked for.
 
 ## The response
 

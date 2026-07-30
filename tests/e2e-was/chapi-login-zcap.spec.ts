@@ -227,11 +227,13 @@ test('public-collection VPR provisions a world-readable collection', async ({
     }
   }
 
-  // The delegated zcap still carries the requested write actions.
+  // The delegated zcap carries a write action, capped to add-only: a public
+  // collection is a publication surface, so the request's `PUT` and `DELETE`
+  // are dropped and only `POST` survives alongside the reads.
   expect(payload.data.zcap).toHaveLength(1)
   const grant = payload.data.zcap[0]
   expect(grant.invocationTarget.endsWith('/example-app-public')).toBe(true)
-  expect(grant.allowedAction).toContain('PUT')
+  expect(grant.allowedAction).toEqual(['GET', 'HEAD', 'POST'])
 
   // The collection itself is world-readable: an unauthenticated (no zcap,
   // no cookies) GET on the collection URL lists it instead of being denied.

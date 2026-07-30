@@ -40,6 +40,38 @@
 
 ### Changed
 
+- What a delegated capability may be granted is now a per-target-class table
+  rather than a single read-only/pass-through switch. Every target a request
+  resolves onto falls into exactly one class, and each class has a ceiling the
+  requested actions are intersected against: the whole Space, a protected
+  wallet collection (the standard collections plus the `id` and `key-map`
+  collections), and a share stay read-only, an app-provisioned **public**
+  collection is now add-only (`GET`/`HEAD`/`POST`), and an app-provisioned
+  private collection keeps the full vocabulary under the consent screen and
+  the shorter write TTL. The public cap is the user-visible change: a
+  world-readable plaintext collection is a publication surface, not a data
+  store, and a write there is irreversible in practice (retracting removes the
+  link, not the copies already fetched), so an app may add to what it
+  published but can no longer be granted `PUT` or `DELETE` to rewrite or
+  retract it.
+- Requested actions are now intersected against the closed action vocabulary
+  the WAS spec fixes (`GET`, `POST`, `PUT`, `DELETE`, plus `HEAD` kept as a
+  tolerated read alias, since the spec authorizes a `HEAD` request as a `GET`
+  and the wallet has always minted it alongside `GET` in every read grant).
+  Previously a requested token was array-wrapped and stringified, so anything a
+  site put in `allowedAction` became the `allowedAction` of a capability the
+  user's root key signs -- including every action a server might grow support
+  for later, retroactively and with no wallet-side review. Unknown verbs and
+  non-string entries are now dropped, the same fail-closed treatment an unknown
+  invocation-target descriptor type already got; the surviving actions are
+  uppercased, deduplicated, and emitted in a stable order, so an equivalent
+  request always yields the same grant.
+- A request asking only for actions its target forbids is now refused visibly
+  instead of being silently downgraded. Where such a request previously came
+  back as a read grant nobody asked for, the consent screen now shows it as
+  "cannot fulfill" and nothing is delegated -- which is both more honest to the
+  user and necessary, since an empty `allowedAction` array means "every action"
+  in the capability model and must never be signed.
 - The wallet now refuses to store a credential that claims to be an app key
   but is not one. Every app key it mints carries a shared `AppKeyCredential`
   marker type (one stable IRI for every app), and a credential carrying that
@@ -86,6 +118,22 @@
   than an earlier version would have minted for the same keys. Already
   published logs are unaffected -- they keep resolving, and a Space whose log
   is already published adopts that log's DID rather than re-creating it.
+
+### Fixed
+
+- A capability request naming a plain URL is now parsed and normalized against
+  the user's Space instead of being matched by string prefix. The prefix test
+  could be walked past: `<space URL>/private-credentials?x=1` starts with the
+  Space URL and so classified as the requesting site's own collection, earning
+  the full write ceiling on the user's own credentials collection -- the exact
+  target the read-only cap exists to protect. A target must now parse as a URL
+  on the Space's origin, resolve to a path inside the Space (dot segments that
+  escape it are refused), carry no query string or fragment, and name a valid
+  collection in its first path segment; the Space URL itself, with or without a
+  trailing slash, is a whole-Space grant. A target carrying a query or fragment
+  is refused outright rather than quietly rewritten, since showing the user one
+  target on the consent screen and delegating another would defeat the point of
+  asking.
 
 ## 0.22.0 - 2026-07-23
 

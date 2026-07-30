@@ -9,6 +9,7 @@ import { x25519RecipientFromDidKey } from '@/lib/didKeyRecipient'
 import {
   resolveInvocationTarget,
   resolveGrant,
+  resolveGrants,
   processZcaps,
   processRequest,
   presentationSuiteFor
@@ -256,7 +257,8 @@ describe('resolveInvocationTarget', () => {
       satisfiable: true,
       invocationTarget: `${SPACE_URL}/example-app-data/doc1`,
       wholeSpace: false,
-      needsProvisioning: false
+      needsProvisioning: false,
+      targetClass: 'collection'
     })
   })
 
@@ -265,16 +267,136 @@ describe('resolveInvocationTarget', () => {
       descriptor: SPACE_URL,
       spaceUrl: SPACE_URL
     })
-    expect(target).toMatchObject({ satisfiable: true, wholeSpace: true })
+    expect(target).toMatchObject({
+      satisfiable: true,
+      wholeSpace: true,
+      targetClass: 'space'
+    })
+    expect(target.collectionId).toBeUndefined()
+  })
+
+  it('treats the Space URL with a trailing slash as a whole-Space grant', () => {
+    const target = resolveInvocationTarget({
+      descriptor: `${SPACE_URL}/`,
+      spaceUrl: SPACE_URL
+    })
+    // The trailing slash is normalized off the delegated target.
+    expect(target).toMatchObject({
+      satisfiable: true,
+      invocationTarget: SPACE_URL,
+      wholeSpace: true,
+      targetClass: 'space'
+    })
+    expect(target.collectionId).toBeUndefined()
   })
 
   it('refuses a foreign URL', () => {
-    expect(
-      resolveInvocationTarget({
-        descriptor: 'https://someone-else.example/space/OTHER',
+    const target = resolveInvocationTarget({
+      descriptor: 'https://someone-else.example/space/OTHER',
+      spaceUrl: SPACE_URL
+    })
+    expect(target.satisfiable).toBe(false)
+    expect(target.targetClass).toBeUndefined()
+  })
+
+  // These previously classified as an RP `collection` (the string started with
+  // `${SPACE_URL}/` and the segment was read off it verbatim), so a query or a
+  // fragment smuggled past the prefix check earned the full write ceiling on a
+  // target the server would route somewhere else entirely.
+  it('refuses a plain-URL target carrying a query or a fragment', () => {
+    for (const descriptor of [
+      `${SPACE_URL}/private-credentials?x=1`,
+      `${SPACE_URL}/private-credentials#frag`,
+      `${SPACE_URL}/example-app-data/doc1?x=1`,
+      `${SPACE_URL}?x=1`,
+      `${SPACE_URL}#frag`
+    ]) {
+      const target = resolveInvocationTarget({
+        descriptor,
         spaceUrl: SPACE_URL
-      }).satisfiable
-    ).toBe(false)
+      })
+      expect(target.satisfiable).toBe(false)
+      expect(target.targetClass).toBeUndefined()
+    }
+  })
+
+  it('refuses a path that escapes the Space through dot segments', () => {
+    for (const descriptor of [
+      `${SPACE_URL}/../other-space/private`,
+      `${SPACE_URL}/example-app-data/../../other-space/private`,
+      `${SPACE_URL}/..`
+    ]) {
+      const target = resolveInvocationTarget({
+        descriptor,
+        spaceUrl: SPACE_URL
+      })
+      expect(target.satisfiable).toBe(false)
+      expect(target.targetClass).toBeUndefined()
+    }
+  })
+
+  it('refuses a first path segment that is not a valid collection id', () => {
+    for (const segment of [
+      'Upper-Case',
+      '-leading-hyphen',
+      'has%20space',
+      'x'.repeat(65)
+    ]) {
+      const target = resolveInvocationTarget({
+        descriptor: `${SPACE_URL}/${segment}/doc1`,
+        spaceUrl: SPACE_URL
+      })
+      expect(target.satisfiable).toBe(false)
+      expect(target.targetClass).toBeUndefined()
+    }
+  })
+
+  it('refuses a differing origin on an otherwise identical path', () => {
+    const space = new URL(SPACE_URL)
+    for (const origin of [
+      `http://${space.host}`,
+      `https://${space.hostname}:8443`,
+      'https://was.example.com.evil'
+    ]) {
+      const target = resolveInvocationTarget({
+        descriptor: `${origin}${space.pathname}/example-app-data`,
+        spaceUrl: SPACE_URL
+      })
+      expect(target.satisfiable).toBe(false)
+      expect(target.targetClass).toBeUndefined()
+    }
+  })
+
+  it('normalizes a trailing slash off a collection URL', () => {
+    const withSlash = resolveInvocationTarget({
+      descriptor: `${SPACE_URL}/example-app-data/`,
+      spaceUrl: SPACE_URL
+    })
+    const without = resolveInvocationTarget({
+      descriptor: `${SPACE_URL}/example-app-data`,
+      spaceUrl: SPACE_URL
+    })
+    expect(withSlash).toMatchObject({
+      satisfiable: true,
+      invocationTarget: `${SPACE_URL}/example-app-data`,
+      collectionId: 'example-app-data',
+      targetClass: 'collection'
+    })
+    expect(withSlash.invocationTarget).toBe(without.invocationTarget)
+  })
+
+  it('classifies a deep resource URL under a protected collection', () => {
+    const url = `${SPACE_URL}/private-credentials/sub/path/resource-1`
+    expect(
+      resolveInvocationTarget({ descriptor: url, spaceUrl: SPACE_URL })
+    ).toMatchObject({
+      satisfiable: true,
+      invocationTarget: url,
+      wholeSpace: false,
+      collectionId: 'private-credentials',
+      encrypted: true,
+      targetClass: 'protected-collection'
+    })
   })
 
   it('resolves a named RP collection and flags provisioning', () => {
@@ -287,7 +409,8 @@ describe('resolveInvocationTarget', () => {
       invocationTarget: `${SPACE_URL}/example-app-data`,
       needsProvisioning: true,
       collectionId: 'example-app-data',
-      encrypted: false
+      encrypted: false,
+      targetClass: 'collection'
     })
   })
 
@@ -298,7 +421,8 @@ describe('resolveInvocationTarget', () => {
     })
     expect(target).toMatchObject({
       needsProvisioning: false,
-      encrypted: false
+      encrypted: false,
+      targetClass: 'protected-collection'
     })
   })
 
@@ -309,8 +433,25 @@ describe('resolveInvocationTarget', () => {
     })
     expect(target).toMatchObject({
       needsProvisioning: false,
-      encrypted: true
+      encrypted: true,
+      targetClass: 'protected-collection'
     })
+  })
+
+  it('treats the `id` and `key-map` collections as protected and present', () => {
+    for (const name of ['id', 'key-map']) {
+      expect(
+        resolveInvocationTarget({
+          descriptor: { type: 'urn:was:collection', name },
+          spaceUrl: SPACE_URL
+        })
+      ).toMatchObject({
+        satisfiable: true,
+        needsProvisioning: false,
+        encrypted: false,
+        targetClass: 'protected-collection'
+      })
+    }
   })
 
   it('rejects an invalid collection name', () => {
@@ -331,17 +472,18 @@ describe('resolveInvocationTarget', () => {
     ).toMatchObject({
       satisfiable: true,
       invocationTarget: SPACE_URL,
-      wholeSpace: true
+      wholeSpace: true,
+      targetClass: 'space'
     })
   })
 
   it('refuses an unknown descriptor type', () => {
-    expect(
-      resolveInvocationTarget({
-        descriptor: { type: 'urn:was:unknown' },
-        spaceUrl: SPACE_URL
-      }).satisfiable
-    ).toBe(false)
+    const target = resolveInvocationTarget({
+      descriptor: { type: 'urn:was:unknown' },
+      spaceUrl: SPACE_URL
+    })
+    expect(target.satisfiable).toBe(false)
+    expect(target.targetClass).toBeUndefined()
   })
 
   it('resolves a public collection: plaintext, provisioned, isPublic', () => {
@@ -358,7 +500,8 @@ describe('resolveInvocationTarget', () => {
       needsProvisioning: true,
       collectionId: 'example-app-public',
       encrypted: false,
-      isPublic: true
+      isPublic: true,
+      targetClass: 'public-collection'
     })
   })
 
@@ -411,7 +554,8 @@ describe('resolveInvocationTarget', () => {
       collectionId: 'private-credentials',
       encrypted: true,
       isPublic: false,
-      isShare: true
+      isShare: true,
+      targetClass: 'share'
     })
   })
 
@@ -504,11 +648,12 @@ describe('resolveGrant action handling', () => {
       descriptor: collectionDetail,
       spaceUrl: SPACE_URL
     })
+    // Emitted in ceiling order, not in the order the request asked in.
     expect(grant.allowedActions).toEqual([
       'GET',
       'HEAD',
-      'PUT',
       'POST',
+      'PUT',
       'DELETE'
     ])
     expect(grant.write).toBe(true)
@@ -567,13 +712,17 @@ describe('resolveGrant action handling', () => {
     expect(grant.write).toBe(false)
   })
 
-  it('caps a write to the DID document resource (string URL)', () => {
+  it('refuses a PUT-only grant on the DID document resource', () => {
+    // The descriptor asks for PUT alone on the protected `id` collection, so
+    // nothing survives that class's read-only ceiling. This used to silently
+    // downgrade to a read-only grant; now the grant is refused outright, since
+    // an empty `allowedAction` array means "every action" in the zcap model.
     const grant = resolveGrant({
       descriptor: didDocumentUrlDetail,
       spaceUrl: SPACE_URL
     })
-    expect(grant.target.collectionId).toBe('id')
-    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.allowedActions).toEqual([])
     expect(grant.write).toBe(false)
   })
 
@@ -582,20 +731,120 @@ describe('resolveGrant action handling', () => {
     expect(grant.write).toBe(false)
   })
 
-  it('keeps requested write actions on a public RP collection', () => {
+  it('caps a public RP collection to add-only', () => {
+    // A write to a plaintext world-readable target is not data management but
+    // publication under the user's identity, and irreversible in practice: an
+    // RP may add to what it published, never rewrite or retract it.
     const grant = resolveGrant({
       descriptor: publicCollectionDetail,
       spaceUrl: SPACE_URL
     })
     expect(grant.target.isPublic).toBe(true)
-    expect(grant.allowedActions).toEqual([
-      'GET',
-      'HEAD',
-      'PUT',
-      'POST',
-      'DELETE'
-    ])
+    expect(grant.allowedActions).toEqual(['GET', 'HEAD', 'POST'])
     expect(grant.write).toBe(true)
+  })
+})
+
+describe('resolveGrant action vocabulary', () => {
+  /**
+   * A capability query on an RP collection (the only class whose ceiling is the
+   * full vocabulary, so normalization is what the assertion is measuring).
+   *
+   * @param allowedAction {ICapabilityQueryDetail['allowedAction']}
+   * @returns {ICapabilityQueryDetail}
+   */
+  function rpQuery(
+    allowedAction: ICapabilityQueryDetail['allowedAction']
+  ): ICapabilityQueryDetail {
+    return {
+      controller: RP_DID,
+      allowedAction,
+      invocationTarget: { type: 'urn:was:collection', name: 'example-app-data' }
+    }
+  }
+
+  it('accepts a single (non-array) action string', () => {
+    const grant = resolveGrant({
+      descriptor: rpQuery('PUT'),
+      spaceUrl: SPACE_URL
+    })
+    expect(grant.allowedActions).toEqual(['PUT'])
+    expect(grant.write).toBe(true)
+  })
+
+  it('uppercases, trims, dedupes, and drops non-vocabulary tokens', () => {
+    const grant = resolveGrant({
+      descriptor: rpQuery([
+        'get',
+        ' Put ',
+        'GET',
+        'FROBNICATE',
+        'PATCH',
+        'OPTIONS',
+        42 as unknown as string,
+        null as unknown as string,
+        { action: 'DELETE' },
+        ['POST'] as unknown as string
+      ]),
+      spaceUrl: SPACE_URL
+    })
+    expect(grant.allowedActions).toEqual(['GET', 'PUT'])
+    expect(grant.write).toBe(true)
+  })
+
+  it('makes an all-dropped action set unsatisfiable, never empty-allowed', () => {
+    // An empty `allowedAction` array means "every action" in the zcap model, so
+    // a request that asks only for tokens outside the vocabulary is refused.
+    const grant = resolveGrant({
+      descriptor: rpQuery(['FROBNICATE', 'PATCH']),
+      spaceUrl: SPACE_URL
+    })
+    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.target.invocationTarget).toBeUndefined()
+    expect(grant.allowedActions).toEqual([])
+    expect(grant.write).toBe(false)
+  })
+
+  it('makes an all-above-ceiling action set unsatisfiable', () => {
+    const grant = resolveGrant({
+      descriptor: {
+        controller: RP_DID,
+        allowedAction: ['PUT', 'DELETE'],
+        invocationTarget: { type: 'urn:was:space' }
+      },
+      spaceUrl: SPACE_URL
+    })
+    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.allowedActions).toEqual([])
+  })
+
+  it('makes an empty action array unsatisfiable rather than grant-all', () => {
+    const grant = resolveGrant({ descriptor: rpQuery([]), spaceUrl: SPACE_URL })
+    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.allowedActions).toEqual([])
+  })
+
+  it('never yields an empty allowedActions on a satisfiable grant', () => {
+    const grants = resolveGrants({
+      zcapRequests: [
+        collectionDetail,
+        spaceDetail,
+        publicCollectionDetail,
+        standardCollectionDetail,
+        didDocumentUrlDetail,
+        foreignDetail,
+        rpQuery(['PATCH']),
+        rpQuery([])
+      ],
+      spaceUrl: SPACE_URL
+    })
+    for (const grant of grants) {
+      if (grant.target.satisfiable) {
+        expect(grant.allowedActions.length).toBeGreaterThan(0)
+      } else {
+        expect(grant.allowedActions).toEqual([])
+      }
+    }
   })
 })
 
@@ -628,11 +877,12 @@ describe('processZcaps', () => {
       `${SPACE_URL}/example-app-data`
     )
     expect(collectionZcap.controller).toBe(RP_DID)
+    // Emitted in ceiling order, not in the order the request asked in.
     expect(collectionZcap.allowedAction).toEqual([
       'GET',
       'HEAD',
-      'PUT',
       'POST',
+      'PUT',
       'DELETE'
     ])
 
@@ -726,7 +976,7 @@ describe('processZcaps', () => {
     expect(writeExpires).toBeLessThan(readExpires)
   })
 
-  it('provisions a public collection as public and delegates the usual RW zcap', async () => {
+  it('provisions a public collection as public and delegates an add-only zcap', async () => {
     delegated.length = 0
     ensureCalls.length = 0
     const before = Date.now()
@@ -745,9 +995,11 @@ describe('processZcaps', () => {
       expires: string
     }
     expect(zcap.invocationTarget).toBe(`${SPACE_URL}/example-app-public`)
-    // Public covers only unauthenticated reads; the delegated zcap still
-    // carries the requested write actions, with the ordinary write TTL.
-    expect(zcap.allowedAction).toEqual(['GET', 'HEAD', 'PUT', 'POST', 'DELETE'])
+    // Public covers only unauthenticated reads; writes stay capability-only,
+    // and are capped to add-only, with the ordinary write TTL. A write to a
+    // plaintext world-readable target is publication under the user's identity
+    // and irreversible in practice, so PUT and DELETE are dropped.
+    expect(zcap.allowedAction).toEqual(['GET', 'HEAD', 'POST'])
     const expiresMs = new Date(zcap.expires).getTime()
     expect(Math.abs(expiresMs - (before + WRITE_TTL_MS))).toBeLessThan(
       60 * 1000
