@@ -1,4 +1,4 @@
-import type { ContactData } from '@interop/social-core'
+import { normalizeLabel, type ContactData } from '@interop/social-core'
 
 /**
  * Seeded into every new wallet's contacts collection at signup, alongside
@@ -36,7 +36,10 @@ export function selfContact({
   return {
     displayName: 'You (this user)',
     phoneNumbers: [],
-    emailAddresses: email ? [{ label: '', email }] : [],
+    // `normalizeLabel` rather than a bare '' so the seeded row is already in
+    // the form every other write path produces -- an unchanged save (or a
+    // mobile merge) must not rewrite the label and churn a revision.
+    emailAddresses: email ? [{ label: normalizeLabel(''), email }] : [],
     urlAddresses: urlAddresses.length > 0 ? urlAddresses : undefined
   }
 }

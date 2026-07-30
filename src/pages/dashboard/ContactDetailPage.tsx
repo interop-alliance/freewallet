@@ -74,14 +74,26 @@ function DidListSection({
   t: (key: string) => string
 }) {
   const { copied, copy } = useCopyToClipboard()
-  const [copiedDid, setCopiedDid] = useState<string | null>(null)
+  // Tracked by row position rather than by DID value, since the stored list is
+  // not guaranteed unique (see `uniqueDids` below): only the row that was
+  // clicked should read "Copied!".
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
 
-  async function handleCopy(did: string) {
-    setCopiedDid(did)
-    await copy(did)
+  async function handleCopy(did: string, index: number) {
+    // Only claim the copy once it actually succeeded -- `copied` may still be
+    // true from an earlier row, which would otherwise show "Copied!" over a
+    // clipboard write that just failed (a non-secure context, say).
+    if (await copy(did)) {
+      setCopiedIndex(index)
+    }
   }
 
-  if (dids.length === 0) {
+  // A contact merged from another replica can carry the same DID twice; the
+  // edit form collapses duplicates on save, but a contact that has not been
+  // saved here yet still arrives with them, so the list shows each DID once.
+  const uniqueDids = [...new Set(dids)]
+
+  if (uniqueDids.length === 0) {
     return null
   }
 
@@ -91,9 +103,9 @@ function DidListSection({
         {t('contact.sections.dids')}
       </Typography>
       <Stack component="ol" sx={contactDetailStyles.didList}>
-        {dids.map((did, index) => (
+        {uniqueDids.map((did, index) => (
           <Stack
-            key={did}
+            key={`${index}-${did}`}
             component="li"
             direction="row"
             sx={contactDetailStyles.didListItem}
@@ -105,12 +117,16 @@ function DidListSection({
               {did}
             </Typography>
             <Tooltip
-              title={copied && copiedDid === did ? t('common.copied') : t('common.copy')}
+              title={
+                copied && copiedIndex === index
+                  ? t('common.copied')
+                  : t('common.copy')
+              }
             >
               <IconButton
                 size="small"
                 onClick={() => {
-                  void handleCopy(did)
+                  void handleCopy(did, index)
                 }}
                 aria-label={t('common.copy')}
                 sx={{ p: 0.25, flexShrink: 0 }}

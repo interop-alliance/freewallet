@@ -8,7 +8,12 @@ import Typography from '@mui/material/Typography'
 import { MdAddCircleOutline, MdRemoveCircleOutline } from 'react-icons/md'
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { normalizeLabel, getDids, type ContactData } from '@interop/social-core'
+import {
+  normalizeLabel,
+  getDids,
+  unmangleDidUrl,
+  type ContactData
+} from '@interop/social-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
@@ -96,7 +101,10 @@ export function ContactFormPage() {
             id: e.id
           }))
         )
-        setDids(getDids(contact))
+        // Deduped on load so a contact merged from another replica does not
+        // present the same DID on two rows; `buildContact` dedupes again, for
+        // the duplicate the user can still type in by hand.
+        setDids([...new Set(getDids(contact))])
       } catch (err) {
         console.error('Could not load contact:', err)
         setNotFound(true)
@@ -149,10 +157,22 @@ export function ContactFormPage() {
   function buildContact(): ContactData {
     const trimmedName =
       displayName.trim() || `${givenName.trim()} ${familyName.trim()}`.trim()
+    // The form surfaces only the `did:` entries of `urlAddresses` (that is what
+    // `getDids` loaded), so the non-DID entries -- a homepage URL an importer
+    // recorded, say -- are carried through verbatim rather than being dropped
+    // when the rebuilt DID rows replace the array.
     const urlAddresses = [
-      ...dids
-        .filter(did => did.trim())
-        .map(did => ({ label: 'did', url: did.trim() }))
+      ...(existingContact?.urlAddresses ?? []).filter(
+        entry => !unmangleDidUrl(entry.url.trim()).startsWith('did:')
+      ),
+      // Deduped, first occurrence winning: the user can type the same DID
+      // twice and a merge from another replica can land two copies, and a
+      // contact holding one DID twice means nothing beyond holding it once.
+      // The comparison is exact -- method-specific ids are case-sensitive.
+      ...[...new Set(dids.map(did => did.trim()).filter(Boolean))].map(did => ({
+        label: 'did',
+        url: did
+      }))
     ]
     return {
       // Carry over every field the form does not edit (extended
