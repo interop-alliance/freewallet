@@ -29,6 +29,7 @@ import {
   mapPopupLoginError
 } from '@/session/completePopupLogin'
 import type { Session } from '@/types/auth'
+import { AppKeyRefusedError } from '@/lib/appKey'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
 import { chapiStyles } from '@/styles/appStyles'
@@ -319,7 +320,11 @@ export function WalletStorePage() {
         err
       )
       const detail =
-        err instanceof Error ? err.message : 'Could not store the credential.'
+        err instanceof AppKeyRefusedError
+          ? t('common.appKeyRefused')
+          : err instanceof Error
+            ? err.message
+            : 'Could not store the credential.'
       setStoreError(
         stored > 0
           ? `Stored ${stored} of ${vcs.length} credentials, then failed: ` +

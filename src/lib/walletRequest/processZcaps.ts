@@ -31,6 +31,17 @@
  * zcap (with the ordinary write TTL). A public grant on a protected wallet
  * collection is unsatisfiable, unconditionally.
  *
+ * A `urn:was:shared-collection` grant is the share flow: it asks not just to
+ * fetch one of the wallet's own encrypted collections but to DECRYPT it. It
+ * leaves the ordinary delegation loop entirely and routes to
+ * `StorageManager.shareCollection`, which grants both axes -- the read-only
+ * pull zcap and the key-epoch roster entry -- in one indivisible call. The
+ * recipient key is never carried in the request: it is derived from the
+ * grantee's `did:key` controller (`x25519RecipientFromDidKey`), so a request
+ * cannot pair one entity's DID with another's decryption key. Only the
+ * encrypted standard collections can be shared (sharing is meaningless where
+ * no epoch roster exists), and only read-only.
+ *
  * Resolution (`resolveGrants`) is pure and drives the consent preview; the
  * delegation step (`processZcaps`) runs only on the consent-approved path.
  * Write grants (any action beyond GET/HEAD) are delegated for a shorter TTL
@@ -43,9 +54,14 @@ import {
   KEY_MAP_COLLECTION,
   RP_ZCAP_TTL_MS,
   RP_ZCAP_WRITE_TTL_MS,
+  SHARE_ZCAP_TTL_MS,
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
 import { deriveAppCollectionRecipient } from '@/lib/appCollectionRecipient'
+import {
+  isEd25519DidKey,
+  x25519RecipientFromDidKey
+} from '@/lib/didKeyRecipient'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 
 /**
@@ -124,6 +140,10 @@ export interface ResolvedTarget {
   // A `urn:was:public-collection` grant: provisioned plaintext with a
   // collection-level PublicCanRead policy, so anyone on the web can read it.
   isPublic: boolean
+  // A `urn:was:shared-collection` grant: the grantee joins the collection's
+  // key-epoch roster and can DECRYPT it, not merely fetch ciphertext. Always an
+  // encrypted standard collection, always read-only.
+  isShare: boolean
 }
 
 /**
@@ -172,7 +192,8 @@ const UNSATISFIABLE: ResolvedTarget = {
   wholeSpace: false,
   needsProvisioning: false,
   encrypted: false,
-  isPublic: false
+  isPublic: false,
+  isShare: false
 }
 
 /**
@@ -191,6 +212,12 @@ const UNSATISFIABLE: ResolvedTarget = {
  *   but flagged `isPublic`: provisioned plaintext with a world-readable
  *   (PublicCanRead) policy. Unsatisfiable on a protected wallet collection --
  *   an RP must never be able to flip the user's own collections public;
+ * - `{ type: 'urn:was:shared-collection', name }` -- like `urn:was:collection`
+ *   but flagged `isShare`: the grantee also joins the collection's key-epoch
+ *   roster, so it can decrypt what it fetches. `name` must be one of the
+ *   ENCRYPTED standard collections; anything else (a plaintext collection, an
+ *   RP collection, the whole Space) is unsatisfiable -- a share is only
+ *   meaningful where an epoch roster exists;
  * - `{ type: 'urn:was:space' }` -- `spaceUrl`, flagged `wholeSpace`;
  * - anything else -- unsatisfiable.
  *
@@ -214,7 +241,8 @@ export function resolveInvocationTarget({
         wholeSpace: true,
         needsProvisioning: false,
         encrypted: false,
-        isPublic: false
+        isPublic: false,
+        isShare: false
       }
     }
     if (descriptor.startsWith(`${spaceUrl}/`)) {
@@ -233,7 +261,8 @@ export function resolveInvocationTarget({
         needsProvisioning: false,
         collectionId: segment || undefined,
         encrypted: !!standard?.encryption,
-        isPublic: false
+        isPublic: false,
+        isShare: false
       }
     }
     return UNSATISFIABLE
@@ -246,7 +275,8 @@ export function resolveInvocationTarget({
       wholeSpace: true,
       needsProvisioning: false,
       encrypted: false,
-      isPublic: false
+      isPublic: false,
+      isShare: false
     }
   }
 
@@ -270,7 +300,8 @@ export function resolveInvocationTarget({
         name !== KEY_MAP_COLLECTION.id,
       collectionId: name,
       encrypted: !!standard?.encryption,
-      isPublic: false
+      isPublic: false,
+      isShare: false
     }
   }
 
@@ -294,7 +325,31 @@ export function resolveInvocationTarget({
       // Public implies plaintext: the collection is provisioned without an
       // encryption marker, so a ciphertext note never applies.
       encrypted: false,
-      isPublic: true
+      isPublic: true,
+      isShare: false
+    }
+  }
+
+  if (descriptor?.type === 'urn:was:shared-collection') {
+    const { name } = descriptor
+    const standard = WALLET_STANDARD_COLLECTIONS.find(
+      entry => entry.id === name
+    )
+    // Only the encrypted standard collections have a key-epoch roster to
+    // escrow a reader into; everything else (a plaintext collection, an RP
+    // collection, a made-up name) cannot be shared.
+    if (!standard?.encryption) {
+      return UNSATISFIABLE
+    }
+    return {
+      satisfiable: true,
+      invocationTarget: `${spaceUrl}/${name}`,
+      wholeSpace: false,
+      needsProvisioning: false,
+      collectionId: name,
+      encrypted: true,
+      isPublic: false,
+      isShare: true
     }
   }
 
@@ -339,12 +394,30 @@ export function resolveGrant({
   descriptor: ICapabilityQueryDetail
   spaceUrl: string
 }): ResolvedGrant {
-  const target = resolveInvocationTarget({
+  let target = resolveInvocationTarget({
     descriptor: descriptor.invocationTarget,
     spaceUrl
   })
+  // A share's recipient key is DERIVED from the grantee's controller DID, so a
+  // controller the derivation cannot handle cannot be a share recipient. Run
+  // the real derivation rather than a shape check: a well-formed-looking but
+  // malformed did:key (a truncated identifier, a non-curve point) would
+  // otherwise preview as satisfiable and then throw mid-response, after earlier
+  // grants in the same request had already been delegated. App Connect resolves
+  // with an empty controller at preview time (the app-key DID may not exist
+  // yet) and fills the real one before delegating, so an absent controller is
+  // not yet a failure.
+  if (target.isShare && descriptor.controller) {
+    try {
+      x25519RecipientFromDidKey({ did: descriptor.controller })
+    } catch {
+      target = UNSATISFIABLE
+    }
+  }
   const readOnly =
-    target.wholeSpace || isProtectedCollection(target.collectionId)
+    target.wholeSpace ||
+    target.isShare ||
+    isProtectedCollection(target.collectionId)
   const allowedActions = readOnly
     ? [...READ_ONLY_ACTIONS]
     : normalizeActions(descriptor.allowedAction)
@@ -390,11 +463,17 @@ export function resolveGrants({
  *   RP_ZCAP_TTL_MS
  * @param [options.writeTtlMs] {number}   write grant lifetime; defaults to
  *   RP_ZCAP_WRITE_TTL_MS (shorter than the read TTL)
+ * @param [options.shareTtlMs] {number}   share grant lifetime; defaults to
+ *   SHARE_ZCAP_TTL_MS (deliberately long -- the settings panel, not expiry, is
+ *   the removal mechanism for a share)
  * @param [options.appProvisioning] {{ seed: Uint8Array }}   present only on the
  *   App Connect path: the app-key seed from which each newly-provisioned PRIVATE
  *   collection is set up multi-recipient (vault KAK plus the app's deterministic
  *   per-collection key) instead of plaintext. Public collections and
  *   non-App-Connect flows provision plaintext as before.
+ * @param [options.app] {{ name: string, origin: string }}   present only on the
+ *   App Connect path: recorded on each share activity so the settings panel can
+ *   name the app instead of showing a bare did:key.
  * @returns {Promise<IZcap[]>}
  */
 export async function processZcaps({
@@ -402,13 +481,17 @@ export async function processZcaps({
   session,
   ttlMs = RP_ZCAP_TTL_MS,
   writeTtlMs = RP_ZCAP_WRITE_TTL_MS,
-  appProvisioning
+  shareTtlMs = SHARE_ZCAP_TTL_MS,
+  appProvisioning,
+  app
 }: {
   zcapRequests: ICapabilityQueryDetail[]
   session: Session
   ttlMs?: number
   writeTtlMs?: number
+  shareTtlMs?: number
   appProvisioning?: { seed: Uint8Array }
+  app?: { name: string; origin: string }
 }): Promise<IZcap[]> {
   if (!hasZcapStorage(session)) {
     throw new ZcapUnavailableError()
@@ -427,6 +510,31 @@ export async function processZcaps({
       spaceUrl
     })
     if (!target.satisfiable || !target.invocationTarget) {
+      continue
+    }
+    if (target.isShare && target.collectionId) {
+      // A share leaves the plain delegation loop: `shareCollection` grants the
+      // pull axis (a read-only zcap) and the read axis (an epoch roster entry)
+      // in one call, so the two can never come apart. `resolveGrant` already
+      // rejected a controller whose recipient key cannot be derived when one
+      // was named; this guard covers the App Connect path, which fills the
+      // controller after resolution.
+      if (!isEd25519DidKey(descriptor.controller)) {
+        throw new Error(
+          'A shared-collection grant requires an Ed25519 did:key controller ' +
+            'to derive the recipient key from.'
+        )
+      }
+      const { zcap } = await session.storage.shareCollection({
+        profile: session.profile,
+        user: session.user,
+        collectionId: target.collectionId,
+        recipient: x25519RecipientFromDidKey({ did: descriptor.controller }),
+        controller: descriptor.controller,
+        expires: new Date(now + shareTtlMs),
+        app
+      })
+      zcaps.push(zcap as IZcap)
       continue
     }
     if (target.needsProvisioning && target.collectionId) {

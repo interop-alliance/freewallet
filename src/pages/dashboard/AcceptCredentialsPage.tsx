@@ -10,6 +10,7 @@ import { BsAward } from 'react-icons/bs'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
+import { AppKeyRefusedError } from '@/lib/appKey'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { cidFrom } from '@interop/was-client/sync'
@@ -24,7 +25,7 @@ export function AcceptCredentialsPage() {
   const location = useLocation()
   const session = useAuthStore(state => state.session)
   const [saving, setSaving] = useState(false)
-  const [storeError, setStoreError] = useState(false)
+  const [storeError, setStoreError] = useState<string | null>(null)
 
   const credentials = (location.state?.credentials ??
     []) as IVerifiableCredential[]
@@ -49,7 +50,7 @@ export function AcceptCredentialsPage() {
       return
     }
     setSaving(true)
-    setStoreError(false)
+    setStoreError(null)
     try {
       // Dedupe the incoming batch by content cid up front purely as an
       // optimization: `addCredential` is idempotent by content cid on its own
@@ -96,7 +97,11 @@ export function AcceptCredentialsPage() {
       navigate('/dashboard')
     } catch (err) {
       console.error('Error storing credentials:', err)
-      setStoreError(true)
+      setStoreError(
+        err instanceof AppKeyRefusedError
+          ? t('common.appKeyRefused')
+          : t('acceptCredentials.storeError')
+      )
       setSaving(false)
     }
   }
@@ -109,7 +114,7 @@ export function AcceptCredentialsPage() {
     <DashboardLayout title={t('acceptCredentials.title')}>
       {storeError && (
         <Alert severity="error" sx={{ mb: 2 }}>
-          {t('acceptCredentials.storeError')}
+          {storeError}
         </Alert>
       )}
       <Stack sx={dashboardStyles.acceptCredentialsList}>

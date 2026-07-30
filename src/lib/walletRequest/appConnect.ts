@@ -91,7 +91,7 @@ export async function processAppConnect({
 }): Promise<WalletResponse> {
   const { app, capabilityQueries } = appConnect
   const stored = await session.storage.listCredentials()
-  const existing = findAppKeyCredential({
+  const existing = await findAppKeyCredential({
     credentials: stored,
     credentialType: app.credentialType,
     origin
@@ -130,6 +130,9 @@ export async function processAppConnect({
       ? await processZcaps({
           zcapRequests,
           session,
+          // Names the app on any share activity this request records, so the
+          // settings panel reads "Text Editor (app.example)" and not a did:key.
+          app: { name: app.name, origin },
           ...(seed && { appProvisioning: { seed } })
         })
       : []

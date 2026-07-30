@@ -38,7 +38,8 @@ import { receiveCredentialEvent } from 'web-credential-handler'
 import {
   MEDIATOR_BASE,
   RP_ZCAP_TTL_MS,
-  RP_ZCAP_WRITE_TTL_MS
+  RP_ZCAP_WRITE_TTL_MS,
+  SHARE_ZCAP_TTL_MS
 } from '@/app.config'
 import {
   completePopupLogin,
@@ -121,6 +122,9 @@ const BLOCK_MESSAGE_KEY: Record<BlockReason, string> = {
 const RP_ZCAP_TTL_DAYS = Math.round(RP_ZCAP_TTL_MS / (24 * 60 * 60 * 1000))
 const RP_ZCAP_WRITE_TTL_DAYS = Math.round(
   RP_ZCAP_WRITE_TTL_MS / (24 * 60 * 60 * 1000)
+)
+const SHARE_ZCAP_TTL_DAYS = Math.round(
+  SHARE_ZCAP_TTL_MS / (24 * 60 * 60 * 1000)
 )
 
 const EMPTY_PROFILE: WalletRequestProfile = {
@@ -355,7 +359,7 @@ export function WalletGetPage() {
       // the first-run vs returning consent copy and the grants preview. The
       // approve-time processing repeats the lookup authoritatively.
       if (profile.appConnect) {
-        const existing = findAppKeyCredential({
+        const existing = await findAppKeyCredential({
           credentials: stored,
           credentialType: profile.appConnect.app.credentialType,
           origin: requestOrigin
@@ -369,8 +373,11 @@ export function WalletGetPage() {
             resolveGrants({
               zcapRequests: appConnectZcapRequests({
                 capabilityQueries: profile.appConnect.capabilityQueries,
-                // Resolution never reads the controller; on first run the
-                // app-key DID does not exist yet.
+                // On first run the app-key DID does not exist yet, so the
+                // controller is empty here. Resolution reads it only to
+                // validate a share's recipient derivation, and treats an
+                // absent controller as "not yet a failure" for exactly this
+                // case; the approved path re-derives with the real subject DID.
                 controller: existing
                   ? (appKeySubjectDid(existing.vc) ?? '')
                   : ''
@@ -737,6 +744,7 @@ export function WalletGetPage() {
                 grants={resolvedGrants}
                 ttlDays={RP_ZCAP_TTL_DAYS}
                 writeTtlDays={RP_ZCAP_WRITE_TTL_DAYS}
+                shareTtlDays={SHARE_ZCAP_TTL_DAYS}
                 hideRecipient
                 heading={t('chapi.get.appConnect.zcapHeading')}
               />
@@ -824,6 +832,7 @@ export function WalletGetPage() {
                 grants={resolvedGrants}
                 ttlDays={RP_ZCAP_TTL_DAYS}
                 writeTtlDays={RP_ZCAP_WRITE_TTL_DAYS}
+                shareTtlDays={SHARE_ZCAP_TTL_DAYS}
               />
             )}
 

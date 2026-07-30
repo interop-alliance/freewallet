@@ -53,6 +53,7 @@ import {
   WALLET_STANDARD_COLLECTIONS,
   WAS_SERVER_URL
 } from '@/app.config'
+import { assertStorableAppKey } from '@/lib/appKey'
 import { getOrCreateDeviceId } from '@/lib/deviceId'
 import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
 import { ensureDidWebvh, type DidWebKeyMapV2 } from '@/lib/didWebvh'
@@ -610,6 +611,14 @@ export class StorageManager {
    * the active backend (the local active replica, or the remote-direct popup
    * backend).
    *
+   * This is the single door every credential coming from outside the wallet
+   * goes through (the CHAPI store popup, the URL / QR / manual-paste import,
+   * and the credentials half of a space import), so it is where a credential
+   * presenting as an app key is screened: one that does not bind its subject
+   * DID to the seed it carries is refused rather than stored and later
+   * ignored. The wallet's own mint path stores through here too and passes,
+   * since a freshly minted app key binds by construction.
+   *
    * @param options {object}
    * @param options.credential {IVerifiableCredential}
    * @param options.user {User}   recorded as the history entry's actor
@@ -622,6 +631,7 @@ export class StorageManager {
     credential: IVerifiableCredential
     user: User
   }) {
+    await assertStorableAppKey(credential)
     // The credential's content cid is its page-facing identity (idempotence,
     // routes, history); the backend encrypts the VC into an EDV envelope keyed
     // by a content-derived envelope-hash id.
@@ -1758,7 +1768,12 @@ export class StorageManager {
    * @param options.controller {string}   the grantee's DID (the zcap controller)
    * @param [options.expires] {Date}   the pull zcap's expiry; defaults to the
    *   read-only grant TTL
-   * @returns {Promise<CollectionEncryption>}   the new marker
+   * @param [options.app] {{ name: string, origin: string }}   the connected app
+   *   the share was granted to, when the grantee is one; recorded on the share
+   *   activity so the settings panel can name it instead of showing a bare DID
+   * @returns {Promise<{ marker: CollectionEncryption, zcap: IDelegatedZcap }>}
+   *   the new marker and the delegated pull-axis capability (the caller embeds
+   *   it in its response -- the grantee needs both axes)
    */
   async shareCollection({
     profile,
@@ -1766,7 +1781,8 @@ export class StorageManager {
     collectionId,
     recipient,
     controller,
-    expires
+    expires,
+    app
   }: {
     profile: ControllerProfile
     user: User
@@ -1774,7 +1790,8 @@ export class StorageManager {
     recipient: RecipientPublicKey
     controller: string
     expires?: Date
-  }): Promise<CollectionEncryption> {
+    app?: { name: string; origin: string }
+  }): Promise<{ marker: CollectionEncryption; zcap: IDelegatedZcap }> {
     const remote = this.#remoteStore
     if (!remote) {
       throw new Error('Sharing a collection requires remote storage.')
@@ -1835,7 +1852,8 @@ export class StorageManager {
           recipientId: recipient.id,
           controller,
           zcap,
-          expires: expiresAt.toISOString()
+          expires: expiresAt.toISOString(),
+          ...(app && { appName: app.name, appOrigin: app.origin })
         },
         created: new Date().toISOString()
       }
@@ -1847,7 +1865,7 @@ export class StorageManager {
     this.#markerRefreshed.clear()
     this.#vaultKeys = { keyAgreementKey, keyResolver }
     await this.#rebuildCiphers()
-    return marker
+    return { marker, zcap }
   }
 
   /**
@@ -1979,21 +1997,28 @@ export class StorageManager {
    * Lists the readers a collection is currently shared with, derived from the
    * marker's `currentEpoch` roster minus the owner's own key (the cryptographic
    * truth), joined best-effort with the `CollectionShare` / `CollectionUnshare`
-   * history for each reader's controller DID and grant expiry. Backs the
-   * settings UI. Returns an empty list for a collection with no epochs (never
-   * shared) or when the marker cannot be resolved.
+   * history for each reader's controller DID, grant expiry, and -- when the
+   * reader is a connected app -- its name and origin. Backs the settings UI.
+   * Returns an empty list for a collection with no epochs (never shared) or
+   * when the marker cannot be resolved.
    *
    * @param options {object}
    * @param options.collectionId {string}
    * @returns {Promise<Array<{ recipientId: string; controller?: string;
-   *   expires?: string }>>}
+   *   expires?: string; appName?: string; appOrigin?: string }>>}
    */
   async listCollectionShares({
     collectionId
   }: {
     collectionId: string
   }): Promise<
-    Array<{ recipientId: string; controller?: string; expires?: string }>
+    Array<{
+      recipientId: string
+      controller?: string
+      expires?: string
+      appName?: string
+      appOrigin?: string
+    }>
   > {
     const remote = this.#remoteStore
     let marker: CollectionEncryption | undefined = this.#markers[collectionId]
@@ -2025,7 +2050,15 @@ export class StorageManager {
 
     // Best-effort labels from history: the latest CollectionShare per recipient
     // for its controller / expiry.
-    const labels = new Map<string, { controller?: string; expires?: string }>()
+    const labels = new Map<
+      string,
+      {
+        controller?: string
+        expires?: string
+        appName?: string
+        appOrigin?: string
+      }
+    >()
     for (const { doc } of await this.listHistoryItems()) {
       if (!doc.type?.includes('CollectionShare')) {
         continue
@@ -2036,12 +2069,16 @@ export class StorageManager {
             recipientId?: string
             controller?: string
             expires?: string
+            appName?: string
+            appOrigin?: string
           }
         | undefined
       if (object?.collectionId === collectionId && object?.recipientId) {
         labels.set(object.recipientId, {
           controller: object.controller,
-          expires: object.expires
+          expires: object.expires,
+          appName: object.appName,
+          appOrigin: object.appOrigin
         })
       }
     }

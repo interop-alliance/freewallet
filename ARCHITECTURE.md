@@ -18,6 +18,8 @@ src/components/     Shared React components
   storage/          Storage browser sub-components
 src/lib/            Pure business logic (no React)
   appKey.ts         App Connect app-key credential (match + mint)
+  didKeyRecipient.ts  A grantee's X25519 recipient key, derived from its
+                    did:key controller (the share flow)
   kms.ts            WebKMS keystore provisioning (ensureKeystore)
   sessionKey.ts     freewallet-session IndexedDB caches (keyring, unlock
                     methods, passkey-safety notices)
@@ -198,11 +200,50 @@ string is load-bearing -- it must match was-react's derivation exactly),
 self-issues the credential (issuer == subject == seed-derived DID, seed
 base64url-no-pad in `credentialSubject.seed`), and saves it to its own
 credential store under the same consent -- no second popup. On a returning
-visit the stored credential is matched by `credentialType` AND
-`credentialSubject.origin === ` the CHAPI requesting origin, so a phishing
-origin can neither recover nor be handed another origin's key (the app-side
-origin check in was-react's `parseSeedCredential` stays as defense in
-depth).
+visit the stored credential is matched by the `AppKeyCredential` marker type
+AND `credentialType` AND `credentialSubject.origin === ` the CHAPI requesting
+origin, so a phishing origin can neither recover nor be handed another
+origin's key (the app-side origin check in was-react's `parseSeedCredential`
+stays as defense in depth).
+
+A match additionally requires that the credential's subject DID **re-derive
+from the seed the credential itself carries** (`appKeySeedBindsSubject`).
+Self-issuance is a weak signal -- anyone can self-issue, and candidates are
+ranked on an `issuanceDate` the credential itself states -- so without this a
+credential planted through the store popup or a manual import would win the
+match and its DID would become the `controller` the wallet delegates to. The
+check is local and deterministic (the seed is right there; re-derive with the
+same `CapabilityAgent.fromSeed` call that minted it) and fails closed on an
+absent, non-base64url, or wrong-length seed.
+
+**The same binding is enforced at store time, so a foreign app key never
+lands.** Every minted app key carries the marker type `AppKeyCredential`
+(`urn:was:AppKeyCredential` -- one stable IRI for every app, defined in the
+inline `@context`, never interpolated from `vocabBase`), which turns "presents
+as an app key" into a term check rather than a shape heuristic. Be clear about
+what the marker is: the `type` array of a planted credential is
+attacker-controlled like everything else in it, so the marker is a
+**self-declaration, not evidence** -- it makes the refusal rule precise, and
+the seed-to-subject binding remains the only thing that authenticates.
+`StorageManager.addCredential` -- the one door every externally supplied
+credential goes through (the CHAPI store popup, the URL / QR / manual-paste
+import, the credentials half of a space import) -- refuses a marked credential
+that does not bind (`assertStorableAppKey`, `AppKeyRefusedError`). Refusing
+beats storing-and-ignoring on two counts: future consumers of an app-key match
+do not each have to remember to re-check the binding, and the wallet does not
+present the user with a credential it will never act on. The marker is
+_required_ at match time rather than merely tolerated, so a credential can
+only reach the delegation path by carrying it -- which is exactly what the
+store-time refusal screens. The wallet's own mint path stores through the same
+door and passes, since a freshly minted key binds by construction. The space
+half of an import is not screened: it writes opaque resources into the user's
+own Space server-side, and the credentials it carries surface through
+`addCredential` like any other import.
+
+The claim terms are shared, not per-app: `seed` and `origin` map to
+`urn:was:seed` / `urn:was:origin`, since they mean the same thing in every app.
+`vocabBase` namespaces only the app's own type term. The JSON keys are
+unchanged.
 
 Because the wallet delegates to the subject DID of the credential it just
 matched or minted, the request never needs to name a controller DID --
@@ -244,6 +285,52 @@ connected app rotates the epoch off the app's key for each such collection
 (`removeRecipient`, which rotates then revokes the pull-axis grants
 indivisibly), so a revoked app cannot decrypt future writes -- the honest
 ceiling being that ciphertext it already fetched stays readable to it.
+
+## Sharing a wallet collection (`urn:was:shared-collection`)
+
+The collections above are ones an app created. **Sharing** is the other
+direction: letting a grantee read and _decrypt_ one of the wallet's own
+encrypted collections. It is asked for with a distinct invocation-target
+descriptor -- `{ type: 'urn:was:shared-collection', name }` -- in either
+channel (a standalone `AuthorizationCapabilityQuery`, or an
+`AppConnectQuery.capabilityQuery`). A distinct descriptor type rather than a
+flag on the existing shape is load-bearing: an unknown `type` already resolves
+to unsatisfiable, so a wallet that predates the feature refuses visibly instead
+of silently degrading to a ciphertext-only read.
+
+**The two axes stay fused.** _Pull_ (a read-only Collection zcap) and _read_
+(an epoch-key recipient entry) are granted together, by one call to
+`StorageManager.shareCollection`, which returns the delegated zcap alongside
+the refreshed marker so it rides back in the response VP's `zcap` array. A
+share grant therefore leaves the ordinary delegation loop in `processZcaps`
+entirely; there is no code path that grants one axis without the other.
+
+**The recipient key is derived, not transmitted.** `name` must be one of the
+encrypted standard collections -- every `WALLET_STANDARD_COLLECTIONS` entry
+carrying an `encryption` marker, so today `private-credentials`,
+`wallet-activity`, `contacts`, and `contacts-history` -- since sharing is
+meaningless where no epoch roster exists. The grantee's X25519 key is derived
+from the `did:key` the request
+already names as `controller` (`x25519RecipientFromDidKey` in
+`src/lib/didKeyRecipient.ts`, the same Ed25519-to-Montgomery conversion the
+wallet applies to its own vault KAK). An explicit key field would let a request
+pair controller DID A with recipient key B; deriving makes that substitution
+impossible by construction. A controller with no Ed25519 twin (a did:web, an
+X25519 did:key) makes the grant unsatisfiable.
+
+**Consent states the ceiling before approval.** The share row on the consent
+screen is visually distinct from every other grant and says three things: the
+grant is read _and_ decrypt; it covers the collection's contents from the
+moment of approval, not only future writes; and removing access later stops
+future reads but cannot take back what has already been read. The second line
+is hedged for a reason: on a collection's FIRST share the epoch roster is
+created lazily (`initRecipients`), and resources written before it are
+single-recipient envelopes sealed to the owner's vault KAK alone. Nothing
+re-encrypts them, so the new reader can fetch but not decrypt those -- the
+owner keeps reading them through the permanent pre-epoch tolerance path. Removal is the Settings "Shared collections"
+panel (`unshareCollection`), not expiry -- the share TTL
+(`SHARE_ZCAP_TTL_MS`) is deliberately long, because expiry would end the pull
+axis while leaving the grantee in the key roster.
 
 Security notes:
 
@@ -307,7 +394,8 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   mediator is `authn.io`.
 - **App Connect** — the one-popup app login: a CHAPI `get` whose VPR carries
   an `AppConnectQuery`, answered with an app-key credential (matched by
-  origin, or minted wallet-side on first run) plus capabilities delegated to
+  origin and seed-to-subject binding, or minted wallet-side on first run)
+  plus capabilities delegated to
   its subject DID, in a single signed presentation. See "App Connect" under
   Architecture.
 - **App key** — a self-issued credential holding a 32-byte seed in
@@ -315,7 +403,15 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   `credentialSubject.origin`; issuer and subject are the seed-derived
   did:key (`CapabilityAgent.fromSeed`, `keyName: 'app-key'`). It is how a
   BYOE app keeps its identity/encryption root in the user's wallet
-  (`src/lib/appKey.ts`).
+  (`src/lib/appKey.ts`). Every app key carries the marker type
+  `AppKeyCredential` (`urn:was:AppKeyCredential`); one carrying the marker
+  without binding its subject DID to its own seed is refused at store time.
+- **Share** — granting a third party read AND decrypt access to one of the
+  wallet's own encrypted collections, asked for with a
+  `urn:was:shared-collection` invocation-target descriptor. One
+  `shareCollection` call grants both axes: a read-only Collection zcap and an
+  entry in the collection's key-epoch roster. Removed from Settings >
+  Shared collections, never by expiry. See "Sharing a wallet collection".
 - **WAS (Wallet Attached Storage)** — an HTTP protocol for storing arbitrary
   resources in user-owned Spaces. Requests are authorized via ZCap.
   See [the spec](https://w3c-ccg.github.io/wallet-attached-storage-spec/).

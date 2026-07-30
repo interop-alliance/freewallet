@@ -11,9 +11,11 @@
  * back data the reader already fetched -- the confirmation dialog says so
  * plainly.
  *
- * There is deliberately no "add share" flow here: how an app publishes its
- * recipient key is an open design question, so this panel only lists and
- * removes.
+ * There is deliberately no "add share" action here. A share is initiated from
+ * the consent screen of a `urn:was:shared-collection` capability request (a
+ * connected app asking, over CHAPI, to read and decrypt one of these
+ * collections); this panel is where the resulting grant is reviewed and
+ * removed.
  */
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
@@ -41,6 +43,39 @@ type CollectionShare = {
   recipientId: string
   controller?: string
   expires?: string
+  appName?: string
+  appOrigin?: string
+}
+
+/**
+ * A connected app reader's label: its name paired with its origin ("Text
+ * Editor (app.example)"). The name is app-supplied display text, so it is
+ * never shown without the origin that actually identifies the app. Only called
+ * for a share that recorded an `appName`; readers without one show their
+ * controller DID alone.
+ *
+ * @param share {CollectionShare}
+ * @returns {string}
+ */
+function appLabel(share: CollectionShare): string {
+  return share.appOrigin
+    ? `${share.appName} (${hostOf(share.appOrigin)})`
+    : (share.appName ?? '')
+}
+
+/**
+ * The host of an origin URL, for a compact label. Falls back to the raw string
+ * when it does not parse.
+ *
+ * @param origin {string}
+ * @returns {string}
+ */
+function hostOf(origin: string): string {
+  try {
+    return new URL(origin).host
+  } catch {
+    return origin
+  }
 }
 
 // The encrypted standard collections -- the only ones that can be shared.
@@ -195,6 +230,11 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
                         p: 1.5
                       }}
                     >
+                      {share.appName && (
+                        <Typography variant="subtitle2">
+                          {appLabel(share)}
+                        </Typography>
+                      )}
                       <Typography
                         variant="body2"
                         sx={dashboardStyles.sharedRecipientDid}

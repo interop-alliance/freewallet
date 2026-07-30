@@ -12,6 +12,14 @@
  * text, the recipient DID is rendered separately with its own label and a
  * monospace style so it cannot be spoofed by the reason. Display-only --
  * approval is the single Continue button on the parent page.
+ *
+ * A share grant (`urn:was:shared-collection`) is the strongest thing this
+ * panel can show and is rendered unmistakably differently: a heavier border
+ * and a filled callout that says the grant is read AND decrypt, that it covers
+ * everything already stored in the collection, and -- pre-stated, before
+ * approval -- the honest ceiling that removing access later cannot take back
+ * what has already been read. It never shows the ordinary "only sees
+ * ciphertext" note, which would be exactly wrong.
  */
 import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
@@ -60,12 +68,14 @@ export function ZcapGrantsPanel({
   grants,
   ttlDays,
   writeTtlDays,
+  shareTtlDays,
   hideRecipient = false,
   heading
 }: {
   grants: ResolvedGrant[]
   ttlDays: number
   writeTtlDays: number
+  shareTtlDays: number
   // App Connect consent hides the recipient DID rows: the recipient is the
   // app's own (possibly not-yet-minted) key, not a DID the user could vet.
   hideRecipient?: boolean
@@ -83,6 +93,7 @@ export function ZcapGrantsPanel({
       {grants.map((grant, index) => {
         const { target, allowedActions, descriptor, write } = grant
         const satisfiable = target.satisfiable
+        const share = satisfiable && target.isShare
         // Warning border for whole-Space, public-collection, and write grants.
         const highlight = target.wholeSpace || target.isPublic || write
         return (
@@ -90,8 +101,10 @@ export function ZcapGrantsPanel({
             key={descriptor.referenceId ?? index}
             sx={{
               p: 1.5,
-              border: 1,
-              borderColor: highlight ? 'warning.main' : 'divider',
+              // A share is the strongest grant here: a heavier border sets it
+              // apart from the ordinary warning rows above and below it.
+              border: share ? 2 : 1,
+              borderColor: share || highlight ? 'warning.main' : 'divider',
               borderRadius: 2,
               opacity: satisfiable ? 1 : 0.6
             }}
@@ -172,7 +185,34 @@ export function ZcapGrantsPanel({
                   </Typography>
                 )}
 
-                {target.encrypted && (
+                {share && (
+                  <Box
+                    sx={{
+                      mt: 1,
+                      p: 1,
+                      borderRadius: 1,
+                      bgcolor: 'warning.main',
+                      color: 'warning.contrastText'
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {t('chapi.get.zcapShareWarning')}
+                    </Typography>
+                    <Typography variant="caption" sx={{ display: 'block' }}>
+                      {t('chapi.get.zcapShareExisting')}
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      sx={{ display: 'block', mt: 0.5 }}
+                    >
+                      {t('chapi.get.zcapShareCeiling')}
+                    </Typography>
+                  </Box>
+                )}
+
+                {/* A share decrypts, so the ciphertext-only note would be
+                    exactly wrong; the callout above states the truth. */}
+                {target.encrypted && !share && (
                   <Typography
                     variant="caption"
                     color="text.secondary"
@@ -187,10 +227,19 @@ export function ZcapGrantsPanel({
                   color="text.secondary"
                   sx={{ display: 'block', mt: 0.5 }}
                 >
-                  {t('chapi.get.zcapExpiry', {
-                    days: write ? writeTtlDays : ttlDays
-                  })}{' '}
-                  {t('chapi.get.zcapRevokeNote')}
+                  {/* A share's expiry covers the fetch axis only -- the epoch
+                      roster entry does not expire -- so it gets its own line
+                      rather than the flat "expires in N days". */}
+                  {share
+                    ? t('chapi.get.zcapShareExpiry', { days: shareTtlDays })
+                    : t('chapi.get.zcapExpiry', {
+                        days: write ? writeTtlDays : ttlDays
+                      })}{' '}
+                  {t(
+                    share
+                      ? 'chapi.get.zcapShareRevokeNote'
+                      : 'chapi.get.zcapRevokeNote'
+                  )}
                 </Typography>
               </>
             ) : (
