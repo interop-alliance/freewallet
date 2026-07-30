@@ -2,6 +2,11 @@
 
 ## Unreleased - TBD
 
+### Added
+
+- On signup, pre-seed the user's Contacts collection with default records
+  (InteropAlliance.org and the user themselves) and their DIDs.
+
 ### Changed
 
 - Aligned with the current `@interop/social-core` contact model: a postal

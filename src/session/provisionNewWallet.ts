@@ -60,14 +60,22 @@ export async function provisionNewWallet({
   // email: a guest's `user.email` is an internal placeholder (see
   // `initGuestSession`), never something the user typed, so it must not leak
   // into the contact.
-  await storage.addContact({ contact: interopAllianceTeamContact })
-  await storage.addContact({
-    contact: selfContact({
-      didWeb: profile.didWeb?.did,
-      didWebvh: profile.didWebvh?.did,
-      email: session.isGuest ? undefined : user.email
+  // Seeded contacts are decorative, so a failure here is logged and stepped
+  // over rather than failing provisioning and leaving the wallet without its
+  // welcome credential (and, on the signup path, without the unlock-methods
+  // entry the page writes after this returns).
+  try {
+    await storage.addContact({ contact: interopAllianceTeamContact })
+    await storage.addContact({
+      contact: selfContact({
+        didWeb: profile.didWeb?.did,
+        didWebvh: profile.didWebvh?.did,
+        email: session.isGuest ? undefined : user.email
+      })
     })
-  })
+  } catch (err) {
+    console.warn('Could not seed the default contacts:', err)
+  }
 
   // Seed the wallet with a welcome credential. `addCredential` records its own
   // credential-created history entry, so this must not log one separately.
