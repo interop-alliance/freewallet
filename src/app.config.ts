@@ -45,6 +45,17 @@ export const RP_ZCAP_TTL_MS =
 export const RP_ZCAP_WRITE_TTL_MS =
   (Number(env.VITE_RP_ZCAP_WRITE_TTL_HOURS) || 168) * 60 * 60 * 1000
 
+// Lifetime of the read-only capability delegated by a *share* grant (a
+// `urn:was:shared-collection` request, which also escrows the grantee into the
+// collection's key-epoch roster). Default 365 days: deliberately long, because
+// expiry is the wrong removal mechanism here. The two axes of a share come
+// apart at expiry -- the pull zcap dies but the epoch escrow does not, leaving
+// a reader in the roster (and in the settings list) who can no longer fetch.
+// The Settings "Shared collections" panel is the removal mechanism: it rotates
+// the epoch and revokes the zcap indivisibly.
+export const SHARE_ZCAP_TTL_MS =
+  (Number(env.VITE_SHARE_ZCAP_TTL_HOURS) || 8760) * 60 * 60 * 1000
+
 // Background-replication tuning (both optional).
 // `VITE_WAS_SYNC_RETRY_MS` -- RxDB `retryTime` backoff between failed cycles.
 export const WAS_SYNC_RETRY_MS = env.VITE_WAS_SYNC_RETRY_MS

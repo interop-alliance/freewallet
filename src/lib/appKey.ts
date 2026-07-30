@@ -10,11 +10,16 @@
  * recover an existing app key nor be handed one minted for another origin.
  *
  * The minted credential is byte-for-byte the shape `@interop/was-react`'s
- * `parseSeedCredential` accepts: an inline seed `@context` (interpolated from
- * the app's `vocabBase` and `credentialType`, no hosted context or
- * document-loader changes), a `name`/`description` pair, and a seed encoded as
- * base64url without padding. It is a VC 1.0 credential signed with the wallet
- * default suite (`Ed25519Signature2020`); `vc.issue` auto-fills `issuanceDate`.
+ * `parseSeedCredential` accepts: an inline seed `@context` (the shared
+ * `urn:was:` terms plus the app's own type term under its `vocabBase`, no
+ * hosted context or document-loader changes), a `name`/`description` pair, and
+ * a seed encoded as base64url without padding. It is a VC 1.0 credential
+ * signed with the wallet default suite (`Ed25519Signature2020`); `vc.issue`
+ * auto-fills `issuanceDate`.
+ *
+ * Every app key also carries the shared `AppKeyCredential` marker type, which
+ * is what makes a store-time refusal of a foreign app key possible
+ * ({@link assertStorableAppKey}).
  */
 import * as vc from '@interop/vc'
 import { base64urlnopad } from '@scure/base'
@@ -51,15 +56,32 @@ export const APP_KEY_KEY_NAME = 'app-key'
 const VC_1_CONTEXT_URL = 'https://www.w3.org/2018/credentials/v1'
 
 /**
+ * The marker type every minted app key carries alongside the app's own
+ * `credentialType`, mapped to one stable IRI for every app (NOT interpolated
+ * from an app's `vocabBase`). It makes "presents as an app key" a term check
+ * rather than a shape heuristic, which is what the store-time refusal
+ * ({@link assertStorableAppKey}) and the match path key off.
+ *
+ * It is a self-declaration, not evidence: the `type` array of a planted
+ * credential is attacker-controlled like the rest of it. The marker makes the
+ * rule precise; the seed-to-subject binding ({@link appKeySeedBindsSubject})
+ * remains the only thing that authenticates.
+ */
+export const APP_KEY_CREDENTIAL_TYPE = 'AppKeyCredential'
+
+const APP_KEY_CREDENTIAL_TYPE_IRI = 'urn:was:AppKeyCredential'
+
+/**
  * The number of random bytes in an app-key seed.
  */
 const SEED_BYTE_LENGTH = 32
 
 /**
  * Builds the inline JSON-LD context object appended after the VC 1.0 context.
- * The type term and the `seed` / `origin` claims are namespaced under the app's
- * `vocabBase`; `name` / `description` map to their schema.org IRIs. Interpolated
- * (not constant) because it varies per app.
+ * The marker type and the `seed` / `origin` claims carry shared `urn:was:`
+ * IRIs -- they mean the same thing for every app, so they do not belong under
+ * a per-app `vocabBase`, which keeps only the app's own type term. Still
+ * interpolated (not constant) because that one term varies per app.
  *
  * @param options {object}
  * @param options.vocabBase {string}
@@ -75,27 +97,124 @@ function appKeyContext({
 }): Record<string, unknown> {
   return {
     '@protected': true,
+    [APP_KEY_CREDENTIAL_TYPE]: APP_KEY_CREDENTIAL_TYPE_IRI,
     [credentialType]: `${vocabBase}${credentialType}`,
-    seed: `${vocabBase}seed`,
-    origin: `${vocabBase}origin`,
+    seed: 'urn:was:seed',
+    origin: 'urn:was:origin',
     name: 'https://schema.org/name',
     description: 'https://schema.org/description'
   }
 }
 
 /**
+ * Whether a credential presents as an app key -- that is, carries the
+ * {@link APP_KEY_CREDENTIAL_TYPE} marker in its `type` array. Says nothing
+ * about whether it IS one; that is the seed-to-subject binding's job.
+ *
+ * @param credential {IVerifiableCredential}
+ * @returns {boolean}
+ */
+export function presentsAsAppKey(credential: IVerifiableCredential): boolean {
+  return typeArray(credential.type).includes(APP_KEY_CREDENTIAL_TYPE)
+}
+
+/**
+ * The refusal a store path raises for a credential that presents as an app key
+ * without binding to its own seed. A distinct class so the UI can show its own
+ * translated wording rather than this message.
+ */
+export class AppKeyRefusedError extends Error {
+  constructor() {
+    super(
+      'This credential claims to be an app key, but its key does not match ' +
+        'its identifier. It was not stored.'
+    )
+    this.name = 'AppKeyRefusedError'
+  }
+}
+
+/**
+ * Refuses a credential that presents as an app key but whose subject DID does
+ * not derive from the seed it itself carries. Called on every path that puts a
+ * credential in the store from outside the wallet (the CHAPI store popup, the
+ * URL / QR / manual-paste import), so a planted app key never reaches the
+ * store, the dashboard, or the user's Space -- rather than being stored and
+ * then quietly ignored at match time.
+ *
+ * A credential with no marker is left alone, so an ordinary credential that
+ * merely happens to carry a `seed` or `origin` claim is never caught; a
+ * genuine app key handed over legitimately still stores, because it binds.
+ *
+ * @param credential {IVerifiableCredential}
+ * @returns {Promise<void>}   rejects with the refusal reason
+ */
+export async function assertStorableAppKey(
+  credential: IVerifiableCredential
+): Promise<void> {
+  if (!presentsAsAppKey(credential)) {
+    return
+  }
+  if (!(await appKeySeedBindsSubject(credential))) {
+    throw new AppKeyRefusedError()
+  }
+}
+
+/**
+ * Whether an app-key credential's subject DID is the one its own seed derives
+ * -- the binding that makes the credential an app key rather than merely a
+ * self-issued claim to be one. Self-issuance is a weak signal (anyone can
+ * self-issue); this is the strong one, and it is fully local: the credential
+ * carries the seed, so re-derive with the same call `mintAppKeyCredential`
+ * uses and compare. Fails closed on an absent, non-base64url, or otherwise
+ * unusable seed rather than throwing out of the match path.
+ *
+ * @param credential {IVerifiableCredential}
+ * @returns {Promise<boolean>}
+ */
+export async function appKeySeedBindsSubject(
+  credential: IVerifiableCredential
+): Promise<boolean> {
+  const subjectDid = subjectId(credential)
+  const seed = appKeySeedBytes(credential)
+  if (!subjectDid || !seed || seed.length !== SEED_BYTE_LENGTH) {
+    return false
+  }
+  try {
+    const agent = await CapabilityAgent.fromSeed({
+      seed,
+      handle: APP_KEY_HANDLE,
+      keyName: APP_KEY_KEY_NAME
+    })
+    return agent.id === subjectDid
+  } catch {
+    return false
+  }
+}
+
+/**
  * The self-issued app-key credentials among a set of stored credentials for a
- * given app + origin: those whose `type` includes `credentialType`, whose
- * issuer equals the subject (self-issued), and whose `credentialSubject.origin`
- * equals `origin`. Sorted latest-first by `issuanceDate`.
+ * given app + origin: those whose `type` includes both the
+ * {@link APP_KEY_CREDENTIAL_TYPE} marker and `credentialType`, whose issuer
+ * equals the subject (self-issued), whose `credentialSubject.origin` equals
+ * `origin`, and whose subject DID derives from the seed they carry. Sorted
+ * latest-first by `issuanceDate`.
+ *
+ * The marker is required here, not merely tolerated: a credential can then
+ * only reach the delegation path by carrying it, which is exactly what the
+ * store-time refusal screens.
+ *
+ * The seed-to-subject check is what keeps a planted credential (imported
+ * before the store-time refusal existed, or restored from a Space) from
+ * winning the match on an attacker-chosen `issuanceDate` and making its DID
+ * the App Connect `controller` the wallet delegates to.
  *
  * @param options {object}
  * @param options.credentials {StoredCredential[]}
  * @param options.credentialType {string}
  * @param options.origin {string}
- * @returns {StoredCredential[]}
+ * @returns {Promise<StoredCredential[]>}
  */
-export function appKeyCredentialsIn({
+export async function appKeyCredentialsIn({
   credentials,
   credentialType,
   origin
@@ -103,17 +222,24 @@ export function appKeyCredentialsIn({
   credentials: StoredCredential[]
   credentialType: string
   origin: string
-}): StoredCredential[] {
-  return credentials
-    .filter(({ vc: credential }) => {
-      const issuer = issuerId(credential.issuer)
-      return (
-        typeArray(credential.type).includes(credentialType) &&
-        !!issuer &&
-        issuer === subjectId(credential) &&
-        appKeyOrigin(credential) === origin
-      )
-    })
+}): Promise<StoredCredential[]> {
+  // Cheap, synchronous predicates first, so only plausible candidates pay for
+  // a key derivation.
+  const candidates = credentials.filter(({ vc: credential }) => {
+    const issuer = issuerId(credential.issuer)
+    return (
+      presentsAsAppKey(credential) &&
+      typeArray(credential.type).includes(credentialType) &&
+      !!issuer &&
+      issuer === subjectId(credential) &&
+      appKeyOrigin(credential) === origin
+    )
+  })
+  const bound = await Promise.all(
+    candidates.map(({ vc: credential }) => appKeySeedBindsSubject(credential))
+  )
+  return candidates
+    .filter((_candidate, index) => bound[index])
     .sort((first, second) => {
       const firstDate = (first.vc.issuanceDate as string) ?? ''
       const secondDate = (second.vc.issuanceDate as string) ?? ''
@@ -129,9 +255,9 @@ export function appKeyCredentialsIn({
  * @param options.credentials {StoredCredential[]}
  * @param options.credentialType {string}
  * @param options.origin {string}
- * @returns {StoredCredential | undefined}
+ * @returns {Promise<StoredCredential | undefined>}
  */
-export function findAppKeyCredential({
+export async function findAppKeyCredential({
   credentials,
   credentialType,
   origin
@@ -139,8 +265,8 @@ export function findAppKeyCredential({
   credentials: StoredCredential[]
   credentialType: string
   origin: string
-}): StoredCredential | undefined {
-  return appKeyCredentialsIn({ credentials, credentialType, origin })[0]
+}): Promise<StoredCredential | undefined> {
+  return (await appKeyCredentialsIn({ credentials, credentialType, origin }))[0]
 }
 
 /**
@@ -176,7 +302,7 @@ export async function mintAppKeyCredential({
       appKeyContext({ vocabBase, credentialType })
     ],
     id: `urn:uuid:${crypto.randomUUID()}`,
-    type: ['VerifiableCredential', credentialType],
+    type: ['VerifiableCredential', APP_KEY_CREDENTIAL_TYPE, credentialType],
     name: `${appName} app key`,
     description:
       `The ${appName} app keeps this key in your wallet so it can open ` +

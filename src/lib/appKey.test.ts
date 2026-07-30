@@ -4,9 +4,15 @@ import { base64urlnopad } from '@scure/base'
 import { CapabilityAgent } from '@interop/webkms-client'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type { StoredCredential } from '@/types/credential'
+import { typeArray } from '@/lib/vcShape'
 import {
+  APP_KEY_CREDENTIAL_TYPE,
   APP_KEY_KEY_NAME,
+  AppKeyRefusedError,
   appKeyCredentialsIn,
+  assertStorableAppKey,
+  presentsAsAppKey,
+  appKeySeedBindsSubject,
   appKeySubjectDid,
   findAppKeyCredential,
   mintAppKeyCredential,
@@ -25,6 +31,24 @@ const origin = 'https://app.example'
  */
 function stored(vc: IVerifiableCredential, cid = 'cid'): StoredCredential {
   return { cid, vc }
+}
+
+/**
+ * A credential whose subject/issuer DID is an attacker's rather than the one
+ * its own seed derives -- otherwise a perfect match (right marker + app type,
+ * self-issued, right origin, newest issuance date).
+ */
+async function plantedCredential(): Promise<IVerifiableCredential> {
+  const attacker = await CapabilityAgent.fromSecret({
+    secret: 'attacker-secret',
+    handle: 'attacker'
+  })
+  const { credential } = await mintAppKeyCredential({ app, origin })
+  ;(credential as { issuer: string }).issuer = attacker.id
+  ;(credential.credentialSubject as { id: string }).id = attacker.id
+  ;(credential as { issuanceDate: string }).issuanceDate =
+    '2099-01-01T00:00:00Z'
+  return credential
 }
 
 describe('mintAppKeyCredential', () => {
@@ -70,9 +94,10 @@ describe('mintAppKeyCredential', () => {
       'https://www.w3.org/2018/credentials/v1',
       {
         '@protected': true,
+        AppKeyCredential: 'urn:was:AppKeyCredential',
         TextEditorAppKey: 'urn:text-editor:vocab#TextEditorAppKey',
-        seed: 'urn:text-editor:vocab#seed',
-        origin: 'urn:text-editor:vocab#origin',
+        seed: 'urn:was:seed',
+        origin: 'urn:was:origin',
         name: 'https://schema.org/name',
         description: 'https://schema.org/description'
       }
@@ -95,8 +120,22 @@ describe('mintAppKeyCredential', () => {
     expect(subject.origin).toBe(origin)
     expect(credential.type).toEqual([
       'VerifiableCredential',
+      'AppKeyCredential',
       'TextEditorAppKey'
     ])
+  })
+
+  it('carries the shared marker type for every app', async () => {
+    const other = await mintAppKeyCredential({
+      app: {
+        name: 'Notes',
+        credentialType: 'NotesAppKey',
+        vocabBase: 'urn:notes:vocab#'
+      },
+      origin: 'https://notes.example'
+    })
+    expect(typeArray(other.credential.type)).toContain(APP_KEY_CREDENTIAL_TYPE)
+    expect(presentsAsAppKey(other.credential)).toBe(true)
   })
 
   it('carries an Ed25519Signature2020 proof', async () => {
@@ -120,25 +159,27 @@ describe('appKeyCredentialsIn / findAppKeyCredential', () => {
       stored(older.credential, 'older'),
       stored(newer.credential, 'newer')
     ]
-    const matched = appKeyCredentialsIn({
+    const matched = await appKeyCredentialsIn({
       credentials,
       credentialType: app.credentialType,
       origin
     })
     expect(matched.map(({ cid }) => cid)).toEqual(['newer', 'older'])
     expect(
-      findAppKeyCredential({
-        credentials,
-        credentialType: app.credentialType,
-        origin
-      })?.cid
+      (
+        await findAppKeyCredential({
+          credentials,
+          credentialType: app.credentialType,
+          origin
+        })
+      )?.cid
     ).toBe('newer')
   })
 
   it('returns undefined for a wrong origin', async () => {
     const { credential } = await mintAppKeyCredential({ app, origin })
     expect(
-      findAppKeyCredential({
+      await findAppKeyCredential({
         credentials: [stored(credential)],
         credentialType: app.credentialType,
         origin: 'https://evil.example'
@@ -149,7 +190,7 @@ describe('appKeyCredentialsIn / findAppKeyCredential', () => {
   it('returns undefined for a wrong credential type', async () => {
     const { credential } = await mintAppKeyCredential({ app, origin })
     expect(
-      findAppKeyCredential({
+      await findAppKeyCredential({
         credentials: [stored(credential)],
         credentialType: 'OtherAppKey',
         origin
@@ -161,11 +202,144 @@ describe('appKeyCredentialsIn / findAppKeyCredential', () => {
     const { credential } = await mintAppKeyCredential({ app, origin })
     ;(credential as { issuer: string }).issuer = 'did:key:zSomeoneElse'
     expect(
-      findAppKeyCredential({
+      await findAppKeyCredential({
         credentials: [stored(credential)],
         credentialType: app.credentialType,
         origin
       })
     ).toBeUndefined()
+  })
+})
+
+describe('app-key seed binding', () => {
+  it('accepts a wallet-minted credential', async () => {
+    const { credential } = await mintAppKeyCredential({ app, origin })
+    expect(await appKeySeedBindsSubject(credential)).toBe(true)
+  })
+
+  it('rejects a subject DID that does not derive from the seed', async () => {
+    expect(await appKeySeedBindsSubject(await plantedCredential())).toBe(false)
+  })
+
+  it('does not match a planted credential, even as the newest candidate', async () => {
+    const mine = await mintAppKeyCredential({ app, origin })
+    ;(mine.credential as { issuanceDate: string }).issuanceDate =
+      '2024-01-01T00:00:00Z'
+    const credentials = [
+      stored(await plantedCredential(), 'planted'),
+      stored(mine.credential, 'mine')
+    ]
+    const matched = await appKeyCredentialsIn({
+      credentials,
+      credentialType: app.credentialType,
+      origin
+    })
+    expect(matched.map(({ cid }) => cid)).toEqual(['mine'])
+    expect(
+      (
+        await findAppKeyCredential({
+          credentials,
+          credentialType: app.credentialType,
+          origin
+        })
+      )?.cid
+    ).toBe('mine')
+  })
+
+  it('fails closed on an absent, malformed, or wrong-length seed', async () => {
+    for (const seed of [
+      undefined,
+      42,
+      'not base64url!!',
+      base64urlnopad.encode(new Uint8Array(16))
+    ]) {
+      const { credential } = await mintAppKeyCredential({ app, origin })
+      const subject = credential.credentialSubject as { seed?: unknown }
+      if (seed === undefined) {
+        delete subject.seed
+      } else {
+        subject.seed = seed
+      }
+      await expect(appKeySeedBindsSubject(credential)).resolves.toBe(false)
+      expect(
+        await findAppKeyCredential({
+          credentials: [stored(credential)],
+          credentialType: app.credentialType,
+          origin
+        })
+      ).toBeUndefined()
+    }
+  })
+})
+
+describe('the AppKeyCredential marker', () => {
+  it('is required at match time', async () => {
+    const { credential } = await mintAppKeyCredential({ app, origin })
+    // Otherwise a perfect match: strip only the marker.
+    ;(credential as { type: string[] }).type = (
+      credential.type as string[]
+    ).filter(term => term !== APP_KEY_CREDENTIAL_TYPE)
+    expect(
+      await findAppKeyCredential({
+        credentials: [stored(credential)],
+        credentialType: app.credentialType,
+        origin
+      })
+    ).toBeUndefined()
+  })
+
+  it('is not claimed by an ordinary credential', async () => {
+    const ordinary = {
+      '@context': ['https://www.w3.org/2018/credentials/v1'],
+      type: ['VerifiableCredential', 'SomeOtherCredential'],
+      issuer: 'did:key:zIssuer',
+      credentialSubject: { id: 'did:key:zSubject', seed: 'abc', origin }
+    } as unknown as IVerifiableCredential
+    expect(presentsAsAppKey(ordinary)).toBe(false)
+    await expect(assertStorableAppKey(ordinary)).resolves.toBeUndefined()
+  })
+})
+
+describe('assertStorableAppKey', () => {
+  it('stores a wallet-minted app key', async () => {
+    const { credential } = await mintAppKeyCredential({ app, origin })
+    await expect(assertStorableAppKey(credential)).resolves.toBeUndefined()
+  })
+
+  it('refuses a planted app key', async () => {
+    await expect(
+      assertStorableAppKey(await plantedCredential())
+    ).rejects.toThrow(AppKeyRefusedError)
+  })
+
+  it('refuses one whose seed was swapped for another key', async () => {
+    const { credential } = await mintAppKeyCredential({ app, origin })
+    const other = await mintAppKeyCredential({ app, origin })
+    ;(credential.credentialSubject as { seed: string }).seed = (
+      other.credential.credentialSubject as { seed: string }
+    ).seed
+    await expect(assertStorableAppKey(credential)).rejects.toThrow(
+      AppKeyRefusedError
+    )
+  })
+
+  it('refuses one with an absent, malformed, or wrong-length seed', async () => {
+    for (const seed of [
+      undefined,
+      42,
+      'not base64url!!',
+      base64urlnopad.encode(new Uint8Array(16))
+    ]) {
+      const { credential } = await mintAppKeyCredential({ app, origin })
+      const subject = credential.credentialSubject as { seed?: unknown }
+      if (seed === undefined) {
+        delete subject.seed
+      } else {
+        subject.seed = seed
+      }
+      await expect(assertStorableAppKey(credential)).rejects.toThrow(
+        AppKeyRefusedError
+      )
+    }
   })
 })

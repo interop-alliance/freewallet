@@ -345,7 +345,7 @@ describe('StorageManager.shareCollection', () => {
       markers: {}
     })
 
-    const marker = await storage.shareCollection({
+    const { marker } = await storage.shareCollection({
       profile: makeProfile(owner, zcapClient),
       user,
       collectionId: 'private-credentials',
@@ -400,14 +400,14 @@ describe('StorageManager.shareCollection', () => {
     })
     const profile = makeProfile(owner, zcapClient)
 
-    const marker1 = await storage.shareCollection({
+    const { marker: marker1 } = await storage.shareCollection({
       profile,
       user,
       collectionId: 'private-credentials',
       recipient: ownerRecipient({ keyAgreementKey: readerA.keyAgreementKey }),
       controller: 'did:key:z6MkReaderA'
     })
-    const marker2 = await storage.shareCollection({
+    const { marker: marker2 } = await storage.shareCollection({
       profile,
       user,
       collectionId: 'private-credentials',
@@ -445,7 +445,7 @@ describe('StorageManager.unshareCollection', () => {
     })
     const profile = makeProfile(owner, zcapClient)
 
-    const shared = await storage.shareCollection({
+    const { marker: shared } = await storage.shareCollection({
       profile,
       user,
       collectionId: 'private-credentials',
@@ -504,6 +504,42 @@ describe('StorageManager.unshareCollection', () => {
     expect(shares).toHaveLength(1)
     expect(shares[0].recipientId).toBe(reader.keyAgreementKey.id)
     expect(shares[0].controller).toBe('did:key:z6MkReader')
+  })
+
+  it('carries a connected app name and origin through to the listing', async () => {
+    const owner = await generateKey()
+    const reader = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore, user } = await initLocalStore(ciphers)
+    const { remoteStore } = makeFakeRemote()
+    const { zcapClient } = makeFakeZcapClient()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      markers: {}
+    })
+
+    const { zcap } = await storage.shareCollection({
+      profile: makeProfile(owner, zcapClient),
+      user,
+      collectionId: 'private-credentials',
+      recipient: ownerRecipient({ keyAgreementKey: reader.keyAgreementKey }),
+      controller: 'did:key:z6MkReader',
+      app: { name: 'Text Editor', origin: 'https://app.example' }
+    })
+
+    // The pull zcap comes back to the caller (it goes in the response VP).
+    expect(zcap.id).toBe('urn:zcap:delegated:1')
+
+    const shares = await storage.listCollectionShares({
+      collectionId: 'private-credentials'
+    })
+    expect(shares[0]).toMatchObject({
+      appName: 'Text Editor',
+      appOrigin: 'https://app.example'
+    })
   })
 })
 

@@ -6,9 +6,68 @@
 
 - On signup, pre-seed the user's Contacts collection with default records
   (InteropAlliance.org and the user themselves) and their DIDs.
+- A capability request can now ask to **share** one of the wallet's own
+  encrypted collections: a `urn:was:shared-collection` invocation-target
+  descriptor grants read _and decrypt_ access, where the ordinary
+  collection grant only ever hands over ciphertext. Approving it makes the
+  grantee a recipient of the collection's key epochs and delegates it a
+  read-only capability in a single indivisible step, so the two halves can
+  never come apart. Only the encrypted standard collections can be shared
+  (today: `private-credentials`, `wallet-activity`, `contacts`, and
+  `contacts-history`); a share of a plaintext collection, an app collection,
+  or the whole Space is refused, as is a request whose grantee's DID has no
+  key the wallet can derive a recipient key from. The grantee's
+  decryption key is never carried in the request -- it is derived locally from
+  the `did:key` the request already names as the capability's controller, so a
+  request cannot pair one entity's DID with another's key.
+- The CHAPI consent screen renders a share request unmistakably differently
+  from an ordinary storage grant: a heavier border and a filled callout saying
+  the grant covers reading _and_ decrypting, that it covers the collection's
+  contents from the moment of approval rather than only future writes, and --
+  stated before approval, not after -- that removing access later stops future
+  reads but cannot take back anything already read. The expiry line is
+  share-specific: it says the _fetch_ permission expires, since the ability to
+  decrypt does not lapse on its own. Both the generic and the App Connect
+  consent panels get it (English and Spanish).
+- A share granted through App Connect records the app's name and origin, so
+  Settings > Shared collections lists "Text Editor (app.example)" above the
+  reader's DID instead of showing the DID alone.
+- `VITE_SHARE_ZCAP_TTL_HOURS` (default 365 days) sets the lifetime of a share's
+  capability. It is deliberately long: expiry is the wrong removal mechanism
+  for a share (it would end the fetch axis while leaving the grantee in the key
+  roster), so the Settings panel's "Remove access" -- which rotates the epoch
+  and revokes the capability together -- is the way a share ends.
 
 ### Changed
 
+- The wallet now refuses to store a credential that claims to be an app key
+  but is not one. Every app key it mints carries a shared `AppKeyCredential`
+  marker type (one stable IRI for every app), and a credential carrying that
+  marker is stored only when its subject DID derives from the seed the
+  credential itself carries -- so a planted app key is turned away at the door
+  rather than sitting in the credential list, showing up in the storage
+  browser, and replicating to the user's Space while being quietly ignored.
+  The refusal applies to every path a credential can arrive on from outside:
+  the CHAPI store popup, and the URL / QR / manual-paste import. The marker is
+  also required at match time, so a credential can only reach the delegation
+  path by carrying it. An ordinary credential that merely happens to have a
+  `seed` or `origin` claim carries no marker and is never caught, and a
+  genuine app key still stores.
+- An app-key credential's `seed` and `origin` claims now carry shared
+  `urn:was:seed` / `urn:was:origin` IRIs instead of ones namespaced under each
+  app's `vocabBase`: they mean the same thing in every app, so two apps' keys
+  no longer make semantically identical claims under different IRIs. The JSON
+  shape is unchanged (`credentialSubject.seed` / `.origin` keep their keys);
+  the app's `vocabBase` now namespaces only its own type term.
+- An App Connect request now only matches a stored app-key credential whose
+  subject DID is the one its own seed derives. Previously any self-issued
+  credential carrying the right type and origin qualified, and candidates were
+  ranked newest-first on an issuance date the credential itself states -- so a
+  credential planted through the store popup or a manual import could win the
+  match and have its DID become the identity the wallet delegates capabilities
+  to. The check is local (the credential carries the seed, so the wallet
+  re-derives and compares) and fails closed: an absent, malformed, or
+  wrong-length seed simply does not match.
 - Aligned with the current `@interop/social-core` contact model: a postal
   address spells its fields `postalCode` and `poBox`, and carries the
   administrative subdivision as `region` only (a separate `state` folds into

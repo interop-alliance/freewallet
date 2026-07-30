@@ -5,6 +5,7 @@ import * as vc from '@interop/vc'
 import { securityLoader } from '@interop/security-document-loader'
 import type { Session } from '@/types/auth'
 import type { ICapabilityQueryDetail, IZcap } from '@/lib/walletRequest'
+import { x25519RecipientFromDidKey } from '@/lib/didKeyRecipient'
 import {
   resolveInvocationTarget,
   resolveGrant,
@@ -99,6 +100,18 @@ const foreignDetail: ICapabilityQueryDetail = {
   invocationTarget: 'https://someone-else.example/space/OTHER/data'
 }
 
+// A share request: read AND decrypt an encrypted standard collection. Its
+// controller is a real did:key (filled in `beforeAll`), because the recipient
+// key is derived from it.
+const shareDetail: ICapabilityQueryDetail = {
+  referenceId: 'shared-credentials',
+  controller: '',
+  invocationTarget: {
+    type: 'urn:was:shared-collection',
+    name: 'private-credentials'
+  }
+}
+
 /**
  * A session whose `keyAgent` really signs (for the round-trip VP
  * test), but whose `zcapClient.delegate` and `storage.ensureCollection` are
@@ -108,6 +121,15 @@ let session: Session
 let delegated: Array<Record<string, unknown>>
 let ensureCalls: Array<{ id: string; isPublic?: boolean }>
 let provisionCalls: Array<{ collectionId: string; recipientId: string }>
+let shareCalls: Array<{
+  collectionId: string
+  recipientId: string
+  controller: string
+  expires?: Date
+  app?: { name: string; origin: string }
+}>
+// A real did:key, so the share flow can derive an X25519 twin from it.
+let granteeDid: string
 
 beforeAll(async () => {
   const keyAgent = await CapabilityAgent.fromSecret({
@@ -115,9 +137,17 @@ beforeAll(async () => {
     handle: 'test',
     keyName: 'test-key'
   })
+  const grantee = await CapabilityAgent.fromSecret({
+    secret: 'a grantee secret',
+    handle: 'test',
+    keyName: 'test-key'
+  })
+  granteeDid = grantee.id
+  shareDetail.controller = granteeDid
   delegated = []
   ensureCalls = []
   provisionCalls = []
+  shareCalls = []
 
   const zcapClient = {
     async delegate({
@@ -176,6 +206,36 @@ beforeAll(async () => {
     }) {
       provisionCalls.push({ collectionId, recipientId: appRecipient.id })
       return { scheme: 'edv' }
+    },
+    async shareCollection({
+      collectionId,
+      recipient,
+      controller,
+      expires,
+      app
+    }: {
+      collectionId: string
+      recipient: { id: string }
+      controller: string
+      expires?: Date
+      app?: { name: string; origin: string }
+    }) {
+      shareCalls.push({
+        collectionId,
+        recipientId: recipient.id,
+        controller,
+        expires,
+        app
+      })
+      const zcap = {
+        id: `urn:zcap:delegated:share:${collectionId}`,
+        invocationTarget: `${SPACE_URL}/${collectionId}`,
+        controller,
+        allowedAction: ['GET', 'HEAD'],
+        expires: expires?.toISOString()
+      }
+      delegated.push(zcap)
+      return { marker: { scheme: 'edv' }, zcap }
     }
   }
 
@@ -334,6 +394,76 @@ describe('resolveInvocationTarget', () => {
         }).satisfiable
       ).toBe(false)
     }
+  })
+
+  it('resolves a share of an encrypted standard collection', () => {
+    const target = resolveInvocationTarget({
+      descriptor: {
+        type: 'urn:was:shared-collection',
+        name: 'private-credentials'
+      },
+      spaceUrl: SPACE_URL
+    })
+    expect(target).toMatchObject({
+      satisfiable: true,
+      invocationTarget: `${SPACE_URL}/private-credentials`,
+      needsProvisioning: false,
+      collectionId: 'private-credentials',
+      encrypted: true,
+      isPublic: false,
+      isShare: true
+    })
+  })
+
+  it('resolves a share of every encrypted standard collection', () => {
+    // The rule is "any standard collection with an encryption marker", so the
+    // contacts collections are shareable on the same terms as credentials.
+    for (const name of ['wallet-activity', 'contacts', 'contacts-history']) {
+      expect(
+        resolveInvocationTarget({
+          descriptor: { type: 'urn:was:shared-collection', name },
+          spaceUrl: SPACE_URL
+        })
+      ).toMatchObject({ satisfiable: true, isShare: true, encrypted: true })
+    }
+  })
+
+  it('refuses a share of anything but an encrypted standard collection', () => {
+    // Plaintext standard collection, the `id` / `key-map` collections, an RP
+    // collection, a made-up name, a missing name -- none has an epoch roster.
+    for (const name of [
+      'public-credentials',
+      'id',
+      'key-map',
+      'example-app-data',
+      'not-a-collection',
+      undefined
+    ]) {
+      expect(
+        resolveInvocationTarget({
+          descriptor: { type: 'urn:was:shared-collection', name },
+          spaceUrl: SPACE_URL
+        }).satisfiable
+      ).toBe(false)
+    }
+  })
+
+  it('never flags an ordinary descriptor isShare', () => {
+    for (const descriptor of [
+      { type: 'urn:was:collection', name: 'private-credentials' },
+      { type: 'urn:was:public-collection', name: 'example-app-public' },
+      { type: 'urn:was:space' }
+    ]) {
+      expect(
+        resolveInvocationTarget({ descriptor, spaceUrl: SPACE_URL }).isShare
+      ).toBe(false)
+    }
+    expect(
+      resolveInvocationTarget({
+        descriptor: `${SPACE_URL}/private-credentials`,
+        spaceUrl: SPACE_URL
+      }).isShare
+    ).toBe(false)
   })
 
   it('rejects an invalid public-collection name', () => {
@@ -643,6 +773,107 @@ describe('processZcaps', () => {
     })
     expect(zcaps).toHaveLength(0)
     expect(ensureCalls).toEqual([])
+  })
+
+  it('routes a share grant to shareCollection, not the delegation loop', async () => {
+    delegated.length = 0
+    shareCalls.length = 0
+    const before = Date.now()
+    const SHARE_TTL_MS = 8760 * 60 * 60 * 1000
+    const zcaps = await processZcaps({
+      zcapRequests: [shareDetail],
+      session,
+      shareTtlMs: SHARE_TTL_MS
+    })
+
+    // One call, both axes: the recipient key derived from the controller DID.
+    expect(shareCalls).toHaveLength(1)
+    expect(shareCalls[0].collectionId).toBe('private-credentials')
+    expect(shareCalls[0].controller).toBe(granteeDid)
+    expect(shareCalls[0].recipientId).toBe(
+      x25519RecipientFromDidKey({ did: granteeDid }).id
+    )
+    expect(
+      Math.abs(shareCalls[0].expires!.getTime() - (before + SHARE_TTL_MS))
+    ).toBeLessThan(60 * 1000)
+
+    // The pull zcap comes back for the response VP's `zcap` array.
+    expect(zcaps).toHaveLength(1)
+    expect(
+      (zcaps[0] as unknown as { allowedAction: string[] }).allowedAction
+    ).toEqual(['GET', 'HEAD'])
+  })
+
+  it('records the app name and origin on an App Connect share', async () => {
+    shareCalls.length = 0
+    await processZcaps({
+      zcapRequests: [shareDetail],
+      session,
+      app: { name: 'Text Editor', origin: 'https://app.example' }
+    })
+    expect(shareCalls[0].app).toEqual({
+      name: 'Text Editor',
+      origin: 'https://app.example'
+    })
+  })
+
+  it('refuses to share with a controller that has no Ed25519 did:key', async () => {
+    shareCalls.length = 0
+    const descriptor = { ...shareDetail, controller: 'did:web:app.example' }
+    // Unsatisfiable at resolution time, so consent shows "cannot fulfill" and
+    // delegation skips it rather than deriving a key from a DID it cannot.
+    expect(resolveGrant({ descriptor, spaceUrl: SPACE_URL }).target).toEqual(
+      expect.objectContaining({ satisfiable: false })
+    )
+    const zcaps = await processZcaps({ zcapRequests: [descriptor], session })
+    expect(zcaps).toHaveLength(0)
+    expect(shareCalls).toHaveLength(0)
+  })
+
+  it('refuses a share whose did:key only looks well formed', async () => {
+    shareCalls.length = 0
+    // Right prefix, undecodable body: caught at resolution (so consent shows
+    // "cannot fulfill") rather than throwing part-way through the response.
+    const descriptor = { ...shareDetail, controller: 'did:key:z6MkZZZZ' }
+    expect(resolveGrant({ descriptor, spaceUrl: SPACE_URL }).target).toEqual(
+      expect.objectContaining({ satisfiable: false })
+    )
+    const zcaps = await processZcaps({ zcapRequests: [descriptor], session })
+    expect(zcaps).toHaveLength(0)
+    expect(shareCalls).toHaveLength(0)
+  })
+
+  it('a share stays read-only even if the request asks for writes', async () => {
+    shareCalls.length = 0
+    const grant = resolveGrant({
+      descriptor: {
+        ...shareDetail,
+        allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE']
+      },
+      spaceUrl: SPACE_URL
+    })
+    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+    expect(grant.write).toBe(false)
+  })
+
+  it('skips a share of a collection with no epoch roster entirely', async () => {
+    delegated.length = 0
+    shareCalls.length = 0
+    const zcaps = await processZcaps({
+      zcapRequests: [
+        {
+          ...shareDetail,
+          invocationTarget: {
+            type: 'urn:was:shared-collection',
+            name: 'public-credentials'
+          }
+        }
+      ],
+      session
+    })
+    expect(zcaps).toHaveLength(0)
+    expect(shareCalls).toHaveLength(0)
+    expect(delegated).toHaveLength(0)
   })
 
   it('throws when the session has no remote storage', async () => {

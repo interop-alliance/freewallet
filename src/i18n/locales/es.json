@@ -1,5 +1,6 @@
 {
   "common": {
+    "appKeyRefused": "Esta credencial dice ser una clave de aplicación, pero su clave no coincide con su identificador. No se guardó.",
     "language": "Idioma",
     "theme": "Tema",
     "switchToDarkMode": "Cambiar a modo oscuro",
@@ -564,6 +565,11 @@
       "zcapWriteWarning": "Este sitio podrá agregar, cambiar o eliminar datos en esta colección.",
       "zcapReadOnlyNote": "Solo lectura",
       "zcapEncryptedNote": "Esta colección está cifrada: este sitio solo verá texto cifrado.",
+      "zcapShareWarning": "Esto otorga acceso de lectura Y descifrado a esta colección: no solo obtenerla, sino leer lo que contiene.",
+      "zcapShareExisting": "Esto abarca todo lo que haya en la colección desde el momento en que lo apruebe, no solo lo que se agregue después. Es posible que no se incluyan los elementos guardados antes de que esta billetera compartiera esta colección por primera vez.",
+      "zcapShareCeiling": "Podrá quitar el acceso más adelante, lo que impide lecturas futuras, pero no puede recuperar lo que ya se haya leído.",
+      "zcapShareExpiry": "El permiso de obtención vence en {{days}} días; la capacidad de descifrar no vence por sí sola.",
+      "zcapShareRevokeNote": "(puede quitar a este lector en cualquier momento desde la Configuración de la billetera)",
       "zcapCannotFulfill": "Esta billetera no puede satisfacer esta solicitud.",
       "zcapUnavailable": "Esta solicitud requiere almacenamiento remoto, que esta billetera no tiene configurado.",
       "zcapExpiry": "Caduca en {{days}} días",
