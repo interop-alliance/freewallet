@@ -6,23 +6,37 @@
  * capability (`urn:zcap:root:<spaceUrl>`); targets outside the Space are
  * unsatisfiable by construction.
  *
- * Two attenuation caps hold every grant read-only unless the RP owns the
- * target:
+ * Attenuation is a table, not a switch: every resolved target falls into one
+ * target class, and each class has an action ceiling (`ACTION_CEILINGS`) that
+ * the requested actions are intersected against. The requested actions are
+ * first normalized against the closed WAS action vocabulary, so a token the
+ * spec does not define never reaches an `allowedAction` the user's root key
+ * signs. The classes:
  *
- * - whole-Space grants are stripped to read-only (a Space-wide write would
- *   permit rewriting the Space Description, i.e. controller takeover);
- * - grants on a protected wallet collection -- the standard collections
+ * - whole Space -- read-only (a Space-wide write would permit rewriting the
+ *   Space Description, i.e. controller takeover);
+ * - a protected wallet collection -- the standard collections
  *   (`private-credentials`, `public-credentials`, `wallet-activity`), the `id`
  *   collection holding the user's published DID artifacts, and the `key-map`
- *   collection holding the private key-id map -- are stripped to read-only too:
- *   an RP may read but never rewrite or delete the user's own credentials,
- *   published identity, or key map.
+ *   collection holding the private key-id map -- read-only: an RP may read but
+ *   never rewrite or delete the user's own credentials, published identity, or
+ *   key map;
+ * - a share -- read-only (see below);
+ * - a public collection -- add-only: reads plus `POST`, never `PUT` or
+ *   `DELETE`. A write to a plaintext world-readable target is not data
+ *   management but publication under the user's identity, and irreversible in
+ *   practice, so an RP may add to what it published but never rewrite or
+ *   retract it;
+ * - an RP-provisioned private collection -- the full vocabulary, subject to the
+ *   consent screen and the shorter write TTL.
  *
- * Only an RP-provisioned (non-protected) collection keeps its requested write
- * actions. The cap applies whether the target arrives as a descriptor object
- * or as a plain URL string under the Space (the collection id is derived from
- * the first path segment after the Space URL either way), so a string target
- * cannot bypass it.
+ * The class is resolved from the target itself, so it applies whether the
+ * target arrives as a descriptor object or as a plain URL string under the
+ * Space (the collection id is derived from the first path segment after the
+ * Space URL either way) -- a string target cannot bypass it. A request whose
+ * actions are all dropped or all above its class's ceiling renders the grant
+ * unsatisfiable rather than empty: an empty `allowedAction` array means "every
+ * action" in the zcap model.
  *
  * A `urn:was:public-collection` grant provisions a plaintext collection with a
  * collection-level world-readable (PublicCanRead) policy, set by the wallet at
@@ -71,15 +85,66 @@ import type { ICapabilityQueryDetail, IZcap } from './types'
 const DEFAULT_ACTIONS = ['GET', 'HEAD']
 
 /**
- * The read-only action cap. A Space-wide write capability would permit
- * rewriting the Space Description (controller takeover), a write on a
- * standard wallet collection would let an RP rewrite or delete the user's own
- * credentials, a write on the `id` collection would let an RP rewrite the
- * user's published DID document, and a write on the `key-map` collection would
- * let an RP rewrite the private key-id map -- so all are always delegated
- * read-only.
+ * The actions that count as reading. Which target classes are held to them is
+ * the ceilings table's business (`ACTION_CEILINGS`); this constant only defines
+ * where reading ends and writing begins, for `includesWrite` -- the flag that
+ * drives the consent write warning and the shorter write-grant TTL.
  */
 const READ_ONLY_ACTIONS = ['GET', 'HEAD']
+
+/**
+ * The closed WAS action vocabulary. The set is not the wallet's to invent: the
+ * WAS spec fixes it to the uppercase HTTP method names, enumerating `GET`,
+ * `POST`, `PUT`, and `DELETE`.
+ *
+ * `HEAD` is the one deliberate addition, as a tolerated read alias rather than
+ * an action of its own: the spec authorizes a `HEAD` request as a `GET`, but
+ * the wallet has always minted `HEAD` alongside `GET` in every read grant
+ * (`READ_ONLY_ACTIONS`), and the server tolerates it. Keeping it is a superset
+ * of what a reader needs and nothing more; dropping it would invalidate every
+ * read grant the wallet has issued for no security gain. It is capped exactly
+ * like `GET` -- it appears only in ceilings that already permit reads.
+ *
+ * Anything outside this set is dropped by `normalizeActions`.
+ */
+const WAS_ACTIONS = ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'] as const
+
+type WasAction = (typeof WAS_ACTIONS)[number]
+
+/**
+ * The class of target a grant resolves onto. Every satisfiable target has
+ * exactly one, and it is what `ACTION_CEILINGS` keys on.
+ */
+export type TargetClass =
+  | 'space'
+  | 'protected-collection'
+  | 'share'
+  | 'public-collection'
+  | 'collection'
+
+/**
+ * The most any grant on a target of each class may be delegated. Requested
+ * actions are intersected against the row; nothing else is ever granted, no
+ * matter what the request asks for.
+ */
+const ACTION_CEILINGS: Record<TargetClass, readonly WasAction[]> = {
+  // A Space-wide write would permit rewriting the Space Description, i.e.
+  // controller takeover.
+  space: ['GET', 'HEAD'],
+  // The user's own credentials, activity log, published DID artifacts, and
+  // private key-id map: readable by an RP, never writable by one.
+  'protected-collection': ['GET', 'HEAD'],
+  // A share hands over decryption as well as fetch; it is never a write grant.
+  share: ['GET', 'HEAD'],
+  // Add-only. The collection is plaintext and world-readable, so a write there
+  // is publication under the user's identity and irreversible in practice
+  // (retracting removes the link, not the copies already fetched): an app may
+  // add to what it published, but never rewrite or retract it.
+  'public-collection': ['GET', 'HEAD', 'POST'],
+  // An RP-provisioned private collection is the RP's own data: the full
+  // vocabulary, bounded by the consent screen and the shorter write TTL.
+  collection: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']
+}
 
 /**
  * Whether an action set includes anything beyond read-only (GET/HEAD): a
@@ -144,6 +209,9 @@ export interface ResolvedTarget {
   // key-epoch roster and can DECRYPT it, not merely fetch ciphertext. Always an
   // encrypted standard collection, always read-only.
   isShare: boolean
+  // Which action ceiling applies (`ACTION_CEILINGS`). Absent only when the
+  // target is unsatisfiable, i.e. when no grant will be made at all.
+  targetClass?: TargetClass
 }
 
 /**
@@ -187,24 +255,81 @@ export function hasZcapStorage(session: Session): boolean {
   return !!session.storage.hasRemoteStorage && !!session.storage.spaceUrl
 }
 
-const UNSATISFIABLE: ResolvedTarget = {
+const UNSATISFIABLE: ResolvedTarget = Object.freeze({
   satisfiable: false,
   wholeSpace: false,
   needsProvisioning: false,
   encrypted: false,
   isPublic: false,
   isShare: false
+})
+
+/**
+ * Parses a plain-URL invocation target against the Space URL, returning the
+ * normalized target and the path segment naming its collection (empty for the
+ * Space itself), or `undefined` if the URL is not inside the Space.
+ *
+ * String matching alone is not enough to decide "inside the Space", which is
+ * what the collection ceilings hang off: `${spaceUrl}/private-credentials?x=1`
+ * and `${spaceUrl}/private-credentials#frag` both start with `${spaceUrl}/`
+ * while their first segment is not the collection id the server would route
+ * them to, and `${spaceUrl}/../other-space/x` starts with it while pointing
+ * outside the Space entirely. So parse: `new URL` resolves dot segments, and
+ * the query and fragment come off the path before the segment is taken. A
+ * target carrying a query or a fragment is refused outright rather than
+ * silently rewritten -- a WAS resource URL has neither, and dropping part of a
+ * target the user is about to consent to would show them something other than
+ * what gets delegated.
+ *
+ * @param options {object}
+ * @param options.target {string}
+ * @param options.spaceUrl {string}
+ * @returns {{ url: string, segment: string } | undefined}
+ */
+function parseSpaceUrl({
+  target,
+  spaceUrl
+}: {
+  target: string
+  spaceUrl: string
+}): { url: string; segment: string } | undefined {
+  let url: URL
+  let space: URL
+  try {
+    url = new URL(target)
+    space = new URL(spaceUrl)
+  } catch {
+    return undefined
+  }
+  if (url.search || url.hash || url.origin !== space.origin) {
+    return undefined
+  }
+  const spacePath = space.pathname.replace(/\/+$/, '')
+  const path = url.pathname.replace(/\/+$/, '')
+  if (path === spacePath) {
+    return { url: `${url.origin}${path}`, segment: '' }
+  }
+  if (!path.startsWith(`${spacePath}/`)) {
+    return undefined
+  }
+  return {
+    url: `${url.origin}${path}`,
+    segment: path.slice(spacePath.length + 1).split('/')[0]
+  }
 }
 
 /**
  * Resolves an abstract `invocationTarget` descriptor against the user's Space:
  *
- * - a plain URL string under `spaceUrl` -- used verbatim (an exact `spaceUrl`
- *   is treated as a whole-Space grant); the collection id is derived from the
- *   first path segment after the Space URL (so a URL under a standard
- *   collection, or a resource inside one, is flagged `collectionId` /
- *   `encrypted` and gets the same read-only cap as its descriptor form); any
- *   other string -- unsatisfiable;
+ * - a plain URL string inside the Space -- parsed and normalized against
+ *   `spaceUrl` (`parseSpaceUrl`), with the collection id taken from the first
+ *   path segment after the Space URL, so a URL under a standard collection (or
+ *   at a resource inside one) is flagged `collectionId` / `encrypted` and gets
+ *   the same cap as its descriptor form. The Space URL itself, with or without
+ *   a trailing slash, is a whole-Space grant. Any other string -- a foreign
+ *   origin, a path that escapes the Space, a target carrying a query or
+ *   fragment, a first segment that is not a valid collection id --
+ *   unsatisfiable;
  * - `{ type: 'urn:was:collection', name }` -- `${spaceUrl}/${name}` after
  *   validating `name`, flagged `needsProvisioning` unless it is a standard
  *   collection (and `encrypted` for the two EDV collections);
@@ -234,38 +359,49 @@ export function resolveInvocationTarget({
   spaceUrl: string
 }): ResolvedTarget {
   if (typeof descriptor === 'string') {
-    if (descriptor === spaceUrl) {
+    const parsed = parseSpaceUrl({ target: descriptor, spaceUrl })
+    if (!parsed) {
+      return UNSATISFIABLE
+    }
+    const { url, segment } = parsed
+    // No collection segment: the target is the Space itself (with or without a
+    // trailing slash), which is a whole-Space grant.
+    if (!segment) {
       return {
         satisfiable: true,
-        invocationTarget: descriptor,
+        invocationTarget: url,
         wholeSpace: true,
         needsProvisioning: false,
         encrypted: false,
         isPublic: false,
-        isShare: false
+        isShare: false,
+        targetClass: 'space'
       }
     }
-    if (descriptor.startsWith(`${spaceUrl}/`)) {
-      // Derive the collection id from the first path segment after the Space
-      // URL, so a plain URL under a standard collection is capped exactly like
-      // its `urn:was:collection` descriptor form.
-      const rest = descriptor.slice(spaceUrl.length + 1)
-      const segment = rest.split('/')[0]
-      const standard = WALLET_STANDARD_COLLECTIONS.find(
-        entry => entry.id === segment
-      )
-      return {
-        satisfiable: true,
-        invocationTarget: descriptor,
-        wholeSpace: false,
-        needsProvisioning: false,
-        collectionId: segment || undefined,
-        encrypted: !!standard?.encryption,
-        isPublic: false,
-        isShare: false
-      }
+    // A segment that cannot be a collection id names nothing the Space can
+    // hold, so there is nothing to delegate against.
+    if (!COLLECTION_NAME_RE.test(segment)) {
+      return UNSATISFIABLE
     }
-    return UNSATISFIABLE
+    // The collection id is the first path segment after the Space URL, so a
+    // URL under a standard collection (or at a resource inside one) is capped
+    // exactly like its `urn:was:collection` descriptor form.
+    const standard = WALLET_STANDARD_COLLECTIONS.find(
+      entry => entry.id === segment
+    )
+    return {
+      satisfiable: true,
+      invocationTarget: url,
+      wholeSpace: false,
+      needsProvisioning: false,
+      collectionId: segment,
+      encrypted: !!standard?.encryption,
+      isPublic: false,
+      isShare: false,
+      targetClass: isProtectedCollection(segment)
+        ? 'protected-collection'
+        : 'collection'
+    }
   }
 
   if (descriptor?.type === 'urn:was:space') {
@@ -276,7 +412,8 @@ export function resolveInvocationTarget({
       needsProvisioning: false,
       encrypted: false,
       isPublic: false,
-      isShare: false
+      isShare: false,
+      targetClass: 'space'
     }
   }
 
@@ -301,7 +438,10 @@ export function resolveInvocationTarget({
       collectionId: name,
       encrypted: !!standard?.encryption,
       isPublic: false,
-      isShare: false
+      isShare: false,
+      targetClass: isProtectedCollection(name)
+        ? 'protected-collection'
+        : 'collection'
     }
   }
 
@@ -326,7 +466,8 @@ export function resolveInvocationTarget({
       // encryption marker, so a ciphertext note never applies.
       encrypted: false,
       isPublic: true,
-      isShare: false
+      isShare: false,
+      targetClass: 'public-collection'
     }
   }
 
@@ -349,7 +490,8 @@ export function resolveInvocationTarget({
       collectionId: name,
       encrypted: true,
       isPublic: false,
-      isShare: true
+      isShare: true,
+      targetClass: 'share'
     }
   }
 
@@ -357,10 +499,16 @@ export function resolveInvocationTarget({
 }
 
 /**
- * Normalizes a query's `allowedAction` to an array; an absent value defaults to
- * read-only (`['GET', 'HEAD']`), never inherit-all.
+ * Normalizes a query's `allowedAction` into a deduplicated set of WAS actions:
+ * an absent value defaults to read-only (`['GET', 'HEAD']`), never inherit-all,
+ * and every requested token is uppercased and intersected against the closed
+ * WAS vocabulary. A token the vocabulary does not define -- an unknown verb, a
+ * non-string, an action the server may grow support for later -- is dropped
+ * here rather than passed through into an `allowedAction` the user's root key
+ * signs, which is the same fail-closed treatment an unknown `descriptor.type`
+ * gets.
  *
- * @param allowedAction {string | string[] | undefined}
+ * @param allowedAction {string | object | Array<string | object> | undefined}
  * @returns {string[]}
  */
 function normalizeActions(
@@ -370,17 +518,55 @@ function normalizeActions(
     return [...DEFAULT_ACTIONS]
   }
   const actions = Array.isArray(allowedAction) ? allowedAction : [allowedAction]
-  return actions.map(action =>
-    typeof action === 'string' ? action : String(action)
+  const normalized: string[] = []
+  for (const action of actions) {
+    if (typeof action !== 'string') {
+      continue
+    }
+    const token = action.trim().toUpperCase()
+    if (
+      (WAS_ACTIONS as readonly string[]).includes(token) &&
+      !normalized.includes(token)
+    ) {
+      normalized.push(token)
+    }
+  }
+  return normalized
+}
+
+/**
+ * Intersects requested actions with the ceiling for the target's class. The
+ * result is ordered by the ceiling, so an equivalent request always yields the
+ * same `allowedAction` array regardless of the order it asked in.
+ *
+ * @param options {object}
+ * @param [options.targetClass] {TargetClass}   absent for an unsatisfiable
+ *   target, which is granted nothing
+ * @param options.requested {string[]}   already normalized by `normalizeActions`
+ * @returns {string[]}
+ */
+function capActions({
+  targetClass,
+  requested
+}: {
+  targetClass?: TargetClass
+  requested: string[]
+}): string[] {
+  if (!targetClass) {
+    return []
+  }
+  return ACTION_CEILINGS[targetClass].filter(action =>
+    requested.includes(action)
   )
 }
 
 /**
  * Resolves a single requested capability into a `ResolvedGrant`: its target
- * plus the normalized, security-capped actions. Whole-Space grants and grants
- * on a protected wallet collection are forced to read-only; only an
- * RP-provisioned collection keeps its requested write actions. The resulting
- * `write` flag records whether the capped actions still include a write.
+ * plus the normalized, security-capped actions. The requested actions are
+ * intersected against the ceiling for the target's class (`ACTION_CEILINGS`),
+ * so a grant never carries more than its class permits and a request that asks
+ * for nothing the class permits is unsatisfiable. The resulting `write` flag
+ * records whether the capped actions still include a write.
  *
  * @param options {object}
  * @param options.descriptor {ICapabilityQueryDetail}
@@ -414,13 +600,17 @@ export function resolveGrant({
       target = UNSATISFIABLE
     }
   }
-  const readOnly =
-    target.wholeSpace ||
-    target.isShare ||
-    isProtectedCollection(target.collectionId)
-  const allowedActions = readOnly
-    ? [...READ_ONLY_ACTIONS]
-    : normalizeActions(descriptor.allowedAction)
+  const allowedActions = capActions({
+    targetClass: target.targetClass,
+    requested: normalizeActions(descriptor.allowedAction)
+  })
+  // Nothing survived the ceiling: the request asked only for actions its target
+  // class forbids (or only for tokens outside the WAS vocabulary). Refuse the
+  // grant visibly instead of delegating an empty `allowedAction` array, which
+  // means "every action" in the zcap model.
+  if (target.satisfiable && allowedActions.length === 0) {
+    target = UNSATISFIABLE
+  }
   return {
     descriptor,
     target,

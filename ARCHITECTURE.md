@@ -249,8 +249,8 @@ Because the wallet delegates to the subject DID of the credential it just
 matched or minted, the request never needs to name a controller DID --
 which is what makes the flow single-round. Delegation reuses
 `resolveGrants` / `processZcaps` verbatim (descriptor resolution,
-provisioning, read-only attenuation caps, TTLs, protected-collection
-rules). The response VP embeds the credential, the `zcap` array, and a
+provisioning, the per-target-class action ceilings, TTLs,
+protected-collection rules). The response VP embeds the credential, the `zcap` array, and a
 wallet-provided `appConnect: { firstRun }` member (a JSON-literal term in
 the VP `@context`), all before signing so the DIDAuth proof covers them
 (`processAppConnect` in `src/lib/walletRequest/appConnect.ts`).
@@ -332,6 +332,19 @@ panel (`unshareCollection`), not expiry -- the share TTL
 (`SHARE_ZCAP_TTL_MS`) is deliberately long, because expiry would end the pull
 axis while leaving the grantee in the key roster.
 
+**The grantee's half lives in `@interop/was-react`.** An app declares the
+wallet-owned collections it wants in `WasAppConfig.sharedCollections`, which
+adds the `urn:was:shared-collection` descriptors to its App Connect request; on
+approval a `SharedCollectionReader` fetches the Collection Description through
+the delegated read zcap, builds the epoch-aware cipher from the marker, and
+decrypts the raw envelopes locally. The key it decrypts with is the app's
+IDENTITY key-agreement key -- the X25519 twin of its own controller DID, which
+is exactly what `x25519RecipientFromDidKey` derived wallet-side, so the two
+sides land on the same `kid` without anything travelling on the wire. Note that
+this is a DIFFERENT key from the per-collection KAK an app-provisioned
+collection uses (`deriveCollectionKeys`): shared collections key off the app
+identity, app-owned collections key off the collection.
+
 Security notes:
 
 - **Seed confidentiality**: the seed exists only in the wallet and the app
@@ -339,9 +352,13 @@ Security notes:
 - **Origin binding**: enforced twice -- wallet-side at match/mint time
   (against the CHAPI requesting origin) and app-side in was-react's
   `parseSeedCredential`.
-- **Grant scope**: unchanged from the generic capability-query model; all
-  of freewallet's attenuation caps apply, and the consent screen shows
-  exactly what `resolveGrants` resolved.
+- **Grant scope**: unchanged from the generic capability-query model; the
+  requested actions are normalized against the closed WAS action vocabulary
+  and intersected with the ceiling for the target's class (whole Space,
+  protected collection, and share read-only; public collection add-only; an
+  app-provisioned private collection the full vocabulary), and the consent
+  screen shows exactly what `resolveGrants` resolved. A grant left with no
+  permitted action is unsatisfiable, never delegated empty.
 - **Challenge/domain**: unchanged DIDAuth verification app-side in
   was-react.
 
