@@ -1,5 +1,16 @@
 # History
 
+## Unreleased - TBD
+
+### Changed
+
+- Updated `@interop/did-method-webvh` to 5.0.0. Newly created did:webvh DID
+  documents no longer carry empty verification-relationship arrays, so a
+  freshly provisioned Space gets a different self-certifying identifier (SCID)
+  than an earlier version would have minted for the same keys. Already
+  published logs are unaffected -- they keep resolving, and a Space whose log
+  is already published adopts that log's DID rather than re-creating it.
+
 ## 0.22.0 - 2026-07-23
 
 ### Added
