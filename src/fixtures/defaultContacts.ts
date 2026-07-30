@@ -7,8 +7,6 @@ import { normalizeLabel, type ContactData } from '@interop/social-core'
  */
 export const interopAllianceTeamContact: ContactData = {
   displayName: 'Interop Alliance Team',
-  phoneNumbers: [],
-  emailAddresses: [],
   urlAddresses: [{ label: 'did', url: 'did:web:interopalliance.org' }]
 }
 
@@ -35,11 +33,10 @@ export function selfContact({
   ]
   return {
     displayName: 'You (this user)',
-    phoneNumbers: [],
     // `normalizeLabel` rather than a bare '' so the seeded row is already in
     // the form every other write path produces -- an unchanged save (or a
     // mobile merge) must not rewrite the label and churn a revision.
-    emailAddresses: email ? [{ label: normalizeLabel(''), email }] : [],
+    emailAddresses: email ? [{ label: normalizeLabel(''), email }] : undefined,
     urlAddresses: urlAddresses.length > 0 ? urlAddresses : undefined
   }
 }

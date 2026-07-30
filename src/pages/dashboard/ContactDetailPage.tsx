@@ -271,14 +271,14 @@ export function ContactDetailPage() {
           />
           <FieldSection
             label={t('contact.sections.phone')}
-            rows={contact.phoneNumbers.map(p => ({
+            rows={(contact.phoneNumbers ?? []).map(p => ({
               label: p.label,
               value: p.number
             }))}
           />
           <FieldSection
             label={t('contact.sections.email')}
-            rows={contact.emailAddresses.map(e => ({
+            rows={(contact.emailAddresses ?? []).map(e => ({
               label: e.label,
               value: e.email
             }))}
