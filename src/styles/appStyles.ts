@@ -1007,6 +1007,33 @@ export const contactDetailStyles = {
   },
   actions: {
     mt: 3
+  },
+  didList: {
+    listStyle: 'none',
+    m: 0,
+    p: 0,
+    mt: 0.5,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1
+  },
+  didListItem: {
+    alignItems: 'flex-start',
+    gap: 1,
+    p: 1,
+    border: 1,
+    borderColor: 'divider',
+    borderRadius: 2
+  },
+  didListIndex: {
+    fontWeight: 600,
+    color: 'text.secondary',
+    flexShrink: 0
+  },
+  didListValue: {
+    fontFamily: 'monospace',
+    wordBreak: 'break-all' as const,
+    flexGrow: 1
   }
 } as const
 

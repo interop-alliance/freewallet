@@ -8,7 +8,7 @@ import Typography from '@mui/material/Typography'
 import { MdAddCircleOutline, MdRemoveCircleOutline } from 'react-icons/md'
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { normalizeLabel, type ContactData } from '@interop/social-core'
+import { normalizeLabel, getDids, type ContactData } from '@interop/social-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
@@ -55,6 +55,7 @@ export function ContactFormPage() {
   const [note, setNote] = useState('')
   const [phoneNumbers, setPhoneNumbers] = useState<LabeledRow[]>([])
   const [emailAddresses, setEmailAddresses] = useState<LabeledRow[]>([])
+  const [dids, setDids] = useState<string[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -95,6 +96,7 @@ export function ContactFormPage() {
             id: e.id
           }))
         )
+        setDids(getDids(contact))
       } catch (err) {
         console.error('Could not load contact:', err)
         setNotFound(true)
@@ -147,6 +149,11 @@ export function ContactFormPage() {
   function buildContact(): ContactData {
     const trimmedName =
       displayName.trim() || `${givenName.trim()} ${familyName.trim()}`.trim()
+    const urlAddresses = [
+      ...dids
+        .filter(did => did.trim())
+        .map(did => ({ label: 'did', url: did.trim() }))
+    ]
     return {
       // Carry over every field the form does not edit (extended
       // @interop/social-core fields and nativeId); the form-bound fields below
@@ -174,6 +181,7 @@ export function ContactFormPage() {
           email: row.value.trim(),
           ...carried('id', row.id)
         })),
+      urlAddresses: urlAddresses.length > 0 ? urlAddresses : undefined,
       note: note.trim() || undefined
     }
   }
@@ -263,6 +271,52 @@ export function ContactFormPage() {
     )
   }
 
+  // DIDs are stored as urlAddresses entries with a fixed `label: 'did'` (see
+  // buildContact()), so unlike renderRows() this only surfaces one text field
+  // per row -- there's no user-editable label.
+  function renderDids() {
+    return (
+      <Box sx={contactFormStyles.rowsSection}>
+        <Typography variant="overline" color="text.secondary">
+          {t('contact.sections.dids')}
+        </Typography>
+        {dids.map((did, index) => (
+          <Stack
+            key={`contact-did-${index}`}
+            direction="row"
+            spacing={1}
+            sx={contactFormStyles.rowGroup}
+          >
+            <TextField
+              value={did}
+              onChange={e =>
+                setDids(dids.map((d, i) => (i === index ? e.target.value : d)))
+              }
+              label={t('contactForm.did')}
+              size="small"
+              fullWidth
+            />
+            <IconButton
+              onClick={() => setDids(dids.filter((_, i) => i !== index))}
+              aria-label={t('contactForm.removeRow')}
+              size="small"
+            >
+              <MdRemoveCircleOutline />
+            </IconButton>
+          </Stack>
+        ))}
+        <Button
+          size="small"
+          onClick={() => setDids([...dids, ''])}
+          startIcon={<MdAddCircleOutline />}
+          sx={contactFormStyles.addRowButton}
+        >
+          {t('contactForm.addRow', { field: t('contact.sections.dids') })}
+        </Button>
+      </Box>
+    )
+  }
+
   if (isEditing && notFound) {
     return <NotFoundPage />
   }
@@ -325,6 +379,7 @@ export function ContactFormPage() {
             setEmailAddresses,
             'contact-email'
           )}
+          {renderDids()}
 
           <TextField
             value={note}
