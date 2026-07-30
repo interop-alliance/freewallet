@@ -4,6 +4,18 @@
 
 ### Changed
 
+- Aligned with the current `@interop/social-core` contact model: a postal
+  address spells its fields `postalCode` and `poBox`, and carries the
+  administrative subdivision as `region` only (a separate `state` folds into
+  `region` when `region` is absent). Stored contact head and revision
+  documents are upgraded to the current shape as they are read, so contacts
+  written by an earlier version compare cleanly against a fresh write and
+  last-write-wins sees no spurious edit; writes always produce the current
+  shape.
+- Editing a contact no longer strips the extra phone/email fields an importer
+  recorded (`digits`, `countryCode`, entry ids): they are carried through a
+  save, and the number-derived `digits` / `countryCode` are dropped only when
+  the number itself is edited.
 - Updated `@interop/did-method-webvh` to 5.0.0. Newly created did:webvh DID
   documents no longer carry empty verification-relationship arrays, so a
   freshly provisioned Space gets a different self-certifying identifier (SCID)

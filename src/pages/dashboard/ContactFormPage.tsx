@@ -15,7 +15,20 @@ import { useAuthStore } from '@/stores/authStore'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { contactFormStyles } from '@/styles/appStyles'
 
-type LabeledRow = { label: string; value: string }
+/**
+ * One editable phone / email row. `label` and `value` are the only fields the
+ * form surfaces; `digits`, `countryCode` and `id` are carried through from the
+ * loaded contact so an edit does not strip what an importer recorded. `digits`
+ * / `countryCode` are derived from the number, so editing the value clears
+ * them rather than leaving a stale pair behind.
+ */
+type LabeledRow = {
+  label: string
+  value: string
+  digits?: string
+  countryCode?: string
+  id?: string
+}
 
 export function ContactFormPage() {
   const { t } = useTranslation()
@@ -67,10 +80,20 @@ export function ContactFormPage() {
         setOrganization(contact.organization ?? '')
         setNote(contact.note ?? '')
         setPhoneNumbers(
-          contact.phoneNumbers.map(p => ({ label: p.label, value: p.number }))
+          contact.phoneNumbers.map(p => ({
+            label: p.label,
+            value: p.number,
+            digits: p.digits,
+            countryCode: p.countryCode,
+            id: p.id
+          }))
         )
         setEmailAddresses(
-          contact.emailAddresses.map(e => ({ label: e.label, value: e.email }))
+          contact.emailAddresses.map(e => ({
+            label: e.label,
+            value: e.email,
+            id: e.id
+          }))
         )
       } catch (err) {
         console.error('Could not load contact:', err)
@@ -94,7 +117,31 @@ export function ContactFormPage() {
     index: number,
     patch: Partial<LabeledRow>
   ) {
-    setRows(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+    setRows(
+      rows.map((row, i) => {
+        if (i !== index) {
+          return row
+        }
+        // A changed value invalidates the number-derived `digits` /
+        // `countryCode` an importer recorded, so drop them.
+        const derived =
+          patch.value === undefined
+            ? {}
+            : { digits: undefined, countryCode: undefined }
+        return { ...row, ...patch, ...derived }
+      })
+    )
+  }
+
+  /**
+   * Emits `key` only when the carried-through value is present, so a row that
+   * never had one stays byte-identical to what the other replica writes.
+   */
+  function carried<K extends string>(
+    key: K,
+    value: string | undefined
+  ): Partial<Record<K, string>> {
+    return value === undefined ? {} : ({ [key]: value } as Record<K, string>)
   }
 
   function buildContact(): ContactData {
@@ -115,13 +162,17 @@ export function ContactFormPage() {
           // Shared normalization (lowercase, 'other' fallback) so web and
           // mobile store byte-identical labels.
           label: normalizeLabel(row.label),
-          number: row.value.trim()
+          number: row.value.trim(),
+          ...carried('digits', row.digits),
+          ...carried('countryCode', row.countryCode),
+          ...carried('id', row.id)
         })),
       emailAddresses: emailAddresses
         .filter(row => row.value.trim())
         .map(row => ({
           label: normalizeLabel(row.label),
-          email: row.value.trim()
+          email: row.value.trim(),
+          ...carried('id', row.id)
         })),
       note: note.trim() || undefined
     }
