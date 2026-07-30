@@ -23,6 +23,10 @@ import type {
   ContactRevisionPayload
 } from '@interop/social-core'
 import {
+  upgradeContactHeadPayload,
+  upgradeContactRevisionPayload
+} from '@interop/social-core'
+import {
   createRxDatabase,
   type RxCollection,
   type RxDatabase,
@@ -917,6 +921,14 @@ export class BrowserStore {
    * the shared {@link _decryptedRows} tolerance (and its decrypt cache) that the
    * credential and history reads use.
    *
+   * Every head passes through `upgradeContactHeadPayload` -- the single read
+   * choke point for contact heads (`listContacts` / `loadContact` both go
+   * through here), so a row written before the current `ContactData` postal
+   * shape is seen by the rest of the app, and by any save that carries its
+   * untouched fields forward, in the current shape. The upgrade is idempotent,
+   * so a row already in the current shape is unaffected, and a re-save
+   * therefore produces no spurious last-write-wins edit.
+   *
    * @returns {Promise<Array<{ rowId: string; head: ContactHeadPayload }>>}
    */
   async #contactEntries(): Promise<
@@ -929,7 +941,7 @@ export class BrowserStore {
     })
     return entries.map(({ rowId, data }) => ({
       rowId,
-      head: data as unknown as ContactHeadPayload
+      head: upgradeContactHeadPayload(data as unknown as ContactHeadPayload)
     }))
   }
 
@@ -1136,7 +1148,12 @@ export class BrowserStore {
     })
     const revisions: ContactRevisionPayload[] = []
     for (const { data } of entries) {
-      const revision = data as unknown as ContactRevisionPayload
+      // Same idempotent read-side upgrade as the head reads, so a snapshot
+      // stored before the current `ContactData` postal shape views and
+      // restores in the current shape.
+      const revision = upgradeContactRevisionPayload(
+        data as unknown as ContactRevisionPayload
+      )
       if (revision.contactId === contactId) {
         revisions.push(revision)
       }
