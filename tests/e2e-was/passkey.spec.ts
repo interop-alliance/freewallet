@@ -21,10 +21,10 @@ import {
  *    passkey-only safety prompt.
  * 2. One-tap passkey login from the login page lands on the dashboard at the
  *    same spaceId.
- * 3. New device: with the wallet and session IndexedDB cleared (the synced
- *    passkey still lives in the authenticator), a passkey login rebuilds the
- *    same wallet from the remote keyring alone and decrypts the welcome
- *    credential.
+ * 3. Wiped client: with the wallet and session IndexedDB cleared (the synced
+ *    passkey still lives in the authenticator), a passkey login locates the
+ *    account but is refused as not enrolled -- the client key set died with
+ *    the wipe, and the passkey alone no longer reconstructs the account.
  * 4. A second passkey added from Settings shows two entries in the passkeys
  *    list.
  * 5. Revoking a passkey through its management zcap (no ceremony) retires it, so
@@ -239,7 +239,7 @@ async function clearAllIndexedDb(page: Page): Promise<void> {
 }
 
 test.describe('Passkey unlock', () => {
-  test('passkey signup, one-tap login, and a new device reach the same wallet', async ({
+  test('passkey signup, one-tap login, and a wiped client is refused (not enrolled)', async ({
     page
   }, testInfo) => {
     test.slow()
@@ -271,20 +271,23 @@ test.describe('Passkey unlock', () => {
       page.getByRole('link', { name: 'Your First Credential' })
     ).toBeVisible({ timeout: 30_000 })
 
-    // New device: clear the wallet and session IndexedDB (the passkey survives
-    // in the authenticator), reload, and log in with the passkey. The random
-    // data seed round-trips through the remote keyring alone, so the spaceId
-    // matches and the vault decrypts the replicated welcome credential.
+    // Wiped client: clear the wallet and session IndexedDB (the passkey
+    // survives in the authenticator -- a stand-in for a platform-synced
+    // passkey on a new machine), reload, and log in with the passkey. The
+    // keyring record locates the account, but this client's key set is gone
+    // with the wipe, so login is refused with the not-enrolled guidance --
+    // the passkey alone can no longer reconstruct the account.
     await logout(page)
     await clearAllIndexedDb(page)
     await page.goto('/#/login')
     await page.reload()
     await page.getByRole('button', { name: 'Log in with a Passkey' }).click()
-    await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
-    expect(await readSpaceId(page)).toBe(originalSpaceId)
     await expect(
-      page.getByRole('link', { name: 'Your First Credential' })
+      page.getByText('this browser does not hold its keys yet', {
+        exact: false
+      })
     ).toBeVisible({ timeout: 30_000 })
+    await expect(page).toHaveURL(/#\/login/)
   })
 
   test('Settings adds a second passkey, guards the last one, and revokes one', async ({

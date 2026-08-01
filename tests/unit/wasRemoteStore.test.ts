@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { ZcapClient } from '@interop/ezcap'
 import type { WasClient } from '@interop/was-client'
-import { WASRemoteStore } from '../../src/stores/wasRemoteStore'
+import { mintSpaceId, WASRemoteStore } from '../../src/stores/wasRemoteStore'
 import { bufferToBase64Url, digestHash } from '../../src/lib/cidFrom'
 import type { ControllerProfile, User } from '../../src/types/auth'
 
@@ -341,6 +341,53 @@ describe('WASRemoteStore.initClient', () => {
     const expectedSpaceId = bufferToBase64Url(await digestHash(controller))
     expect(remoteStore.controller).toBe(controller)
     expect(remoteStore.spaceId).toBe(expectedSpaceId)
+  })
+
+  it('binds to the pointer Space id and stays did:key-controlled pre-promotion', async () => {
+    const clientDid = 'did:key:z6MktestControllerDid'
+    const { remoteStore } = await WASRemoteStore.initClient({
+      storageServerUrl: 'https://example.test',
+      user: { id: clientDid } as unknown as User,
+      profile: {
+        keyAgent: { id: clientDid },
+        zcapClient: { request: vi.fn() },
+        accountPointer: { spaceId: 'minted-space-id', host: 'https://h' }
+      } as unknown as ControllerProfile
+    })
+
+    expect(remoteStore.spaceId).toBe('minted-space-id')
+    expect(remoteStore.controller).toBe(clientDid)
+  })
+
+  it('binds to the promoted did:webvh controller once the pointer names it', async () => {
+    const clientDid = 'did:key:z6MktestControllerDid'
+    const webvhDid = 'did:webvh:zQmScid:example.test:space:minted-space-id:id'
+    const { remoteStore } = await WASRemoteStore.initClient({
+      storageServerUrl: 'https://example.test',
+      user: { id: clientDid } as unknown as User,
+      profile: {
+        keyAgent: { id: clientDid },
+        zcapClient: { request: vi.fn() },
+        accountPointer: {
+          did: webvhDid,
+          spaceId: 'minted-space-id',
+          host: 'https://h'
+        }
+      } as unknown as ControllerProfile
+    })
+
+    expect(remoteStore.spaceId).toBe('minted-space-id')
+    expect(remoteStore.controller).toBe(webvhDid)
+  })
+})
+
+describe('mintSpaceId', () => {
+  it('mints distinct base64url identifiers', () => {
+    const first = mintSpaceId()
+    const second = mintSpaceId()
+    // 32 random bytes -> 43 base64url chars, no padding.
+    expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(second).not.toBe(first)
   })
 })
 

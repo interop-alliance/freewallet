@@ -56,7 +56,18 @@ import {
 import { assertStorableAppKey } from '@/lib/appKey'
 import { getOrCreateDeviceId } from '@/lib/deviceId'
 import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
-import { ensureDidWebvh, type DidWebKeyMapV2 } from '@/lib/didWebvh'
+import {
+  clientSigningKeyMultibase,
+  didKeyZcapClient,
+  ensureDidWebvh,
+  isWebvhDid,
+  webvhCapabilityAgent,
+  webvhZcapClient,
+  type DidWebKeyMapV2
+} from '@interop/wallet-core/webvh'
+import { promoteKeystoreController, rebindKeystoreAgent } from '@/lib/kms'
+import { ensurePukRoster } from '@interop/wallet-core/keys'
+import { savePukEpochPin } from '@/lib/sessionKey'
 import {
   createEdvDocCipher,
   isEncryptedEnvelope,
@@ -1074,6 +1085,139 @@ export class StorageManager {
     return this.#provisioning
   }
 
+  /**
+   * Promotes the account's Space (and keystore) controller to the published
+   * did:webvh -- the last step of promotion by ordering: the Space was
+   * created under this client's did:key, the log went into the
+   * world-readable `id` collection, and this PUTs the Space Description
+   * naming the did:webvh, authorized by the stored controller. Idempotent
+   * across every state:
+   *
+   * - Fresh signup (store bound to the did:key): promote, then swap the
+   *   session's signing -- `profile.zcapClient` and the remote store rebind
+   *   to the `<did:webvh>#<multibase>` keyId, since under the current-key-set
+   *   rule the did:key-signed form stops verifying the moment the promotion
+   *   lands.
+   * - Pointer-promoted login (store already bound to the did:webvh): confirm
+   *   with one describe and return.
+   * - Torn signup (pointer names the did:webvh but the promotion PUT never
+   *   landed): the describe fails, and the promotion is retried signed by
+   *   the stored did:key controller, then the store rebinds back to the
+   *   session's did:webvh client.
+   *
+   * The keystore half runs after the Space half, non-fatally (KMS outages
+   * must not fail provisioning): the keystore config's controller becomes
+   * the did:webvh and the session's KeystoreAgent rebinds to invoke under
+   * it.
+   *
+   * @param options {object}
+   * @param options.profile {ControllerProfile}
+   * @returns {Promise<void>}
+   */
+  async ensurePromotedController({
+    profile
+  }: {
+    profile: ControllerProfile
+  }): Promise<void> {
+    const remote = this.#remoteStore
+    const did = profile.didWebvh?.did
+    const { keyAgent } = profile
+    if (!remote || !keyAgent || !isWebvhDid(did)) {
+      return
+    }
+
+    if (remote.controller === did) {
+      // Already bound to the promoted controller (the pointer path): one
+      // describe confirms the server agrees; a null answer (404-shaped for
+      // unauthorized) means the promotion PUT never landed -- retry it
+      // signed by the stored did:key controller, then rebind back.
+      const description = (await remote
+        .spaceHandle()
+        .describe()
+        .catch(() => null)) as { controller?: string } | null
+      if (description?.controller === did) {
+        this.#promoteKeystore({ profile, did })
+        return
+      }
+      remote.rebindController({
+        zcapClient: didKeyZcapClient({ keyAgent }),
+        controller: keyAgent.id
+      })
+      try {
+        await remote.promoteSpaceController({ controller: did })
+      } finally {
+        remote.rebindController({
+          zcapClient: profile.zcapClient,
+          controller: did
+        })
+      }
+      this.#promoteKeystore({ profile, did })
+      return
+    }
+
+    // Fresh promotion: the PUT is authorized by the stored did:key
+    // controller the store is still bound to; the swap follows.
+    await remote.promoteSpaceController({ controller: did })
+    const zcapClient = webvhZcapClient({ keyAgent, did })
+    profile.zcapClient = zcapClient
+    remote.rebindController({ zcapClient, controller: did })
+    this.#promoteKeystore({ profile, did })
+  }
+
+  /**
+   * The keystore half of controller promotion, non-fatal by design (no
+   * wallet feature hard-depends on the keystore): promotes the keystore
+   * config's controller to the did:webvh -- retrying once with the did:key
+   * identity when the bound agent's invocation is refused (a keystore not
+   * yet promoted, invoked as the did:webvh) -- and rebinds the session's
+   * KeystoreAgent to invoke under the promoted identity.
+   *
+   * Fired without await from the Space promotion path: the keystore's
+   * promotion has no ordering dependency on anything that follows, and a
+   * KMS hiccup only surfaces as the same warn a failed keystore
+   * provisioning does.
+   *
+   * @param options {object}
+   * @param options.profile {ControllerProfile}
+   * @param options.did {string}   the account's did:webvh DID
+   * @returns {void}
+   */
+  #promoteKeystore({
+    profile,
+    did
+  }: {
+    profile: ControllerProfile
+    did: string
+  }): void {
+    const { keystoreAgent, keyAgent } = profile
+    if (!keystoreAgent || !keyAgent) {
+      return
+    }
+    void (async () => {
+      try {
+        await promoteKeystoreController({ keystoreAgent, controller: did })
+      } catch {
+        // The bound identity could not read/update the config -- a keystore
+        // still under the did:key invoked as the did:webvh. Retry as the
+        // did:key.
+        const didKeyBound = rebindKeystoreAgent({
+          keystoreAgent,
+          capabilityAgent: keyAgent
+        })
+        await promoteKeystoreController({
+          keystoreAgent: didKeyBound,
+          controller: did
+        })
+      }
+      profile.keystoreAgent = rebindKeystoreAgent({
+        keystoreAgent,
+        capabilityAgent: webvhCapabilityAgent({ keyAgent, did })
+      })
+    })().catch(err => {
+      console.warn('Keystore controller promotion failed:', err)
+    })
+  }
+
   async #provisionUserCollections({
     user,
     profile
@@ -1093,7 +1237,38 @@ export class StorageManager {
     // collection.
     await this.#localStore.migratePublicCredentialCids()
     if (this.#remoteStore) {
+      // A pointer-promoted session signs with the did:webvh keyId from the
+      // start; confirm the server agrees before any signed upsert runs, and
+      // heal a signup that tore between the pointer backfill and the
+      // promotion PUT (the requests below would otherwise all be refused).
+      if (profile && isWebvhDid(profile.accountPointer?.did)) {
+        await this.ensurePromotedController({ profile })
+      }
       await this.#remoteStore.ensureUserCollections({ user })
+      // Ensure the PUK wrap-set roster (`key-map/puk.json`) exists,
+      // create-if-absent through the marker-store seam: an absent roster is
+      // initialized with the account's PUK as its first epoch, wrapped to
+      // this client's own key-agreement key, and the created epoch is pinned
+      // as the latest seen. An existing roster is left untouched (the
+      // login-time read authenticates it). Non-fatal like DID provisioning:
+      // the idempotent ensure resumes on the next login.
+      if (profile?.puk && profile?.clientKeyAgreementKey) {
+        try {
+          const marker = await ensurePukRoster({
+            store: this.#remoteStore.pukRosterStore(),
+            puk: profile.puk,
+            clientKeyAgreementKey: profile.clientKeyAgreementKey
+          })
+          if (marker.currentEpoch) {
+            await savePukEpochPin({
+              spaceId: this.#remoteStore.spaceId,
+              epochId: marker.currentEpoch
+            })
+          }
+        } catch (err) {
+          console.warn('PUK roster provisioning failed:', err)
+        }
+      }
       // Provision and publish the user's did:web DID (only when a keystore
       // agent is present). Runs here, after the Space and `id` collection
       // exist. Non-fatal like keystore provisioning: a KMS/WAS hiccup must not
@@ -1112,26 +1287,46 @@ export class StorageManager {
           })
           profile.didWeb = { did, keys }
 
-          // Provision and publish the did:webvh log alongside did:web (Phase
-          // 2, decision 6), in its own try so a webvh hiccup never rolls back
-          // the did:web provisioning. Gated on the opt-out flag. `ensureDidWeb`
-          // returned the parsed keys.json (with any webvh block), threaded in
-          // so steady state stays one keys.json read total.
-          if (ENABLE_DID_WEBVH) {
+          // Provision and publish the did:webvh log alongside did:web, in
+          // its own try so a webvh hiccup never rolls back the did:web
+          // provisioning. Gated on the opt-out flag, and on this client
+          // holding its update-key seeds and identity keys (the document
+          // carries a verification method per enrolled client, and the log
+          // can only be extended with the client-held update key).
+          // `ensureDidWeb` returned the parsed keys.json (with any webvh
+          // block), threaded in so steady state stays one keys.json read
+          // total.
+          if (
+            ENABLE_DID_WEBVH &&
+            profile.clientWebvhKeys &&
+            profile.keyAgent &&
+            profile.clientKeyAgreementKey
+          ) {
             try {
-              const {
-                updateKey,
-                stagedKey,
-                did: webvhDid
-              } = await ensureDidWebvh({
-                keystoreAgent: profile.keystoreAgent,
-                remoteStore: this.#remoteStore,
+              const { publicKeyMultibase: keyAgreementKeyMultibase } =
+                profile.clientKeyAgreementKey as unknown as {
+                  publicKeyMultibase?: string
+                }
+              if (!keyAgreementKeyMultibase) {
+                throw new Error(
+                  'The client key-agreement key has no public multibase.'
+                )
+              }
+              const { did: webvhDid } = await ensureDidWebvh({
+                idStore: this.#remoteStore,
                 wasServerUrl: this.#remoteStore.storageServerUrl,
                 spaceId: this.#remoteStore.spaceId,
-                didWebKeys: keys as DidWebKeyMapV2
+                didWebKeys: keys as DidWebKeyMapV2,
+                clientKeys: {
+                  signingKeyMultibase: clientSigningKeyMultibase({
+                    keyAgent: profile.keyAgent
+                  }),
+                  keyAgreementKeyMultibase
+                },
+                updateKeys: profile.clientWebvhKeys
               })
               if (webvhDid) {
-                profile.didWebvh = { did: webvhDid, updateKey, stagedKey }
+                profile.didWebvh = { did: webvhDid }
               }
             } catch (err) {
               console.warn('did:webvh provisioning failed:', err)

@@ -157,20 +157,20 @@ describe('initSessionFromSeed', () => {
     expect(session.isGuest).toBe(false)
   })
 
-  it('carries the data seed on a non-guest profile', async () => {
+  it('carries the client seed on a non-guest profile', async () => {
     const seed = randomSeed()
     const { session } = await initSessionFromSeed({ seed })
-    expect(Array.from(session.profile.dataSeed as Uint8Array)).toEqual(
+    expect(Array.from(session.profile.clientSeed as Uint8Array)).toEqual(
       Array.from(seed)
     )
   })
 
-  it('omits the data seed on a guest profile', async () => {
+  it('omits the client seed on a guest profile', async () => {
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
       isGuest: true
     })
-    expect(session.profile.dataSeed).toBeUndefined()
+    expect(session.profile.clientSeed).toBeUndefined()
   })
 
   it('passes the derived user and profile to the storage bootstrap', async () => {

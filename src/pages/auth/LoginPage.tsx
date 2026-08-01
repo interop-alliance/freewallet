@@ -4,6 +4,7 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Link from '@mui/material/Link'
+import Stack from '@mui/material/Stack'
 import { FiKey } from 'react-icons/fi'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
@@ -15,8 +16,19 @@ import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { loginWithPassphrase, loginWithPasskey } from '@/session/initSession'
-import { KeyringRecordUnusableError } from '@/session/keyring'
+import {
+  AccountPointerChangedError,
+  KeyringRecordUnusableError
+} from '@/session/keyring'
 import { backfillPassphraseUnlockMethod } from '@/session/unlockMethods'
+import { checkRecoveryHealth } from '@/session/recovery'
+import { showToast } from '@/stores/toastStore'
+import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
+import {
+  EnrollmentPendingError,
+  mintEnrollmentRequest
+} from '@interop/wallet-core/enrollment'
+import { completeEnrollment } from '@/lib/enrollment'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import {
   PasskeyCancelledError,
@@ -24,6 +36,7 @@ import {
   passkeySupported
 } from '@/lib/passkey'
 import { registerWallet } from '@/lib/registerWallet'
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import type { AuthLocationState } from '@/types/auth'
 
 export function LoginPage() {
@@ -38,6 +51,27 @@ export function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isPasskeySubmitting, setIsPasskeySubmitting] = useState(false)
   const [errorKey, setErrorKey] = useState<string | null>(null)
+  // The enrollment (connect-this-browser) flow off the not-enrolled state:
+  // the passphrase that located the account, then the locally minted key set
+  // and its connect code. In-memory only -- nothing is durable until
+  // `completeEnrollment` succeeds.
+  const [notEnrolledPassphrase, setNotEnrolledPassphrase] = useState<
+    string | null
+  >(null)
+  const [enrollment, setEnrollment] = useState<{
+    passphrase: string
+    clientSeed: Uint8Array
+    webvhUpdateKeys: ClientWebvhUpdateKeys
+    code: string
+    clientDid: string
+  } | null>(null)
+  const [enrollBusy, setEnrollBusy] = useState(false)
+  const [enrollErrorKey, setEnrollErrorKey] = useState<string | null>(null)
+  const { copied: codeCopied, copy: copyCode } = useCopyToClipboard({
+    onError: (err: unknown) => {
+      console.error('Could not copy the connect code:', err)
+    }
+  })
 
   useEffect(() => {
     void registerWallet()
@@ -62,6 +96,16 @@ export function LoginPage() {
       const { session, userExists } = await loginWithPassphrase({
         passphrase
       })
+      if (!session && userExists) {
+        // The passphrase located the account, but this browser holds no
+        // client key set for it -- unlocking is no longer sufficient to BE
+        // the account. Offer the connect-this-browser (enrollment) flow.
+        setErrorKey('auth.errors.clientNotEnrolled')
+        setNotEnrolledPassphrase(passphrase)
+        setEnrollment(null)
+        setEnrollErrorKey(null)
+        return
+      }
       if (!session || !userExists) {
         return navigate('/signup', {
           state: { authMessageKey: 'auth.errors.profileNotFound' }
@@ -79,11 +123,29 @@ export function LoginPage() {
       void backfillPassphraseUnlockMethod({ session }).catch(err =>
         console.warn('Could not backfill the unlock-methods registry:', err)
       )
+      // The login-time recovery health check: a recovery delegation signed by
+      // a since-removed client rots silently and would brick recovery exactly
+      // when it is needed, so nudge now rather than then.
+      void checkRecoveryHealth({ session })
+        .then(flags => {
+          if (flags.length > 0) {
+            showToast({
+              message: t('auth.login.recoveryHealthWarning'),
+              severity: 'warning'
+            })
+          }
+        })
+        .catch(err => console.warn('Recovery health check failed:', err))
       navigate('/dashboard', { replace: true })
     } catch (err) {
       // The WAS storage server is unreachable -- offer a guest-mode fallback.
       if (isStorageUnreachable(err)) {
         setErrorKey('auth.errors.storageUnreachable')
+      } else if (err instanceof AccountPointerChangedError) {
+        // The continuity refusal: the server returned an account pointer that
+        // conflicts with the one this browser has pinned.
+        console.error('Login refused:', err)
+        setErrorKey('auth.errors.accountPointerChanged')
       } else if (err instanceof KeyringRecordUnusableError) {
         // A keyring record was found but is corrupt -- not a server outage
         // and not a wrong passphrase; surface it with recovery guidance.
@@ -99,6 +161,72 @@ export function LoginPage() {
   }
 
   /**
+   * Starts the connect-this-browser flow off the not-enrolled state: mints
+   * this browser's key set locally and shows the connect code to carry to an
+   * already-connected browser. Only public halves leave this page.
+   */
+  const handleStartEnrollment = async () => {
+    if (!notEnrolledPassphrase || enrollBusy) {
+      return
+    }
+    setEnrollBusy(true)
+    setEnrollErrorKey(null)
+    try {
+      const minted = await mintEnrollmentRequest()
+      setEnrollment({ passphrase: notEnrolledPassphrase, ...minted })
+    } catch (err) {
+      console.error('Could not start connecting this browser:', err)
+      setEnrollErrorKey('auth.enroll.failed')
+    } finally {
+      setEnrollBusy(false)
+    }
+  }
+
+  /**
+   * Finishes the connect-this-browser flow once the other browser approved
+   * the code: verifies the enrollment from the published log, performs the
+   * first roster read, persists the key set under the passphrase, and logs
+   * in. While the approval has not landed yet, surfaces the pending state and
+   * stays (retried by pressing the button again).
+   */
+  const handleCompleteEnrollment = async () => {
+    if (!enrollment || enrollBusy) {
+      return
+    }
+    setEnrollBusy(true)
+    setEnrollErrorKey(null)
+    try {
+      await completeEnrollment({
+        clientSeed: enrollment.clientSeed,
+        webvhUpdateKeys: enrollment.webvhUpdateKeys,
+        passphrase: enrollment.passphrase
+      })
+      const { session } = await loginWithPassphrase({
+        passphrase: enrollment.passphrase
+      })
+      if (!session) {
+        setEnrollErrorKey('auth.enroll.failed')
+        return
+      }
+      await session.storageReady
+      login(session)
+      void backfillPassphraseUnlockMethod({ session }).catch(err =>
+        console.warn('Could not backfill the unlock-methods registry:', err)
+      )
+      navigate('/dashboard', { replace: true })
+    } catch (err) {
+      if (err instanceof EnrollmentPendingError) {
+        setEnrollErrorKey('auth.enroll.pending')
+      } else {
+        console.error('Connecting this browser failed:', err)
+        setEnrollErrorKey('auth.enroll.failed')
+      }
+    } finally {
+      setEnrollBusy(false)
+    }
+  }
+
+  /**
    * Handles the "Log in with a Passkey" button. Runs the WebAuthn PRF
    * assertion via `loginWithPasskey`, then upgrades to a full session on a hit.
    */
@@ -110,6 +238,12 @@ export function LoginPage() {
     setErrorKey(null)
     try {
       const { session, userExists } = await loginWithPasskey()
+      if (!session && userExists) {
+        // The passkey located the account, but this browser holds no client
+        // key set for it (e.g. a platform-synced passkey on a fresh machine).
+        setErrorKey('auth.errors.clientNotEnrolled')
+        return
+      }
       if (!session || !userExists) {
         // A fresh passkey cannot create an account -- stay on the page and ask
         // the user to log in with their passphrase first.
@@ -130,6 +264,11 @@ export function LoginPage() {
       } else if (isStorageUnreachable(err)) {
         // The WAS storage server is unreachable -- offer a guest-mode fallback.
         setErrorKey('auth.errors.storageUnreachable')
+      } else if (err instanceof AccountPointerChangedError) {
+        // The continuity refusal: the server returned an account pointer that
+        // conflicts with the one this browser has pinned.
+        console.error('Passkey login refused:', err)
+        setErrorKey('auth.errors.accountPointerChanged')
       } else if (err instanceof KeyringRecordUnusableError) {
         // A keyring record was found but is corrupt -- not a server outage;
         // surface it with recovery guidance.
@@ -178,7 +317,14 @@ export function LoginPage() {
                   </Alert>
                 ) : errorKey ? (
                   <Alert severity="error" sx={authStyles.userMessage}>
-                    {t(errorKey)}
+                    {t(errorKey)}{' '}
+                    <Link
+                      component={RouterLink}
+                      to="/recover"
+                      underline="always"
+                    >
+                      {t('auth.login.recoverLink')}
+                    </Link>
                   </Alert>
                 ) : (
                   bannerText && (
@@ -187,6 +333,19 @@ export function LoginPage() {
                     </Alert>
                   )
                 )}
+
+                {errorKey === 'auth.errors.clientNotEnrolled' &&
+                  notEnrolledPassphrase &&
+                  !enrollment && (
+                    <Button
+                      variant="outlined"
+                      onClick={handleStartEnrollment}
+                      loading={enrollBusy}
+                      sx={authStyles.actionButton}
+                    >
+                      {t('auth.enroll.connectButton')}
+                    </Button>
+                  )}
 
                 <Typography
                   variant="h5"
@@ -230,9 +389,80 @@ export function LoginPage() {
                     .
                   </Box>
                 </Typography>
+                <Typography
+                  variant="body2"
+                  component="p"
+                  sx={authStyles.authFooterText}
+                >
+                  <Link component={RouterLink} to="/recover" underline="always">
+                    {t('auth.login.forgotPassphrase')}
+                  </Link>
+                </Typography>
               </Box>
             </CardContent>
           </Card>
+
+          {/* Connect-this-browser (enrollment) card */}
+          {enrollment && (
+            <Card sx={authStyles.authCard} variant="outlined">
+              <CardContent sx={authStyles.authCardContent}>
+                <Stack sx={{ gap: 2 }}>
+                  <Typography variant="h5" component="h2">
+                    {t('auth.enroll.heading')}
+                  </Typography>
+                  <Typography variant="body2">
+                    {t('auth.enroll.explain')}
+                  </Typography>
+                  <TextField
+                    label={t('auth.enroll.codeLabel')}
+                    value={enrollment.code}
+                    multiline
+                    minRows={3}
+                    slotProps={{
+                      input: { readOnly: true },
+                      htmlInput: { 'data-testid': 'enroll-connect-code' }
+                    }}
+                  />
+                  <Button
+                    variant="outlined"
+                    onClick={() => void copyCode(enrollment.code)}
+                  >
+                    {codeCopied
+                      ? t('common.copied')
+                      : t('auth.enroll.copyCode')}
+                  </Button>
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ wordBreak: 'break-all' }}
+                  >
+                    {t('auth.enroll.fingerprint', {
+                      did: enrollment.clientDid
+                    })}
+                  </Typography>
+                  {enrollErrorKey && (
+                    <Alert
+                      severity={
+                        enrollErrorKey === 'auth.enroll.pending'
+                          ? 'info'
+                          : 'error'
+                      }
+                    >
+                      {t(enrollErrorKey)}
+                    </Alert>
+                  )}
+                  <Button
+                    variant="contained"
+                    onClick={handleCompleteEnrollment}
+                    loading={enrollBusy}
+                    sx={authStyles.actionButton}
+                  >
+                    {t('auth.enroll.completeButton')}
+                  </Button>
+                </Stack>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Passkey card */}
           {passkeySupported() && (

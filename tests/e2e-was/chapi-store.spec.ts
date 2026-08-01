@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import {
+  fillSettled,
   signupViaWizard,
   goToHistory,
   expectHistoryEntry,
@@ -79,7 +80,7 @@ test('a credential stored via the CHAPI popup lands in the wallet and history', 
 
   // 3. Log in with the passphrase; the popup reaches the confirm screen, which
   // summarizes the offered credential.
-  await page.locator('input[type="password"]').fill(passphrase)
+  await fillSettled(page.locator('input[type="password"]'), passphrase)
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await expect(page.getByText('E2E Test Credential')).toBeVisible({
     timeout: 30_000
@@ -112,7 +113,7 @@ test('a credential stored via the CHAPI popup lands in the wallet and history', 
   // immediate replication cycle and reloads the list; poll it until the pulled
   // credential's card shows up (replication is asynchronous).
   await page.goto('/#/login')
-  await page.locator('input[type="password"]').fill(passphrase)
+  await fillSettled(page.locator('input[type="password"]'), passphrase)
   await page.getByRole('button', { name: 'Log in', exact: true }).click()
   await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
 

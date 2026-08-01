@@ -14,6 +14,9 @@ const LoginPage = lazy(() =>
 const SignupPage = lazy(() =>
   import('@/pages/auth/SignupPage').then(m => ({ default: m.SignupPage }))
 )
+const RecoverPage = lazy(() =>
+  import('@/pages/auth/RecoverPage').then(m => ({ default: m.RecoverPage }))
+)
 const GuestLoginPage = lazy(() =>
   import('@/pages/auth/GuestLoginPage').then(m => ({
     default: m.GuestLoginPage
@@ -126,6 +129,7 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/recover" element={<RecoverPage />} />
         <Route path="/guest-login" element={<GuestLoginPage />} />
         <Route path="/logout" element={<LogoutPage />} />
 

@@ -2,11 +2,20 @@
  * The `freewallet-session` IndexedDB database: a local, per-browser store
  * (deliberately separate from the RxDB wallet database, so it survives
  * wallet-storage decisions independently and is shared across tabs) holding
- * the caches that ordinary login relies on -- the keyring cache (offline /
- * no-WAS seed unwrap), the unlock-methods registry cache, and the
- * passkey-safety notices. None of it is secret on its own: the keyring and
- * unlock-methods records are ciphertext, inert without the passphrase-derived
- * key, and the passkey-safety notice is a local UI reminder.
+ * what ordinary login relies on -- the keyring cache (the offline / no-WAS
+ * copy of the account-pointer record), this client's wrapped client-key
+ * records, the account-pointer pins, the PUK roster-epoch pins, the
+ * unlock-methods registry cache, and the passkey-safety notices. None of it
+ * is secret on its own: the keyring, client-key, and unlock-methods records
+ * are ciphertext, inert without the passphrase-derived key; the pointer and
+ * roster-epoch pins and the passkey-safety notice are local integrity/UI
+ * state, not secrets.
+ *
+ * Two kinds of entries live here and must not be conflated: the keyring and
+ * unlock-methods entries are CACHES of remote records (refreshed on a hit,
+ * droppable on a miss), while a client-key record is PRIMARY state -- the only
+ * copy of this client's key set, never reconstructible from a server or a
+ * passphrase, deleted only by the explicit unlock-method lifecycle flows.
  */
 const SESSION_DB_NAME = 'freewallet-session'
 const SESSION_STORE = 'session'
@@ -115,7 +124,7 @@ function keyringCacheKey(spaceId: string): string {
  * The record is the ciphertext-bearing keyring document; it is inert without
  * the passphrase that derives the unlock key-agreement key. The entry is
  * stamped with the write time so callers can bound how long it may answer
- * as an offline fallback (see `fetchKeyringSeed` in `src/session/keyring.ts`).
+ * as an offline fallback (see `fetchKeyring` in `src/session/keyring.ts`).
  *
  * @param options {object}
  * @param options.spaceId {string}   the unlock Space id
@@ -192,6 +201,289 @@ export async function deleteKeyringCache({
   await withSessionStore(
     'readwrite',
     store => store.delete(keyringCacheKey(spaceId)),
+    idb
+  )
+}
+
+/**
+ * The object-store key under which an unlock method's wrapped client-key
+ * record lives. Keyed by the unlock Space id -- like the keyring cache -- so
+ * each unlock method (passphrase, each passkey) holds its own wrap of this
+ * client's key set, and several accounts can coexist in the shared session
+ * database.
+ *
+ * @param spaceId {string}   the unlock Space id
+ * @returns {string}
+ */
+function clientKeyRecordKey(spaceId: string): string {
+  return `client-keys/${spaceId}`
+}
+
+/**
+ * Saves a wrapped client-key record (this client's key set + cached PUK,
+ * JWE-wrapped to an unlock method's KAK), keyed by that method's unlock Space
+ * id. Unlike the keyring cache this is primary state, not a cache of anything
+ * remote: the client's private keys exist nowhere else.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param options.record {unknown}   the wrapped client-key record
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function saveClientKeyRecord({
+  spaceId,
+  record,
+  idb
+}: {
+  spaceId: string
+  record: unknown
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.put(record, clientKeyRecordKey(spaceId)),
+    idb
+  )
+}
+
+/**
+ * Loads a wrapped client-key record by its unlock Space id, or `null` when
+ * this client holds no key set under that unlock method (a browser that has
+ * never provisioned or enrolled for the account).
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<unknown | null>}
+ */
+export async function loadClientKeyRecord({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<unknown | null> {
+  const stored = await withSessionStore(
+    'readonly',
+    store => store.get(clientKeyRecordKey(spaceId)),
+    idb
+  )
+  return stored === undefined ? null : stored
+}
+
+/**
+ * Deletes a wrapped client-key record by its unlock Space id. Called only by
+ * the explicit unlock-method lifecycle flows (a passphrase change rebinding to
+ * a new unlock Space, method revocation, account deletion) -- never in
+ * response to a server answer, since the record is the only copy of this
+ * client's keys.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deleteClientKeyRecord({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.delete(clientKeyRecordKey(spaceId)),
+    idb
+  )
+}
+
+/**
+ * The object-store key under which an unlock method's account-pointer pin
+ * lives -- keyed by the unlock Space id, like the keyring cache the pin
+ * guards.
+ *
+ * @param spaceId {string}   the unlock Space id
+ * @returns {string}
+ */
+function accountPointerPinKey(spaceId: string): string {
+  return `account-pointer/${spaceId}`
+}
+
+/**
+ * Pins the account pointer this client has seen for an unlock method -- the
+ * recorded first-fetch trust bound. A later remote record whose pointer
+ * conflicts with the pin is refused rather than followed (see `fetchKeyring`
+ * in `src/session/keyring.ts`). The pin is plaintext local state: the pointer
+ * is not a secret, only a continuity prior.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param options.pointer {unknown}   the account pointer to pin
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function saveAccountPointerPin({
+  spaceId,
+  pointer,
+  idb
+}: {
+  spaceId: string
+  pointer: unknown
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store =>
+      store.put(
+        { pointer, pinnedAt: Date.now() },
+        accountPointerPinKey(spaceId)
+      ),
+    idb
+  )
+}
+
+/**
+ * Loads the pinned account pointer for an unlock method, or `null` when this
+ * client has never seen the account under that method.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<unknown | null>}
+ */
+export async function loadAccountPointerPin({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<unknown | null> {
+  const stored = await withSessionStore(
+    'readonly',
+    store => store.get(accountPointerPinKey(spaceId)),
+    idb
+  )
+  if (stored === null || stored === undefined) {
+    return null
+  }
+  return (stored as { pointer?: unknown }).pointer ?? null
+}
+
+/**
+ * Deletes the pinned account pointer for an unlock method -- on a remote
+ * 404-shaped miss (the method was retired, so the continuity prior is stale)
+ * and in the unlock-method lifecycle flows.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deleteAccountPointerPin({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.delete(accountPointerPinKey(spaceId)),
+    idb
+  )
+}
+
+/**
+ * The object-store key under which an account's PUK roster-epoch pin lives --
+ * keyed by the data Space id, which identifies the roster resource the pin
+ * guards (`key-map/puk.json` in that Space).
+ *
+ * @param spaceId {string}   the data Space id
+ * @returns {string}
+ */
+function pukEpochPinKey(spaceId: string): string {
+  return `puk-epoch/${spaceId}`
+}
+
+/**
+ * Pins the latest-seen PUK roster epoch for an account -- the continuity
+ * prior beside the account-pointer pin. The roster lives as an opaque
+ * resource the server enforces no marker invariants on, so a served roster
+ * whose epochs no longer contain (or precede) the pinned epoch is refused as
+ * a rollback rather than followed (see `@interop/wallet-core/keys`). Plaintext
+ * local state: an epoch id is public key material, not a secret.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param options.epochId {string}   the roster's current epoch id (a did:key)
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function savePukEpochPin({
+  spaceId,
+  epochId,
+  idb
+}: {
+  spaceId: string
+  epochId: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store =>
+      store.put({ epochId, pinnedAt: Date.now() }, pukEpochPinKey(spaceId)),
+    idb
+  )
+}
+
+/**
+ * Loads the pinned PUK roster epoch for an account, or `null` when this
+ * client has never seen the roster.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<string | null>}
+ */
+export async function loadPukEpochPin({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<string | null> {
+  const stored = await withSessionStore(
+    'readonly',
+    store => store.get(pukEpochPinKey(spaceId)),
+    idb
+  )
+  if (stored === null || stored === undefined) {
+    return null
+  }
+  const { epochId } = stored as { epochId?: unknown }
+  return typeof epochId === 'string' && epochId ? epochId : null
+}
+
+/**
+ * Deletes the pinned PUK roster epoch for an account -- account deletion and
+ * Space wipes, where the continuity prior is deliberately reset.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deletePukEpochPin({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.delete(pukEpochPinKey(spaceId)),
     idb
   )
 }

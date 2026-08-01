@@ -1,5 +1,6 @@
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { readLogFromString, resolveDIDFromLog } from '@interop/did-method-webvh'
+import { fillSettled } from './helpers'
 
 /**
  * Hosted did:webvh DID log e2e (Track F, Phase 2). Runs against the app in
@@ -54,7 +55,7 @@ async function signup(page: Page, testInfo: TestInfo) {
   const email = `e2e-${token}@example.com`
 
   await page.goto('/#/signup')
-  await page.locator('input[type="password"]').fill(passphrase)
+  await fillSettled(page.locator('input[type="password"]'), passphrase)
   const next = page.getByRole('button', { name: 'Next' })
   // The strength meter that gates "Next" lazy-loads its (large) zxcvbn
   // dictionaries; the first score can lag well past the default 5s.
@@ -133,11 +134,20 @@ test('signup publishes a verifying did:webvh log and a Multikey did:web projecti
   // The two ids cross-link: did.json advertises the did:webvh id it projects.
   expect(doc.alsoKnownAs).toContain(resolved.did)
   // Adopting the webvh projection flips the Phase 1 2020-suite VM types to
-  // Multikey (same key material, new type + context).
-  expect(doc.verificationMethod).toHaveLength(3)
+  // Multikey (same key material, new type + context). Four VMs now: the two
+  // KMS-held conveniences (authentication / assertionMethod) plus this
+  // client's Ed25519 signing key and its X25519 key-agreement twin -- the
+  // KMS keyAgreement key is deliberately absent (no server-held key may be
+  // a wrap target).
+  expect(doc.verificationMethod).toHaveLength(4)
   for (const vm of doc.verificationMethod) {
     expect(vm.type).toBe('Multikey')
   }
+  const multibases = doc.verificationMethod.map(
+    vm => (vm as { publicKeyMultibase?: string }).publicKeyMultibase ?? ''
+  )
+  // Exactly one X25519 key (z6LS...): the client's identity KAK.
+  expect(multibases.filter(pkm => pkm.startsWith('z6LS'))).toHaveLength(1)
 })
 
 test('rotating the update key appends a verifying entry and rolls the staged key', async ({
@@ -247,27 +257,27 @@ test('a Space export/import round-trip preserves did.jsonl byte-exact and world-
   })
   expect(exportedTar.length).toBeGreaterThan(0)
 
-  // --- Empty the target so the re-import actually rewrites the DID resources.
-  //     Import merges and SKIPS ids that already exist -- and a per-resource
-  //     delete only tombstones (which also blocks re-creation), so deleting the
-  //     whole `id` collection (physically removed, no tombstones) is the clean
-  //     way to force import to re-create the collection, its resources, and the
-  //     collection-level `PublicCanRead` policy. The private `key-map`
-  //     collection (holding keys.json) is deleted alongside it.
+  // --- Empty a target collection so the re-import actually rewrites (import
+  //     merges and SKIPS ids that already exist). The private `key-map`
+  //     collection (holding keys.json) is the one emptied: on a promoted
+  //     Space the `id` collection's history log is load-bearing -- the server
+  //     resolves the did:webvh controller from it on every request -- so
+  //     deleting it would revoke the very authority the import (and every
+  //     request after it) needs. Restoring a Space wholesale is a
+  //     fresh-space flow, not an in-place one.
   await page.evaluate(async () => {
     const storage = (window as unknown as { __E2E_STORAGE__: E2EStorage })
       .__E2E_STORAGE__
-    await storage.wasClient!.space(storage.spaceId!).collection('id').delete()
     await storage
       .wasClient!.space(storage.spaceId!)
       .collection('key-map')
       .delete()
   })
-  // Gone: an unauthenticated fetch now 404s.
-  expect((await page.request.get(logUrl)).status()).toBe(404)
+  // Still there: the log stayed published (and load-bearing) throughout.
+  expect((await page.request.get(logUrl)).status()).toBe(200)
 
   // --- Re-import the exact exported bytes; the importer must actually write
-  //     (not skip) into the now-empty `id` collection.
+  //     (not skip) into the now-empty `key-map` collection.
   const stats = await page.evaluate(async (bytes: number[]) => {
     const storage = (window as unknown as { __E2E_STORAGE__: E2EStorage })
       .__E2E_STORAGE__
@@ -279,9 +289,9 @@ test('a Space export/import round-trip preserves did.jsonl byte-exact and world-
   expect(stats.collectionsCreated).toBeGreaterThan(0)
   expect(stats.resourcesCreated).toBeGreaterThan(0)
 
-  // --- Policy round-trip: both DID resources are world-readable again (the
-  //     `id` collection's collection-level `PublicCanRead` survived
-  //     export/import).
+  // --- Policy round-trip: both DID resources are still world-readable after
+  //     the import (the `id` collection's collection-level `PublicCanRead`
+  //     survives the merge untouched).
   const logAfterRes = await page.request.get(logUrl)
   expect(logAfterRes.status()).toBe(200)
   const logAfter = await logAfterRes.text()

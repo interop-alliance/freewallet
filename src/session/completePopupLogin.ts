@@ -54,6 +54,11 @@ export async function completePopupLogin({
       passphrase,
       remoteDirectStorage: true
     })
+    if (!session && userExists) {
+      // The account was located but this browser holds no client key set for
+      // it (not enrolled) -- distinct guidance from "no account".
+      return { errorKey: 'chapi.clientNotEnrolled' }
+    }
     if (!session || !userExists) {
       return { errorKey: 'chapi.accountNotFound' }
     }

@@ -46,43 +46,281 @@ src/app.config.ts   Environment variable exports + app-wide constants
 
 ## Session & auth flow
 
-There is no external identity provider. A user's identity is derived entirely
-from their passphrase:
+There is no external identity provider, and nothing about the account is
+derivable from the passphrase. Each wallet client (a browser profile) mints a
+random 32-byte **client seed** locally on first run -- the Ed25519 pair
+behind its did:key plus the X25519 twin -- and the private halves never leave
+the client. The passphrase (or a passkey PRF output) derives only an **unlock
+identity** (the keyring v2 seam in `src/session/keyring.ts`), which does two
+jobs at login: it fetches the **keyring record** from its own minimal unlock
+Space -- carrying the encrypted account pointer `{ did, spaceId, host }`, the
+controller, and the email, never key material -- and it unwraps the local
+**client-key record** in the `freewallet-session` IndexedDB, which holds this
+client's seed, a cached copy of the PUK, and this client's did:webvh
+update-key seeds:
 
 ```
-passphrase (string | Uint8Array)
-  → CapabilityAgent.fromSecret()   → keyAgent  (holds an Ed25519 key pair)
-                                      keyAgent.id === a did:key DID
+unlock secret (passphrase | passkey PRF output)
+  → deriveUnlockIdentity(KDF)      → unlock Space → keyring record
+                                      { controller, email, pointer }
+  → unwrap local client-key record → { clientSeed, puk, webvhUpdateKeys }
+  → agentsFromSeed(clientSeed)     → keyAgent  (keyAgent.id === a did:key DID)
   → ZcapClient(invocationSigner)   → zcapClient (signs HTTP requests with ZCap)
-  → { user: { id: did:key }, profile: { keyAgent, zcapClient } }
+  → { user: { id: did:key }, profile: { keyAgent, zcapClient, puk } }
   → StorageManager.initStorageClients()
   → Session { user, profile, storage, isGuest }
 ```
 
-The `Session` object is stored in the Zustand `authStore`; it is **in-memory
-only** (the passphrase is never persisted), so reloading the browser logs the
-user out and they must log in again. Guest sessions use a random 32-byte
-secret and never touch the WAS server or the KMS.
+When the account pointer names a did:webvh (every promoted account -- see
+"The did:webvh identity" below), the session's `zcapClient` signs with the
+same client Ed25519 key under its verification-method id in the did:webvh
+document (`<did:webvh>#<multibase>`) instead of the did:key form, since the
+data Space's controller is the did:webvh and, under the current-key-set
+rule, only a keyId the resolved document lists can authorize anything.
+`user.id` stays the client did:key (it is also the App Connect response VP's
+holder, which must remain resolvable by app-side loaders).
+
+Unlocking is therefore not sufficient to BE the account: a passphrase on a
+fresh browser (or in a storage-partitioned CHAPI popup iframe) locates the
+account but holds no client keys, and login surfaces a distinct
+"not enrolled" state instead of a session -- from which the login page offers
+the enrollment ceremony (see "The client enrollment ceremony" below; the
+partitioned CHAPI popup stays a degraded state). Each client also **pins**
+the account pointer it has seen
+(plaintext local state, the first-fetch trust bound); a fetched record whose
+pointer conflicts with the pin is refused (`AccountPointerChangedError`)
+rather than followed. The `Session` object is stored in the Zustand
+`authStore`; it is **in-memory only** (the passphrase is never persisted), so
+reloading the browser logs the user out and they must log in again. Guest
+sessions use a random 32-byte seed directly and never touch the WAS server or
+the KMS.
 
 All four session entry points (login, signup, both CHAPI popup pages) funnel
-through `initSessionFromSecret`. When a KMS is configured (`KMS_SERVER_URL`),
+through `initSessionFromSeed`. When a KMS is configured (`KMS_SERVER_URL`),
 it also provisions a **WebKMS keystore** for the controller (`ensureKeystore`
 in `src/lib/kms.ts`: list-by-controller, create on miss -- one keystore per
 controller by convention), binding a `KeystoreAgent` as
 `profile.keystoreAgent`. Operational keys can live server-side in that
-keystore, while the passphrase-derived `keyAgent` stays strictly client-side
-as the **keystore controller**. Provisioning failure is non-fatal (logged;
-the settings page shows the state).
+keystore, while the controlling key stays strictly client-side: the keystore
+is created under the first client's did:key and its controller is promoted
+to the account's did:webvh alongside the Space's (the same
+`promoteKeystoreController` sequence, non-fatal). No server-held key is ever
+an update key or an encryption-roster recipient. Provisioning failure is
+non-fatal (logged; the settings page shows the state).
+
+## The did:webvh identity (per-client keys, promoted controller)
+
+The account's stable id is a `did:webvh` whose hash-chained log lives as
+`did.jsonl` in the world-readable `id` collection
+(`@interop/wallet-core/webvh`).
+Its document is the enrolled-client roster: each enrolled wallet client
+contributes its Ed25519 verification method (published under
+`authentication`, `assertionMethod`, `capabilityInvocation`, AND
+`capabilityDelegation`) and its X25519 twin under `keyAgreement` -- ids are
+`<did:webvh>#<multibase>` with `controller: <did:webvh>`. Two KMS-held VMs
+(`authentication` / `assertionMethod`) remain as server-side conveniences;
+the KMS-held `keyAgreement` VM is deliberately NOT in the document -- the
+`keyAgreement` relation is the source of record for PUK-wrap recipients, and
+no server-held key may ever be a wrap target.
+
+**Update keys are client-held.** `updateKeys` carries one update key per
+enrolled client (apps never), derived from 32-byte seeds that live in the
+wrapped client-key record beside the client seed and the PUK -- so the
+server cannot extend the log, which is what makes it the one
+self-certifying artifact the server hosts. Prerotation stays on with a
+**carry-over commitment convention**: `nextKeyHashes` commits each client's
+staged key AND each active key's own hash, because the resolver re-checks
+every entry's re-stated `updateKeys` against the previous entry's
+commitments -- without the active-key hashes no non-rotating entry (an
+enrollment commit, a future document edit) could ever resolve. Rotation is
+per-client self-rotation (`rotateWebvhUpdateKey`: persist the rolled seeds
+into the client-key record BEFORE the log entry publishes, then finalize),
+and it preserves every other client's update key while swapping only its
+own. `keys.json`'s webvh block narrows to `{ did }` -- key roles no longer
+live server-side.
+
+**Controller promotion by ordering.** The Space id is an independent random
+identifier minted at signup (`mintSpaceId`) and carried in the account
+pointer -- deliberately not a hash of any controller, since the did:webvh id
+embeds the Space id and a derivation would be circular (unlock Spaces keep
+their `hash(unlock did:key)` addressing -- discovery, not identity).
+Provisioning creates the Space under the first client's did:key, publishes
+the log, and then -- once the pointer durably names the did -- PUTs the
+Space Description with `controller: <did:webvh>`, authorized by the stored
+did:key (`StorageManager.ensurePromotedController`, which also swaps the
+live session's signing to the promoted keyId and re-heals a signup torn
+between the pointer backfill and the promotion PUT). From then on the
+server resolves the controller by reading and fully verifying the log out
+of its own storage (SCID-pinned, hash chain, prerotation, update-key
+signatures) and authorizes by the **current-key-set rule**: an invocation
+or delegation verifies iff its verification method is in the resolved
+document now -- so a delegation signed by a since-revoked client stops
+verifying the moment its VM leaves the document.
 
 ## Session persistence
 
-Sessions are **in-memory only**. A fresh passphrase login builds the whole
-`Session` -- the root `keyAgent`, the passphrase-derived vault KAK, and the
-`zcapClient` that signs every WAS request with the root key. Nothing about
-the session is written to disk, so there is no refresh-survival: reloading
-the browser drops the session and the user logs in again. The vault is
+Sessions are **in-memory only**. A fresh login builds the whole `Session` --
+the root `keyAgent` (from this client's locally stored seed), the PUK-backed
+vault KAK, and the `zcapClient` that signs every WAS request with the root
+key. Nothing about the live session is written to disk unwrapped (the client
+seed and PUK persist only inside the wrapped client-key record, under the
+unlock layer), so there is no refresh-survival: reloading the browser drops
+the session and the user logs in again. The vault is
 therefore always unlocked while a session exists (the KAK is present) and
 simply gone once it ends; there is no "locked vault" state.
+
+## The PUK wrap-set roster (`key-map/puk.json`)
+
+The per-user key (PUK) -- recipient zero of every encrypted collection -- has
+one remote home: a roster resource in the private, capability-gated `key-map`
+collection (deliberately outside the synced collections; no local replica, no
+background replication). Its body is a `CollectionEncryption` marker stored
+verbatim, and **the roster's current key epoch IS the current PUK**: the
+epoch id is the PUK's did:key, and the epoch secret -- the PUK's raw 32-byte
+key -- is wrapped once per enrolled wallet client, to that client's own
+(identity) key-agreement key (`profile.clientKeyAgreementKey`, the X25519
+twin of the client's did:key). The roster is a delivery channel, not a
+source of authority: each client keeps the PUK in its own local state under
+the unlock layer (the client-key record), and the roster's epoch stamp marks
+a cached copy stale.
+
+Everything goes through was-client's marker-store seam (the plain-JSON-
+resource adapter): read-with-etag, compare-and-swap writes, and a guarded
+create for the initially-absent roster -- no marker logic is reimplemented
+wallet-side (`@interop/wallet-core/keys`; the store handles live in
+`wasRemoteStore.ts`). Provisioning (`ensureUserCollections`) initializes the
+roster idempotently with the account's existing PUK as the first epoch;
+login performs one direct read (`initSessionFromSeed`, before the storage
+clients are built) that either confirms the cached PUK current or -- on an
+epoch mismatch, a rotation by another client -- unwraps the fresh PUK with
+this client's own key, adopts it for the session, and persists it into the
+client-key record.
+
+A resource-hosted marker gets none of the server-side epoch invariants a
+Collection Description enforces, so three client-side guards are load-bearing
+alone against a tampering host: the marker's `epochsMac` (a fabricated epoch
+configuration fails authentication and is refused); a locally pinned
+latest-seen roster epoch (`src/lib/sessionKey.ts`, beside the account-pointer
+pin -- a served roster that rolls back behind the pin is refused, so a
+stale-roster replay lands in the same accepted continuity class as a
+substituted account pointer); and, at rotation time, a recipient resolver
+backed by the locally verified did:webvh document -- a roster entry with no
+matching `keyAgreement` verification method is dropped and never receives a
+wrap, so a server-injected entry sits ignored (wraps are minted only by
+enrolled clients, against log-verified keys).
+
+## The client enrollment ceremony (`@interop/wallet-core/enrollment`)
+
+Connecting a second wallet client (a fresh browser profile) to an existing
+account, without any secret ever leaving either side. The new client mints
+its whole key set locally -- client seed, did:webvh update-key seeds -- and
+only PUBLIC halves travel, as a compact **connect code**
+(`freewallet-connect:<base64url(JSON)>`) carried point-to-point: pasted
+between two browsers today, and QR-renderable unchanged for a camera-holding
+wallet later. A rendezvous-server transport remains future work. Nothing
+travels back over the channel: the account pointer comes out of the keyring
+(the enrollee holds the passphrase), and the PUK comes back through the
+wrap-set roster. Both screens display the new client's did:key fingerprint,
+and the person running the ceremony compares them before approving -- the
+point-to-point verification the roster wrap and the document VM then inherit.
+
+The flow, quorum-of-one (any single enrolled client can enroll):
+
+1. **Enrollee** (login page, from the not-enrolled state): "Connect this
+   browser" mints the key set (`mintEnrollmentRequest`) and shows the code.
+   Nothing is durable yet.
+2. **Enrolling client** (Settings > Enroll another wallet): pastes the code,
+   compares the fingerprint, approves (`approveEnrollment`). Push, not pull,
+   in the recovery-anchor order -- decryption material before authorization:
+   the PUK is wrapped to the new client's key-agreement key in
+   `key-map/puk.json` FIRST (`addPukRosterRecipient`, escrow semantics: every
+   epoch, so pre-enrollment history decrypts), and only then the two
+   did:webvh log entries (`enrollWebvhClient`) -- a sparse **commit** entry
+   extending `nextKeyHashes` with the new client's update- and staged-key
+   hashes (prerotation demands the commitment land one entry early), then the
+   **add** entry publishing the new client's two verification methods and its
+   update key. No authorized-but-blind window exists at any point.
+3. **Enrollee** ("finish connecting"): verifies the enrollment from the
+   world-readable log (resolved locally, checked against the pointer's DID),
+   performs its first roster read -- signed with its just-published
+   `<did:webvh>#<multibase>` key, authorized by the current-key-set rule --
+   unwraps the PUK, persists the key set into the local client-key record
+   under the passphrase's unlock layer (stamping the account controller, so
+   the login-time identity check binds the record to the account), and logs
+   in as an ordinary enrolled client.
+
+Every stage is idempotent and the ceremony is resumable from durable state
+alone -- re-running with the same code converges: a tear after the roster
+write leaves an orphan wrap (invisible to authorization, harmless), a tear
+between the log entries is detected from the standing `nextKeyHashes`
+commitments (the add entry alone is appended, never a fork).
+
+## Recovery codes (`@interop/wallet-core/recovery`)
+
+The "lost my only client" answer: a 16-byte base58 **recovery code**, shown
+exactly once at issuance, that restores the whole account from a fresh
+browser with nothing else in hand. On the roster model a code is a
+**minimal always-enrolled wallet client** whose entire key set derives
+deterministically from its bytes (its own unlock identity under a distinct
+single-expansion HKDF -- a code and a passphrase that stringify alike can
+never derive the same unlock Space -- plus a client seed and one did:webvh
+update key), so the key material exists nowhere until the code is typed.
+
+Its posture is deliberately split. **Decryption stands**: the code's
+`keyAgreement` verification method is published in the did:webvh document
+(an ordinary, deliberately unmarked Multikey entry -- a recovery key is the
+keyAgreement-only case, so client listings keyed on `capabilityInvocation`
+never see it, and the document does not label which keyAgreement key is the
+recovery one), and its PUK wrap stands in the `key-map/puk.json` roster --
+both maintained for free by rotation fan-out. **Authority stays latent**:
+the code's update key joins `updateKeys` nowhere; only its hash is committed
+in `nextKeyHashes`, and the one bridge into the zcap profile is a pre-minted
+PUT-on-`did.jsonl` delegation carried inside the code's unlock record beside
+the account pointer (never a seed, never a key wrap -- the record stays a
+pure pointer). The narrow scope keeps recovery **loud**: any use of a code,
+legitimate or stolen, must first extend the world-readable, hash-chained log
+before it can read a single byte.
+
+Issuance (Settings > Recovery codes, `issueRecoveryCode` in
+`src/session/recovery.ts`) runs in the recovery-anchor order -- decryption
+material before authorization: roster wrap first (escrow: every epoch, so
+recovery decrypts pre-issuance history), then the document entry (VM +
+commitment), then the delegation and unlock record, then a registry entry
+carrying public halves only. Nothing binds until the confirm-once dialog's
+"I saved this code".
+
+Recovery (`/recover`, `recoverAccountWithCode`): the typed code decrypts its
+unlock record, the log is fetched and locally verified against the pointer,
+a brand-new ordinary client key set is minted, and the delegation writes the
+self-enrolling continuation -- a **reveal-and-commit** entry signed by the
+code's pre-committed update key (with prerotation active, an entry verifies
+against its own re-stated `updateKeys`, each hashing into the previous
+entry's `nextKeyHashes` -- which is exactly what lets a committed key reveal
+itself), then an **add-and-retire** entry signed by the new client's update
+key: new client in (both VMs, all four signing relations, update authority),
+the spent code's VM, update key, and hash out, and a replacement code's
+posture in. The PUK is unwrapped from the code's standing wrap and
+**mandatorily rotated** off the spent code (recipients of the fresh epoch
+resolved from the just-updated verified document); a replacement code is
+pushed hard (shown once, must be confirmed saved before login unlocks); the
+spent code's unlock Space is deleted (a typed code is a spent credential --
+it thereafter fails with wording distinct from "wrong code"); and the new
+client binds under a freshly chosen passphrase, ending in an ordinary
+enrolled login. Until the client-revocation cascade re-epochs the encrypted
+collections, the fresh PUK is escrowed into each collection's existing
+epochs (a pre-epoch collection gets the old PUK installed as its first
+epoch -- the PUK is the epoch construction, so pre-epoch envelopes ARE
+epoch-`oldPuk` envelopes), keeping every replica decrypting across the
+rotation; the honest residue is that writes still land under epochs the
+spent code could read.
+
+Revoking a code from Settings is the issuance reversal and is REAL (the
+secret was only ever a pointer to the record): document entry out, PUK
+rotated off the code's wrap, unlock Space deleted, registry entry dropped.
+A login-time health check watches for **delegation rot** -- the stored
+delegation stops chaining the moment its signing client's verification
+method leaves the document (current-key-set rule), which would brick
+recovery exactly when it is needed -- and nudges regeneration.
 
 ## Storage model (local-first)
 
@@ -120,7 +358,9 @@ and quotas.
 `StorageManager` is the facade; pages and components always talk to it, never
 directly to a backend class.
 
-A user's remote Space is identified by `spaceId = base64url(SHA-256(did:key))`.
+A user's remote Space is identified by an independent random `spaceId`
+minted at signup and carried in the account pointer (unlock Spaces keep
+`spaceId = base64url(SHA-256(unlock did:key))` as a discovery convention).
 Collections created on first login: `private-credentials`, `public-credentials`,
 `wallet-activity`.
 
@@ -394,6 +634,7 @@ Security notes:
 | `/`                                      | `LandingPage`            | Public landing / wallet registration |
 | `/login`                                 | `LoginPage`              | Passphrase login                     |
 | `/signup`                                | `SignupPage`             | New account creation                 |
+| `/recover`                               | `RecoverPage`            | Recovery-code account recovery       |
 | `/guest-login`                           | `GuestLoginPage`         | Ephemeral guest session              |
 | `/logout`                                | `LogoutPage`             | Clears session                       |
 | `/wallet/get`                            | `WalletGetPage`          | CHAPI popup — share a VC             |
@@ -480,8 +721,11 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
 - **WAS (Wallet Attached Storage)** — an HTTP protocol for storing arbitrary
   resources in user-owned Spaces. Requests are authorized via ZCap.
   See [the spec](https://w3c-ccg.github.io/wallet-attached-storage-spec/).
-- **Space** — a storage area on the WAS server, identified by
-  `spaceId = base64url(SHA-256(controller DID))`. Owned by one controller.
+- **Space** — a storage area on the WAS server. The account Space's id is an
+  independent random identifier minted at signup and carried in the account
+  pointer; unlock Spaces are addressed by
+  `spaceId = base64url(SHA-256(unlock did:key))` (a discovery convention).
+  Owned by one controller.
 - **Collection** — a named grouping of Resources within a Space.
   Standard collections: `private-credentials`, `public-credentials`,
   `wallet-activity`.
@@ -500,9 +744,11 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   client-side only. Accessed via `KmsClient`/`KeystoreAgent` from
   `@interop/webkms-client`; provisioned at login by `src/lib/kms.ts`.
 - **Vault KAK** — the X25519 key-agreement key that encrypts/decrypts the
-  EDV envelopes, unwrapped at login from the keyring with the
-  passphrase-derived unlock key (for pre-keyring accounts and guests it IS
-  the passphrase/secret-derived key). Never replicated in unwrapped form
+  EDV envelopes: the PUK's key-agreement key, recovered at login from the
+  local client-key record with the unlock-derived key (legacy accounts minted
+  before the PUK fall back to the seed-derived twin), then checked against
+  the PUK wrap-set roster (`key-map/puk.json`), which confirms the cached
+  copy current or delivers a rotated one. Never replicated in unwrapped form
   and never held by the KMS; it is present for the life of every session.
 - **Session** — the in-memory object (`src/types/auth.ts`) holding the logged-in
   user, their `ControllerProfile` (keyAgent + zcapClient), and their

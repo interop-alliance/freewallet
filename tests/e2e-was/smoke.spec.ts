@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { goToStorage, signupViaWizard } from './helpers'
+import { fillSettled, goToStorage, signupViaWizard } from './helpers'
 
 /**
  * WAS (remote storage) smoke tests. These run against the app in remote mode
@@ -17,7 +17,7 @@ test.describe('WAS remote storage', () => {
     const email = `e2e-${token}@example.com`
 
     await page.goto('/#/signup')
-    await page.locator('input[type="password"]').fill(passphrase)
+    await fillSettled(page.locator('input[type="password"]'), passphrase)
     await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled()
     await page.getByRole('button', { name: 'Next' }).click()
     await page.locator('input[type="email"]').fill(email)

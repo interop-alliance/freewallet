@@ -23,7 +23,13 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { useInfoBox } from '@/hooks/useInfoBox'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { getFileUrl } from '@interop/did-method-webvh'
-import { rotateWebvhUpdateKey } from '@/lib/didWebvh'
+import { rotateWebvhUpdateKey } from '@interop/wallet-core/webvh'
+import {
+  enrollmentClientDid,
+  parseEnrollmentRequest,
+  type EnrollmentRequest
+} from '@interop/wallet-core/enrollment'
+import { approveEnrollment } from '@/lib/enrollment'
 import {
   bindPassphrase,
   changePassphrase,
@@ -52,6 +58,7 @@ import {
 import { deletePasskeySafetyNotice } from '@/lib/sessionKey'
 import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
 import { formatDate } from '@/lib/viewMappers/formatDate'
+import { RecoveryCodesSection } from '@/components/RecoveryCodesSection'
 import { SharedCollectionsPanel } from '@/components/SharedCollectionsPanel'
 import { dashboardStyles } from '@/styles/appStyles'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
@@ -177,10 +184,10 @@ export function SettingsPage() {
     }
   }
   // Passphrase keyring (keyring v2) state. The whole section is shown for
-  // non-guest sessions; changing the passphrase re-binds the data seed under a
-  // new unlock identity, so it needs the data seed in memory.
+  // non-guest sessions; changing the passphrase re-binds this client's key
+  // set under a new unlock identity, so it needs the client seed in memory.
   const keyringSectionVisible = !session?.isGuest
-  const canChangePassphrase = !!session?.profile?.dataSeed
+  const canChangePassphrase = !!session?.profile?.clientSeed
   const [oldPassphrase, setOldPassphrase] = useState('')
   const [newPassphrase, setNewPassphrase] = useState('')
   const [newPassphraseScore, setNewPassphraseScore] = useState(0)
@@ -200,7 +207,7 @@ export function SettingsPage() {
 
   const handleChangePassphrase = async () => {
     const profile = session?.profile
-    const seed = profile?.dataSeed
+    const seed = profile?.clientSeed
     if (!session || !profile || !seed) {
       return
     }
@@ -210,10 +217,11 @@ export function SettingsPage() {
     try {
       const { oldPassphraseRetired, unlockSpaceId, manageCapability } =
         await changePassphrase({
-          seed,
+          clientSeed: seed,
           controller: session.user.id,
           oldPassphrase,
-          newPassphrase
+          newPassphrase,
+          puk: profile.puk
         })
       setOldPassphrase('')
       setNewPassphrase('')
@@ -274,10 +282,11 @@ export function SettingsPage() {
     }
   }
   // Passkeys (keyring v2 unlock methods). The section is shown only where
-  // WebAuthn exists; adding a passkey binds the in-memory data seed under the
-  // passkey's PRF-derived unlock identity, so it needs the seed present.
+  // WebAuthn exists; adding a passkey binds this client's in-memory key set
+  // under the passkey's PRF-derived unlock identity, so it needs the seed
+  // present.
   const passkeysSupported = passkeySupported()
-  const canAddPasskey = !!session?.profile?.dataSeed
+  const canAddPasskey = !!session?.profile?.clientSeed
   const [addingPasskey, setAddingPasskey] = useState(false)
   const [passkeyError, setPasskeyError] = useState<
     'duplicate' | 'unsupported' | 'failed' | null
@@ -328,7 +337,7 @@ export function SettingsPage() {
     !!unlockRegistry &&
     !hasPassphraseEntry &&
     session?.profile?.unlockMethod?.type !== 'passphrase'
-  const canAddPassphrase = knownNoPassphrase && !!session?.profile?.dataSeed
+  const canAddPassphrase = knownNoPassphrase && !!session?.profile?.clientSeed
 
   // Refreshes the registry from the source of truth after a mutation (not the
   // cancellable mount load below).
@@ -368,7 +377,7 @@ export function SettingsPage() {
 
   const handleAddPasskey = async () => {
     const profile = session?.profile
-    const seed = profile?.dataSeed
+    const seed = profile?.clientSeed
     if (!session || !profile || !seed) {
       return
     }
@@ -396,12 +405,15 @@ export function SettingsPage() {
         session.user.email ??
         `Freewallet ${new Date().toLocaleDateString(i18n.language, DATE_FMT)}`
 
-      // Run the ceremony, bind the data seed under the passkey's unlock
-      // identity, and build the registry entry. Delegating management to the
-      // data did:key lets Settings later revoke this passkey without a tap on
-      // the (possibly lost) authenticator.
+      // Run the ceremony, bind this client's key set under the passkey's
+      // unlock identity, and build the registry entry. Delegating management
+      // to the account did:key lets Settings later revoke this passkey
+      // without a tap on the (possibly lost) authenticator.
       const { entry } = await enrollPasskey({
-        seed,
+        clientSeed: seed,
+        puk: profile.puk,
+        webvhUpdateKeys: profile.clientWebvhKeys,
+        pointer: profile.accountPointer,
         controller: session.user.id,
         userHandle: base64urlnopad.decode(registry.userHandle),
         userName,
@@ -525,8 +537,9 @@ export function SettingsPage() {
       setRemoving(false)
     }
   }
-  // "Add a passphrase" for passkey-only accounts (see 2.8): binds the data seed
-  // under a passphrase unlock identity and appends a passphrase registry entry.
+  // "Add a passphrase" for passkey-only accounts (see 2.8): binds this
+  // client's key set under a passphrase unlock identity and appends a
+  // passphrase registry entry.
   const [addPassphrase, setAddPassphrase] = useState('')
   const [addPassphraseScore, setAddPassphraseScore] = useState(0)
   const [addingPassphrase, setAddingPassphrase] = useState(false)
@@ -538,7 +551,7 @@ export function SettingsPage() {
     addPassphraseLengthPassed && addPassphraseScore >= PASSWORD_RULES.minscore
 
   const handleAddPassphrase = async () => {
-    const seed = session?.profile?.dataSeed
+    const seed = session?.profile?.clientSeed
     if (!session || !seed) {
       return
     }
@@ -547,10 +560,13 @@ export function SettingsPage() {
     setAddPassphraseSuccess(false)
     try {
       const { unlockSpaceId, manageCapability } = await bindPassphrase({
-        seed,
+        clientSeed: seed,
         controller: session.user.id,
         passphrase: addPassphrase,
         email: session.user.email,
+        puk: session.profile.puk,
+        webvhUpdateKeys: session.profile.clientWebvhKeys,
+        pointer: session.profile.accountPointer,
         delegateManagementTo: session.user.id
       })
       const base: UnlockMethodsRecord = unlockRegistry ?? {
@@ -661,6 +677,16 @@ export function SettingsPage() {
   const [rotating, setRotating] = useState(false)
   const [rotateDone, setRotateDone] = useState(false)
   const [rotateError, setRotateError] = useState(false)
+  // The enroll-another-wallet ceremony (the enrolling side): the pasted
+  // connect code, its parsed request when valid, and the ceremony state.
+  const [enrollDialogOpen, setEnrollDialogOpen] = useState(false)
+  const [enrollCode, setEnrollCode] = useState('')
+  const [enrollRequest, setEnrollRequest] = useState<EnrollmentRequest | null>(
+    null
+  )
+  const [enrolling, setEnrolling] = useState(false)
+  const [enrollDone, setEnrollDone] = useState(false)
+  const [enrollError, setEnrollError] = useState(false)
 
   const handleCopyDidWebvh = async () => {
     if (!publishedDidWebvh) {
@@ -670,7 +696,10 @@ export function SettingsPage() {
   }
 
   const handleRotate = async () => {
-    if (!session) {
+    const remoteStore = session?.storage.remoteStore
+    const updateKeys = session?.profile.clientWebvhKeys
+    const persistClientKeys = session?.profile.persistClientKeys
+    if (!session || !remoteStore || !updateKeys || !persistClientKeys) {
       return
     }
     setRotateDialogOpen(false)
@@ -678,13 +707,72 @@ export function SettingsPage() {
     setRotateDone(false)
     setRotateError(false)
     try {
-      await rotateWebvhUpdateKey({ session })
+      // Per-client self-rotation with the client-held seeds: every changed
+      // seed set is persisted into the wrapped client-key record (and the
+      // in-memory profile) before and after the log extends, so a crash
+      // mid-rotation resumes from durable state.
+      await rotateWebvhUpdateKey({
+        idStore: remoteStore,
+        updateKeys,
+        persistUpdateKeys: async next => {
+          await persistClientKeys({ webvhUpdateKeys: next })
+          session.profile.clientWebvhKeys = next
+        }
+      })
       setRotateDone(true)
     } catch (err) {
       console.error('Could not rotate the did:webvh update key:', err)
       setRotateError(true)
     } finally {
       setRotating(false)
+    }
+  }
+
+  /**
+   * Tracks the pasted connect code, parsing it eagerly so the dialog can show
+   * the new client's key fingerprint (for the on-screen comparison) before
+   * anything is approved.
+   */
+  const handleEnrollCodeChange = (code: string) => {
+    setEnrollCode(code)
+    setEnrollError(false)
+    if (!code.trim()) {
+      setEnrollRequest(null)
+      return
+    }
+    try {
+      setEnrollRequest(parseEnrollmentRequest({ code }))
+    } catch {
+      setEnrollRequest(null)
+    }
+  }
+
+  /**
+   * Runs the enrollment ceremony for the pasted connect code, in the push
+   * order (the PUK wrap into the roster first, then the two log entries).
+   * Idempotent -- approving the same code again after a failure resumes.
+   */
+  const handleEnroll = async () => {
+    if (!session || !enrollRequest || enrolling) {
+      return
+    }
+    setEnrolling(true)
+    setEnrollError(false)
+    try {
+      await approveEnrollment({
+        request: enrollRequest,
+        profile: session.profile,
+        storage: session.storage
+      })
+      setEnrollDone(true)
+      setEnrollDialogOpen(false)
+      setEnrollCode('')
+      setEnrollRequest(null)
+    } catch (err) {
+      console.error('Enrolling the new wallet client failed:', err)
+      setEnrollError(true)
+    } finally {
+      setEnrolling(false)
     }
   }
 
@@ -1170,6 +1258,13 @@ export function SettingsPage() {
           )}
         </Stack>
 
+        {session && !session.isGuest && (
+          <>
+            <Divider />
+            <RecoveryCodesSection session={session} />
+          </>
+        )}
+
         {session && (
           <>
             <Divider />
@@ -1296,14 +1391,18 @@ export function SettingsPage() {
               )}
             </SettingRow>
           )}
-          {kmsConfigured && publishedDidWebvh && (
+          {publishedDidWebvh && (
             <Stack sx={{ gap: 0.5, mt: 1 }}>
               <Stack direction="row" sx={{ alignItems: 'center', gap: 2 }}>
                 <Button
                   variant="outlined"
                   size="small"
                   sx={{ borderRadius: 2, px: 2, py: 1 }}
-                  disabled={rotating}
+                  disabled={
+                    rotating ||
+                    !session?.profile.clientWebvhKeys ||
+                    !session?.profile.persistClientKeys
+                  }
                   onClick={() => {
                     setRotateDone(false)
                     setRotateError(false)
@@ -1325,6 +1424,40 @@ export function SettingsPage() {
               )}
               {rotateError && (
                 <Alert severity="error">{t('settings.rotateError')}</Alert>
+              )}
+              <Stack
+                direction="row"
+                sx={{ alignItems: 'center', gap: 2, mt: 1 }}
+              >
+                <Button
+                  variant="outlined"
+                  size="small"
+                  sx={{ borderRadius: 2, px: 2, py: 1 }}
+                  disabled={
+                    enrolling ||
+                    !session?.profile.clientWebvhKeys ||
+                    !session?.profile.clientKeyAgreementKey
+                  }
+                  onClick={() => {
+                    setEnrollDone(false)
+                    setEnrollError(false)
+                    setEnrollCode('')
+                    setEnrollRequest(null)
+                    setEnrollDialogOpen(true)
+                  }}
+                >
+                  {enrolling
+                    ? t('settings.enrolling')
+                    : t('settings.enrollClient')}
+                </Button>
+                <Typography variant="body2" color="text.secondary">
+                  {t('settings.enrollClientHint')}
+                </Typography>
+              </Stack>
+              {enrollDone && (
+                <Typography variant="body2" color="success.main">
+                  {t('settings.enrollSuccess')}
+                </Typography>
               )}
             </Stack>
           )}
@@ -1456,6 +1589,74 @@ export function SettingsPage() {
             </Button>
             <Button variant="contained" onClick={handleRotate}>
               {t('settings.rotateConfirmAction')}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog
+          open={enrollDialogOpen}
+          onClose={() => {
+            if (!enrolling) {
+              setEnrollDialogOpen(false)
+            }
+          }}
+          fullWidth
+        >
+          <DialogTitle>{t('settings.enrollConfirmTitle')}</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              {t('settings.enrollConfirmMessage')}
+            </DialogContentText>
+            <TextField
+              fullWidth
+              size="small"
+              multiline
+              minRows={3}
+              label={t('settings.enrollCodeLabel')}
+              value={enrollCode}
+              onChange={event => handleEnrollCodeChange(event.target.value)}
+              error={enrollCode.trim().length > 0 && !enrollRequest}
+              helperText={
+                enrollCode.trim().length > 0 && !enrollRequest
+                  ? t('settings.enrollCodeInvalid')
+                  : undefined
+              }
+              slotProps={{
+                htmlInput: { 'data-testid': 'enroll-code-input' }
+              }}
+              sx={{ mt: 2 }}
+            />
+            {enrollRequest && (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ mt: 2, wordBreak: 'break-all' }}
+              >
+                {t('settings.enrollFingerprint', {
+                  did: enrollmentClientDid({ request: enrollRequest })
+                })}
+              </Typography>
+            )}
+            {enrollError && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {t('settings.enrollError')}
+              </Alert>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button
+              onClick={() => setEnrollDialogOpen(false)}
+              disabled={enrolling}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleEnroll}
+              loading={enrolling}
+              disabled={!enrollRequest}
+            >
+              {t('settings.enrollConfirmAction')}
             </Button>
           </DialogActions>
         </Dialog>

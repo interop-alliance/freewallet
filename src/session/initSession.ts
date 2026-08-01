@@ -1,17 +1,51 @@
 /**
- * Session bootstrap. Derives a did:key identity from the user's passphrase
- * via CapabilityAgent, instantiates a ZcapClient for signing storage requests,
- * and initializes the StorageManager (local or remote depending on env vars).
- * The resulting Session object is stored in authStore.
+ * Session bootstrap. Builds a did:key identity from this client's locally
+ * minted 32-byte seed via CapabilityAgent, instantiates a ZcapClient for
+ * signing storage requests, and initializes the StorageManager (local or
+ * remote depending on env vars). The resulting Session object is stored in
+ * authStore. A passphrase (or passkey) login resolves through the keyring:
+ * the unlock identity locates the account (the encrypted account pointer) and
+ * unwraps this client's local key set -- it never reconstructs the account
+ * from the secret, so a client with no local key set can locate the account
+ * but not act (not enrolled).
  */
+import type { IKeyAgreementKey } from '@interop/data-integrity-core'
+import type { ZcapClient } from '@interop/ezcap'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { deriveSpaceId } from '@interop/was-client/sync'
 import type { ControllerProfile, Session, User } from '@/types/auth'
-import { KMS_SERVER_URL, PASSKEY_KDF } from '@/app.config'
+import { KMS_SERVER_URL, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
+import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { ensureKeystore } from '@/lib/kms'
 import { assertPasskeyPrf } from '@/lib/passkey'
+import {
+  isWebvhDid,
+  webvhCapabilityAgent,
+  webvhZcapClient,
+  type ClientWebvhUpdateKeys
+} from '@interop/wallet-core/webvh'
+import {
+  mintPuk,
+  pukRosterMarkerStore,
+  pukVaultKeys,
+  PukRosterContinuityError,
+  PukRosterIntegrityError,
+  PukRosterUnwrapError,
+  readPukRoster,
+  type Puk
+} from '@interop/wallet-core/keys'
+import { loadPukEpochPin, savePukEpochPin } from '@/lib/sessionKey'
 import { StorageManager } from '@/stores/storageManager'
-import { fetchKeyringSeed, KeyringRecordUnusableError } from '@/session/keyring'
-import type { KeyringFetchResult } from '@/session/keyring'
+import {
+  fetchKeyring,
+  KeyringRecordUnusableError,
+  updateClientKeyPuk
+} from '@/session/keyring'
+import type { AccountPointer } from '@interop/wallet-core/keyring'
+import type {
+  KeyringFetchResult,
+  PersistableClientKeys
+} from '@/session/keyring'
 
 /**
  * Creates a random guest session.
@@ -22,14 +56,15 @@ export async function initGuestSession() {
 
   const guestEmail = 'guest@example.com'
 
-  // The random 32 bytes are used directly as the data seed (no salted-hash
-  // step). A guest identity is ephemeral and never keyring-bound, so the
-  // derivation change relative to a passphrase login is harmless here.
+  // The random 32 bytes are used directly as the client seed (no salted-hash
+  // step). A guest identity is ephemeral and never keyring-bound.
   // Guest is a new-wallet flow: `provisionNewWallet` owns collection
   // provisioning (plus the initial history + welcome credential), so session
-  // creation must not also fire it.
+  // creation must not also fire it. The guest PUK is minted fresh like the
+  // rest of the guest identity and, being keyring-less, dies with the session.
   const { session } = await initSessionFromSeed({
     seed: randomGuestSecret,
+    puk: await mintPuk(),
     email: guestEmail,
     isGuest: true,
     provisionStorage: false
@@ -40,14 +75,14 @@ export async function initGuestSession() {
 
 /**
  * Initializes a session (user, profile with zcap agents, storage manager) from
- * an already-derived 32-byte data seed. This is the shared core behind the
+ * an already-obtained 32-byte client seed. This is the shared core behind the
  * keyring path (`loginWithPassphrase`, `SignupPage`) and the guest bootstrap:
- * everything downstream of "data seed in hand" -- KMS keystore provisioning,
+ * everything downstream of "client seed in hand" -- KMS keystore provisioning,
  * storage clients -- is identical regardless of how the seed was obtained.
  *
- * For non-guest sessions the seed is carried on `profile.dataSeed` (so Settings
- * can re-bind the passphrase); guests skip it (a guest identity is ephemeral
- * and never keyring-bound).
+ * For non-guest sessions the seed is carried on `profile.clientSeed` (so
+ * Settings can re-bind unlock methods); guests skip it (a guest identity is
+ * ephemeral and never keyring-bound).
  *
  * Collection provisioning is folded in here rather than left as a separate
  * post-login step at every callsite: when `provisionStorage` is set (the
@@ -61,7 +96,23 @@ export async function initGuestSession() {
  * before the data Space is created), so session creation must not fire it.
  *
  * @param options {object}
- * @param options.seed {Uint8Array}   the 32-byte data seed
+ * @param options.seed {Uint8Array}   this client's 32-byte seed
+ * @param [options.puk] {Puk}   the per-user key -- recovered from the local
+ *   client-key record on login, or freshly minted by a provisioning flow.
+ *   When present, its KAK (not the seed-derived vault KAK) becomes the
+ *   profile's key-agreement key, i.e. recipient zero of every encrypted
+ *   collection. Absent only on legacy accounts provisioned before the PUK,
+ *   which keep the seed-derived KAK until re-provisioned.
+ * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
+ *   did:webvh update-key seeds (from the client-key record, or freshly minted
+ *   by a provisioning flow), stamped on the profile for log maintenance
+ * @param [options.persistClientKeys] {function}   re-wraps the client-key
+ *   record with changed members (rotated PUK, rolled update-key seeds)
+ *   without the unlock secret; stamped on the profile
+ * @param [options.accountPointer] {AccountPointer}   the account pointer this
+ *   client holds as local state, stamped on the profile. A pointer naming a
+ *   did:webvh marks the account promoted: the session signs data-Space
+ *   requests with the `<did:webvh>#<multibase>` keyId from the start
  * @param [options.email] {string}
  * @param [options.isGuest] {boolean}
  * @param [options.remoteDirectStorage] {boolean}   route credential + history
@@ -70,23 +121,78 @@ export async function initGuestSession() {
  * @param [options.provisionStorage] {boolean}   fire `ensureUserCollections`
  *   from session creation and expose it as `session.storageReady`; default
  *   true. Set false for the new-wallet flows that provision explicitly.
+ * @param [options.idb] {IDBFactory}   first-party IndexedDB for the PUK
+ *   roster-epoch pin (CHAPI popups thread the Storage Access API handle here)
+ * @param [options.onPukRotated] {function}   called with the fresh PUK when
+ *   the roster check finds a rotated epoch, so the login path can persist it
+ *   into this client's client-key record (the session adopts it either way)
  * @returns {Promise<{ session: Session, userExists: boolean }>}
  */
 export async function initSessionFromSeed({
   seed,
+  puk,
+  webvhUpdateKeys,
+  persistClientKeys,
+  accountPointer,
   email,
   isGuest = false,
   remoteDirectStorage = false,
-  provisionStorage = true
+  provisionStorage = true,
+  idb,
+  onPukRotated
 }: {
   seed: Uint8Array
+  puk?: Puk
+  webvhUpdateKeys?: ClientWebvhUpdateKeys
+  persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
+  accountPointer?: AccountPointer
   email?: string
   isGuest?: boolean
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
+  idb?: IDBFactory
+  onPukRotated?: (puk: Puk) => Promise<void>
 }) {
   const { keyAgent, zcapClient, keyAgreementKey, keyResolver } =
     await agentsFromSeed({ seed })
+
+  // Once the account pointer names a did:webvh, the Space controller has
+  // been promoted: every data-Space request must be signed with this
+  // client's verification method in the did:webvh document
+  // (`<did:webvh>#<multibase>`), not its did:key. Same key, promoted keyId.
+  const accountDid = accountPointer?.did
+  const sessionZcapClient = isWebvhDid(accountDid)
+    ? webvhZcapClient({ keyAgent, did: accountDid })
+    : zcapClient
+
+  // The direct PUK roster read (`key-map/puk.json`): confirms the cached PUK
+  // current, or -- on an epoch mismatch (a rotation by another client) --
+  // delivers the fresh PUK, which the session adopts and `onPukRotated`
+  // persists. Runs before the storage clients are built, since the vault
+  // keys below must be the CURRENT PUK's.
+  let activePuk = puk
+  if (puk && !isGuest && WAS_SERVER_URL) {
+    const spaceId = accountPointer?.spaceId ?? deriveSpaceId(keyAgent.id)
+    const adopted = await checkPukRosterAtLogin({
+      zcapClient: sessionZcapClient,
+      spaceId,
+      puk,
+      clientKeyAgreementKey: keyAgreementKey,
+      idb
+    })
+    if (adopted) {
+      activePuk = adopted
+      await onPukRotated?.(adopted)
+    }
+  }
+
+  // Recipient zero becomes the PUK: when the account carries one, the vault
+  // key pair the storage layer consumes is the PUK's KAK + resolver in place
+  // of the seed-derived pair. The rest of the profile (signing identity,
+  // zcap client) is untouched.
+  const vaultKeys = activePuk
+    ? pukVaultKeys({ puk: activePuk })
+    : { keyAgreementKey, keyResolver }
 
   // Ensure a KMS keystore exists for this controller (list-by-controller,
   // create on first login) and bind a KeystoreAgent to it. Guests skip the
@@ -101,7 +207,20 @@ export async function initSessionFromSeed({
       ? ensureKeystore({
           kmsServerUrl: KMS_SERVER_URL,
           keyAgent,
-          zcapClient
+          // Once promoted, the keystore is looked up under (and invoked as)
+          // the account's did:webvh; before promotion, the did:key defaults
+          // apply.
+          zcapClient: sessionZcapClient,
+          ...(isWebvhDid(accountDid)
+            ? {
+                controller: accountDid,
+                capabilityAgent: webvhCapabilityAgent({
+                  keyAgent,
+                  did: accountDid
+                }),
+                fallbackZcapClient: zcapClient
+              }
+            : {})
         }).catch(err => {
           console.warn('KMS keystore provisioning failed:', err)
           return undefined
@@ -114,12 +233,25 @@ export async function initSessionFromSeed({
   }
   const profile: ControllerProfile = {
     keyAgent,
-    zcapClient,
-    keyAgreementKey,
-    keyResolver
+    zcapClient: sessionZcapClient,
+    keyAgreementKey: vaultKeys.keyAgreementKey,
+    keyResolver: vaultKeys.keyResolver,
+    // This client's own (identity) KAK, distinct from the PUK-backed vault
+    // KAK above: its entry in the PUK wrap-set roster.
+    clientKeyAgreementKey: keyAgreementKey,
+    ...(activePuk ? { puk: activePuk } : {}),
+    ...(webvhUpdateKeys ? { clientWebvhKeys: webvhUpdateKeys } : {}),
+    ...(persistClientKeys ? { persistClientKeys } : {}),
+    ...(accountPointer ? { accountPointer } : {})
   }
   if (!isGuest) {
-    profile.dataSeed = seed
+    profile.clientSeed = seed
+  }
+  if (isWebvhDid(accountDid)) {
+    // The pointer names a published did:webvh: surface it on the profile so
+    // provisioning treats the log as already adopted (it re-verifies against
+    // the published copy either way).
+    profile.didWebvh = { did: accountDid }
   }
 
   const [keystoreAgent, { storage, userExists }] = await Promise.all([
@@ -153,27 +285,110 @@ export async function initSessionFromSeed({
 }
 
 /**
- * Passphrase login (keyring v2). The keyring is the only login path: the
- * passphrase derives an unlock identity that locates and unwraps the account's
- * real data seed. Two branches:
+ * The login-time PUK roster check: one direct compare-and-swap-style read of
+ * `key-map/puk.json` with the session's root signing key, before any storage
+ * client exists. Returns the fresh PUK when the roster's current epoch
+ * differs from the cached one (a rotation by another client), `null` when
+ * the cached PUK is confirmed current or no roster exists yet (an account
+ * whose provisioning has not created it -- the idempotent ensure will).
+ * Either way the served roster is authenticated (`epochsMac`) and checked
+ * against the locally pinned latest-seen epoch, and the pin advances to the
+ * epoch just seen.
  *
- * - **Keyring hit**: the passphrase's unlock identity located a keyring record;
- *   the session is built from the unwrapped data seed (`initSessionFromSeed`).
- *   The unwrapped controller is sanity-checked against the derived did:key -- a
- *   mismatch means a corrupt record and throws `KeyringRecordUnusableError`
+ * Failure semantics: the three roster refusals -- a rolled-back/replayed
+ * roster, a configuration that fails authentication, and a current epoch
+ * this client cannot unwrap -- rethrow and refuse the login (the same
+ * continuity class as a substituted account pointer). Anything else (an
+ * unreachable server, offline) warns and returns `null`, so offline logins
+ * keep working from the cached PUK.
+ *
+ * @param options {object}
+ * @param options.zcapClient {ZcapClient}   the session's root signing client
+ * @param options.spaceId {string}   the data Space id
+ * @param options.puk {Puk}   the cached per-user key
+ * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
+ *   (identity) KAK -- its roster entry
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<Puk | null>}   the freshly adopted PUK, or null
+ */
+async function checkPukRosterAtLogin({
+  zcapClient,
+  spaceId,
+  puk,
+  clientKeyAgreementKey,
+  idb
+}: {
+  zcapClient: ZcapClient
+  spaceId: string
+  puk: Puk
+  clientKeyAgreementKey: IKeyAgreementKey
+  idb?: IDBFactory
+}): Promise<Puk | null> {
+  try {
+    const store = pukRosterMarkerStore({
+      storageServerUrl: WAS_SERVER_URL,
+      zcapClient,
+      spaceId
+    })
+    const pinnedEpochId = await loadPukEpochPin({ spaceId, idb })
+    const read = await readPukRoster({
+      store,
+      puk,
+      clientKeyAgreementKey,
+      pinnedEpochId
+    })
+    if (!read) {
+      return null
+    }
+    await savePukEpochPin({ spaceId, epochId: read.latestEpochId, idb })
+    return read.rotated ? read.puk : null
+  } catch (err) {
+    if (
+      err instanceof PukRosterContinuityError ||
+      err instanceof PukRosterIntegrityError ||
+      err instanceof PukRosterUnwrapError
+    ) {
+      throw err
+    }
+    // An unreachable server (or any transport hiccup) must not lock the
+    // user out of an offline login: the cached PUK stays authoritative.
+    console.warn(
+      'PUK roster check failed; continuing with the cached PUK:',
+      err
+    )
+    return null
+  }
+}
+
+/**
+ * Passphrase login (keyring v2). The keyring is the only login path: the
+ * passphrase derives an unlock identity that locates the account and unwraps
+ * this client's local key set. Three branches:
+ *
+ * - **Enrolled hit**: the keyring record was found AND this client holds a
+ *   key set under the passphrase's unlock method; the session is built from
+ *   the local client seed (`initSessionFromSeed`). The record's controller is
+ *   sanity-checked against the derived did:key -- a mismatch means a corrupt
+ *   record (or a foreign key set) and throws `KeyringRecordUnusableError`
  *   rather than proceeding under the wrong identity (the same error
- *   `fetchKeyringSeed` throws for a record that fails to unwrap, so callers
+ *   `fetchKeyring` throws for a record that fails to unwrap, so callers
  *   surface one "keyring record unusable" state). Returns
  *   `{ session, userExists }` -- a hit whose data Space
  *   is missing legitimately reports `userExists: false` (a half-finished
  *   signup), and the caller sends it to signup, which rebinds.
+ * - **Located, not enrolled**: the keyring record was found (the account
+ *   exists) but this client holds no key set -- a fresh browser. Unlocking is
+ *   no longer sufficient to BE the account: nothing about the account is
+ *   derivable from the passphrase, so until this client is enrolled it cannot
+ *   act. Returns `{ session: null, userExists: true }` and the caller
+ *   surfaces the not-enrolled guidance.
  * - **Miss**: no keyring anywhere, so there is no account. Returns
  *   `{ session: null, userExists: false }` and the caller routes to signup.
  *
- * `fetchKeyringSeed` rethrows when the remote could not be reached (so the
+ * `fetchKeyring` rethrows when the remote could not be reached (so the
  * caller's storage-unreachable handling fires rather than misreading it as "no
- * account"), and all storage/network errors from session init propagate
- * unchanged.
+ * account"), throws `AccountPointerChangedError` on a continuity refusal, and
+ * all storage/network errors from session init propagate unchanged.
  *
  * @param options {object}
  * @param options.passphrase {string}
@@ -202,7 +417,7 @@ export async function loginWithPassphrase({
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
 }): Promise<{ session: Session | null; userExists: boolean }> {
-  const found = await fetchKeyringSeed({
+  const found = await fetchKeyring({
     passphrase,
     idb,
     mintManageCapability: true
@@ -217,51 +432,87 @@ export async function loginWithPassphrase({
     type: 'passphrase',
     email,
     remoteDirectStorage,
-    provisionStorage
+    provisionStorage,
+    idb,
+    // A roster rotation adopted at login is persisted into this client's
+    // client-key record, so the next login starts from the rotated PUK.
+    onPukRotated: async puk =>
+      updateClientKeyPuk({ secret: passphrase, kdf: KEYRING_KDF, puk, idb })
   })
 }
 
 /**
- * Shared tail of the keyring login paths: builds the session from an unwrapped
- * keyring hit and sanity-checks the recovered controller against the derived
- * did:key. A mismatch means a corrupt record and throws
- * `KeyringRecordUnusableError` rather than proceeding under the wrong
- * identity. The session email prefers the caller's fresh value (the login
- * form) over the one carried by the keyring record.
+ * Shared tail of the keyring login paths: builds the session from a keyring
+ * hit's local client key set and sanity-checks the recovered controller
+ * against the derived did:key. A mismatch means a corrupt record (or a
+ * foreign key set) and throws `KeyringRecordUnusableError` rather than
+ * proceeding under the wrong identity. A hit with no `clientKeys` -- a fresh
+ * browser that located the account but is not enrolled -- returns
+ * `{ session: null, userExists: true }` without touching storage. The session
+ * email prefers the caller's fresh value (the login form) over the one
+ * carried by the keyring record.
  *
  * Records which unlock method produced this full session on
  * `profile.unlockMethod` (its type, unlock Space id, and the management zcap
- * `fetchKeyringSeed` minted), so Settings can backfill the unlock-methods
+ * `fetchKeyring` minted), so Settings can backfill the unlock-methods
  * registry without re-prompting for the secret.
  *
  * @param options {object}
- * @param options.found {KeyringFetchResult}   the unwrapped keyring hit
+ * @param options.found {KeyringFetchResult}   the keyring hit
  * @param options.type {'passphrase' | 'passkey'}   the method that unlocked
  * @param [options.email] {string}   caller-supplied email, when any
  * @param [options.remoteDirectStorage] {boolean}
  * @param [options.provisionStorage] {boolean}
- * @returns {Promise<{ session: Session, userExists: boolean }>}
+ * @param [options.idb] {IDBFactory}   first-party IndexedDB for the PUK
+ *   roster-epoch pin
+ * @param [options.onPukRotated] {function}   persists a roster-rotated PUK
+ *   into this client's client-key record (supplied by the login path, which
+ *   holds the unlock secret)
+ * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 async function sessionFromKeyringHit({
   found,
   type,
   email,
   remoteDirectStorage = false,
-  provisionStorage = true
+  provisionStorage = true,
+  idb,
+  onPukRotated
 }: {
   found: KeyringFetchResult
   type: 'passphrase' | 'passkey'
   email?: string
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
-}): Promise<{ session: Session; userExists: boolean }> {
+  idb?: IDBFactory
+  onPukRotated?: (puk: Puk) => Promise<void>
+}): Promise<{ session: Session | null; userExists: boolean }> {
+  if (!found.clientKeys) {
+    // The account was located (the keyring record exists) but this client
+    // holds no key set for it: the passphrase can no longer reconstruct the
+    // account. The caller surfaces the not-enrolled state.
+    return { session: null, userExists: true }
+  }
   const { session, userExists } = await initSessionFromSeed({
-    seed: found.seed,
+    seed: found.clientKeys.clientSeed,
+    puk: found.clientKeys.puk,
+    webvhUpdateKeys: found.clientKeys.webvhUpdateKeys,
+    persistClientKeys: found.persistClientKeys,
+    accountPointer: found.pointer,
     email: email ?? found.email,
     remoteDirectStorage,
-    provisionStorage
+    provisionStorage,
+    idb,
+    onPukRotated
   })
-  if (session.user.id !== found.controller) {
+  // The local key set must have been bound for THIS account: an enrolled
+  // client's record carries the controller it was bound under; a legacy
+  // record (pre-enrollment) was necessarily written by the first client,
+  // whose own did:key is the controller. Either way a mismatch means the
+  // keyring record was swapped for another account's (or the key set is
+  // foreign) -- refuse rather than proceed under the wrong identity.
+  const boundController = found.clientKeys.controller ?? session.user.id
+  if (boundController !== found.controller) {
     // A corrupt record under the correct unlock Space: the session is
     // discarded, so settle its fired provisioning promise rather than leave it
     // an unhandled rejection if it also fails.
@@ -272,8 +523,11 @@ async function sessionFromKeyringHit({
       )
     })
   }
-  // The profile object is plain; stamp the unlock method that produced this
-  // session so Settings can backfill the registry without the secret.
+  // The profile object is plain; stamp the account controller the record was
+  // bound under (recovery-code issuance re-states it in the records it
+  // mints) and the unlock method that produced this session so Settings can
+  // backfill the registry without the secret.
+  session.profile.accountController = found.controller
   session.profile.unlockMethod = {
     type,
     unlockSpaceId: found.unlockSpaceId,
@@ -287,13 +541,15 @@ async function sessionFromKeyringHit({
  * picker scopes to this RP's discoverable credentials), derives the unlock
  * identity from the PRF output under the passkey KDF, and resolves it through
  * the keyring exactly like the passphrase path -- the two differ only in the
- * secret and its KDF. The email (absent from any login form here) is
- * recovered from the keyring record when one was bound.
+ * secret and its KDF, including the "located, not enrolled" state
+ * (`{ session: null, userExists: true }`) on a client holding no key set.
+ * The email (absent from any login form here) is recovered from the keyring
+ * record when one was bound.
  *
  * Ceremony failures propagate as the typed errors from `src/lib/passkey.ts`
  * (`PasskeyCancelledError`, `PasskeyPrfUnsupportedError`); a keyring miss --
  * a passkey with no bound wallet, e.g. one orphaned by a revocation --
- * returns `{ session: null, userExists: false }`. `fetchKeyringSeed`
+ * returns `{ session: null, userExists: false }`. `fetchKeyring`
  * rethrows when the remote could not be reached, so callers'
  * storage-unreachable handling fires rather than misreading it as "no
  * account".
@@ -322,7 +578,7 @@ export async function loginWithPasskey({
 } = {}): Promise<{ session: Session | null; userExists: boolean }> {
   const { prfOutput } = await assertPasskeyPrf({ signal })
 
-  const found = await fetchKeyringSeed({
+  const found = await fetchKeyring({
     secret: prfOutput,
     kdf: PASSKEY_KDF,
     idb,
@@ -336,6 +592,11 @@ export async function loginWithPasskey({
     found,
     type: 'passkey',
     remoteDirectStorage,
-    provisionStorage
+    provisionStorage,
+    idb,
+    // A roster rotation adopted at login is persisted into this client's
+    // client-key record, so the next login starts from the rotated PUK.
+    onPukRotated: async puk =>
+      updateClientKeyPuk({ secret: prfOutput, kdf: PASSKEY_KDF, puk, idb })
   })
 }
