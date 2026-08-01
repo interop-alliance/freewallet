@@ -1,6 +1,6 @@
 /**
  * "Shared collections" settings panel. For each encrypted standard collection
- * (the `WALLET_STANDARD_COLLECTIONS` entries carrying an `encryption` marker),
+ * (the `WALLET_STANDARD_COLLECTIONS` entries carrying an `encryption` descriptor),
  * it lists the readers the collection is currently shared with -- their
  * controller DID (or key id), the grant's expiry, and a "Remove access" action.
  *
@@ -12,7 +12,7 @@
  * plainly.
  *
  * There is deliberately no "add share" action here. A share is initiated from
- * the consent screen of a `urn:was:shared-collection` capability request (a
+ * the consent screen of a `https://w3id.org/byoe#shared-collection` capability request (a
  * connected app asking, over CHAPI, to read and decrypt one of these
  * collections); this panel is where the resulting grant is reviewed and
  * removed.

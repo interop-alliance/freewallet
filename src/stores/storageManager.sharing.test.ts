@@ -1,7 +1,7 @@
 /**
  * Unit tests for StorageManager's multi-recipient collection sharing surface:
  * `shareCollection` / `unshareCollection` / `listCollectionShares`, plus the
- * transparent unknown-epoch marker refresh on `listCredentials`.
+ * transparent unknown-epoch descriptor refresh on `listCredentials`.
  *
  * The remote WAS store is a structural fake -- an in-memory Collection
  * Description with a compare-and-swap etag (so the real `initRecipients` /
@@ -9,7 +9,7 @@
  * a `collectionEncryption` served from that same description, and a `revoke`
  * recorder on the Space handle. The local store is a real BrowserStore on
  * memory RxDB, and the ciphers are real EDV codecs over freshly generated
- * X25519 keys, so an epoch written under one marker really fails to decrypt
+ * X25519 keys, so an epoch written under one descriptor really fails to decrypt
  * under a stale one.
  *
  * @vitest-environment node
@@ -76,12 +76,12 @@ async function generateKey(): Promise<{
 
 /**
  * A CAS-backed in-memory `Collection`: one Collection Description with an
- * `encryption` marker and a monotonic version counter used as the compare-and-
+ * `encryption` descriptor and a monotonic version counter used as the compare-and-
  * swap etag, so the real recipient operations run their real write path.
  */
 function makeFakeCollection(collectionId: string): {
   collection: Collection
-  marker(): CollectionEncryption
+  descriptor(): CollectionEncryption
 } {
   let version = 0
   let description: {
@@ -105,7 +105,7 @@ function makeFakeCollection(collectionId: string): {
   }
   return {
     collection: fake as unknown as Collection,
-    marker: () => description.encryption
+    descriptor: () => description.encryption
   }
 }
 
@@ -113,7 +113,7 @@ function makeFakeCollection(collectionId: string): {
  * A structural fake of WASRemoteStore over CAS-backed collections and a
  * revoke-recording Space handle. `collectionEncryption` and `collectionHandle`
  * share the same per-collection instance, so a recipient op through the handle
- * is visible to a later marker read.
+ * is visible to a later descriptor read.
  */
 function makeFakeRemote(): {
   remoteStore: WASRemoteStore
@@ -163,13 +163,13 @@ function makeFakeRemote(): {
     spaceId,
     spaceUrl,
     async collectionEncryption({ collectionId }: { collectionId: string }) {
-      return collection(collectionId).marker()
+      return collection(collectionId).descriptor()
     },
     async ensureEncryptedCollection({ id }: { id: string }) {
       // The fake collection is declared `edv` from birth, so this mirrors the
-      // real method's "already encrypted" return: the current marker (with any
+      // real method's "already encrypted" return: the current descriptor (with any
       // epochs), never re-declaring.
-      return collection(id).marker()
+      return collection(id).descriptor()
     },
     collectionHandle({ collectionId }: { collectionId: string }) {
       return collection(collectionId).collection
@@ -234,12 +234,12 @@ function makeFakeRemote(): {
 
 /**
  * Builds the encrypted-collection ciphers over the owner's keys and the given
- * per-collection markers (keyed by WAS collection id), mirroring what
+ * per-collection descriptors (keyed by WAS collection id), mirroring what
  * StorageManager builds internally.
  */
 async function buildCiphers(
   owner: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver },
-  markers: Record<string, CollectionEncryption>
+  descriptors: Record<string, CollectionEncryption>
 ): Promise<Record<string, DocCipher>> {
   const specs: Array<[string, string]> = [
     ['privateCredentials', 'private-credentials'],
@@ -252,7 +252,7 @@ async function buildCiphers(
         keyAgreementKey: owner.keyAgreementKey,
         keyResolver: owner.keyResolver,
         collectionId: id,
-        encryption: markers[id]
+        encryption: descriptors[id]
       })
     ])
   )
@@ -315,10 +315,12 @@ function makeProfile(
 }
 
 /**
- * The JWE-recipient kids of a marker's current epoch roster.
+ * The JWE-recipient kids of a descriptor's current epoch roster.
  */
-function currentEpochKids(marker: CollectionEncryption): string[] {
-  const epoch = marker.epochs?.find(entry => entry.id === marker.currentEpoch)
+function currentEpochKids(descriptor: CollectionEncryption): string[] {
+  const epoch = descriptor.epochs?.find(
+    entry => entry.id === descriptor.currentEpoch
+  )
   return (epoch?.recipients ?? []).map(recipient => recipient.header.kid)
 }
 
@@ -342,10 +344,10 @@ describe('StorageManager.shareCollection', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
 
-    const { marker } = await storage.shareCollection({
+    const { descriptor } = await storage.shareCollection({
       profile: makeProfile(owner, zcapClient),
       user,
       collectionId: 'private-credentials',
@@ -355,9 +357,9 @@ describe('StorageManager.shareCollection', () => {
 
     // Read axis: the first epoch exists, and both the owner (recipient zero)
     // and the new reader are on its roster.
-    expect(marker.epochs).toHaveLength(1)
-    expect(marker.currentEpoch).toBeDefined()
-    expect(currentEpochKids(marker)).toEqual(
+    expect(descriptor.epochs).toHaveLength(1)
+    expect(descriptor.currentEpoch).toBeDefined()
+    expect(currentEpochKids(descriptor)).toEqual(
       expect.arrayContaining([
         owner.keyAgreementKey.id,
         reader.keyAgreementKey.id
@@ -396,18 +398,18 @@ describe('StorageManager.shareCollection', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
     const profile = makeProfile(owner, zcapClient)
 
-    const { marker: marker1 } = await storage.shareCollection({
+    const { descriptor: descriptor1 } = await storage.shareCollection({
       profile,
       user,
       collectionId: 'private-credentials',
       recipient: ownerRecipient({ keyAgreementKey: readerA.keyAgreementKey }),
       controller: 'did:key:z6MkReaderA'
     })
-    const { marker: marker2 } = await storage.shareCollection({
+    const { descriptor: descriptor2 } = await storage.shareCollection({
       profile,
       user,
       collectionId: 'private-credentials',
@@ -416,9 +418,9 @@ describe('StorageManager.shareCollection', () => {
     })
 
     // Adds are cheap: the current epoch is unchanged, but the roster grew.
-    expect(marker2.currentEpoch).toBe(marker1.currentEpoch)
-    expect(marker2.epochs).toHaveLength(1)
-    expect(currentEpochKids(marker2)).toEqual(
+    expect(descriptor2.currentEpoch).toBe(descriptor1.currentEpoch)
+    expect(descriptor2.epochs).toHaveLength(1)
+    expect(currentEpochKids(descriptor2)).toEqual(
       expect.arrayContaining([
         owner.keyAgreementKey.id,
         readerA.keyAgreementKey.id,
@@ -441,11 +443,11 @@ describe('StorageManager.unshareCollection', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
     const profile = makeProfile(owner, zcapClient)
 
-    const { marker: shared } = await storage.shareCollection({
+    const { descriptor: shared } = await storage.shareCollection({
       profile,
       user,
       collectionId: 'private-credentials',
@@ -475,7 +477,7 @@ describe('StorageManager.unshareCollection', () => {
     ).toBe(true)
   })
 
-  it('lists current shares from the marker roster minus the owner', async () => {
+  it('lists current shares from the descriptor roster minus the owner', async () => {
     const owner = await generateKey()
     const reader = await generateKey()
     const ciphers = await buildCiphers(owner, {})
@@ -487,7 +489,7 @@ describe('StorageManager.unshareCollection', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
 
     await storage.shareCollection({
@@ -518,7 +520,7 @@ describe('StorageManager.unshareCollection', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
 
     const { zcap } = await storage.shareCollection({
@@ -632,7 +634,7 @@ describe('StorageManager.revokeAppGrants', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
     const past = new Date(Date.now() - 1_000_000).toISOString()
@@ -683,7 +685,7 @@ describe('StorageManager.revokeAppGrants', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
@@ -722,7 +724,7 @@ describe('StorageManager.revokeAppGrants', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
@@ -756,7 +758,7 @@ describe('StorageManager.revokeAppGrants', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
@@ -783,7 +785,7 @@ describe('StorageManager.revokeAppGrants', () => {
       localStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
 
     const outcome = await storage.revokeAppGrants({
@@ -807,16 +809,16 @@ describe('StorageManager.provisionAppCollection', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
 
-    const marker = await storage.provisionAppCollection({
+    const descriptor = await storage.provisionAppCollection({
       collectionId: 'app-docs',
       appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
     })
 
-    expect(marker.epochs).toHaveLength(1)
-    expect(currentEpochKids(marker)).toEqual(
+    expect(descriptor.epochs).toHaveLength(1)
+    expect(currentEpochKids(descriptor)).toEqual(
       expect.arrayContaining([owner.keyAgreementKey.id, app.keyAgreementKey.id])
     )
   })
@@ -832,13 +834,13 @@ describe('StorageManager.provisionAppCollection', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
     const appRecipient = ownerRecipient({
       keyAgreementKey: app.keyAgreementKey
     })
 
-    const marker1 = await storage.provisionAppCollection({
+    const descriptor1 = await storage.provisionAppCollection({
       collectionId: 'app-docs',
       appRecipient
     })
@@ -851,13 +853,13 @@ describe('StorageManager.provisionAppCollection', () => {
     })
     // Reconnect: the app is escrowed back in (add, not a rotation, so the
     // roster grows but the current epoch is the post-revoke one).
-    const marker2 = await storage.provisionAppCollection({
+    const descriptor2 = await storage.provisionAppCollection({
       collectionId: 'app-docs',
       appRecipient
     })
 
-    expect(marker1.currentEpoch).toBeDefined()
-    expect(currentEpochKids(marker2)).toEqual(
+    expect(descriptor1.currentEpoch).toBeDefined()
+    expect(currentEpochKids(descriptor2)).toEqual(
       expect.arrayContaining([owner.keyAgreementKey.id, app.keyAgreementKey.id])
     )
   })
@@ -873,24 +875,24 @@ describe('StorageManager.provisionAppCollection', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
     const appRecipient = ownerRecipient({
       keyAgreementKey: app.keyAgreementKey
     })
 
-    const marker1 = await storage.provisionAppCollection({
+    const descriptor1 = await storage.provisionAppCollection({
       collectionId: 'app-docs',
       appRecipient
     })
-    const marker2 = await storage.provisionAppCollection({
+    const descriptor2 = await storage.provisionAppCollection({
       collectionId: 'app-docs',
       appRecipient
     })
 
-    // No rotation, no new epoch: the marker is unchanged.
-    expect(marker2.currentEpoch).toBe(marker1.currentEpoch)
-    expect(collection('app-docs').marker().epochs).toHaveLength(1)
+    // No rotation, no new epoch: the descriptor is unchanged.
+    expect(descriptor2.currentEpoch).toBe(descriptor1.currentEpoch)
+    expect(collection('app-docs').descriptor().epochs).toHaveLength(1)
   })
 })
 
@@ -930,7 +932,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
 
     await storage.provisionAppCollection({
@@ -962,10 +964,10 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
     expect(outcome).toEqual({ collections: 1, rotated: 1, failed: 0 })
     // Read axis: the app is off the new current epoch; the owner remains.
-    const marker = await remoteStore.collectionEncryption({
+    const descriptor = await remoteStore.collectionEncryption({
       collectionId: 'app-docs'
     })
-    expect(currentEpochKids(marker!)).toEqual([owner.keyAgreementKey.id])
+    expect(currentEpochKids(descriptor!)).toEqual([owner.keyAgreementKey.id])
     // Pull axis: the recorded grant was revoked.
     expect((revoked as Array<{ id: string }>).map(zcap => zcap.id)).toContain(
       'z-app-docs'
@@ -982,7 +984,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
 
     const future = new Date(Date.now() + 1_000_000).toISOString()
@@ -1024,21 +1026,21 @@ describe('StorageManager.decryptCollectionResource (app collection)', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
 
-    const marker = await storage.provisionAppCollection({
+    const descriptor = await storage.provisionAppCollection({
       collectionId: 'app-docs',
       appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
     })
 
     // A document written under the current epoch (the owner is recipient zero,
-    // so a cipher built from the marker over the owner's keys can write it).
+    // so a cipher built from the descriptor over the owner's keys can write it).
     const ownerCipher = await createEdvDocCipher({
       keyAgreementKey: owner.keyAgreementKey,
       keyResolver: owner.keyResolver,
       collectionId: 'app-docs',
-      encryption: marker
+      encryption: descriptor
     })
     const doc = { title: 'App note', body: 'hello' }
     const { envelope } = await ownerCipher.encrypt({
@@ -1062,7 +1064,7 @@ describe('StorageManager.decryptCollectionResource (app collection)', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: {}
+      descriptors: {}
     })
 
     // A well-formed EDV envelope shape, but the collection was never provisioned
@@ -1082,7 +1084,7 @@ describe('StorageManager.decryptCollectionResource (app collection)', () => {
 })
 
 describe('StorageManager unknown-epoch refresh', () => {
-  it('re-reads the marker and returns a credential written under a newer epoch', async () => {
+  it('re-reads the descriptor and returns a credential written under a newer epoch', async () => {
     const owner = await generateKey()
     const extra = await generateKey()
     const { remoteStore } = makeFakeRemote()
@@ -1091,7 +1093,7 @@ describe('StorageManager unknown-epoch refresh', () => {
     const collectionHandle = remoteStore.collectionHandle({
       collectionId: 'private-credentials'
     })
-    const marker1 = await initRecipients({
+    const descriptor1 = await initRecipients({
       collection: collectionHandle,
       recipients: [
         ownerRecipient({ keyAgreementKey: owner.keyAgreementKey }),
@@ -1100,9 +1102,9 @@ describe('StorageManager unknown-epoch refresh', () => {
     })
 
     // StorageManager (and the local store) build ciphers from the STALE
-    // marker 1.
+    // descriptor 1.
     const ciphers = await buildCiphers(owner, {
-      'private-credentials': marker1
+      'private-credentials': descriptor1
     })
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
@@ -1110,19 +1112,19 @@ describe('StorageManager unknown-epoch refresh', () => {
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      markers: { 'private-credentials': marker1 }
+      descriptors: { 'private-credentials': descriptor1 }
     })
 
     // A rekey rotates the fake collection to epoch 2 (emitting no change feed
     // entry): removing the extra reader leaves the owner alone on the new
     // epoch.
-    const marker2 = await removeRecipient({
+    const descriptor2 = await removeRecipient({
       collection: collectionHandle,
       space: remoteStore.spaceHandle(),
       recipientId: extra.keyAgreementKey.id!,
       revoke: []
     })
-    expect(marker2.currentEpoch).not.toBe(marker1.currentEpoch)
+    expect(descriptor2.currentEpoch).not.toBe(descriptor1.currentEpoch)
 
     // A credential is written locally under epoch 2 (as replication would land
     // it), which the stale epoch-1 cipher cannot route.
@@ -1130,14 +1132,14 @@ describe('StorageManager unknown-epoch refresh', () => {
       keyAgreementKey: owner.keyAgreementKey,
       keyResolver: owner.keyResolver,
       collectionId: 'private-credentials',
-      encryption: marker2
+      encryption: descriptor2
     })
     const credential = makeCredential('Alice')
     const cid = await cidFrom({ doc: credential })
     const { id, envelope, epoch } = await epoch2Cipher.encrypt({
       data: credential as unknown as Json
     })
-    expect(epoch).toBe(marker2.currentEpoch)
+    expect(epoch).toBe(descriptor2.currentEpoch)
     await localStore.rxCollection('privateCredentials').insert({
       id,
       updatedAt: new Date().toISOString(),
@@ -1146,13 +1148,13 @@ describe('StorageManager unknown-epoch refresh', () => {
       data: envelope
     })
 
-    // listCredentials transparently refreshes the marker from the fake remote,
+    // listCredentials transparently refreshes the descriptor from the fake remote,
     // rebuilds the cipher, and returns the credential.
     const listed = await storage.listCredentials()
     expect(listed).toEqual([{ cid, vc: credential }])
   })
 
-  it('remote-direct: refreshes the marker and returns a fresh-epoch credential', async () => {
+  it('remote-direct: refreshes the descriptor and returns a fresh-epoch credential', async () => {
     const owner = await generateKey()
     const extra = await generateKey()
     const { remoteStore, seedResource } = makeFakeRemote()
@@ -1160,7 +1162,7 @@ describe('StorageManager unknown-epoch refresh', () => {
     const collectionHandle = remoteStore.collectionHandle({
       collectionId: 'private-credentials'
     })
-    const marker1 = await initRecipients({
+    const descriptor1 = await initRecipients({
       collection: collectionHandle,
       recipients: [
         ownerRecipient({ keyAgreementKey: owner.keyAgreementKey }),
@@ -1168,9 +1170,9 @@ describe('StorageManager unknown-epoch refresh', () => {
       ]
     })
 
-    // The remote-direct popup backend builds ciphers from the STALE marker 1.
+    // The remote-direct popup backend builds ciphers from the STALE descriptor 1.
     const ciphers = await buildCiphers(owner, {
-      'private-credentials': marker1
+      'private-credentials': descriptor1
     })
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
@@ -1179,11 +1181,11 @@ describe('StorageManager unknown-epoch refresh', () => {
       ciphers,
       remoteDirect: true,
       vaultKeys: owner,
-      markers: { 'private-credentials': marker1 }
+      descriptors: { 'private-credentials': descriptor1 }
     })
 
     // A rekey rotates the collection to epoch 2 (owner alone).
-    const marker2 = await removeRecipient({
+    const descriptor2 = await removeRecipient({
       collection: collectionHandle,
       space: remoteStore.spaceHandle(),
       recipientId: extra.keyAgreementKey.id!,
@@ -1196,7 +1198,7 @@ describe('StorageManager unknown-epoch refresh', () => {
       keyAgreementKey: owner.keyAgreementKey,
       keyResolver: owner.keyResolver,
       collectionId: 'private-credentials',
-      encryption: marker2
+      encryption: descriptor2
     })
     const credential = makeCredential('Alice')
     const cid = await cidFrom({ doc: credential })
@@ -1209,7 +1211,7 @@ describe('StorageManager unknown-epoch refresh', () => {
       body: envelope
     })
 
-    // The remote-direct listCredentials refreshes the marker, rebuilds the
+    // The remote-direct listCredentials refreshes the descriptor, rebuilds the
     // backend's cipher via setCiphers, and re-reads -- returning the fresh row.
     const listed = await storage.listCredentials()
     expect(listed).toEqual([{ cid, vc: credential }])

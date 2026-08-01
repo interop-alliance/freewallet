@@ -13,7 +13,7 @@
  * monospace style so it cannot be spoofed by the reason. Display-only --
  * approval is the single Continue button on the parent page.
  *
- * A share grant (`urn:was:shared-collection`) is the strongest thing this
+ * A share grant (`https://w3id.org/byoe#shared-collection`) is the strongest thing this
  * panel can show and is rendered unmistakably differently: a heavier border
  * and a filled callout that says the grant is read AND decrypt, that it covers
  * everything already stored in the collection, and -- pre-stated, before

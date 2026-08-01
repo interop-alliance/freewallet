@@ -86,7 +86,7 @@ test('login VPR provisions a collection and returns Space-rooted grants', async 
             allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
             controller: RP_DID,
             invocationTarget: {
-              type: 'urn:was:collection',
+              type: 'https://w3id.org/byoe#collection',
               name: 'example-app-data'
             }
           },
@@ -95,7 +95,7 @@ test('login VPR provisions a collection and returns Space-rooted grants', async 
             reason: 'Example App reads your wallet Space.',
             allowedAction: ['GET', 'HEAD', 'PUT'],
             controller: RP_DID,
-            invocationTarget: { type: 'urn:was:space' }
+            invocationTarget: { type: 'https://w3id.org/byoe#space' }
           }
         ]
       }
@@ -188,7 +188,7 @@ test('public-collection VPR provisions a world-readable collection', async ({
             allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
             controller: RP_DID,
             invocationTarget: {
-              type: 'urn:was:public-collection',
+              type: 'https://w3id.org/byoe#public-collection',
               name: 'example-app-public'
             }
           }

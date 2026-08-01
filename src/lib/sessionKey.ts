@@ -409,7 +409,7 @@ function pukEpochPinKey(spaceId: string): string {
 /**
  * Pins the latest-seen PUK roster epoch for an account -- the continuity
  * prior beside the account-pointer pin. The roster lives as an opaque
- * resource the server enforces no marker invariants on, so a served roster
+ * resource the server enforces no descriptor invariants on, so a served roster
  * whose epochs no longer contain (or precede) the pinned epoch is refused as
  * a rollback rather than followed (see `@interop/wallet-core/keys`). Plaintext
  * local state: an epoch id is public key material, not a secret.

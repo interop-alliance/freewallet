@@ -94,10 +94,10 @@ describe('mintAppKeyCredential', () => {
       'https://www.w3.org/2018/credentials/v1',
       {
         '@protected': true,
-        AppKeyCredential: 'urn:was:AppKeyCredential',
+        AppKeyCredential: 'https://w3id.org/byoe#AppKeyCredential',
         TextEditorAppKey: 'urn:text-editor:vocab#TextEditorAppKey',
-        seed: 'urn:was:seed',
-        origin: 'urn:was:origin',
+        seed: 'https://w3id.org/byoe#seed',
+        origin: 'https://w3id.org/byoe#origin',
         name: 'https://schema.org/name',
         description: 'https://schema.org/description'
       }

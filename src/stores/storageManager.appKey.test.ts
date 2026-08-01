@@ -85,7 +85,7 @@ async function makeStorage(): Promise<{ storage: StorageManager; user: User }> {
     localStore,
     ciphers,
     vaultKeys: { keyAgreementKey: key, keyResolver },
-    markers: {}
+    descriptors: {}
   })
   return { storage, user }
 }

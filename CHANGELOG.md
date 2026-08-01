@@ -85,13 +85,38 @@
 
 ### Changed
 
+- **BREAKING**: All BYOE-layer wire vocabulary moves from the retired
+  `urn:was:` / `urn:freewallet:vocab#` schemes to the shared
+  `https://w3id.org/byoe#` namespace: the app-key credential's marker type
+  and claim terms (`#AppKeyCredential` / `#seed` / `#origin`, now imported
+  from the published `byoe-context` package), the capability-descriptor
+  types matched by `processZcaps` (`#collection` / `#public-collection` /
+  `#shared-collection` / `#space`), and -- via the shared `composeVp`
+  default -- the response VP's embedded `#zcap` / `#appConnect` terms.
+  Token spellings and JSON keys are unchanged; matching is literal string
+  equality on both sides, so this lands in lockstep with the
+  `@interop/was-react` release carrying the app-side renames. Pre-release,
+  no migration path: test accounts re-provision.
+
+- The Collection Description's `encryption` member is now called an
+  **encryption descriptor** throughout (previously "marker"), following the
+  spec wording: identifiers (`localStorageDescriptorCache`,
+  `#refreshDescriptors`, the `descriptors` constructor option, the
+  `{ descriptor, zcap }` share return shape), prose, and the consumed
+  `@interop/wallet-core` `/descriptors` subpath and
+  `@interop/was-client` `/edv` descriptor-store exports. The app-key
+  credential marker type, the App Connect response marker, and the local
+  one-time-migration markers are unrelated senses and keep their names; the
+  `freewallet:collection-encryption:` localStorage keys are term-neutral
+  and unchanged.
+
 - **The account identity, unlock, and enrollment machinery now comes from
   `@interop/wallet-core`** instead of being maintained here: did:webvh
   hosting and its ZCap signing identities (`/webvh`), the per-user key and
   its wrap-set roster (`/keys`), the unlock derivation and unlock Space
   lifecycle (`/keyring`), the enrollment ceremony (`/enrollment`), recovery
-  codes (`/recovery`), the collection-encryption marker acquisition and its
-  unknown-epoch refresh policy (`/markers`), and the shared
+  codes (`/recovery`), the collection-encryption descriptor acquisition and
+  its unknown-epoch refresh policy (`/descriptors`), and the shared
   system-collection and resource names (`/space`). Behavior, wire formats,
   and stored records are unchanged --
   they are shared contracts now, so a second wallet reading the same account

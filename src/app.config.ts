@@ -46,7 +46,7 @@ export const RP_ZCAP_WRITE_TTL_MS =
   (Number(env.VITE_RP_ZCAP_WRITE_TTL_HOURS) || 168) * 60 * 60 * 1000
 
 // Lifetime of the read-only capability delegated by a *share* grant (a
-// `urn:was:shared-collection` request, which also escrows the grantee into the
+// `https://w3id.org/byoe#shared-collection` request, which also escrows the grantee into the
 // collection's key-epoch roster). Default 365 days: deliberately long, because
 // expiry is the wrong removal mechanism here. The two axes of a share come
 // apart at expiry -- the pull zcap dies but the epoch escrow does not, leaving
@@ -71,7 +71,7 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
   id: string
   name: string
   isPublic?: boolean
-  // Declares the collection's client-side encryption marker on the server,
+  // Declares the collection's client-side encryption descriptor on the server,
   // making it self-describing (a future client/delegate can discover that it is
   // encrypted and supply its own keys). Set-once / immutable on the server.
   encryption?: { scheme: 'edv' }
@@ -80,7 +80,7 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
   // `@interop/wallet-core/space` so this list matches Freewallet mobile's Space
   // layout byte-for-byte. The RxDB `key` and the friendly display `name` are
   // local (the library spec does not carry them); the local `encryption`
-  // marker's `{ scheme: 'edv' }` object is derived from the spec's `'edv'` /
+  // descriptor's `{ scheme: 'edv' }` object is derived from the spec's `'edv'` /
   // `'plaintext'` encryption string.
   {
     key: 'privateCredentials',
