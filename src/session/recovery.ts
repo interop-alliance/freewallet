@@ -72,7 +72,7 @@ import {
 } from '@interop/wallet-core/keyring'
 import {
   addPukRosterRecipient,
-  pukRosterMarkerStore,
+  pukRosterDescriptorStore,
   pukRosterRecipientResolver,
   pukVaultKeys,
   readPukRoster,
@@ -581,14 +581,14 @@ async function escrowPukForCollections({
       continue
     }
     try {
-      const marker = await remoteStore.collectionEncryption({
+      const descriptor = await remoteStore.collectionEncryption({
         collectionId: spec.id
       })
-      if (!marker) {
+      if (!descriptor) {
         // Not declared encrypted server-side (e.g. never provisioned).
         continue
       }
-      if (!marker.epochs?.length || !marker.currentEpoch) {
+      if (!descriptor.epochs?.length || !descriptor.currentEpoch) {
         // No epoch roster yet: the collection's envelopes are pre-epoch,
         // sealed single-recipient to the old PUK's KAK -- which, because the
         // PUK IS the epoch construction, is byte-for-byte an epoch-`oldPuk`
@@ -601,8 +601,8 @@ async function escrowPukForCollections({
         })
         continue
       }
-      const current = marker.epochs.find(
-        epoch => epoch.id === marker.currentEpoch
+      const current = descriptor.epochs.find(
+        epoch => epoch.id === descriptor.currentEpoch
       )
       if (
         current?.recipients.some(entry => entry.header.kid === newRecipient.id)
@@ -923,7 +923,7 @@ export async function recoverAccountWithCode({
   // epoch (owner: the spent code's KAK, whose wraps stand since issuance),
   // read the standing PUK, then the mandatory rotation off the spent code --
   // it is presumed compromised the moment it is typed.
-  const rosterStore = pukRosterMarkerStore({
+  const rosterStore = pukRosterDescriptorStore({
     storageServerUrl: pointer.host,
     zcapClient: newZcapClient,
     spaceId: pointer.spaceId

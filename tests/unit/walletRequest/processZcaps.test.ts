@@ -26,14 +26,14 @@ const collectionDetail: ICapabilityQueryDetail = {
   reason: 'Example App stores your documents in your wallet storage.',
   allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
   controller: RP_DID,
-  invocationTarget: { type: 'urn:was:collection', name: 'example-app-data' }
+  invocationTarget: { type: 'https://w3id.org/byoe#collection', name: 'example-app-data' }
 }
 
 const spaceDetail: ICapabilityQueryDetail = {
   referenceId: 'space-read',
   allowedAction: ['GET', 'HEAD', 'PUT'],
   controller: RP_DID,
-  invocationTarget: { type: 'urn:was:space' }
+  invocationTarget: { type: 'https://w3id.org/byoe#space' }
 }
 
 // A write request on a standard wallet collection (via descriptor object).
@@ -41,7 +41,7 @@ const standardCollectionDetail: ICapabilityQueryDetail = {
   referenceId: 'private-write',
   allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE'],
   controller: RP_DID,
-  invocationTarget: { type: 'urn:was:collection', name: 'private-credentials' }
+  invocationTarget: { type: 'https://w3id.org/byoe#collection', name: 'private-credentials' }
 }
 
 // A write request on a standard wallet collection, expressed as a plain URL.
@@ -65,7 +65,7 @@ const idCollectionDetail: ICapabilityQueryDetail = {
   referenceId: 'id-write',
   allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE'],
   controller: RP_DID,
-  invocationTarget: { type: 'urn:was:collection', name: 'id' }
+  invocationTarget: { type: 'https://w3id.org/byoe#collection', name: 'id' }
 }
 
 // A write request on the `key-map` collection (the private key-id map).
@@ -73,7 +73,7 @@ const keyMapCollectionDetail: ICapabilityQueryDetail = {
   referenceId: 'key-map-write',
   allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE'],
   controller: RP_DID,
-  invocationTarget: { type: 'urn:was:collection', name: 'key-map' }
+  invocationTarget: { type: 'https://w3id.org/byoe#collection', name: 'key-map' }
 }
 
 // A write request on the DID document resource itself (plain URL).
@@ -91,7 +91,7 @@ const publicCollectionDetail: ICapabilityQueryDetail = {
   allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
   controller: RP_DID,
   invocationTarget: {
-    type: 'urn:was:public-collection',
+    type: 'https://w3id.org/byoe#public-collection',
     name: 'example-app-public'
   }
 }
@@ -108,7 +108,7 @@ const shareDetail: ICapabilityQueryDetail = {
   referenceId: 'shared-credentials',
   controller: '',
   invocationTarget: {
-    type: 'urn:was:shared-collection',
+    type: 'https://w3id.org/byoe#shared-collection',
     name: 'private-credentials'
   }
 }
@@ -236,7 +236,7 @@ beforeAll(async () => {
         expires: expires?.toISOString()
       }
       delegated.push(zcap)
-      return { marker: { scheme: 'edv' }, zcap }
+      return { descriptor: { scheme: 'edv' }, zcap }
     }
   }
 
@@ -401,7 +401,7 @@ describe('resolveInvocationTarget', () => {
 
   it('resolves a named RP collection and flags provisioning', () => {
     const target = resolveInvocationTarget({
-      descriptor: { type: 'urn:was:collection', name: 'example-app-data' },
+      descriptor: { type: 'https://w3id.org/byoe#collection', name: 'example-app-data' },
       spaceUrl: SPACE_URL
     })
     expect(target).toMatchObject({
@@ -416,7 +416,7 @@ describe('resolveInvocationTarget', () => {
 
   it('grants an existing standard collection without provisioning', () => {
     const target = resolveInvocationTarget({
-      descriptor: { type: 'urn:was:collection', name: 'public-credentials' },
+      descriptor: { type: 'https://w3id.org/byoe#collection', name: 'public-credentials' },
       spaceUrl: SPACE_URL
     })
     expect(target).toMatchObject({
@@ -428,7 +428,7 @@ describe('resolveInvocationTarget', () => {
 
   it('flags an encrypted standard collection', () => {
     const target = resolveInvocationTarget({
-      descriptor: { type: 'urn:was:collection', name: 'private-credentials' },
+      descriptor: { type: 'https://w3id.org/byoe#collection', name: 'private-credentials' },
       spaceUrl: SPACE_URL
     })
     expect(target).toMatchObject({
@@ -442,7 +442,7 @@ describe('resolveInvocationTarget', () => {
     for (const name of ['id', 'key-map']) {
       expect(
         resolveInvocationTarget({
-          descriptor: { type: 'urn:was:collection', name },
+          descriptor: { type: 'https://w3id.org/byoe#collection', name },
           spaceUrl: SPACE_URL
         })
       ).toMatchObject({
@@ -457,7 +457,7 @@ describe('resolveInvocationTarget', () => {
   it('rejects an invalid collection name', () => {
     expect(
       resolveInvocationTarget({
-        descriptor: { type: 'urn:was:collection', name: 'Bad_Name!' },
+        descriptor: { type: 'https://w3id.org/byoe#collection', name: 'Bad_Name!' },
         spaceUrl: SPACE_URL
       }).satisfiable
     ).toBe(false)
@@ -466,7 +466,7 @@ describe('resolveInvocationTarget', () => {
   it('resolves the whole Space', () => {
     expect(
       resolveInvocationTarget({
-        descriptor: { type: 'urn:was:space' },
+        descriptor: { type: 'https://w3id.org/byoe#space' },
         spaceUrl: SPACE_URL
       })
     ).toMatchObject({
@@ -479,7 +479,7 @@ describe('resolveInvocationTarget', () => {
 
   it('refuses an unknown descriptor type', () => {
     const target = resolveInvocationTarget({
-      descriptor: { type: 'urn:was:unknown' },
+      descriptor: { type: 'https://w3id.org/byoe#unknown' },
       spaceUrl: SPACE_URL
     })
     expect(target.satisfiable).toBe(false)
@@ -489,7 +489,7 @@ describe('resolveInvocationTarget', () => {
   it('resolves a public collection: plaintext, provisioned, isPublic', () => {
     const target = resolveInvocationTarget({
       descriptor: {
-        type: 'urn:was:public-collection',
+        type: 'https://w3id.org/byoe#public-collection',
         name: 'example-app-public'
       },
       spaceUrl: SPACE_URL
@@ -507,8 +507,8 @@ describe('resolveInvocationTarget', () => {
 
   it('never flags a non-public descriptor isPublic', () => {
     for (const descriptor of [
-      { type: 'urn:was:collection', name: 'example-app-data' },
-      { type: 'urn:was:space' }
+      { type: 'https://w3id.org/byoe#collection', name: 'example-app-data' },
+      { type: 'https://w3id.org/byoe#space' }
     ]) {
       expect(
         resolveInvocationTarget({ descriptor, spaceUrl: SPACE_URL }).isPublic
@@ -532,7 +532,7 @@ describe('resolveInvocationTarget', () => {
     ]) {
       expect(
         resolveInvocationTarget({
-          descriptor: { type: 'urn:was:public-collection', name },
+          descriptor: { type: 'https://w3id.org/byoe#public-collection', name },
           spaceUrl: SPACE_URL
         }).satisfiable
       ).toBe(false)
@@ -542,7 +542,7 @@ describe('resolveInvocationTarget', () => {
   it('resolves a share of an encrypted standard collection', () => {
     const target = resolveInvocationTarget({
       descriptor: {
-        type: 'urn:was:shared-collection',
+        type: 'https://w3id.org/byoe#shared-collection',
         name: 'private-credentials'
       },
       spaceUrl: SPACE_URL
@@ -560,12 +560,12 @@ describe('resolveInvocationTarget', () => {
   })
 
   it('resolves a share of every encrypted standard collection', () => {
-    // The rule is "any standard collection with an encryption marker", so the
+    // The rule is "any standard collection with an encryption descriptor", so the
     // contacts collections are shareable on the same terms as credentials.
     for (const name of ['wallet-activity', 'contacts', 'contacts-history']) {
       expect(
         resolveInvocationTarget({
-          descriptor: { type: 'urn:was:shared-collection', name },
+          descriptor: { type: 'https://w3id.org/byoe#shared-collection', name },
           spaceUrl: SPACE_URL
         })
       ).toMatchObject({ satisfiable: true, isShare: true, encrypted: true })
@@ -585,7 +585,7 @@ describe('resolveInvocationTarget', () => {
     ]) {
       expect(
         resolveInvocationTarget({
-          descriptor: { type: 'urn:was:shared-collection', name },
+          descriptor: { type: 'https://w3id.org/byoe#shared-collection', name },
           spaceUrl: SPACE_URL
         }).satisfiable
       ).toBe(false)
@@ -594,9 +594,9 @@ describe('resolveInvocationTarget', () => {
 
   it('never flags an ordinary descriptor isShare', () => {
     for (const descriptor of [
-      { type: 'urn:was:collection', name: 'private-credentials' },
-      { type: 'urn:was:public-collection', name: 'example-app-public' },
-      { type: 'urn:was:space' }
+      { type: 'https://w3id.org/byoe#collection', name: 'private-credentials' },
+      { type: 'https://w3id.org/byoe#public-collection', name: 'example-app-public' },
+      { type: 'https://w3id.org/byoe#space' }
     ]) {
       expect(
         resolveInvocationTarget({ descriptor, spaceUrl: SPACE_URL }).isShare
@@ -613,13 +613,13 @@ describe('resolveInvocationTarget', () => {
   it('rejects an invalid public-collection name', () => {
     expect(
       resolveInvocationTarget({
-        descriptor: { type: 'urn:was:public-collection', name: 'Bad_Name!' },
+        descriptor: { type: 'https://w3id.org/byoe#public-collection', name: 'Bad_Name!' },
         spaceUrl: SPACE_URL
       }).satisfiable
     ).toBe(false)
     expect(
       resolveInvocationTarget({
-        descriptor: { type: 'urn:was:public-collection' },
+        descriptor: { type: 'https://w3id.org/byoe#public-collection' },
         spaceUrl: SPACE_URL
       }).satisfiable
     ).toBe(false)
@@ -631,7 +631,7 @@ describe('resolveGrant action handling', () => {
     const grant = resolveGrant({
       descriptor: {
         controller: RP_DID,
-        invocationTarget: { type: 'urn:was:collection', name: 'app-data' }
+        invocationTarget: { type: 'https://w3id.org/byoe#collection', name: 'app-data' }
       },
       spaceUrl: SPACE_URL
     })
@@ -759,7 +759,7 @@ describe('resolveGrant action vocabulary', () => {
     return {
       controller: RP_DID,
       allowedAction,
-      invocationTarget: { type: 'urn:was:collection', name: 'example-app-data' }
+      invocationTarget: { type: 'https://w3id.org/byoe#collection', name: 'example-app-data' }
     }
   }
 
@@ -810,7 +810,7 @@ describe('resolveGrant action vocabulary', () => {
       descriptor: {
         controller: RP_DID,
         allowedAction: ['PUT', 'DELETE'],
-        invocationTarget: { type: 'urn:was:space' }
+        invocationTarget: { type: 'https://w3id.org/byoe#space' }
       },
       spaceUrl: SPACE_URL
     })
@@ -1036,7 +1036,7 @@ describe('processZcaps', () => {
           allowedAction: ['GET', 'HEAD'],
           controller: RP_DID,
           invocationTarget: {
-            type: 'urn:was:public-collection',
+            type: 'https://w3id.org/byoe#public-collection',
             name: 'private-credentials'
           }
         }
@@ -1136,7 +1136,7 @@ describe('processZcaps', () => {
         {
           ...shareDetail,
           invocationTarget: {
-            type: 'urn:was:shared-collection',
+            type: 'https://w3id.org/byoe#shared-collection',
             name: 'public-credentials'
           }
         }

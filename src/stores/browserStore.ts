@@ -79,7 +79,7 @@ export class BrowserStore {
   // purgeable garbage: the row is likely fresh data written under an epoch the
   // cached Collection Description has not caught up to (a rekey emits no change
   // feed entry). They are counted separately, skipped, and NOT cached, so a
-  // caller can refresh the marker and re-read.
+  // caller can refresh the descriptor and re-read.
   #unknownEpochCredentials = 0
   #unknownEpochHistory = 0
   // Session-lifetime decrypt cache, keyed first by logical collection key and
@@ -90,7 +90,7 @@ export class BrowserStore {
   // content-derived hash of the JWE ciphertext, so it maps to exactly one
   // plaintext under ANY cipher that can decrypt it -- an envelope's content, and
   // therefore its content-derived id, is fixed once written. `setCiphers` may
-  // swap the injected ciphers (after a marker refresh or a share), but that only
+  // swap the injected ciphers (after a descriptor refresh or a share), but that only
   // widens which rows decrypt; it never changes the plaintext a given row id
   // yields, so the cached entries stay valid across a swap. Entries are dropped
   // when their row is removed and the cache is cleared on teardown; an insert
@@ -329,7 +329,7 @@ export class BrowserStore {
    * KAK) is collected in `undecryptableRowIds` -- purgeable garbage. A row whose
    * envelope names an UNKNOWN key epoch ({@link UnknownEpochError}) is collected
    * separately in `unknownEpochRowIds` and NOT cached: it is possibly-fresh data
-   * behind a stale marker, so a caller can refresh the marker (rebuild the cipher
+   * behind a stale descriptor, so a caller can refresh the descriptor (rebuild the cipher
    * via {@link setCiphers}) and re-read rather than deleting it.
    *
    * `fromEnvelope` distinguishes a decrypted envelope row from a plaintext
@@ -388,8 +388,8 @@ export class BrowserStore {
           entries.push({ rowId: id, data: plaintext, fromEnvelope: true })
         } catch (err) {
           if (err instanceof UnknownEpochError) {
-            // Possibly-fresh data behind a stale marker: skip it (uncached) so a
-            // marker refresh can pick it up, never purge it.
+            // Possibly-fresh data behind a stale descriptor: skip it (uncached) so a
+            // descriptor refresh can pick it up, never purge it.
             console.warn(
               `Skipping unknown-epoch "${logicalKey}" row "${id}":`,
               err
@@ -498,7 +498,7 @@ export class BrowserStore {
    * {@link listCredentials} call had to skip because their envelope named a key
    * epoch this instance's cipher does not know (its cached Collection
    * Description is likely stale). Unlike {@link undecryptableCredentials} these
-   * rows are not purged -- a caller refreshes the marker, rebuilds the cipher
+   * rows are not purged -- a caller refreshes the descriptor, rebuilds the cipher
    * via {@link setCiphers}, and re-reads.
    *
    * @returns {number}
@@ -519,7 +519,7 @@ export class BrowserStore {
 
   /**
    * Swaps the injected per-collection document ciphers -- used after a
-   * Collection Description marker refresh or a share/unshare rebuilds the
+   * Collection Description descriptor refresh or a share/unshare rebuilds the
    * ciphers under a new key epoch. The decrypt caches are deliberately kept:
    * a row id is the content-derived hash of its envelope, so it maps to exactly
    * one plaintext under any cipher that can decrypt it; a wider cipher set only
@@ -551,10 +551,10 @@ export class BrowserStore {
    * list/load/add/delete. The row id is returned so a caller can still target
    * (and remove) it even though its content cid is unknowable.
    *
-   * A row whose envelope names an UNKNOWN key epoch (its cached marker is
+   * A row whose envelope names an UNKNOWN key epoch (its cached descriptor is
    * likely stale, `UnknownEpochError`) is collected separately in
    * `unknownEpochRowIds` and NOT cached: it is possibly-fresh data behind a
-   * stale marker, not purgeable garbage, so a caller can refresh the marker and
+   * stale descriptor, not purgeable garbage, so a caller can refresh the descriptor and
    * re-read rather than deleting it.
    *
    * @returns {Promise<{ entries: Array<{ rowId: string; cid: string;
@@ -917,7 +917,7 @@ export class BrowserStore {
    * row), no cid-based dedupe needed.
    *
    * A row whose envelope will not decrypt under the current KAK is skipped, and
-   * an unknown-epoch row is skipped uncached for a marker refresh to pick up --
+   * an unknown-epoch row is skipped uncached for a descriptor refresh to pick up --
    * the shared {@link _decryptedRows} tolerance (and its decrypt cache) that the
    * credential and history reads use.
    *
@@ -1167,12 +1167,12 @@ export class BrowserStore {
    * `private-credentials` / `wallet-activity` were local-active but not yet
    * replicating) into EDV envelopes under their content-derived ids. Runs at
    * login before replication starts -- required, not just tidy: once a remote
-   * collection carries its encryption marker, the server rejects a plaintext
+   * collection carries its encryption descriptor, the server rejects a plaintext
    * content push (422), which would wedge the push cycle in retry.
    *
    * Only never-synced rows are touched (`version === 0`, the local
    * placeholder; a pulled row carries the server revision, >= 1) -- a legacy
-   * plaintext row replicated down from a pre-marker remote collection is left
+   * plaintext row replicated down from a pre-descriptor remote collection is left
    * as-is and handled by the tolerant read paths. The re-keyed original is
    * soft-deleted; its pushed tombstone targets a resource that never existed
    * remotely, which the server treats as an idempotent no-op. The original's

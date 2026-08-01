@@ -88,7 +88,7 @@ async function initLocalStore({
 
 /**
  * A fake DocCipher whose every encrypt surfaces a fixed `epoch` id (mimicking a
- * multi-recipient cipher writing under the marker's `currentEpoch`), so a test
+ * multi-recipient cipher writing under the descriptor's `currentEpoch`), so a test
  * can assert the remote-direct write stamped it as `WAS-Key-Epoch`.
  */
 function makeFakeEpochCipher(epoch: string): DocCipher {
@@ -363,7 +363,7 @@ describe('BrowserStore (encrypted collections)', () => {
 
   it('reads legacy plaintext rows through the tolerant read paths', async () => {
     const { localStore } = await initLocalStore({ ciphers: encryptedCiphers() })
-    // A plaintext activity row pulled from a pre-encryption-marker remote
+    // A plaintext activity row pulled from a pre-encryption-descriptor remote
     // collection: server revision >= 1, plaintext data.
     await localStore.rxCollection('walletActivity').insert({
       id: 'legacy-activity',
@@ -591,7 +591,7 @@ function makeEpochCipher(epoch: string): DocCipher {
 
 /**
  * A fake cipher whose `decrypt` always throws `UnknownEpochError` -- standing
- * in for a row stamped with a key epoch this cipher's cached marker has never
+ * in for a row stamped with a key epoch this cipher's cached descriptor has never
  * seen (a rekey emits no change-feed entry). `encrypt` still produces a normal
  * fake envelope, so a caller can seed rows with it.
  */
@@ -673,7 +673,7 @@ describe('BrowserStore (key epochs)', () => {
     const listed = await localStore.listCredentials()
 
     // The row is skipped, counted as unknown-epoch (fresh data behind a stale
-    // marker), and NOT as undecryptable garbage.
+    // descriptor), and NOT as undecryptable garbage.
     expect(listed).toHaveLength(0)
     expect(localStore.unknownEpochCredentials).toBe(1)
     expect(localStore.undecryptableCredentials).toBe(0)
@@ -1254,7 +1254,7 @@ describe('RemoteDirectStore', () => {
     })
     collections.set('privateCredentials', new Map([[id, envelope]]))
 
-    // A cipher that cannot route the envelope's epoch (a stale marker).
+    // A cipher that cannot route the envelope's epoch (a stale descriptor).
     const stale: DocCipher = {
       async encrypt() {
         throw new Error('unused')
@@ -1276,7 +1276,7 @@ describe('RemoteDirectStore', () => {
     expect(store.unknownEpochCredentials).toBe(1)
     expect(store.undecryptableCredentials).toBe(0)
 
-    // A marker refresh swaps in a cipher that can decrypt it; the row re-reads.
+    // A descriptor refresh swaps in a cipher that can decrypt it; the row re-reads.
     store.setCiphers({
       privateCredentials: good,
       walletActivity: makeFakeCipher()

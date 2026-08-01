@@ -29,8 +29,8 @@ import {
 } from '@interop/was-client'
 import {
   createEdvEncryption,
-  resourceMarkerStore,
-  type MarkerStore
+  resourceDescriptorStore,
+  type EncryptionDescriptorStore
 } from '@interop/was-client/edv'
 import { publicCredentialUrl as buildPublicCredentialUrl } from '@interop/wallet-core/space'
 import type { ControllerProfile, User } from '@/types/auth'
@@ -230,10 +230,10 @@ export class WASRemoteStore {
   }
 
   /**
-   * Reads a standard collection's `encryption` marker (the widened
+   * Reads a standard collection's `encryption` descriptor (the widened
    * `CollectionEncryption` with its `epochs` / `currentEpoch` roster), or
-   * `undefined` when the collection is plaintext or has no marker. Network
-   * errors throw through: callers treat a marker fetch as best-effort and fall
+   * `undefined` when the collection is plaintext or has no descriptor. Network
+   * errors throw through: callers treat a descriptor fetch as best-effort and fall
    * back to a cached copy.
    *
    * @param options {object}
@@ -287,8 +287,8 @@ export class WASRemoteStore {
     // `ensureSpaceAndCollection`, which idempotently upserts the Space (with
     // this wallet's `Freewallet Space` name and controller) and then configures
     // the collection: an `'edv'` collection declares the set-once encryption
-    // marker (a late declaration on a pre-marker collection is allowed, so a
-    // re-run upgrades it in place), a `'plaintext'` collection is a marker-less
+    // descriptor (a late declaration on a pre-descriptor collection is allowed, so a
+    // re-run upgrades it in place), a `'plaintext'` collection is a descriptor-less
     // `force` upsert (running with the root capability, a 404 from the pre-merge
     // describe really means absent), and a public collection additionally gets a
     // collection-level world-read grant. The app-specific roster and its
@@ -334,11 +334,11 @@ export class WASRemoteStore {
             spaceName: 'Freewallet Space'
           })
         } catch (err) {
-          // An encrypted collection whose marker already carries key epochs
+          // An encrypted collection whose descriptor already carries key epochs
           // (a share, or a recovery escrow) refuses the bare `edv`
           // re-declaration: the PUT would drop the append-only epochs and
           // the server rejects it. A name-only configure merges the current
-          // description forward, re-stating the standing marker (epochs
+          // description forward, re-stating the standing descriptor (epochs
           // included) verbatim -- the idempotent form of "ensure it exists".
           if (encryption) {
             try {
@@ -450,19 +450,19 @@ export class WASRemoteStore {
   }
 
   /**
-   * Returns the marker store over the PUK wrap-set roster
-   * (`key-map/puk.json`): the `resourceMarkerStore` adapter, so the was-client
+   * Returns the descriptor store over the PUK wrap-set roster
+   * (`key-map/puk.json`): the `resourceDescriptorStore` adapter, so the was-client
    * recipient primitives read/CAS-write the roster through the seam. The
    * `plaintext` handle override skips the collection describe -- the roster is
    * read before/independently of the collection's description, and the
-   * `key-map` collection is provisioned plaintext for good (a marker resource
+   * `key-map` collection is provisioned plaintext for good (a descriptor resource
    * must not itself be EDV-encoded, or the store's write preconditions would
    * not be honored).
    *
-   * @returns {MarkerStore}
+   * @returns {EncryptionDescriptorStore}
    */
-  pukRosterStore(): MarkerStore {
-    return resourceMarkerStore({
+  pukRosterStore(): EncryptionDescriptorStore {
+    return resourceDescriptorStore({
       resource: this.was
         .space(this.spaceId)
         .collection(KEY_MAP_COLLECTION.id, { encryption: 'plaintext' })
@@ -577,14 +577,14 @@ export class WASRemoteStore {
 
   /**
    * Provisions an arbitrary (RP-requested) collection in this user's Space:
-   * always plaintext (no encryption marker) -- usable by a relying party
+   * always plaintext (no encryption descriptor) -- usable by a relying party
    * through its delegated zcap. By default it is not world-readable; with
    * `isPublic`, a collection-level `PublicCanRead` policy is set at
    * provisioning time, so anyone on the web can read it without
    * authorization (writes stay capability-only). Policy endpoints are
    * capability-only on the server, so only the wallet -- holding the space
    * root -- can set it. This is the `ensureUserCollections` pattern minus the
-   * encryption marker.
+   * encryption descriptor.
    *
    * @param options {object}
    * @param options.id {string}   the WAS collection id (validated by the caller)
@@ -626,13 +626,13 @@ export class WASRemoteStore {
   /**
    * Ensures an App Connect app-provisioned collection exists AND is declared
    * encrypted with the `'edv'` scheme, without ever clobbering an existing
-   * `encryption` marker (which may already carry a key-epoch roster). Reads the
+   * `encryption` descriptor (which may already carry a key-epoch roster). Reads the
    * description first: a missing collection or one with no encryption block is
-   * configured with the bare `{ scheme: 'edv' }` marker (a fresh create or a
+   * configured with the bare `{ scheme: 'edv' }` descriptor (a fresh create or a
    * late in-place declaration); a collection that already carries an encryption
    * block is left untouched so its epochs survive. Returns the current
-   * encryption marker after ensuring the declaration -- `undefined` when the
-   * collection was just declared and has no epochs yet, or the existing marker
+   * encryption descriptor after ensuring the declaration -- `undefined` when the
+   * collection was just declared and has no epochs yet, or the existing descriptor
    * (possibly with epochs) otherwise -- so the caller can decide whether to
    * initialize or extend the recipient roster.
    *
@@ -661,7 +661,7 @@ export class WASRemoteStore {
     }
     // Declare `'edv'` only when there is no encryption block to lose: a fresh
     // create (current === null) or a plaintext collection getting a late
-    // in-place declaration. Never re-send `encryption` when a marker already
+    // in-place declaration. Never re-send `encryption` when a descriptor already
     // exists -- `configure` merges the passed value forward, so a bare
     // `{ scheme: 'edv' }` would drop an existing epoch roster.
     if (!current || !current.encryption) {

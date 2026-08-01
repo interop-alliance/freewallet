@@ -50,9 +50,9 @@ import type { WASRemoteStore } from '@/stores/wasRemoteStore'
  * envelope/id/encryption logic lives in the injected {@link DocCipher} each
  * backend shares.
  *
- * The unknown-epoch counters and `setCiphers` are the marker-refresh contract:
+ * The unknown-epoch counters and `setCiphers` are the descriptor-refresh contract:
  * after a read reports unknown-epoch rows the facade rebuilds the ciphers under
- * a freshly fetched marker, swaps them in via `setCiphers`, and re-reads.
+ * a freshly fetched descriptor, swaps them in via `setCiphers`, and re-reads.
  */
 export interface SyncedCollectionStore {
   addCredential(options: {
@@ -204,7 +204,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
    * plaintext rows through keyed by their resource id) and its tolerant
    * bucketing: a row whose envelope will not decrypt under the current KAK is
    * counted undecryptable (purgeable), a row naming an unknown key epoch is
-   * counted separately so a marker refresh can pick it up. Rebuilds the session
+   * counted separately so a descriptor refresh can pick it up. Rebuilds the session
    * cache and the cid index. The per-resource GETs run in parallel.
    *
    * @returns {Promise<void>}
@@ -246,7 +246,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
           entries.push({ resourceId, cid, vc })
         } catch (err) {
           if (err instanceof UnknownEpochError) {
-            // Possibly-fresh data behind a stale marker: skip it so a marker
+            // Possibly-fresh data behind a stale descriptor: skip it so a descriptor
             // refresh can pick it up, never purge it.
             console.warn(
               `Skipping unknown-epoch remote private-credentials resource ` +

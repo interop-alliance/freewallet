@@ -402,7 +402,7 @@ describe('WASRemoteStore.ensureCollection', () => {
 
     await store.ensureCollection({ id: 'example-app-data' })
     expect(collection).toHaveBeenCalledWith('example-app-data')
-    // No encryption marker: the collection is provisioned plaintext.
+    // No encryption descriptor: the collection is provisioned plaintext.
     expect(configure).toHaveBeenCalledWith({
       name: 'example-app-data',
       force: true

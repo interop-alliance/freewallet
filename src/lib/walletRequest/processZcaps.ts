@@ -38,14 +38,14 @@
  * unsatisfiable rather than empty: an empty `allowedAction` array means "every
  * action" in the zcap model.
  *
- * A `urn:was:public-collection` grant provisions a plaintext collection with a
+ * A `https://w3id.org/byoe#public-collection` grant provisions a plaintext collection with a
  * collection-level world-readable (PublicCanRead) policy, set by the wallet at
  * provisioning time. Public covers only unauthenticated reads; writes stay
  * capability-only, so the grant still delegates the usual collection-scoped
  * zcap (with the ordinary write TTL). A public grant on a protected wallet
  * collection is unsatisfiable, unconditionally.
  *
- * A `urn:was:shared-collection` grant is the share flow: it asks not just to
+ * A `https://w3id.org/byoe#shared-collection` grant is the share flow: it asks not just to
  * fetch one of the wallet's own encrypted collections but to DECRYPT it. It
  * leaves the ordinary delegation loop entirely and routes to
  * `StorageManager.shareCollection`, which grants both axes -- the read-only
@@ -201,10 +201,10 @@ export interface ResolvedTarget {
   collectionId?: string
   // A standard EDV-encrypted collection: the RP will only see ciphertext.
   encrypted: boolean
-  // A `urn:was:public-collection` grant: provisioned plaintext with a
+  // A `https://w3id.org/byoe#public-collection` grant: provisioned plaintext with a
   // collection-level PublicCanRead policy, so anyone on the web can read it.
   isPublic: boolean
-  // A `urn:was:shared-collection` grant: the grantee joins the collection's
+  // A `https://w3id.org/byoe#shared-collection` grant: the grantee joins the collection's
   // key-epoch roster and can DECRYPT it, not merely fetch ciphertext. Always an
   // encrypted standard collection, always read-only.
   isShare: boolean
@@ -329,20 +329,20 @@ function parseSpaceUrl({
  *   origin, a path that escapes the Space, a target carrying a query or
  *   fragment, a first segment that is not a valid collection id --
  *   unsatisfiable;
- * - `{ type: 'urn:was:collection', name }` -- `${spaceUrl}/${name}` after
+ * - `{ type: 'https://w3id.org/byoe#collection', name }` -- `${spaceUrl}/${name}` after
  *   validating `name`, flagged `needsProvisioning` unless it is a standard
  *   collection (and `encrypted` for the two EDV collections);
- * - `{ type: 'urn:was:public-collection', name }` -- like `urn:was:collection`
+ * - `{ type: 'https://w3id.org/byoe#public-collection', name }` -- like `https://w3id.org/byoe#collection`
  *   but flagged `isPublic`: provisioned plaintext with a world-readable
  *   (PublicCanRead) policy. Unsatisfiable on a protected wallet collection --
  *   an RP must never be able to flip the user's own collections public;
- * - `{ type: 'urn:was:shared-collection', name }` -- like `urn:was:collection`
+ * - `{ type: 'https://w3id.org/byoe#shared-collection', name }` -- like `https://w3id.org/byoe#collection`
  *   but flagged `isShare`: the grantee also joins the collection's key-epoch
  *   roster, so it can decrypt what it fetches. `name` must be one of the
  *   ENCRYPTED standard collections; anything else (a plaintext collection, an
  *   RP collection, the whole Space) is unsatisfiable -- a share is only
  *   meaningful where an epoch roster exists;
- * - `{ type: 'urn:was:space' }` -- `spaceUrl`, flagged `wholeSpace`;
+ * - `{ type: 'https://w3id.org/byoe#space' }` -- `spaceUrl`, flagged `wholeSpace`;
  * - anything else -- unsatisfiable.
  *
  * @param options {object}
@@ -384,7 +384,7 @@ export function resolveInvocationTarget({
     }
     // The collection id is the first path segment after the Space URL, so a
     // URL under a standard collection (or at a resource inside one) is capped
-    // exactly like its `urn:was:collection` descriptor form.
+    // exactly like its `https://w3id.org/byoe#collection` descriptor form.
     const standard = WALLET_STANDARD_COLLECTIONS.find(
       entry => entry.id === segment
     )
@@ -403,7 +403,7 @@ export function resolveInvocationTarget({
     }
   }
 
-  if (descriptor?.type === 'urn:was:space') {
+  if (descriptor?.type === 'https://w3id.org/byoe#space') {
     return {
       satisfiable: true,
       invocationTarget: spaceUrl,
@@ -416,7 +416,7 @@ export function resolveInvocationTarget({
     }
   }
 
-  if (descriptor?.type === 'urn:was:collection') {
+  if (descriptor?.type === 'https://w3id.org/byoe#collection') {
     const { name } = descriptor
     if (!name || !COLLECTION_NAME_RE.test(name)) {
       return UNSATISFIABLE
@@ -444,7 +444,7 @@ export function resolveInvocationTarget({
     }
   }
 
-  if (descriptor?.type === 'urn:was:public-collection') {
+  if (descriptor?.type === 'https://w3id.org/byoe#public-collection') {
     const { name } = descriptor
     if (!name || !COLLECTION_NAME_RE.test(name)) {
       return UNSATISFIABLE
@@ -462,7 +462,7 @@ export function resolveInvocationTarget({
       needsProvisioning: true,
       collectionId: name,
       // Public implies plaintext: the collection is provisioned without an
-      // encryption marker, so a ciphertext note never applies.
+      // encryption descriptor, so a ciphertext note never applies.
       encrypted: false,
       isPublic: true,
       isShare: false,
@@ -470,7 +470,7 @@ export function resolveInvocationTarget({
     }
   }
 
-  if (descriptor?.type === 'urn:was:shared-collection') {
+  if (descriptor?.type === 'https://w3id.org/byoe#shared-collection') {
     const { name } = descriptor
     const standard = WALLET_STANDARD_COLLECTIONS.find(
       entry => entry.id === name

@@ -325,7 +325,7 @@ test.describe('CHAPI Login with Wallet', () => {
               allowedAction: ['GET', 'HEAD', 'PUT'],
               controller: 'did:key:z6MkrRPexample',
               invocationTarget: {
-                type: 'urn:was:collection',
+                type: 'https://w3id.org/byoe#collection',
                 name: 'example-app-data'
               }
             }

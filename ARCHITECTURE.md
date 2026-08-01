@@ -174,7 +174,7 @@ simply gone once it ends; there is no "locked vault" state.
 The per-user key (PUK) -- recipient zero of every encrypted collection -- has
 one remote home: a roster resource in the private, capability-gated `key-map`
 collection (deliberately outside the synced collections; no local replica, no
-background replication). Its body is a `CollectionEncryption` marker stored
+background replication). Its body is a `CollectionEncryption` descriptor stored
 verbatim, and **the roster's current key epoch IS the current PUK**: the
 epoch id is the PUK's did:key, and the epoch secret -- the PUK's raw 32-byte
 key -- is wrapped once per enrolled wallet client, to that client's own
@@ -184,9 +184,9 @@ source of authority: each client keeps the PUK in its own local state under
 the unlock layer (the client-key record), and the roster's epoch stamp marks
 a cached copy stale.
 
-Everything goes through was-client's marker-store seam (the plain-JSON-
+Everything goes through was-client's descriptor-store seam (the plain-JSON-
 resource adapter): read-with-etag, compare-and-swap writes, and a guarded
-create for the initially-absent roster -- no marker logic is reimplemented
+create for the initially-absent roster -- no descriptor logic is reimplemented
 wallet-side (`@interop/wallet-core/keys`; the store handles live in
 `wasRemoteStore.ts`). Provisioning (`ensureUserCollections`) initializes the
 roster idempotently with the account's existing PUK as the first epoch;
@@ -196,9 +196,9 @@ epoch mismatch, a rotation by another client -- unwraps the fresh PUK with
 this client's own key, adopts it for the session, and persists it into the
 client-key record.
 
-A resource-hosted marker gets none of the server-side epoch invariants a
+A resource-hosted descriptor gets none of the server-side epoch invariants a
 Collection Description enforces, so three client-side guards are load-bearing
-alone against a tampering host: the marker's `epochsMac` (a fabricated epoch
+alone against a tampering host: the descriptor's `epochsMac` (a fabricated epoch
 configuration fails authentication and is refused); a locally pinned
 latest-seen roster epoch (`src/lib/sessionKey.ts`, beside the account-pointer
 pin -- a served roster that rolls back behind the pin is refused, so a
@@ -403,7 +403,7 @@ key-epoch logic lives once. A write reproduces verbatim what background
 replication would have pushed (the raw EDV envelope under its content-derived
 envelope-hash id, created with `If-None-Match: *`, stamped with the same
 `WAS-Key-Epoch`), so the main app's replication pulls it cleanly. An
-unknown-epoch read (a rekey by another client) drives the same one-time marker
+unknown-epoch read (a rekey by another client) drives the same one-time descriptor
 refresh the local backend uses, so a fresh-epoch credential is never dropped.
 Contacts are not reachable in a popup, so the remote-direct backend rejects
 them rather than touching the empty partitioned store. The backend is selected
@@ -458,8 +458,9 @@ absent, non-base64url, or wrong-length seed.
 
 **The same binding is enforced at store time, so a foreign app key never
 lands.** Every minted app key carries the marker type `AppKeyCredential`
-(`urn:was:AppKeyCredential` -- one stable IRI for every app, defined in the
-inline `@context`, never interpolated from `vocabBase`), which turns "presents
+(`https://w3id.org/byoe#AppKeyCredential` -- one stable IRI for every app,
+defined in the inline `@context`, never interpolated from `vocabBase`), which
+turns "presents
 as an app key" into a term check rather than a shape heuristic. Be clear about
 what the marker is: the `type` array of a planted credential is
 attacker-controlled like everything else in it, so the marker is a
@@ -481,7 +482,8 @@ own Space server-side, and the credentials it carries surface through
 `addCredential` like any other import.
 
 The claim terms are shared, not per-app: `seed` and `origin` map to
-`urn:was:seed` / `urn:was:origin`, since they mean the same thing in every app.
+`https://w3id.org/byoe#seed` / `https://w3id.org/byoe#origin`, since they
+mean the same thing in every app.
 `vocabBase` namespaces only the app's own type term. The JSON keys are
 unchanged.
 
@@ -513,29 +515,29 @@ from its own controller key, so the app and the wallet -- holding the vault KAK
 Provisioning is idempotent: no epochs yet ->
 `initRecipients([owner, app])`; a reconnect after revoke -> `addRecipient(app)`;
 already present -> no-op. The wallet ensures the collection exists without
-clobbering an existing `encryption` marker, so an established epoch roster is
-never dropped. Public (`urn:was:public-collection`) grants stay plaintext and
-world-readable as before; only private app collections are encrypted. The
+clobbering an existing `encryption` descriptor, so an established epoch roster is
+never dropped. Public (`https://w3id.org/byoe#public-collection`) grants
+stay plaintext and world-readable as before; only private app collections are encrypted. The
 policy is that **the user is always a recipient of an encrypted collection in
 their own Space** -- any future exception (an app collection the user is
 deliberately not a recipient of) must be an explicit, separate consent surface,
 never a silent default.
 
 Because the user is recipient zero, the wallet decrypts these collections in
-the storage browser as an ordinary recipient with its vault KAK, marker-driven
+the storage browser as an ordinary recipient with its vault KAK, descriptor-driven
 from the fetched Collection Description (no seed at read time). Revoking a
 connected app rotates the epoch off the app's key for each such collection
 (`removeRecipient`, which rotates then revokes the pull-axis grants
 indivisibly), so a revoked app cannot decrypt future writes -- the honest
 ceiling being that ciphertext it already fetched stays readable to it.
 
-## Sharing a wallet collection (`urn:was:shared-collection`)
+## Sharing a wallet collection (`https://w3id.org/byoe#shared-collection`)
 
 The collections above are ones an app created. **Sharing** is the other
 direction: letting a grantee read and _decrypt_ one of the wallet's own
 encrypted collections. It is asked for with a distinct invocation-target
-descriptor -- `{ type: 'urn:was:shared-collection', name }` -- in either
-channel (a standalone `AuthorizationCapabilityQuery`, or an
+descriptor -- `{ type: 'https://w3id.org/byoe#shared-collection', name }` --
+in either channel (a standalone `AuthorizationCapabilityQuery`, or an
 `AppConnectQuery.capabilityQuery`). A distinct descriptor type rather than a
 flag on the existing shape is load-bearing: an unknown `type` already resolves
 to unsatisfiable, so a wallet that predates the feature refuses visibly instead
@@ -544,13 +546,13 @@ of silently degrading to a ciphertext-only read.
 **The two axes stay fused.** _Pull_ (a read-only Collection zcap) and _read_
 (an epoch-key recipient entry) are granted together, by one call to
 `StorageManager.shareCollection`, which returns the delegated zcap alongside
-the refreshed marker so it rides back in the response VP's `zcap` array. A
+the refreshed descriptor so it rides back in the response VP's `zcap` array. A
 share grant therefore leaves the ordinary delegation loop in `processZcaps`
 entirely; there is no code path that grants one axis without the other.
 
 **The recipient key is derived, not transmitted.** `name` must be one of the
 encrypted standard collections -- every `WALLET_STANDARD_COLLECTIONS` entry
-carrying an `encryption` marker, so today `private-credentials`,
+carrying an `encryption` descriptor, so today `private-credentials`,
 `wallet-activity`, `contacts`, and `contacts-history` -- since sharing is
 meaningless where no epoch roster exists. The grantee's X25519 key is derived
 from the `did:key` the request
@@ -577,9 +579,9 @@ axis while leaving the grantee in the key roster.
 
 **The grantee's half lives in `@interop/was-react`.** An app declares the
 wallet-owned collections it wants in `WasAppConfig.sharedCollections`, which
-adds the `urn:was:shared-collection` descriptors to its App Connect request; on
-approval a `SharedCollectionReader` fetches the Collection Description through
-the delegated read zcap, builds the epoch-aware cipher from the marker, and
+adds the `https://w3id.org/byoe#shared-collection` descriptors to its App
+Connect request; on approval a `SharedCollectionReader` fetches the Collection Description through
+the delegated read zcap, builds the epoch-aware cipher from the descriptor, and
 decrypts the raw envelopes locally. The key it decrypts with is the app's
 IDENTITY key-agreement key -- the X25519 twin of its own controller DID, which
 is exactly what `x25519RecipientFromDidKey` derived wallet-side, so the two
@@ -687,8 +689,9 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   did:key (`CapabilityAgent.fromSeed`, `keyName: 'app-key'`). It is how a
   BYOE app keeps its identity/encryption root in the user's wallet
   (`src/lib/appKey.ts`). Every app key carries the marker type
-  `AppKeyCredential` (`urn:was:AppKeyCredential`); one carrying the marker
-  without binding its subject DID to its own seed is refused at store time.
+  `AppKeyCredential` (`https://w3id.org/byoe#AppKeyCredential`); one
+  carrying the marker without binding its subject DID to its own seed is
+  refused at store time.
 - **Client / `clientId`** — the keyed, custodied, revocable identity of an
   (app, user) pair: a keypair that can be a zcap grantee, a delegation
   `controller`, or an entry in a collection's key-epoch roster. For a BYOE app
@@ -714,7 +717,7 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   rename.
 - **Share** — granting a third party read AND decrypt access to one of the
   wallet's own encrypted collections, asked for with a
-  `urn:was:shared-collection` invocation-target descriptor. One
+  `https://w3id.org/byoe#shared-collection` invocation-target descriptor. One
   `shareCollection` call grants both axes: a read-only Collection zcap and an
   entry in the collection's key-epoch roster. Removed from Settings >
   Shared collections, never by expiry. See "Sharing a wallet collection".

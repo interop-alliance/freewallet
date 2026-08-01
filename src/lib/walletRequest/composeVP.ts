@@ -7,9 +7,9 @@
  * the user's did:key) and enforces Freewallet's stricter DID Auth rule (a
  * `domain` is required, where the shared guard requires only a `challenge`).
  *
- * The shared `composeVp` defaults its `vocabBaseIri` to `urn:freewallet:vocab#`,
- * so the embedded-grant `@context` term IRIs -- and therefore the signed proof
- * bytes -- are identical to the pre-extraction output.
+ * The shared `composeVp` defaults its `vocabBaseIri` to
+ * `https://w3id.org/byoe#` (the shared BYOE vocabulary), which is the
+ * namespace Freewallet embeds its grant terms under -- no override is passed.
  */
 import {
   composeVp,

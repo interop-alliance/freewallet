@@ -32,7 +32,7 @@ const capabilityDetail: ICapabilityQueryDetail = {
   reason: 'Example App stores your documents in your wallet storage.',
   allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
   controller: 'did:key:z6MkrRP',
-  invocationTarget: { type: 'urn:was:collection', name: 'example-app-data' }
+  invocationTarget: { type: 'https://w3id.org/byoe#collection', name: 'example-app-data' }
 }
 
 // Canonical VCALM shape: an array-valued capabilityQuery.

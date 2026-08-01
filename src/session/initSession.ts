@@ -26,7 +26,7 @@ import {
 } from '@interop/wallet-core/webvh'
 import {
   mintPuk,
-  pukRosterMarkerStore,
+  pukRosterDescriptorStore,
   pukVaultKeys,
   PukRosterContinuityError,
   PukRosterIntegrityError,
@@ -325,7 +325,7 @@ async function checkPukRosterAtLogin({
   idb?: IDBFactory
 }): Promise<Puk | null> {
   try {
-    const store = pukRosterMarkerStore({
+    const store = pukRosterDescriptorStore({
       storageServerUrl: WAS_SERVER_URL,
       zcapClient,
       spaceId

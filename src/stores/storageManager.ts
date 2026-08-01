@@ -68,11 +68,11 @@ import {
 import { promoteKeystoreController, rebindKeystoreAgent } from '@/lib/kms'
 import { ensurePukRoster } from '@interop/wallet-core/keys'
 import {
-  acquireMarker,
-  acquireMarkers,
-  MarkerRefreshPolicy,
-  type MarkerCache
-} from '@interop/wallet-core/markers'
+  acquireDescriptor,
+  acquireDescriptors,
+  DescriptorRefreshPolicy,
+  type EncryptionDescriptorCache
+} from '@interop/wallet-core/descriptors'
 import { savePukEpochPin } from '@/lib/sessionKey'
 import {
   createEdvDocCipher,
@@ -120,34 +120,34 @@ export type ImportSpaceSummary = {
 }
 
 // The WAS collection ids of the encrypted standard collections -- the set
-// whose markers are acquired at session start and refreshed on an
+// whose descriptors are acquired at session start and refreshed on an
 // unknown-epoch read.
 const ENCRYPTED_COLLECTION_IDS = WALLET_STANDARD_COLLECTIONS.filter(
   ({ encryption }) => encryption
 ).map(({ id }) => id)
 
 /**
- * The localStorage-backed `MarkerCache` for one account's Space: a collection's
- * last-seen encryption marker under
+ * The localStorage-backed `EncryptionDescriptorCache` for one account's Space: a collection's
+ * last-seen encryption descriptor under
  * `freewallet:collection-encryption:<spaceId>:<collectionId>`, scoped by Space
  * so two accounts on one browser never collide. The cache is the offline
- * fallback: when a marker fetch fails, a previously-shared collection must
+ * fallback: when a descriptor fetch fails, a previously-shared collection must
  * keep encrypting under its current epoch. Reads treat a corrupt entry (or a
  * non-browser environment) as absent; writes no-op without localStorage.
  *
  * @param options {object}
  * @param options.spaceId {string}
- * @returns {MarkerCache}
+ * @returns {EncryptionDescriptorCache}
  */
-function localStorageMarkerCache({
+function localStorageDescriptorCache({
   spaceId
 }: {
   spaceId: string
-}): MarkerCache {
+}): EncryptionDescriptorCache {
   const cacheKey = (collectionId: string): string =>
     `freewallet:collection-encryption:${spaceId}:${collectionId}`
   return {
-    async readMarker({ collectionId }) {
+    async readDescriptor({ collectionId }) {
       if (typeof localStorage === 'undefined') {
         return undefined
       }
@@ -161,29 +161,29 @@ function localStorageMarkerCache({
         return undefined
       }
     },
-    async writeMarker({ collectionId, marker }) {
+    async writeDescriptor({ collectionId, descriptor }) {
       if (typeof localStorage === 'undefined') {
         return
       }
-      localStorage.setItem(cacheKey(collectionId), JSON.stringify(marker))
+      localStorage.setItem(cacheKey(collectionId), JSON.stringify(descriptor))
     }
   }
 }
 
 /**
- * Logs a swallowed marker-fetch failure (the cached-fallback branch of
- * `acquireMarkers`).
+ * Logs a swallowed descriptor-fetch failure (the cached-fallback branch of
+ * `acquireDescriptors`).
  *
  * @param err {unknown}
  * @param info {object}
  * @param info.collectionId {string}
  */
-function warnMarkerFetchError(
+function warnDescriptorFetchError(
   err: unknown,
   { collectionId }: { collectionId: string }
 ): void {
   console.warn(
-    `Could not fetch the encryption marker for collection "${collectionId}"; ` +
+    `Could not fetch the encryption descriptor for collection "${collectionId}"; ` +
       'falling back to the cached copy.',
     err
   )
@@ -206,37 +206,37 @@ export class StorageManager {
   #remoteDirect: boolean
   // The per-collection document ciphers, kept here for the storage browser's own
   // decrypt at the WAS seam (`decryptCollectionResource`) and rebuilt on a
-  // marker refresh.
+  // descriptor refresh.
   #ciphers?: Record<string, DocCipher>
   // The provisioning promise from `ensureUserCollections` (fired at session
   // creation), awaited by the read-readiness contract in non-remote-direct mode.
   #provisioning?: Promise<void>
-  // The vault key material, kept so ciphers can be rebuilt after a marker
+  // The vault key material, kept so ciphers can be rebuilt after a descriptor
   // refresh (an unknown-epoch read) without re-plumbing the profile.
   #vaultKeys?: {
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
   }
-  // The last-known per-collection encryption markers, keyed by WAS collection
+  // The last-known per-collection encryption descriptors, keyed by WAS collection
   // id, that the current ciphers were built from.
-  #markers: Record<string, CollectionEncryption>
-  // The durable (localStorage) marker cache for this account's Space -- the
-  // offline fallback marker acquisition falls back to. Only set with a remote
-  // store (a guest / no-WAS session has no markers to cache).
-  #markerCache?: MarkerCache
+  #descriptors: Record<string, CollectionEncryption>
+  // The durable (localStorage) descriptor cache for this account's Space -- the
+  // offline fallback descriptor acquisition falls back to. Only set with a remote
+  // store (a guest / no-WAS session has no descriptors to cache).
+  #descriptorCache?: EncryptionDescriptorCache
   // The once-per-collection-per-session unknown-epoch refresh guard, shared by
   // the standard and the app-provisioned encrypted collections, so a genuinely
   // foreign envelope cannot drive a refresh loop. Its `reset` re-arms a
   // collection whenever a share / unshare / recipient rotation installs a
-  // fresh marker.
-  #refreshPolicy = new MarkerRefreshPolicy({
+  // fresh descriptor.
+  #refreshPolicy = new DescriptorRefreshPolicy({
     refresh: async ({ collectionId }) => {
       if (ENCRYPTED_COLLECTION_IDS.includes(collectionId)) {
-        await this.#refreshMarkers()
+        await this.#refreshDescriptors()
       } else {
-        // An app-provisioned collection: drop the cached marker and cipher so
+        // An app-provisioned collection: drop the cached descriptor and cipher so
         // the re-read rebuilds them from a fresh Description fetch.
-        delete this.#appMarkers[collectionId]
+        delete this.#appDescriptors[collectionId]
         delete this.#appCiphers[collectionId]
       }
     }
@@ -244,12 +244,12 @@ export class StorageManager {
   // Lazily-built per-collection ciphers for App Connect app-provisioned
   // (non-standard) encrypted collections, keyed by WAS collection id. The
   // wallet decrypts these as an ordinary recipient with its vault KAK (recipient
-  // zero), driven by the collection's fetched marker; built on first
+  // zero), driven by the collection's fetched descriptor; built on first
   // decrypt-read from the storage browser, invalidated when a rekey lands.
   #appCiphers: Record<string, DocCipher> = {}
-  // The markers the `#appCiphers` entries were built from, keyed by WAS
+  // The descriptors the `#appCiphers` entries were built from, keyed by WAS
   // collection id -- the offline/lazy source for an app collection's cipher.
-  #appMarkers: Record<string, CollectionEncryption> = {}
+  #appDescriptors: Record<string, CollectionEncryption> = {}
 
   constructor({
     localStore,
@@ -257,7 +257,7 @@ export class StorageManager {
     ciphers,
     remoteDirect = false,
     vaultKeys,
-    markers
+    descriptors
   }: {
     localStore: BrowserStore
     remoteStore?: WASRemoteStore
@@ -267,15 +267,15 @@ export class StorageManager {
       keyAgreementKey: IKeyAgreementKey
       keyResolver: IKeyResolver
     }
-    markers?: Record<string, CollectionEncryption>
+    descriptors?: Record<string, CollectionEncryption>
   }) {
     this.#localStore = localStore
     this.#remoteStore = remoteStore
     this.#ciphers = ciphers
     this.#vaultKeys = vaultKeys
-    this.#markers = markers ?? {}
-    this.#markerCache = remoteStore
-      ? localStorageMarkerCache({ spaceId: remoteStore.spaceId })
+    this.#descriptors = descriptors ?? {}
+    this.#descriptorCache = remoteStore
+      ? localStorageDescriptorCache({ spaceId: remoteStore.spaceId })
       : undefined
     // Remote-direct routing is only meaningful when a remote store is configured
     // (a guest / no-WAS session always uses the local BrowserStore).
@@ -371,25 +371,25 @@ export class StorageManager {
   /**
    * Builds the per-collection document ciphers for the encrypted standard
    * collections from a session's key material (the vault KAK and its resolver).
-   * When a collection has a multi-recipient encryption marker (its `markers`
+   * When a collection has a multi-recipient encryption descriptor (its `descriptors`
    * entry, keyed by WAS collection id), the cipher is built epoch-aware from
    * it; without one it is the single-key path, unchanged.
    *
    * @param options {object}
    * @param options.keyAgreementKey {IKeyAgreementKey}
    * @param options.keyResolver {IKeyResolver}
-   * @param [options.markers] {Record<string, CollectionEncryption>}   per-
-   *   collection encryption markers, keyed by WAS collection id
+   * @param [options.descriptors] {Record<string, CollectionEncryption>}   per-
+   *   collection encryption descriptors, keyed by WAS collection id
    * @returns {Promise<Record<string, DocCipher>>}
    */
   static async #buildCiphers({
     keyAgreementKey,
     keyResolver,
-    markers
+    descriptors
   }: {
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
-    markers?: Record<string, CollectionEncryption>
+    descriptors?: Record<string, CollectionEncryption>
   }) {
     const cipherEntries = await Promise.all(
       WALLET_STANDARD_COLLECTIONS.filter(({ encryption }) => encryption).map(
@@ -399,7 +399,7 @@ export class StorageManager {
             keyAgreementKey,
             keyResolver,
             collectionId: id,
-            encryption: markers?.[id]
+            encryption: descriptors?.[id]
           })
         ]
       )
@@ -408,7 +408,7 @@ export class StorageManager {
   }
 
   /**
-   * Rebuilds the per-collection ciphers from the current markers and the held
+   * Rebuilds the per-collection ciphers from the current descriptors and the held
    * vault keys, then swaps them into the local store (and this facade). No-op
    * without vault keys.
    *
@@ -421,42 +421,42 @@ export class StorageManager {
     const ciphers = await StorageManager.#buildCiphers({
       keyAgreementKey: this.#vaultKeys.keyAgreementKey,
       keyResolver: this.#vaultKeys.keyResolver,
-      markers: this.#markers
+      descriptors: this.#descriptors
     })
     this.#ciphers = ciphers
     // Swap into the active backend (the local store in the normal case, the
     // remote-direct backend in the popup); both honor `setCiphers` for the
-    // marker-refresh path.
+    // descriptor-refresh path.
     this.#store.setCiphers(ciphers)
   }
 
   /**
-   * Refreshes every encrypted collection's marker from the remote store, caches
+   * Refreshes every encrypted collection's descriptor from the remote store, caches
    * them, and rebuilds + swaps the ciphers. Called when a local read reports
    * unknown-epoch rows -- a rekey emits no change-feed entry, so the local
-   * cipher may be built from a stale marker. No-op without a remote store or
+   * cipher may be built from a stale descriptor. No-op without a remote store or
    * vault keys.
    *
    * @returns {Promise<void>}
    */
-  async #refreshMarkers(): Promise<void> {
-    if (!this.#remoteStore || !this.#vaultKeys || !this.#markerCache) {
+  async #refreshDescriptors(): Promise<void> {
+    if (!this.#remoteStore || !this.#vaultKeys || !this.#descriptorCache) {
       return
     }
-    this.#markers = await acquireMarkers({
+    this.#descriptors = await acquireDescriptors({
       source: this.#remoteStore,
-      cache: this.#markerCache,
+      cache: this.#descriptorCache,
       collectionIds: ENCRYPTED_COLLECTION_IDS,
-      onFetchError: warnMarkerFetchError
+      onFetchError: warnDescriptorFetchError
     })
     await this.#rebuildCiphers()
   }
 
   /**
    * Runs a read that reports whether it skipped unknown-epoch rows; on the first
-   * such report for a collection this session, refreshes the marker (rebuilding
+   * such report for a collection this session, refreshes the descriptor (rebuilding
    * + swapping the ciphers) and re-reads once, via the shared
-   * `MarkerRefreshPolicy`. The single seam behind `listCredentials`,
+   * `DescriptorRefreshPolicy`. The single seam behind `listCredentials`,
    * `listHistoryItems`, and `decryptCollectionResource`, so a fresh-epoch
    * resource is never silently dropped after a rekey by another client -- for
    * either backend, since the remote-direct backend surfaces the same counts.
@@ -505,7 +505,7 @@ export class StorageManager {
       throw new Error('A full session profile requires the key material.')
     }
 
-    // Build the remote store first (when configured), so its encryption markers
+    // Build the remote store first (when configured), so its encryption descriptors
     // can be fetched before the ciphers are built: a shared collection encrypts
     // under its current key epoch, discovered from the Collection Description.
     let remoteStore
@@ -516,31 +516,31 @@ export class StorageManager {
         profile
       }))
     }
-    // Fetch the current encryption marker for each encrypted standard
+    // Fetch the current encryption descriptor for each encrypted standard
     // collection best-effort (concurrently -- login is not gated on a serial
     // chain of describes), caching each success and falling back to the cached
-    // copy on a fetch failure. A collection with no marker stays absent -- the
-    // single-key path; with no remote store there are no markers at all
+    // copy on a fetch failure. A collection with no descriptor stays absent -- the
+    // single-key path; with no remote store there are no descriptors at all
     // (guest / no-WAS: single-key).
-    const markers = remoteStore
-      ? await acquireMarkers({
+    const descriptors = remoteStore
+      ? await acquireDescriptors({
           source: remoteStore,
-          cache: localStorageMarkerCache({ spaceId: remoteStore.spaceId }),
+          cache: localStorageDescriptorCache({ spaceId: remoteStore.spaceId }),
           collectionIds: ENCRYPTED_COLLECTION_IDS,
-          onFetchError: warnMarkerFetchError
+          onFetchError: warnDescriptorFetchError
         })
       : {}
 
     // One document cipher per encrypted collection, built from the session's
     // passphrase-derived key material (guests included -- their random secret
     // encrypts just as well; it is merely unrecoverable after logout, like the
-    // rest of a guest session) plus any multi-recipient marker. The local store
+    // rest of a guest session) plus any multi-recipient descriptor. The local store
     // holds EDV envelopes for these collections and replication ships them
     // verbatim.
     const ciphers = await StorageManager.#buildCiphers({
       keyAgreementKey,
       keyResolver,
-      markers
+      descriptors
     })
 
     // The local store is always the active replica.
@@ -557,7 +557,7 @@ export class StorageManager {
       ciphers,
       remoteDirect,
       vaultKeys: { keyAgreementKey, keyResolver },
-      markers
+      descriptors
     })
     return { storage, userExists }
   }
@@ -607,8 +607,8 @@ export class StorageManager {
   }
 
   async listCredentials(): Promise<Array<StoredCredential>> {
-    // Unknown-epoch rows mean the cipher may be built from a stale marker (a
-    // rekey emits no change-feed entry); the shared helper refreshes the marker
+    // Unknown-epoch rows mean the cipher may be built from a stale descriptor (a
+    // rekey emits no change-feed entry); the shared helper refreshes the descriptor
     // once and re-reads, uniformly for both backends.
     return this.#readWithEpochRefresh({
       collectionId: 'private-credentials',
@@ -733,8 +733,8 @@ export class StorageManager {
    * plaintext bodies, non-standard collections, a locked vault, or an
    * envelope that fails to decrypt (logged, not thrown), letting callers fall
    * back to showing the raw envelope. An `UnknownEpochError` (a rekey on
-   * another device the cached marker has not caught up to) drives the same
-   * one-time marker refresh + retry `listCredentials` / `listHistoryItems` use,
+   * another device the cached descriptor has not caught up to) drives the same
+   * one-time descriptor refresh + retry `listCredentials` / `listHistoryItems` use,
    * so a freshly-rekeyed resource is not rendered as raw JWE until re-login.
    *
    * @param options {object}
@@ -759,13 +759,13 @@ export class StorageManager {
     if (!entry) {
       // A non-standard collection: an App Connect app-provisioned collection the
       // wallet decrypts as an ordinary recipient (vault KAK = recipient zero),
-      // marker-driven from the fetched Collection Description.
+      // descriptor-driven from the fetched Collection Description.
       return this.#decryptAppCollectionResource({ collectionId, data })
     }
     return this.#readWithEpochRefresh({
       collectionId,
       read: async () => {
-        // Re-fetch the cipher inside the read: a marker refresh rebuilds it.
+        // Re-fetch the cipher inside the read: a descriptor refresh rebuilds it.
         const cipher = this.#ciphers?.[entry.key]
         if (!cipher) {
           return { value: undefined, unknownEpoch: false }
@@ -794,14 +794,14 @@ export class StorageManager {
    * Best-effort decrypt of an EDV envelope from a non-standard (App Connect
    * app-provisioned) encrypted collection, using the session's vault KAK as an
    * ordinary recipient (recipient zero). Lazily fetches the collection's
-   * `encryption` marker, builds and caches a per-collection `DocCipher` from it
-   * (only when the marker carries epochs -- a wallet with only its vault KAK can
+   * `encryption` descriptor, builds and caches a per-collection `DocCipher` from it
+   * (only when the descriptor carries epochs -- a wallet with only its vault KAK can
    * decrypt an app collection only once it is provisioned multi-recipient with
    * the vault KAK as a recipient), and decrypts. On an `UnknownEpochError` (a
-   * rekey the cached marker has not caught up to) it re-fetches the marker,
+   * rekey the cached descriptor has not caught up to) it re-fetches the descriptor,
    * rebuilds the cipher, and retries once per session for that collection.
    * Returns undefined on any failure (no vault keys / no remote store / no epoch
-   * marker / a decrypt error), letting the caller show the raw envelope.
+   * descriptor / a decrypt error), letting the caller show the raw envelope.
    *
    * @param options {object}
    * @param options.collectionId {string}   the WAS collection id
@@ -822,7 +822,7 @@ export class StorageManager {
     const { keyAgreementKey, keyResolver } = this.#vaultKeys
 
     // The shared refresh policy guards the retry to once per collection per
-    // session; its refresh drops the cached app marker and cipher, so the
+    // session; its refresh drops the cached app descriptor and cipher, so the
     // re-read below rebuilds them from a fresh Description fetch.
     return this.#refreshPolicy.readWithRefresh({
       collectionId,
@@ -832,29 +832,30 @@ export class StorageManager {
       }> => {
         let cipher = this.#appCiphers[collectionId]
         if (!cipher) {
-          let marker = this.#appMarkers[collectionId]
-          if (!marker) {
+          let descriptor: CollectionEncryption | undefined =
+            this.#appDescriptors[collectionId]
+          if (!descriptor) {
             try {
-              marker = await remote.collectionEncryption({ collectionId })
+              descriptor = await remote.collectionEncryption({ collectionId })
             } catch (err) {
               console.warn(
-                `Could not fetch the encryption marker for app collection ` +
+                `Could not fetch the encryption descriptor for app collection ` +
                   `"${collectionId}":`,
                 err
               )
             }
           }
-          if (!marker?.epochs || marker.epochs.length === 0) {
+          if (!descriptor?.epochs || descriptor.epochs.length === 0) {
             // No multi-recipient roster: the vault KAK is not (yet) a
             // recipient, so there is nothing this session can decrypt.
             return { value: undefined, unknownEpoch: false }
           }
-          this.#appMarkers[collectionId] = marker
+          this.#appDescriptors[collectionId] = descriptor
           cipher = await createEdvDocCipher({
             keyAgreementKey,
             keyResolver,
             collectionId,
-            encryption: marker
+            encryption: descriptor
           })
           this.#appCiphers[collectionId] = cipher
         }
@@ -928,7 +929,7 @@ export class StorageManager {
    * zero (policy -- the user is a recipient of every encrypted collection in
    * their own Space) alongside the app's identity key-agreement key. The
    * collection is ensured to exist and declared `'edv'` without clobbering an
-   * existing marker, then the epoch roster is brought to the desired state:
+   * existing descriptor, then the epoch roster is brought to the desired state:
    *
    * - no epochs yet -> `initRecipients` with `[owner, appRecipient]`;
    * - epochs exist but the app is absent (reconnect after revoke) ->
@@ -937,7 +938,7 @@ export class StorageManager {
    *
    * The app never needs the vault KAK and the wallet never needs the app seed
    * at all (the recipient is derived from the app's controller DID, and the
-   * roster kid is in the marker), so this is the only step that pairs the two
+   * roster kid is in the descriptor), so this is the only step that pairs the two
    * recipients. Requires the vault key material and a remote store (an App
    * Connect popup always has both).
    *
@@ -946,7 +947,7 @@ export class StorageManager {
    * @param options.appRecipient {RecipientPublicKey}   the app's identity
    *   public key-agreement key, the X25519 twin of its controller `did:key`
    *   (its `id` is the recipient `kid`)
-   * @returns {Promise<CollectionEncryption>}   the current marker
+   * @returns {Promise<CollectionEncryption>}   the current descriptor
    */
   async provisionAppCollection({
     collectionId,
@@ -967,15 +968,15 @@ export class StorageManager {
     const { keyAgreementKey } = this.#vaultKeys
     const collection = remote.collectionHandle({ collectionId })
     // Ensure the collection exists and is declared encrypted without dropping an
-    // existing epoch roster; the returned marker (with any epochs) drives the
+    // existing epoch roster; the returned descriptor (with any epochs) drives the
     // init-vs-add decision below.
     const current = await remote.ensureEncryptedCollection({ id: collectionId })
 
-    let marker: CollectionEncryption
+    let descriptor: CollectionEncryption
     if (!current?.epochs || current.epochs.length === 0) {
       // Lazy first provision: mint the first epoch with the owner as recipient
       // zero plus the app's identity key.
-      marker = await initRecipients({
+      descriptor = await initRecipients({
         collection,
         recipients: [ownerRecipient({ keyAgreementKey }), appRecipient]
       })
@@ -992,21 +993,21 @@ export class StorageManager {
       }
       // Reconnect after a revoke rotated the epoch off the app: escrow the app
       // back into every epoch (adds are cheap -- no rotation).
-      marker = await addRecipient({
+      descriptor = await addRecipient({
         collection,
         recipient: appRecipient,
         owner: { keyAgreementKey }
       })
     }
 
-    // Update the marker cache and the in-memory app-collection state, then drop
+    // Update the descriptor cache and the in-memory app-collection state, then drop
     // any stale app cipher so the wallet's own next read rebuilds under the new
-    // marker (mirrors shareCollection's tail).
-    await this.#markerCache?.writeMarker({ collectionId, marker })
-    this.#appMarkers[collectionId] = marker
+    // descriptor (mirrors shareCollection's tail).
+    await this.#descriptorCache?.writeDescriptor({ collectionId, descriptor })
+    this.#appDescriptors[collectionId] = descriptor
     delete this.#appCiphers[collectionId]
     this.#refreshPolicy.reset({ collectionId })
-    return marker
+    return descriptor
   }
 
   /**
@@ -1174,7 +1175,7 @@ export class StorageManager {
     // Re-key any plaintext rows a pre-encryption version of the app left in
     // the (now encrypted) local collections. Runs before login completes --
     // and so before background replication starts -- because the remote
-    // collections reject plaintext pushes once their encryption marker is set.
+    // collections reject plaintext pushes once their encryption descriptor is set.
     await this.#localStore.migrateLocalPlaintextDocs()
     // Re-key any `public-credentials` rows left under the pre-fix CID formula.
     // Runs regardless of vault state -- public rows are plaintext -- and before
@@ -1191,7 +1192,7 @@ export class StorageManager {
       }
       await this.#remoteStore.ensureUserCollections({ user })
       // Ensure the PUK wrap-set roster (`key-map/puk.json`) exists,
-      // create-if-absent through the marker-store seam: an absent roster is
+      // create-if-absent through the descriptor-store seam: an absent roster is
       // initialized with the account's PUK as its first epoch, wrapped to
       // this client's own key-agreement key, and the created epoch is pinned
       // as the latest seen. An existing roster is left untouched (the
@@ -1199,15 +1200,15 @@ export class StorageManager {
       // the idempotent ensure resumes on the next login.
       if (profile?.puk && profile?.clientKeyAgreementKey) {
         try {
-          const marker = await ensurePukRoster({
+          const descriptor = await ensurePukRoster({
             store: this.#remoteStore.pukRosterStore(),
             puk: profile.puk,
             clientKeyAgreementKey: profile.clientKeyAgreementKey
           })
-          if (marker.currentEpoch) {
+          if (descriptor.currentEpoch) {
             await savePukEpochPin({
               spaceId: this.#remoteStore.spaceId,
-              epochId: marker.currentEpoch
+              epochId: descriptor.currentEpoch
             })
           }
         } catch (err) {
@@ -1633,7 +1634,7 @@ export class StorageManager {
    * pull-axis zcaps -- indivisible), so a revoked app cannot decrypt future
    * writes. The owner (the vault KAK) stays recipient zero; for these
    * collections every non-owner entry is the app's, and removal needs no seed
-   * (the roster kid is in the marker), so it works even for an orphaned state.
+   * (the roster kid is in the descriptor), so it works even for an orphaned state.
    *
    * The candidate collections come from the recorded grant zcaps'
    * `invocationTarget`s (standard / protected collections and whole-Space grants
@@ -1690,12 +1691,12 @@ export class StorageManager {
     let failed = 0
     for (const [collectionId, revoke] of byCollection) {
       try {
-        const marker = await remote.collectionEncryption({ collectionId })
-        if (!marker?.epochs?.length || !marker.currentEpoch) {
+        const descriptor = await remote.collectionEncryption({ collectionId })
+        if (!descriptor?.epochs?.length || !descriptor.currentEpoch) {
           continue
         }
-        const epoch = marker.epochs.find(
-          entry => entry.id === marker.currentEpoch
+        const epoch = descriptor.epochs.find(
+          entry => entry.id === descriptor.currentEpoch
         )
         if (!epoch) {
           continue
@@ -1707,17 +1708,17 @@ export class StorageManager {
           continue
         }
         for (const recipientId of nonOwner) {
-          const newMarker = await removeRecipient({
+          const newDescriptor = await removeRecipient({
             collection: remote.collectionHandle({ collectionId }),
             space: remote.spaceHandle(),
             recipientId,
             revoke
           })
-          await this.#markerCache?.writeMarker({
+          await this.#descriptorCache?.writeDescriptor({
             collectionId,
-            marker: newMarker
+            descriptor: newDescriptor
           })
-          this.#appMarkers[collectionId] = newMarker
+          this.#appDescriptors[collectionId] = newDescriptor
           delete this.#appCiphers[collectionId]
           this.#refreshPolicy.reset({ collectionId })
         }
@@ -1872,7 +1873,7 @@ export class StorageManager {
   async listHistoryItems(): Promise<
     Array<{ id: string; doc: WalletActivity }>
   > {
-    // Same stale-marker refresh as `listCredentials`, once per session.
+    // Same stale-descriptor refresh as `listCredentials`, once per session.
     return this.#readWithEpochRefresh({
       collectionId: 'wallet-activity',
       read: async () => ({
@@ -1896,7 +1897,7 @@ export class StorageManager {
    * plus the new reader. On an already-shared collection `addRecipient` escrows
    * the reader into every epoch (no rotation -- adds are cheap). The delegated
    * zcap (the full document, needed later for revocation) is recorded in a
-   * `CollectionShare` history activity, and the refreshed marker is cached and
+   * `CollectionShare` history activity, and the refreshed descriptor is cached and
    * swapped into the local ciphers.
    *
    * @param options {object}
@@ -1912,8 +1913,8 @@ export class StorageManager {
    * @param [options.app] {{ name: string, origin: string }}   the connected app
    *   the share was granted to, when the grantee is one; recorded on the share
    *   activity so the settings panel can name it instead of showing a bare DID
-   * @returns {Promise<{ marker: CollectionEncryption, zcap: IDelegatedZcap }>}
-   *   the new marker and the delegated pull-axis capability (the caller embeds
+   * @returns {Promise<{ descriptor: CollectionEncryption, zcap: IDelegatedZcap }>}
+   *   the new descriptor and the delegated pull-axis capability (the caller embeds
    *   it in its response -- the grantee needs both axes)
    */
   async shareCollection({
@@ -1932,7 +1933,7 @@ export class StorageManager {
     controller: string
     expires?: Date
     app?: { name: string; origin: string }
-  }): Promise<{ marker: CollectionEncryption; zcap: IDelegatedZcap }> {
+  }): Promise<{ descriptor: CollectionEncryption; zcap: IDelegatedZcap }> {
     const remote = this.#remoteStore
     if (!remote) {
       throw new Error('Sharing a collection requires remote storage.')
@@ -1949,14 +1950,14 @@ export class StorageManager {
     // into the existing epochs. The owner must always be recipient zero.
     const collection = remote.collectionHandle({ collectionId })
     const current = await remote.collectionEncryption({ collectionId })
-    let marker: CollectionEncryption
+    let descriptor: CollectionEncryption
     if (!current?.epochs || current.epochs.length === 0) {
-      marker = await initRecipients({
+      descriptor = await initRecipients({
         collection,
         recipients: [ownerRecipient({ keyAgreementKey }), recipient]
       })
     } else {
-      marker = await addRecipient({
+      descriptor = await addRecipient({
         collection,
         recipient,
         owner: { keyAgreementKey }
@@ -2000,13 +2001,13 @@ export class StorageManager {
       }
     })
 
-    // Update the marker cache and rebuild + swap the ciphers under it.
-    await this.#markerCache?.writeMarker({ collectionId, marker })
-    this.#markers = { ...this.#markers, [collectionId]: marker }
+    // Update the descriptor cache and rebuild + swap the ciphers under it.
+    await this.#descriptorCache?.writeDescriptor({ collectionId, descriptor })
+    this.#descriptors = { ...this.#descriptors, [collectionId]: descriptor }
     this.#refreshPolicy.reset()
     this.#vaultKeys = { keyAgreementKey, keyResolver }
     await this.#rebuildCiphers()
-    return { marker, zcap }
+    return { descriptor, zcap }
   }
 
   /**
@@ -2021,7 +2022,7 @@ export class StorageManager {
    * from the `CollectionShare` history activities and passed to `revoke`; an
    * empty set is acceptable (e.g. all grants already expired) -- the rotation
    * still happens. A `CollectionUnshare` activity is recorded (no zcap), and
-   * the rotated marker is cached and swapped into the local ciphers.
+   * the rotated descriptor is cached and swapped into the local ciphers.
    *
    * @param options {object}
    * @param options.profile {ControllerProfile}   the passphrase session profile
@@ -2029,7 +2030,7 @@ export class StorageManager {
    * @param options.collectionId {string}
    * @param options.recipientId {string}   the removed reader's key-agreement
    *   key id (`kid`)
-   * @returns {Promise<CollectionEncryption>}   the new marker
+   * @returns {Promise<CollectionEncryption>}   the new descriptor
    */
   async unshareCollection({
     profile,
@@ -2062,7 +2063,7 @@ export class StorageManager {
       recipientId,
       items
     })
-    const marker = await removeRecipient({
+    const descriptor = await removeRecipient({
       collection: remote.collectionHandle({ collectionId }),
       space: remote.spaceHandle(),
       recipientId,
@@ -2082,12 +2083,12 @@ export class StorageManager {
       }
     })
 
-    await this.#markerCache?.writeMarker({ collectionId, marker })
-    this.#markers = { ...this.#markers, [collectionId]: marker }
+    await this.#descriptorCache?.writeDescriptor({ collectionId, descriptor })
+    this.#descriptors = { ...this.#descriptors, [collectionId]: descriptor }
     this.#refreshPolicy.reset()
     this.#vaultKeys = { keyAgreementKey, keyResolver }
     await this.#rebuildCiphers()
-    return marker
+    return descriptor
   }
 
   /**
@@ -2136,12 +2137,12 @@ export class StorageManager {
 
   /**
    * Lists the readers a collection is currently shared with, derived from the
-   * marker's `currentEpoch` roster minus the owner's own key (the cryptographic
+   * descriptor's `currentEpoch` roster minus the owner's own key (the cryptographic
    * truth), joined best-effort with the `CollectionShare` / `CollectionUnshare`
    * history for each reader's controller DID, grant expiry, and -- when the
    * reader is a connected app -- its name and origin. Backs the settings UI.
    * Returns an empty list for a collection with no epochs (never shared) or
-   * when the marker cannot be resolved.
+   * when the descriptor cannot be resolved.
    *
    * @param options {object}
    * @param options.collectionId {string}
@@ -2162,18 +2163,21 @@ export class StorageManager {
     }>
   > {
     const remote = this.#remoteStore
-    let marker: CollectionEncryption | undefined = this.#markers[collectionId]
-    if (!marker && remote && this.#markerCache) {
-      marker = await acquireMarker({
+    let descriptor: CollectionEncryption | undefined =
+      this.#descriptors[collectionId]
+    if (!descriptor && remote && this.#descriptorCache) {
+      descriptor = await acquireDescriptor({
         source: remote,
-        cache: this.#markerCache,
+        cache: this.#descriptorCache,
         collectionId
       })
     }
-    if (!marker?.currentEpoch || !marker.epochs) {
+    if (!descriptor?.currentEpoch || !descriptor.epochs) {
       return []
     }
-    const epoch = marker.epochs.find(entry => entry.id === marker!.currentEpoch)
+    const epoch = descriptor.epochs.find(
+      entry => entry.id === descriptor!.currentEpoch
+    )
     if (!epoch) {
       return []
     }

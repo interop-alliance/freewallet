@@ -11,8 +11,9 @@
  *
  * The minted credential is byte-for-byte the shape `@interop/was-react`'s
  * `parseSeedCredential` accepts: an inline seed `@context` (the shared
- * `urn:was:` terms plus the app's own type term under its `vocabBase`, no
- * hosted context or document-loader changes), a `name`/`description` pair, and
+ * `https://w3id.org/byoe#` terms plus the app's own type term under its
+ * `vocabBase`, no hosted context or document-loader changes), a
+ * `name`/`description` pair, and
  * a seed encoded as base64url without padding. It is a VC 1.0 credential
  * signed with the wallet default suite (`Ed25519Signature2020`); `vc.issue`
  * auto-fills `issuanceDate`.
@@ -23,6 +24,7 @@
  */
 import * as vc from '@interop/vc'
 import { base64urlnopad } from '@scure/base'
+import { CONTEXT_V1 } from 'byoe-context'
 import { CapabilityAgent } from '@interop/webkms-client'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
@@ -69,7 +71,13 @@ const VC_1_CONTEXT_URL = 'https://www.w3.org/2018/credentials/v1'
  */
 export const APP_KEY_CREDENTIAL_TYPE = 'AppKeyCredential'
 
-const APP_KEY_CREDENTIAL_TYPE_IRI = 'urn:was:AppKeyCredential'
+/**
+ * The shared BYOE term IRIs, taken from the published context rather than
+ * restated here.
+ */
+const BYOE_TERMS = CONTEXT_V1['@context']
+
+const APP_KEY_CREDENTIAL_TYPE_IRI = BYOE_TERMS.AppKeyCredential
 
 /**
  * The number of random bytes in an app-key seed.
@@ -78,10 +86,11 @@ const SEED_BYTE_LENGTH = 32
 
 /**
  * Builds the inline JSON-LD context object appended after the VC 1.0 context.
- * The marker type and the `seed` / `origin` claims carry shared `urn:was:`
- * IRIs -- they mean the same thing for every app, so they do not belong under
- * a per-app `vocabBase`, which keeps only the app's own type term. Still
- * interpolated (not constant) because that one term varies per app.
+ * The marker type and the `seed` / `origin` claims carry shared
+ * `https://w3id.org/byoe#` IRIs (imported from `byoe-context`) -- they mean
+ * the same thing for every app, so they do not belong under a per-app
+ * `vocabBase`, which keeps only the app's own type term. Still interpolated
+ * (not constant) because that one term varies per app.
  *
  * @param options {object}
  * @param options.vocabBase {string}
@@ -99,10 +108,10 @@ function appKeyContext({
     '@protected': true,
     [APP_KEY_CREDENTIAL_TYPE]: APP_KEY_CREDENTIAL_TYPE_IRI,
     [credentialType]: `${vocabBase}${credentialType}`,
-    seed: 'urn:was:seed',
-    origin: 'urn:was:origin',
-    name: 'https://schema.org/name',
-    description: 'https://schema.org/description'
+    seed: BYOE_TERMS.seed,
+    origin: BYOE_TERMS.origin,
+    name: BYOE_TERMS.name,
+    description: BYOE_TERMS.description
   }
 }
 
