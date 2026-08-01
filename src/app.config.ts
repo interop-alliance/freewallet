@@ -139,67 +139,28 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
 // and immutable, same as `wallet-activity`.
 export const SYNCED_COLLECTIONS: Array<{ key: string; id: string }> =
   WALLET_STANDARD_COLLECTIONS.map(({ key, id }) => ({ key, id }))
-/**
- * The `id` collection: a standard-on-the-server collection that holds only the
- * user's world-readable DID artifacts -- the published DID document
- * (`did.json`) and the did:webvh history log (`did.jsonl`). Deliberately kept
- * out of WALLET_STANDARD_COLLECTIONS -- it gets no local RxDB replica and no
- * background replication. Provisioned alongside the standard collections with a
- * collection-level `PublicCanRead` policy, so every resource in it is
- * world-readable. The private key-id map lives in the separate `key-map`
- * collection (`KEY_MAP_COLLECTION`), never here.
- *
- * The path segments name the collection that holds the DID document, so the
- * did:web id is `did:web:<host>:space:<spaceId>:id` and resolves to
- * `https://<host>/space/<spaceId>/id/did.json`.
- */
-export const ID_COLLECTION = { id: 'id', name: 'Identity' }
-/**
- * The `key-map` collection: a plaintext, capability-only system collection
- * holding the private key-id map (`keys.json`) alone. Like `ID_COLLECTION` it
- * lives outside WALLET_STANDARD_COLLECTIONS -- no local RxDB replica, no
- * background replication. Kept separate from `id` precisely so the `id`
- * collection can be made collection-level public without ever exposing the key
- * map: `keys.json` is never world-readable.
- */
-export const KEY_MAP_COLLECTION = { id: 'key-map', name: 'Key Map' }
-// The world-readable DID document resource, served as `application/did+json`.
-export const DID_DOCUMENT_RESOURCE = 'did.json'
-// The (non-public) key-id map: verification method to KMS key id. Lives in the
-// `key-map` collection. The recovery anchor -- written before `did.json` so a
-// torn provisioning resumes from it.
-export const DID_KEYS_RESOURCE = 'keys.json'
-// The world-readable did:webvh history log, a raw JSON-Lines string
-// served as `text/jsonl`: one log entry per line, each a full DID-document
-// snapshot in a hash chain. Sibling of `did.json` in the same `id` collection;
-// `did:webvh:<scid>:<host>:space:<spaceId>:id` resolves to
-// `https://<host>/space/<spaceId>/id/did.jsonl`.
-export const DID_LOG_RESOURCE = 'did.jsonl'
+// The system collections and resource names that carry the account's identity
+// and key material -- the world-readable `id` collection (`did.json`,
+// `did.jsonl`), the private `key-map` collection (`keys.json`, `puk.json`),
+// and the unlock Space's `keyring` collection (`keyring.json`). They are
+// shared wallet Space layout, declared once in `@interop/wallet-core/space`
+// and re-exported here so app-side call sites keep one config import.
+export {
+  DID_DOCUMENT_RESOURCE,
+  DID_KEYS_RESOURCE,
+  DID_LOG_RESOURCE,
+  ID_COLLECTION,
+  KEY_MAP_COLLECTION,
+  KEYRING_COLLECTION,
+  KEYRING_RESOURCE,
+  PUK_ROSTER_RESOURCE
+} from '@interop/wallet-core/space'
 
 // Whether to provision and publish the user's did:webvh DID log alongside the
 // did:web document. An opt-out flag: default `true` (freewallet acts
 // as a did:webvh demo platform, publishing the log out of the box), disabled
 // only when `VITE_ENABLE_DID_WEBVH` is exactly the string `'false'`.
 export const ENABLE_DID_WEBVH = env.VITE_ENABLE_DID_WEBVH !== 'false'
-
-/**
- * PBKDF2 parameters for the passphrase unlock derivation
- * (`unlockSeed = PBKDF2(passphrase)`). Version 1 pins exactly these
- * parameters; the keyring record's `version` field records which set produced
- * it, so changing any of them (iterations, hash, salt) requires minting a new
- * record version rather than silently breaking existing unlock derivations.
- * The salt is a fixed app-wide constant -- login stays passphrase-only, with
- * no email (or other) input mixed into the derivation. Every unlock method's
- * KDF carries a distinct salt, so two methods can never derive the same
- * unlock Space.
- */
-export const KEYRING_KDF = {
-  version: 1,
-  algorithm: 'PBKDF2',
-  iterations: 600_000,
-  hash: 'SHA-256',
-  salt: 'freewallet/keyring/unlock/v1'
-} as const
 
 /**
  * HKDF parameters for the passkey unlock derivation
@@ -230,13 +191,6 @@ export const PASSKEY_PRF_INPUT = new TextEncoder().encode(
 // orphans every registered passkey.
 export const PASSKEY_RP_ID = env.VITE_PASSKEY_RP_ID || undefined
 
-// The unlock Space's single collection (holds the one keyring record), and the
-// record's resource id within it. The unlock Space is a minimal second Space,
-// controlled by the passphrase-derived unlock identity and separate from the
-// wallet data Space.
-export const KEYRING_COLLECTION = { id: 'keyring', name: 'Keyring' }
-export const KEYRING_RESOURCE = 'keyring.json'
-
 // The unlock-methods registry: a single collection in the user's DATA Space
 // (not the unlock Space) holding one `methods.json` resource -- the list of an
 // account's unlock methods (passphrase, passkeys). Deliberately kept out of
@@ -259,6 +213,16 @@ export const UNLOCK_METHODS_RESOURCE = 'methods.json'
 // acceptable -- and long enough that a lost method stays revocable years later
 // without re-deriving its unlock identity from the (possibly lost) secret.
 export const UNLOCK_MANAGE_ZCAP_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000
+
+// Lifetime of the PUT-on-`did.jsonl` delegation a recovery code's unlock
+// record carries (`src/session/recovery.ts`). Deliberately long-lived like the
+// management zcap above: a recovery code must work years after issuance, and
+// the delegation's scope is one resource (the world-readable DID log), whose
+// worst-case abuse is a log write that still has to verify against the
+// published hash chain and prerotation commitments to resolve. The login-time
+// recovery health check watches for delegation rot (the signing client's
+// verification method leaving the document) rather than expiry.
+export const RECOVERY_ZCAP_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000
 
 // Offline-fallback lifetime of a locally cached keyring record when a WAS
 // server is configured (the remote copy is the source of truth and is

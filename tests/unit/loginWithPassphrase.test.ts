@@ -2,19 +2,21 @@
 /**
  * Unit tests for the keyring-v2 login (`loginWithPassphrase` in
  * `src/session/initSession.ts`). The keyring is the only login path: the
- * passphrase resolves through `fetchKeyringSeed` to the account's real data
- * seed. The keyring module is mocked so the branch matrix (keyring hit,
- * controller mismatch, miss, fetch rejection) runs deterministically; the
- * network-touching boundaries (`StorageManager.initStorageClients`,
- * `ensureKeystore`) are stubbed, while the CapabilityAgent seed derivation runs
- * for real so the controller sanity check exercises the true did:key.
+ * passphrase resolves through `fetchKeyring` to the account pointer and this
+ * client's local key set -- never to any account-reconstructing secret. The
+ * keyring module is mocked so the branch matrix (enrolled hit, located but
+ * not enrolled, controller mismatch, miss, fetch rejection) runs
+ * deterministically; the network-touching boundaries
+ * (`StorageManager.initStorageClients`, `ensureKeystore`) are stubbed, while
+ * the CapabilityAgent seed derivation runs for real so the controller sanity
+ * check exercises the true did:key.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
 
 vi.mock('@/session/keyring', async importOriginal => ({
   ...(await importOriginal<typeof import('@/session/keyring')>()),
-  fetchKeyringSeed: vi.fn()
+  fetchKeyring: vi.fn()
 }))
 vi.mock('@/lib/kms', () => ({ ensureKeystore: vi.fn() }))
 vi.mock('@/stores/storageManager', () => ({
@@ -22,11 +24,19 @@ vi.mock('@/stores/storageManager', () => ({
 }))
 
 import { StorageManager } from '@/stores/storageManager'
-import { fetchKeyringSeed, KeyringRecordUnusableError } from '@/session/keyring'
+import { fetchKeyring, KeyringRecordUnusableError } from '@/session/keyring'
+import type { AccountPointer } from '@interop/wallet-core/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
 import { ensureKeystore } from '@/lib/kms'
+import { mintPuk } from '@interop/wallet-core/keys'
+import { epochKeyIdFor } from '@interop/was-client/edv'
 
 const PASSPHRASE = 'correct horse battery staple'
+const POINTER: AccountPointer = {
+  did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
+  spaceId: 'space-123',
+  host: 'https://was.example.test'
+}
 
 /**
  * A storage stub carrying the `ensureUserCollections` seam that session
@@ -41,9 +51,9 @@ function makeFakeStorage() {
 let fakeStorage = makeFakeStorage()
 
 /**
- * The did:key a seed reconstitutes to under the bootstrap parameters -- the
- * identity `initSessionFromSeed` assigns and the controller a valid keyring
- * record carries.
+ * The did:key a client seed reconstitutes to under the bootstrap parameters --
+ * the identity `initSessionFromSeed` assigns and the controller a valid
+ * keyring record carries for its enrolling client.
  */
 async function didFromSeed(seed: Uint8Array): Promise<string> {
   const agent = await CapabilityAgent.fromSeed({
@@ -65,7 +75,7 @@ beforeEach(() => {
     userExists: false
   })
   vi.mocked(ensureKeystore).mockResolvedValue(undefined as never)
-  vi.mocked(fetchKeyringSeed).mockReset()
+  vi.mocked(fetchKeyring).mockReset()
 })
 
 afterEach(() => {
@@ -73,13 +83,14 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('loginWithPassphrase -- keyring hit', () => {
-  it('builds the session from the unwrapped seed', async () => {
-    const seed = randomSeed()
-    const controller = await didFromSeed(seed)
-    vi.mocked(fetchKeyringSeed).mockResolvedValue({
-      seed,
+describe('loginWithPassphrase -- enrolled keyring hit', () => {
+  it('builds the session from the local client key set', async () => {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
       controller,
+      pointer: POINTER,
+      clientKeys: { clientSeed },
       unlockSpaceId: 'unlock-space-test'
     })
     vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
@@ -96,12 +107,64 @@ describe('loginWithPassphrase -- keyring hit', () => {
     expect(userExists).toBe(true)
   })
 
-  it('fires ensureUserCollections as storageReady by default', async () => {
-    const seed = randomSeed()
-    const controller = await didFromSeed(seed)
-    vi.mocked(fetchKeyringSeed).mockResolvedValue({
-      seed,
+  it('stamps the account pointer on the profile', async () => {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
       controller,
+      pointer: POINTER,
+      clientKeys: { clientSeed },
+      unlockSpaceId: 'unlock-space-test'
+    })
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+
+    expect(session!.profile.accountPointer).toEqual(POINTER)
+  })
+
+  it('makes the recovered PUK recipient zero (the profile KAK) and carries it on the profile', async () => {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    const puk = await mintPuk()
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller,
+      clientKeys: { clientSeed, puk },
+      unlockSpaceId: 'unlock-space-test'
+    })
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+
+    const { profile } = vi.mocked(StorageManager.initStorageClients).mock
+      .calls[0][0]
+    expect(profile.keyAgreementKey!.id).toBe(epochKeyIdFor(puk.id))
+    expect(session!.profile.puk).toBe(puk)
+  })
+
+  it('keeps the seed-derived KAK for a legacy record with no PUK', async () => {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller,
+      clientKeys: { clientSeed },
+      unlockSpaceId: 'unlock-space-test'
+    })
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+
+    const { profile } = vi.mocked(StorageManager.initStorageClients).mock
+      .calls[0][0]
+    // The legacy vault KAK is the Montgomery twin of the signing key, so its
+    // id is rooted in the account's own did:key controller.
+    expect(profile.keyAgreementKey!.id.startsWith(controller)).toBe(true)
+    expect(session!.profile.puk).toBeUndefined()
+  })
+
+  it('fires ensureUserCollections as storageReady by default', async () => {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller,
+      clientKeys: { clientSeed },
       unlockSpaceId: 'unlock-space-test'
     })
 
@@ -112,11 +175,11 @@ describe('loginWithPassphrase -- keyring hit', () => {
   })
 
   it('forwards provisionStorage: false (the signup probe) to skip provisioning', async () => {
-    const seed = randomSeed()
-    const controller = await didFromSeed(seed)
-    vi.mocked(fetchKeyringSeed).mockResolvedValue({
-      seed,
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
       controller,
+      clientKeys: { clientSeed },
       unlockSpaceId: 'unlock-space-test'
     })
 
@@ -130,11 +193,11 @@ describe('loginWithPassphrase -- keyring hit', () => {
   })
 
   it('reports userExists: false when the data Space is missing (half-finished signup)', async () => {
-    const seed = randomSeed()
-    const controller = await didFromSeed(seed)
-    vi.mocked(fetchKeyringSeed).mockResolvedValue({
-      seed,
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
       controller,
+      clientKeys: { clientSeed },
       unlockSpaceId: 'unlock-space-test'
     })
     vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
@@ -151,9 +214,9 @@ describe('loginWithPassphrase -- keyring hit', () => {
   })
 
   it('throws on a controller / identity mismatch (corrupt record)', async () => {
-    vi.mocked(fetchKeyringSeed).mockResolvedValue({
-      seed: randomSeed(),
+    vi.mocked(fetchKeyring).mockResolvedValue({
       controller: 'did:key:z6MkWrongControllerForThisSeed',
+      clientKeys: { clientSeed: randomSeed() },
       unlockSpaceId: 'unlock-space-test'
     })
 
@@ -163,9 +226,30 @@ describe('loginWithPassphrase -- keyring hit', () => {
   })
 })
 
+describe('loginWithPassphrase -- located but not enrolled', () => {
+  it('returns a null session and userExists: true when this client holds no key set', async () => {
+    // The passphrase located the account (the record exists and unwraps) but
+    // there are no local client keys: unlocking is not sufficient to BE the
+    // account, so no session is built and storage is never touched.
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller: 'did:key:z6MkDataControllerForTests',
+      pointer: POINTER,
+      unlockSpaceId: 'unlock-space-test'
+    })
+
+    const { session, userExists } = await loginWithPassphrase({
+      passphrase: PASSPHRASE
+    })
+
+    expect(session).toBeNull()
+    expect(userExists).toBe(true)
+    expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
+  })
+})
+
 describe('loginWithPassphrase -- keyring miss', () => {
   it('returns a null session and userExists: false when no keyring exists', async () => {
-    vi.mocked(fetchKeyringSeed).mockResolvedValue(null)
+    vi.mocked(fetchKeyring).mockResolvedValue(null)
 
     const { session, userExists } = await loginWithPassphrase({
       passphrase: PASSPHRASE
@@ -178,10 +262,8 @@ describe('loginWithPassphrase -- keyring miss', () => {
 })
 
 describe('loginWithPassphrase -- fetch failure', () => {
-  it('propagates a fetchKeyringSeed rejection (e.g. remote unreachable)', async () => {
-    vi.mocked(fetchKeyringSeed).mockRejectedValue(
-      new Error('storage unreachable')
-    )
+  it('propagates a fetchKeyring rejection (e.g. remote unreachable)', async () => {
+    vi.mocked(fetchKeyring).mockRejectedValue(new Error('storage unreachable'))
 
     await expect(
       loginWithPassphrase({ passphrase: PASSPHRASE })

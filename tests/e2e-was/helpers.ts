@@ -5,6 +5,28 @@ import {
   type TestInfo
 } from '@playwright/test'
 
+/**
+ * Fills a form field and verifies the value survived, retrying until it
+ * sticks. A `goto` resolves on the navigation itself, before React commits
+ * the new route's tree; under parallel-worker load a fill issued in that
+ * window can land on the outgoing route's input and be dropped with it,
+ * leaving the freshly mounted field empty (the keyring login spec flaked
+ * exactly this way). Use for the first fill after a navigation.
+ *
+ * @param locator {Locator}   the input to fill
+ * @param value {string}   the value to fill in
+ * @returns {Promise<void>}
+ */
+export async function fillSettled(
+  locator: Locator,
+  value: string
+): Promise<void> {
+  await expect(async () => {
+    await locator.fill(value)
+    await expect(locator).toHaveValue(value, { timeout: 500 })
+  }).toPass({ timeout: 15_000 })
+}
+
 export function testUser(testInfo: TestInfo) {
   const token = `${Date.now()}-w${testInfo.workerIndex}`
   return {
@@ -17,7 +39,7 @@ export async function signupViaWizard(page: Page, testInfo: TestInfo) {
   const { passphrase, email } = testUser(testInfo)
 
   await page.goto('/#/signup')
-  await page.locator('input[type="password"]').fill(passphrase)
+  await fillSettled(page.locator('input[type="password"]'), passphrase)
   // The strength meter enables Next only after it scores the passphrase;
   // under a parallel-worker CPU squeeze that can outlast the default 5s.
   await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled({

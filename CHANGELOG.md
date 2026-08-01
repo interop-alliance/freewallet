@@ -4,6 +4,51 @@
 
 ### Added
 
+- **Recovery codes** (`/recover`, Settings > "Recovery codes"): a 16-byte
+  base58 code, shown exactly once at issuance, that restores the whole
+  account from a fresh browser when the passphrase and every connected
+  browser are lost. A code is a minimal always-enrolled wallet client whose
+  entire key set derives from its bytes: its decryption standing (a
+  published key-agreement entry in the DID document plus a per-user-key
+  wrap) is maintained for free by rotation, while its authority stays
+  latent until the code is typed -- so any use of a code must first extend
+  the world-readable account log. Recovering enrolls a brand-new ordinary
+  client, retires the spent code (a typed code is a spent credential,
+  presumed compromised), rotates the per-user key off it, and pushes a
+  replacement code that must be confirmed saved -- ending in an ordinary
+  enrolled login under a freshly chosen passphrase. Entry points: "Forgot
+  your passphrase?" on the login page and a pointer on the signup page.
+  Revoking a code from Settings is a real revocation -- the code resolves
+  to nothing afterwards, everywhere -- and a login-time health check warns
+  when a stored recovery delegation has rotted and would brick recovery.
+  Design details in ARCHITECTURE.md ("Recovery codes").
+
+- A **per-user key (PUK)** is now minted at wallet provisioning:
+  client-side, never server-held, replacing the passphrase-seed-derived
+  vault KAK as "recipient zero" of every encrypted collection. It is cached
+  locally under the unlock layer, so every unlock method recovers it at
+  login and a passphrase change preserves it. Its one remote home is a
+  **wrap-set roster** (`key-map/puk.json`, outside the synced collections):
+  the roster's current key epoch IS the current PUK, wrapped once per
+  enrolled client, and login confirms the cached copy current or adopts a
+  rotated one. Three client-side guards defend the roster against a
+  tampering host: an authenticated epoch configuration (`epochsMac`), a
+  locally pinned latest-seen epoch (a rolled-back roster is refused), and
+  rotation recipients resolved only from the locally verified did:webvh
+  document. Accounts provisioned before the PUK keep the seed-derived key
+  until re-provisioned. See ARCHITECTURE.md ("The PUK wrap-set roster").
+
+- **A second browser can now be connected to an existing account** -- the
+  client enrollment ceremony. The new browser's "not enrolled" login offers
+  "Connect this browser": it mints its whole key set locally and displays a
+  compact **connect code** carrying only public halves (QR-renderable
+  unchanged); an already-connected browser approves it from Settings >
+  "Enroll another wallet", both screens showing the new client's did:key
+  fingerprint for comparison first. Any single enrolled client can enroll,
+  no secret ever transits a server or the code, there is no
+  authorized-but-blind window, and every stage is idempotent -- re-running
+  the same code after an interruption converges without forking the account
+  log. See ARCHITECTURE.md ("The client enrollment ceremony").
 - On signup, pre-seed the user's Contacts collection with default records
   (InteropAlliance.org and the user themselves) and their DIDs.
 - A capability request can now ask to **share** one of the wallet's own
@@ -40,6 +85,48 @@
 
 ### Changed
 
+- **The account identity, unlock, and enrollment machinery now comes from
+  `@interop/wallet-core`** instead of being maintained here: did:webvh
+  hosting and its ZCap signing identities (`/webvh`), the per-user key and
+  its wrap-set roster (`/keys`), the unlock derivation and unlock Space
+  lifecycle (`/keyring`), the enrollment ceremony (`/enrollment`), recovery
+  codes (`/recovery`), and the shared system-collection and resource names
+  (`/space`). Behavior, wire formats, and stored records are unchanged --
+  they are shared contracts now, so a second wallet reading the same account
+  agrees with this one by construction. The freewallet-specific glue (the
+  `freewallet-session` IndexedDB layer, the unlock-methods registry, the
+  KMS-driven did:web provisioning) stays here.
+
+- **The shared account data seed is retired; each client now holds its own
+  key set**, minted locally on first run, with private halves that never
+  leave the client. The keyring record in each unlock Space now carries only
+  an encrypted **account pointer** `{ did, spaceId, host }` in place of the
+  retired wrapped seed; the unlock layer (whose shape is unchanged) protects
+  the local client-key record instead. Logging in therefore stops being
+  sufficient to BE the account: a passphrase on a fresh browser locates the
+  account but surfaces a distinct "this browser does not hold the account's
+  keys" state, from which the login page offers the enrollment ceremony (a
+  storage-partitioned CHAPI popup stays degraded). Each client also pins the
+  account pointer it has seen and refuses a substituted one. Records written
+  under the old seed-carrying shape are refused as unusable (accounts are
+  re-provisioned, not migrated).
+
+- **The account's stable identity is now a `did:webvh`, and its DID document
+  is the roster of that account's enrolled wallet clients** -- a
+  hash-chained log, world-readable in the `id` collection, that anyone can
+  fetch and fully verify. The log's update keys are client-held (one per
+  enrolled client, prerotation on), so the storage server can never extend
+  the account's own history, and no server-held key is ever a recipient of
+  an encrypted collection. The Space's controller -- and the KMS keystore's,
+  non-fatally -- is promoted to the did:webvh at signup (a signup
+  interrupted mid-promotion heals on the next login), after which the server
+  authorizes by verifying the published log: a capability verifies only
+  against the keys the document lists _now_, so dropping a client from the
+  roster stops everything it signed from verifying. Sessions on a promoted
+  account sign with the client key under its did:webvh verification-method
+  id; the user id shown to connecting apps stays the client's `did:key`, and
+  the unlock layer stays `did:key` end to end. See ARCHITECTURE.md ("The
+  did:webvh identity").
 - One rule now decides who a key-epoch recipient is: the X25519 twin of a
   controller `did:key`, for an app and a person alike. An App
   Connect-provisioned private collection now admits the app with its identity

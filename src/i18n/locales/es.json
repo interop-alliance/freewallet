@@ -78,6 +78,17 @@
     "rotateConfirmAction": "Rotar",
     "rotateSuccess": "Clave de actualización rotada. El registro del DID se amplió.",
     "rotateError": "No se pudo rotar la clave de actualización. Inténtelo de nuevo.",
+    "enrollClient": "Inscribir otra billetera",
+    "enrolling": "Inscribiendo...",
+    "enrollClientHint": "Conecta otro navegador a esta cuenta usando el código de conexión que muestra.",
+    "enrollConfirmTitle": "¿Inscribir otra billetera?",
+    "enrollConfirmMessage": "En el navegador nuevo, introduzca su frase de contraseña en la página de inicio de sesión y elija \"Conectar este navegador\". Pegue aquí el código de conexión que muestra.",
+    "enrollCodeLabel": "Código de conexión",
+    "enrollCodeInvalid": "Este no es un código de conexión válido.",
+    "enrollFingerprint": "Clave del cliente nuevo: {{did}}. Compárela con la huella mostrada en el navegador nuevo antes de aprobar.",
+    "enrollConfirmAction": "Aprobar",
+    "enrollSuccess": "El navegador nuevo quedó inscrito. Termine de conectar en ese navegador.",
+    "enrollError": "No se pudo inscribir el navegador nuevo. Aprobar el mismo código de nuevo retoma donde quedó.",
     "handleSection": "Identificador de inicio de sesión",
     "handleLabel": "Nombre de usuario preferido",
     "handleHint": "El nombre de usuario que ven los sitios cuando inicia sesión con su billetera. Se guarda como una credencial autoemitida; déjelo en blanco para quitarlo.",
@@ -140,7 +151,28 @@
     "sharedRemoveConfirmAction": "Quitar acceso",
     "sharedRemoving": "Quitando...",
     "sharedRemoved": "Acceso quitado.",
-    "sharedRemoveFailed": "No se pudo quitar el acceso. Inténtelo de nuevo."
+    "sharedRemoveFailed": "No se pudo quitar el acceso. Inténtelo de nuevo.",
+    "recovery": {
+      "section": "Códigos de recuperación",
+      "intro": "Un código de recuperación puede restaurar el acceso a esta cartera desde cualquier navegador si pierdes tu frase de contraseña y todos los navegadores conectados. Cada código funciona exactamente una vez y puede revocarse aquí en cualquier momento: revocarlo lo retira de verdad, en todas partes.",
+      "requiresEnrolledClient": "Generar códigos de recuperación requiere un cliente de cartera completamente inscrito en un servidor de almacenamiento; esta sesión no puede emitirlos.",
+      "none": "Aún no se han generado códigos de recuperación.",
+      "defaultLabel": "Código de recuperación {{number}}",
+      "unlabeled": "Código sin etiqueta",
+      "healthFlagged": "Necesita regenerarse",
+      "healthWarning": "Un código marcado puede que ya no pueda recuperar esta cartera (el navegador que lo emitió ha cambiado). Revócalo y genera uno nuevo.",
+      "remove": "Revocar este código de recuperación",
+      "removeConfirm": "¿Revocar este código de recuperación? Dejará de funcionar en todas partes, de inmediato, y esto no puede deshacerse.",
+      "generate": "Generar código de recuperación",
+      "dialogTitle": "Tu nuevo código de recuperación",
+      "shownOnce": "Este código se muestra solo una vez. Guárdalo en un lugar seguro (un gestor de contraseñas, o impreso) antes de confirmar.",
+      "copy": "Copiar código de recuperación",
+      "labelField": "Etiqueta",
+      "codePowerHint": "Cualquiera que tenga este código puede tomar el control de la cartera desde cualquier navegador, pero usarlo siempre deja un registro visible y permanente, retira el código y rota las claves de la cuenta.",
+      "confirmSaved": "Guardé este código",
+      "saveError": "No se pudo crear el código de recuperación. No se guardó nada: inténtalo de nuevo.",
+      "revokeError": "No se pudo revocar el código de recuperación. Inténtalo de nuevo."
+    }
   },
   "landing": {
     "title": "Freewallet",
@@ -156,6 +188,8 @@
       "profileExists": "Este perfil ya existe; inicie sesión.",
       "setupFailed": "No se pudo terminar de configurar su billetera. Inténtelo de nuevo.",
       "keyringUnusable": "Se encontró su cuenta, pero su registro de acceso guardado no se pudo leer. Si el problema persiste, cambie su frase de contraseña desde un dispositivo donde aún tenga la sesión iniciada para escribir un registro nuevo.",
+      "clientNotEnrolled": "Se encontró su cuenta, pero este navegador aún no tiene sus claves. Use \"Conectar este navegador\" abajo para inscribirlo desde un navegador donde su billetera ya esté configurada.",
+      "accountPointerChanged": "El servidor de almacenamiento devolvió datos de cuenta que no coinciden con lo que este navegador recuerda, por lo que el inicio de sesión se detuvo por precaución. Si no esperaba esto, contacte a su proveedor de almacenamiento.",
       "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Mientras lo solucionamos, pruebe el <guest>modo invitado</guest>.",
       "passkeyNoAccount": "No se encontró ninguna billetera para esta llave de acceso. Inicie sesión con su frase de contraseña y luego agregue esta llave de acceso desde Configuración.",
       "passkeyPrfUnsupported": "Esta llave de acceso o este navegador no puede desbloquear Freewallet. Pruebe con otra llave de acceso o inicie sesión con su frase de contraseña."
@@ -166,7 +200,21 @@
       "submit": "Iniciar sesión",
       "passkey": "Iniciar sesión con llave de acceso",
       "noWallet": "¿No tiene una billetera?",
-      "signUpLink": "Registrarse"
+      "signUpLink": "Registrarse",
+      "forgotPassphrase": "¿Olvidaste tu frase de contraseña?",
+      "recoverLink": "Recupera tu cartera con un código de recuperación.",
+      "recoveryHealthWarning": "Es posible que uno de tus códigos de recuperación ya no funcione. Abre Configuración > Códigos de recuperación y genera uno nuevo."
+    },
+    "enroll": {
+      "connectButton": "Conectar este navegador",
+      "heading": "Conectar este navegador",
+      "explain": "Este navegador generó sus propias claves; el código de conexión de abajo solo contiene sus mitades públicas. En un navegador donde su billetera ya esté configurada, abra Configuración, elija \"Inscribir otra billetera\", pegue este código y compare la huella de la clave en ambas pantallas antes de aprobar.",
+      "codeLabel": "Código de conexión",
+      "copyCode": "Copiar código",
+      "fingerprint": "Huella de la clave: {{did}}",
+      "completeButton": "Ya lo aprobé -- terminar de conectar",
+      "pending": "Este navegador aún no está inscrito. Apruebe el código de conexión desde su otro navegador y vuelva a pulsar el botón.",
+      "failed": "No se pudo conectar este navegador. Inténtelo de nuevo."
     },
     "signup": {
       "heading": "Registrarse",
@@ -195,13 +243,43 @@
       "connectDropbox": "Conectar con Dropbox",
       "connectDrive": "Conectar con Google Drive",
       "courtesyStorage": "10 MB de cortesía (gratis)",
-      "createWallet": "Crear billetera"
+      "createWallet": "Crear billetera",
+      "lostPassphrase": "¿Perdiste tu frase de contraseña?",
+      "recoverLink": "Recupera tu cartera existente en lugar de empezar de nuevo."
     },
     "guest": {
       "heading": "Modo invitado",
       "bulletRandom": "se creará un inicio de sesión aleatorio",
       "bulletEphemeral": "el inicio de sesión y el almacenamiento se eliminarán al terminar la sesión",
       "submit": "Entrar como invitado"
+    },
+    "recover": {
+      "heading": "Recupera tu cartera",
+      "intro": "Introduce un código de recuperación que guardaste antes. El código localiza tu cuenta y permite que este navegador se una como un cliente nuevo y completamente inscrito -- sin necesidad de frase de contraseña.",
+      "noCodeHint": "Si nunca generaste un código de recuperación, tu cartera no puede recuperarse por esta vía: el código se crea con antelación desde Configuración > Códigos de recuperación con la sesión iniciada. Los códigos son la única vía de recuperación: nada de tu cuenta puede reconstruirse solo con una frase de contraseña.",
+      "codeLabel": "Código de recuperación",
+      "checkCode": "Comprobar código",
+      "accountFound": "Se encontró una cuenta de cartera para {{email}}.",
+      "accountFoundNoEmail": "Se encontró una cuenta de cartera para este código.",
+      "newPassphraseExplain": "Elige una nueva frase de contraseña para este navegador. Tu frase anterior (si aún la conoces) sigue funcionando en otros dispositivos hasta que la cambies en Configuración. La recuperación también retirará el código que acabas de escribir y emitirá uno de reemplazo: un código escrito cuenta como usado.",
+      "newPassphraseLabel": "Nueva frase de contraseña",
+      "submit": "Recuperar cartera",
+      "recovered": "Tu cartera fue recuperada. Este navegador es ahora un cliente inscrito y el código que escribiste ya no funciona.",
+      "replacementExplain": "Este es tu NUEVO código de recuperación. Se muestra solo una vez: guárdalo en un lugar seguro antes de iniciar sesión. El código que escribiste ha sido retirado.",
+      "copyCode": "Copiar el nuevo código de recuperación",
+      "replacementSavedButton": "Guardé el nuevo código",
+      "replacementSavedDone": "Nuevo código guardado",
+      "login": "Iniciar sesión en tu cartera",
+      "backToLogin": "Volver a iniciar sesión",
+      "errors": {
+        "invalidCode": "Este no es un código de recuperación válido. Revisa errores de tecleo: los códigos nunca contienen 0, O, I ni l.",
+        "noMatch": "No se encontró ninguna cartera para este código de recuperación. Puede que nunca se haya emitido, o que haya sido revocado o ya usado. Esto es distinto de un código mal escrito: el código está bien formado, simplemente no desbloquea nada.",
+        "revoked": "Este código de recuperación fue revocado o ya usado; ya no puede recuperar la cartera.",
+        "unavailable": "Los códigos de recuperación requieren un servidor de almacenamiento y esta instalación no tiene ninguno configurado.",
+        "couldNotCheck": "No se pudo contactar con el servidor de almacenamiento, así que el código no pudo comprobarse. Esto no significa que el código sea incorrecto: inténtalo de nuevo cuando vuelvas a estar en línea.",
+        "failed": "La recuperación falló. Inténtalo de nuevo.",
+        "loginFailed": "La cartera se recuperó pero el inicio de sesión falló. Intenta iniciar sesión con tu nueva frase de contraseña desde la página de inicio."
+      }
     }
   },
   "nav": {
@@ -531,6 +609,7 @@
   },
   "chapi": {
     "accountNotFound": "Cuenta no encontrada. Cree su billetera en la aplicación principal primero.",
+    "clientNotEnrolled": "Se encontró su cuenta, pero este contexto del navegador no tiene sus claves. Abra la aplicación de la billetera directamente e inicie sesión allí primero.",
     "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Inténtelo de nuevo en un momento.",
     "loginFailed": "No se pudo iniciar sesión. Inténtelo de nuevo.",
     "loginPrompt": "Introduzca la frase de contraseña de su billetera para continuar:",

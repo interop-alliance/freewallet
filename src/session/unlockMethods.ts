@@ -1,9 +1,10 @@
 /**
  * The unlock-methods registry: the list of how an account can be unlocked
  * (passphrase, one or more passkeys). Unlike the keyring record -- which lives
- * in each unlock method's own unlock Space and holds the wrapped data seed --
- * the registry lives once in the user's DATA Space, so a logged-in wallet can
- * enumerate and manage its methods without re-deriving each unlock identity.
+ * in each unlock method's own unlock Space and holds the encrypted account
+ * pointer -- the registry lives once in the user's DATA Space, so a logged-in
+ * wallet can enumerate and manage its methods without re-deriving each unlock
+ * identity.
  *
  * The record carries a single WebAuthn `userHandle` (minted at the first
  * passkey registration and reused for every later passkey, so authenticator
@@ -29,6 +30,7 @@ import type {
   IKeyResolver,
   IZcap
 } from '@interop/data-integrity-core'
+import type { ZcapClient } from '@interop/ezcap'
 import { base64urlnopad } from '@scure/base'
 import {
   DATE_FMT,
@@ -43,15 +45,24 @@ import {
   type PasskeyRegistration
 } from '@/lib/passkey'
 import { bindUnlockSecret, deleteUnlockMethod } from '@/session/keyring'
+import type { AccountPointer } from '@interop/wallet-core/keyring'
+import type { PersistableClientKeys } from '@/session/keyring'
+import {
+  didKeyZcapClient,
+  type ClientWebvhUpdateKeys
+} from '@interop/wallet-core/webvh'
+import type { Puk } from '@interop/wallet-core/keys'
 import { createEdvDocCipher } from '@interop/was-client/edv'
 import {
+  deleteAccountPointerPin,
+  deleteClientKeyRecord,
   deleteKeyringCache,
   deleteUnlockMethodsCache,
   loadUnlockMethodsCache,
   saveUnlockMethodsCache
 } from '@/lib/sessionKey'
+import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
 import {
-  deleteUnlockSpaceWithCapability,
   ensureUnlockMethodsCollection,
   getUnlockMethodsRecord,
   putUnlockMethodsRecord
@@ -91,9 +102,37 @@ export interface PasskeyUnlockMethod {
 }
 
 /**
- * A single unlock-method entry -- a discriminated union on `type`.
+ * A recovery-code unlock method (the code is a minimal
+ * always-enrolled client). Beside the shared members, the entry records the
+ * code's public posture so Settings can correlate it with the document and
+ * roster without the code: `recoveryKid` (its PUK-roster kid),
+ * `keyAgreementKeyMultibase` / `updateKeyMultibase` (the published
+ * `keyAgreement` VM and the `nextKeyHashes` commitment), and
+ * `delegationKeyId` (the verification method that signed the record's
+ * `did.jsonl` delegation -- what the login-time health check tests against
+ * the current document, since a delegation signed by a since-removed client
+ * stops verifying under the current-key-set rule). Public halves only; the
+ * code itself is never stored anywhere.
  */
-export type UnlockMethod = PassphraseUnlockMethod | PasskeyUnlockMethod
+export interface RecoveryCodeUnlockMethod {
+  type: 'recovery-code'
+  label: string
+  createdAt: string
+  unlockSpaceId: string
+  manageCapability?: IZcap
+  recoveryKid: string
+  keyAgreementKeyMultibase: string
+  updateKeyMultibase: string
+  delegationKeyId?: string
+}
+
+/**
+ * A single unlock-method entry -- a discriminated union on `type`, kept
+ * additive (the quorum seam: a future method joins the union rather than
+ * changing the record shape).
+ */
+export type UnlockMethod =
+  PassphraseUnlockMethod | PasskeyUnlockMethod | RecoveryCodeUnlockMethod
 
 /**
  * The version-1 unlock-methods registry record. `userHandle` is a base64url
@@ -327,6 +366,69 @@ export async function putUnlockMethods({
 }
 
 /**
+ * Re-seals the remote unlock-methods record from one set of vault keys to
+ * another -- the PUK-rotation bridge. The stored record is a single-recipient
+ * envelope to the vault KAK, so whichever client rotates the PUK must re-wrap
+ * the registry to the new one, or every later session (holding only the
+ * rotated PUK) meets an envelope it cannot decrypt and the registry is lost
+ * for good. Reads the remote copy (the source of truth), decrypts with the
+ * pre-rotation keys, re-encrypts to the post-rotation keys, and PUTs it back;
+ * a registry that does not exist yet is a no-op. The local cache is left
+ * alone: with a WAS server the remote copy is read first and refreshes the
+ * cache on the next hit.
+ *
+ * @param options {object}
+ * @param options.storageServerUrl {string}
+ * @param options.zcapClient {ZcapClient}   an enrolled client's root client
+ * @param options.spaceId {string}   the data Space id
+ * @param options.from {object}   the pre-rotation vault keys
+ * @param options.from.keyAgreementKey {IKeyAgreementKey}
+ * @param options.from.keyResolver {IKeyResolver}
+ * @param options.to {object}   the post-rotation vault keys
+ * @param options.to.keyAgreementKey {IKeyAgreementKey}
+ * @param options.to.keyResolver {IKeyResolver}
+ * @returns {Promise<void>}
+ */
+export async function rewrapUnlockMethodsRecord({
+  storageServerUrl,
+  zcapClient,
+  spaceId,
+  from,
+  to
+}: {
+  storageServerUrl: string
+  zcapClient: ZcapClient
+  spaceId: string
+  from: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
+  to: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
+}): Promise<void> {
+  const stored = await getUnlockMethodsRecord({
+    storageServerUrl,
+    zcapClient,
+    spaceId
+  })
+  if (!stored) {
+    return
+  }
+  const record = await unwrapRecord({
+    record: stored,
+    keyAgreementKey: from.keyAgreementKey,
+    keyResolver: from.keyResolver
+  })
+  const wrapped = await wrapRecord({
+    record,
+    keyAgreementKey: to.keyAgreementKey,
+    keyResolver: to.keyResolver
+  })
+  await putUnlockMethodsRecord({
+    storageServerUrl,
+    zcapClient,
+    spaceId,
+    record: wrapped
+  })
+}
+
+/**
  * Resolves the data Space id from the session's storage, throwing when absent
  * (a WAS server is configured but the session has no remote store -- e.g. a
  * guest, which never reaches this registry).
@@ -344,8 +446,9 @@ function requireSpaceId(session: Session): string {
 
 /**
  * Whether a registry entry names a given unlock method: a passkey entry matches
- * on `credentialId`, a passphrase entry on its type (there is only ever one
- * passphrase entry). Used to drop the retired entry from the methods list.
+ * on `credentialId`, a recovery-code entry on `recoveryKid`, a passphrase
+ * entry on its type (there is only ever one passphrase entry). Used to drop
+ * the retired entry from the methods list.
  *
  * @param candidate {UnlockMethod}   an entry in the stored registry
  * @param target {UnlockMethod}   the entry being removed
@@ -356,6 +459,12 @@ function isSameMethod(candidate: UnlockMethod, target: UnlockMethod): boolean {
     return (
       candidate.type === 'passkey' &&
       candidate.credentialId === target.credentialId
+    )
+  }
+  if (target.type === 'recovery-code') {
+    return (
+      candidate.type === 'recovery-code' &&
+      candidate.recoveryKid === target.recoveryKid
     )
   }
   return candidate.type === target.type
@@ -434,14 +543,26 @@ export async function revokeUnlockMethod({
           'revoked by tapping the passkey being removed.'
       )
     }
+    // The management zcap names the account did:key as its controller (the
+    // unlock layer stays did:key end to end), so the invocation must sign
+    // under the did:key keyId even when the session's own client signs data
+    // requests as the promoted did:webvh.
+    const { keyAgent } = session.profile
     await deleteUnlockSpaceWithCapability({
       storageServerUrl: WAS_SERVER_URL,
-      zcapClient: session.profile.zcapClient,
+      zcapClient: keyAgent
+        ? didKeyZcapClient({ keyAgent })
+        : session.profile.zcapClient,
       spaceId: entry.unlockSpaceId,
       capability: entry.manageCapability
     })
   }
   await deleteKeyringCache({ spaceId: entry.unlockSpaceId, idb })
+  // Retiring the method also retires this client's local records under it:
+  // the client-key wrap (other methods keep their own wraps of the same key
+  // set) and the pointer pin.
+  await deleteClientKeyRecord({ spaceId: entry.unlockSpaceId, idb })
+  await deleteAccountPointerPin({ spaceId: entry.unlockSpaceId, idb })
   await dropRegistryEntry({ session, entry, idb })
 }
 
@@ -575,54 +696,72 @@ export async function backfillPassphraseUnlockMethod({
 
 /**
  * Enrolls a new passkey as an unlock method: runs the WebAuthn registration
- * ceremony, binds the data seed under the passkey's PRF-derived unlock identity,
- * and assembles the registry entry describing the passkey. The caller is
- * responsible for persisting the returned entry in the registry (and, at signup,
- * for provisioning the data Space first). Shared by the signup and Settings
- * "add a passkey" flows.
+ * ceremony, binds this client's key set under the passkey's PRF-derived
+ * unlock identity, and assembles the registry entry describing the passkey.
+ * The caller is responsible for persisting the returned entry in the registry
+ * (and, at signup, for provisioning the data Space first). Shared by the
+ * signup and Settings "add a passkey" flows.
  *
- * `delegateManagementTo` drives the entry's optional `manageCapability`: when a
- * data did:key is given (and a WAS server is configured) the bind delegates
- * GET/DELETE on the new unlock Space to it, and the entry carries the resulting
- * capability so the passkey can later be revoked tap-free; otherwise the entry
- * omits it.
+ * `delegateManagementTo` drives the entry's optional `manageCapability`: when
+ * an account did:key is given (and a WAS server is configured) the bind
+ * delegates GET/DELETE on the new unlock Space to it, and the entry carries
+ * the resulting capability so the passkey can later be revoked tap-free;
+ * otherwise the entry omits it.
  *
  * @param options {object}
- * @param options.seed {Uint8Array}   the data seed to bind under the passkey
- * @param options.controller {string}   the data did:key
+ * @param options.clientSeed {Uint8Array}   this client's 32-byte seed to bind
+ *   under the passkey
+ * @param options.controller {string}   the account did:key
  * @param options.userHandle {Uint8Array}   the account's WebAuthn user handle
  * @param options.userName {string}   the WebAuthn user name shown in pickers
  * @param options.locale {string}   active i18n language for the entry's date label
  * @param options.promptForPrfRetry {() => boolean | Promise<boolean>}   PRF-retry
  *   consent callback (see `registerPasskey`)
  * @param [options.email] {string}   account email, carried in the wrapped record
+ * @param [options.puk] {Puk}   the account's per-user key, cached in the local
+ *   client-key record so a passkey login recovers it
+ * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
+ *   did:webvh update-key seeds, cached in the local client-key record so a
+ *   passkey login recovers update authority
+ * @param [options.pointer] {AccountPointer}   the account pointer the new
+ *   keyring record carries
  * @param [options.excludeCredentialIds] {Uint8Array[]}   authenticators already
  *   holding a passkey for this wallet, excluded from the ceremony
- * @param [options.delegateManagementTo] {string}   a data did:key to delegate the
- *   unlock Space management zcap to
+ * @param [options.delegateManagementTo] {string}   an account did:key to
+ *   delegate the unlock Space management zcap to
  * @returns {Promise<{ registration: PasskeyRegistration, entry: PasskeyUnlockMethod }>}
  */
 export async function enrollPasskey({
-  seed,
+  clientSeed,
   controller,
   userHandle,
   userName,
   locale,
   promptForPrfRetry,
   email,
+  puk,
+  webvhUpdateKeys,
+  pointer,
   excludeCredentialIds,
   delegateManagementTo
 }: {
-  seed: Uint8Array
+  clientSeed: Uint8Array
   controller: string
   userHandle: Uint8Array
   userName: string
   locale: string
   promptForPrfRetry: () => boolean | Promise<boolean>
   email?: string
+  puk?: Puk
+  webvhUpdateKeys?: ClientWebvhUpdateKeys
+  pointer?: AccountPointer
   excludeCredentialIds?: Uint8Array[]
   delegateManagementTo?: string
-}): Promise<{ registration: PasskeyRegistration; entry: PasskeyUnlockMethod }> {
+}): Promise<{
+  registration: PasskeyRegistration
+  entry: PasskeyUnlockMethod
+  persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+}> {
   const registration = await registerPasskey({
     userHandle,
     userName,
@@ -630,18 +769,22 @@ export async function enrollPasskey({
     promptForPrfRetry
   })
 
-  // Bind the data seed under the passkey's PRF-derived unlock identity -- this
-  // is what makes the passkey able to log in. Delegating management to the data
-  // did:key lets the passkey later be revoked without a tap on the (possibly
-  // lost) authenticator.
-  const { unlockSpaceId, manageCapability } = await bindUnlockSecret({
-    seed,
-    controller,
-    secret: registration.prfOutput,
-    kdf: PASSKEY_KDF,
-    email,
-    delegateManagementTo
-  })
+  // Bind this client's key set under the passkey's PRF-derived unlock
+  // identity -- this is what makes the passkey able to log in on this client.
+  // Delegating management to the account did:key lets the passkey later be
+  // revoked without a tap on the (possibly lost) authenticator.
+  const { unlockSpaceId, manageCapability, persistClientKeys } =
+    await bindUnlockSecret({
+      clientSeed,
+      controller,
+      secret: registration.prfOutput,
+      kdf: PASSKEY_KDF,
+      email,
+      puk,
+      webvhUpdateKeys,
+      pointer,
+      delegateManagementTo
+    })
 
   const now = new Date()
   const entry: PasskeyUnlockMethod = {
@@ -655,5 +798,5 @@ export async function enrollPasskey({
     unlockSpaceId,
     ...(manageCapability ? { manageCapability } : {})
   }
-  return { registration, entry }
+  return { registration, entry, persistClientKeys }
 }

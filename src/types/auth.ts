@@ -14,8 +14,13 @@ import type {
 import type { ZcapClient } from '@interop/ezcap'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { KeystoreAgent } from '@interop/webkms-client'
-import type { DidWebKeyMap } from '@/lib/didWeb'
-import type { WebvhUpdateKey, WebvhStagedKey } from '@/lib/didWebvh'
+import type {
+  ClientWebvhUpdateKeys,
+  DidWebKeyMap
+} from '@interop/wallet-core/webvh'
+import type { Puk } from '@interop/wallet-core/keys'
+import type { AccountPointer } from '@interop/wallet-core/keyring'
+import type { PersistableClientKeys } from '@/session/keyring'
 
 /**
  * Minimal interface over @interop/webkms-client's CapabilityAgent.
@@ -53,12 +58,19 @@ export interface User {
 export interface ControllerProfile {
   keyAgent?: ICapabilityAgent
   zcapClient: ZcapClient
-  // X25519 key agreement key, derived deterministically from the passphrase
-  // (the Montgomery form of the Ed25519 signing key). Used to encrypt/decrypt
-  // the EDV-over-WAS `private-credentials` collection.
+  // X25519 key agreement key used to encrypt/decrypt the EDV-over-WAS
+  // encrypted collections (recipient zero of every key-epoch roster): the
+  // PUK's KAK when the account carries one, else the legacy seed-derived
+  // vault KAK (the Montgomery form of the Ed25519 signing key).
   keyAgreementKey?: IKeyAgreementKey
   // Resolves `keyAgreementKey.id` to its public form during encrypt.
   keyResolver?: IKeyResolver
+  // This client's own (identity) X25519 key-agreement key -- the Montgomery
+  // twin of the client's Ed25519 did:key pair, kept distinct from the
+  // PUK-backed `keyAgreementKey` above. It is the client's entry in the PUK
+  // wrap-set roster (`key-map/puk.json`): rotation wraps the fresh PUK to it,
+  // and a roster read unwraps with it.
+  clientKeyAgreementKey?: IKeyAgreementKey
   // WebKMS keystore agent, bound to the user's keystore on the configured
   // KMS server (KMS_SERVER_URL). Absent for guests, when no KMS server is
   // configured, or when keystore provisioning failed at login.
@@ -67,18 +79,46 @@ export interface ControllerProfile {
   // provisioning has succeeded. Absent for guests, without a KMS/WAS server,
   // or when provisioning failed.
   didWeb?: { did: string; keys: DidWebKeyMap }
-  // The user's published did:webvh DID and its update-key refs (Phase 2),
-  // present once the log has been published. Key refs only, never secrets.
-  // Absent when the did:webvh flag is off, without a KMS/WAS server, or when
+  // The user's published did:webvh DID, present once the log has been
+  // published. The update keys behind the log are client-held
+  // (`clientWebvhKeys` below), so the profile carries only the id. Absent
+  // when the did:webvh flag is off, without a WAS server, or when
   // provisioning failed -- everything degrades to did:web behavior.
-  didWebvh?: {
-    did: string
-    updateKey: WebvhUpdateKey
-    stagedKey: WebvhStagedKey
-  }
-  // The 32-byte data seed behind `keyAgent`, held in memory so Settings can
-  // re-bind the passphrase (keyring v2). Never persisted.
-  dataSeed?: Uint8Array
+  didWebvh?: { did: string }
+  // This client's did:webvh update-key seeds (active + staged), recovered
+  // from the local client-key record at login or minted at signup. Held in
+  // memory for the session so provisioning can extend the log and Settings
+  // can self-rotate; never persisted unwrapped (at rest they live only in
+  // the wrapped client-key record).
+  clientWebvhKeys?: ClientWebvhUpdateKeys
+  // Re-wraps this client's client-key record with changed members (a rotated
+  // PUK, rolled update-key seeds) without re-prompting for the unlock
+  // secret: a closure over the unlock identity that produced this session
+  // (login) or the freshest bind (signup). In-memory only, same trust class
+  // as `clientSeed` above. Absent for guests and not-enrolled states.
+  persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
+  // The 32-byte client seed behind `keyAgent` -- this client's locally minted
+  // key set, never derived from any shared secret -- held in memory so
+  // Settings can re-bind unlock methods (keyring v2). Never persisted
+  // unwrapped (at rest it lives only in the wrapped client-key record).
+  clientSeed?: Uint8Array
+  // The account controller the keyring record was bound under -- the FIRST
+  // client's did:key, which every keyring/recovery record carries and every
+  // unlock-Space management zcap is delegated to. On the first client it
+  // equals `user.id`; on an enrolled (second) client it differs. Stamped from
+  // the keyring hit at login; flows that mint further unlock records (a
+  // recovery-code issuance) carry it forward so any client can issue.
+  accountController?: string
+  // The account pointer { did, spaceId, host } this client holds as local
+  // state (recovered from the keyring record at login, or stamped at
+  // provisioning). Discovery only; absent for guests and no-WAS sessions.
+  accountPointer?: AccountPointer
+  // The per-user key (PUK) recovered from the local client-key record (or
+  // freshly minted at provisioning), held in memory so bind flows can carry
+  // it into new client-key records. Absent on legacy accounts minted before
+  // the PUK, whose recipient zero stays the seed-derived vault KAK until they
+  // are re-provisioned. Never persisted unwrapped.
+  puk?: Puk
   // Which unlock method produced this session, and the management zcap it
   // delegated to the data identity at bind time. In-memory only, never
   // persisted: it lets Settings backfill the unlock-methods registry

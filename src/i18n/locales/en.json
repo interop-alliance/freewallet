@@ -78,6 +78,17 @@
     "rotateConfirmAction": "Rotate",
     "rotateSuccess": "Update key rotated. The DID log was extended.",
     "rotateError": "Could not rotate the update key. Please try again.",
+    "enrollClient": "Enroll another wallet",
+    "enrolling": "Enrolling...",
+    "enrollClientHint": "Connects another browser to this account using the connect code it shows.",
+    "enrollConfirmTitle": "Enroll another wallet?",
+    "enrollConfirmMessage": "On the new browser, enter your passphrase on the login page and choose \"Connect this browser\". Paste the connect code it shows here.",
+    "enrollCodeLabel": "Connect code",
+    "enrollCodeInvalid": "This is not a valid connect code.",
+    "enrollFingerprint": "New client key: {{did}}. Compare it with the fingerprint shown on the new browser before approving.",
+    "enrollConfirmAction": "Approve",
+    "enrollSuccess": "The new browser was enrolled. Finish connecting on that browser.",
+    "enrollError": "Could not enroll the new browser. Approving the same code again resumes where it left off.",
     "handleSection": "Login handle",
     "handleLabel": "Preferred username",
     "handleHint": "The username sites see when you log in with your wallet. Stored as a self-issued credential; leave blank to unset.",
@@ -140,7 +151,28 @@
     "sharedRemoveConfirmAction": "Remove access",
     "sharedRemoving": "Removing...",
     "sharedRemoved": "Access removed.",
-    "sharedRemoveFailed": "Could not remove access. Please try again."
+    "sharedRemoveFailed": "Could not remove access. Please try again.",
+    "recovery": {
+      "section": "Recovery codes",
+      "intro": "A recovery code can restore access to this wallet from any browser if you lose your passphrase and every connected browser. Each code works exactly once and can be revoked here at any time -- revoking really retires it, everywhere.",
+      "requiresEnrolledClient": "Generating recovery codes requires a fully enrolled wallet client on a storage server; this session cannot issue them.",
+      "none": "No recovery codes have been generated yet.",
+      "defaultLabel": "Recovery code {{number}}",
+      "unlabeled": "Unlabeled code",
+      "healthFlagged": "Needs regeneration",
+      "healthWarning": "A flagged code may no longer be able to recover this wallet (the browser that issued it has changed). Revoke it and generate a fresh one.",
+      "remove": "Revoke this recovery code",
+      "removeConfirm": "Revoke this recovery code? It will stop working everywhere, immediately, and this cannot be undone.",
+      "generate": "Generate recovery code",
+      "dialogTitle": "Your new recovery code",
+      "shownOnce": "This code is shown only once. Save it somewhere safe (a password manager, or printed) before confirming.",
+      "copy": "Copy recovery code",
+      "labelField": "Label",
+      "codePowerHint": "Anyone holding this code can take over the wallet from any browser -- but using it always leaves a visible, permanent record, retires the code, and rotates the account keys.",
+      "confirmSaved": "I saved this code",
+      "saveError": "The recovery code could not be created. Nothing was saved -- please try again.",
+      "revokeError": "The recovery code could not be revoked. Please try again."
+    }
   },
   "landing": {
     "title": "Freewallet",
@@ -156,6 +188,8 @@
       "profileExists": "This profile already exists, please log in.",
       "setupFailed": "Could not finish setting up your wallet. Please try again.",
       "keyringUnusable": "Your account was found, but its stored login record could not be read. If this keeps happening, change your passphrase from a device where you are still logged in to write a fresh record.",
+      "clientNotEnrolled": "Your account was found, but this browser does not hold its keys yet. Use \"Connect this browser\" below to enroll it from a browser where your wallet is already set up.",
+      "accountPointerChanged": "The storage server returned account details that do not match what this browser remembers, so sign-in was stopped as a precaution. If you did not expect this, contact your storage provider.",
       "storageUnreachable": "Could not reach the storage server. While we're fixing it, try <guest>guest mode</guest>.",
       "passkeyNoAccount": "No wallet was found for this passkey. Log in with your passphrase, then add this passkey from Settings.",
       "passkeyPrfUnsupported": "This passkey or browser cannot unlock Freewallet. Try a different passkey or log in with your passphrase."
@@ -166,7 +200,21 @@
       "submit": "Log in",
       "passkey": "Log in with a Passkey",
       "noWallet": "Don't have an existing wallet?",
-      "signUpLink": "Sign up"
+      "signUpLink": "Sign up",
+      "forgotPassphrase": "Forgot your passphrase?",
+      "recoverLink": "Recover your wallet with a recovery code.",
+      "recoveryHealthWarning": "One of your recovery codes may no longer work. Open Settings > Recovery codes and generate a fresh one."
+    },
+    "enroll": {
+      "connectButton": "Connect this browser",
+      "heading": "Connect this browser",
+      "explain": "This browser minted its own keys; the connect code below carries only their public halves. In a browser where your wallet is already set up, open Settings, choose \"Enroll another wallet\", paste this code, and compare the key fingerprint on both screens before approving.",
+      "codeLabel": "Connect code",
+      "copyCode": "Copy code",
+      "fingerprint": "Key fingerprint: {{did}}",
+      "completeButton": "I approved it -- finish connecting",
+      "pending": "This browser is not enrolled yet. Approve the connect code from your other browser, then press the button again.",
+      "failed": "Connecting this browser failed. Please try again."
     },
     "signup": {
       "heading": "Sign up",
@@ -195,13 +243,43 @@
       "connectDropbox": "Connect to Dropbox",
       "connectDrive": "Connect to Google Drive",
       "courtesyStorage": "Courtesy 10 Mb storage (free)",
-      "createWallet": "Create Wallet"
+      "createWallet": "Create Wallet",
+      "lostPassphrase": "Lost your passphrase?",
+      "recoverLink": "Recover your existing wallet instead of starting over."
     },
     "guest": {
       "heading": "Guest Mode Login",
       "bulletRandom": "a random login will be created",
       "bulletEphemeral": "login and storage will be deleted at end of session",
       "submit": "Guest Mode Log In"
+    },
+    "recover": {
+      "heading": "Recover your wallet",
+      "intro": "Enter a recovery code you saved earlier. The code locates your wallet account and lets this browser join it as a new, fully enrolled client -- no passphrase needed.",
+      "noCodeHint": "If you never generated a recovery code, your wallet cannot be recovered this way -- a code is created ahead of time from Settings > Recovery codes in a logged-in wallet. Codes are the only recovery path: nothing about your account can be reconstructed from a passphrase alone.",
+      "codeLabel": "Recovery code",
+      "checkCode": "Check code",
+      "accountFound": "Found a wallet account for {{email}}.",
+      "accountFoundNoEmail": "Found a wallet account for this code.",
+      "newPassphraseExplain": "Choose a new passphrase for this browser. Your old passphrase (if you still know it) keeps working on other devices until you change it in Settings. Recovering will also retire the code you just typed and issue a replacement -- a typed code counts as used.",
+      "newPassphraseLabel": "New passphrase",
+      "submit": "Recover wallet",
+      "recovered": "Your wallet was recovered. This browser is now an enrolled client, and the code you typed no longer works.",
+      "replacementExplain": "This is your NEW recovery code. It is shown only once -- save it somewhere safe before logging in. The code you typed has been retired.",
+      "copyCode": "Copy the new recovery code",
+      "replacementSavedButton": "I saved the new code",
+      "replacementSavedDone": "New code saved",
+      "login": "Log in to your wallet",
+      "backToLogin": "Back to log in",
+      "errors": {
+        "invalidCode": "This is not a valid recovery code. Check for typos -- codes never contain 0, O, I, or l.",
+        "noMatch": "No wallet was found for this recovery code. It may never have been issued, or it may have been revoked or already used. This is different from a mistyped code -- the code is well-formed, it just unlocks nothing.",
+        "revoked": "This recovery code has been revoked or already used; it can no longer recover the wallet.",
+        "unavailable": "Recovery codes require a storage server, and this deployment has none configured.",
+        "couldNotCheck": "The storage server could not be reached, so the code could not be checked. This does not mean the code is wrong -- please try again once you are back online.",
+        "failed": "Recovery failed. Please try again.",
+        "loginFailed": "The wallet was recovered but logging in failed. Try logging in with your new passphrase from the login page."
+      }
     }
   },
   "nav": {
@@ -531,6 +609,7 @@
   },
   "chapi": {
     "accountNotFound": "Account not found. Please create your wallet from the main app first.",
+    "clientNotEnrolled": "Your account was found, but this browser context does not hold its keys. Open the wallet app directly and log in there first.",
     "storageUnreachable": "Could not reach the storage server. Please try again in a moment.",
     "loginFailed": "Could not log in. Please try again.",
     "loginPrompt": "Enter your wallet passphrase to continue:",

@@ -1,139 +1,173 @@
 /**
- * Keyring v2 -- decouples the wallet identity from the passphrase.
+ * Keyring v2 -- the unlock layer, protecting this client's key set.
  *
- * A freewallet account has two identities:
+ * A freewallet account is no longer a shared data seed. Each client (a
+ * browser profile) generates its own key set locally on first run -- a random
+ * 32-byte client seed behind an Ed25519 signing pair and its X25519
+ * (Montgomery) twin -- and the private halves never leave the client and are
+ * never derived from any shared secret. Two identities meet here:
  *
- * - The **data identity** is the wallet's real root: the Ed25519 key pair
- *   behind the did:key, the spaceId, the KMS keystore controller, and the
- *   vault KAK. It is a random 32-byte seed, never derivable from any
- *   passphrase.
+ * - The **client identity** is this client's local root: the Ed25519 key pair
+ *   behind its did:key and the X25519 twin. The client also caches the
+ *   account's per-user key (PUK, the roster identity for encrypted
+ *   collections) beside its own keys, under the same unlock layer.
  * - The **unlock identity** is derived from an unlock secret at login -- the
  *   passphrase today; a passkey PRF output or a recovery code are further
  *   methods on the same seam (`unlockSeed = KDF(secret)` per the method's
  *   `UnlockKdf`, then `CapabilityAgent.fromSeed` with a distinct `'unlock'`
- *   handle so it can never collide with the data identity's `'bootstrap'`
+ *   handle so it can never collide with the client identity's `'bootstrap'`
  *   derivation). It controls nothing but its own minimal Space. One unlock
  *   method = one unlock identity = one unlock Space; each method's KDF salt
  *   differs, so two methods can never derive the same Space.
  *
- * The **keyring record** lives in the unlock identity's own Space
- * (`keyring/keyring.json`) -- the only placement that is locatable before the
- * data identity is known. Its payload is the data seed wrapped (JWE, ECDH-ES to
- * the unlock KAK) via the same EDV cipher the wallet already ships, so the
- * unlock Space never publicly links the two identities. The remote copy is the
- * source of truth and is consulted first on every login; a **local cache** of
- * the record in the `freewallet-session` IndexedDB database serves no-WAS
- * deployments and, within a bounded TTL (`KEYRING_CACHE_TTL_MS`), offline
- * logins when the remote is unreachable.
+ * The unlock layer protects two records per unlock method:
  *
- * A passphrase change re-wraps the data seed under a new unlock identity, PUTs
- * it to the new unlock Space, then deletes the old unlock Space -- which is
- * what retires the old passphrase (the random data seed is never derivable from
- * a passphrase, so once its unlock Space is gone the old passphrase resolves to
- * nothing). Because login checks the remote first, other devices see the
- * retirement on their next online login (their stale caches are dropped);
- * offline, a stale cache stops answering once its TTL lapses.
+ * - The **keyring record** lives in the unlock identity's own Space
+ *   (`keyring/keyring.json`) -- the only placement that is locatable before
+ *   the account is known. Its payload is the **account pointer**
+ *   `{ did, spaceId, host }` (plus the controller and the account email),
+ *   wrapped (JWE, ECDH-ES to the unlock KAK) via the same EDV cipher the
+ *   wallet already ships -- discovery for a portable credential, never key
+ *   material. The retired wrapped data seed is gone: a passphrase on a fresh
+ *   browser locates the account but cannot act until that client is enrolled.
+ *   The remote copy is the source of truth and is consulted first on every
+ *   login; a **local cache** in the `freewallet-session` IndexedDB serves
+ *   no-WAS deployments and, within `KEYRING_CACHE_TTL_MS`, offline logins.
+ * - The **client-key record** lives only in the `freewallet-session`
+ *   IndexedDB: this client's key set (the client seed) and its cached copy of
+ *   the PUK, wrapped to the same unlock KAK. It is primary state, not a cache
+ *   -- the private keys exist nowhere else -- so it is deleted only by the
+ *   explicit unlock-method lifecycle flows, never on a server answer.
+ *
+ * **Pointer continuity**: the pointer a client has seen is pinned locally
+ * (the recorded first-fetch trust bound). A remote record whose pointer
+ * conflicts with the pin throws `AccountPointerChangedError` instead of being
+ * followed -- a passphrase-only bootstrap trusts the server at first contact,
+ * but a client that has seen the account before does not have to keep
+ * trusting a substituted record.
+ *
+ * A passphrase change re-wraps both records under a new unlock identity, PUTs
+ * the keyring record to the new unlock Space, then deletes the old unlock
+ * Space and the old local records -- which is what retires the old passphrase
+ * (nothing about the account is derivable from a passphrase, so once its
+ * unlock Space is gone the old passphrase resolves to nothing). Because login
+ * checks the remote first, other clients see the retirement on their next
+ * online login; offline, a stale cache stops answering once its TTL lapses.
  *
  * Account deletion retires the keyring the same way -- it deletes the unlock
- * Space and its cache outright, after the caller has wiped the data Space
- * (once the keyring is gone the data seed is unrecoverable).
+ * Space and every local record outright, after the caller has wiped the data
+ * Space.
  */
-import { CapabilityAgent } from '@interop/webkms-client'
-import { Ed25519Signature2020 } from '@interop/ed25519-signature'
-import { ZcapClient } from '@interop/ezcap'
-import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
-import type {
-  IKeyAgreementKey,
-  IKeyResolver,
-  IZcap
-} from '@interop/data-integrity-core'
+import type { ZcapClient } from '@interop/ezcap'
+import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import { base64urlnopad } from '@scure/base'
 import {
   KEYRING_CACHE_TTL_MS,
-  KEYRING_COLLECTION,
-  KEYRING_KDF,
   UNLOCK_MANAGE_ZCAP_TTL_MS,
   WAS_SERVER_URL
 } from '@/app.config'
-import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
-import { singleKeyResolver } from '@interop/wallet-core/identity'
-import { createEdvDocCipher } from '@interop/was-client/edv'
-import {
-  deleteKeyringCache,
-  loadKeyringCache,
-  saveKeyringCache
-} from '@/lib/sessionKey'
+import { bufferToBase64Url } from '@/lib/cidFrom'
+import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
+import type { Puk } from '@interop/wallet-core/keys'
 import {
   deleteUnlockSpace,
+  deriveUnlockIdentity,
   ensureUnlockSpace,
   getUnlockKeyring,
-  putUnlockKeyring
-} from '@/stores/wasRemoteStore'
+  putUnlockKeyring,
+  unwrapKeyringRecord,
+  wrapKeyringRecord,
+  KEYRING_KDF,
+  type AccountPointer,
+  type KeyringRecordContents,
+  type UnlockIdentity,
+  type UnlockKdf
+} from '@interop/wallet-core/keyring'
+import { createEdvDocCipher } from '@interop/was-client/edv'
+import {
+  deleteAccountPointerPin,
+  deleteClientKeyRecord,
+  deleteKeyringCache,
+  loadAccountPointerPin,
+  loadClientKeyRecord,
+  loadKeyringCache,
+  saveAccountPointerPin,
+  saveClientKeyRecord,
+  saveKeyringCache
+} from '@/lib/sessionKey'
 
 /**
- * Unlock-derivation parameters, one variant per KDF family: PBKDF2 stretches
- * a low-entropy passphrase; HKDF expands already-uniform key material (e.g. a
- * passkey PRF output). Each unlock method pins its own parameter set -- and
- * its own salt, so two methods can never derive the same unlock identity.
- * The `version` records which parameter set produced a derivation; the
- * keyring record's own `version` is stamped separately.
+ * The version stamped on the stored `{ version, wrapped }` client-key
+ * envelope, and the cipher context id its JWE is bound to (distinct from the
+ * keyring record's, so the two envelopes can never be swapped for each
+ * other).
  */
-export type UnlockKdf =
-  | {
-      version: number
-      algorithm: 'PBKDF2'
-      iterations: number
-      hash: string
-      salt: string
-    }
-  | {
-      version: number
-      algorithm: 'HKDF'
-      hash: string
-      salt: string
-      info: string
-    }
+const CLIENT_KEYS_RECORD_VERSION = 1
+const CLIENT_KEYS_CIPHER_ID = 'client-keys'
 
 /**
- * The recovered data identity: the 32-byte data seed plus the controller
- * (data did:key) the keyring record carries alongside it. `email` is the
- * account email captured at bind time (when one was given) -- carried in the
- * record so any unlock method recovers it (a passkey login has no login form
- * to ask on).
+ * This client's key set as recovered from the local client-key record: the
+ * random 32-byte client seed behind the client's Ed25519 + X25519 pair, the
+ * locally cached PUK (absent only on records written for accounts minted
+ * before the PUK existed), this client's did:webvh update-key seeds
+ * (absent on records written before the update keys became client-held), and
+ * the account controller the record was bound for (absent on records written
+ * before multi-client enrollment; those were necessarily written by the
+ * first client, whose own did:key IS the controller).
  */
-export interface KeyringSeed {
-  seed: Uint8Array
-  controller: string
-  email?: string
+export interface ClientKeySet {
+  clientSeed: Uint8Array
+  puk?: Puk
+  webvhUpdateKeys?: ClientWebvhUpdateKeys
+  controller?: string
 }
 
 /**
- * What `fetchKeyringSeed` returns to callers on a hit: the recovered data
- * identity (`KeyringSeed`), plus the derived unlock Space id (always -- it is
- * already computed) and, when `mintManageCapability` was requested and a WAS
- * server is configured, a management zcap the unlock identity delegated to the
- * recovered `controller`. The capability grants GET/DELETE on the unlock Space
- * only, so a later Settings flow can retire this method (a lost passkey) with
- * the session's root key -- no re-derivation from, or tap on, the secret.
+ * The re-wrappable members of a client-key record -- what a live session may
+ * change after login (a roster-rotated PUK, rolled did:webvh update-key
+ * seeds). The client seed itself is immutable for the record's lifetime.
  */
-export interface KeyringFetchResult extends KeyringSeed {
+export interface PersistableClientKeys {
+  puk?: Puk
+  webvhUpdateKeys?: ClientWebvhUpdateKeys
+}
+
+/**
+ * What `fetchKeyring` returns to callers on a hit: the record contents, plus
+ * the derived unlock Space id (always -- it is already computed),
+ * `clientKeys` when this client holds a key set under the unlock method (an
+ * enrolled client; absent on a fresh browser, which can locate the account
+ * but not act), and, when `mintManageCapability` was requested and a WAS
+ * server is configured, a management zcap the unlock identity delegated to
+ * the recovered `controller`. The capability grants GET/DELETE on the unlock
+ * Space only, so a later Settings flow can retire this method (a lost
+ * passkey) with the session's root key -- no re-derivation from, or tap on,
+ * the secret.
+ */
+export interface KeyringFetchResult extends KeyringRecordContents {
   unlockSpaceId: string
+  clientKeys?: ClientKeySet
   manageCapability?: IZcap
+  // Present beside `clientKeys`: re-wraps the client-key record with changed
+  // members (see `PersistableClientKeys`) without the unlock secret -- a
+  // closure over the unlock identity that produced this hit. In-memory only.
+  persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
 }
 
 /**
- * Delegates the long-lived management zcap on an unlock Space to the data
- * identity: GET/DELETE on the unlock Space URL, controlled by the data did:key,
- * expiring after `UNLOCK_MANAGE_ZCAP_TTL_MS`. Pure signing (no server round
- * trip); the chain roots at the Space's synthesized root capability (the ezcap
- * client generates it from the target). Only ever called when a WAS server is
- * configured -- the unlock Space, and thus the capability, exist only then.
+ * Delegates the long-lived management zcap on an unlock Space to the account
+ * controller: GET/DELETE on the unlock Space URL, controlled by the account
+ * did:key, expiring after `UNLOCK_MANAGE_ZCAP_TTL_MS`. Pure signing (no
+ * server round trip); the chain roots at the Space's synthesized root
+ * capability (the ezcap client generates it from the target). Only ever
+ * called when a WAS server is configured -- the unlock Space, and thus the
+ * capability, exist only then.
  *
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the unlock identity's client (it can
  *   both invoke and delegate)
  * @param options.spaceId {string}   the unlock Space id
- * @param options.controller {string}   the data did:key to delegate to
+ * @param options.controller {string}   the account did:key to delegate to
  * @returns {Promise<IZcap>}
  */
 async function delegateUnlockManagement({
@@ -158,228 +192,351 @@ async function delegateUnlockManagement({
 }
 
 /**
- * Derives the 32-byte unlock seed from an unlock secret (WebCrypto),
- * branching on the KDF family: PBKDF2 stretches a passphrase, HKDF expands
- * already-uniform key material such as a passkey PRF output.
+ * Wraps this client's key set (+ the cached PUK) into a client-key record
+ * under the unlock KAK, and saves it to the `freewallet-session` IndexedDB
+ * keyed by the unlock Space id.
  *
  * @param options {object}
- * @param options.secret {string | Uint8Array}
- * @param options.kdf {UnlockKdf}
- * @returns {Promise<Uint8Array>}
+ * @param options.unlock {UnlockIdentity}
+ * @param options.clientSeed {Uint8Array}   the 32-byte client seed
+ * @param [options.puk] {Puk}   the per-user key, cached beside the client keys
+ * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
+ *   did:webvh update-key seeds, cached beside the client keys
+ * @param [options.controller] {string}   the account controller this key set
+ *   was bound for -- on an enrolled (non-first) client it differs from the
+ *   client's own did:key
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
  */
-async function deriveUnlockSeed({
-  secret,
-  kdf
-}: {
-  secret: string | Uint8Array
-  kdf: UnlockKdf
-}): Promise<Uint8Array> {
-  // Copy a bytes secret into a fresh buffer: WebCrypto's BufferSource wants a
-  // plain ArrayBuffer-backed view, which a caller's slice may not be.
-  const secretBytes =
-    typeof secret === 'string'
-      ? new TextEncoder().encode(secret)
-      : new Uint8Array(secret)
-  if (kdf.algorithm === 'PBKDF2') {
-    const baseKey = await crypto.subtle.importKey(
-      'raw',
-      secretBytes,
-      'PBKDF2',
-      false,
-      ['deriveBits']
-    )
-    const bits = await crypto.subtle.deriveBits(
-      {
-        name: 'PBKDF2',
-        salt: new TextEncoder().encode(kdf.salt),
-        iterations: kdf.iterations,
-        hash: kdf.hash
-      },
-      baseKey,
-      256
-    )
-    return new Uint8Array(bits)
-  }
-  const baseKey = await crypto.subtle.importKey(
-    'raw',
-    secretBytes,
-    'HKDF',
-    false,
-    ['deriveBits']
-  )
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: 'HKDF',
-      hash: kdf.hash,
-      salt: new TextEncoder().encode(kdf.salt),
-      info: new TextEncoder().encode(kdf.info)
-    },
-    baseKey,
-    256
-  )
-  return new Uint8Array(bits)
-}
-
-/**
- * Derives the full unlock identity from an unlock secret: the unlock
- * CapabilityAgent, a ZcapClient that can both invoke and delegate (the
- * unlock agent delegates a management zcap on its own Space to the data
- * identity at bind time), the unlock KAK + resolver for wrap/unwrap, and the
- * unlock Space id. Performs no I/O -- exported as the derivation seam for
- * tests and future unlock methods.
- *
- * @param options {object}
- * @param options.secret {string | Uint8Array}
- * @param options.kdf {UnlockKdf}
- * @returns {Promise<object>}
- */
-export async function deriveUnlockIdentity({
-  secret,
-  kdf
-}: {
-  secret: string | Uint8Array
-  kdf: UnlockKdf
-}) {
-  const seed = await deriveUnlockSeed({ secret, kdf })
-  const agent = await CapabilityAgent.fromSeed({
-    seed,
-    handle: 'unlock',
-    keyName: 'unlock-key'
-  })
-  const signer = agent.getSigner()
-  const zcapClient = new ZcapClient({
-    SuiteClass: Ed25519Signature2020,
-    invocationSigner: signer,
-    delegationSigner: signer
-  })
-
-  // The unlock KAK is the Montgomery form of the unlock signing key -- the same
-  // derivation the data side uses (`agentsFromSeed`), so a returning user
-  // reconstitutes the exact key that wrapped the keyring record.
-  const keyAgreementKey =
-    X25519KeyAgreementKey2020.fromEd25519VerificationKey2020({
-      keyPair: agent.getVerificationKeyPair()
-    })
-  const keyResolver: IKeyResolver = singleKeyResolver({ keyAgreementKey })
-
-  const spaceId = bufferToBase64Url(await digestHash(agent.id))
-  return { agent, zcapClient, keyAgreementKey, keyResolver, spaceId }
-}
-
-/**
- * Wraps a data seed into a keyring record: the seed (+ controller / timestamp)
- * encrypted under the unlock KAK via the EDV cipher.
- *
- * @param options {object}
- * @param options.seed {Uint8Array}
- * @param options.controller {string}   the data did:key
- * @param [options.email] {string}   the account email, when known
- * @param options.keyAgreementKey {IKeyAgreementKey}   the unlock KAK
- * @param options.keyResolver {IKeyResolver}
- * @returns {Promise<{ version: number, wrapped: unknown }>}
- */
-async function wrapSeed({
-  seed,
+async function saveClientKeys({
+  unlock,
+  clientSeed,
+  puk,
+  webvhUpdateKeys,
   controller,
-  email,
-  keyAgreementKey,
-  keyResolver
+  idb
 }: {
-  seed: Uint8Array
-  controller: string
-  email?: string
-  keyAgreementKey: IKeyAgreementKey
-  keyResolver: IKeyResolver
-}): Promise<{ version: number; wrapped: unknown }> {
+  unlock: UnlockIdentity
+  clientSeed: Uint8Array
+  puk?: Puk
+  webvhUpdateKeys?: ClientWebvhUpdateKeys
+  controller?: string
+  idb?: IDBFactory
+}): Promise<void> {
   const cipher = await createEdvDocCipher({
-    keyAgreementKey,
-    keyResolver,
-    collectionId: KEYRING_COLLECTION.id
+    keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+    keyResolver: unlock.keyResolver,
+    collectionId: CLIENT_KEYS_CIPHER_ID
   })
   const { envelope } = await cipher.encrypt({
     data: {
-      seed: bufferToBase64Url(seed),
-      controller,
-      ...(email ? { email } : {}),
+      clientSeed: bufferToBase64Url(clientSeed),
+      ...(puk
+        ? {
+            puk: {
+              id: puk.id,
+              secret: bufferToBase64Url(puk.secret),
+              ...(puk.signingSeed
+                ? { signingSeed: bufferToBase64Url(puk.signingSeed) }
+                : {})
+            }
+          }
+        : {}),
+      ...(webvhUpdateKeys
+        ? {
+            webvh: {
+              updateSeed: bufferToBase64Url(webvhUpdateKeys.updateSeed),
+              stagedSeed: bufferToBase64Url(webvhUpdateKeys.stagedSeed),
+              ...(webvhUpdateKeys.pendingStagedSeed
+                ? {
+                    pendingStagedSeed: bufferToBase64Url(
+                      webvhUpdateKeys.pendingStagedSeed
+                    )
+                  }
+                : {})
+            }
+          }
+        : {}),
+      ...(controller ? { controller } : {}),
       createdAt: new Date().toISOString()
     }
   })
-  return { version: 1, wrapped: envelope }
+  await saveClientKeyRecord({
+    spaceId: unlock.spaceId,
+    record: { version: CLIENT_KEYS_RECORD_VERSION, wrapped: envelope },
+    idb
+  })
 }
 
 /**
- * Unwraps and validates a keyring record. Rejects a record whose `version` is
- * not 1, and sanity-checks the decrypted plaintext (32-byte seed, non-empty
- * controller). An extra `seedOrigin` field (written by records from earlier in
- * this session) is tolerated and ignored.
+ * Builds the `persistClientKeys` closure over an unlock identity: loads the
+ * current client-key record, merges the changed members, and re-wraps. A
+ * missing or unusable record is left alone -- the closure must never
+ * manufacture one. Holding the closure keeps the unlock identity's key
+ * material in memory for the session; that is deliberate (it is what lets a
+ * rotation persist without re-prompting for the secret) and adds no exposure
+ * the in-memory client seed did not already carry.
  *
  * @param options {object}
- * @param options.record {unknown}
- * @param options.keyAgreementKey {IKeyAgreementKey}   the unlock KAK
- * @param options.keyResolver {IKeyResolver}
- * @returns {Promise<KeyringSeed>}
+ * @param options.unlock {UnlockIdentity}
+ * @param [options.idb] {IDBFactory}
+ * @returns {(changes: PersistableClientKeys) => Promise<void>}
  */
-async function unwrapSeed({
+function clientKeysPersister({
+  unlock,
+  idb
+}: {
+  unlock: UnlockIdentity
+  idb?: IDBFactory
+}): (changes: PersistableClientKeys) => Promise<void> {
+  return async changes => {
+    const clientKeys = await loadClientKeys({ unlock, idb })
+    if (!clientKeys) {
+      return
+    }
+    await saveClientKeys({
+      unlock,
+      clientSeed: clientKeys.clientSeed,
+      puk: changes.puk ?? clientKeys.puk,
+      webvhUpdateKeys: changes.webvhUpdateKeys ?? clientKeys.webvhUpdateKeys,
+      controller: clientKeys.controller,
+      idb
+    })
+  }
+}
+
+/**
+ * Loads and unwraps this client's key set for an unlock identity, or
+ * `undefined` when this client holds none under it (a browser that has never
+ * provisioned or enrolled for the account -- it can locate the account but
+ * not act). A record that fails to unwrap or validate is warned about,
+ * evicted, and reported as absent: corrupt ciphertext is unrecoverable
+ * either way, and login then surfaces the honest "this client is not
+ * enrolled" state.
+ *
+ * @param options {object}
+ * @param options.unlock {UnlockIdentity}
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<ClientKeySet | undefined>}
+ */
+async function loadClientKeys({
+  unlock,
+  idb
+}: {
+  unlock: UnlockIdentity
+  idb?: IDBFactory
+}): Promise<ClientKeySet | undefined> {
+  const record = await loadClientKeyRecord({ spaceId: unlock.spaceId, idb })
+  if (!record) {
+    return undefined
+  }
+  try {
+    return await unwrapClientKeys({ record, unlock })
+  } catch (err) {
+    console.warn('Discarding an unusable client-key record:', err)
+    await deleteClientKeyRecord({ spaceId: unlock.spaceId, idb })
+    return undefined
+  }
+}
+
+/**
+ * Unwraps and validates a stored client-key record: rejects an unknown outer
+ * `version`, decrypts the payload, and sanity-checks the key material
+ * (32-byte client seed, well-formed PUK when present).
+ *
+ * @param options {object}
+ * @param options.record {unknown}   the stored `{ version, wrapped }` envelope
+ * @param options.unlock {UnlockIdentity}
+ * @returns {Promise<ClientKeySet>}
+ */
+async function unwrapClientKeys({
   record,
-  keyAgreementKey,
-  keyResolver
+  unlock
 }: {
   record: unknown
-  keyAgreementKey: IKeyAgreementKey
-  keyResolver: IKeyResolver
-}): Promise<KeyringSeed> {
+  unlock: UnlockIdentity
+}): Promise<ClientKeySet> {
   if (record === null || typeof record !== 'object') {
-    throw new Error('Malformed keyring record.')
+    throw new Error('Malformed client-key record.')
   }
   const { version, wrapped } = record as {
     version?: unknown
     wrapped?: unknown
   }
-  if (version !== 1) {
-    throw new Error(`Unsupported keyring record version "${String(version)}".`)
+  if (version !== CLIENT_KEYS_RECORD_VERSION) {
+    throw new Error(
+      `Unsupported client-key record version "${String(version)}".`
+    )
   }
   const cipher = await createEdvDocCipher({
-    keyAgreementKey,
-    keyResolver,
-    collectionId: KEYRING_COLLECTION.id
+    keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+    keyResolver: unlock.keyResolver,
+    collectionId: CLIENT_KEYS_CIPHER_ID
   })
   const plaintext = (await cipher.decrypt({
     envelope: wrapped as never
   })) as {
-    seed?: unknown
+    clientSeed?: unknown
+    puk?: unknown
+    webvh?: unknown
     controller?: unknown
-    email?: unknown
   }
 
-  if (typeof plaintext.controller !== 'string' || !plaintext.controller) {
-    throw new Error('Keyring record is missing a controller.')
+  if (typeof plaintext.clientSeed !== 'string') {
+    throw new Error('Client-key record is missing the client seed.')
   }
-  if (typeof plaintext.seed !== 'string') {
-    throw new Error('Keyring record is missing a seed.')
+  const clientSeed = base64urlnopad.decode(plaintext.clientSeed)
+  if (clientSeed.length !== 32) {
+    throw new Error('Client-key record client seed is not 32 bytes.')
   }
-  const seed = base64urlnopad.decode(plaintext.seed)
-  if (seed.length !== 32) {
-    throw new Error('Keyring record seed is not 32 bytes.')
+  if (
+    plaintext.controller !== undefined &&
+    (typeof plaintext.controller !== 'string' || !plaintext.controller)
+  ) {
+    throw new Error('Client-key record has a malformed controller.')
   }
-
+  const puk = parseRecordPuk(plaintext.puk)
+  const webvhUpdateKeys = parseRecordWebvhKeys(plaintext.webvh)
   return {
-    seed,
-    controller: plaintext.controller,
-    // A record written before emails were carried (or bound without one)
-    // simply has no email; anything non-string is ignored, not fatal.
-    ...(typeof plaintext.email === 'string' && plaintext.email
-      ? { email: plaintext.email }
+    clientSeed,
+    ...(puk ? { puk } : {}),
+    ...(webvhUpdateKeys ? { webvhUpdateKeys } : {}),
+    ...(plaintext.controller ? { controller: plaintext.controller } : {})
+  }
+}
+
+/**
+ * Parses and validates the optional `webvh` member of a client-key record
+ * plaintext: this client's did:webvh update-key seeds. An absent member
+ * returns undefined (a record written before the update keys became
+ * client-held); a present-but-malformed one throws -- the account's identity
+ * log can only be extended with these seeds, so proceeding without them
+ * would silently strand update authority.
+ *
+ * @param value {unknown}   the record's `webvh` member
+ * @returns {ClientWebvhUpdateKeys | undefined}
+ */
+function parseRecordWebvhKeys(
+  value: unknown
+): ClientWebvhUpdateKeys | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  if (value === null || typeof value !== 'object') {
+    throw new Error('Client-key record has malformed did:webvh update keys.')
+  }
+  const { updateSeed, stagedSeed, pendingStagedSeed } = value as {
+    updateSeed?: unknown
+    stagedSeed?: unknown
+    pendingStagedSeed?: unknown
+  }
+  const decodeSeed = (member: unknown, name: string): Uint8Array => {
+    if (typeof member !== 'string') {
+      throw new Error(`Client-key record did:webvh ${name} is missing.`)
+    }
+    const bytes = base64urlnopad.decode(member)
+    if (bytes.length !== 32) {
+      throw new Error(`Client-key record did:webvh ${name} is not 32 bytes.`)
+    }
+    return bytes
+  }
+  return {
+    updateSeed: decodeSeed(updateSeed, 'update seed'),
+    stagedSeed: decodeSeed(stagedSeed, 'staged seed'),
+    ...(pendingStagedSeed !== undefined
+      ? { pendingStagedSeed: decodeSeed(pendingStagedSeed, 'pending seed') }
       : {})
   }
 }
 
 /**
- * Thrown by `fetchKeyringSeed` when a keyring record was found under the
+ * Parses and validates the optional `puk` member of a client-key record
+ * plaintext. An absent member returns undefined (a record written for an
+ * account minted before the PUK); a present-but-malformed one throws -- the
+ * account's encrypted collections are keyed on the PUK, so proceeding without
+ * it would silently orphan them.
+ *
+ * @param value {unknown}   the record's `puk` member
+ * @returns {Puk | undefined}
+ */
+function parseRecordPuk(value: unknown): Puk | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  if (value === null || typeof value !== 'object') {
+    throw new Error('Client-key record has a malformed PUK.')
+  }
+  const { id, secret, signingSeed } = value as {
+    id?: unknown
+    secret?: unknown
+    signingSeed?: unknown
+  }
+  if (typeof id !== 'string' || !id) {
+    throw new Error('Client-key record PUK is missing its key id.')
+  }
+  if (typeof secret !== 'string') {
+    throw new Error('Client-key record PUK is missing its key material.')
+  }
+  const secretBytes = base64urlnopad.decode(secret)
+  if (secretBytes.length !== 32) {
+    throw new Error('Client-key record PUK key material is not 32 bytes.')
+  }
+  // The signing seed is absent on a PUK adopted from a roster rotation (the
+  // roster wraps the key-agreement secret alone); when present it must be
+  // well-formed.
+  if (signingSeed === undefined) {
+    return { id, secret: secretBytes }
+  }
+  if (typeof signingSeed !== 'string') {
+    throw new Error('Client-key record PUK is missing its key material.')
+  }
+  const signingSeedBytes = base64urlnopad.decode(signingSeed)
+  if (signingSeedBytes.length !== 32) {
+    throw new Error('Client-key record PUK key material is not 32 bytes.')
+  }
+  return { id, secret: secretBytes, signingSeed: signingSeedBytes }
+}
+
+/**
+ * Replaces the PUK cached in this client's client-key record -- rotation
+ * delivery landing locally: the roster read at login found a fresh epoch,
+ * the session adopted the fresh PUK, and this persists it so the next login
+ * starts from the rotated key. Re-derives the unlock identity from the
+ * secret (the record is wrapped to the unlock KAK), re-wraps the stored
+ * client seed with the new PUK, and saves the record back. A missing or
+ * unusable record is left alone -- there is nothing to update, and this
+ * function must never manufacture one.
+ *
+ * @param options {object}
+ * @param options.secret {string | Uint8Array}   the unlock secret that
+ *   produced the session
+ * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
+ * @param options.puk {Puk}   the freshly adopted per-user key
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function updateClientKeyPuk({
+  secret,
+  kdf,
+  puk,
+  idb
+}: {
+  secret: string | Uint8Array
+  kdf: UnlockKdf
+  puk: Puk
+  idb?: IDBFactory
+}): Promise<void> {
+  const unlock = await deriveUnlockIdentity({ secret, kdf })
+  await clientKeysPersister({ unlock, idb })({ puk })
+}
+
+/**
+ * Thrown by `fetchKeyring` when a keyring record was found under the
  * passphrase's unlock Space but could not be unwrapped or validated -- a
- * genuinely corrupt/malformed record. Distinct from "no account" (a `null`
- * return; a wrong passphrase resolves to a different unlock Space and misses)
- * and from an unreachable server (a rethrown network error), so callers can
- * surface it with its own recovery guidance.
+ * genuinely corrupt/malformed (or retired version-1) record. Distinct from
+ * "no account" (a `null` return; a wrong passphrase resolves to a different
+ * unlock Space and misses) and from an unreachable server (a rethrown network
+ * error), so callers can surface it with its own recovery guidance.
  */
 export class KeyringRecordUnusableError extends Error {
   constructor({ cause }: { cause?: unknown } = {}) {
@@ -387,6 +544,102 @@ export class KeyringRecordUnusableError extends Error {
     super(`Unusable keyring record.${detail}`)
     this.name = 'KeyringRecordUnusableError'
     this.cause = cause
+  }
+}
+
+/**
+ * Thrown by `fetchKeyring` when the remote keyring record's account pointer
+ * conflicts with the pointer this client has pinned for the unlock method --
+ * the continuity refusal: a server (or an attacker who can write to it) has
+ * substituted where this passphrase resolves to since this client last saw
+ * the account. Login is refused rather than misdirected; the pin is left in
+ * place so the state is inspectable.
+ */
+export class AccountPointerChangedError extends Error {
+  pinned: AccountPointer
+  fetched?: AccountPointer
+  constructor({
+    pinned,
+    fetched
+  }: {
+    pinned: AccountPointer
+    fetched?: AccountPointer
+  }) {
+    super(
+      'The account pointer in the keyring record does not match the one ' +
+        'this client has pinned.'
+    )
+    this.name = 'AccountPointerChangedError'
+    this.pinned = pinned
+    this.fetched = fetched
+  }
+}
+
+/**
+ * Whether a freshly fetched pointer conflicts with the pinned one. The
+ * account location (`spaceId`, `host`) must match exactly, and a pinned did
+ * may never change or disappear; a fetched record that ADDS a did to a pin
+ * recorded before provisioning published one is a benign upgrade, not a
+ * conflict. A record with no pointer at all, against a pin, is a conflict --
+ * a WAS-bound record always carries one.
+ *
+ * @param options {object}
+ * @param options.pinned {AccountPointer}
+ * @param [options.fetched] {AccountPointer}
+ * @returns {boolean}
+ */
+function pointerConflicts({
+  pinned,
+  fetched
+}: {
+  pinned: AccountPointer
+  fetched?: AccountPointer
+}): boolean {
+  if (!fetched) {
+    return true
+  }
+  return (
+    fetched.spaceId !== pinned.spaceId ||
+    fetched.host !== pinned.host ||
+    (pinned.did !== undefined && fetched.did !== pinned.did)
+  )
+}
+
+/**
+ * Enforces pointer continuity for a freshly fetched remote record: refuses a
+ * pointer that conflicts with the local pin (throws
+ * `AccountPointerChangedError`), and otherwise records/refreshes the pin --
+ * the first fetch establishes the trust bound; a benign did upgrade advances
+ * it.
+ *
+ * @param options {object}
+ * @param options.unlock {UnlockIdentity}
+ * @param options.found {KeyringRecordContents}   the unwrapped remote record
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+async function enforcePointerContinuity({
+  unlock,
+  found,
+  idb
+}: {
+  unlock: UnlockIdentity
+  found: KeyringRecordContents
+  idb?: IDBFactory
+}): Promise<void> {
+  const pinned = (await loadAccountPointerPin({
+    spaceId: unlock.spaceId,
+    idb
+  })) as AccountPointer | null
+  if (pinned && pointerConflicts({ pinned, fetched: found.pointer })) {
+    throw new AccountPointerChangedError({ pinned, fetched: found.pointer })
+  }
+  if (found.pointer) {
+    await saveAccountPointerPin({
+      spaceId: unlock.spaceId,
+      pointer: found.pointer,
+      idb
+    })
   }
 }
 
@@ -400,7 +653,7 @@ export class KeyringRecordUnusableError extends Error {
  *
  * @param options {object}
  * @param options.cached {{ record: unknown }}   the loaded cache entry
- * @param options.unlock {Awaited<ReturnType<typeof deriveUnlockIdentity>>}
+ * @param options.unlock {UnlockIdentity}
  * @param options.mintManageCapability {boolean}
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<KeyringFetchResult | null>}
@@ -412,12 +665,12 @@ async function readCachedRecord({
   idb
 }: {
   cached: { record: unknown }
-  unlock: Awaited<ReturnType<typeof deriveUnlockIdentity>>
+  unlock: UnlockIdentity
   mintManageCapability: boolean
   idb?: IDBFactory
 }): Promise<KeyringFetchResult | null> {
   try {
-    const unwrapped = await unwrapSeed({
+    const unwrapped = await unwrapKeyringRecord({
       record: cached.record,
       keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
       keyResolver: unlock.keyResolver
@@ -425,7 +678,8 @@ async function readCachedRecord({
     return await buildFetchResult({
       found: unwrapped,
       unlock,
-      mintManageCapability
+      mintManageCapability,
+      idb
     })
   } catch (err) {
     console.warn('Discarding an unusable cached keyring record:', err)
@@ -435,24 +689,31 @@ async function readCachedRecord({
 }
 
 /**
- * Locates and unwraps the keyring for an unlock secret. When a WAS server is
- * configured the remote copy is consulted first -- it is the source of truth,
- * and checking it before the cache is what makes a method change (e.g. a
- * passphrase change) on another device take effect here: a found record
+ * Locates the keyring for an unlock secret. When a WAS server is configured
+ * the remote copy is consulted first -- it is the source of truth, and
+ * checking it before the cache is what makes a method change (e.g. a
+ * passphrase change) on another client take effect here: a found record
  * refreshes the local cache, while a 404-shaped miss (a null record) drops
- * any cached copy and returns `null` (no account for this secret -- never
- * bound, or retired). When the remote GET fails (network/unreachable), the
- * cache answers as an offline fallback, but only within
- * `KEYRING_CACHE_TTL_MS`; past that (or with no usable cache) the error
- * rethrows, so the caller sees "could not check" rather than misreading it as
- * "no account". A remote record that fails to unwrap or validate throws
+ * the cached copy and the pointer pin and returns `null` (no account for this
+ * secret -- never bound, or retired). The local client-key record is left
+ * alone on a miss: it is the only copy of this client's keys, and a server
+ * answer must never be able to destroy it. When the remote GET fails
+ * (network/unreachable), the cache answers as an offline fallback, but only
+ * within `KEYRING_CACHE_TTL_MS`; past that (or with no usable cache) the
+ * error rethrows, so the caller sees "could not check" rather than misreading
+ * it as "no account". A remote record that fails to unwrap or validate throws
  * `KeyringRecordUnusableError` (corrupt record -- a state distinct from both
- * "no account" and "server unreachable") and never refreshes the cache. With
- * no WAS server configured the cache is the keyring's only copy, so the
- * lookup is cache-only with no TTL.
+ * "no account" and "server unreachable") and never refreshes the cache; one
+ * whose pointer conflicts with the local pin throws
+ * `AccountPointerChangedError` and is neither cached nor followed. With no
+ * WAS server configured the cache is the keyring's only copy, so the lookup
+ * is cache-only with no TTL.
  *
- * The result on a hit always carries the derived `unlockSpaceId` (cheap -- it
- * is already computed); when `mintManageCapability` is set and a WAS server is
+ * A hit carries `clientKeys` when this client holds a key set under the
+ * unlock method (an enrolled client -- the session can be built), and omits
+ * it on a fresh browser (the account is located; acting requires enrollment).
+ * The result always carries the derived `unlockSpaceId` (cheap -- it is
+ * already computed); when `mintManageCapability` is set and a WAS server is
  * configured it also carries a `manageCapability` delegated to the recovered
  * controller (pure signing, minted on both the remote-hit and cache-fallback
  * paths), so a full login can record the method's revocation authority in the
@@ -468,7 +729,7 @@ async function readCachedRecord({
  *   Space management zcap to the recovered controller; default false
  * @returns {Promise<KeyringFetchResult | null>}
  */
-export async function fetchKeyringSeed({
+export async function fetchKeyring({
   secret,
   passphrase,
   idb,
@@ -540,15 +801,19 @@ export async function fetchKeyringSeed({
 
   if (!record) {
     // A 404-shaped miss: no keyring for this passphrase (never bound, or
-    // retired by a passphrase change on this or another device). Drop any
-    // cached copy so the retired passphrase cannot keep resolving offline.
+    // retired by a passphrase change on this or another client). Drop the
+    // cached copy so the retired passphrase cannot keep resolving offline,
+    // and the pointer pin -- the continuity prior is stale once this client
+    // has seen "no account". The client-key record stays: it is primary
+    // state, and without a session it is inert anyway.
     await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
+    await deleteAccountPointerPin({ spaceId: unlock.spaceId, idb })
     return null
   }
 
-  let found: KeyringSeed
+  let found: KeyringRecordContents
   try {
-    found = await unwrapSeed({
+    found = await unwrapKeyringRecord({
       record,
       keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
       keyResolver: unlock.keyResolver
@@ -560,33 +825,47 @@ export async function fetchKeyringSeed({
     // and never refresh the cache from an unusable record.
     throw new KeyringRecordUnusableError({ cause: err })
   }
+  // The continuity check runs before the cache refresh, so a refused record
+  // is neither followed nor allowed to become tomorrow's offline fallback.
+  await enforcePointerContinuity({ unlock, found, idb })
   await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
-  return await buildFetchResult({ found, unlock, mintManageCapability })
+  return await buildFetchResult({ found, unlock, mintManageCapability, idb })
 }
 
 /**
- * Assembles a `fetchKeyringSeed` hit: the unwrapped `KeyringSeed` plus the
- * derived unlock Space id and, when requested and a WAS server is configured,
- * the management zcap delegated to the recovered controller.
+ * Assembles a `fetchKeyring` hit: the unwrapped record contents plus the
+ * derived unlock Space id, this client's key set when one is stored under the
+ * unlock method, and, when requested and a WAS server is configured, the
+ * management zcap delegated to the recovered controller.
  *
  * @param options {object}
- * @param options.found {KeyringSeed}   the unwrapped record
- * @param options.unlock {Awaited<ReturnType<typeof deriveUnlockIdentity>>}
+ * @param options.found {KeyringRecordContents}   the unwrapped record
+ * @param options.unlock {UnlockIdentity}
  * @param options.mintManageCapability {boolean}
+ * @param [options.idb] {IDBFactory}
  * @returns {Promise<KeyringFetchResult>}
  */
 async function buildFetchResult({
   found,
   unlock,
-  mintManageCapability
+  mintManageCapability,
+  idb
 }: {
-  found: KeyringSeed
-  unlock: Awaited<ReturnType<typeof deriveUnlockIdentity>>
+  found: KeyringRecordContents
+  unlock: UnlockIdentity
   mintManageCapability: boolean
+  idb?: IDBFactory
 }): Promise<KeyringFetchResult> {
+  const clientKeys = await loadClientKeys({ unlock, idb })
   const result: KeyringFetchResult = {
     ...found,
-    unlockSpaceId: unlock.spaceId
+    unlockSpaceId: unlock.spaceId,
+    ...(clientKeys
+      ? {
+          clientKeys,
+          persistClientKeys: clientKeysPersister({ unlock, idb })
+        }
+      : {})
   }
   if (mintManageCapability && WAS_SERVER_URL) {
     result.manageCapability = await delegateUnlockManagement({
@@ -599,51 +878,74 @@ async function buildFetchResult({
 }
 
 /**
- * Binds an unlock secret to a data seed: derives the unlock identity for the
- * method's KDF, ensures the unlock Space (when WAS is configured), wraps and
- * PUTs the keyring record, and saves the local cache. Throws on failure (the
- * caller decides fatality -- fatal for signups). With no WAS server configured
- * the keyring is cache-only, so the account is then only recoverable in this
+ * Binds an unlock secret to this client's key set and the account it belongs
+ * to: derives the unlock identity for the method's KDF, ensures the unlock
+ * Space (when WAS is configured), wraps and PUTs the account-pointer keyring
+ * record, wraps the client seed + PUK into the local client-key record, pins
+ * the pointer, and saves the local cache. Throws on failure (the caller
+ * decides fatality -- fatal for signups). With no WAS server configured the
+ * keyring is cache-only, so the account is then only recoverable in this
  * browser profile. Returns the unlock Space id so callers (the unlock-methods
- * registry) can record which Space this method resolves to.
+ * registry) can record which Space this method resolves to. Also returns a
+ * `persistClientKeys` closure over the just-derived unlock identity, so the
+ * caller can later re-wrap the record (rolled update-key seeds, a rotated
+ * PUK) without re-prompting for the secret.
  *
  * @param options {object}
- * @param options.seed {Uint8Array}   the data seed
- * @param options.controller {string}   the data did:key
+ * @param options.clientSeed {Uint8Array}   this client's 32-byte seed
+ * @param options.controller {string}   the account did:key
  * @param options.secret {string | Uint8Array}   the unlock secret
  * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
  * @param [options.email] {string}   the account email, carried in the wrapped
  *   record so any unlock method recovers it at login
- * @param [options.delegateManagementTo] {string}   a data did:key to delegate
- *   the unlock Space management zcap to (GET/DELETE on this unlock Space). When
- *   set and a WAS server is configured, the returned `manageCapability` is the
- *   revocation authority a later Settings flow uses to retire this method (a
- *   lost passkey) without tapping or re-deriving from the secret.
+ * @param [options.puk] {Puk}   the per-user key, cached in the local
+ *   client-key record so any unlock method recovers it at login
+ * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
+ *   did:webvh update-key seeds, cached in the local client-key record so any
+ *   unlock method recovers update authority at login
+ * @param [options.pointer] {AccountPointer}   the account pointer the record
+ *   carries (and this client pins); absent on no-WAS deployments
+ * @param [options.delegateManagementTo] {string}   an account did:key to
+ *   delegate the unlock Space management zcap to (GET/DELETE on this unlock
+ *   Space). When set and a WAS server is configured, the returned
+ *   `manageCapability` is the revocation authority a later Settings flow uses
+ *   to retire this method (a lost passkey) without tapping or re-deriving
+ *   from the secret.
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap }>}
  */
 export async function bindUnlockSecret({
-  seed,
+  clientSeed,
   controller,
   secret,
   kdf,
   email,
+  puk,
+  webvhUpdateKeys,
+  pointer,
   delegateManagementTo,
   idb
 }: {
-  seed: Uint8Array
+  clientSeed: Uint8Array
   controller: string
   secret: string | Uint8Array
   kdf: UnlockKdf
   email?: string
+  puk?: Puk
+  webvhUpdateKeys?: ClientWebvhUpdateKeys
+  pointer?: AccountPointer
   delegateManagementTo?: string
   idb?: IDBFactory
-}): Promise<{ unlockSpaceId: string; manageCapability?: IZcap }> {
+}): Promise<{
+  unlockSpaceId: string
+  manageCapability?: IZcap
+  persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+}> {
   const unlock = await deriveUnlockIdentity({ secret, kdf })
-  const record = await wrapSeed({
-    seed,
+  const record = await wrapKeyringRecord({
     controller,
     email,
+    pointer,
     keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
     keyResolver: unlock.keyResolver
   })
@@ -663,8 +965,8 @@ export async function bindUnlockSecret({
       record
     })
     if (delegateManagementTo) {
-      // The unlock agent delegates GET/DELETE on its own Space to the data
-      // identity, so a lost method stays revocable without re-deriving this
+      // The unlock agent delegates GET/DELETE on its own Space to the account
+      // controller, so a lost method stays revocable without re-deriving this
       // unlock identity from the (possibly lost) secret. Pure signing.
       manageCapability = await delegateUnlockManagement({
         zcapClient: unlock.zcapClient,
@@ -675,49 +977,84 @@ export async function bindUnlockSecret({
   }
 
   await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
+  await saveClientKeys({
+    unlock,
+    clientSeed,
+    puk,
+    webvhUpdateKeys,
+    controller,
+    idb
+  })
+  if (pointer) {
+    await saveAccountPointerPin({ spaceId: unlock.spaceId, pointer, idb })
+  }
 
-  return { unlockSpaceId: unlock.spaceId, manageCapability }
+  return {
+    unlockSpaceId: unlock.spaceId,
+    manageCapability,
+    persistClientKeys: clientKeysPersister({ unlock, idb })
+  }
 }
 
 /**
- * Binds a passphrase to a data seed -- the passphrase-shaped wrapper over
- * `bindUnlockSecret`, defaulting to the app's passphrase KDF.
+ * Binds a passphrase to this client's key set -- the passphrase-shaped
+ * wrapper over `bindUnlockSecret`, defaulting to the app's passphrase KDF.
  *
  * @param options {object}
- * @param options.seed {Uint8Array}   the data seed
- * @param options.controller {string}   the data did:key
+ * @param options.clientSeed {Uint8Array}   this client's 32-byte seed
+ * @param options.controller {string}   the account did:key
  * @param options.passphrase {string}
  * @param [options.email] {string}   the account email, carried in the wrapped
  *   record
- * @param [options.delegateManagementTo] {string}   a data did:key to delegate
- *   the unlock Space management zcap to (see `bindUnlockSecret`)
+ * @param [options.puk] {Puk}   the per-user key, cached in the local
+ *   client-key record
+ * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
+ *   did:webvh update-key seeds, cached in the local client-key record
+ * @param [options.pointer] {AccountPointer}   the account pointer the record
+ *   carries
+ * @param [options.delegateManagementTo] {string}   an account did:key to
+ *   delegate the unlock Space management zcap to (see `bindUnlockSecret`)
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
- * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap }>}
+ * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap,
+ *   persistClientKeys: Function }>}
  */
 export async function bindPassphrase({
-  seed,
+  clientSeed,
   controller,
   passphrase,
   email,
+  puk,
+  webvhUpdateKeys,
+  pointer,
   delegateManagementTo,
   idb,
   kdf = KEYRING_KDF
 }: {
-  seed: Uint8Array
+  clientSeed: Uint8Array
   controller: string
   passphrase: string
   email?: string
+  puk?: Puk
+  webvhUpdateKeys?: ClientWebvhUpdateKeys
+  pointer?: AccountPointer
   delegateManagementTo?: string
   idb?: IDBFactory
   kdf?: UnlockKdf
-}): Promise<{ unlockSpaceId: string; manageCapability?: IZcap }> {
+}): Promise<{
+  unlockSpaceId: string
+  manageCapability?: IZcap
+  persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+}> {
   return bindUnlockSecret({
-    seed,
+    clientSeed,
     controller,
     secret: passphrase,
     kdf,
     email,
+    puk,
+    webvhUpdateKeys,
+    pointer,
     delegateManagementTo,
     idb
   })
@@ -736,11 +1073,11 @@ export class WrongPassphraseError extends Error {
 }
 
 /**
- * Verifies an already-derived unlock identity against a data controller by
- * reading and unwrapping its keyring record. When a WAS server is configured
- * the remote copy is read -- the source of truth, so a locally cached record
- * cannot verify a passphrase already retired on another device; with no WAS
- * server the local cache is the keyring's only copy.
+ * Verifies an already-derived unlock identity against an account controller
+ * by reading and unwrapping its keyring record. When a WAS server is
+ * configured the remote copy is read -- the source of truth, so a locally
+ * cached record cannot verify a passphrase already retired on another client;
+ * with no WAS server the local cache is the keyring's only copy.
  *
  * A missing record, or one that fails to unwrap or whose controller does not
  * match, is a `WrongPassphraseError`. A network error while reading the remote
@@ -749,22 +1086,22 @@ export class WrongPassphraseError extends Error {
  * and `verifyPassphrase`.
  *
  * @param options {object}
- * @param options.unlock {Awaited<ReturnType<typeof deriveUnlockIdentity>>}
+ * @param options.unlock {UnlockIdentity}
  *   the unlock identity for the passphrase being verified
- * @param options.controller {string}   the data did:key to match
+ * @param options.controller {string}   the account did:key to match
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<KeyringSeed>}   the verified record's unwrapped contents
- *   (so a rebind can preserve fields such as the email)
+ * @returns {Promise<KeyringRecordContents>}   the verified record's unwrapped
+ *   contents (so a rebind can preserve fields such as the email and pointer)
  */
 async function verifyUnlockKeyring({
   unlock,
   controller,
   idb
 }: {
-  unlock: Awaited<ReturnType<typeof deriveUnlockIdentity>>
+  unlock: UnlockIdentity
   controller: string
   idb?: IDBFactory
-}): Promise<KeyringSeed> {
+}): Promise<KeyringRecordContents> {
   let record: unknown
   if (WAS_SERVER_URL) {
     record = await getUnlockKeyring({
@@ -780,9 +1117,9 @@ async function verifyUnlockKeyring({
   if (!record) {
     throw new WrongPassphraseError()
   }
-  let unwrapped: KeyringSeed | null = null
+  let unwrapped: KeyringRecordContents | null = null
   try {
-    unwrapped = await unwrapSeed({
+    unwrapped = await unwrapKeyringRecord({
       record,
       keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
       keyResolver: unlock.keyResolver
@@ -800,7 +1137,7 @@ async function verifyUnlockKeyring({
  * Verifies an unlock secret against its keyring without changing anything, so
  * destructive flows (account deletion) can confirm the secret before acting.
  * Derives the unlock identity for `secret` under the method's KDF and runs
- * the shared keyring verification against `controller` (the data did:key).
+ * the shared keyring verification against `controller` (the account did:key).
  *
  * Throws `WrongPassphraseError` when the secret does not unlock a keyring
  * bound to `controller`. A network error while reading the remote record
@@ -808,7 +1145,7 @@ async function verifyUnlockKeyring({
  * secret.
  *
  * @param options {object}
- * @param options.controller {string}   the data did:key
+ * @param options.controller {string}   the account did:key
  * @param options.secret {string | Uint8Array}   the unlock secret
  * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
  * @param [options.idb] {IDBFactory}
@@ -834,7 +1171,7 @@ export async function verifyUnlockSecret({
  * over `verifyUnlockSecret`, defaulting to the app's passphrase KDF.
  *
  * @param options {object}
- * @param options.controller {string}   the data did:key
+ * @param options.controller {string}   the account did:key
  * @param options.passphrase {string}
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
@@ -857,15 +1194,16 @@ export async function verifyPassphrase({
 /**
  * Retires an unlock method's keyring (account deletion, method removal):
  * derives the unlock identity, deletes its unlock Space (when a WAS server is
- * configured), and always clears the local cache. With no WAS server
+ * configured), and always clears the local records -- the cache, the pointer
+ * pin, and this method's client-key record (an explicit lifecycle flow is the
+ * one place a client-key record may be deleted). With no WAS server
  * configured there is no Space, so `unlockSpaceDeleted` stays `true`.
  *
  * Performs no verification -- a wrong secret derives a different unlock Space
  * id and `deleteUnlockSpace` is idempotent, so callers confirm the secret
- * first via `verifyUnlockSecret`. Once an account's last keyring is gone the
- * data seed is unrecoverable (the random data seed is never derivable from an
- * unlock secret), so callers must wipe/dispose the data Space before deleting
- * the final method.
+ * first via `verifyUnlockSecret`. Once an account's last keyring is gone this
+ * client's keys are unrecoverable, so callers must wipe/dispose the data
+ * Space before deleting the final method.
  *
  * @param options {object}
  * @param options.secret {string | Uint8Array}   the unlock secret
@@ -898,6 +1236,8 @@ export async function deleteUnlockMethod({
     }
   }
   await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
+  await deleteClientKeyRecord({ spaceId: unlock.spaceId, idb })
+  await deleteAccountPointerPin({ spaceId: unlock.spaceId, idb })
 
   return { unlockSpaceDeleted }
 }
@@ -926,11 +1266,13 @@ export async function deleteKeyring({
 }
 
 /**
- * Changes the account passphrase. Verifies the old passphrase by unwrapping its
- * keyring (the remote copy when a WAS server is configured -- the source of
- * truth -- else the local cache) and matching the recovered controller against
- * the data did:key, binds the new passphrase, then deletes the old unlock Space
- * and its cache entry.
+ * Changes the account passphrase. Verifies the old passphrase by unwrapping
+ * its keyring (the remote copy when a WAS server is configured -- the source
+ * of truth -- else the local cache) and matching the recovered controller
+ * against the account did:key, binds the new passphrase (re-wrapping this
+ * client's key set and the PUK, and carrying the verified record's email and
+ * pointer forward), then deletes the old unlock Space and this method's old
+ * local records.
  *
  * A missing record, or one that fails to unwrap or whose controller does not
  * match, is a `WrongPassphraseError`. A network error while reading the remote
@@ -948,26 +1290,30 @@ export async function deleteKeyring({
  * its revocation authority.
  *
  * @param options {object}
- * @param options.seed {Uint8Array}   the data seed
- * @param options.controller {string}   the data did:key
+ * @param options.clientSeed {Uint8Array}   this client's 32-byte seed
+ * @param options.controller {string}   the account did:key
  * @param options.oldPassphrase {string}
  * @param options.newPassphrase {string}
+ * @param [options.puk] {Puk}   the per-user key to carry into the new
+ *   client-key record (the session's copy; falls back to the old record's)
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
  * @returns {Promise<{ oldPassphraseRetired: boolean, unlockSpaceId: string, manageCapability?: IZcap }>}
  */
 export async function changePassphrase({
-  seed,
+  clientSeed,
   controller,
   oldPassphrase,
   newPassphrase,
+  puk,
   idb,
   kdf = KEYRING_KDF
 }: {
-  seed: Uint8Array
+  clientSeed: Uint8Array
   controller: string
   oldPassphrase: string
   newPassphrase: string
+  puk?: Puk
   idb?: IDBFactory
   kdf?: UnlockKdf
 }): Promise<{
@@ -982,7 +1328,7 @@ export async function changePassphrase({
 
   // Verify the old passphrase via its keyring. With a WAS server configured
   // the remote copy is read -- the source of truth, so a locally cached record
-  // cannot verify a passphrase already retired on another device. A network
+  // cannot verify a passphrase already retired on another client. A network
   // error while reading the remote rethrows -- an unreachable remote must not
   // be misread as a wrong passphrase. With no WAS server the local cache is
   // the keyring's only copy.
@@ -992,21 +1338,29 @@ export async function changePassphrase({
     idb
   })
 
+  // Prefer the caller's live PUK; fall back to the one cached in the old
+  // client-key record, so a rebind can never silently drop it.
+  const oldClientKeys = await loadClientKeys({ unlock: oldUnlock, idb })
+
   const { unlockSpaceId, manageCapability } = await bindPassphrase({
-    seed,
+    clientSeed,
     controller,
     passphrase: newPassphrase,
-    // Preserve the account email carried by the old record across the rebind.
+    // Preserve the account email and pointer carried by the old record, and
+    // the PUK, across the rebind.
     email: verified.email,
-    // Delegate the new unlock Space's management zcap to the data identity, so
-    // Settings can record it in the registry (and revoke this method later).
+    pointer: verified.pointer,
+    puk: puk ?? oldClientKeys?.puk,
+    // Delegate the new unlock Space's management zcap to the account
+    // controller, so Settings can record it in the registry (and revoke this
+    // method later).
     delegateManagementTo: controller,
     idb,
     kdf
   })
 
   // Retire the old unlock identity -- but only when it differs from the new
-  // one (an old == new rebind must not delete the Space just written). The
+  // one (an old == new rebind must not delete the records just written). The
   // spaceId is deterministic from the passphrase, so comparing the passphrases
   // answers this without a third unlock derivation.
   let oldSpaceDeleted = true
@@ -1024,6 +1378,8 @@ export async function changePassphrase({
       }
     }
     await deleteKeyringCache({ spaceId: oldUnlock.spaceId, idb })
+    await deleteClientKeyRecord({ spaceId: oldUnlock.spaceId, idb })
+    await deleteAccountPointerPin({ spaceId: oldUnlock.spaceId, idb })
   }
 
   // The old unlock Space is gone (deleted, or old == new so nothing to delete);

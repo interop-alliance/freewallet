@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CapabilityAgent, KmsClient } from '@interop/webkms-client'
 import type { ZcapClient } from '@interop/ezcap'
-import { ensureKeystore } from '@/lib/kms'
+import { ensureKeystore, promoteKeystoreController } from '@/lib/kms'
 
 const KMS_SERVER_URL = 'https://kms.example.test/kms'
 const KEYSTORES_URL = `${KMS_SERVER_URL}/keystores`
@@ -94,5 +94,101 @@ describe('ensureKeystore', () => {
     await expect(
       ensureKeystore({ kmsServerUrl: KMS_SERVER_URL, keyAgent, zcapClient })
     ).rejects.toThrow('kms unreachable')
+  })
+
+  it('falls back to the did:key listing for a not-yet-promoted keystore', async () => {
+    const keyAgent = await testKeyAgent()
+    const webvhDid = 'did:webvh:zQmScid:kms.example.test:space:abc:id'
+    const keystoreId = `${KEYSTORES_URL}/z19uFallbackKeystore`
+    // The promoted-controller listing misses; the did:key fallback hits.
+    const request = vi.fn().mockResolvedValue({ data: { results: [] } })
+    const fallbackRequest = vi
+      .fn()
+      .mockResolvedValue({ data: { results: [{ id: keystoreId }] } })
+    const createSpy = vi.spyOn(KmsClient, 'createKeystore')
+
+    const keystoreAgent = await ensureKeystore({
+      kmsServerUrl: KMS_SERVER_URL,
+      keyAgent,
+      zcapClient: { request } as unknown as ZcapClient,
+      controller: webvhDid,
+      capabilityAgent: { id: webvhDid } as never,
+      fallbackZcapClient: {
+        request: fallbackRequest
+      } as unknown as ZcapClient
+    })
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: `${KEYSTORES_URL}?controller=${encodeURIComponent(webvhDid)}`
+      })
+    )
+    expect(fallbackRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: `${KEYSTORES_URL}?controller=${encodeURIComponent(keyAgent.id)}`
+      })
+    )
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(keystoreAgent.keystoreId).toBe(keystoreId)
+    // Bound as the did:key so its invocations verify against the
+    // still-unpromoted keystore config.
+    expect(keystoreAgent.capabilityAgent).toBe(keyAgent)
+  })
+})
+
+describe('promoteKeystoreController', () => {
+  const webvhDid = 'did:webvh:zQmScid:kms.example.test:space:abc:id'
+
+  function stubKeystoreAgent(config: { controller: string }) {
+    const signer = { sign: vi.fn() }
+    const getKeystore = vi.fn().mockResolvedValue({
+      id: 'ks-1',
+      sequence: 3,
+      controller: config.controller
+    })
+    const updateKeystore = vi.fn().mockResolvedValue(undefined)
+    return {
+      keystoreAgent: {
+        kmsClient: { getKeystore, updateKeystore },
+        capabilityAgent: { getSigner: () => signer }
+      } as never,
+      getKeystore,
+      updateKeystore
+    }
+  }
+
+  it('writes the bumped config naming the did:webvh', async () => {
+    const { keystoreAgent, updateKeystore } = stubKeystoreAgent({
+      controller: 'did:key:z6MkOldController'
+    })
+
+    const promoted = await promoteKeystoreController({
+      keystoreAgent,
+      controller: webvhDid
+    })
+
+    expect(promoted).toBe(true)
+    expect(updateKeystore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          sequence: 4,
+          controller: webvhDid
+        })
+      })
+    )
+  })
+
+  it('no-ops when the keystore already names the controller', async () => {
+    const { keystoreAgent, updateKeystore } = stubKeystoreAgent({
+      controller: webvhDid
+    })
+
+    const promoted = await promoteKeystoreController({
+      keystoreAgent,
+      controller: webvhDid
+    })
+
+    expect(promoted).toBe(false)
+    expect(updateKeystore).not.toHaveBeenCalled()
   })
 })

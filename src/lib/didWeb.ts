@@ -14,6 +14,8 @@
 import type { KeystoreAgent } from '@interop/webkms-client'
 import type { ISigner } from '@interop/data-integrity-core'
 import type { Session } from '@/types/auth'
+import { multibaseOf } from '@interop/wallet-core/webvh'
+import type { DidWebKey, DidWebKeyMap } from '@interop/wallet-core/webvh'
 import { DID_DOCUMENT_RESOURCE } from '@/app.config'
 import { getKmsSignFunction } from '@/lib/kms'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
@@ -43,27 +45,6 @@ const X25519_2020_CONTEXT = 'https://w3id.org/security/suites/x25519-2020/v1'
 const PUBLIC_KEY_MULTIBASE_PLACEHOLDER = '{publicKeyMultibase}'
 
 /**
- * One verification method's durable binding: the verification-method id (the
- * did:web `#fragment` URL, which is also the KMS key's publicAlias) and the
- * KMS key id used to invoke signing.
- */
-export interface DidWebKey {
-  vmId: string
-  kmsKeyId: string
-}
-
-/**
- * The key-id map persisted as `keys.json` in the private `key-map` collection:
- * the durable mapping from DID relationship to KMS key, since the KMS protocol
- * has no list-keys endpoint and key ids are server-generated.
- */
-export interface DidWebKeyMap {
-  authentication: DidWebKey
-  assertionMethod: DidWebKey
-  keyAgreement: DidWebKey
-}
-
-/**
  * Builds the did:web DID for a Space from the WAS server URL and space id. The
  * host segment is percent-encoded per the did:web method spec, so a dev host
  * with a port becomes `localhost%3A8080`.
@@ -82,16 +63,6 @@ export function didWebFromSpace({
 }): string {
   const { host } = new URL(wasServerUrl)
   return `did:web:${encodeURIComponent(host)}:space:${spaceId}:id`
-}
-
-/**
- * The bare `publicKeyMultibase` a KMS key alias or verification-method id
- * carries in its fragment. The KMS expanded `#{publicKeyMultibase}` at generate
- * time, so the fragment IS the multibase key (no separate key-description fetch
- * needed).
- */
-export function multibaseOf(id: string): string {
-  return id.slice(id.lastIndexOf('#') + 1)
 }
 
 /**

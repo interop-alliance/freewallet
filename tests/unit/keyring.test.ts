@@ -1,19 +1,21 @@
 // @vitest-environment node
 /**
  * Unit tests for the keyring v2 module (`src/session/keyring.ts`): the unlock
- * derivation (deterministic, secret-sensitive), the wrap/unwrap round-trip
- * and its record validation, and the `fetchKeyringSeed` / `bindPassphrase` /
- * `changePassphrase` public contract across the WAS-configured and cache-only
- * branches. The module is now method-agnostic -- unlock derivation runs off a
- * generic `{ secret, kdf }` pair (a string passphrase under PBKDF2, or uniform
- * byte material such as a passkey PRF output under HKDF) via the exported
- * `deriveUnlockIdentity` / `bindUnlockSecret` seam, and the passphrase
- * functions are thin wrappers over it; the frozen-vector block pins the
- * production salts. The unlock-Space WAS helpers are replaced by an in-memory fake
- * keyed by unlock Space id; the `freewallet-session` IndexedDB cache is backed
- * by a minimal in-memory `IDBFactory` (node has no IndexedDB). Tiny PBKDF2
- * iteration counts keep the derivation fast; the real EDV cipher and
- * CapabilityAgent / X25519 derivations run unmocked.
+ * derivation (deterministic, secret-sensitive), the record wrap/unwrap
+ * round-trip and its validation, the local client-key record (this client's
+ * key set + cached PUK under the unlock layer), account-pointer continuity
+ * (the local pin and its refusal), and the `fetchKeyring` / `bindPassphrase`
+ * / `changePassphrase` public contract across the WAS-configured and
+ * cache-only branches. The module is method-agnostic -- unlock derivation
+ * runs off a generic `{ secret, kdf }` pair (a string passphrase under
+ * PBKDF2, or uniform byte material such as a passkey PRF output under HKDF)
+ * via the exported `deriveUnlockIdentity` / `bindUnlockSecret` seam, and the
+ * passphrase functions are thin wrappers over it; the frozen-vector block
+ * pins the production salts. The unlock-Space WAS helpers are replaced by an
+ * in-memory fake keyed by unlock Space id; the `freewallet-session`
+ * IndexedDB is backed by a minimal in-memory `IDBFactory` (node has no
+ * IndexedDB). Tiny PBKDF2 iteration counts keep the derivation fast; the
+ * real EDV cipher and CapabilityAgent / X25519 derivations run unmocked.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
@@ -25,10 +27,9 @@ import type {
 import { WasError } from '@interop/was-client'
 import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
 import { createEdvDocCipher } from '@interop/was-client/edv'
-import { loadKeyringCache } from '@/lib/sessionKey'
+import { loadClientKeyRecord, loadKeyringCache } from '@/lib/sessionKey'
 import {
   KEYRING_CACHE_TTL_MS,
-  KEYRING_KDF,
   PASSKEY_KDF,
   UNLOCK_MANAGE_ZCAP_TTL_MS
 } from '@/app.config'
@@ -52,7 +53,8 @@ vi.mock('@/app.config', async importOriginal => ({
   }
 }))
 
-vi.mock('@/stores/wasRemoteStore', () => ({
+vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/wallet-core/keyring')>()),
   ensureUnlockSpace: vi.fn(async () => {}),
   putUnlockKeyring: vi.fn(
     async ({ spaceId, record }: { spaceId: string; record: unknown }) => {
@@ -71,21 +73,25 @@ vi.mock('@/stores/wasRemoteStore', () => ({
 }))
 
 import {
+  AccountPointerChangedError,
   bindPassphrase,
   bindUnlockSecret,
   changePassphrase,
   deleteKeyring,
-  deriveUnlockIdentity,
-  fetchKeyringSeed,
+  fetchKeyring,
   KeyringRecordUnusableError,
   verifyPassphrase,
   WrongPassphraseError
 } from '@/session/keyring'
 import {
   deleteUnlockSpace,
+  deriveUnlockIdentity,
   ensureUnlockSpace,
-  getUnlockKeyring
-} from '@/stores/wasRemoteStore'
+  getUnlockKeyring,
+  KEYRING_KDF,
+  type AccountPointer
+} from '@interop/wallet-core/keyring'
+import { mintPuk } from '@interop/wallet-core/keys'
 
 const KDF = {
   version: 1,
@@ -95,11 +101,16 @@ const KDF = {
   salt: 'freewallet/test/unlock'
 } as const
 const DATA_CONTROLLER = 'did:key:z6MkDataControllerForTests'
+const POINTER: AccountPointer = {
+  did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
+  spaceId: 'space-123',
+  host: 'https://was.example.test'
+}
 
 /**
  * A minimal in-memory `IDBFactory` sufficient for the session-store helpers in
  * `src/lib/sessionKey.ts` (a single object store, get/put/delete by key). Each
- * test gets a fresh one so caches start empty.
+ * test gets a fresh one so local records start empty.
  *
  * @returns {IDBFactory}
  */
@@ -173,17 +184,17 @@ function createFakeIdb(): IDBFactory {
 }
 
 /**
- * Writes a raw value directly into the fake session store at a keyring-cache
- * key (bypassing `saveKeyringCache` and its write-time stamp), to simulate a
- * legacy cache entry written before timestamps existed.
+ * Writes a raw value directly into the fake session store at an arbitrary
+ * key (bypassing the typed helpers), to craft legacy or malformed local
+ * entries.
  */
-async function putRawCacheEntry({
+async function putRawSessionEntry({
   idb,
-  spaceId,
+  key,
   value
 }: {
   idb: IDBFactory
-  spaceId: string
+  key: string
   value: unknown
 }): Promise<void> {
   const db = await new Promise<IDBDatabase>(resolve => {
@@ -194,7 +205,7 @@ async function putRawCacheEntry({
     const request = db
       .transaction('session', 'readwrite')
       .objectStore('session')
-      .put(value, `keyring/${spaceId}`)
+      .put(value, key)
     request.onsuccess = () => resolve()
   })
 }
@@ -243,15 +254,15 @@ async function unlockFor(passphrase: string) {
 /**
  * Builds a keyring record ({version, wrapped}) whose ciphertext decrypts (under
  * the given passphrase's unlock KAK) to an arbitrary plaintext, so the negative
- * validation paths can be exercised.
+ * validation and pointer-substitution paths can be exercised.
  */
 async function craftRecord({
   passphrase,
   plaintext,
-  version = 1
+  version = 2
 }: {
   passphrase: string
-  plaintext: Record<string, string>
+  plaintext: Record<string, unknown>
   version?: number
 }) {
   const { keyAgreementKey, keyResolver, spaceId } = await unlockFor(passphrase)
@@ -260,8 +271,33 @@ async function craftRecord({
     keyResolver,
     collectionId: 'keyring'
   })
-  const { envelope } = await cipher.encrypt({ data: plaintext })
+  const { envelope } = await cipher.encrypt({
+    data: plaintext as Parameters<typeof cipher.encrypt>[0]['data']
+  })
   return { record: { version, wrapped: envelope }, spaceId }
+}
+
+/**
+ * Decrypts a stored keyring record's plaintext under the given passphrase's
+ * unlock KAK, so a test can assert what the record does (and does not) carry.
+ */
+async function decryptRecord({
+  passphrase,
+  record
+}: {
+  passphrase: string
+  record: unknown
+}): Promise<Record<string, unknown>> {
+  const { keyAgreementKey, keyResolver } = await unlockFor(passphrase)
+  const cipher = await createEdvDocCipher({
+    keyAgreementKey: keyAgreementKey as unknown as IKeyAgreementKey,
+    keyResolver,
+    collectionId: 'keyring'
+  })
+  const { wrapped } = record as { wrapped: unknown }
+  return (await cipher.decrypt({
+    envelope: wrapped as never
+  })) as Record<string, unknown>
 }
 
 function randomSeed(): Uint8Array {
@@ -272,7 +308,7 @@ function randomSeed(): Uint8Array {
 
 /**
  * Encodes raw bytes as an unpadded base64url string (matching the module's
- * internal encoder), for building crafted keyring plaintexts.
+ * internal encoder), for building crafted plaintexts.
  */
 function seedToBase64Url(bytes: Uint8Array): string {
   let binary = ''
@@ -300,7 +336,7 @@ describe('unlock derivation', () => {
     const expected = await unlockFor('correct horse battery staple')
 
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'correct horse battery staple',
       idb,
@@ -320,33 +356,62 @@ describe('unlock derivation', () => {
 })
 
 describe('wrap / unwrap', () => {
-  it('round-trips seed and controller through bind + fetch', async () => {
+  it('round-trips controller, email, and pointer through bind + fetch', async () => {
     const idb = createFakeIdb()
-    const seed = randomSeed()
 
     await bindPassphrase({
-      seed,
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'round-trip passphrase',
+      email: 'holder@example.com',
+      pointer: POINTER,
       idb,
       kdf: KDF
     })
 
-    const found = await fetchKeyringSeed({
+    const found = await fetchKeyring({
       passphrase: 'round-trip passphrase',
       idb,
       kdf: KDF
     })
     expect(found).not.toBeNull()
-    expect(Array.from(found!.seed)).toEqual(Array.from(seed))
     expect(found!.controller).toBe(DATA_CONTROLLER)
+    expect(found!.email).toBe('holder@example.com')
+    expect(found!.pointer).toEqual(POINTER)
   })
 
-  it('rejects a record whose version is not 1', async () => {
+  it('writes a record that carries no key material of any kind', async () => {
+    const idb = createFakeIdb()
+    const clientSeed = randomSeed()
+    const puk = await mintPuk()
+
+    await bindPassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'no key material passphrase',
+      puk,
+      pointer: POINTER,
+      idb,
+      kdf: KDF
+    })
+
+    const { spaceId } = await unlockFor('no key material passphrase')
+    const plaintext = await decryptRecord({
+      passphrase: 'no key material passphrase',
+      record: wasState.spaces.get(spaceId)
+    })
+    expect(Object.keys(plaintext).sort()).toEqual([
+      'controller',
+      'createdAt',
+      'pointer'
+    ])
+  })
+
+  it('rejects a legacy version-1 record (the retired wrapped-seed shape)', async () => {
     const idb = createFakeIdb()
     const { record, spaceId } = await craftRecord({
-      passphrase: 'v2 passphrase',
-      version: 2,
+      passphrase: 'legacy v1 passphrase',
+      version: 1,
       plaintext: {
         seed: seedToBase64Url(randomSeed()),
         controller: DATA_CONTROLLER,
@@ -356,8 +421,8 @@ describe('wrap / unwrap', () => {
     wasState.spaces.set(spaceId, record)
 
     await expect(
-      fetchKeyringSeed({ passphrase: 'v2 passphrase', idb, kdf: KDF })
-    ).rejects.toThrow(/version/)
+      fetchKeyring({ passphrase: 'legacy v1 passphrase', idb, kdf: KDF })
+    ).rejects.toThrow(KeyringRecordUnusableError)
   })
 
   it('rejects a record with an empty controller', async () => {
@@ -365,7 +430,6 @@ describe('wrap / unwrap', () => {
     const { record, spaceId } = await craftRecord({
       passphrase: 'empty controller passphrase',
       plaintext: {
-        seed: seedToBase64Url(randomSeed()),
         controller: '',
         createdAt: new Date().toISOString()
       }
@@ -373,7 +437,7 @@ describe('wrap / unwrap', () => {
     wasState.spaces.set(spaceId, record)
 
     await expect(
-      fetchKeyringSeed({
+      fetchKeyring({
         passphrase: 'empty controller passphrase',
         idb,
         kdf: KDF
@@ -381,21 +445,25 @@ describe('wrap / unwrap', () => {
     ).rejects.toThrow(/controller/)
   })
 
-  it('rejects a record whose seed is not 32 bytes', async () => {
+  it('rejects a record whose pointer is malformed (missing host)', async () => {
     const idb = createFakeIdb()
     const { record, spaceId } = await craftRecord({
-      passphrase: 'short seed passphrase',
+      passphrase: 'malformed pointer passphrase',
       plaintext: {
-        seed: seedToBase64Url(new Uint8Array(16)),
         controller: DATA_CONTROLLER,
+        pointer: { spaceId: 'space-123' },
         createdAt: new Date().toISOString()
       }
     })
     wasState.spaces.set(spaceId, record)
 
     await expect(
-      fetchKeyringSeed({ passphrase: 'short seed passphrase', idb, kdf: KDF })
-    ).rejects.toThrow(/32 bytes/)
+      fetchKeyring({
+        passphrase: 'malformed pointer passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).rejects.toThrow(KeyringRecordUnusableError)
   })
 
   it('maps a corrupt remote record to KeyringRecordUnusableError and never caches it', async () => {
@@ -403,10 +471,10 @@ describe('wrap / unwrap', () => {
     const { spaceId } = await unlockFor('corrupt record passphrase')
     // A record with the right shape but an undecryptable payload -- the
     // "genuinely corrupt record under the correct unlock Space" case.
-    wasState.spaces.set(spaceId, { version: 1, wrapped: { garbage: true } })
+    wasState.spaces.set(spaceId, { version: 2, wrapped: { garbage: true } })
 
     await expect(
-      fetchKeyringSeed({
+      fetchKeyring({
         passphrase: 'corrupt record passphrase',
         idb,
         kdf: KDF
@@ -418,11 +486,354 @@ describe('wrap / unwrap', () => {
   })
 })
 
-describe('fetchKeyringSeed', () => {
+describe('the client key set under the unlock layer', () => {
+  it('round-trips the client seed and the cached PUK through bind + fetch', async () => {
+    const idb = createFakeIdb()
+    const clientSeed = randomSeed()
+    const puk = await mintPuk()
+
+    await bindPassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'client keys round-trip passphrase',
+      puk,
+      idb,
+      kdf: KDF
+    })
+
+    const found = await fetchKeyring({
+      passphrase: 'client keys round-trip passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.clientKeys).toBeDefined()
+    expect(Array.from(found!.clientKeys!.clientSeed)).toEqual(
+      Array.from(clientSeed)
+    )
+    expect(found!.clientKeys!.puk!.id).toBe(puk.id)
+    expect(Array.from(found!.clientKeys!.puk!.secret)).toEqual(
+      Array.from(puk.secret)
+    )
+    expect(Array.from(found!.clientKeys!.puk!.signingSeed!)).toEqual(
+      Array.from(puk.signingSeed)
+    )
+  })
+
+  it('round-trips the did:webvh update-key seeds and re-wraps via persistClientKeys', async () => {
+    const idb = createFakeIdb()
+    const clientSeed = randomSeed()
+    const puk = await mintPuk()
+    const webvhUpdateKeys = {
+      updateSeed: randomSeed(),
+      stagedSeed: randomSeed()
+    }
+
+    await bindPassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'webvh keys round-trip passphrase',
+      puk,
+      webvhUpdateKeys,
+      idb,
+      kdf: KDF
+    })
+
+    const found = await fetchKeyring({
+      passphrase: 'webvh keys round-trip passphrase',
+      idb,
+      kdf: KDF
+    })
+    const recovered = found!.clientKeys!.webvhUpdateKeys!
+    expect(Array.from(recovered.updateSeed)).toEqual(
+      Array.from(webvhUpdateKeys.updateSeed)
+    )
+    expect(Array.from(recovered.stagedSeed)).toEqual(
+      Array.from(webvhUpdateKeys.stagedSeed)
+    )
+    expect(recovered.pendingStagedSeed).toBeUndefined()
+
+    // Re-wrap rolled seeds (a rotation) without the secret: the changed
+    // member lands, the untouched members survive.
+    const rolled = {
+      updateSeed: webvhUpdateKeys.stagedSeed,
+      stagedSeed: randomSeed(),
+      pendingStagedSeed: randomSeed()
+    }
+    await found!.persistClientKeys!({ webvhUpdateKeys: rolled })
+
+    const after = await fetchKeyring({
+      passphrase: 'webvh keys round-trip passphrase',
+      idb,
+      kdf: KDF
+    })
+    const persisted = after!.clientKeys!.webvhUpdateKeys!
+    expect(Array.from(persisted.updateSeed)).toEqual(
+      Array.from(rolled.updateSeed)
+    )
+    expect(Array.from(persisted.stagedSeed)).toEqual(
+      Array.from(rolled.stagedSeed)
+    )
+    expect(Array.from(persisted.pendingStagedSeed!)).toEqual(
+      Array.from(rolled.pendingStagedSeed)
+    )
+    expect(after!.clientKeys!.puk!.id).toBe(puk.id)
+    expect(Array.from(after!.clientKeys!.clientSeed)).toEqual(
+      Array.from(clientSeed)
+    )
+  })
+
+  it('locates the account but reports no client keys on a fresh profile (not enrolled)', async () => {
+    // Bind through one browser profile, then fetch on a second profile whose
+    // session store is empty: the passphrase can no longer reconstruct the
+    // account -- it finds the pointer but not the keys.
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'fresh profile passphrase',
+      pointer: POINTER,
+      idb: createFakeIdb(),
+      kdf: KDF
+    })
+
+    const found = await fetchKeyring({
+      passphrase: 'fresh profile passphrase',
+      idb: createFakeIdb(),
+      kdf: KDF
+    })
+    expect(found).not.toBeNull()
+    expect(found!.pointer).toEqual(POINTER)
+    expect(found!.clientKeys).toBeUndefined()
+  })
+
+  it('mints unrelated client key sets in two profiles under the same passphrase', async () => {
+    // Two browser profiles bound under one passphrase: each holds its own
+    // locally minted key set; neither derives from the shared secret.
+    const profileA = createFakeIdb()
+    const profileB = createFakeIdb()
+    const seedA = randomSeed()
+    const seedB = randomSeed()
+    await bindPassphrase({
+      clientSeed: seedA,
+      controller: DATA_CONTROLLER,
+      passphrase: 'shared passphrase',
+      idb: profileA,
+      kdf: KDF
+    })
+    await bindPassphrase({
+      clientSeed: seedB,
+      controller: DATA_CONTROLLER,
+      passphrase: 'shared passphrase',
+      idb: profileB,
+      kdf: KDF
+    })
+
+    const foundA = await fetchKeyring({
+      passphrase: 'shared passphrase',
+      idb: profileA,
+      kdf: KDF
+    })
+    const foundB = await fetchKeyring({
+      passphrase: 'shared passphrase',
+      idb: profileB,
+      kdf: KDF
+    })
+    expect(Array.from(foundA!.clientKeys!.clientSeed)).toEqual(
+      Array.from(seedA)
+    )
+    expect(Array.from(foundB!.clientKeys!.clientSeed)).toEqual(
+      Array.from(seedB)
+    )
+    expect(Array.from(foundA!.clientKeys!.clientSeed)).not.toEqual(
+      Array.from(foundB!.clientKeys!.clientSeed)
+    )
+  })
+
+  it('discards a malformed client-key record and reports not enrolled', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'garbled client keys passphrase',
+      idb,
+      kdf: KDF
+    })
+    const { spaceId } = await unlockFor('garbled client keys passphrase')
+    await putRawSessionEntry({
+      idb,
+      key: `client-keys/${spaceId}`,
+      value: { version: 1, wrapped: { garbage: true } }
+    })
+
+    const found = await fetchKeyring({
+      passphrase: 'garbled client keys passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found).not.toBeNull()
+    expect(found!.clientKeys).toBeUndefined()
+    // The unusable record was evicted, not left to warn on every login.
+    await expect(loadClientKeyRecord({ spaceId, idb })).resolves.toBeNull()
+  })
+})
+
+describe('account-pointer continuity', () => {
+  it('refuses a server-substituted pointer on a client that has seen the account', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'substituted pointer passphrase',
+      pointer: POINTER,
+      idb,
+      kdf: KDF
+    })
+
+    // The server swaps the record for one it encrypted itself, pointing the
+    // passphrase at a different account Space.
+    const { record, spaceId } = await craftRecord({
+      passphrase: 'substituted pointer passphrase',
+      plaintext: {
+        controller: DATA_CONTROLLER,
+        pointer: { ...POINTER, spaceId: 'attacker-space' },
+        createdAt: new Date().toISOString()
+      }
+    })
+    wasState.spaces.set(spaceId, record)
+
+    await expect(
+      fetchKeyring({
+        passphrase: 'substituted pointer passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).rejects.toThrow(AccountPointerChangedError)
+  })
+
+  it('pins on first fetch, then refuses a later substitution', async () => {
+    // A portable-credential login on a fresh profile: the first fetch is the
+    // trust bound (nothing to compare against), the second is held to it.
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'first fetch pin passphrase',
+      pointer: POINTER,
+      idb: createFakeIdb(),
+      kdf: KDF
+    })
+    const freshIdb = createFakeIdb()
+    const first = await fetchKeyring({
+      passphrase: 'first fetch pin passphrase',
+      idb: freshIdb,
+      kdf: KDF
+    })
+    expect(first!.pointer).toEqual(POINTER)
+
+    const { record, spaceId } = await craftRecord({
+      passphrase: 'first fetch pin passphrase',
+      plaintext: {
+        controller: DATA_CONTROLLER,
+        pointer: { ...POINTER, host: 'https://evil.example.test' },
+        createdAt: new Date().toISOString()
+      }
+    })
+    wasState.spaces.set(spaceId, record)
+
+    await expect(
+      fetchKeyring({
+        passphrase: 'first fetch pin passphrase',
+        idb: freshIdb,
+        kdf: KDF
+      })
+    ).rejects.toThrow(AccountPointerChangedError)
+  })
+
+  it('accepts a record that adds a did to a did-less pin (benign upgrade), then holds it', async () => {
+    const idb = createFakeIdb()
+    const didlessPointer = { spaceId: POINTER.spaceId, host: POINTER.host }
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'did upgrade passphrase',
+      pointer: didlessPointer,
+      idb,
+      kdf: KDF
+    })
+
+    const { record, spaceId } = await craftRecord({
+      passphrase: 'did upgrade passphrase',
+      plaintext: {
+        controller: DATA_CONTROLLER,
+        pointer: POINTER,
+        createdAt: new Date().toISOString()
+      }
+    })
+    wasState.spaces.set(spaceId, record)
+
+    const upgraded = await fetchKeyring({
+      passphrase: 'did upgrade passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(upgraded!.pointer).toEqual(POINTER)
+
+    // The upgraded did is now pinned: swapping it is a substitution.
+    const { record: swapped } = await craftRecord({
+      passphrase: 'did upgrade passphrase',
+      plaintext: {
+        controller: DATA_CONTROLLER,
+        pointer: { ...POINTER, did: 'did:webvh:QmOther:evil:space:x:id' },
+        createdAt: new Date().toISOString()
+      }
+    })
+    wasState.spaces.set(spaceId, swapped)
+
+    await expect(
+      fetchKeyring({ passphrase: 'did upgrade passphrase', idb, kdf: KDF })
+    ).rejects.toThrow(AccountPointerChangedError)
+  })
+
+  it('drops the pin on a remote miss (the continuity prior is stale)', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'stale pin passphrase',
+      pointer: POINTER,
+      idb,
+      kdf: KDF
+    })
+    // Retired everywhere: the fetch sees "no account" and forgets the prior.
+    wasState.spaces.clear()
+    await expect(
+      fetchKeyring({ passphrase: 'stale pin passphrase', idb, kdf: KDF })
+    ).resolves.toBeNull()
+
+    // The same passphrase later resolves to a different (re-created) account:
+    // no stale pin blocks it.
+    const { record, spaceId } = await craftRecord({
+      passphrase: 'stale pin passphrase',
+      plaintext: {
+        controller: DATA_CONTROLLER,
+        pointer: { ...POINTER, spaceId: 'recreated-space' },
+        createdAt: new Date().toISOString()
+      }
+    })
+    wasState.spaces.set(spaceId, record)
+
+    const found = await fetchKeyring({
+      passphrase: 'stale pin passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.pointer!.spaceId).toBe('recreated-space')
+  })
+})
+
+describe('fetchKeyring', () => {
   it('consults the remote even on a cache hit (the remote is the source of truth)', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'cache hit passphrase',
       idb,
@@ -430,7 +841,7 @@ describe('fetchKeyringSeed', () => {
     })
     vi.clearAllMocks()
 
-    const found = await fetchKeyringSeed({
+    const found = await fetchKeyring({
       passphrase: 'cache hit passphrase',
       idb,
       kdf: KDF
@@ -439,21 +850,21 @@ describe('fetchKeyringSeed', () => {
     expect(getUnlockKeyring).toHaveBeenCalledOnce()
   })
 
-  it('drops the cache and returns null when the remote keyring is gone (passphrase retired on another device)', async () => {
+  it('drops the cache and returns null when the remote keyring is gone (passphrase retired elsewhere)', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'retired passphrase',
       idb,
       kdf: KDF
     })
-    // Simulate a passphrase change made on another device: the old unlock
-    // Space is deleted remotely while this device's cache still holds the
+    // Simulate a passphrase change made on another client: the old unlock
+    // Space is deleted remotely while this client's cache still holds the
     // record.
     wasState.spaces.clear()
 
-    const found = await fetchKeyringSeed({
+    const found = await fetchKeyring({
       passphrase: 'retired passphrase',
       idb,
       kdf: KDF
@@ -464,11 +875,42 @@ describe('fetchKeyringSeed', () => {
     await expect(loadKeyringCache({ spaceId, idb })).resolves.toBeNull()
   })
 
+  it('leaves the client-key record intact on a remote miss (a server answer must not destroy keys)', async () => {
+    const idb = createFakeIdb()
+    const clientSeed = randomSeed()
+    await bindPassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'survives miss passphrase',
+      idb,
+      kdf: KDF
+    })
+    const { spaceId } = await unlockFor('survives miss passphrase')
+    const record = wasState.spaces.get(spaceId)
+
+    // A (possibly lying) 404: the fetch reports no account...
+    wasState.spaces.clear()
+    await expect(
+      fetchKeyring({ passphrase: 'survives miss passphrase', idb, kdf: KDF })
+    ).resolves.toBeNull()
+
+    // ...but once the record is back, this client still holds its keys.
+    wasState.spaces.set(spaceId, record)
+    const found = await fetchKeyring({
+      passphrase: 'survives miss passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(Array.from(found!.clientKeys!.clientSeed)).toEqual(
+      Array.from(clientSeed)
+    )
+  })
+
   it('falls back to a fresh cache when the remote is unreachable', async () => {
     const idb = createFakeIdb()
-    const seed = randomSeed()
+    const clientSeed = randomSeed()
     await bindPassphrase({
-      seed,
+      clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'offline fallback passphrase',
       idb,
@@ -478,20 +920,22 @@ describe('fetchKeyringSeed', () => {
       cause: new TypeError('NetworkError when attempting to fetch')
     })
 
-    const found = await fetchKeyringSeed({
+    const found = await fetchKeyring({
       passphrase: 'offline fallback passphrase',
       idb,
       kdf: KDF
     })
     expect(found).not.toBeNull()
-    expect(Array.from(found!.seed)).toEqual(Array.from(seed))
+    expect(Array.from(found!.clientKeys!.clientSeed)).toEqual(
+      Array.from(clientSeed)
+    )
   })
 
   it('rethrows when the remote is unreachable and the cache has expired', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'expired cache passphrase',
       idb,
@@ -504,7 +948,7 @@ describe('fetchKeyringSeed', () => {
     wasState.getError = networkError
 
     await expect(
-      fetchKeyringSeed({
+      fetchKeyring({
         passphrase: 'expired cache passphrase',
         idb,
         kdf: KDF
@@ -517,29 +961,27 @@ describe('fetchKeyringSeed', () => {
     const { record, spaceId } = await craftRecord({
       passphrase: 'legacy cache passphrase',
       plaintext: {
-        seed: seedToBase64Url(randomSeed()),
         controller: DATA_CONTROLLER,
         createdAt: new Date().toISOString()
       }
     })
     // A bare record at the cache key, as written before write-time stamps.
-    await putRawCacheEntry({ idb, spaceId, value: record })
+    await putRawSessionEntry({ idb, key: `keyring/${spaceId}`, value: record })
     const networkError = new WasError('NetworkError when attempting to fetch', {
       cause: new TypeError('NetworkError when attempting to fetch')
     })
     wasState.getError = networkError
 
     await expect(
-      fetchKeyringSeed({ passphrase: 'legacy cache passphrase', idb, kdf: KDF })
+      fetchKeyring({ passphrase: 'legacy cache passphrase', idb, kdf: KDF })
     ).rejects.toBe(networkError)
   })
 
   it('reads remote on a cache miss and refreshes the cache', async () => {
-    const seed = randomSeed()
     // Bind through one profile (populates remote + its cache), then fetch on a
     // fresh profile whose cache is empty.
     await bindPassphrase({
-      seed,
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'cache miss passphrase',
       idb: createFakeIdb(),
@@ -548,7 +990,7 @@ describe('fetchKeyringSeed', () => {
     vi.clearAllMocks()
 
     const freshIdb = createFakeIdb()
-    const found = await fetchKeyringSeed({
+    const found = await fetchKeyring({
       passphrase: 'cache miss passphrase',
       idb: freshIdb,
       kdf: KDF
@@ -563,7 +1005,7 @@ describe('fetchKeyringSeed', () => {
   })
 
   it('returns null when no keyring exists anywhere', async () => {
-    const found = await fetchKeyringSeed({
+    const found = await fetchKeyring({
       passphrase: 'unknown account passphrase',
       idb: createFakeIdb(),
       kdf: KDF
@@ -577,7 +1019,7 @@ describe('fetchKeyringSeed', () => {
     })
     wasState.getError = networkError
     await expect(
-      fetchKeyringSeed({
+      fetchKeyring({
         passphrase: 'offline passphrase',
         idb: createFakeIdb(),
         kdf: KDF
@@ -587,7 +1029,7 @@ describe('fetchKeyringSeed', () => {
 
   it('is cache-only (no remote call) when no WAS server is configured', async () => {
     wasState.url = undefined
-    const found = await fetchKeyringSeed({
+    const found = await fetchKeyring({
       passphrase: 'no was passphrase',
       idb: createFakeIdb(),
       kdf: KDF
@@ -599,9 +1041,9 @@ describe('fetchKeyringSeed', () => {
   it('serves the cache with no TTL when no WAS server is configured', async () => {
     wasState.url = undefined
     const idb = createFakeIdb()
-    const seed = randomSeed()
+    const clientSeed = randomSeed()
     await bindPassphrase({
-      seed,
+      clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'no was warm cache passphrase',
       idb,
@@ -612,22 +1054,24 @@ describe('fetchKeyringSeed', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(Date.now() + KEYRING_CACHE_TTL_MS * 10)
 
-    const found = await fetchKeyringSeed({
+    const found = await fetchKeyring({
       passphrase: 'no was warm cache passphrase',
       idb,
       kdf: KDF
     })
     expect(found).not.toBeNull()
-    expect(Array.from(found!.seed)).toEqual(Array.from(seed))
+    expect(Array.from(found!.clientKeys!.clientSeed)).toEqual(
+      Array.from(clientSeed)
+    )
     expect(getUnlockKeyring).not.toHaveBeenCalled()
   })
 })
 
 describe('bindPassphrase', () => {
-  it('writes both remote and cache when WAS is configured', async () => {
+  it('writes the remote record, the cache, and the client-key record when WAS is configured', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'bind remote passphrase',
       idb,
@@ -638,13 +1082,14 @@ describe('bindPassphrase', () => {
     expect(ensureUnlockSpace).toHaveBeenCalledOnce()
     expect(wasState.spaces.has(spaceId)).toBe(true)
     await expect(loadKeyringCache({ spaceId, idb })).resolves.not.toBeNull()
+    await expect(loadClientKeyRecord({ spaceId, idb })).resolves.not.toBeNull()
   })
 
   it('is cache-only when no WAS server is configured', async () => {
     wasState.url = undefined
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'bind cache only passphrase',
       idb,
@@ -655,13 +1100,14 @@ describe('bindPassphrase', () => {
     expect(ensureUnlockSpace).not.toHaveBeenCalled()
     expect(wasState.spaces.size).toBe(0)
     await expect(loadKeyringCache({ spaceId, idb })).resolves.not.toBeNull()
+    await expect(loadClientKeyRecord({ spaceId, idb })).resolves.not.toBeNull()
   })
 
   it('is idempotent (a second identical bind succeeds)', async () => {
     const idb = createFakeIdb()
-    const seed = randomSeed()
+    const clientSeed = randomSeed()
     const args = {
-      seed,
+      clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'idempotent passphrase',
       idb,
@@ -669,7 +1115,7 @@ describe('bindPassphrase', () => {
     }
     const { spaceId } = await unlockFor('idempotent passphrase')
     await bindPassphrase(args)
-    await expect(bindPassphrase(args)).resolves.toEqual({
+    await expect(bindPassphrase(args)).resolves.toMatchObject({
       unlockSpaceId: spaceId
     })
     expect(wasState.spaces.has(spaceId)).toBe(true)
@@ -678,7 +1124,7 @@ describe('bindPassphrase', () => {
   it('returns the unlock Space id it bound', async () => {
     const idb = createFakeIdb()
     const { unlockSpaceId } = await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'space id return passphrase',
       idb,
@@ -688,10 +1134,10 @@ describe('bindPassphrase', () => {
     expect(unlockSpaceId).toBe(spaceId)
   })
 
-  it('carries the email through the wrapped record to fetchKeyringSeed', async () => {
+  it('carries the email through the wrapped record to fetchKeyring', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'email carrying passphrase',
       email: 'holder@example.com',
@@ -699,7 +1145,7 @@ describe('bindPassphrase', () => {
       kdf: KDF
     })
 
-    const found = await fetchKeyringSeed({
+    const found = await fetchKeyring({
       passphrase: 'email carrying passphrase',
       idb,
       kdf: KDF
@@ -710,14 +1156,14 @@ describe('bindPassphrase', () => {
   it('omits the email when none was bound', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'no email passphrase',
       idb,
       kdf: KDF
     })
 
-    const found = await fetchKeyringSeed({
+    const found = await fetchKeyring({
       passphrase: 'no email passphrase',
       idb,
       kdf: KDF
@@ -727,13 +1173,14 @@ describe('bindPassphrase', () => {
 })
 
 describe('changePassphrase', () => {
-  it('retires the account (old Space + cache deleted)', async () => {
+  it('retires the old method (Space, cache, client-key record, and pin deleted)', async () => {
     const idb = createFakeIdb()
-    const seed = randomSeed()
+    const clientSeed = randomSeed()
     await bindPassphrase({
-      seed,
+      clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'old passphrase',
+      pointer: POINTER,
       idb,
       kdf: KDF
     })
@@ -741,7 +1188,7 @@ describe('changePassphrase', () => {
     const newSpace = (await unlockFor('new passphrase')).spaceId
 
     const { oldPassphraseRetired } = await changePassphrase({
-      seed,
+      clientSeed,
       controller: DATA_CONTROLLER,
       oldPassphrase: 'old passphrase',
       newPassphrase: 'new passphrase',
@@ -757,14 +1204,88 @@ describe('changePassphrase', () => {
       loadKeyringCache({ spaceId: oldSpace, idb })
     ).resolves.toBeNull()
     await expect(
+      loadClientKeyRecord({ spaceId: oldSpace, idb })
+    ).resolves.toBeNull()
+    await expect(
       loadKeyringCache({ spaceId: newSpace, idb })
     ).resolves.not.toBeNull()
+    await expect(
+      loadClientKeyRecord({ spaceId: newSpace, idb })
+    ).resolves.not.toBeNull()
+  })
+
+  it('preserves the client seed, PUK, email, and pointer across the rebind', async () => {
+    const idb = createFakeIdb()
+    const clientSeed = randomSeed()
+    const puk = await mintPuk()
+    await bindPassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'carry rebind old passphrase',
+      email: 'holder@example.com',
+      puk,
+      pointer: POINTER,
+      idb,
+      kdf: KDF
+    })
+
+    await changePassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      oldPassphrase: 'carry rebind old passphrase',
+      newPassphrase: 'carry rebind new passphrase',
+      puk,
+      idb,
+      kdf: KDF
+    })
+
+    const found = await fetchKeyring({
+      passphrase: 'carry rebind new passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.email).toBe('holder@example.com')
+    expect(found!.pointer).toEqual(POINTER)
+    expect(Array.from(found!.clientKeys!.clientSeed)).toEqual(
+      Array.from(clientSeed)
+    )
+    expect(found!.clientKeys!.puk!.id).toBe(puk.id)
+  })
+
+  it("falls back to the old record's PUK when the caller passes none", async () => {
+    const idb = createFakeIdb()
+    const clientSeed = randomSeed()
+    const puk = await mintPuk()
+    await bindPassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'puk fallback old passphrase',
+      puk,
+      idb,
+      kdf: KDF
+    })
+
+    await changePassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      oldPassphrase: 'puk fallback old passphrase',
+      newPassphrase: 'puk fallback new passphrase',
+      idb,
+      kdf: KDF
+    })
+
+    const found = await fetchKeyring({
+      passphrase: 'puk fallback new passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.clientKeys!.puk!.id).toBe(puk.id)
   })
 
   it('throws WrongPassphraseError when no keyring exists for the old passphrase', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'the real old passphrase',
       idb,
@@ -773,7 +1294,7 @@ describe('changePassphrase', () => {
 
     await expect(
       changePassphrase({
-        seed: randomSeed(),
+        clientSeed: randomSeed(),
         controller: DATA_CONTROLLER,
         oldPassphrase: 'a wrong old passphrase',
         newPassphrase: 'brand new passphrase',
@@ -783,11 +1304,11 @@ describe('changePassphrase', () => {
     ).rejects.toBeInstanceOf(WrongPassphraseError)
   })
 
-  it('rejects an old passphrase already retired on another device despite a cached record', async () => {
+  it('rejects an old passphrase already retired on another client despite a cached record', async () => {
     const idb = createFakeIdb()
-    const seed = randomSeed()
+    const clientSeed = randomSeed()
     await bindPassphrase({
-      seed,
+      clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'stale old passphrase',
       idb,
@@ -799,7 +1320,7 @@ describe('changePassphrase', () => {
 
     await expect(
       changePassphrase({
-        seed,
+        clientSeed,
         controller: DATA_CONTROLLER,
         oldPassphrase: 'stale old passphrase',
         newPassphrase: 'brand new passphrase',
@@ -811,12 +1332,11 @@ describe('changePassphrase', () => {
 
   it('throws WrongPassphraseError when the record controller does not match', async () => {
     const idb = createFakeIdb()
-    // A record exists at the old passphrase's unlock Space, but it belongs to a
-    // different data identity than the one being changed.
+    // A record exists at the old passphrase's unlock Space, but it belongs to
+    // a different account than the one being changed.
     const { record, spaceId } = await craftRecord({
       passphrase: 'mismatch old passphrase',
       plaintext: {
-        seed: seedToBase64Url(randomSeed()),
         controller: 'did:key:z6MkSomeOtherDataController',
         createdAt: new Date().toISOString()
       }
@@ -825,7 +1345,7 @@ describe('changePassphrase', () => {
 
     await expect(
       changePassphrase({
-        seed: randomSeed(),
+        clientSeed: randomSeed(),
         controller: DATA_CONTROLLER,
         oldPassphrase: 'mismatch old passphrase',
         newPassphrase: 'brand new passphrase',
@@ -837,11 +1357,11 @@ describe('changePassphrase', () => {
 
   it('rethrows an unreachable remote during verify (not a wrong passphrase)', async () => {
     const idb = createFakeIdb()
-    const seed = randomSeed()
+    const clientSeed = randomSeed()
     // Bind through a separate profile so the verify cache is empty and the
     // verify must hit the remote, which is then made unreachable.
     await bindPassphrase({
-      seed,
+      clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'unreachable verify passphrase',
       idb: createFakeIdb(),
@@ -854,7 +1374,7 @@ describe('changePassphrase', () => {
 
     await expect(
       changePassphrase({
-        seed,
+        clientSeed,
         controller: DATA_CONTROLLER,
         oldPassphrase: 'unreachable verify passphrase',
         newPassphrase: 'brand new passphrase',
@@ -866,9 +1386,9 @@ describe('changePassphrase', () => {
 
   it('reports oldPassphraseRetired: false when the old Space deletion fails', async () => {
     const idb = createFakeIdb()
-    const seed = randomSeed()
+    const clientSeed = randomSeed()
     await bindPassphrase({
-      seed,
+      clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'delete-fails old passphrase',
       idb,
@@ -879,7 +1399,7 @@ describe('changePassphrase', () => {
     )
 
     const { oldPassphraseRetired } = await changePassphrase({
-      seed,
+      clientSeed,
       controller: DATA_CONTROLLER,
       oldPassphrase: 'delete-fails old passphrase',
       newPassphrase: 'delete-fails new passphrase',
@@ -890,40 +1410,11 @@ describe('changePassphrase', () => {
     expect(oldPassphraseRetired).toBe(false)
   })
 
-  it('preserves the bound email across the rebind', async () => {
+  it('does not delete the just-written records when old and new passphrases are equal', async () => {
     const idb = createFakeIdb()
-    const seed = randomSeed()
+    const clientSeed = randomSeed()
     await bindPassphrase({
-      seed,
-      controller: DATA_CONTROLLER,
-      passphrase: 'email rebind old passphrase',
-      email: 'holder@example.com',
-      idb,
-      kdf: KDF
-    })
-
-    await changePassphrase({
-      seed,
-      controller: DATA_CONTROLLER,
-      oldPassphrase: 'email rebind old passphrase',
-      newPassphrase: 'email rebind new passphrase',
-      idb,
-      kdf: KDF
-    })
-
-    const found = await fetchKeyringSeed({
-      passphrase: 'email rebind new passphrase',
-      idb,
-      kdf: KDF
-    })
-    expect(found!.email).toBe('holder@example.com')
-  })
-
-  it('does not delete the Space when old and new passphrases are equal', async () => {
-    const idb = createFakeIdb()
-    const seed = randomSeed()
-    await bindPassphrase({
-      seed,
+      clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'same passphrase',
       idb,
@@ -932,7 +1423,7 @@ describe('changePassphrase', () => {
     const spaceId = (await unlockFor('same passphrase')).spaceId
 
     await changePassphrase({
-      seed,
+      clientSeed,
       controller: DATA_CONTROLLER,
       oldPassphrase: 'same passphrase',
       newPassphrase: 'same passphrase',
@@ -942,6 +1433,7 @@ describe('changePassphrase', () => {
 
     expect(deleteUnlockSpace).not.toHaveBeenCalled()
     expect(wasState.spaces.has(spaceId)).toBe(true)
+    await expect(loadClientKeyRecord({ spaceId, idb })).resolves.not.toBeNull()
   })
 })
 
@@ -949,7 +1441,7 @@ describe('verifyPassphrase', () => {
   it('resolves for the bound passphrase and correct controller', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'verify correct passphrase',
       idb,
@@ -969,7 +1461,7 @@ describe('verifyPassphrase', () => {
   it('throws WrongPassphraseError for a wrong passphrase', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'the correct passphrase',
       idb,
@@ -991,7 +1483,6 @@ describe('verifyPassphrase', () => {
     const { record, spaceId } = await craftRecord({
       passphrase: 'verify mismatch passphrase',
       plaintext: {
-        seed: seedToBase64Url(randomSeed()),
         controller: 'did:key:z6MkSomeOtherDataController',
         createdAt: new Date().toISOString()
       }
@@ -1009,11 +1500,10 @@ describe('verifyPassphrase', () => {
   })
 
   it('rethrows an unreachable remote (not a wrong passphrase)', async () => {
-    const seed = randomSeed()
     // Bind through a separate profile so the verify cache is empty and the
     // verify must hit the remote, which is then made unreachable.
     await bindPassphrase({
-      seed,
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'verify unreachable passphrase',
       idb: createFakeIdb(),
@@ -1036,12 +1526,13 @@ describe('verifyPassphrase', () => {
 })
 
 describe('deleteKeyring', () => {
-  it('deletes the unlock Space and the local cache', async () => {
+  it('deletes the unlock Space and every local record for the method', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'delete keyring passphrase',
+      pointer: POINTER,
       idb,
       kdf: KDF
     })
@@ -1057,9 +1548,10 @@ describe('deleteKeyring', () => {
     expect(deleteUnlockSpace).toHaveBeenCalledOnce()
     expect(wasState.spaces.has(spaceId)).toBe(false)
     await expect(loadKeyringCache({ spaceId, idb })).resolves.toBeNull()
-    // The keyring is gone: no seed resolves for this passphrase any more.
+    await expect(loadClientKeyRecord({ spaceId, idb })).resolves.toBeNull()
+    // The keyring is gone: nothing resolves for this passphrase any more.
     await expect(
-      fetchKeyringSeed({
+      fetchKeyring({
         passphrase: 'delete keyring passphrase',
         idb,
         kdf: KDF
@@ -1067,10 +1559,10 @@ describe('deleteKeyring', () => {
     ).resolves.toBeNull()
   })
 
-  it('clears the cache and reports unlockSpaceDeleted: false when the remote delete fails', async () => {
+  it('clears the local records and reports unlockSpaceDeleted: false when the remote delete fails', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'delete-fails keyring passphrase',
       idb,
@@ -1089,13 +1581,14 @@ describe('deleteKeyring', () => {
 
     expect(unlockSpaceDeleted).toBe(false)
     await expect(loadKeyringCache({ spaceId, idb })).resolves.toBeNull()
+    await expect(loadClientKeyRecord({ spaceId, idb })).resolves.toBeNull()
   })
 
-  it('clears the cache with no remote call when no WAS server is configured', async () => {
+  it('clears the local records with no remote call when no WAS server is configured', async () => {
     wasState.url = undefined
     const idb = createFakeIdb()
     await bindPassphrase({
-      seed: randomSeed(),
+      clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,
       passphrase: 'delete no-was passphrase',
       idb,
@@ -1112,6 +1605,7 @@ describe('deleteKeyring', () => {
     expect(unlockSpaceDeleted).toBe(true)
     expect(deleteUnlockSpace).not.toHaveBeenCalled()
     await expect(loadKeyringCache({ spaceId, idb })).resolves.toBeNull()
+    await expect(loadClientKeyRecord({ spaceId, idb })).resolves.toBeNull()
   })
 })
 
@@ -1236,27 +1730,29 @@ describe('deriveUnlockIdentity (method-agnostic derivation)', () => {
   })
 
   describe('bindUnlockSecret with an injected PRF output', () => {
-    it('binds and recovers a data seed under a 32-byte passkey-PRF secret', async () => {
+    it('binds and recovers the client key set under a 32-byte passkey-PRF secret', async () => {
       const idb = createFakeIdb()
       const prfOutput = new Uint8Array(32)
       crypto.getRandomValues(prfOutput)
-      const seed = randomSeed()
+      const clientSeed = randomSeed()
 
       await bindUnlockSecret({
-        seed,
+        clientSeed,
         controller: DATA_CONTROLLER,
         secret: prfOutput,
         kdf: PASSKEY_KDF,
         idb
       })
 
-      const found = await fetchKeyringSeed({
+      const found = await fetchKeyring({
         secret: prfOutput,
         kdf: PASSKEY_KDF,
         idb
       })
       expect(found).not.toBeNull()
-      expect(Array.from(found!.seed)).toEqual(Array.from(seed))
+      expect(Array.from(found!.clientKeys!.clientSeed)).toEqual(
+        Array.from(clientSeed)
+      )
       expect(found!.controller).toBe(DATA_CONTROLLER)
     })
 
@@ -1266,7 +1762,7 @@ describe('deriveUnlockIdentity (method-agnostic derivation)', () => {
       crypto.getRandomValues(prfOutput)
 
       await bindUnlockSecret({
-        seed: randomSeed(),
+        clientSeed: randomSeed(),
         controller: DATA_CONTROLLER,
         secret: prfOutput,
         kdf: PASSKEY_KDF,
@@ -1275,7 +1771,7 @@ describe('deriveUnlockIdentity (method-agnostic derivation)', () => {
 
       const otherOutput = new Uint8Array(32)
       crypto.getRandomValues(otherOutput)
-      const miss = await fetchKeyringSeed({
+      const miss = await fetchKeyring({
         secret: otherOutput,
         kdf: PASSKEY_KDF,
         idb
@@ -1295,10 +1791,10 @@ describe('management zcap delegation', () => {
   }
 
   describe('bindUnlockSecret with delegateManagementTo', () => {
-    it('delegates a GET/DELETE zcap on the unlock Space to the data identity', async () => {
+    it('delegates a GET/DELETE zcap on the unlock Space to the account identity', async () => {
       const idb = createFakeIdb()
       const { manageCapability, unlockSpaceId } = await bindUnlockSecret({
-        seed: randomSeed(),
+        clientSeed: randomSeed(),
         controller: DATA_CONTROLLER,
         secret: 'manage delegate passphrase',
         kdf: KDF,
@@ -1321,7 +1817,7 @@ describe('management zcap delegation', () => {
     it('returns no capability without delegateManagementTo', async () => {
       const idb = createFakeIdb()
       const { manageCapability } = await bindUnlockSecret({
-        seed: randomSeed(),
+        clientSeed: randomSeed(),
         controller: DATA_CONTROLLER,
         secret: 'no delegate passphrase',
         kdf: KDF,
@@ -1334,7 +1830,7 @@ describe('management zcap delegation', () => {
       wasState.url = undefined
       const idb = createFakeIdb()
       const { manageCapability } = await bindUnlockSecret({
-        seed: randomSeed(),
+        clientSeed: randomSeed(),
         controller: DATA_CONTROLLER,
         secret: 'no was delegate passphrase',
         kdf: KDF,
@@ -1345,19 +1841,19 @@ describe('management zcap delegation', () => {
     })
   })
 
-  describe('fetchKeyringSeed with mintManageCapability', () => {
+  describe('fetchKeyring with mintManageCapability', () => {
     it('returns the unlock Space id and a capability delegated to the recovered controller', async () => {
       const idb = createFakeIdb()
       const { spaceId } = await unlockFor('mint on fetch passphrase')
       await bindPassphrase({
-        seed: randomSeed(),
+        clientSeed: randomSeed(),
         controller: DATA_CONTROLLER,
         passphrase: 'mint on fetch passphrase',
         idb,
         kdf: KDF
       })
 
-      const found = await fetchKeyringSeed({
+      const found = await fetchKeyring({
         passphrase: 'mint on fetch passphrase',
         idb,
         kdf: KDF,
@@ -1376,14 +1872,14 @@ describe('management zcap delegation', () => {
       const idb = createFakeIdb()
       const { spaceId } = await unlockFor('no mint passphrase')
       await bindPassphrase({
-        seed: randomSeed(),
+        clientSeed: randomSeed(),
         controller: DATA_CONTROLLER,
         passphrase: 'no mint passphrase',
         idb,
         kdf: KDF
       })
 
-      const found = await fetchKeyringSeed({
+      const found = await fetchKeyring({
         passphrase: 'no mint passphrase',
         idb,
         kdf: KDF
@@ -1396,9 +1892,9 @@ describe('management zcap delegation', () => {
   describe('changePassphrase return value', () => {
     it("returns the new passphrase's unlock Space id and management capability", async () => {
       const idb = createFakeIdb()
-      const seed = randomSeed()
+      const clientSeed = randomSeed()
       await bindPassphrase({
-        seed,
+        clientSeed,
         controller: DATA_CONTROLLER,
         passphrase: 'change return old passphrase',
         idb,
@@ -1407,7 +1903,7 @@ describe('management zcap delegation', () => {
       const newSpace = (await unlockFor('change return new passphrase')).spaceId
 
       const { unlockSpaceId, manageCapability } = await changePassphrase({
-        seed,
+        clientSeed,
         controller: DATA_CONTROLLER,
         oldPassphrase: 'change return old passphrase',
         newPassphrase: 'change return new passphrase',

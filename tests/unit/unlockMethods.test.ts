@@ -12,7 +12,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
-import type { IZcap } from '@interop/data-integrity-core'
+import type {
+  IKeyAgreementKey,
+  IKeyResolver,
+  IZcap
+} from '@interop/data-integrity-core'
 import type { Session } from '@/types/auth'
 import {
   loadKeyringCache,
@@ -51,7 +55,11 @@ vi.mock('@/stores/wasRemoteStore', () => ({
       throw wasState.getError
     }
     return wasState.records.has(spaceId) ? wasState.records.get(spaceId) : null
-  }),
+  })
+}))
+
+vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/wallet-core/keyring')>()),
   deleteUnlockSpaceWithCapability: vi.fn(async () => {})
 }))
 
@@ -60,12 +68,13 @@ import {
   getUnlockMethods,
   putUnlockMethods,
   revokeUnlockMethod,
+  rewrapUnlockMethodsRecord,
   type PasskeyUnlockMethod,
   type PassphraseUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
+import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
 import {
-  deleteUnlockSpaceWithCapability,
   ensureUnlockMethodsCollection,
   getUnlockMethodsRecord,
   putUnlockMethodsRecord
@@ -581,6 +590,78 @@ describe('backfillPassphraseUnlockMethod', () => {
 
     const result = await backfillPassphraseUnlockMethod({ session, idb })
     expect(result).not.toBeNull()
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+  })
+})
+
+describe('rewrapUnlockMethodsRecord', () => {
+  /**
+   * A second, distinct vault key set (a different seed), standing in for the
+   * post-rotation PUK's vault keys.
+   */
+  async function makeVaultKeys(fillByte: number) {
+    const seed = new Uint8Array(32)
+    seed.fill(fillByte)
+    const agent = await CapabilityAgent.fromSeed({
+      seed,
+      handle: `test-rewrap-${fillByte}`,
+      keyName: 'test-rewrap-key'
+    })
+    const keyAgreementKey =
+      X25519KeyAgreementKey2020.fromEd25519VerificationKey2020({
+        keyPair: agent.getVerificationKeyPair()
+      })
+    const keyResolver = async () => ({
+      id: keyAgreementKey.id,
+      type: keyAgreementKey.type,
+      publicKeyMultibase: keyAgreementKey.publicKeyMultibase
+    })
+    return {
+      keyAgreementKey: keyAgreementKey as IKeyAgreementKey,
+      keyResolver: keyResolver as IKeyResolver
+    }
+  }
+
+  it('re-seals the stored record so only the new keys decrypt it', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession()
+    await putUnlockMethods({ session, record: sampleRecord(), idb })
+
+    const from = {
+      keyAgreementKey: session.profile.keyAgreementKey! as IKeyAgreementKey,
+      keyResolver: session.profile.keyResolver! as IKeyResolver
+    }
+    const to = await makeVaultKeys(9)
+    await rewrapUnlockMethodsRecord({
+      storageServerUrl: 'https://was.example.test',
+      zcapClient: {} as never,
+      spaceId: DATA_SPACE_ID,
+      from,
+      to
+    })
+
+    // A session holding the NEW vault keys reads the registry.
+    const rotatedSession = await makeSession()
+    rotatedSession.profile.keyAgreementKey = to.keyAgreementKey as never
+    rotatedSession.profile.keyResolver = to.keyResolver as never
+    const read = await getUnlockMethods({ session: rotatedSession, idb })
+    expect(read).toEqual(sampleRecord())
+
+    // The old keys no longer route the envelope.
+    await expect(getUnlockMethods({ session, idb })).rejects.toThrow()
+  })
+
+  it('is a no-op when no registry exists', async () => {
+    const from = await makeVaultKeys(3)
+    const to = await makeVaultKeys(4)
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+    await rewrapUnlockMethodsRecord({
+      storageServerUrl: 'https://was.example.test',
+      zcapClient: {} as never,
+      spaceId: DATA_SPACE_ID,
+      from,
+      to
+    })
     expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
   })
 })

@@ -24,7 +24,7 @@ test.describe('Storage quota', () => {
     await goToStorage(page)
     await expectQuotaCard(page)
 
-    await expect(page.getByText('OK')).toBeVisible()
+    await expect(page.getByText('OK', { exact: true })).toBeVisible()
     await expect(page.getByText('Unlimited')).toBeVisible()
     await expect(page.getByText('Server Filesystem')).toBeVisible()
     await expect(page.getByText(/^Measured /)).toBeVisible()

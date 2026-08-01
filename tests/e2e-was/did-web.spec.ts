@@ -5,6 +5,7 @@ import {
   type Page,
   type TestInfo
 } from '@playwright/test'
+import { fillSettled } from './helpers'
 
 /**
  * Signup wizard walk with generous waits. Same steps as the shared
@@ -19,7 +20,7 @@ async function signup(page: Page, testInfo: TestInfo) {
   const email = `e2e-${token}@example.com`
 
   await page.goto('/#/signup')
-  await page.locator('input[type="password"]').fill(passphrase)
+  await fillSettled(page.locator('input[type="password"]'), passphrase)
   const next = page.getByRole('button', { name: 'Next' })
   // The strength meter that gates "Next" lazy-loads its (large) zxcvbn
   // dictionaries; the first score can lag well past the default 5s.
@@ -141,9 +142,14 @@ test('signup publishes a did:web document and a DIDAuth VP is signed by the KMS 
     keyAgreement: string[]
   }
   expect(doc.id).toMatch(/^did:web:.+:space:.+:id$/)
-  expect(doc.verificationMethod).toHaveLength(3)
-  expect(doc.authentication).toHaveLength(1)
-  expect(doc.assertionMethod).toHaveLength(1)
+  // The webvh projection: two KMS-held VMs (authentication / assertionMethod)
+  // plus this client's signing key and key-agreement twin; `authentication`
+  // and `assertionMethod` each list the KMS key and the client key, while
+  // `keyAgreement` is the client's KAK alone (no server-held key is ever a
+  // wrap target).
+  expect(doc.verificationMethod).toHaveLength(4)
+  expect(doc.authentication).toHaveLength(2)
+  expect(doc.assertionMethod).toHaveLength(2)
   expect(doc.keyAgreement).toHaveLength(1)
   // Each relationship references one of the document's verification methods.
   const vmIds = doc.verificationMethod.map(vm => vm.id)
@@ -171,7 +177,7 @@ test('signup publishes a did:web document and a DIDAuth VP is signed by the KMS 
   await page.reload()
 
   // Log in with the passphrase, then approve the DIDAuth consent screen.
-  await page.locator('input[type="password"]').fill(passphrase)
+  await fillSettled(page.locator('input[type="password"]'), passphrase)
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByText(/is requesting DID Authentication/)).toBeVisible()
   await page.getByRole('button', { name: 'Continue' }).click()

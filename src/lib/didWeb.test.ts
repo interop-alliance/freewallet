@@ -4,12 +4,8 @@
  */
 import { describe, it, expect } from 'vitest'
 import type { KeystoreAgent } from '@interop/webkms-client'
-import {
-  assembleDidDocument,
-  didWebFromSpace,
-  ensureDidWeb,
-  type DidWebKeyMap
-} from './didWeb'
+import { assembleDidDocument, didWebFromSpace, ensureDidWeb } from './didWeb'
+import type { DidWebKeyMap } from '@interop/wallet-core/webvh'
 import { DID_DOCUMENT_RESOURCE, DID_KEYS_RESOURCE } from '@/app.config'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 

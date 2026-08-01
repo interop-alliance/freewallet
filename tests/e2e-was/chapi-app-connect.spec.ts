@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { signupViaWizard } from './helpers'
+import { fillSettled, signupViaWizard } from './helpers'
 
 /**
  * WAS-backed E2E for the App Connect CHAPI consent flow. A single CHAPI `get`
@@ -152,7 +152,7 @@ async function connectViaPopup(
   await page.goto('/#/wallet/get')
   await page.reload()
 
-  await page.locator('input[type="password"]').fill(passphrase)
+  await fillSettled(page.locator('input[type="password"]'), passphrase)
   await page.getByRole('button', { name: 'Continue' }).click()
 
   // The app-centric consent panel: "Connect {app}?" plus the run-specific copy.

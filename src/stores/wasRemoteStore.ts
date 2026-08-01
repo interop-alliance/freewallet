@@ -20,7 +20,6 @@
  * carries the user's invocation signer.
  */
 import type { ZcapClient } from '@interop/ezcap'
-import type { IZcap } from '@interop/data-integrity-core'
 import {
   WasClient,
   type Collection,
@@ -28,7 +27,11 @@ import {
   type Resource,
   type Space
 } from '@interop/was-client'
-import { createEdvEncryption } from '@interop/was-client/edv'
+import {
+  createEdvEncryption,
+  resourceMarkerStore,
+  type MarkerStore
+} from '@interop/was-client/edv'
 import { publicCredentialUrl as buildPublicCredentialUrl } from '@interop/wallet-core/space'
 import type { ControllerProfile, User } from '@/types/auth'
 import {
@@ -36,14 +39,15 @@ import {
   DID_KEYS_RESOURCE,
   ID_COLLECTION,
   KEY_MAP_COLLECTION,
-  KEYRING_COLLECTION,
-  KEYRING_RESOURCE,
+  PUK_ROSTER_RESOURCE,
   UNLOCK_METHODS_COLLECTION,
   UNLOCK_METHODS_RESOURCE,
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
 // Deep import (bypassing the `@/lib/sync` barrel) so this eagerly loaded module
 // does not drag the barrel's RxDB replication machinery into the entry chunk.
+import { bufferToBase64Url } from '@/lib/cidFrom'
+import { isWebvhDid } from '@interop/wallet-core/webvh'
 import type { Json } from '@/lib/sync/types.js'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
@@ -79,6 +83,21 @@ interface ParsedWasPath {
  * @see https://digitalcredentials.github.io/wallet-attached-storage-spec/
  * @see https://github.com/interop-alliance/zcap-developer-guide
  */
+/**
+ * Mints a fresh Space id for a new account: an independent random
+ * identifier (32 bytes, base64url), carried in the account pointer from
+ * then on. Deliberately not a derivation of any controller: the account's
+ * controller is promoted to a did:webvh whose id embeds this Space id, so a
+ * controller-derived id would be circular. Unlock Spaces keep their
+ * `hash(unlock did:key)` addressing -- that derivation is a discovery
+ * convention, not an identity.
+ *
+ * @returns {string}
+ */
+export function mintSpaceId(): string {
+  return bufferToBase64Url(crypto.getRandomValues(new Uint8Array(32)))
+}
+
 export class WASRemoteStore {
   public storageServerUrl: string
   public was: WasClient
@@ -315,11 +334,31 @@ export class WASRemoteStore {
             spaceName: 'Freewallet Space'
           })
         } catch (err) {
-          console.error(`Error creating collection "${id}":`, err)
-          throw new Error(
-            `Error creating collection "${id}" in space "${this.spaceId}".`,
-            { cause: err }
-          )
+          // An encrypted collection whose marker already carries key epochs
+          // (a share, or a recovery escrow) refuses the bare `edv`
+          // re-declaration: the PUT would drop the append-only epochs and
+          // the server rejects it. A name-only configure merges the current
+          // description forward, re-stating the standing marker (epochs
+          // included) verbatim -- the idempotent form of "ensure it exists".
+          if (encryption) {
+            try {
+              await this.was.space(this.spaceId).collection(id).configure({
+                name
+              })
+            } catch {
+              throw new Error(
+                `Error creating collection "${id}" in space ` +
+                  `"${this.spaceId}".`,
+                { cause: err }
+              )
+            }
+          } else {
+            console.error(`Error creating collection "${id}":`, err)
+            throw new Error(
+              `Error creating collection "${id}" in space "${this.spaceId}".`,
+              { cause: err }
+            )
+          }
         }
         if (key) {
           collections.set(key, this.#collectionBaseUrl(id))
@@ -328,6 +367,59 @@ export class WASRemoteStore {
     )
 
     this.collections = collections
+  }
+
+  /**
+   * Promotes (or confirms) the Space's controller -- the last step of the
+   * promotion-by-ordering sequence: the Space was created under the first
+   * client's did:key, the did:webvh log has been published into the
+   * world-readable `id` collection, and this PUT names the did:webvh as the
+   * controller, authorized by the stored controller (whichever it currently
+   * is -- the call is idempotent). Supplies the full description (name and
+   * controller) so nothing is merged from an unreadable current one, and
+   * updates the in-memory controller so later collection upserts name the
+   * promoted controller rather than demoting the Space.
+   *
+   * @param options {object}
+   * @param options.controller {string}   the account's did:webvh DID
+   * @returns {Promise<void>}
+   */
+  async promoteSpaceController({
+    controller
+  }: {
+    controller: string
+  }): Promise<void> {
+    await this.was
+      .space(this.spaceId)
+      .configure({ name: 'Freewallet Space', controller })
+    this.controller = controller
+  }
+
+  /**
+   * Rebinds this store's signing client and controller -- the in-session
+   * swap right after controller promotion: from here on every request is
+   * signed with the promoted controller's keyId. Every handle this store
+   * hands out goes through `this.was`, so replacing it is sufficient.
+   *
+   * @param options {object}
+   * @param options.zcapClient {ZcapClient}   signs with the promoted keyId
+   * @param options.controller {string}   the account's did:webvh DID
+   * @returns {void}
+   */
+  rebindController({
+    zcapClient,
+    controller
+  }: {
+    zcapClient: ZcapClient
+    controller: string
+  }): void {
+    this.was = new WasClient({
+      serverUrl: this.storageServerUrl,
+      zcapClient,
+      // Mirrors the constructor: no decrypt path lives here.
+      encryption: createEdvEncryption({ resolveKeys: async () => null })
+    })
+    this.controller = controller
   }
 
   /**
@@ -355,6 +447,27 @@ export class WASRemoteStore {
       .space(this.spaceId)
       .collection(KEY_MAP_COLLECTION.id)
       .resource(DID_KEYS_RESOURCE)
+  }
+
+  /**
+   * Returns the marker store over the PUK wrap-set roster
+   * (`key-map/puk.json`): the `resourceMarkerStore` adapter, so the was-client
+   * recipient primitives read/CAS-write the roster through the seam. The
+   * `plaintext` handle override skips the collection describe -- the roster is
+   * read before/independently of the collection's description, and the
+   * `key-map` collection is provisioned plaintext for good (a marker resource
+   * must not itself be EDV-encoded, or the store's write preconditions would
+   * not be honored).
+   *
+   * @returns {MarkerStore}
+   */
+  pukRosterStore(): MarkerStore {
+    return resourceMarkerStore({
+      resource: this.was
+        .space(this.spaceId)
+        .collection(KEY_MAP_COLLECTION.id, { encryption: 'plaintext' })
+        .resource(PUK_ROSTER_RESOURCE)
+    })
   }
 
   /**
@@ -614,8 +727,16 @@ export class WASRemoteStore {
     user: User
     profile: ControllerProfile
   }) {
-    const controller = profile.keyAgent?.id || user.id
-    const spaceId = deriveSpaceId(controller)
+    // The Space id is an independent identifier carried in the account
+    // pointer (minted at provisioning); the legacy derivation from the
+    // client did:key remains only as a fallback for sessions that predate
+    // the pointer. The controller follows the pointer too: once the Space
+    // has been promoted to the did:webvh, every upsert must name it -- a
+    // re-provisioning that passed the client did:key would demote the Space.
+    const clientDid = profile.keyAgent?.id || user.id
+    const pointerDid = profile.accountPointer?.did
+    const controller = isWebvhDid(pointerDid) ? pointerDid : clientDid
+    const spaceId = profile.accountPointer?.spaceId ?? deriveSpaceId(clientDid)
     const remoteStore = new WASRemoteStore({
       storageServerUrl,
       zcapClient: profile.zcapClient,
@@ -1122,168 +1243,6 @@ async function putPlaintextRecord({
     .collection(collectionId, { encryption: 'plaintext' })
     .resource(resourceId)
     .put(body, { contentType: 'application/json' })
-}
-
-/**
- * Ensures the unlock Space and its single `keyring` collection exist
- * (upsert -- idempotent). Runs with the unlock root capability, so `force`
- * lets the collection upsert treat a 404 from the pre-merge describe as
- * genuinely absent rather than unreadable.
- *
- * @param options {object}
- * @param options.storageServerUrl {string}
- * @param options.zcapClient {ZcapClient}
- * @param options.spaceId {string}   the unlock Space id
- * @param options.controller {string}   the unlock did:key
- * @returns {Promise<void>}
- */
-export async function ensureUnlockSpace({
-  storageServerUrl,
-  zcapClient,
-  spaceId,
-  controller
-}: {
-  storageServerUrl: string
-  zcapClient: ZcapClient
-  spaceId: string
-  controller: string
-}): Promise<void> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  await was.space(spaceId).configure({ name: 'Freewallet Keyring', controller })
-  await ensurePlaintextCollection({
-    storageServerUrl,
-    zcapClient,
-    spaceId,
-    collectionId: KEYRING_COLLECTION.id,
-    name: KEYRING_COLLECTION.name
-  })
-}
-
-/**
- * Reads the keyring record from the unlock Space, or returns `null` when it
- * does not exist yet. A network / unreachable error propagates, so callers can
- * distinguish "no keyring" from "could not check".
- *
- * @param options {object}
- * @param options.storageServerUrl {string}
- * @param options.zcapClient {ZcapClient}
- * @param options.spaceId {string}   the unlock Space id
- * @returns {Promise<unknown | null>}
- */
-export async function getUnlockKeyring({
-  storageServerUrl,
-  zcapClient,
-  spaceId
-}: {
-  storageServerUrl: string
-  zcapClient: ZcapClient
-  spaceId: string
-}): Promise<unknown | null> {
-  return getPlaintextRecord({
-    storageServerUrl,
-    zcapClient,
-    spaceId,
-    collectionId: KEYRING_COLLECTION.id,
-    resourceId: KEYRING_RESOURCE
-  })
-}
-
-/**
- * Writes (upserts) the keyring record into the unlock Space as a JSON document.
- *
- * @param options {object}
- * @param options.storageServerUrl {string}
- * @param options.zcapClient {ZcapClient}
- * @param options.spaceId {string}   the unlock Space id
- * @param options.record {object}   the keyring record
- * @returns {Promise<void>}
- */
-export async function putUnlockKeyring({
-  storageServerUrl,
-  zcapClient,
-  spaceId,
-  record
-}: {
-  storageServerUrl: string
-  zcapClient: ZcapClient
-  spaceId: string
-  record: object
-}): Promise<void> {
-  await putPlaintextRecord({
-    storageServerUrl,
-    zcapClient,
-    spaceId,
-    collectionId: KEYRING_COLLECTION.id,
-    resourceId: KEYRING_RESOURCE,
-    record
-  })
-}
-
-/**
- * Deletes the whole unlock Space (what retires an old passphrase on a
- * passphrase change). `space.delete()` is idempotent, so an already-absent
- * Space is a success.
- *
- * @param options {object}
- * @param options.storageServerUrl {string}
- * @param options.zcapClient {ZcapClient}
- * @param options.spaceId {string}   the unlock Space id
- * @returns {Promise<void>}
- */
-export async function deleteUnlockSpace({
-  storageServerUrl,
-  zcapClient,
-  spaceId
-}: {
-  storageServerUrl: string
-  zcapClient: ZcapClient
-  spaceId: string
-}): Promise<void> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  await was.space(spaceId).delete()
-}
-
-/**
- * Deletes an unlock Space with an explicitly attached management capability,
- * rather than by root invocation. The `zcapClient` here is the DATA identity's
- * (not the unlock identity's); the attached `capability` -- the management zcap
- * the unlock identity delegated to the data identity at bind time -- is what
- * authorizes the DELETE against the unlock Space. This is the tap-free
- * revocation path for a lost unlock method: the data identity can retire it
- * without re-deriving the unlock identity from the (possibly lost) secret. A
- * 404 is treated as success (idempotent -- the Space is already gone).
- *
- * @param options {object}
- * @param options.storageServerUrl {string}
- * @param options.zcapClient {ZcapClient}   the data identity's client
- * @param options.spaceId {string}   the unlock Space id
- * @param options.capability {IZcap}   the delegated management zcap
- * @returns {Promise<void>}
- */
-export async function deleteUnlockSpaceWithCapability({
-  storageServerUrl,
-  zcapClient,
-  spaceId,
-  capability
-}: {
-  storageServerUrl: string
-  zcapClient: ZcapClient
-  spaceId: string
-  capability: IZcap
-}): Promise<void> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  try {
-    await was.request({
-      capability,
-      path: `/space/${spaceId}`,
-      method: 'DELETE'
-    })
-  } catch (err) {
-    if (errorStatus(err) === 404) {
-      return
-    }
-    throw err
-  }
 }
 
 /**
