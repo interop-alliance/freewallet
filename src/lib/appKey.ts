@@ -339,9 +339,11 @@ export function appKeySubjectDid(
 /**
  * The 32-byte seed an app-key credential carries
  * (`credentialSubject.seed`, base64url-no-pad), or undefined when it is absent
- * or malformed. This is the client secret from which the app's per-collection
- * key-agreement keys derive; the wallet holds it at consent time (freshly
- * minted or matched) to provision the app's encrypted collections.
+ * or malformed. This is the app's client secret, the root of its identity and
+ * of the keys it encrypts its own data with. The wallet reads it only to
+ * re-derive the credential's subject DID and check that the two bind
+ * ({@link appKeySeedBindsSubject}); nothing downstream of the match takes the
+ * seed, so it never reaches the grant path.
  *
  * @param credential {IVerifiableCredential}
  * @returns {Uint8Array | undefined}

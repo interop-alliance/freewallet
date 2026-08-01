@@ -71,7 +71,6 @@ import {
   SHARE_ZCAP_TTL_MS,
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
-import { deriveAppCollectionRecipient } from '@/lib/appCollectionRecipient'
 import {
   isEd25519DidKey,
   x25519RecipientFromDidKey
@@ -656,11 +655,11 @@ export function resolveGrants({
  * @param [options.shareTtlMs] {number}   share grant lifetime; defaults to
  *   SHARE_ZCAP_TTL_MS (deliberately long -- the settings panel, not expiry, is
  *   the removal mechanism for a share)
- * @param [options.appProvisioning] {{ seed: Uint8Array }}   present only on the
- *   App Connect path: the app-key seed from which each newly-provisioned PRIVATE
- *   collection is set up multi-recipient (vault KAK plus the app's deterministic
- *   per-collection key) instead of plaintext. Public collections and
- *   non-App-Connect flows provision plaintext as before.
+ * @param [options.appProvisioning] {boolean}   true only on the App Connect
+ *   path: each newly-provisioned PRIVATE collection is set up multi-recipient
+ *   (the vault KAK plus the app's identity KAK, derived from the controller
+ *   DID) instead of plaintext. Public collections and non-App-Connect flows
+ *   provision plaintext as before.
  * @param [options.app] {{ name: string, origin: string }}   present only on the
  *   App Connect path: recorded on each share activity so the settings panel can
  *   name the app instead of showing a bare did:key.
@@ -680,7 +679,7 @@ export async function processZcaps({
   ttlMs?: number
   writeTtlMs?: number
   shareTtlMs?: number
-  appProvisioning?: { seed: Uint8Array }
+  appProvisioning?: boolean
   app?: { name: string; origin: string }
 }): Promise<IZcap[]> {
   if (!hasZcapStorage(session)) {
@@ -730,11 +729,19 @@ export async function processZcaps({
     if (target.needsProvisioning && target.collectionId) {
       if (appProvisioning && !target.isPublic) {
         // App Connect PRIVATE collection: provision multi-recipient EDV, with
-        // the user's vault KAK as recipient zero and the app's deterministic
-        // per-collection key alongside it, so both can read what the app writes.
-        const appRecipient = await deriveAppCollectionRecipient({
-          seed: appProvisioning.seed,
-          collectionId: target.collectionId
+        // the user's vault KAK as recipient zero and the app's identity KAK
+        // alongside it, so both can read what the app writes. The recipient is
+        // derived from the controller DID the wallet is already delegating to
+        // -- the same rule a share uses, so there is one recipient derivation
+        // in the system and the wallet never touches the app's seed here.
+        if (!isEd25519DidKey(descriptor.controller)) {
+          throw new Error(
+            'Provisioning an encrypted app collection requires an Ed25519 ' +
+              'did:key controller to derive the recipient key from.'
+          )
+        }
+        const appRecipient = x25519RecipientFromDidKey({
+          did: descriptor.controller
         })
         await session.storage.provisionAppCollection({
           collectionId: target.collectionId,

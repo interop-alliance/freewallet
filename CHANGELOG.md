@@ -40,6 +40,14 @@
 
 ### Changed
 
+- One rule now decides who a key-epoch recipient is: the X25519 twin of a
+  controller `did:key`, for an app and a person alike. An App
+  Connect-provisioned private collection now admits the app with its identity
+  key, derived from the subject DID the wallet is already delegating to,
+  instead of a per-collection key derived from the app-key seed -- the seed no
+  longer enters the grant path at all. Apps must be on `@interop/was-react`
+  with the matching change; collections encrypted under the old
+  per-collection keys are not migrated.
 - What a delegated capability may be granted is now a per-target-class table
   rather than a single read-only/pass-through switch. Every target a request
   resolves onto falls into exactly one class, and each class has a ceiling the

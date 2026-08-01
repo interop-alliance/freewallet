@@ -970,7 +970,7 @@ export class StorageManager {
    * Provisions an App Connect app-provisioned PRIVATE collection as a
    * multi-recipient EDV collection: the user's vault KAK is always recipient
    * zero (policy -- the user is a recipient of every encrypted collection in
-   * their own Space) alongside the app's deterministic per-collection key. The
+   * their own Space) alongside the app's identity key-agreement key. The
    * collection is ensured to exist and declared `'edv'` without clobbering an
    * existing marker, then the epoch roster is brought to the desired state:
    *
@@ -980,14 +980,16 @@ export class StorageManager {
    * - epochs exist and the app is present -> no-op.
    *
    * The app never needs the vault KAK and the wallet never needs the app seed
-   * to remove it later (the roster kid is in the marker), so this is the only
-   * step that pairs the two recipients. Requires the vault key material and a
-   * remote store (an App Connect popup always has both).
+   * at all (the recipient is derived from the app's controller DID, and the
+   * roster kid is in the marker), so this is the only step that pairs the two
+   * recipients. Requires the vault key material and a remote store (an App
+   * Connect popup always has both).
    *
    * @param options {object}
    * @param options.collectionId {string}   the WAS collection id to provision
-   * @param options.appRecipient {RecipientPublicKey}   the app's per-collection
-   *   public key-agreement key (its `id` is the recipient `kid`)
+   * @param options.appRecipient {RecipientPublicKey}   the app's identity
+   *   public key-agreement key, the X25519 twin of its controller `did:key`
+   *   (its `id` is the recipient `kid`)
    * @returns {Promise<CollectionEncryption>}   the current marker
    */
   async provisionAppCollection({
@@ -1016,7 +1018,7 @@ export class StorageManager {
     let marker: CollectionEncryption
     if (!current?.epochs || current.epochs.length === 0) {
       // Lazy first provision: mint the first epoch with the owner as recipient
-      // zero plus the app's per-collection key.
+      // zero plus the app's identity key.
       marker = await initRecipients({
         collection,
         recipients: [ownerRecipient({ keyAgreementKey }), appRecipient]
