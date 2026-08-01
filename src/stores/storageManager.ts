@@ -67,6 +67,12 @@ import {
 } from '@interop/wallet-core/webvh'
 import { promoteKeystoreController, rebindKeystoreAgent } from '@/lib/kms'
 import { ensurePukRoster } from '@interop/wallet-core/keys'
+import {
+  acquireMarker,
+  acquireMarkers,
+  MarkerRefreshPolicy,
+  type MarkerCache
+} from '@interop/wallet-core/markers'
 import { savePukEpochPin } from '@/lib/sessionKey'
 import {
   createEdvDocCipher,
@@ -113,82 +119,73 @@ export type ImportSpaceSummary = {
   resourcesSkipped: number
 }
 
+// The WAS collection ids of the encrypted standard collections -- the set
+// whose markers are acquired at session start and refreshed on an
+// unknown-epoch read.
+const ENCRYPTED_COLLECTION_IDS = WALLET_STANDARD_COLLECTIONS.filter(
+  ({ encryption }) => encryption
+).map(({ id }) => id)
+
 /**
- * The localStorage key under which a collection's last-seen encryption marker
- * is cached, scoped by Space so two accounts on one browser never collide. The
- * cache is the offline fallback: when a marker fetch fails, a
- * previously-shared collection must keep encrypting under its current epoch.
+ * The localStorage-backed `MarkerCache` for one account's Space: a collection's
+ * last-seen encryption marker under
+ * `freewallet:collection-encryption:<spaceId>:<collectionId>`, scoped by Space
+ * so two accounts on one browser never collide. The cache is the offline
+ * fallback: when a marker fetch fails, a previously-shared collection must
+ * keep encrypting under its current epoch. Reads treat a corrupt entry (or a
+ * non-browser environment) as absent; writes no-op without localStorage.
  *
  * @param options {object}
  * @param options.spaceId {string}
- * @param options.collectionId {string}
- * @returns {string}
+ * @returns {MarkerCache}
  */
-function markerCacheKey({
-  spaceId,
-  collectionId
+function localStorageMarkerCache({
+  spaceId
 }: {
   spaceId: string
-  collectionId: string
-}): string {
-  return `freewallet:collection-encryption:${spaceId}:${collectionId}`
+}): MarkerCache {
+  const cacheKey = (collectionId: string): string =>
+    `freewallet:collection-encryption:${spaceId}:${collectionId}`
+  return {
+    async readMarker({ collectionId }) {
+      if (typeof localStorage === 'undefined') {
+        return undefined
+      }
+      const raw = localStorage.getItem(cacheKey(collectionId))
+      if (!raw) {
+        return undefined
+      }
+      try {
+        return JSON.parse(raw) as CollectionEncryption
+      } catch {
+        return undefined
+      }
+    },
+    async writeMarker({ collectionId, marker }) {
+      if (typeof localStorage === 'undefined') {
+        return
+      }
+      localStorage.setItem(cacheKey(collectionId), JSON.stringify(marker))
+    }
+  }
 }
 
 /**
- * Reads a cached collection encryption marker, or `undefined` when none is
- * cached (or in a non-browser environment). A corrupt cache entry is treated
- * as absent.
+ * Logs a swallowed marker-fetch failure (the cached-fallback branch of
+ * `acquireMarkers`).
  *
- * @param options {object}
- * @param options.spaceId {string}
- * @param options.collectionId {string}
- * @returns {CollectionEncryption | undefined}
+ * @param err {unknown}
+ * @param info {object}
+ * @param info.collectionId {string}
  */
-function readCachedMarker({
-  spaceId,
-  collectionId
-}: {
-  spaceId: string
-  collectionId: string
-}): CollectionEncryption | undefined {
-  if (typeof localStorage === 'undefined') {
-    return undefined
-  }
-  const raw = localStorage.getItem(markerCacheKey({ spaceId, collectionId }))
-  if (!raw) {
-    return undefined
-  }
-  try {
-    return JSON.parse(raw) as CollectionEncryption
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Caches a collection encryption marker (no-op in a non-browser environment).
- *
- * @param options {object}
- * @param options.spaceId {string}
- * @param options.collectionId {string}
- * @param options.marker {CollectionEncryption}
- * @returns {void}
- */
-function writeCachedMarker({
-  spaceId,
-  collectionId,
-  marker
-}: {
-  spaceId: string
-  collectionId: string
-  marker: CollectionEncryption
-}): void {
-  if (typeof localStorage === 'undefined') {
-    return
-  }
-  localStorage.setItem(
-    markerCacheKey({ spaceId, collectionId }),
-    JSON.stringify(marker)
+function warnMarkerFetchError(
+  err: unknown,
+  { collectionId }: { collectionId: string }
+): void {
+  console.warn(
+    `Could not fetch the encryption marker for collection "${collectionId}"; ` +
+      'falling back to the cached copy.',
+    err
   )
 }
 
@@ -223,11 +220,27 @@ export class StorageManager {
   // The last-known per-collection encryption markers, keyed by WAS collection
   // id, that the current ciphers were built from.
   #markers: Record<string, CollectionEncryption>
-  // WAS collection ids whose marker has already been refreshed once this
-  // session in response to an unknown-epoch read, so a genuinely foreign
-  // envelope cannot drive a refresh loop. Cleared whenever a share / unshare
-  // installs a fresh marker.
-  #markerRefreshed = new Set<string>()
+  // The durable (localStorage) marker cache for this account's Space -- the
+  // offline fallback marker acquisition falls back to. Only set with a remote
+  // store (a guest / no-WAS session has no markers to cache).
+  #markerCache?: MarkerCache
+  // The once-per-collection-per-session unknown-epoch refresh guard, shared by
+  // the standard and the app-provisioned encrypted collections, so a genuinely
+  // foreign envelope cannot drive a refresh loop. Its `reset` re-arms a
+  // collection whenever a share / unshare / recipient rotation installs a
+  // fresh marker.
+  #refreshPolicy = new MarkerRefreshPolicy({
+    refresh: async ({ collectionId }) => {
+      if (ENCRYPTED_COLLECTION_IDS.includes(collectionId)) {
+        await this.#refreshMarkers()
+      } else {
+        // An app-provisioned collection: drop the cached marker and cipher so
+        // the re-read rebuilds them from a fresh Description fetch.
+        delete this.#appMarkers[collectionId]
+        delete this.#appCiphers[collectionId]
+      }
+    }
+  })
   // Lazily-built per-collection ciphers for App Connect app-provisioned
   // (non-standard) encrypted collections, keyed by WAS collection id. The
   // wallet decrypts these as an ordinary recipient with its vault KAK (recipient
@@ -261,6 +274,9 @@ export class StorageManager {
     this.#ciphers = ciphers
     this.#vaultKeys = vaultKeys
     this.#markers = markers ?? {}
+    this.#markerCache = remoteStore
+      ? localStorageMarkerCache({ spaceId: remoteStore.spaceId })
+      : undefined
     // Remote-direct routing is only meaningful when a remote store is configured
     // (a guest / no-WAS session always uses the local BrowserStore).
     this.#remoteDirect = remoteDirect && !!remoteStore
@@ -392,63 +408,6 @@ export class StorageManager {
   }
 
   /**
-   * Fetches the current encryption marker for each encrypted standard
-   * collection best-effort, caching each success in localStorage and falling
-   * back to the cached copy on a fetch failure (offline: a previously-shared
-   * collection must keep encrypting under its current epoch). A successful
-   * fetch that returns no marker (an unshared collection) leaves the entry
-   * absent -- the single-key path. Returns the markers keyed by WAS collection
-   * id; with no remote store it is empty (guest / no-WAS: single-key).
-   *
-   * @param options {object}
-   * @param [options.remoteStore] {WASRemoteStore}
-   * @returns {Promise<Record<string, CollectionEncryption>>}
-   */
-  static async #acquireMarkers({
-    remoteStore
-  }: {
-    remoteStore?: WASRemoteStore
-  }): Promise<Record<string, CollectionEncryption>> {
-    const markers: Record<string, CollectionEncryption> = {}
-    if (!remoteStore) {
-      return markers
-    }
-    const { spaceId } = remoteStore
-    // The per-collection marker fetches are independent signed round trips; run
-    // them concurrently so login is not gated on a serial chain of describes.
-    const resolved = await Promise.all(
-      WALLET_STANDARD_COLLECTIONS.filter(({ encryption }) => encryption).map(
-        async ({ id }): Promise<[string, CollectionEncryption] | null> => {
-          try {
-            const fetched = await remoteStore.collectionEncryption({
-              collectionId: id
-            })
-            if (fetched) {
-              writeCachedMarker({ spaceId, collectionId: id, marker: fetched })
-              return [id, fetched]
-            }
-            return null
-          } catch (err) {
-            console.warn(
-              `Could not fetch the encryption marker for collection "${id}"; ` +
-                'falling back to the cached copy.',
-              err
-            )
-            const cached = readCachedMarker({ spaceId, collectionId: id })
-            return cached ? [id, cached] : null
-          }
-        }
-      )
-    )
-    for (const entry of resolved) {
-      if (entry) {
-        markers[entry[0]] = entry[1]
-      }
-    }
-    return markers
-  }
-
-  /**
    * Rebuilds the per-collection ciphers from the current markers and the held
    * vault keys, then swaps them into the local store (and this facade). No-op
    * without vault keys.
@@ -481,49 +440,26 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async #refreshMarkers(): Promise<void> {
-    if (!this.#remoteStore || !this.#vaultKeys) {
+    if (!this.#remoteStore || !this.#vaultKeys || !this.#markerCache) {
       return
     }
-    this.#markers = await StorageManager.#acquireMarkers({
-      remoteStore: this.#remoteStore
+    this.#markers = await acquireMarkers({
+      source: this.#remoteStore,
+      cache: this.#markerCache,
+      collectionIds: ENCRYPTED_COLLECTION_IDS,
+      onFetchError: warnMarkerFetchError
     })
     await this.#rebuildCiphers()
   }
 
   /**
-   * Whether an unknown-epoch read should drive a one-time marker refresh for a
-   * collection: a rekey emits no change-feed entry, so the cipher may be built
-   * from a stale marker. Guarded so a genuinely foreign envelope cannot loop --
-   * once per session per collection, and only with a remote store + vault keys.
-   *
-   * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
-   * @param options.unknown {boolean}   whether the read reported unknown-epoch rows
-   * @returns {boolean}
-   */
-  #shouldRefreshEpoch({
-    collectionId,
-    unknown
-  }: {
-    collectionId: string
-    unknown: boolean
-  }): boolean {
-    return (
-      unknown &&
-      !!this.#remoteStore &&
-      !!this.#vaultKeys &&
-      !this.#markerRefreshed.has(collectionId)
-    )
-  }
-
-  /**
    * Runs a read that reports whether it skipped unknown-epoch rows; on the first
    * such report for a collection this session, refreshes the marker (rebuilding
-   * + swapping the ciphers) and re-reads once. The single seam behind
-   * `listCredentials`, `listHistoryItems`, and `decryptCollectionResource`, so a
-   * fresh-epoch resource is never silently dropped after a rekey on another
-   * device -- for either backend, since the remote-direct backend surfaces the
-   * same counts.
+   * + swapping the ciphers) and re-reads once, via the shared
+   * `MarkerRefreshPolicy`. The single seam behind `listCredentials`,
+   * `listHistoryItems`, and `decryptCollectionResource`, so a fresh-epoch
+   * resource is never silently dropped after a rekey by another client -- for
+   * either backend, since the remote-direct backend surfaces the same counts.
    *
    * @param options {object}
    * @param options.collectionId {string}   the WAS collection id
@@ -537,15 +473,12 @@ export class StorageManager {
     collectionId: string
     read: () => Promise<{ value: T; unknownEpoch: boolean }>
   }): Promise<T> {
-    const first = await read()
-    if (
-      this.#shouldRefreshEpoch({ collectionId, unknown: first.unknownEpoch })
-    ) {
-      this.#markerRefreshed.add(collectionId)
-      await this.#refreshMarkers()
+    // A refresh needs a remote store and the vault keys; without them, serve
+    // the single read as-is (and leave the policy's guard unspent).
+    if (!this.#remoteStore || !this.#vaultKeys) {
       return (await read()).value
     }
-    return first.value
+    return this.#refreshPolicy.readWithRefresh({ collectionId, read })
   }
 
   static async initStorageClients({
@@ -583,7 +516,20 @@ export class StorageManager {
         profile
       }))
     }
-    const markers = await StorageManager.#acquireMarkers({ remoteStore })
+    // Fetch the current encryption marker for each encrypted standard
+    // collection best-effort (concurrently -- login is not gated on a serial
+    // chain of describes), caching each success and falling back to the cached
+    // copy on a fetch failure. A collection with no marker stays absent -- the
+    // single-key path; with no remote store there are no markers at all
+    // (guest / no-WAS: single-key).
+    const markers = remoteStore
+      ? await acquireMarkers({
+          source: remoteStore,
+          cache: localStorageMarkerCache({ spaceId: remoteStore.spaceId }),
+          collectionIds: ENCRYPTED_COLLECTION_IDS,
+          onFetchError: warnMarkerFetchError
+        })
+      : {}
 
     // One document cipher per encrypted collection, built from the session's
     // passphrase-derived key material (guests included -- their random secret
@@ -875,62 +821,61 @@ export class StorageManager {
     }
     const { keyAgreementKey, keyResolver } = this.#vaultKeys
 
-    const attempt = async (
-      forceRefresh: boolean
-    ): Promise<{ value: Json | undefined; unknownEpoch: boolean }> => {
-      let cipher = this.#appCiphers[collectionId]
-      if (!cipher || forceRefresh) {
-        let marker = forceRefresh ? undefined : this.#appMarkers[collectionId]
-        if (!marker) {
-          try {
-            marker = await remote.collectionEncryption({ collectionId })
-          } catch (err) {
-            console.warn(
-              `Could not fetch the encryption marker for app collection ` +
-                `"${collectionId}":`,
-              err
-            )
-            marker = this.#appMarkers[collectionId]
+    // The shared refresh policy guards the retry to once per collection per
+    // session; its refresh drops the cached app marker and cipher, so the
+    // re-read below rebuilds them from a fresh Description fetch.
+    return this.#refreshPolicy.readWithRefresh({
+      collectionId,
+      read: async (): Promise<{
+        value: Json | undefined
+        unknownEpoch: boolean
+      }> => {
+        let cipher = this.#appCiphers[collectionId]
+        if (!cipher) {
+          let marker = this.#appMarkers[collectionId]
+          if (!marker) {
+            try {
+              marker = await remote.collectionEncryption({ collectionId })
+            } catch (err) {
+              console.warn(
+                `Could not fetch the encryption marker for app collection ` +
+                  `"${collectionId}":`,
+                err
+              )
+            }
           }
+          if (!marker?.epochs || marker.epochs.length === 0) {
+            // No multi-recipient roster: the vault KAK is not (yet) a
+            // recipient, so there is nothing this session can decrypt.
+            return { value: undefined, unknownEpoch: false }
+          }
+          this.#appMarkers[collectionId] = marker
+          cipher = await createEdvDocCipher({
+            keyAgreementKey,
+            keyResolver,
+            collectionId,
+            encryption: marker
+          })
+          this.#appCiphers[collectionId] = cipher
         }
-        if (!marker?.epochs || marker.epochs.length === 0) {
-          // No multi-recipient roster: the vault KAK is not (yet) a recipient,
-          // so there is nothing this session can decrypt.
+        try {
+          return {
+            value: await cipher.decrypt({ envelope: data }),
+            unknownEpoch: false
+          }
+        } catch (err) {
+          if (err instanceof UnknownEpochError) {
+            return { value: undefined, unknownEpoch: true }
+          }
+          console.warn(
+            `Could not decrypt resource envelope from app collection ` +
+              `"${collectionId}":`,
+            err
+          )
           return { value: undefined, unknownEpoch: false }
         }
-        this.#appMarkers[collectionId] = marker
-        cipher = await createEdvDocCipher({
-          keyAgreementKey,
-          keyResolver,
-          collectionId,
-          encryption: marker
-        })
-        this.#appCiphers[collectionId] = cipher
       }
-      try {
-        return {
-          value: await cipher.decrypt({ envelope: data }),
-          unknownEpoch: false
-        }
-      } catch (err) {
-        if (err instanceof UnknownEpochError) {
-          return { value: undefined, unknownEpoch: true }
-        }
-        console.warn(
-          `Could not decrypt resource envelope from app collection ` +
-            `"${collectionId}":`,
-          err
-        )
-        return { value: undefined, unknownEpoch: false }
-      }
-    }
-
-    const first = await attempt(false)
-    if (first.unknownEpoch && !this.#markerRefreshed.has(collectionId)) {
-      this.#markerRefreshed.add(collectionId)
-      return (await attempt(true)).value
-    }
-    return first.value
+    })
   }
 
   async deleteCollectionResource(resource: StorageResource): Promise<void> {
@@ -1057,10 +1002,10 @@ export class StorageManager {
     // Update the marker cache and the in-memory app-collection state, then drop
     // any stale app cipher so the wallet's own next read rebuilds under the new
     // marker (mirrors shareCollection's tail).
-    writeCachedMarker({ spaceId: remote.spaceId, collectionId, marker })
+    await this.#markerCache?.writeMarker({ collectionId, marker })
     this.#appMarkers[collectionId] = marker
     delete this.#appCiphers[collectionId]
-    this.#markerRefreshed.delete(collectionId)
+    this.#refreshPolicy.reset({ collectionId })
     return marker
   }
 
@@ -1768,14 +1713,13 @@ export class StorageManager {
             recipientId,
             revoke
           })
-          writeCachedMarker({
-            spaceId: remote.spaceId,
+          await this.#markerCache?.writeMarker({
             collectionId,
             marker: newMarker
           })
           this.#appMarkers[collectionId] = newMarker
           delete this.#appCiphers[collectionId]
-          this.#markerRefreshed.delete(collectionId)
+          this.#refreshPolicy.reset({ collectionId })
         }
         rotated += 1
       } catch (err) {
@@ -2057,9 +2001,9 @@ export class StorageManager {
     })
 
     // Update the marker cache and rebuild + swap the ciphers under it.
-    writeCachedMarker({ spaceId: remote.spaceId, collectionId, marker })
+    await this.#markerCache?.writeMarker({ collectionId, marker })
     this.#markers = { ...this.#markers, [collectionId]: marker }
-    this.#markerRefreshed.clear()
+    this.#refreshPolicy.reset()
     this.#vaultKeys = { keyAgreementKey, keyResolver }
     await this.#rebuildCiphers()
     return { marker, zcap }
@@ -2138,9 +2082,9 @@ export class StorageManager {
       }
     })
 
-    writeCachedMarker({ spaceId: remote.spaceId, collectionId, marker })
+    await this.#markerCache?.writeMarker({ collectionId, marker })
     this.#markers = { ...this.#markers, [collectionId]: marker }
-    this.#markerRefreshed.clear()
+    this.#refreshPolicy.reset()
     this.#vaultKeys = { keyAgreementKey, keyResolver }
     await this.#rebuildCiphers()
     return marker
@@ -2219,17 +2163,12 @@ export class StorageManager {
   > {
     const remote = this.#remoteStore
     let marker: CollectionEncryption | undefined = this.#markers[collectionId]
-    if (!marker && remote) {
-      try {
-        marker = await remote.collectionEncryption({ collectionId })
-        if (marker) {
-          writeCachedMarker({ spaceId: remote.spaceId, collectionId, marker })
-        }
-      } catch {
-        marker = remote
-          ? readCachedMarker({ spaceId: remote.spaceId, collectionId })
-          : undefined
-      }
+    if (!marker && remote && this.#markerCache) {
+      marker = await acquireMarker({
+        source: remote,
+        cache: this.#markerCache,
+        collectionId
+      })
     }
     if (!marker?.currentEpoch || !marker.epochs) {
       return []

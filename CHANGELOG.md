@@ -90,8 +90,10 @@
   hosting and its ZCap signing identities (`/webvh`), the per-user key and
   its wrap-set roster (`/keys`), the unlock derivation and unlock Space
   lifecycle (`/keyring`), the enrollment ceremony (`/enrollment`), recovery
-  codes (`/recovery`), and the shared system-collection and resource names
-  (`/space`). Behavior, wire formats, and stored records are unchanged --
+  codes (`/recovery`), the collection-encryption marker acquisition and its
+  unknown-epoch refresh policy (`/markers`), and the shared
+  system-collection and resource names (`/space`). Behavior, wire formats,
+  and stored records are unchanged --
   they are shared contracts now, so a second wallet reading the same account
   agrees with this one by construction. The freewallet-specific glue (the
   `freewallet-session` IndexedDB layer, the unlock-methods registry, the
