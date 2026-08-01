@@ -903,20 +903,40 @@ describe('processZcaps', () => {
     delegated.length = 0
     ensureCalls.length = 0
     provisionCalls.length = 0
-    const seed = new Uint8Array(32).fill(3)
     await processZcaps({
-      zcapRequests: [collectionDetail, publicCollectionDetail],
+      zcapRequests: [
+        // A real did:key controller: the app's recipient key is the X25519
+        // twin of the DID the wallet is delegating to, exactly as for a share.
+        { ...collectionDetail, controller: granteeDid },
+        publicCollectionDetail
+      ],
       session,
-      appProvisioning: { seed }
+      appProvisioning: true
     })
 
-    // The private collection routed through provisionAppCollection (with a
-    // derived recipient kid); the public one stayed plaintext via
+    // The private collection routed through provisionAppCollection (with the
+    // identity-KAK recipient kid); the public one stayed plaintext via
     // ensureCollection.
     expect(provisionCalls).toHaveLength(1)
     expect(provisionCalls[0].collectionId).toBe('example-app-data')
-    expect(provisionCalls[0].recipientId).toMatch(/^did:key:z.+#z.+/)
+    expect(provisionCalls[0].recipientId).toBe(
+      x25519RecipientFromDidKey({ did: granteeDid }).id
+    )
     expect(ensureCalls).toEqual([{ id: 'example-app-public', isPublic: true }])
+  })
+
+  it('App Connect: refuses to provision for an underivable controller', async () => {
+    provisionCalls.length = 0
+    // Right prefix, undecodable body: there is no X25519 twin to admit the app
+    // with, so the collection is never created half-encrypted.
+    await expect(
+      processZcaps({
+        zcapRequests: [{ ...collectionDetail, controller: 'did:key:z6MkZZZZ' }],
+        session,
+        appProvisioning: true
+      })
+    ).rejects.toThrow()
+    expect(provisionCalls).toHaveLength(0)
   })
 
   it('without appProvisioning, a private collection provisions plaintext', async () => {

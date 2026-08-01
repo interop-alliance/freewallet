@@ -11,7 +11,6 @@
  */
 import type { Session } from '@/types/auth'
 import {
-  appKeySeedBytes,
   appKeySubjectDid,
   findAppKeyCredential,
   mintAppKeyCredential
@@ -121,10 +120,6 @@ export async function processAppConnect({
     capabilityQueries,
     controller: subjectDid
   })
-  // The app-key seed (minted or matched, both carry it) is what a newly
-  // provisioned private collection is set up multi-recipient from: the app's
-  // deterministic per-collection key alongside the user's vault KAK.
-  const seed = appKeySeedBytes(credential)
   const zcaps: IZcap[] =
     zcapRequests.length > 0
       ? await processZcaps({
@@ -133,7 +128,11 @@ export async function processAppConnect({
           // Names the app on any share activity this request records, so the
           // settings panel reads "Text Editor (app.example)" and not a did:key.
           app: { name: app.name, origin },
-          ...(seed && { appProvisioning: { seed } })
+          // A newly provisioned private collection is set up multi-recipient:
+          // the app's identity KAK (the X25519 twin of `subjectDid`, derived
+          // in `processZcaps`) alongside the user's vault KAK. The seed stays
+          // out of the grant path -- the subject DID is all that is needed.
+          appProvisioning: true
         })
       : []
 

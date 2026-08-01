@@ -163,7 +163,7 @@ key-epoch logic lives once. A write reproduces verbatim what background
 replication would have pushed (the raw EDV envelope under its content-derived
 envelope-hash id, created with `If-None-Match: *`, stamped with the same
 `WAS-Key-Epoch`), so the main app's replication pulls it cleanly. An
-unknown-epoch read (a rekey on another device) drives the same one-time marker
+unknown-epoch read (a rekey by another client) drives the same one-time marker
 refresh the local backend uses, so a fresh-epoch credential is never dropped.
 Contacts are not reachable in a popup, so the remote-direct backend rejects
 them rather than touching the empty partitioned store. The backend is selected
@@ -262,12 +262,15 @@ app-connect Login activity.
 Connect `capabilityQuery` provisions a **private** (non-public) collection, the
 wallet does not leave it plaintext: it declares the collection EDV-encrypted
 and sets up a multi-recipient key-epoch roster in which **the user's vault KAK
-is always a recipient (recipient zero)** alongside the app's deterministic
-per-collection key. That per-collection key is derived from the app seed with
-`deriveCollectionKeys({ seed, collectionId })` (`@interop/wallet-core/identity`,
-the exact call was-react uses), so the app -- holding the seed -- and the wallet
--- holding the vault KAK -- both read the collection, while the WAS server only
-ever stores ciphertext. Provisioning is idempotent: no epochs yet ->
+is always a recipient (recipient zero)** alongside the app's **identity KAK**
+-- the X25519 (Montgomery) twin of the `did:key` the wallet is delegating to,
+derived with the same `x25519RecipientFromDidKey` a share uses. There is one
+recipient-derivation rule in the system, for an app and a person alike, and the
+app seed never enters the grant path: the wallet derives the app's recipient
+key from a public identifier it already has. The app derives the private half
+from its own controller key, so the app and the wallet -- holding the vault KAK
+-- both read the collection, while the WAS server only ever stores ciphertext.
+Provisioning is idempotent: no epochs yet ->
 `initRecipients([owner, app])`; a reconnect after revoke -> `addRecipient(app)`;
 already present -> no-op. The wallet ensures the collection exists without
 clobbering an existing `encryption` marker, so an established epoch roster is
@@ -340,10 +343,9 @@ the delegated read zcap, builds the epoch-aware cipher from the marker, and
 decrypts the raw envelopes locally. The key it decrypts with is the app's
 IDENTITY key-agreement key -- the X25519 twin of its own controller DID, which
 is exactly what `x25519RecipientFromDidKey` derived wallet-side, so the two
-sides land on the same `kid` without anything travelling on the wire. Note that
-this is a DIFFERENT key from the per-collection KAK an app-provisioned
-collection uses (`deriveCollectionKeys`): shared collections key off the app
-identity, app-owned collections key off the collection.
+sides land on the same `kid` without anything travelling on the wire. It is the
+same key an app-provisioned collection admits the app with: one recipient
+identity per app, whoever owns the collection.
 
 Security notes:
 
@@ -361,6 +363,29 @@ Security notes:
   permitted action is unsatisfiable, never delegated empty.
 - **Challenge/domain**: unchanged DIDAuth verification app-side in
   was-react.
+- **Per-user app identity**: an app key is minted from 32 fresh random bytes
+  inside the connecting user's own wallet and stored in that user's own
+  credential store, so the app's DID -- and therefore the X25519 recipient
+  key derived from it -- is scoped to the **(user, origin, credentialType)**
+  triple. The same app connected by two users gets two unrelated DIDs. This
+  is deliberately independent randomness per user rather than a derivation
+  over (app, user): there is no cross-user linkability between an app's
+  DIDs, and compromising one user's app key reveals nothing about another's,
+  where a shared-root KDF would break every user at once. "Encrypted to the
+  app's key" throughout this document therefore means _that user's_ instance
+  of the app, never a key the app reuses across its users.
+
+  The expectation this states is on the App Connect path, where the wallet
+  mints the key and fills `controller` itself. A standalone
+  `AuthorizationCapabilityQuery` names its own `controller`, so an app taking
+  that route could supply one static DID for every user, and each user's
+  collection would then wrap its (still distinct) epoch secret to one
+  app-held key. The wallet cannot detect this -- it only ever sees one user's
+  view -- so it is an ecosystem expectation of app authors, not an enforced
+  invariant: **a grantee DID SHOULD NOT be shared across users.** What the
+  wallet does guarantee either way is that the recipient key is derived from
+  the named controller, so a request can never pair controller DID A with
+  recipient key B.
 
 ## Route map
 
@@ -423,6 +448,29 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   (`src/lib/appKey.ts`). Every app key carries the marker type
   `AppKeyCredential` (`urn:was:AppKeyCredential`); one carrying the marker
   without binding its subject DID to its own seed is refused at store time.
+- **Client / `clientId`** — the keyed, custodied, revocable identity of an
+  (app, user) pair: a keypair that can be a zcap grantee, a delegation
+  `controller`, or an entry in a collection's key-epoch roster. For a BYOE app
+  it is the **app key**'s subject DID above, scoped to
+  `(user, origin, credentialType)` and stable across browsers because the
+  wallet custodies the seed and re-issues it on a browser-attested origin
+  match — a client-only SPA holds no durable secret of its own, so its
+  identity is stable by custody, with the origin as the anchor. Deliberately
+  not called a "device": one machine hosts many clients (browser profiles,
+  several apps, several accounts), and a client is not tied to hardware.
+  "App session" is informal prose for one live session of a client; nothing
+  named `appSessionId` is persisted.
+- **`writerId`** — an unkeyed, clearable, unrecoverable attribution label
+  saying which writing agent produced a revision. Its only jobs are history
+  attribution and breaking last-write-wins ties; it is minted locally
+  (`src/lib/deviceId.ts`, a `localStorage` key), dies with a wallet reset, and
+  is deliberately not derived from any secret — so it is never an identity and
+  must not be treated as one. Distinct from a `clientId` in lifetime and in
+  trust: it can vanish and be re-minted with nothing carried over. Also not a
+  `replicaId`: it is minted per browser profile while the local database is
+  per user, so it is not 1:1 with a replica. Still spelled `deviceId` in code
+  and in the `@interop/social-core` contact payloads pending the cross-repo
+  rename.
 - **Share** — granting a third party read AND decrypt access to one of the
   wallet's own encrypted collections, asked for with a
   `urn:was:shared-collection` invocation-target descriptor. One
