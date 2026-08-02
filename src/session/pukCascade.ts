@@ -4,9 +4,10 @@
  * revoked), every encrypted collection in the Space -- the encrypted standard
  * collections AND the app-provisioned ones -- is re-epoch'd onto the fresh
  * key in parallel, so writes stop landing under epochs the revoked party can
- * decrypt. The per-collection op lives in `@interop/wallet-core/keys`
- * (`rotateCollectionEpochsToPuk`); this module owns what only the wallet
- * knows -- which collections exist -- and the parallel best-effort driving.
+ * decrypt. The driving (and the per-collection staleness/rotation op) lives
+ * in `@interop/wallet-core/keys`; this module owns what only this wallet
+ * knows -- which collections exist, and how each one's descriptor store and
+ * encryption declaration are reached through the remote store.
  *
  * Convergence is the design, not an afterthought: staleness is detected from
  * durable data alone (a collection is stale exactly when its current epoch
@@ -15,30 +16,18 @@
  * epochs. Failures are collected per collection rather than aborting the
  * fan-out; the cascade-completion sweep is the standing backstop.
  */
-import {
-  collectionDescriptorStore,
-  type EncryptionDescriptorStore
-} from '@interop/was-client/edv'
+import { collectionDescriptorStore } from '@interop/was-client/edv'
 import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import {
-  rotateCollectionEpochsToPuk,
-  unwrapPukGenerations,
-  type CollectionPukRotationOutcome,
-  type Puk
+  cascadeCollectionsToPuk as driveCascade,
+  type Puk,
+  type PukCascadeResult
 } from '@interop/wallet-core/keys'
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
-/**
- * What the fan-out did, per collection id: the outcomes for every collection
- * that needed (or took) work, and the per-collection failures the caller
- * surfaces -- the cascade never aborts on one stuck collection.
- */
-export interface PukCascadeResult {
-  outcomes: Record<string, CollectionPukRotationOutcome>
-  failed: Array<{ collectionId: string; error: unknown }>
-}
+export type { PukCascadeResult } from '@interop/wallet-core/keys'
 
 /**
  * The encrypted collections the cascade covers: the standard collections that
@@ -102,42 +91,25 @@ export async function cascadeCollectionsToPuk({
   clientKeyAgreementKey: IKeyAgreementKey
   puk: Puk
 }): Promise<PukCascadeResult> {
-  const generations = await unwrapPukGenerations({
-    descriptor: rosterDescriptor,
-    clientKeyAgreementKey
+  const result = await driveCascade({
+    collectionIds: await encryptedCollectionIds({ remoteStore }),
+    storeFor: collectionId =>
+      collectionDescriptorStore({
+        collection: remoteStore.collectionHandle({ collectionId })
+      }),
+    // Skip a collection the server does not declare encrypted (e.g. a
+    // standard collection on an account that never provisioned it).
+    isEncrypted: async collectionId =>
+      Boolean(await remoteStore.collectionEncryption({ collectionId })),
+    rosterDescriptor,
+    clientKeyAgreementKey,
+    puk
   })
-  const collectionIds = await encryptedCollectionIds({ remoteStore })
-
-  const outcomes: Record<string, CollectionPukRotationOutcome> = {}
-  const failed: Array<{ collectionId: string; error: unknown }> = []
-  await Promise.all(
-    collectionIds.map(async collectionId => {
-      try {
-        // Skip a collection the server does not declare encrypted (e.g. a
-        // standard collection on an account that never provisioned it).
-        const descriptor = await remoteStore.collectionEncryption({
-          collectionId
-        })
-        if (!descriptor) {
-          return
-        }
-        const store: EncryptionDescriptorStore = collectionDescriptorStore({
-          collection: remoteStore.collectionHandle({ collectionId })
-        })
-        outcomes[collectionId] = await rotateCollectionEpochsToPuk({
-          store,
-          puk,
-          generations
-        })
-      } catch (err) {
-        console.warn(
-          `Could not rotate collection "${collectionId}" onto the current ` +
-            'PUK:',
-          err
-        )
-        failed.push({ collectionId, error: err })
-      }
-    })
-  )
-  return { outcomes, failed }
+  for (const { collectionId, error } of result.failed) {
+    console.warn(
+      `Could not rotate collection "${collectionId}" onto the current PUK:`,
+      error
+    )
+  }
+  return result
 }

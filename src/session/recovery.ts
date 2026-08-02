@@ -1287,12 +1287,12 @@ export async function remintRecoveryDelegations({
       })
       // The code's unlock KAK, public half only -- exactly enough to
       // re-encrypt the record to the same recipient the code derives.
-      const unlockKak = X25519KeyAgreementKey2020.from({
+      const unlockKak = (await X25519KeyAgreementKey2020.from({
         id: entry.unlockKeyAgreementKeyId,
         controller: entry.unlockKeyAgreementKeyId.split('#')[0],
         type: 'X25519KeyAgreementKey2020',
         publicKeyMultibase: entry.unlockKeyAgreementKeyMultibase
-      }) as IKeyAgreementKey
+      })) as IKeyAgreementKey
       const wrapped = await wrapRecoveryRecord({
         controller: session.profile.accountController ?? session.user.id,
         email: session.user.email,
