@@ -47,11 +47,11 @@ import { isWebvhDid } from '@interop/wallet-core/webvh'
 import { WAS_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import { savePukEpochPin } from '@/lib/sessionKey'
-import { getUnlockMethods, rewrapUnlockMethodsRecord } from '@/session/unlockMethods'
 import {
-  remintRecoveryDelegations,
-  verifyAccountLog
-} from '@/session/recovery'
+  getUnlockMethods,
+  rewrapUnlockMethodsRecord
+} from '@/session/unlockMethods'
+import { remintRecoveryDelegations, verifyAccountLog } from '@/session/recovery'
 import {
   cascadeCollectionsToPuk,
   type PukCascadeResult

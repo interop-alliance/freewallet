@@ -55,7 +55,10 @@ import {
   ID_COLLECTION,
   DID_DOCUMENT_RESOURCE
 } from '@interop/wallet-core/space'
-import { agentsFromSeed, singleKeyResolver } from '@interop/wallet-core/identity'
+import {
+  agentsFromSeed,
+  singleKeyResolver
+} from '@interop/wallet-core/identity'
 import {
   deriveUnlockIdentity,
   deleteUnlockSpace,
