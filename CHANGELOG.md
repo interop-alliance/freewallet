@@ -146,8 +146,10 @@
 
 - **The account identity, unlock, and enrollment machinery now comes from
   `@interop/wallet-core`** instead of being maintained here: did:webvh
-  hosting and its ZCap signing identities (`/webvh`), the per-user key and
-  its wrap-set roster (`/keys`), the unlock derivation and unlock Space
+  hosting and its ZCap signing identities (`/webvh`), the per-user key, its
+  wrap-set roster, and the rotation cascade's collection fan-out (`/keys` --
+  the wallet keeps only the enumeration of which collections exist and the
+  per-collection store adapters), the unlock derivation and unlock Space
   lifecycle (`/keyring`), the enrollment ceremony (`/enrollment`), recovery
   codes (`/recovery`), the collection-encryption descriptor acquisition and
   its unknown-epoch refresh policy (`/descriptors`), and the shared
