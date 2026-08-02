@@ -21,7 +21,31 @@
   Revoking a code from Settings is a real revocation -- the code resolves
   to nothing afterwards, everywhere -- and a login-time health check warns
   when a stored recovery delegation has rotted and would brick recovery.
-  Design details in ARCHITECTURE.md ("Recovery codes").
+  Spending or revoking a code re-epochs every encrypted collection onto
+  the fresh per-user key (the same cascade client revocation runs), so
+  writes stop landing under epochs the spent or revoked code could read;
+  revoking from Settings also adopts the rotated key into the live session
+  in place. Design details in ARCHITECTURE.md ("Recovery codes").
+
+- **Client revocation** (`revokeEnrolledClient` in `src/session/revocation.ts`):
+  disconnecting an enrolled wallet client from the account, run entirely in
+  the revoking client as one synchronous cascade in dependency order. The
+  revoked client's verification methods, update key, and standing
+  commitments leave the account's DID document in a single log entry --
+  under the current-key-set rule that one edit stops the revoked client's
+  requests, and every delegation and app grant it ever signed, from
+  verifying anywhere. The per-user key then rotates off the revoked
+  client's wrap in the roster, every encrypted collection re-epochs onto
+  the fresh key in parallel (revoked key generations retired, history
+  escrowed, so every other replica keeps decrypting across the rotation),
+  and the recovery delegations the revoked client had signed -- which
+  stopped chaining at the document edit -- are re-minted by the revoking
+  client. The revoking session adopts the fresh key in place (no re-login),
+  a wallet-activity record is written, and the cascade converges under a
+  naive full re-run: every stage detects completion from durable state
+  alone, so a mid-cascade crash strands nothing. The Settings surface for
+  it ships separately; the honest ceiling is unchanged -- ciphertext the
+  revoked client already fetched stays readable to it.
 
 - A **per-user key (PUK)** is now minted at wallet provisioning:
   client-side, never server-held, replacing the passphrase-seed-derived

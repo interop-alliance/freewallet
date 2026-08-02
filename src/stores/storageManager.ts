@@ -104,6 +104,7 @@ import {
   addHistoryCredentialUnshared as buildHistoryCredentialUnshared,
   addHistoryLogin as buildHistoryLogin,
   addHistoryAppRevoke as buildHistoryAppRevoke,
+  addHistoryClientRevoked as buildHistoryClientRevoked,
   type WalletActivity
 } from '@interop/wallet-core/space'
 
@@ -450,6 +451,38 @@ export class StorageManager {
       onFetchError: warnDescriptorFetchError
     })
     await this.#rebuildCiphers()
+  }
+
+  /**
+   * Adopts a rotated PUK's vault keys into the live session's storage -- the
+   * tail of the revocation cascade: once the roster and the collections have
+   * moved to a fresh PUK, the session that drove the rotation (it minted the
+   * key, so it holds it) swaps its vault key material, refetches the rotated
+   * descriptors, and rebuilds the ciphers, so it keeps reading and writing
+   * without a re-login. The app-collection cipher caches are dropped too (they
+   * were built from the old vault KAK) and rebuild lazily on next decrypt.
+   *
+   * @param options {object}
+   * @param options.keyAgreementKey {IKeyAgreementKey}   the fresh PUK's KAK
+   * @param options.keyResolver {IKeyResolver}
+   * @returns {Promise<void>}
+   */
+  async adoptRotatedVaultKeys({
+    keyAgreementKey,
+    keyResolver
+  }: {
+    keyAgreementKey: IKeyAgreementKey
+    keyResolver: IKeyResolver
+  }): Promise<void> {
+    this.#vaultKeys = { keyAgreementKey, keyResolver }
+    this.#appCiphers = {}
+    this.#appDescriptors = {}
+    if (this.#remoteStore && this.#descriptorCache) {
+      await this.#refreshDescriptors()
+    } else {
+      await this.#rebuildCiphers()
+    }
+    this.#refreshPolicy.reset()
   }
 
   /**
@@ -1519,6 +1552,46 @@ export class StorageManager {
       cid,
       revoked,
       skipped,
+      id: resourceId
+    })
+    await this.#addHistoryItem({ resourceId, activity })
+  }
+
+  /**
+   * Records (in the `wallet-activity` collection) a ClientRevoke activity: an
+   * enrolled wallet client was disconnected -- the revocation cascade's audit
+   * record.
+   *
+   * @param options {object}
+   * @param options.user {User}
+   * @param options.signingKeyMultibase {string}   the revoked client's signing
+   *   key multibase
+   * @param [options.label] {string}
+   * @param [options.rotated] {number}   collections that took a fresh epoch
+   * @param [options.failed] {number}   collections the cascade could not
+   *   rotate (the completion sweep's remainder)
+   * @returns {Promise<void>}
+   */
+  async addHistoryClientRevoked({
+    user,
+    signingKeyMultibase,
+    label,
+    rotated,
+    failed
+  }: {
+    user: User
+    signingKeyMultibase: string
+    label?: string
+    rotated?: number
+    failed?: number
+  }) {
+    const resourceId = uuidv7()
+    const activity = buildHistoryClientRevoked({
+      user,
+      signingKeyMultibase,
+      label,
+      rotated,
+      failed,
       id: resourceId
     })
     await this.#addHistoryItem({ resourceId, activity })

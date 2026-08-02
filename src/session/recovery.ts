@@ -21,38 +21,33 @@
  *   key set minted, the delegation invoked to write the self-enrolling
  *   continuation, the PUK unwrapped from the code's standing wrap, the
  *   mandatory PUK rotation in the roster (the spent code presumed
- *   compromised), a replacement code issued hard, and the new client bound
- *   under a fresh passphrase. The remaining rekey -- re-epoching every
- *   encrypted collection off the old PUK -- is the client-revocation epoch
- *   cascade, a separate work item; until it lands, the fresh PUK is escrowed into each encrypted collection's
- *   existing epochs so a rotated-PUK session keeps decrypting.
+ *   compromised), the epoch cascade re-keying every encrypted collection off
+ *   the spent code's reach, a replacement code issued hard, and the new
+ *   client bound under a fresh passphrase.
  * - `revokeRecoveryCode` -- the Settings removal: document entry out, PUK
- *   rotated off the code's wrap, unlock Space deleted, registry entry
- *   dropped.
+ *   rotated off the code's wrap, the same collection cascade, unlock Space
+ *   deleted, registry entry dropped, and the live session adopting the
+ *   rotated key in place.
  * - `checkRecoveryHealth` -- the login-time delegation-rot check: a stored
  *   delegation chains only while its signing client's verification method is
  *   in the current document, and a rotted delegation bricks recovery exactly
- *   when it is needed.
+ *   when it is needed. Client revocation re-mints rotted delegations
+ *   automatically (`remintRecoveryDelegations`); the check remains the
+ *   backstop for entries that predate the re-mint fields.
  */
 import { WasClient } from '@interop/was-client'
-import {
-  addRecipient,
-  epochKeyIdFor,
-  initRecipients,
-  removeRecipient
-} from '@interop/was-client/edv'
 import {
   deriveNextKeyHash,
   readLogFromString,
   resolveDIDFromLog
 } from '@interop/did-method-webvh'
+import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { base64urlnopad } from '@scure/base'
 import {
   RECOVERY_ZCAP_TTL_MS,
   UNLOCK_MANAGE_ZCAP_TTL_MS,
-  WALLET_STANDARD_COLLECTIONS,
   WAS_SERVER_URL
 } from '@/app.config'
 import {
@@ -60,26 +55,29 @@ import {
   ID_COLLECTION,
   DID_DOCUMENT_RESOURCE
 } from '@interop/wallet-core/space'
-import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { agentsFromSeed, singleKeyResolver } from '@interop/wallet-core/identity'
 import {
   deriveUnlockIdentity,
   deleteUnlockSpace,
   ensureUnlockSpace,
   getUnlockKeyring,
   putUnlockKeyring,
+  putUnlockKeyringWithCapability,
   type AccountPointer,
   type UnlockIdentity
 } from '@interop/wallet-core/keyring'
 import {
   addPukRosterRecipient,
   pukRosterDescriptorStore,
-  pukRosterRecipientResolver,
   pukVaultKeys,
   readPukRoster,
+  rotatePukRoster,
   type Puk,
   type RosterRecipientDocument
 } from '@interop/wallet-core/keys'
+import { cascadeCollectionsToPuk } from '@/session/pukCascade'
 import {
+  didKeyZcapClient,
   isWebvhDid,
   mintClientWebvhUpdateKeys,
   updateKeyMultibase,
@@ -220,10 +218,13 @@ async function delegateLogWrite({
 }
 
 /**
- * Delegates the unlock-Space management zcap (GET/DELETE) from a code's
+ * Delegates the unlock-Space management zcap (GET/PUT/DELETE) from a code's
  * unlock identity to the account controller, so the code stays revocable
  * from Settings without re-typing it (the same bridge every other unlock
- * method records).
+ * method records). PUT is what lets the revocation cascade re-PUT the code's
+ * record with a freshly minted delegation when the original's signing client
+ * is revoked -- the record's JWE recipient stays the code's unlock KAK, so
+ * the re-wrap needs only the public half the registry records.
  *
  * @param options {object}
  * @param options.unlock {UnlockIdentity}
@@ -244,7 +245,7 @@ async function delegateUnlockManagement({
   return await unlock.zcapClient.delegate({
     invocationTarget,
     controller,
-    allowedActions: ['GET', 'DELETE'],
+    allowedActions: ['GET', 'PUT', 'DELETE'],
     expires: new Date(Date.now() + UNLOCK_MANAGE_ZCAP_TTL_MS)
   })
 }
@@ -261,7 +262,9 @@ async function delegateUnlockManagement({
  * @param [options.email] {string}
  * @param options.pointer {AccountPointer}
  * @param options.delegation {IZcap}
- * @returns {Promise<{ unlockSpaceId: string, manageCapability: IZcap }>}
+ * @returns {Promise<{ unlockSpaceId: string, manageCapability: IZcap,
+ *   unlockKeyAgreementKeyId?: string,
+ *   unlockKeyAgreementKeyMultibase?: string }>}
  */
 async function bindRecoveryRecord({
   client,
@@ -275,7 +278,12 @@ async function bindRecoveryRecord({
   email?: string
   pointer: AccountPointer
   delegation: IZcap
-}): Promise<{ unlockSpaceId: string; manageCapability: IZcap }> {
+}): Promise<{
+  unlockSpaceId: string
+  manageCapability: IZcap
+  unlockKeyAgreementKeyId?: string
+  unlockKeyAgreementKeyMultibase?: string
+}> {
   const unlock = await deriveUnlockIdentity({
     secret: client.codeBytes,
     kdf: RECOVERY_KDF
@@ -304,11 +312,25 @@ async function bindRecoveryRecord({
     unlock,
     controller
   })
-  return { unlockSpaceId: unlock.spaceId, manageCapability }
+  // The unlock KAK's public identity, recorded so the revocation cascade can
+  // later re-wrap the record without the code (encryption needs no secret).
+  const unlockKak = unlock.keyAgreementKey as unknown as {
+    id?: string
+    publicKeyMultibase?: string
+  }
+  return {
+    unlockSpaceId: unlock.spaceId,
+    manageCapability,
+    unlockKeyAgreementKeyId: unlockKak.id,
+    unlockKeyAgreementKeyMultibase: unlockKak.publicKeyMultibase
+  }
 }
 
 /**
- * Assembles the registry entry for an issued code -- public halves only.
+ * Assembles the registry entry for an issued code -- public halves only. The
+ * unlock-KAK members (when the bind step surfaced them) are what let the
+ * revocation cascade re-mint the code's delegation and re-wrap its record
+ * without the code.
  *
  * @param options {object}
  * @param options.client {RecoveryClient}
@@ -316,6 +338,8 @@ async function bindRecoveryRecord({
  * @param options.unlockSpaceId {string}
  * @param options.manageCapability {IZcap}
  * @param options.delegation {IZcap}
+ * @param [options.unlockKeyAgreementKeyId] {string}
+ * @param [options.unlockKeyAgreementKeyMultibase] {string}
  * @returns {RecoveryCodeUnlockMethod}
  */
 function recoveryRegistryEntry({
@@ -323,13 +347,17 @@ function recoveryRegistryEntry({
   label,
   unlockSpaceId,
   manageCapability,
-  delegation
+  delegation,
+  unlockKeyAgreementKeyId,
+  unlockKeyAgreementKeyMultibase
 }: {
   client: RecoveryClient
   label: string
   unlockSpaceId: string
   manageCapability: IZcap
   delegation: IZcap
+  unlockKeyAgreementKeyId?: string
+  unlockKeyAgreementKeyMultibase?: string
 }): RecoveryCodeUnlockMethod {
   const delegationKeyId = delegationProofKeyId(delegation)
   return {
@@ -341,7 +369,12 @@ function recoveryRegistryEntry({
     recoveryKid: client.recipientKid,
     keyAgreementKeyMultibase: client.keyAgreementKeyMultibase,
     updateKeyMultibase: client.updateKeyMultibase,
-    ...(delegationKeyId ? { delegationKeyId } : {})
+    recoveryClientDid: client.clientDid,
+    ...(delegationKeyId ? { delegationKeyId } : {}),
+    ...(unlockKeyAgreementKeyId ? { unlockKeyAgreementKeyId } : {}),
+    ...(unlockKeyAgreementKeyMultibase
+      ? { unlockKeyAgreementKeyMultibase }
+      : {})
   }
 }
 
@@ -520,7 +553,7 @@ export async function issueRecoveryCode({
     pointer,
     recoveryClientDid: client.clientDid
   })
-  const { unlockSpaceId, manageCapability } = await bindRecoveryRecord({
+  const bound = await bindRecoveryRecord({
     client,
     controller,
     email: session.user.email,
@@ -532,9 +565,11 @@ export async function issueRecoveryCode({
   const entry = recoveryRegistryEntry({
     client,
     label,
-    unlockSpaceId,
-    manageCapability,
-    delegation
+    unlockSpaceId: bound.unlockSpaceId,
+    manageCapability: bound.manageCapability,
+    delegation,
+    unlockKeyAgreementKeyId: bound.unlockKeyAgreementKeyId,
+    unlockKeyAgreementKeyMultibase: bound.unlockKeyAgreementKeyMultibase
   })
   await recordRecoveryMethod({ session, entry, idb })
 
@@ -542,97 +577,21 @@ export async function issueRecoveryCode({
 }
 
 /**
- * Escrows a freshly rotated PUK into each encrypted standard collection's
- * existing epochs, so a session holding only the new PUK keeps decrypting
- * resources sealed under the old one. This is the bridge until the full
- * revocation cascade re-epochs the collections themselves -- until then,
- * writes still land under epochs the old PUK (and therefore a spent code)
- * can read, a recorded deferral. Best-effort per collection.
- *
- * @param options {object}
- * @param options.remoteStore {WASRemoteStore}
- * @param options.ownerPuk {Puk}   the pre-rotation PUK (a recipient of the
- *   collections' existing epochs)
- * @param options.newPuk {Puk}
- * @returns {Promise<void>}
- */
-async function escrowPukForCollections({
-  remoteStore,
-  ownerPuk,
-  newPuk
-}: {
-  remoteStore: WASRemoteStore
-  ownerPuk: Puk
-  newPuk: Puk
-}): Promise<void> {
-  if (ownerPuk.id === newPuk.id) {
-    return
-  }
-  const { keyAgreementKey: ownerKak } = pukVaultKeys({ puk: ownerPuk })
-  // The PUK's id is its key-agreement did:key; the multibase after the
-  // method prefix is the public key.
-  const pukRecipient = (puk: Puk) => ({
-    id: epochKeyIdFor(puk.id),
-    publicKeyMultibase: puk.id.split(':')[2]!
-  })
-  const newRecipient = pukRecipient(newPuk)
-  for (const spec of WALLET_STANDARD_COLLECTIONS) {
-    if (!spec.encryption) {
-      continue
-    }
-    try {
-      const descriptor = await remoteStore.collectionEncryption({
-        collectionId: spec.id
-      })
-      if (!descriptor) {
-        // Not declared encrypted server-side (e.g. never provisioned).
-        continue
-      }
-      if (!descriptor.epochs?.length || !descriptor.currentEpoch) {
-        // No epoch roster yet: the collection's envelopes are pre-epoch,
-        // sealed single-recipient to the old PUK's KAK -- which, because the
-        // PUK IS the epoch construction, is byte-for-byte an epoch-`oldPuk`
-        // envelope. Install the old PUK as the first epoch, wrapped to both
-        // PUKs, so the epoch-aware read path decrypts them with either.
-        await initRecipients({
-          collection: remoteStore.collectionHandle({ collectionId: spec.id }),
-          recipients: [pukRecipient(ownerPuk), newRecipient],
-          epoch: { epochId: ownerPuk.id, secret: ownerPuk.secret }
-        })
-        continue
-      }
-      const current = descriptor.epochs.find(
-        epoch => epoch.id === descriptor.currentEpoch
-      )
-      if (
-        current?.recipients.some(entry => entry.header.kid === newRecipient.id)
-      ) {
-        continue
-      }
-      await addRecipient({
-        collection: remoteStore.collectionHandle({ collectionId: spec.id }),
-        recipient: newRecipient,
-        owner: { keyAgreementKey: ownerKak }
-      })
-    } catch (err) {
-      console.warn(
-        `Could not escrow the rotated PUK into collection "${spec.id}":`,
-        err
-      )
-    }
-  }
-}
-
-/**
  * Reads and locally verifies the world-readable DID log named by an account
- * pointer, refusing a log that resolves to a different DID.
+ * pointer, refusing a log that resolves to a different DID. Shared with the
+ * client-revocation cascade (`src/session/revocation.ts`), whose roster
+ * rotation resolves recipients from the same verified document.
  *
  * @param options {object}
  * @param options.pointer {AccountPointer}
  * @returns {Promise<{ doc: RosterRecipientDocument, updateKeys: string[],
  *   nextKeyHashes: string[] }>}
  */
-async function verifyAccountLog({ pointer }: { pointer: AccountPointer }) {
+export async function verifyAccountLog({
+  pointer
+}: {
+  pointer: AccountPointer
+}) {
   const response = await fetch(didLogUrl({ pointer }))
   if (response.status === 404) {
     throw new Error('The account has no published DID log.')
@@ -958,15 +917,14 @@ export async function recoverAccountWithCode({
 
   // The rotation wraps the fresh epoch only to recipients the just-updated,
   // locally verified document backs -- the spent code's VM is gone, so its
-  // entry is dropped even before the recipient filter.
+  // entry is dropped even before the recipient filter. The pull axis already
+  // ran at the document: the spent code's VM and update-key hash left in the
+  // continuation's add-and-retire entry.
   const { doc } = await verifyAccountLog({ pointer })
-  await removeRecipient({
+  await rotatePukRoster({
     store: rosterStore,
-    recipientId: spent.recipientKid,
-    resolveRecipientKey: pukRosterRecipientResolver({ document: doc }),
-    // The pull axis already ran at the document: the spent code's VM and
-    // update-key hash left in the continuation's add-and-retire entry.
-    pull: async () => {}
+    document: doc,
+    retireRecipientId: spent.recipientKid
   })
   const postRotation = await readPukRoster({
     store: rosterStore,
@@ -982,10 +940,18 @@ export async function recoverAccountWithCode({
     idb
   })
 
-  // Bridge the rotation for the encrypted collections (see
-  // `escrowPukForCollections`: the full re-epoch cascade comes with
-  // client revocation).
-  await escrowPukForCollections({ remoteStore, ownerPuk: oldPuk, newPuk })
+  // The epoch cascade: every encrypted collection takes a fresh epoch naming
+  // the rotated PUK, the spent code's generation retired, history escrowed --
+  // so new writes are sealed away from the spent code, not just future
+  // rotations. Best-effort per collection; the completion sweep backstops a
+  // partial run, and a stranded collection stays readable meanwhile (the old
+  // epochs remain, escrowed to the fresh PUK).
+  await cascadeCollectionsToPuk({
+    remoteStore,
+    rosterDescriptor: postRotation.descriptor,
+    clientKeyAgreementKey: newClientAgents.keyAgreementKey,
+    puk: newPuk
+  })
 
   // Re-seal the unlock-methods registry to the rotated PUK: its record is a
   // single-recipient envelope to the vault KAK, and the post-login registry
@@ -1045,7 +1011,10 @@ export async function recoverAccountWithCode({
     label: `Replacement code (recovery ${new Date().toISOString().slice(0, 10)})`,
     unlockSpaceId: replacementBind.unlockSpaceId,
     manageCapability: replacementBind.manageCapability,
-    delegation: replacementDelegation
+    delegation: replacementDelegation,
+    unlockKeyAgreementKeyId: replacementBind.unlockKeyAgreementKeyId,
+    unlockKeyAgreementKeyMultibase:
+      replacementBind.unlockKeyAgreementKeyMultibase
   })
 
   // Bind the new client under the new passphrase: the keyring record, the
@@ -1114,20 +1083,20 @@ export async function recordRecoveryOutcome({
 
 /**
  * Revokes a recovery code from a live enrolled session -- the issuance
- * reversal, in the reverse order: the document entry out first (the pull
+ * reversal, in the cascade order: the document entry out first (the pull
  * axis: the code's VM and commitment leave, so the doc-backed resolver drops
  * its roster entry), then the mandatory PUK rotation off the code's wrap,
- * then the unlock Space (whose deletion is what makes the code resolve to
- * nothing afterwards), then the registry entry. The revocation is REAL --
- * the secret was only ever a pointer to the record -- which is stronger than
- * what the sharing layer can promise.
+ * then the epoch cascade re-keying every encrypted collection, then the
+ * unlock Space (whose deletion is what makes the code resolve to nothing
+ * afterwards) and the registry entry. The revocation is REAL -- the secret
+ * was only ever a pointer to the record -- which is stronger than what the
+ * sharing layer can promise.
  *
  * The rotated PUK is persisted into this client's client-key record and
- * epoch pin, but the live session keeps operating on the old PUK (the
- * encrypted collections still carry its epochs; the fresh PUK is escrowed
- * into them so the next login's rotated-PUK session keeps decrypting). Other
- * clients adopt the rotation at their next login via the ordinary roster
- * read.
+ * epoch pin, and the live session ADOPTS it in place (it drove the rotation,
+ * so it holds the fresh key): profile vault keys swapped, storage ciphers
+ * rebuilt -- no re-login. Other clients adopt the rotation at their next
+ * login via the ordinary roster read.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -1158,14 +1127,13 @@ export async function revokeRecoveryCode({
   })
 
   // 2. The PUK rotation off the code's wrap, recipients resolved from the
-  // just-updated document.
+  // just-updated document (the pull axis already ran there).
   const { doc } = await verifyAccountLog({ pointer })
   const rosterStore = remoteStore.pukRosterStore()
-  await removeRecipient({
+  await rotatePukRoster({
     store: rosterStore,
-    recipientId: entry.recoveryKid,
-    resolveRecipientKey: pukRosterRecipientResolver({ document: doc }),
-    pull: async () => {}
+    document: doc,
+    retireRecipientId: entry.recoveryKid
   })
   const read = await readPukRoster({
     store: rosterStore,
@@ -1180,31 +1148,32 @@ export async function revokeRecoveryCode({
       idb
     })
     if (read.rotated) {
-      // Persist the rotated PUK for the next login and bridge the encrypted
-      // collections; the live session keeps its current vault keys.
+      // Persist the rotated PUK for the next login, then re-epoch every
+      // encrypted collection onto it (best-effort per collection; the
+      // completion sweep backstops a partial run).
       rotatedPuk = read.puk
       await session.profile.persistClientKeys?.({ puk: read.puk })
-      if (session.profile.puk) {
-        await escrowPukForCollections({
-          remoteStore,
-          ownerPuk: session.profile.puk,
-          newPuk: read.puk
-        })
-      }
+      await cascadeCollectionsToPuk({
+        remoteStore,
+        rosterDescriptor: read.descriptor,
+        clientKeyAgreementKey,
+        puk: read.puk
+      })
     }
   }
 
   // 3. The unlock Space and the registry entry -- the shared tap-free
   // revocation path (the entry's management zcap, invoked with this
-  // client's did:key).
+  // client's did:key). Still under the OLD vault keys, so the registry
+  // reads/writes decrypt the stored record.
   await revokeUnlockMethod({ session, entry, idb })
 
-  // 4. Re-seal the registry to the rotated PUK. Step 3's registry write went
-  // out under the live session's (old) vault KAK, which the next login --
-  // adopting the rotated PUK from the roster -- could never decrypt. Last, so
-  // the final stored copy is new-PUK-sealed; the honest residue is that THIS
-  // session's later registry reads fail until re-login, which beats losing
-  // the registry to every future session. Best-effort, like the escrow.
+  // 4. Re-seal the registry to the rotated PUK (step 3's write went out
+  // under the old vault KAK), then adopt the rotation in the live session:
+  // profile vault keys swapped and the storage ciphers rebuilt, so this
+  // session keeps reading and writing the re-epoch'd collections without a
+  // re-login. Best-effort: a failed re-seal leaves the registry sealed to
+  // the old PUK, which the next login surfaces as a warning.
   const { keyAgreementKey, keyResolver } = session.profile
   if (rotatedPuk && keyAgreementKey && keyResolver) {
     try {
@@ -1221,7 +1190,146 @@ export async function revokeRecoveryCode({
         err
       )
     }
+    const vaultKeys = pukVaultKeys({ puk: rotatedPuk })
+    session.profile.puk = rotatedPuk
+    session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
+    session.profile.keyResolver = vaultKeys.keyResolver
+    try {
+      await session.storage.adoptRotatedVaultKeys(vaultKeys)
+    } catch (err) {
+      console.warn(
+        'Could not rebuild the storage ciphers on the rotated PUK; the next ' +
+          'login adopts it instead:',
+        err
+      )
+    }
   }
+}
+
+/**
+ * Re-mints the recovery delegations the current document no longer backs --
+ * the FW-56 delta riding the revocation cascade: revoking a client kills, by
+ * the current-key-set rule, every `did.jsonl` delegation that client signed,
+ * which would brick recovery exactly when it is needed. For each registry
+ * entry whose recorded delegation no longer chains (its signing verification
+ * method left the document), this client signs a fresh delegation to the
+ * code's signing DID, re-wraps the record to the code's unlock KAK (the
+ * public half the registry records -- the record carries no secrets, so
+ * re-encryption needs none), re-PUTs it through the entry's management zcap,
+ * and updates the registry's `delegationKeyId`.
+ *
+ * Best-effort per entry: an entry that predates the re-mint fields (no
+ * `recoveryClientDid` / unlock-KAK members, or a GET/DELETE-only management
+ * zcap) is skipped and stays flagged by the login-time health check, whose
+ * regenerate nudge remains the backstop.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.doc {RosterRecipientDocument}   the locally verified
+ *   did:webvh document, AFTER the revocation edit
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<{ reminted: number; skipped: number }>}
+ */
+export async function remintRecoveryDelegations({
+  session,
+  doc,
+  idb
+}: {
+  session: Session
+  doc: RosterRecipientDocument
+  idb?: IDBFactory
+}): Promise<{ reminted: number; skipped: number }> {
+  const pointer = session.profile.accountPointer
+  if (!WAS_SERVER_URL || !pointer) {
+    return { reminted: 0, skipped: 0 }
+  }
+  const record = await getUnlockMethods({ session, idb })
+  const entries = (record?.methods ?? []).filter(
+    (method): method is RecoveryCodeUnlockMethod =>
+      method.type === 'recovery-code'
+  )
+  if (entries.length === 0) {
+    return { reminted: 0, skipped: 0 }
+  }
+  const publishedMultibases = new Set(
+    (doc.verificationMethod ?? [])
+      .map(method => method.publicKeyMultibase)
+      .filter((multibase): multibase is string => !!multibase)
+  )
+  let reminted = 0
+  let skipped = 0
+  for (const entry of entries) {
+    const delegationMultibase = entry.delegationKeyId?.split('#').pop()
+    const rotted =
+      !delegationMultibase || !publishedMultibases.has(delegationMultibase)
+    if (!rotted) {
+      continue
+    }
+    if (
+      !entry.recoveryClientDid ||
+      !entry.unlockKeyAgreementKeyId ||
+      !entry.unlockKeyAgreementKeyMultibase ||
+      !entry.manageCapability
+    ) {
+      // An entry issued before the re-mint fields existed: the health check
+      // keeps flagging it until the code is regenerated.
+      skipped += 1
+      continue
+    }
+    try {
+      const delegation = await delegateLogWrite({
+        zcapClient: session.profile.zcapClient,
+        pointer,
+        recoveryClientDid: entry.recoveryClientDid
+      })
+      // The code's unlock KAK, public half only -- exactly enough to
+      // re-encrypt the record to the same recipient the code derives.
+      const unlockKak = X25519KeyAgreementKey2020.from({
+        id: entry.unlockKeyAgreementKeyId,
+        controller: entry.unlockKeyAgreementKeyId.split('#')[0],
+        type: 'X25519KeyAgreementKey2020',
+        publicKeyMultibase: entry.unlockKeyAgreementKeyMultibase
+      }) as IKeyAgreementKey
+      const wrapped = await wrapRecoveryRecord({
+        controller: session.profile.accountController ?? session.user.id,
+        email: session.user.email,
+        pointer,
+        delegation,
+        keyAgreementKey: unlockKak,
+        keyResolver: singleKeyResolver({ keyAgreementKey: unlockKak })
+      })
+      // The management zcap names the account did:key as its controller (the
+      // unlock layer stays did:key end to end), so the PUT signs under the
+      // did:key keyId, like every other management-zcap invocation.
+      const { keyAgent } = session.profile
+      await putUnlockKeyringWithCapability({
+        storageServerUrl: WAS_SERVER_URL,
+        zcapClient: keyAgent
+          ? didKeyZcapClient({ keyAgent })
+          : session.profile.zcapClient,
+        spaceId: entry.unlockSpaceId,
+        record: wrapped,
+        capability: entry.manageCapability
+      })
+      const delegationKeyId = delegationProofKeyId(delegation)
+      await recordRecoveryMethod({
+        session,
+        entry: {
+          ...entry,
+          ...(delegationKeyId ? { delegationKeyId } : {})
+        },
+        idb
+      })
+      reminted += 1
+    } catch (err) {
+      console.warn(
+        `Could not re-mint the recovery delegation for "${entry.label}":`,
+        err
+      )
+      skipped += 1
+    }
+  }
+  return { reminted, skipped }
 }
 
 /**
@@ -1240,9 +1348,11 @@ export interface RecoveryHealthFlag {
  * current document (its signing client's verification method is still
  * listed -- the current-key-set rule) and that the code's posture (its
  * `keyAgreement` VM and committed update-key hash) still stands. A rotted
- * delegation bricks recovery exactly when it is needed, so callers nudge the
- * user to regenerate the code (automatic re-minting rides the future
- * revocation cascade).
+ * delegation bricks recovery exactly when it is needed. The revocation
+ * cascade re-mints rotted delegations automatically
+ * (`remintRecoveryDelegations`); this check is the backstop for entries that
+ * predate the re-mint fields, whose flag nudges the user to regenerate the
+ * code.
  * Returns only the flagged entries; resolves `[]` when there is nothing to
  * check or the account has no recovery codes.
  *
