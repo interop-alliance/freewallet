@@ -113,6 +113,14 @@ export interface PasskeyUnlockMethod {
  * the current document, since a delegation signed by a since-removed client
  * stops verifying under the current-key-set rule). Public halves only; the
  * code itself is never stored anywhere.
+ *
+ * The last three members are what let the revocation cascade RE-MINT a
+ * rotted delegation without holding the code: `recoveryClientDid` is the
+ * code-derived signing DID a fresh delegation is made to, and the unlock-KAK
+ * pair identifies the public key the re-wrapped record is encrypted to (the
+ * record carries no secrets, so re-encryption needs none). Entries issued
+ * before these fields exist fall back to the health check's regenerate
+ * nudge.
  */
 export interface RecoveryCodeUnlockMethod {
   type: 'recovery-code'
@@ -124,6 +132,9 @@ export interface RecoveryCodeUnlockMethod {
   keyAgreementKeyMultibase: string
   updateKeyMultibase: string
   delegationKeyId?: string
+  recoveryClientDid?: string
+  unlockKeyAgreementKeyId?: string
+  unlockKeyAgreementKeyMultibase?: string
 }
 
 /**

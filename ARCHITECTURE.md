@@ -306,21 +306,78 @@ pushed hard (shown once, must be confirmed saved before login unlocks); the
 spent code's unlock Space is deleted (a typed code is a spent credential --
 it thereafter fails with wording distinct from "wrong code"); and the new
 client binds under a freshly chosen passphrase, ending in an ordinary
-enrolled login. Until the client-revocation cascade re-epochs the encrypted
-collections, the fresh PUK is escrowed into each collection's existing
-epochs (a pre-epoch collection gets the old PUK installed as its first
-epoch -- the PUK is the epoch construction, so pre-epoch envelopes ARE
-epoch-`oldPuk` envelopes), keeping every replica decrypting across the
-rotation; the honest residue is that writes still land under epochs the
-spent code could read.
+enrolled login. The fresh PUK then fans out through the epoch cascade (see
+"Client revocation" below): every encrypted collection re-epochs onto it,
+so writes stop landing under epochs the spent code could read.
 
 Revoking a code from Settings is the issuance reversal and is REAL (the
 secret was only ever a pointer to the record): document entry out, PUK
-rotated off the code's wrap, unlock Space deleted, registry entry dropped.
-A login-time health check watches for **delegation rot** -- the stored
-delegation stops chaining the moment its signing client's verification
-method leaves the document (current-key-set rule), which would brick
-recovery exactly when it is needed -- and nudges regeneration.
+rotated off the code's wrap and the collections re-epoch'd by the same
+cascade, unlock Space deleted, registry entry dropped; the live session
+adopts the rotated PUK in place. A login-time health check watches for
+**delegation rot** -- the stored delegation stops chaining the moment its
+signing client's verification method leaves the document (current-key-set
+rule), which would brick recovery exactly when it is needed -- and nudges
+regeneration; a client revocation re-mints the affected delegations itself
+as part of its cascade.
+
+## Client revocation and the epoch cascade
+
+Disconnecting an enrolled wallet client from the account
+(`revokeEnrolledClient` in `src/session/revocation.ts`; no Settings surface
+yet). Run in the revoking client, synchronously, in dependency order:
+
+1. **The document edit** (`revokeWebvhClient` in
+   `@interop/wallet-core/webvh`): the revoked client's two verification
+   methods, its update key, and both its standing `nextKeyHashes`
+   commitments (the carry-over hash and the staged hash -- the latter
+   recovered by log attribution, since leaving an opaque committed hash
+   behind would be a re-seizure credential via the reveal mechanism) leave
+   in one log entry. Under the current-key-set rule this single edit is the
+   revoked client's pull axis everywhere: its invocations, and every
+   delegation and app grant it ever signed, stop verifying the moment its
+   verification method leaves the document. There are no per-collection
+   revoke calls anywhere in the cascade; apps a revoked client had
+   connected reconnect through the ordinary App Connect flow.
+2. **The PUK rotation** in the `key-map/puk.json` roster
+   (`rotatePukRoster`), recipients resolved from the just-updated verified
+   document -- the roster delivers, never sources, so the revoked client's
+   entry is dropped even before the retire filter.
+3. **The epoch cascade** (`cascadeCollectionsToPuk` in
+   `src/session/pukCascade.ts`): every encrypted collection -- the
+   encrypted standard collections plus every remotely listed collection
+   whose Description carries an encryption descriptor -- is re-epoch'd onto
+   the fresh PUK in parallel, via was-client's `replaceRecipient` (~2
+   requests per collection): the revoked PUK generations are retired from
+   the epoch rosters and the fresh PUK is escrowed into every prior epoch,
+   so every other replica keeps decrypting across the rotation. A
+   collection is stale exactly when its current epoch names a non-current
+   PUK generation -- staleness is detected from durable state alone -- and
+   a never-epoch'd collection gets the newest prior generation installed as
+   its first epoch (the PUK is the epoch construction, so pre-epoch
+   envelopes ARE epoch-`oldPuk` envelopes). Failures are collected per
+   collection, never aborting the fan-out.
+4. **The recovery re-PUTs** (`remintRecoveryDelegations`): recovery
+   delegations the revoked client had signed stopped chaining at step 1;
+   the revoking client re-mints them and re-PUTs the unlock records.
+
+The revoking session then adopts the fresh PUK in place -- profile vault
+keys swapped, storage ciphers rebuilt (`adoptRotatedVaultKeys`), the
+unlock-methods registry re-wrapped -- so it keeps operating without a
+re-login, and a wallet-activity record is written under the fresh epoch.
+Self-revocation is refused up front (use another enrolled client, or a
+recovery code). The cascade is convergent under a naive full re-run: the
+log entry is idempotent, the roster no-ops once the entry is off the
+current epoch, and the staleness rule finds exactly the stranded
+collections -- so a mid-cascade crash strands nothing permanently. The
+honest ceiling is unchanged: ciphertext the revoked client already fetched
+stays readable to it, and old epochs open to keys it already held.
+
+Recovery-code spend and revocation drive stages 2 and 3 of the same
+cascade (their document edits are their own, described above, and a spent
+code's replacement delegation is minted by its own ceremony rather than
+the re-mint stage), which is what closes the "writes still land under
+readable epochs" residue in both flows.
 
 ## Storage model (local-first)
 

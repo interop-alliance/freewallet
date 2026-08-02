@@ -11,7 +11,21 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
-import { ZcapClient } from '@interop/ezcap'
+import type { ZcapClient } from '@interop/ezcap'
+
+/**
+ * Asserts the value is a ZcapClient by shape (constructor name plus the
+ * signing/request surface) rather than `instanceof`: the client may be
+ * constructed inside `@interop/wallet-core`, which under a `link:` override
+ * resolves its own copy of `@interop/ezcap`, so the class object differs
+ * while the instance is the real thing.
+ */
+function expectZcapClient(value: unknown): void {
+  const client = value as ZcapClient
+  expect(client?.constructor?.name).toBe('ZcapClient')
+  expect(typeof client.request).toBe('function')
+  expect(typeof client.delegate).toBe('function')
+}
 
 /**
  * The KMS server url the bootstrap reads from app.config, made mutable so a
@@ -94,7 +108,7 @@ describe('agentsFromSeed', () => {
 
     expect(keyAgent.id).toBe(await expectedDid(seed))
     expect(keyAgent.id).toMatch(/^did:key:z6Mk/)
-    expect(zcapClient).toBeInstanceOf(ZcapClient)
+    expectZcapClient(zcapClient)
     // The X25519 key-agreement key is derived under the same did:key DID.
     expect(keyAgreementKey.id).toContain(keyAgent.id)
     expect(keyResolver).toBeInstanceOf(Function)
@@ -139,7 +153,7 @@ describe('initSessionFromSeed', () => {
     expect(session.user.id).toBe(await expectedDid(seed))
     expect(session.user.email).toBe('user@example.test')
     expect(session.profile.keyAgent?.id).toBe(session.user.id)
-    expect(session.profile.zcapClient).toBeInstanceOf(ZcapClient)
+    expectZcapClient(session.profile.zcapClient)
     expect(session.profile.keyAgreementKey).toBeDefined()
     expect(session.profile.keyResolver).toBeInstanceOf(Function)
     expect(session.storage).toBe(fakeStorage)

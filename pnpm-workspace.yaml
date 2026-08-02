@@ -6,4 +6,4 @@ allowedDeprecatedVersions:
   defekt: '9.3.0'
 minimumReleaseAgeExclude:
   - '@interop/*'
-  - byoe-context@0.1.0
+  - 'byoe-context*'
