@@ -1,0 +1,541 @@
+/**
+ * Settings section for the wallets connected to the account (FW-69): lists
+ * the enrolled wallet clients from the locally verified did:webvh log (a
+ * recovery code's keyAgreement-only key never appears, and apps are never
+ * enrolled -- they stay in the Applications surface), marks the client this
+ * session runs in, renames clients (labels live in
+ * `key-map/client-labels.json`; the document carries key material only),
+ * starts the enroll-another-wallet ceremony, and disconnects a client by
+ * driving the full revocation cascade -- with honest copy about the last
+ * enrolled client (disconnecting it would abandon update authority; a
+ * recovery code is the answer to "my only browser is gone").
+ */
+import Alert from '@mui/material/Alert'
+import Button from '@mui/material/Button'
+import Card from '@mui/material/Card'
+import Chip from '@mui/material/Chip'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
+import IconButton from '@mui/material/IconButton'
+import Stack from '@mui/material/Stack'
+import TextField from '@mui/material/TextField'
+import Tooltip from '@mui/material/Tooltip'
+import Typography from '@mui/material/Typography'
+import { MdEdit } from 'react-icons/md'
+import { useTranslation } from 'react-i18next'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  enrollmentClientDid,
+  parseEnrollmentRequest,
+  type EnrollmentRequest
+} from '@interop/wallet-core/enrollment'
+import type { Session } from '@/types/auth'
+import {
+  canManageAccountClients,
+  disconnectAccountClient,
+  listAccountClients,
+  renameAccountClient,
+  type AccountClientView
+} from '@/session/clients'
+import { approveEnrollment } from '@/lib/enrollment'
+import { formatDate } from '@/lib/viewMappers/formatDate'
+import { showToast } from '@/stores/toastStore'
+
+export function EnrolledClientsSection({ session }: { session: Session }) {
+  const { t, i18n } = useTranslation()
+  const canManage = canManageAccountClients({ session })
+  // `null` = not loaded yet (or the listing failed; `loadError` tells apart).
+  const [clients, setClients] = useState<AccountClientView[] | null>(null)
+  const [loadError, setLoadError] = useState(false)
+  // Inline label editing: one row at a time, keyed by signing multibase.
+  const [editingKey, setEditingKey] = useState<string | null>(null)
+  const [labelDraft, setLabelDraft] = useState('')
+  const [labelSaving, setLabelSaving] = useState(false)
+  // The disconnect confirm dialog and its cascade run.
+  const [disconnectTarget, setDisconnectTarget] =
+    useState<AccountClientView | null>(null)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const [disconnectError, setDisconnectError] = useState(false)
+  const [cascadeWarning, setCascadeWarning] = useState(false)
+  // The enroll-another-wallet ceremony (the enrolling side): the pasted
+  // connect code, its parsed request when valid, the new client's label, and
+  // the ceremony state.
+  const [enrollDialogOpen, setEnrollDialogOpen] = useState(false)
+  const [enrollCode, setEnrollCode] = useState('')
+  const [enrollRequest, setEnrollRequest] = useState<EnrollmentRequest | null>(
+    null
+  )
+  const [enrollLabel, setEnrollLabel] = useState('')
+  const [enrolling, setEnrolling] = useState(false)
+  const [enrollDone, setEnrollDone] = useState(false)
+  const [enrollError, setEnrollError] = useState(false)
+
+  const loadClients = useCallback(async () => {
+    try {
+      const listed = await listAccountClients({ session })
+      setClients(listed)
+      setLoadError(false)
+    } catch (err) {
+      console.warn('Could not list the enrolled wallet clients:', err)
+      setLoadError(true)
+    }
+  }, [session])
+
+  // The initial load polls: right after signup the did:webvh provisioning
+  // (and the pointer promotion `canManageAccountClients` gates on) still runs
+  // in the background, so the first attempts may find no log yet. Polling
+  // stops on the first successful listing, or after ~1 minute for sessions
+  // that can never manage clients (no storage server configured).
+  useEffect(() => {
+    let cancelled = false
+    let attempts = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    async function attemptLoad() {
+      attempts++
+      if (canManageAccountClients({ session })) {
+        try {
+          const listed = await listAccountClients({ session })
+          if (!cancelled) {
+            setClients(listed)
+            setLoadError(false)
+          }
+          return
+        } catch (err) {
+          console.warn('Could not list the enrolled wallet clients:', err)
+          if (!cancelled) {
+            setLoadError(true)
+          }
+        }
+      }
+      if (!cancelled && attempts < 15) {
+        timer = setTimeout(() => void attemptLoad(), 4000)
+      }
+    }
+    void attemptLoad()
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [session])
+
+  const handleSaveLabel = async (client: AccountClientView) => {
+    const trimmed = labelDraft.trim()
+    if (!trimmed || trimmed === client.label) {
+      setEditingKey(null)
+      return
+    }
+    setLabelSaving(true)
+    try {
+      await renameAccountClient({
+        session,
+        signingKeyMultibase: client.signingKeyMultibase,
+        label: trimmed
+      })
+      setEditingKey(null)
+      showToast({ message: t('settings.clients.labelSaved') })
+      await loadClients()
+    } catch (err) {
+      console.error('Could not rename the wallet client:', err)
+      showToast({ message: t('settings.clients.labelSaveFailed') })
+    } finally {
+      setLabelSaving(false)
+    }
+  }
+
+  /**
+   * Runs the full disconnect cascade for the confirmed client. Every stage
+   * after the account-log edit converges under a re-run (and the login-time
+   * sweep is the standing backstop), so a failure or partial completion is
+   * surfaced with "run it again" copy rather than treated as fatal.
+   */
+  const handleDisconnect = async () => {
+    const target = disconnectTarget
+    if (!target || disconnecting) {
+      return
+    }
+    setDisconnecting(true)
+    setDisconnectError(false)
+    setCascadeWarning(false)
+    try {
+      const outcome = await disconnectAccountClient({
+        session,
+        client: target
+      })
+      setDisconnectTarget(null)
+      if (outcome.collections.failed.length > 0) {
+        setCascadeWarning(true)
+      } else {
+        showToast({ message: t('settings.clients.disconnected') })
+      }
+      await loadClients()
+    } catch (err) {
+      console.error('Could not disconnect the wallet client:', err)
+      setDisconnectError(true)
+    } finally {
+      setDisconnecting(false)
+    }
+  }
+
+  /**
+   * Tracks the pasted connect code, parsing it eagerly so the dialog can show
+   * the new client's key fingerprint (for the on-screen comparison) before
+   * anything is approved.
+   */
+  const handleEnrollCodeChange = (code: string) => {
+    setEnrollCode(code)
+    setEnrollError(false)
+    if (!code.trim()) {
+      setEnrollRequest(null)
+      return
+    }
+    try {
+      setEnrollRequest(parseEnrollmentRequest({ code }))
+    } catch {
+      setEnrollRequest(null)
+    }
+  }
+
+  /**
+   * Runs the enrollment ceremony for the pasted connect code, in the push
+   * order (the PUK wrap into the roster first, then the two log entries),
+   * saving the chosen label once the ceremony lands. Idempotent -- approving
+   * the same code again after a failure resumes.
+   */
+  const handleEnroll = async () => {
+    if (!enrollRequest || enrolling) {
+      return
+    }
+    setEnrolling(true)
+    setEnrollError(false)
+    try {
+      await approveEnrollment({
+        request: enrollRequest,
+        profile: session.profile,
+        storage: session.storage,
+        label: enrollLabel
+      })
+      setEnrollDone(true)
+      setEnrollDialogOpen(false)
+      setEnrollCode('')
+      setEnrollRequest(null)
+      await loadClients()
+    } catch (err) {
+      console.error('Enrolling the new wallet client failed:', err)
+      setEnrollError(true)
+    } finally {
+      setEnrolling(false)
+    }
+  }
+
+  const canEnroll =
+    canManage &&
+    !!session.profile.clientWebvhKeys &&
+    !!session.profile.clientKeyAgreementKey
+  const lastClient = (clients?.length ?? 0) <= 1
+
+  return (
+    <Stack sx={{ gap: 1 }}>
+      <Typography variant="h6">{t('settings.clients.section')}</Typography>
+      <Typography variant="body2" color="text.secondary">
+        {t('settings.clients.intro')}
+      </Typography>
+
+      {!canManage && (
+        <Typography variant="body2" color="text.secondary">
+          {t('settings.clients.requiresAccount')}
+        </Typography>
+      )}
+
+      {canManage && loadError && (
+        <Alert severity="warning">{t('settings.clients.loadError')}</Alert>
+      )}
+
+      {clients !== null && clients.length > 0 && (
+        <Stack sx={{ gap: 1.5, mt: 1 }} data-testid="enrolled-clients-list">
+          {clients.map(client => {
+            const editing = editingKey === client.signingKeyMultibase
+            const displayName = client.label ?? t('settings.clients.unlabeled')
+            return (
+              <Card
+                key={client.signingKeyMultibase}
+                variant="outlined"
+                sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 0.5,
+                  p: 1.5
+                }}
+              >
+                <Stack
+                  direction="row"
+                  sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
+                >
+                  {editing ? (
+                    <>
+                      <TextField
+                        size="small"
+                        label={t('settings.clients.nameLabel')}
+                        value={labelDraft}
+                        onChange={event => setLabelDraft(event.target.value)}
+                        sx={{ minWidth: 220 }}
+                      />
+                      <Button
+                        variant="contained"
+                        size="small"
+                        loading={labelSaving}
+                        disabled={labelDraft.trim().length === 0}
+                        onClick={() => void handleSaveLabel(client)}
+                      >
+                        {t('common.save')}
+                      </Button>
+                      <Button
+                        size="small"
+                        disabled={labelSaving}
+                        onClick={() => setEditingKey(null)}
+                      >
+                        {t('common.cancel')}
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Typography variant="body1">{displayName}</Typography>
+                      <Tooltip title={t('common.edit')}>
+                        <IconButton
+                          size="small"
+                          aria-label={t('common.edit')}
+                          onClick={() => {
+                            setLabelDraft(client.label ?? '')
+                            setEditingKey(client.signingKeyMultibase)
+                          }}
+                          sx={{ p: 0.25 }}
+                        >
+                          <MdEdit size={15} />
+                        </IconButton>
+                      </Tooltip>
+                      {client.isCurrent && (
+                        <Chip
+                          size="small"
+                          color="primary"
+                          label={t('settings.clients.thisBrowser')}
+                        />
+                      )}
+                    </>
+                  )}
+                </Stack>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ wordBreak: 'break-all' }}
+                >
+                  {t('settings.clients.keyFingerprint', {
+                    did: `did:key:${client.signingKeyMultibase}`
+                  })}
+                </Typography>
+                {client.addedAt && (
+                  <Typography variant="body2" color="text.secondary">
+                    {t('settings.clients.connectedOn', {
+                      date: formatDate({
+                        isoDate: client.addedAt,
+                        locale: i18n.language
+                      })
+                    })}
+                  </Typography>
+                )}
+                {!client.isCurrent && !lastClient && (
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    color="error"
+                    sx={{ borderRadius: 2, alignSelf: 'flex-start' }}
+                    disabled={disconnecting || !client.updateKeyMultibase}
+                    onClick={() => {
+                      setDisconnectError(false)
+                      setCascadeWarning(false)
+                      setDisconnectTarget(client)
+                    }}
+                  >
+                    {t('settings.clients.disconnect')}
+                  </Button>
+                )}
+              </Card>
+            )
+          })}
+        </Stack>
+      )}
+
+      {clients !== null && lastClient && (
+        <Typography variant="body2" color="text.secondary">
+          {t('settings.clients.lastClientHint')}
+        </Typography>
+      )}
+
+      {cascadeWarning && (
+        <Alert severity="warning">
+          {t('settings.clients.cascadeIncomplete')}
+        </Alert>
+      )}
+
+      {canEnroll && (
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 2, mt: 1 }}>
+          <Button
+            variant="outlined"
+            size="small"
+            sx={{ borderRadius: 2, px: 2, py: 1 }}
+            disabled={enrolling}
+            onClick={() => {
+              setEnrollDone(false)
+              setEnrollError(false)
+              setEnrollCode('')
+              setEnrollRequest(null)
+              setEnrollLabel(
+                t('settings.clients.defaultLabel', {
+                  number: (clients?.length ?? 1) + 1
+                })
+              )
+              setEnrollDialogOpen(true)
+            }}
+          >
+            {enrolling ? t('settings.enrolling') : t('settings.enrollClient')}
+          </Button>
+          <Typography variant="body2" color="text.secondary">
+            {t('settings.enrollClientHint')}
+          </Typography>
+        </Stack>
+      )}
+      {enrollDone && (
+        <Typography variant="body2" color="success.main">
+          {t('settings.enrollSuccess')}
+        </Typography>
+      )}
+
+      <Dialog
+        open={disconnectTarget !== null}
+        onClose={() => {
+          if (!disconnecting) {
+            setDisconnectTarget(null)
+          }
+        }}
+        fullWidth
+      >
+        <DialogTitle>
+          {t('settings.clients.disconnectConfirmTitle', {
+            name: disconnectTarget?.label ?? t('settings.clients.unlabeled')
+          })}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {t('settings.clients.disconnectConfirmMessage')}
+          </DialogContentText>
+          {disconnecting && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              {t('settings.clients.disconnectProgress')}
+            </Alert>
+          )}
+          {disconnectError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {t('settings.clients.disconnectError')}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setDisconnectTarget(null)}
+            disabled={disconnecting}
+          >
+            {t('common.cancel')}
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            loading={disconnecting}
+            onClick={() => void handleDisconnect()}
+          >
+            {t('settings.clients.disconnectConfirmAction')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={enrollDialogOpen}
+        onClose={() => {
+          if (!enrolling) {
+            setEnrollDialogOpen(false)
+          }
+        }}
+        fullWidth
+      >
+        <DialogTitle>{t('settings.enrollConfirmTitle')}</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {t('settings.enrollConfirmMessage')}
+          </DialogContentText>
+          <TextField
+            fullWidth
+            size="small"
+            multiline
+            minRows={3}
+            label={t('settings.enrollCodeLabel')}
+            value={enrollCode}
+            onChange={event => handleEnrollCodeChange(event.target.value)}
+            error={enrollCode.trim().length > 0 && !enrollRequest}
+            helperText={
+              enrollCode.trim().length > 0 && !enrollRequest
+                ? t('settings.enrollCodeInvalid')
+                : undefined
+            }
+            slotProps={{
+              htmlInput: { 'data-testid': 'enroll-code-input' }
+            }}
+            sx={{ mt: 2 }}
+          />
+          <TextField
+            fullWidth
+            size="small"
+            label={t('settings.clients.nameLabel')}
+            value={enrollLabel}
+            onChange={event => setEnrollLabel(event.target.value)}
+            slotProps={{
+              htmlInput: { 'data-testid': 'enroll-label-input' }
+            }}
+            sx={{ mt: 2 }}
+          />
+          {enrollRequest && (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ mt: 2, wordBreak: 'break-all' }}
+            >
+              {t('settings.enrollFingerprint', {
+                did: enrollmentClientDid({ request: enrollRequest })
+              })}
+            </Typography>
+          )}
+          {enrollError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {t('settings.enrollError')}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setEnrollDialogOpen(false)}
+            disabled={enrolling}
+          >
+            {t('common.cancel')}
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void handleEnroll()}
+            loading={enrolling}
+            disabled={!enrollRequest}
+          >
+            {t('settings.enrollConfirmAction')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Stack>
+  )
+}

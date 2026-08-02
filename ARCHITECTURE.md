@@ -324,8 +324,9 @@ as part of its cascade.
 ## Client revocation and the epoch cascade
 
 Disconnecting an enrolled wallet client from the account
-(`revokeEnrolledClient` in `src/session/revocation.ts`; no Settings surface
-yet). Run in the revoking client, synchronously, in dependency order:
+(`revokeEnrolledClient` in `src/session/revocation.ts`, driven from the
+Settings "Connected wallets" panel -- see "The Settings clients surface"
+below). Run in the revoking client, synchronously, in dependency order:
 
 1. **The document edit** (`revokeWebvhClient` in
    `@interop/wallet-core/webvh`): the revoked client's two verification
@@ -388,6 +389,52 @@ cascade (their document edits are their own, described above, and a spent
 code's replacement delegation is minted by its own ceremony rather than
 the re-mint stage), which is what closes the "writes still land under
 readable epochs" residue in both flows.
+
+## The Settings clients surface ("Connected wallets")
+
+The management surface over the enrolled-client roster
+(`src/components/EnrolledClientsSection.tsx`, glue in
+`src/session/clients.ts`): the place "disconnect this phone" lives, sibling
+of the Applications page (apps are grantees, never enrolled, and stay in
+their own revocation surface).
+
+The listing is a read over the locally verified did:webvh log -- the same
+`verifyAccountLog` step every ceremony runs, then wallet-core's
+`listEnrolledWebvhClients`, keyed on `capabilityInvocation`. That keying is
+the exclusion story: a recovery code's key is published under `keyAgreement`
+only (deliberately unmarked), and the KMS-held conveniences under
+`authentication` / `assertionMethod`, so neither can appear, structurally
+rather than by filter. Two members are not readable off the current document
+and are recovered by log attribution: each client's ACTIVE update key (the
+flat `updateKeys` set has no per-client grouping; the entry that published
+the client's verification methods revealed its initial key, and each entry
+retiring the attributed key while revealing exactly one replacement is that
+client's self-rotation -- an ambiguous attribution disables disconnect for
+the row rather than guessing) and its enrollment moment (`versionTime` of
+the publishing entry). A listed row with all three key members is exactly a
+`RevokedClientKeys`, so Disconnect drives the FW-66 cascade verbatim.
+
+**Labels live beside the keys, not in the document.** The document carries
+key material only, so display labels go in `key-map/client-labels.json`
+(wallet-core's `readClientLabels` / `setClientLabel` over a two-method
+store seam; plaintext in the private, capability-gated `key-map` collection
+-- the host already serves the world-readable log naming every client key,
+so a label adds only the display name). A label is chosen at enrollment
+approval (a field in the enroll dialog, written after the ceremony lands,
+best-effort) and editable inline from the panel; the current client is
+marked with a "This browser" chip (matched on the session's own signing
+key) rather than by any stored state.
+
+Disconnect confirms with the honest ceiling (re-keying stops future reads;
+already-fetched ciphertext stays readable), runs the cascade with keep-this-
+tab-open progress copy, and surfaces both failure modes as resumable ("try
+again -- it picks up where it stopped"; a partial collection fan-out points
+at the login-time sweep). The last enrolled client cannot be disconnected --
+that would abandon the account's update authority (it is also always the
+current client from its own session, and self-revocation is refused) -- and
+the panel says so, pointing at recovery-code issuance instead. The
+enroll-another-wallet entry point (the enrollment ceremony's approving half)
+lives in this panel.
 
 ## Storage model (local-first)
 

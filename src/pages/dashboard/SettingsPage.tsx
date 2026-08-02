@@ -25,12 +25,6 @@ import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { getFileUrl } from '@interop/did-method-webvh'
 import { rotateWebvhUpdateKey } from '@interop/wallet-core/webvh'
 import {
-  enrollmentClientDid,
-  parseEnrollmentRequest,
-  type EnrollmentRequest
-} from '@interop/wallet-core/enrollment'
-import { approveEnrollment } from '@/lib/enrollment'
-import {
   bindPassphrase,
   changePassphrase,
   deleteKeyring,
@@ -59,6 +53,7 @@ import { deletePasskeySafetyNotice } from '@/lib/sessionKey'
 import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { RecoveryCodesSection } from '@/components/RecoveryCodesSection'
+import { EnrolledClientsSection } from '@/components/EnrolledClientsSection'
 import { SharedCollectionsPanel } from '@/components/SharedCollectionsPanel'
 import { dashboardStyles } from '@/styles/appStyles'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
@@ -677,16 +672,6 @@ export function SettingsPage() {
   const [rotating, setRotating] = useState(false)
   const [rotateDone, setRotateDone] = useState(false)
   const [rotateError, setRotateError] = useState(false)
-  // The enroll-another-wallet ceremony (the enrolling side): the pasted
-  // connect code, its parsed request when valid, and the ceremony state.
-  const [enrollDialogOpen, setEnrollDialogOpen] = useState(false)
-  const [enrollCode, setEnrollCode] = useState('')
-  const [enrollRequest, setEnrollRequest] = useState<EnrollmentRequest | null>(
-    null
-  )
-  const [enrolling, setEnrolling] = useState(false)
-  const [enrollDone, setEnrollDone] = useState(false)
-  const [enrollError, setEnrollError] = useState(false)
 
   const handleCopyDidWebvh = async () => {
     if (!publishedDidWebvh) {
@@ -725,54 +710,6 @@ export function SettingsPage() {
       setRotateError(true)
     } finally {
       setRotating(false)
-    }
-  }
-
-  /**
-   * Tracks the pasted connect code, parsing it eagerly so the dialog can show
-   * the new client's key fingerprint (for the on-screen comparison) before
-   * anything is approved.
-   */
-  const handleEnrollCodeChange = (code: string) => {
-    setEnrollCode(code)
-    setEnrollError(false)
-    if (!code.trim()) {
-      setEnrollRequest(null)
-      return
-    }
-    try {
-      setEnrollRequest(parseEnrollmentRequest({ code }))
-    } catch {
-      setEnrollRequest(null)
-    }
-  }
-
-  /**
-   * Runs the enrollment ceremony for the pasted connect code, in the push
-   * order (the PUK wrap into the roster first, then the two log entries).
-   * Idempotent -- approving the same code again after a failure resumes.
-   */
-  const handleEnroll = async () => {
-    if (!session || !enrollRequest || enrolling) {
-      return
-    }
-    setEnrolling(true)
-    setEnrollError(false)
-    try {
-      await approveEnrollment({
-        request: enrollRequest,
-        profile: session.profile,
-        storage: session.storage
-      })
-      setEnrollDone(true)
-      setEnrollDialogOpen(false)
-      setEnrollCode('')
-      setEnrollRequest(null)
-    } catch (err) {
-      console.error('Enrolling the new wallet client failed:', err)
-      setEnrollError(true)
-    } finally {
-      setEnrolling(false)
     }
   }
 
@@ -1261,6 +1198,8 @@ export function SettingsPage() {
         {session && !session.isGuest && (
           <>
             <Divider />
+            <EnrolledClientsSection session={session} />
+            <Divider />
             <RecoveryCodesSection session={session} />
           </>
         )}
@@ -1425,40 +1364,6 @@ export function SettingsPage() {
               {rotateError && (
                 <Alert severity="error">{t('settings.rotateError')}</Alert>
               )}
-              <Stack
-                direction="row"
-                sx={{ alignItems: 'center', gap: 2, mt: 1 }}
-              >
-                <Button
-                  variant="outlined"
-                  size="small"
-                  sx={{ borderRadius: 2, px: 2, py: 1 }}
-                  disabled={
-                    enrolling ||
-                    !session?.profile.clientWebvhKeys ||
-                    !session?.profile.clientKeyAgreementKey
-                  }
-                  onClick={() => {
-                    setEnrollDone(false)
-                    setEnrollError(false)
-                    setEnrollCode('')
-                    setEnrollRequest(null)
-                    setEnrollDialogOpen(true)
-                  }}
-                >
-                  {enrolling
-                    ? t('settings.enrolling')
-                    : t('settings.enrollClient')}
-                </Button>
-                <Typography variant="body2" color="text.secondary">
-                  {t('settings.enrollClientHint')}
-                </Typography>
-              </Stack>
-              {enrollDone && (
-                <Typography variant="body2" color="success.main">
-                  {t('settings.enrollSuccess')}
-                </Typography>
-              )}
             </Stack>
           )}
         </Stack>
@@ -1589,74 +1494,6 @@ export function SettingsPage() {
             </Button>
             <Button variant="contained" onClick={handleRotate}>
               {t('settings.rotateConfirmAction')}
-            </Button>
-          </DialogActions>
-        </Dialog>
-
-        <Dialog
-          open={enrollDialogOpen}
-          onClose={() => {
-            if (!enrolling) {
-              setEnrollDialogOpen(false)
-            }
-          }}
-          fullWidth
-        >
-          <DialogTitle>{t('settings.enrollConfirmTitle')}</DialogTitle>
-          <DialogContent>
-            <DialogContentText>
-              {t('settings.enrollConfirmMessage')}
-            </DialogContentText>
-            <TextField
-              fullWidth
-              size="small"
-              multiline
-              minRows={3}
-              label={t('settings.enrollCodeLabel')}
-              value={enrollCode}
-              onChange={event => handleEnrollCodeChange(event.target.value)}
-              error={enrollCode.trim().length > 0 && !enrollRequest}
-              helperText={
-                enrollCode.trim().length > 0 && !enrollRequest
-                  ? t('settings.enrollCodeInvalid')
-                  : undefined
-              }
-              slotProps={{
-                htmlInput: { 'data-testid': 'enroll-code-input' }
-              }}
-              sx={{ mt: 2 }}
-            />
-            {enrollRequest && (
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ mt: 2, wordBreak: 'break-all' }}
-              >
-                {t('settings.enrollFingerprint', {
-                  did: enrollmentClientDid({ request: enrollRequest })
-                })}
-              </Typography>
-            )}
-            {enrollError && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {t('settings.enrollError')}
-              </Alert>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button
-              onClick={() => setEnrollDialogOpen(false)}
-              disabled={enrolling}
-            >
-              {t('common.cancel')}
-            </Button>
-            <Button
-              variant="contained"
-              onClick={handleEnroll}
-              loading={enrolling}
-              disabled={!enrollRequest}
-            >
-              {t('settings.enrollConfirmAction')}
             </Button>
           </DialogActions>
         </Dialog>
