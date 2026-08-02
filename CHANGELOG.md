@@ -47,6 +47,16 @@
   it ships separately; the honest ceiling is unchanged -- ciphertext the
   revoked client already fetched stays readable to it.
 
+- **The cascade-completion sweep**: every login now re-checks, in the
+  background, that each encrypted collection's current key epoch names the
+  roster's current per-user key, and re-epochs any that a crashed
+  revocation or recovery cascade left stranded. Staleness is detected from
+  durable state alone (no checkpoint resource anywhere), so a cascade one
+  client never got to finish is completed by the next client to log in --
+  and on a healthy account the sweep reads the collection descriptors and
+  writes nothing. Best-effort by design: a failed sweep never fails the
+  login and simply converges on the next run.
+
 - A **per-user key (PUK)** is now minted at wallet provisioning:
   client-side, never server-held, replacing the passphrase-seed-derived
   vault KAK as "recipient zero" of every encrypted collection. It is cached

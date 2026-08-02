@@ -360,7 +360,11 @@ describe('the cascade, rotated path', () => {
 
   it('records the audit history with the per-collection tallies', async () => {
     const session = sessionWith()
-    await revokeEnrolledClient({ session, client: REVOKED, label: 'Old laptop' })
+    await revokeEnrolledClient({
+      session,
+      client: REVOKED,
+      label: 'Old laptop'
+    })
     expect(session.storage.addHistoryClientRevoked).toHaveBeenCalledWith({
       user: session.user,
       signingKeyMultibase: REVOKED.signingKeyMultibase,

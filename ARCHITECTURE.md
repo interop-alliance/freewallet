@@ -373,6 +373,16 @@ collections -- so a mid-cascade crash strands nothing permanently. The
 honest ceiling is unchanged: ciphertext the revoked client already fetched
 stays readable to it, and old epochs open to keys it already held.
 
+The standing backstop is the **cascade-completion sweep**: session creation
+re-runs the collection fan-out (stage 3) in the background on every login
+whose roster read succeeded, chained behind collection provisioning and
+exposed as `session.pukSweep` (best-effort -- a failed sweep never fails
+the login). Because staleness is durable-state-only, the sweep completes a
+cascade another client crashed partway through, and on a healthy account it
+reads the collection descriptors and writes nothing. It doubles as the
+standing invariant check that no collection's current epoch names a retired
+PUK generation.
+
 Recovery-code spend and revocation drive stages 2 and 3 of the same
 cascade (their document edits are their own, described above, and a spent
 code's replacement delegation is minted by its own ceremony rather than

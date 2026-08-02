@@ -32,8 +32,10 @@ import {
   PukRosterIntegrityError,
   PukRosterUnwrapError,
   readPukRoster,
-  type Puk
+  type Puk,
+  type PukRosterReadResult
 } from '@interop/wallet-core/keys'
+import { cascadeCollectionsToPuk } from '@/session/pukCascade'
 import { loadPukEpochPin, savePukEpochPin } from '@/lib/sessionKey'
 import { StorageManager } from '@/stores/storageManager'
 import {
@@ -90,7 +92,10 @@ export async function initGuestSession() {
  * `ensureUserCollections` is *fired but not awaited* and its promise exposed as
  * `session.storageReady`, so a caller can run a hot read concurrently with
  * provisioning yet still `await session.storageReady` when it needs the
- * collections ready. The new-wallet flows (signup, guest) pass
+ * collections ready. On the same seam, when the login's roster read
+ * succeeded and a remote store is attached, the cascade-completion sweep is
+ * fired behind provisioning and exposed as `session.pukSweep` (best-effort;
+ * see the Session type). The new-wallet flows (signup, guest) pass
  * `provisionStorage: false`: their provisioning is a deliberately ordered
  * sequence owned by `provisionNewWallet` (signup must bind the passphrase
  * before the data Space is created), so session creation must not fire it.
@@ -169,20 +174,22 @@ export async function initSessionFromSeed({
   // current, or -- on an epoch mismatch (a rotation by another client) --
   // delivers the fresh PUK, which the session adopts and `onPukRotated`
   // persists. Runs before the storage clients are built, since the vault
-  // keys below must be the CURRENT PUK's.
+  // keys below must be the CURRENT PUK's. The read result is retained: its
+  // descriptor feeds the cascade-completion sweep fired further down.
   let activePuk = puk
+  let rosterRead: PukRosterReadResult | null = null
   if (puk && !isGuest && WAS_SERVER_URL) {
     const spaceId = accountPointer?.spaceId ?? deriveSpaceId(keyAgent.id)
-    const adopted = await checkPukRosterAtLogin({
+    rosterRead = await checkPukRosterAtLogin({
       zcapClient: sessionZcapClient,
       spaceId,
       puk,
       clientKeyAgreementKey: keyAgreementKey,
       idb
     })
-    if (adopted) {
-      activePuk = adopted
-      await onPukRotated?.(adopted)
+    if (rosterRead?.rotated) {
+      activePuk = rosterRead.puk
+      await onPukRotated?.(rosterRead.puk)
     }
   }
 
@@ -278,7 +285,37 @@ export async function initSessionFromSeed({
   // guests (local only) and returning logins alike. The new-wallet flows opt
   // out (`provisionStorage: false`) and provision explicitly.
   if (provisionStorage) {
-    session.storageReady = storage.ensureUserCollections({ user, profile })
+    const storageReady = storage.ensureUserCollections({ user, profile })
+    session.storageReady = storageReady
+
+    // The cascade-completion sweep: with the roster in hand (the direct read
+    // above) and a remote store attached, re-run the collection fan-out of
+    // the PUK cascade in the background. A collection is stale exactly when
+    // its current epoch names a non-current PUK generation -- durable state
+    // alone -- so a cascade another client crashed partway is completed
+    // here, and a healthy account's sweep reads descriptors and writes
+    // nothing. Chained behind provisioning (so freshly ensured collections
+    // are visible) and strictly best-effort: a failed sweep never fails the
+    // login, and the next login (or revocation) converges the same branch.
+    const remoteStore = storage.remoteStore
+    if (rosterRead && activePuk && remoteStore) {
+      const sweepPuk = activePuk
+      const rosterDescriptor = rosterRead.descriptor
+      session.pukSweep = storageReady
+        .catch(() => {})
+        .then(async () =>
+          cascadeCollectionsToPuk({
+            remoteStore,
+            rosterDescriptor,
+            clientKeyAgreementKey: keyAgreementKey,
+            puk: sweepPuk
+          })
+        )
+        .catch((err): null => {
+          console.warn('The PUK cascade-completion sweep failed:', err)
+          return null
+        })
+    }
   }
 
   return { session, userExists }
@@ -287,13 +324,13 @@ export async function initSessionFromSeed({
 /**
  * The login-time PUK roster check: one direct compare-and-swap-style read of
  * `key-map/puk.json` with the session's root signing key, before any storage
- * client exists. Returns the fresh PUK when the roster's current epoch
- * differs from the cached one (a rotation by another client), `null` when
- * the cached PUK is confirmed current or no roster exists yet (an account
- * whose provisioning has not created it -- the idempotent ensure will).
- * Either way the served roster is authenticated (`epochsMac`) and checked
- * against the locally pinned latest-seen epoch, and the pin advances to the
- * epoch just seen.
+ * client exists. Returns the full roster read -- `rotated` marks whether the
+ * roster's current epoch differs from the cached PUK (a rotation by another
+ * client), and the descriptor feeds the cascade-completion sweep -- or
+ * `null` when no roster exists yet (an account whose provisioning has not
+ * created it -- the idempotent ensure will). Either way the served roster is
+ * authenticated (`epochsMac`) and checked against the locally pinned
+ * latest-seen epoch, and the pin advances to the epoch just seen.
  *
  * Failure semantics: the three roster refusals -- a rolled-back/replayed
  * roster, a configuration that fails authentication, and a current epoch
@@ -309,7 +346,7 @@ export async function initSessionFromSeed({
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) KAK -- its roster entry
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<Puk | null>}   the freshly adopted PUK, or null
+ * @returns {Promise<PukRosterReadResult | null>}   the roster read, or null
  */
 async function checkPukRosterAtLogin({
   zcapClient,
@@ -323,7 +360,7 @@ async function checkPukRosterAtLogin({
   puk: Puk
   clientKeyAgreementKey: IKeyAgreementKey
   idb?: IDBFactory
-}): Promise<Puk | null> {
+}): Promise<PukRosterReadResult | null> {
   try {
     const store = pukRosterDescriptorStore({
       storageServerUrl: WAS_SERVER_URL,
@@ -341,7 +378,7 @@ async function checkPukRosterAtLogin({
       return null
     }
     await savePukEpochPin({ spaceId, epochId: read.latestEpochId, idb })
-    return read.rotated ? read.puk : null
+    return read
   } catch (err) {
     if (
       err instanceof PukRosterContinuityError ||

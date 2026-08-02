@@ -21,6 +21,7 @@ import type {
 import type { Puk } from '@interop/wallet-core/keys'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
+import type { PukCascadeResult } from '@/session/pukCascade'
 
 /**
  * Minimal interface over @interop/webkms-client's CapabilityAgent.
@@ -157,6 +158,14 @@ export interface Session {
   // new-wallet flows (signup, guest), whose provisioning is owned by
   // `provisionNewWallet` in a deliberate order.
   storageReady?: Promise<void>
+  // The cascade-completion sweep fired by session creation when the login's
+  // roster read succeeded and a remote store is attached: re-runs the
+  // collection fan-out of the PUK cascade (staleness detected from durable
+  // state alone), so a cascade another client crashed partway completes on
+  // the next login. Chained behind `storageReady`, strictly best-effort --
+  // resolves `null` when the sweep itself failed (never rejects) -- and
+  // absent when there was nothing to sweep from (guest, no WAS, no roster).
+  pukSweep?: Promise<PukCascadeResult | null>
   expires?: string // ISO date string, matches Auth.js convention
   isGuest: boolean
 }
