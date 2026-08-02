@@ -22,6 +22,7 @@ import {
   type EnrollmentRequest
 } from '@interop/wallet-core/enrollment'
 import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
+import { setClientLabel } from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
 import { savePukEpochPin } from '@/lib/sessionKey'
 import { bindPassphrase, fetchKeyring } from '@/session/keyring'
@@ -40,16 +41,22 @@ import type { StorageManager } from '@/stores/storageManager'
  * @param options.request {EnrollmentRequest}   the parsed connect code
  * @param options.profile {ControllerProfile}   the approving session's profile
  * @param options.storage {StorageManager}   the approving session's storage
+ * @param [options.label] {string}   a display label for the new client,
+ *   chosen here at approval (the document carries key material, never
+ *   labels, so it lands in `key-map/client-labels.json`); best-effort -- a
+ *   label write failure never fails the completed ceremony
  * @returns {Promise<{ did: string }>}   the account's did:webvh
  */
 export async function approveEnrollment({
   request,
   profile,
-  storage
+  storage,
+  label
 }: {
   request: EnrollmentRequest
   profile: ControllerProfile
   storage: StorageManager
+  label?: string
 }): Promise<{ did: string }> {
   const remoteStore = storage.remoteStore
   if (!remoteStore) {
@@ -68,13 +75,25 @@ export async function approveEnrollment({
     )
   }
 
-  return approveEnrollmentCore({
+  const approved = await approveEnrollmentCore({
     request,
     clientWebvhKeys: profile.clientWebvhKeys,
     clientKeyAgreementKey: profile.clientKeyAgreementKey,
     pukRosterStore: remoteStore.pukRosterStore(),
     idStore: remoteStore
   })
+  if (label?.trim()) {
+    try {
+      await setClientLabel({
+        store: remoteStore.clientLabelsStore(),
+        signingKeyMultibase: request.signingKeyMultibase,
+        label
+      })
+    } catch (err) {
+      console.warn("Could not save the new client's label:", err)
+    }
+  }
+  return approved
 }
 
 /**

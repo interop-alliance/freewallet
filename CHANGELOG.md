@@ -4,6 +4,21 @@
 
 ### Added
 
+- **Connected wallets** (Settings > "Connected wallets"): the management
+  surface over the account's enrolled wallet clients, listed from the
+  locally verified public account log -- so a recovery code (whose key is
+  published for decryption only) and connected apps (which are never
+  enrolled) can never appear in it. The wallet this browser runs is marked;
+  each wallet gets a human-readable name, chosen when its enrollment is
+  approved and editable inline afterwards (names live in the account's
+  private key-map, never in the public document). "Disconnect" runs the
+  full client-revocation cascade with resumable-failure messaging, and the
+  last enrolled wallet cannot be disconnected -- that would abandon the
+  account's update authority -- with the panel pointing at recovery-code
+  issuance instead. The "Enroll another wallet" entry point moved into this
+  panel (from the DID section) and now asks for the new wallet's name at
+  approval.
+
 - **Recovery codes** (`/recover`, Settings > "Recovery codes"): a 16-byte
   base58 code, shown exactly once at issuance, that restores the whole
   account from a fresh browser when the passphrase and every connected

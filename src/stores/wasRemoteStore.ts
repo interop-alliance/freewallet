@@ -33,8 +33,10 @@ import {
   type EncryptionDescriptorStore
 } from '@interop/was-client/edv'
 import { publicCredentialUrl as buildPublicCredentialUrl } from '@interop/wallet-core/space'
+import type { ClientLabelsStore } from '@interop/wallet-core/keys'
 import type { ControllerProfile, User } from '@/types/auth'
 import {
+  CLIENT_LABELS_RESOURCE,
   DID_DOCUMENT_RESOURCE,
   DID_KEYS_RESOURCE,
   ID_COLLECTION,
@@ -468,6 +470,31 @@ export class WASRemoteStore {
         .collection(KEY_MAP_COLLECTION.id, { encryption: 'plaintext' })
         .resource(PUK_ROSTER_RESOURCE)
     })
+  }
+
+  /**
+   * Returns the store over the enrolled-client display labels
+   * (`key-map/client-labels.json`) for the wallet-core label helpers -- the
+   * same private plaintext collection (and describe-skipping handle) as the
+   * PUK roster's store.
+   *
+   * @returns {ClientLabelsStore}
+   */
+  clientLabelsStore(): ClientLabelsStore {
+    const resource = this.was
+      .space(this.spaceId)
+      .collection(KEY_MAP_COLLECTION.id, { encryption: 'plaintext' })
+      .resource(CLIENT_LABELS_RESOURCE)
+    return {
+      async get() {
+        const result = await resource.get()
+        return result === null ? undefined : result
+      },
+      async put({ content }: { content: object }) {
+        const body = new TextEncoder().encode(JSON.stringify(content))
+        await resource.put(body, { contentType: 'application/json' })
+      }
+    }
   }
 
   /**

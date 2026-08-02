@@ -587,8 +587,8 @@ export async function issueRecoveryCode({
  *
  * @param options {object}
  * @param options.pointer {AccountPointer}
- * @returns {Promise<{ doc: RosterRecipientDocument, updateKeys: string[],
- *   nextKeyHashes: string[] }>}
+ * @returns {Promise<{ doc: RosterRecipientDocument, log: DIDLog,
+ *   updateKeys: string[], nextKeyHashes: string[] }>}
  */
 export async function verifyAccountLog({
   pointer
@@ -604,9 +604,8 @@ export async function verifyAccountLog({
       `Fetching the account's DID log failed (HTTP ${response.status}).`
     )
   }
-  const resolvedLog = await resolveDIDFromLog(
-    readLogFromString(await response.text())
-  )
+  const log = readLogFromString(await response.text())
+  const resolvedLog = await resolveDIDFromLog(log)
   if (resolvedLog.meta.error || !resolvedLog.did || !resolvedLog.doc) {
     throw new Error(
       `The account's DID log failed to resolve (${resolvedLog.meta.error}).`
@@ -620,6 +619,7 @@ export async function verifyAccountLog({
   }
   return {
     doc: resolvedLog.doc as RosterRecipientDocument,
+    log,
     updateKeys: resolvedLog.meta.updateKeys ?? [],
     nextKeyHashes: resolvedLog.meta.nextKeyHashes ?? []
   }
