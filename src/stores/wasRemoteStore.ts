@@ -33,10 +33,17 @@ import {
   type EncryptionDescriptorStore
 } from '@interop/was-client/edv'
 import { publicCredentialUrl as buildPublicCredentialUrl } from '@interop/wallet-core/space'
-import type { ClientLabelsStore } from '@interop/wallet-core/keys'
+import {
+  wasClientLabelsStore,
+  type ClientLabelsStore
+} from '@interop/wallet-core/keys'
+import {
+  isWebvhDid,
+  wasWebvhIdStore,
+  type WebvhIdStore
+} from '@interop/wallet-core/webvh'
 import type { ControllerProfile, User } from '@/types/auth'
 import {
-  CLIENT_LABELS_RESOURCE,
   DID_DOCUMENT_RESOURCE,
   DID_KEYS_RESOURCE,
   ID_COLLECTION,
@@ -49,7 +56,6 @@ import {
 // Deep import (bypassing the `@/lib/sync` barrel) so this eagerly loaded module
 // does not drag the barrel's RxDB replication machinery into the entry chunk.
 import { bufferToBase64Url } from '@/lib/cidFrom'
-import { isWebvhDid } from '@interop/wallet-core/webvh'
 import type { Json } from '@/lib/sync/types.js'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
@@ -342,11 +348,21 @@ export class WASRemoteStore {
           // the server rejects it. A name-only configure merges the current
           // description forward, re-stating the standing descriptor (epochs
           // included) verbatim -- the idempotent form of "ensure it exists".
+          // The original error is still logged on a successful retry: the
+          // retry also masks failures that were never the epoch refusal
+          // (including a failed Space-description PUT, which
+          // `ensureSpaceAndCollection` performs FIRST), and those should
+          // stay visible even when the narrower configure happens to land.
           if (encryption) {
             try {
               await this.was.space(this.spaceId).collection(id).configure({
                 name
               })
+              console.warn(
+                `Collection "${id}" was ensured via the name-only retry; ` +
+                  'the full ensure had failed with:',
+                err
+              )
             } catch {
               throw new Error(
                 `Error creating collection "${id}" in space ` +
@@ -355,7 +371,6 @@ export class WASRemoteStore {
               )
             }
           } else {
-            console.error(`Error creating collection "${id}":`, err)
             throw new Error(
               `Error creating collection "${id}" in space "${this.spaceId}".`,
               { cause: err }
@@ -425,20 +440,6 @@ export class WASRemoteStore {
   }
 
   /**
-   * Returns a `Resource` handle for a resource in this Space's `id` collection,
-   * invoked with the root capability.
-   *
-   * @param resourceId {string}
-   * @returns {Resource}
-   */
-  #idResource(resourceId: string): Resource {
-    return this.was
-      .space(this.spaceId)
-      .collection(ID_COLLECTION.id)
-      .resource(resourceId)
-  }
-
-  /**
    * Returns a `Resource` handle for the single `keys.json` resource in this
    * Space's `key-map` collection, invoked with the root capability.
    *
@@ -474,27 +475,25 @@ export class WASRemoteStore {
 
   /**
    * Returns the store over the enrolled-client display labels
-   * (`key-map/client-labels.json`) for the wallet-core label helpers -- the
-   * same private plaintext collection (and describe-skipping handle) as the
-   * PUK roster's store.
+   * (`key-map/client-labels.json`) for the wallet-core label helpers, bound to
+   * this store's current signing client.
    *
    * @returns {ClientLabelsStore}
    */
   clientLabelsStore(): ClientLabelsStore {
-    const resource = this.was
-      .space(this.spaceId)
-      .collection(KEY_MAP_COLLECTION.id, { encryption: 'plaintext' })
-      .resource(CLIENT_LABELS_RESOURCE)
-    return {
-      async get() {
-        const result = await resource.get()
-        return result === null ? undefined : result
-      },
-      async put({ content }: { content: object }) {
-        const body = new TextEncoder().encode(JSON.stringify(content))
-        await resource.put(body, { contentType: 'application/json' })
-      }
-    }
+    return wasClientLabelsStore({ was: this.was, spaceId: this.spaceId })
+  }
+
+  /**
+   * Returns the `id`-collection store the did:webvh ceremonies (provisioning,
+   * enrollment, revocation, recovery) read and write through, bound to this
+   * store's current signing client -- rebound along with it after controller
+   * promotion.
+   *
+   * @returns {WebvhIdStore}
+   */
+  webvhIdStore(): WebvhIdStore {
+    return wasWebvhIdStore({ was: this.was, spaceId: this.spaceId })
   }
 
   /**
@@ -507,85 +506,6 @@ export class WASRemoteStore {
    */
   async getKeyMap(): Promise<unknown> {
     const result = await this.#keyMapResource().get()
-    return result === null ? undefined : result
-  }
-
-  /**
-   * Writes (upserts) the key-id map into `key-map/keys.json`, JSON-serialized
-   * with an explicit `application/json` content type.
-   *
-   * @param options {object}
-   * @param options.content {object}   the key-id map body
-   * @returns {Promise<void>}
-   */
-  async putKeyMap({ content }: { content: object }): Promise<void> {
-    const body = new TextEncoder().encode(JSON.stringify(content))
-    await this.#keyMapResource().put(body, { contentType: 'application/json' })
-  }
-
-  /**
-   * Reads the `did.json` DID document from the `id` collection, returning the
-   * parsed body or `undefined` when it is missing (the DID provisioning
-   * existence probe).
-   *
-   * @param options {object}
-   * @param options.resourceId {string}
-   * @returns {Promise<unknown>}
-   */
-  async getIdResource({
-    resourceId
-  }: {
-    resourceId: string
-  }): Promise<unknown> {
-    const result = await this.#idResource(resourceId).get()
-    return result === null ? undefined : result
-  }
-
-  /**
-   * Writes (upserts) a resource into the `id` collection. An object body is
-   * JSON-serialized; a string body (the raw `did.jsonl` JSON-Lines log) passes
-   * through verbatim. Either way the bytes are sent with an explicit content
-   * type -- `did.json` as `application/did+json`, `did.jsonl` as `text/jsonl`
-   * (a plain-object `put` would force `application/json`, and the JSON-Lines
-   * log is not a single JSON document).
-   *
-   * @param options {object}
-   * @param options.resourceId {string}
-   * @param options.content {object | string}   a JSON body, or a raw string body
-   * @param [options.contentType] {string}   defaults to `application/json`
-   * @returns {Promise<void>}
-   */
-  async putIdResource({
-    resourceId,
-    content,
-    contentType = 'application/json'
-  }: {
-    resourceId: string
-    content: object | string
-    contentType?: string
-  }): Promise<void> {
-    const serialized =
-      typeof content === 'string' ? content : JSON.stringify(content)
-    const body = new TextEncoder().encode(serialized)
-    await this.#idResource(resourceId).put(body, { contentType })
-  }
-
-  /**
-   * Reads a resource from the `id` collection as raw text, without JSON parsing
-   * -- the did:webvh existence probe and log reader. Returns `undefined` when
-   * the resource is missing (WAS conflates 404 for missing/unauthorized). Used
-   * for `did.jsonl`, which is a JSON-Lines string rather than a JSON document.
-   *
-   * @param options {object}
-   * @param options.resourceId {string}
-   * @returns {Promise<string | undefined>}
-   */
-  async getIdResourceRaw({
-    resourceId
-  }: {
-    resourceId: string
-  }): Promise<string | undefined> {
-    const result = await this.#idResource(resourceId).getText()
     return result === null ? undefined : result
   }
 
@@ -1236,8 +1156,7 @@ async function getPlaintextRecord({
 
 /**
  * Writes (upserts) a single plaintext JSON record into a Space collection.
- * Serialized to bytes with an explicit `application/json` content-type
- * (mirroring `putIdResource`).
+ * Serialized to bytes with an explicit `application/json` content-type.
  *
  * @param options {object}
  * @param options.storageServerUrl {string}

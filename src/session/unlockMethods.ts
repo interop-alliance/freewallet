@@ -523,6 +523,34 @@ export function canRevokeWithoutCeremony(entry: UnlockMethod): boolean {
 }
 
 /**
+ * Picks the signer for a management-zcap invocation by the capability's own
+ * `controller`: a grant delegated to this client's bare did:key (the
+ * unpromoted single-client account, and every entry minted before grants
+ * moved to the account did:webvh) signs under the did:key keyId; anything
+ * else signs with the session's root zcapClient, which on a promoted account
+ * signs under this client's `<did:webvh>#<multibase>` verification method --
+ * the form the current-key-set rule authorizes for every enrolled client.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.capability {IZcap}   the management zcap being invoked
+ * @returns {ZcapClient}
+ */
+export function managementZcapClient({
+  session,
+  capability
+}: {
+  session: Session
+  capability: IZcap
+}): ZcapClient {
+  const { keyAgent } = session.profile
+  const controller = (capability as { controller?: string }).controller
+  return keyAgent && controller === keyAgent.id
+    ? didKeyZcapClient({ keyAgent })
+    : session.profile.zcapClient
+}
+
+/**
  * Revokes an unlock method tap-free: deletes its unlock Space with the entry's
  * management zcap (invoked by the session's ROOT zcapClient), drops the local
  * keyring cache for that Space, then removes the entry from the registry. This
@@ -554,16 +582,12 @@ export async function revokeUnlockMethod({
           'revoked by tapping the passkey being removed.'
       )
     }
-    // The management zcap names the account did:key as its controller (the
-    // unlock layer stays did:key end to end), so the invocation must sign
-    // under the did:key keyId even when the session's own client signs data
-    // requests as the promoted did:webvh.
-    const { keyAgent } = session.profile
     await deleteUnlockSpaceWithCapability({
       storageServerUrl: WAS_SERVER_URL,
-      zcapClient: keyAgent
-        ? didKeyZcapClient({ keyAgent })
-        : session.profile.zcapClient,
+      zcapClient: managementZcapClient({
+        session,
+        capability: entry.manageCapability
+      }),
       spaceId: entry.unlockSpaceId,
       capability: entry.manageCapability
     })
@@ -706,6 +730,43 @@ export async function backfillPassphraseUnlockMethod({
 }
 
 /**
+ * Swaps the live session onto the unlock identity a passphrase change just
+ * produced. The change deleted the old unlock Space and its client-key
+ * record, so the profile's `persistClientKeys` closure would otherwise
+ * silently no-op (losing rolled update-key seeds or a rotated PUK), and the
+ * stale `profile.unlockMethod` would let the registry backfill repoint the
+ * passphrase entry at the deleted Space. Mutates `session.profile` in place;
+ * the session keeps operating without a re-login.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.unlockSpaceId {string}   the new passphrase's unlock Space
+ * @param [options.manageCapability] {IZcap}   the management zcap the new
+ *   bind delegated to the account controller
+ * @param options.persistClientKeys {Function}   the re-wrap closure over the
+ *   new unlock identity (returned by `changePassphrase`)
+ * @returns {void}
+ */
+export function adoptPassphraseRebind({
+  session,
+  unlockSpaceId,
+  manageCapability,
+  persistClientKeys
+}: {
+  session: Session
+  unlockSpaceId: string
+  manageCapability?: IZcap
+  persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+}): void {
+  session.profile.persistClientKeys = persistClientKeys
+  session.profile.unlockMethod = {
+    type: 'passphrase',
+    unlockSpaceId,
+    manageCapability
+  }
+}
+
+/**
  * Enrolls a new passkey as an unlock method: runs the WebAuthn registration
  * ceremony, binds this client's key set under the passkey's PRF-derived
  * unlock identity, and assembles the registry entry describing the passkey.
@@ -714,7 +775,7 @@ export async function backfillPassphraseUnlockMethod({
  * signup and Settings "add a passkey" flows.
  *
  * `delegateManagementTo` drives the entry's optional `manageCapability`: when
- * an account did:key is given (and a WAS server is configured) the bind
+ * an account DID is given (and a WAS server is configured) the bind
  * delegates GET/DELETE on the new unlock Space to it, and the entry carries
  * the resulting capability so the passkey can later be revoked tap-free;
  * otherwise the entry omits it.
@@ -738,7 +799,7 @@ export async function backfillPassphraseUnlockMethod({
  *   keyring record carries
  * @param [options.excludeCredentialIds] {Uint8Array[]}   authenticators already
  *   holding a passkey for this wallet, excluded from the ceremony
- * @param [options.delegateManagementTo] {string}   an account did:key to
+ * @param [options.delegateManagementTo] {string}   an account DID to
  *   delegate the unlock Space management zcap to
  * @returns {Promise<{ registration: PasskeyRegistration, entry: PasskeyUnlockMethod }>}
  */

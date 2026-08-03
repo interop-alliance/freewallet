@@ -20,6 +20,11 @@ import {
   AccountPointerChangedError,
   KeyringRecordUnusableError
 } from '@/session/keyring'
+import {
+  PukRosterContinuityError,
+  PukRosterIntegrityError,
+  PukRosterUnwrapError
+} from '@interop/wallet-core/keys'
 import { backfillPassphraseUnlockMethod } from '@/session/unlockMethods'
 import { checkRecoveryHealth } from '@/session/recovery'
 import { showToast } from '@/stores/toastStore'
@@ -87,9 +92,13 @@ export function LoginPage() {
     }
     setIsSubmitting(true)
     setErrorKey(null)
+    // Hoisted out of the try: the torn-enrollment catch arm below offers the
+    // connect-this-browser flow, which needs the passphrase that located the
+    // account.
+    let passphrase = ''
     try {
       const data = new FormData(event.currentTarget)
-      const passphrase = data.get('login-passphrase') as string
+      passphrase = data.get('login-passphrase') as string
       if (!passphrase) {
         return
       }
@@ -146,6 +155,28 @@ export function LoginPage() {
         // conflicts with the one this browser has pinned.
         console.error('Login refused:', err)
         setErrorKey('auth.errors.accountPointerChanged')
+      } else if (err instanceof PukRosterContinuityError) {
+        // The rollback refusal: the served key roster sits behind the epoch
+        // this browser has already seen.
+        console.error('Login refused:', err)
+        setErrorKey('auth.errors.pukRosterContinuity')
+      } else if (err instanceof PukRosterIntegrityError) {
+        // The served key roster failed authentication -- a fabricated or
+        // tampered epoch configuration.
+        console.error('Login refused:', err)
+        setErrorKey('auth.errors.pukRosterIntegrity')
+      } else if (err instanceof PukRosterUnwrapError) {
+        // A torn enrollment: this browser's key is published for the account,
+        // but the key roster holds no wrap for it, so the session cannot
+        // recover the account key. Connecting this browser again mints a
+        // fresh key set and redoes the wrap, so offer that flow.
+        console.error('Login failed:', err)
+        setErrorKey('auth.errors.pukRosterUnwrap')
+        if (passphrase) {
+          setNotEnrolledPassphrase(passphrase)
+          setEnrollment(null)
+          setEnrollErrorKey(null)
+        }
       } else if (err instanceof KeyringRecordUnusableError) {
         // A keyring record was found but is corrupt -- not a server outage
         // and not a wrong passphrase; surface it with recovery guidance.
@@ -269,6 +300,22 @@ export function LoginPage() {
         // conflicts with the one this browser has pinned.
         console.error('Passkey login refused:', err)
         setErrorKey('auth.errors.accountPointerChanged')
+      } else if (err instanceof PukRosterContinuityError) {
+        // The rollback refusal: the served key roster sits behind the epoch
+        // this browser has already seen.
+        console.error('Passkey login refused:', err)
+        setErrorKey('auth.errors.pukRosterContinuity')
+      } else if (err instanceof PukRosterIntegrityError) {
+        // The served key roster failed authentication -- a fabricated or
+        // tampered epoch configuration.
+        console.error('Passkey login refused:', err)
+        setErrorKey('auth.errors.pukRosterIntegrity')
+      } else if (err instanceof PukRosterUnwrapError) {
+        // A torn enrollment: this browser's key is published for the account,
+        // but the key roster holds no wrap for it. The connect-this-browser
+        // flow starts from a passphrase, so the copy asks for one here.
+        console.error('Passkey login failed:', err)
+        setErrorKey('auth.errors.pukRosterUnwrap')
       } else if (err instanceof KeyringRecordUnusableError) {
         // A keyring record was found but is corrupt -- not a server outage;
         // surface it with recovery guidance.
@@ -334,7 +381,8 @@ export function LoginPage() {
                   )
                 )}
 
-                {errorKey === 'auth.errors.clientNotEnrolled' &&
+                {(errorKey === 'auth.errors.clientNotEnrolled' ||
+                  errorKey === 'auth.errors.pukRosterUnwrap') &&
                   notEnrolledPassphrase &&
                   !enrollment && (
                     <Button

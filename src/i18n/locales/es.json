@@ -61,6 +61,7 @@
       "synced": "Sincronizado",
       "error": "Error de sincronización (se reintentará)"
     },
+    "unpromotedAccount": "Esta cuenta no ha terminado de configurar su identidad publicada (un paso de configuración falló anteriormente). Las billeteras conectadas y los códigos de recuperación no estarán disponibles hasta que se complete; se reintenta automáticamente en cada inicio de sesión.",
     "kmsSection": "Gestión de claves",
     "kmsNone": "No hay un servidor de gestión de claves configurado; las claves permanecen en este dispositivo.",
     "keystore": "Almacén de claves",
@@ -213,6 +214,9 @@
       "keyringUnusable": "Se encontró su cuenta, pero su registro de acceso guardado no se pudo leer. Si el problema persiste, cambie su frase de contraseña desde un dispositivo donde aún tenga la sesión iniciada para escribir un registro nuevo.",
       "clientNotEnrolled": "Se encontró su cuenta, pero este navegador aún no tiene sus claves. Use \"Conectar este navegador\" abajo para inscribirlo desde un navegador donde su billetera ya esté configurada.",
       "accountPointerChanged": "El servidor de almacenamiento devolvió datos de cuenta que no coinciden con lo que este navegador recuerda, por lo que el inicio de sesión se detuvo por precaución. Si no esperaba esto, contacte a su proveedor de almacenamiento.",
+      "pukRosterContinuity": "El servidor de almacenamiento devolvió una versión de la lista de claves de su cuenta anterior a la que este navegador ya vio, por lo que el inicio de sesión se detuvo por precaución. No se cambió nada. Si no esperaba esto, contacte a su proveedor de almacenamiento.",
+      "pukRosterIntegrity": "El servidor de almacenamiento devolvió una lista de claves de su cuenta que no superó su comprobación de integridad, por lo que el inicio de sesión se detuvo por precaución. No se cambió nada. Si no esperaba esto, contacte a su proveedor de almacenamiento.",
+      "pukRosterUnwrap": "Este navegador está conectado a su cuenta, pero le falta su copia de la clave de la cuenta; una configuración interrumpida a medias puede dejarlo así. Use \"Conectar este navegador\" abajo para conectarlo de nuevo desde un navegador donde su billetera ya esté configurada. Si inició sesión con una llave de acceso, primero introduzca su frase de contraseña.",
       "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Mientras lo solucionamos, pruebe el <guest>modo invitado</guest>.",
       "passkeyNoAccount": "No se encontró ninguna billetera para esta llave de acceso. Inicie sesión con su frase de contraseña y luego agregue esta llave de acceso desde Configuración.",
       "passkeyPrfUnsupported": "Esta llave de acceso o este navegador no puede desbloquear Freewallet. Pruebe con otra llave de acceso o inicie sesión con su frase de contraseña."
@@ -632,7 +636,7 @@
   },
   "chapi": {
     "accountNotFound": "Cuenta no encontrada. Cree su billetera en la aplicación principal primero.",
-    "clientNotEnrolled": "Se encontró su cuenta, pero este contexto del navegador no tiene sus claves. Abra la aplicación de la billetera directamente e inicie sesión allí primero.",
+    "clientNotEnrolled": "Se encontró su cuenta, pero sus claves no son accesibles desde esta ventana emergente. Abra la aplicación de la billetera en su propia pestaña, inicie sesión allí y vuelva a intentarlo aquí. Algunos navegadores nunca permiten que una ventana emergente acceda a las claves; en ese caso, use la aplicación de la billetera directamente.",
     "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Inténtelo de nuevo en un momento.",
     "loginFailed": "No se pudo iniciar sesión. Inténtelo de nuevo.",
     "loginPrompt": "Introduzca la frase de contraseña de su billetera para continuar:",

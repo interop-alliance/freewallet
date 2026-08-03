@@ -11,9 +11,13 @@ import type { Session } from '@/types/auth'
 
 vi.mock('@/session/initSession', () => ({ loginWithPassphrase: vi.fn() }))
 vi.mock('@/lib/storageErrors', () => ({ isStorageUnreachable: vi.fn() }))
+vi.mock('@/lib/storageAccess', () => ({
+  requestUnpartitionedIdb: vi.fn(async () => undefined)
+}))
 
 import { loginWithPassphrase } from '@/session/initSession'
 import { isStorageUnreachable } from '@/lib/storageErrors'
+import { requestUnpartitionedIdb } from '@/lib/storageAccess'
 import {
   completePopupLogin,
   mapPopupLoginError
@@ -43,7 +47,26 @@ describe('completePopupLogin', () => {
     expect(result).toEqual({ session: fakeSession })
     expect(loginWithPassphrase).toHaveBeenCalledWith({
       passphrase: PASSPHRASE,
-      remoteDirectStorage: true
+      remoteDirectStorage: true,
+      idb: undefined
+    })
+  })
+
+  it('threads the unpartitioned IndexedDB handle when the browser grants one', async () => {
+    const unpartitioned = { isUnpartitionedIdb: true } as unknown as IDBFactory
+    vi.mocked(requestUnpartitionedIdb).mockResolvedValue(unpartitioned)
+    vi.mocked(loginWithPassphrase).mockResolvedValue({
+      session: fakeSession,
+      userExists: true
+    })
+
+    const result = await completePopupLogin({ passphrase: PASSPHRASE })
+
+    expect(result).toEqual({ session: fakeSession })
+    expect(loginWithPassphrase).toHaveBeenCalledWith({
+      passphrase: PASSPHRASE,
+      remoteDirectStorage: true,
+      idb: unpartitioned
     })
   })
 

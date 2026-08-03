@@ -30,13 +30,13 @@ const NEW_PASSPHRASE = 'Recovered-passphrase-42!'
 
 /**
  * Opens a fresh, cold browser context (empty IndexedDB and localStorage) to
- * stand in for a new machine's browser. Callers must close the returned
- * page's context.
+ * stand in for a new wallet client (a fresh browser profile). Callers must
+ * close the returned page's context.
  *
  * @param browser {Browser}
  * @returns {Promise<Page>}
  */
-async function coldDevicePage(browser: Browser): Promise<Page> {
+async function coldClientPage(browser: Browser): Promise<Page> {
   const context = await browser.newContext({ baseURL: APP_URL })
   return context.newPage()
 }
@@ -141,80 +141,80 @@ test.describe('Recovery codes', () => {
     expect(afterIssuance).toHaveLength(entriesBefore + 1)
 
     // The cold profile: nothing but the code.
-    const secondDevice = await coldDevicePage(browser)
+    const secondClient = await coldClientPage(browser)
     try {
-      await secondDevice.goto('/#/recover')
+      await secondClient.goto('/#/recover')
 
       // A well-formed code for no wallet: the honest "no account" wording,
       // distinct from a malformed code.
       await fillSettled(
-        secondDevice.locator('input[name="recovery-code"]'),
+        secondClient.locator('input[name="recovery-code"]'),
         '1111111111111111'
       )
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'Check code', exact: true })
         .click()
       await expect(
-        secondDevice.getByText('No wallet was found for this recovery code', {
+        secondClient.getByText('No wallet was found for this recovery code', {
           exact: false
         })
       ).toBeVisible({ timeout: 30_000 })
 
       // Malformed text is rejected as not-a-code.
       await fillSettled(
-        secondDevice.locator('input[name="recovery-code"]'),
+        secondClient.locator('input[name="recovery-code"]'),
         'not a code'
       )
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'Check code', exact: true })
         .click()
       await expect(
-        secondDevice.getByText('not a valid recovery code', { exact: false })
+        secondClient.getByText('not a valid recovery code', { exact: false })
       ).toBeVisible()
 
       // The real code locates the account.
       await fillSettled(
-        secondDevice.locator('input[name="recovery-code"]'),
+        secondClient.locator('input[name="recovery-code"]'),
         code
       )
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'Check code', exact: true })
         .click()
       await expect(
-        secondDevice.getByText('Found a wallet account', { exact: false })
+        secondClient.getByText('Found a wallet account', { exact: false })
       ).toBeVisible({ timeout: 30_000 })
 
       // A new passphrase for this browser, then the whole ceremony.
       await fillSettled(
-        secondDevice.locator('input[id="new-passphrase"]'),
+        secondClient.locator('input[id="new-passphrase"]'),
         NEW_PASSPHRASE
       )
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'Recover wallet', exact: true })
         .click()
       await expect(
-        secondDevice.getByText('Your wallet was recovered', { exact: false })
+        secondClient.getByText('Your wallet was recovered', { exact: false })
       ).toBeVisible({ timeout: 120_000 })
 
       // The replacement code is pushed hard: shown once, must be confirmed
       // saved before login unlocks.
       const replacement =
-        (await secondDevice
+        (await secondClient
           .getByTestId('replacement-recovery-code')
           .textContent()) ?? ''
       expect(replacement).toMatch(
         /^[1-9A-HJ-NP-Za-km-z]{4}(-[1-9A-HJ-NP-Za-km-z]{1,4})+$/
       )
       expect(replacement).not.toBe(code)
-      const loginButton = secondDevice.getByRole('button', {
+      const loginButton = secondClient.getByRole('button', {
         name: 'Log in to your wallet'
       })
       await expect(loginButton).toBeDisabled()
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'I saved the new code' })
         .click()
       await loginButton.click()
-      await expect(secondDevice).toHaveURL(/#\/dashboard/, {
+      await expect(secondClient).toHaveURL(/#\/dashboard/, {
         timeout: 60_000
       })
 
@@ -222,37 +222,37 @@ test.describe('Recovery codes', () => {
       // rotation: the welcome credential (sealed under the old PUK's epoch)
       // renders via the escrowed wraps.
       await expect(
-        secondDevice.getByRole('link', { name: 'Your First Credential' })
+        secondClient.getByRole('link', { name: 'Your First Credential' })
       ).toBeVisible({ timeout: 30_000 })
 
       // An ordinary re-login exercises the persisted client-key record.
-      await logOut(secondDevice)
-      await logIn(secondDevice, NEW_PASSPHRASE)
+      await logOut(secondClient)
+      await logIn(secondClient, NEW_PASSPHRASE)
 
       // The spent code now fails, with wording distinct from "wrong code":
       // its unlock Space is gone and its posture left the document.
-      await logOut(secondDevice)
-      await secondDevice.goto('/#/recover')
+      await logOut(secondClient)
+      await secondClient.goto('/#/recover')
       await expect(
-        secondDevice.getByRole('heading', {
+        secondClient.getByRole('heading', {
           name: 'Recover your wallet',
           level: 1
         })
       ).toBeVisible()
       await fillSettled(
-        secondDevice.locator('input[name="recovery-code"]'),
+        secondClient.locator('input[name="recovery-code"]'),
         code
       )
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'Check code', exact: true })
         .click()
       await expect(
-        secondDevice.getByText(
+        secondClient.getByText(
           /No wallet was found for this recovery code|has been revoked or already used/
         )
       ).toBeVisible({ timeout: 30_000 })
     } finally {
-      await secondDevice.context().close()
+      await secondClient.context().close()
     }
 
     // The ceremony is verifiable entries on the public log: issuance (1) plus

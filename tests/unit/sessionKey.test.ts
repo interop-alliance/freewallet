@@ -11,8 +11,10 @@ import {
   deletePasskeySafetyNotice,
   loadKeyringCache,
   loadPasskeySafetyNotice,
+  loadPukEpochPin,
   savePasskeySafetyNotice,
-  saveKeyringCache
+  saveKeyringCache,
+  savePukEpochPin
 } from '@/lib/sessionKey'
 
 /**
@@ -154,6 +156,81 @@ describe('keyring cache helpers', () => {
     await expect(
       loadKeyringCache({ spaceId: 'space-b', idb })
     ).resolves.toMatchObject({ record: { n: 2 } })
+  })
+})
+
+describe('PUK epoch pin helpers', () => {
+  const EPOCH_IDS = ['did:key:z6LSepoch1', 'did:key:z6LSepoch2']
+
+  it('establishes a first pin and advances it along the epoch order', async () => {
+    const idb = createFakeIdb()
+    await savePukEpochPin({
+      spaceId: 'space-a',
+      epochId: EPOCH_IDS[0]!,
+      epochIds: EPOCH_IDS,
+      idb
+    })
+    await expect(loadPukEpochPin({ spaceId: 'space-a', idb })).resolves.toBe(
+      EPOCH_IDS[0]
+    )
+    await savePukEpochPin({
+      spaceId: 'space-a',
+      epochId: EPOCH_IDS[1]!,
+      epochIds: EPOCH_IDS,
+      idb
+    })
+    await expect(loadPukEpochPin({ spaceId: 'space-a', idb })).resolves.toBe(
+      EPOCH_IDS[1]
+    )
+  })
+
+  it('refuses to move the pin backward along the served order', async () => {
+    const idb = createFakeIdb()
+    await savePukEpochPin({
+      spaceId: 'space-a',
+      epochId: EPOCH_IDS[1]!,
+      epochIds: EPOCH_IDS,
+      idb
+    })
+    // A rolled-back (authentic, older) roster re-pinning the prior epoch.
+    await savePukEpochPin({
+      spaceId: 'space-a',
+      epochId: EPOCH_IDS[0]!,
+      epochIds: EPOCH_IDS,
+      idb
+    })
+    await expect(loadPukEpochPin({ spaceId: 'space-a', idb })).resolves.toBe(
+      EPOCH_IDS[1]
+    )
+  })
+
+  it('refuses a differing write with no epoch order to compare against', async () => {
+    const idb = createFakeIdb()
+    await savePukEpochPin({ spaceId: 'space-a', epochId: EPOCH_IDS[1]!, idb })
+    await savePukEpochPin({ spaceId: 'space-a', epochId: EPOCH_IDS[0]!, idb })
+    await expect(loadPukEpochPin({ spaceId: 'space-a', idb })).resolves.toBe(
+      EPOCH_IDS[1]
+    )
+  })
+
+  it('refuses a served order that omits the stored pin', async () => {
+    const idb = createFakeIdb()
+    await savePukEpochPin({
+      spaceId: 'space-a',
+      epochId: EPOCH_IDS[1]!,
+      epochIds: EPOCH_IDS,
+      idb
+    })
+    // A fabricated roster whose epoch list cannot order the stored pin.
+    await savePukEpochPin({
+      spaceId: 'space-a',
+      epochId: 'did:key:z6LSfabricated',
+      epochIds: ['did:key:z6LSfabricated'],
+      idb
+    })
+    await expect(loadPukEpochPin({ spaceId: 'space-a', idb })).resolves.toBe(
+      EPOCH_IDS[1]
+    )
   })
 })
 

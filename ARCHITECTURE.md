@@ -375,14 +375,22 @@ honest ceiling is unchanged: ciphertext the revoked client already fetched
 stays readable to it, and old epochs open to keys it already held.
 
 The standing backstop is the **cascade-completion sweep**: session creation
-re-runs the collection fan-out (stage 3) in the background on every login
-whose roster read succeeded, chained behind collection provisioning and
-exposed as `session.pukSweep` (best-effort -- a failed sweep never fails
-the login). Because staleness is durable-state-only, the sweep completes a
-cascade another client crashed partway through, and on a healthy account it
-reads the collection descriptors and writes nothing. It doubles as the
-standing invariant check that no collection's current epoch names a retired
-PUK generation.
+re-runs stages 2 and 3 in the background on every login whose roster read
+succeeded, chained behind collection provisioning and exposed as
+`session.pukSweep` (best-effort -- a failed sweep never fails the login).
+The roster stage runs first (`convergePukRosterToDocument`): a cascade torn
+between its document edit and its rotation leaves the roster wrapping the
+CURRENT key to a recipient the locally verified document no longer keys --
+durable and silent, since the revoked client's document edit will never be
+re-run -- so a current-epoch recipient the document-backed resolver cannot
+answer for is rotated away from here, and the fresh key is adopted (client-key
+record, epoch pin, live session vault keys and ciphers) before the collection
+fan-out runs against it. Because staleness is durable-state-only, the fan-out
+then completes a cascade another client crashed partway through, and on a
+healthy account both stages read descriptors and write nothing. Together they
+are the standing invariant check that the roster keys exactly the document's
+clients and that no collection's current epoch names a retired PUK
+generation.
 
 Recovery-code spend and revocation drive stages 2 and 3 of the same
 cascade (their document edits are their own, described above, and a spent
@@ -412,7 +420,8 @@ retiring the attributed key while revealing exactly one replacement is that
 client's self-rotation -- an ambiguous attribution disables disconnect for
 the row rather than guessing) and its enrollment moment (`versionTime` of
 the publishing entry). A listed row with all three key members is exactly a
-`RevokedClientKeys`, so Disconnect drives the FW-66 cascade verbatim.
+`RevokedClientKeys`, so Disconnect drives the client-revocation epoch cascade
+verbatim.
 
 **Labels live beside the keys, not in the document.** The document carries
 key material only, so display labels go in `key-map/client-labels.json`

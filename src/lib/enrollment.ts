@@ -45,7 +45,9 @@ import type { StorageManager } from '@/stores/storageManager'
  *   chosen here at approval (the document carries key material, never
  *   labels, so it lands in `key-map/client-labels.json`); best-effort -- a
  *   label write failure never fails the completed ceremony
- * @returns {Promise<{ did: string }>}   the account's did:webvh
+ * @returns {Promise<object>}   the account's did:webvh, plus the newly
+ *   enrolled client's own identity as the ceremony states it (its did:key and
+ *   its signing-key multibase -- what a label or a listing row is filed under)
  */
 export async function approveEnrollment({
   request,
@@ -57,7 +59,7 @@ export async function approveEnrollment({
   profile: ControllerProfile
   storage: StorageManager
   label?: string
-}): Promise<{ did: string }> {
+}): Promise<{ did: string; clientDid: string; signingKeyMultibase: string }> {
   const remoteStore = storage.remoteStore
   if (!remoteStore) {
     throw new Error('Enrollment requires a configured WAS server.')
@@ -80,13 +82,13 @@ export async function approveEnrollment({
     clientWebvhKeys: profile.clientWebvhKeys,
     clientKeyAgreementKey: profile.clientKeyAgreementKey,
     pukRosterStore: remoteStore.pukRosterStore(),
-    idStore: remoteStore
+    idStore: remoteStore.webvhIdStore()
   })
   if (label?.trim()) {
     try {
       await setClientLabel({
         store: remoteStore.clientLabelsStore(),
-        signingKeyMultibase: request.signingKeyMultibase,
+        signingKeyMultibase: approved.signingKeyMultibase,
         label
       })
     } catch (err) {

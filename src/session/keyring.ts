@@ -67,7 +67,10 @@ import {
   WAS_SERVER_URL
 } from '@/app.config'
 import { bufferToBase64Url } from '@/lib/cidFrom'
-import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
+import {
+  isWebvhDid,
+  type ClientWebvhUpdateKeys
+} from '@interop/wallet-core/webvh'
 import type { Puk } from '@interop/wallet-core/keys'
 import {
   deleteUnlockSpace,
@@ -152,12 +155,44 @@ export interface KeyringFetchResult extends KeyringRecordContents {
   // members (see `PersistableClientKeys`) without the unlock secret -- a
   // closure over the unlock identity that produced this hit. In-memory only.
   persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
+  // Re-wraps and re-PUTs the keyring record with a changed account pointer
+  // (and refreshes the local cache + pointer pin) without the unlock secret
+  // -- the login-time heal path for a signup whose did:webvh backfill never
+  // ran (a KMS hiccup): once a later login's provisioning publishes the log,
+  // the pointer can durably adopt the did. In-memory only.
+  persistAccountPointer?: (pointer: AccountPointer) => Promise<void>
+}
+
+/**
+ * The DID an unlock Space's management zcap is delegated to: the account's
+ * published did:webvh when the pointer names one, else the account controller
+ * did:key. The did:webvh form is what makes the grant invocable by the whole
+ * enrolled-client roster under the current-key-set rule -- every enrolled
+ * client (including one minted by a later recovery) signs management
+ * invocations with its own `<did:webvh>#<multibase>` session key, and a
+ * revoked client loses the grant the moment its verification method leaves
+ * the document. The did:key fallback covers the unpromoted single-client
+ * account, where the account controller IS this client's own key.
+ *
+ * @param options {object}
+ * @param [options.pointer] {AccountPointer}   the account pointer, when known
+ * @param options.controller {string}   the account controller did:key
+ * @returns {string}
+ */
+export function unlockManagementGrantee({
+  pointer,
+  controller
+}: {
+  pointer?: AccountPointer
+  controller: string
+}): string {
+  return pointer && isWebvhDid(pointer.did) ? pointer.did : controller
 }
 
 /**
  * Delegates the long-lived management zcap on an unlock Space to the account
- * controller: GET/DELETE on the unlock Space URL, controlled by the account
- * did:key, expiring after `UNLOCK_MANAGE_ZCAP_TTL_MS`. Pure signing (no
+ * identity (see `unlockManagementGrantee`): GET/DELETE on the unlock Space
+ * URL, expiring after `UNLOCK_MANAGE_ZCAP_TTL_MS`. Pure signing (no
  * server round trip); the chain roots at the Space's synthesized root
  * capability (the ezcap client generates it from the target). Only ever
  * called when a WAS server is configured -- the unlock Space, and thus the
@@ -167,7 +202,8 @@ export interface KeyringFetchResult extends KeyringRecordContents {
  * @param options.zcapClient {ZcapClient}   the unlock identity's client (it can
  *   both invoke and delegate)
  * @param options.spaceId {string}   the unlock Space id
- * @param options.controller {string}   the account did:key to delegate to
+ * @param options.controller {string}   the account DID to delegate to (a
+ *   promoted account's did:webvh, or the account did:key)
  * @returns {Promise<IZcap>}
  */
 async function delegateUnlockManagement({
@@ -302,6 +338,51 @@ function clientKeysPersister({
       controller: clientKeys.controller,
       idb
     })
+  }
+}
+
+/**
+ * Builds the `persistAccountPointer` closure a fetch result carries: re-wraps
+ * the keyring record with a changed account pointer under the same unlock
+ * identity, PUTs it (when a WAS server is configured), and refreshes the
+ * local cache and the pointer pin. The controller and email are restated from
+ * the fetched record -- only the pointer changes. This is the login-time
+ * counterpart of signup's did:webvh pointer backfill, for accounts whose
+ * backfill never ran (a provisioning hiccup at signup).
+ *
+ * @param options {object}
+ * @param options.unlock {UnlockIdentity}
+ * @param options.found {KeyringRecordContents}
+ * @param [options.idb] {IDBFactory}
+ * @returns {(pointer: AccountPointer) => Promise<void>}
+ */
+function accountPointerPersister({
+  unlock,
+  found,
+  idb
+}: {
+  unlock: UnlockIdentity
+  found: KeyringRecordContents
+  idb?: IDBFactory
+}): (pointer: AccountPointer) => Promise<void> {
+  return async pointer => {
+    const record = await wrapKeyringRecord({
+      controller: found.controller,
+      email: found.email,
+      pointer,
+      keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+      keyResolver: unlock.keyResolver
+    })
+    if (WAS_SERVER_URL) {
+      await putUnlockKeyring({
+        storageServerUrl: WAS_SERVER_URL,
+        zcapClient: unlock.zcapClient,
+        spaceId: unlock.spaceId,
+        record
+      })
+    }
+    await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
+    await saveAccountPointerPin({ spaceId: unlock.spaceId, pointer, idb })
   }
 }
 
@@ -863,7 +944,8 @@ async function buildFetchResult({
     ...(clientKeys
       ? {
           clientKeys,
-          persistClientKeys: clientKeysPersister({ unlock, idb })
+          persistClientKeys: clientKeysPersister({ unlock, idb }),
+          persistAccountPointer: accountPointerPersister({ unlock, found, idb })
         }
       : {})
   }
@@ -871,7 +953,10 @@ async function buildFetchResult({
     result.manageCapability = await delegateUnlockManagement({
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId,
-      controller: found.controller
+      controller: unlockManagementGrantee({
+        pointer: found.pointer,
+        controller: found.controller
+      })
     })
   }
   return result
@@ -905,12 +990,12 @@ async function buildFetchResult({
  *   unlock method recovers update authority at login
  * @param [options.pointer] {AccountPointer}   the account pointer the record
  *   carries (and this client pins); absent on no-WAS deployments
- * @param [options.delegateManagementTo] {string}   an account did:key to
- *   delegate the unlock Space management zcap to (GET/DELETE on this unlock
- *   Space). When set and a WAS server is configured, the returned
- *   `manageCapability` is the revocation authority a later Settings flow uses
- *   to retire this method (a lost passkey) without tapping or re-deriving
- *   from the secret.
+ * @param [options.delegateManagementTo] {string}   an account DID (see
+ *   `unlockManagementGrantee`) to delegate the unlock Space management zcap
+ *   to (GET/DELETE on this unlock Space). When set and a WAS server is
+ *   configured, the returned `manageCapability` is the revocation authority
+ *   a later Settings flow uses to retire this method (a lost passkey)
+ *   without tapping or re-deriving from the secret.
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap }>}
  */
@@ -966,7 +1051,7 @@ export async function bindUnlockSecret({
     })
     if (delegateManagementTo) {
       // The unlock agent delegates GET/DELETE on its own Space to the account
-      // controller, so a lost method stays revocable without re-deriving this
+      // identity, so a lost method stays revocable without re-deriving this
       // unlock identity from the (possibly lost) secret. Pure signing.
       manageCapability = await delegateUnlockManagement({
         zcapClient: unlock.zcapClient,
@@ -1012,7 +1097,7 @@ export async function bindUnlockSecret({
  *   did:webvh update-key seeds, cached in the local client-key record
  * @param [options.pointer] {AccountPointer}   the account pointer the record
  *   carries
- * @param [options.delegateManagementTo] {string}   an account did:key to
+ * @param [options.delegateManagementTo] {string}   an account DID to
  *   delegate the unlock Space management zcap to (see `bindUnlockSecret`)
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
@@ -1270,9 +1355,9 @@ export async function deleteKeyring({
  * its keyring (the remote copy when a WAS server is configured -- the source
  * of truth -- else the local cache) and matching the recovered controller
  * against the account did:key, binds the new passphrase (re-wrapping this
- * client's key set and the PUK, and carrying the verified record's email and
- * pointer forward), then deletes the old unlock Space and this method's old
- * local records.
+ * client's key set, the PUK, and the did:webvh update-key seeds, and carrying
+ * the verified record's email and pointer forward), then deletes the old
+ * unlock Space and this method's old local records.
  *
  * A missing record, or one that fails to unwrap or whose controller does not
  * match, is a `WrongPassphraseError`. A network error while reading the remote
@@ -1287,7 +1372,9 @@ export async function deleteKeyring({
  * The new passphrase's `unlockSpaceId` and `manageCapability` are returned (the
  * new bind delegates the management zcap to `controller`), so Settings can
  * update the unlock-methods registry's passphrase entry to the new Space and
- * its revocation authority.
+ * its revocation authority -- along with the new bind's `persistClientKeys`
+ * closure, so the live session can re-wrap the new record (a rotated PUK,
+ * rolled update-key seeds) without re-prompting for the passphrase.
  *
  * @param options {object}
  * @param options.clientSeed {Uint8Array}   this client's 32-byte seed
@@ -1296,9 +1383,13 @@ export async function deleteKeyring({
  * @param options.newPassphrase {string}
  * @param [options.puk] {Puk}   the per-user key to carry into the new
  *   client-key record (the session's copy; falls back to the old record's)
+ * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
+ *   did:webvh update-key seeds to carry into the new client-key record (the
+ *   session's copy; falls back to the old record's)
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
- * @returns {Promise<{ oldPassphraseRetired: boolean, unlockSpaceId: string, manageCapability?: IZcap }>}
+ * @returns {Promise<{ oldPassphraseRetired: boolean, unlockSpaceId: string,
+ *   manageCapability?: IZcap, persistClientKeys: Function }>}
  */
 export async function changePassphrase({
   clientSeed,
@@ -1306,6 +1397,7 @@ export async function changePassphrase({
   oldPassphrase,
   newPassphrase,
   puk,
+  webvhUpdateKeys,
   idb,
   kdf = KEYRING_KDF
 }: {
@@ -1314,12 +1406,14 @@ export async function changePassphrase({
   oldPassphrase: string
   newPassphrase: string
   puk?: Puk
+  webvhUpdateKeys?: ClientWebvhUpdateKeys
   idb?: IDBFactory
   kdf?: UnlockKdf
 }): Promise<{
   oldPassphraseRetired: boolean
   unlockSpaceId: string
   manageCapability?: IZcap
+  persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
 }> {
   const oldUnlock = await deriveUnlockIdentity({
     secret: oldPassphrase,
@@ -1338,26 +1432,32 @@ export async function changePassphrase({
     idb
   })
 
-  // Prefer the caller's live PUK; fall back to the one cached in the old
-  // client-key record, so a rebind can never silently drop it.
+  // Prefer the caller's live PUK and update-key seeds; fall back to the ones
+  // cached in the old client-key record, so a rebind can never silently drop
+  // them.
   const oldClientKeys = await loadClientKeys({ unlock: oldUnlock, idb })
 
-  const { unlockSpaceId, manageCapability } = await bindPassphrase({
-    clientSeed,
-    controller,
-    passphrase: newPassphrase,
-    // Preserve the account email and pointer carried by the old record, and
-    // the PUK, across the rebind.
-    email: verified.email,
-    pointer: verified.pointer,
-    puk: puk ?? oldClientKeys?.puk,
-    // Delegate the new unlock Space's management zcap to the account
-    // controller, so Settings can record it in the registry (and revoke this
-    // method later).
-    delegateManagementTo: controller,
-    idb,
-    kdf
-  })
+  const { unlockSpaceId, manageCapability, persistClientKeys } =
+    await bindPassphrase({
+      clientSeed,
+      controller,
+      passphrase: newPassphrase,
+      // Preserve the account email and pointer carried by the old record, and
+      // the PUK and did:webvh update-key seeds, across the rebind.
+      email: verified.email,
+      pointer: verified.pointer,
+      puk: puk ?? oldClientKeys?.puk,
+      webvhUpdateKeys: webvhUpdateKeys ?? oldClientKeys?.webvhUpdateKeys,
+      // Delegate the new unlock Space's management zcap to the account
+      // identity, so Settings can record it in the registry (and revoke this
+      // method later).
+      delegateManagementTo: unlockManagementGrantee({
+        pointer: verified.pointer,
+        controller
+      }),
+      idb,
+      kdf
+    })
 
   // Retire the old unlock identity -- but only when it differs from the new
   // one (an old == new rebind must not delete the records just written). The
@@ -1387,6 +1487,7 @@ export async function changePassphrase({
   return {
     oldPassphraseRetired: oldSpaceDeleted,
     unlockSpaceId,
-    manageCapability
+    manageCapability,
+    persistClientKeys
   }
 }

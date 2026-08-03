@@ -29,13 +29,13 @@ const APP_URL = 'http://localhost:5274'
 
 /**
  * Opens a fresh, cold browser context (empty IndexedDB and localStorage) to
- * stand in for a second machine's browser. Callers must close the returned
- * page's context.
+ * stand in for a second wallet client (a fresh browser profile). Callers
+ * must close the returned page's context.
  *
  * @param browser {Browser}
  * @returns {Promise<Page>}
  */
-async function coldDevicePage(browser: Browser): Promise<Page> {
+async function coldClientPage(browser: Browser): Promise<Page> {
   const context = await browser.newContext({ baseURL: APP_URL })
   return context.newPage()
 }
@@ -79,34 +79,34 @@ test.describe('Client enrollment ceremony', () => {
 
     // Client 2 (cold profile): the passphrase locates the account but the
     // login is refused as not enrolled, surfacing the connect flow.
-    const secondDevice = await coldDevicePage(browser)
+    const secondClient = await coldClientPage(browser)
     try {
-      await secondDevice.goto('/#/login')
+      await secondClient.goto('/#/login')
       await fillSettled(
-        secondDevice.locator('input[type="password"]'),
+        secondClient.locator('input[type="password"]'),
         passphrase
       )
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'Log in', exact: true })
         .click()
       await expect(
-        secondDevice.getByText('this browser does not hold its keys yet', {
+        secondClient.getByText('this browser does not hold its keys yet', {
           exact: false
         })
       ).toBeVisible({ timeout: 30_000 })
 
       // Start the connect flow: the key set is minted locally and only the
       // public halves surface as the connect code.
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'Connect this browser' })
         .click()
-      const codeField = secondDevice.getByTestId('enroll-connect-code')
+      const codeField = secondClient.getByTestId('enroll-connect-code')
       await expect(codeField).toBeVisible({ timeout: 20_000 })
       const code = await codeField.inputValue()
       expect(code.startsWith('freewallet-connect:')).toBe(true)
       // The fingerprint to compare on both screens.
       await expect(
-        secondDevice.getByText(/Key fingerprint: did:key:z6Mk/)
+        secondClient.getByText(/Key fingerprint: did:key:z6Mk/)
       ).toBeVisible()
 
       // Client 1 approves the code from Settings: the enrolling half of the
@@ -123,10 +123,10 @@ test.describe('Client enrollment ceremony', () => {
       // Client 2 completes: verifies the published log, performs its first
       // roster read with its did:webvh keyId, persists the key set, and logs
       // in as an ordinary enrolled client.
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'I approved it -- finish connecting' })
         .click()
-      await expect(secondDevice).toHaveURL(/#\/dashboard/, {
+      await expect(secondClient).toHaveURL(/#\/dashboard/, {
         timeout: 60_000
       })
 
@@ -134,24 +134,24 @@ test.describe('Client enrollment ceremony', () => {
       // credential (an encrypted private-credentials write from before this
       // client existed) renders.
       await expect(
-        secondDevice.getByRole('link', { name: 'Your First Credential' })
+        secondClient.getByRole('link', { name: 'Your First Credential' })
       ).toBeVisible({ timeout: 30_000 })
 
       // A reload-then-login exercises the persisted client-key record (the
       // ordinary enrolled-login path, not ceremony state).
-      await secondDevice.goto('/#/login')
+      await secondClient.goto('/#/login')
       await fillSettled(
-        secondDevice.locator('input[type="password"]'),
+        secondClient.locator('input[type="password"]'),
         passphrase
       )
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'Log in', exact: true })
         .click()
-      await expect(secondDevice).toHaveURL(/#\/dashboard/, {
+      await expect(secondClient).toHaveURL(/#\/dashboard/, {
         timeout: 30_000
       })
     } finally {
-      await secondDevice.context().close()
+      await secondClient.context().close()
     }
 
     // The enrollment is exactly two verifiable entries on the public log:

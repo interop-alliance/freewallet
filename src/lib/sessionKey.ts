@@ -414,21 +414,49 @@ function pukEpochPinKey(spaceId: string): string {
  * a rollback rather than followed (see `@interop/wallet-core/keys`). Plaintext
  * local state: an epoch id is public key material, not a secret.
  *
+ * The pin is monotonic, never a blind overwrite: when a pin is already stored
+ * and differs from the write, it only advances along the served (append-only)
+ * epoch order in `epochIds`, and a write that would move it backward -- or
+ * that cannot be ordered against the stored pin at all -- is refused as a
+ * warn-and-no-op. A caller without the epoch order in hand can therefore only
+ * establish a first pin or restate the stored value; it can never launder a
+ * rollback into the pin.
+ *
  * @param options {object}
  * @param options.spaceId {string}   the data Space id
  * @param options.epochId {string}   the roster's current epoch id (a did:key)
+ * @param [options.epochIds] {string[]}   the served roster's append-only
+ *   epoch-id order (oldest first), ordering the stored pin against the write
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 export async function savePukEpochPin({
   spaceId,
   epochId,
+  epochIds,
   idb
 }: {
   spaceId: string
   epochId: string
+  epochIds?: string[]
   idb?: IDBFactory
 }): Promise<void> {
+  const stored = await loadPukEpochPin({ spaceId, idb })
+  if (stored === epochId) {
+    return
+  }
+  if (stored) {
+    const storedIndex = epochIds ? epochIds.indexOf(stored) : -1
+    const nextIndex = epochIds ? epochIds.indexOf(epochId) : -1
+    if (storedIndex === -1 || nextIndex === -1 || nextIndex < storedIndex) {
+      console.warn(
+        'Refusing to move the PUK epoch pin backward (or off the served ' +
+          'epoch order); keeping the stored pin.',
+        { storedEpochId: stored, epochId }
+      )
+      return
+    }
+  }
   await withSessionStore(
     'readwrite',
     store =>

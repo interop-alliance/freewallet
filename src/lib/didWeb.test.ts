@@ -119,10 +119,7 @@ function fakes({
     keyAgreement: 0
   }
 
-  const remoteStore = {
-    async getKeyMap() {
-      return keys
-    },
+  const webvhIdStore = {
     async putKeyMap() {
       // The key map is the `key-map` collection's single `keys.json` resource;
       // record it under DID_KEYS_RESOURCE so write-ordering assertions read
@@ -144,6 +141,15 @@ function fakes({
       contentType?: string
     }) {
       puts.push({ resourceId, contentType })
+    }
+  }
+
+  const remoteStore = {
+    async getKeyMap() {
+      return keys
+    },
+    webvhIdStore() {
+      return webvhIdStore
     }
   } as unknown as WASRemoteStore
 

@@ -139,6 +139,20 @@ export async function ensureKeystore({
       agent = keyAgent
     }
   }
+  if (!config && controller !== keyAgent.id) {
+    // A promoted account with no keystore under either identity -- an
+    // enrolled client whose account keystore was created under the FIRST
+    // client's did:key and never promoted. Creating one here would mint an
+    // orphan keystore per enrolled client, with keys.json's `kmsKeyId`s
+    // still pointing into the account's real keystore. Surface the state
+    // instead (the caller treats provisioning failures as non-fatal and the
+    // settings page shows it); the promotion retry at the first client's
+    // next login heals it.
+    throw new Error(
+      'No keystore was found under the promoted account controller or this ' +
+        "client's did:key; refusing to create an orphan keystore."
+    )
+  }
   if (!config) {
     const created = await KmsClient.createKeystore({
       url: keystoresUrl,

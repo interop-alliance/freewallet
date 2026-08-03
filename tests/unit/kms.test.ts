@@ -134,6 +134,29 @@ describe('ensureKeystore', () => {
     // still-unpromoted keystore config.
     expect(keystoreAgent.capabilityAgent).toBe(keyAgent)
   })
+
+  it('refuses to mint an orphan keystore on a promoted account', async () => {
+    const keyAgent = await testKeyAgent()
+    const webvhDid = 'did:webvh:zQmScid:kms.example.test:space:abc:id'
+    // Both the promoted-controller listing and the did:key fallback miss:
+    // the account keystore lives under the FIRST client's did:key, which
+    // this enrolled client is not. Creating one here would orphan it.
+    const { zcapClient } = zcapClientListing([])
+    const { zcapClient: fallbackZcapClient } = zcapClientListing([])
+    const createSpy = vi.spyOn(KmsClient, 'createKeystore')
+
+    await expect(
+      ensureKeystore({
+        kmsServerUrl: KMS_SERVER_URL,
+        keyAgent,
+        zcapClient,
+        controller: webvhDid,
+        capabilityAgent: { id: webvhDid } as never,
+        fallbackZcapClient
+      })
+    ).rejects.toThrow('orphan keystore')
+    expect(createSpy).not.toHaveBeenCalled()
+  })
 })
 
 describe('promoteKeystoreController', () => {

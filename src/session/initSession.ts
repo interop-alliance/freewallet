@@ -9,6 +9,7 @@
  * from the secret, so a client with no local key set can locate the account
  * but not act (not enrolled).
  */
+import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
@@ -20,11 +21,13 @@ import { ensureKeystore } from '@/lib/kms'
 import { assertPasskeyPrf } from '@/lib/passkey'
 import {
   isWebvhDid,
+  verifyAccountLog,
   webvhCapabilityAgent,
   webvhZcapClient,
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
 import {
+  convergePukRosterToDocument,
   mintPuk,
   pukRosterDescriptorStore,
   pukVaultKeys,
@@ -178,8 +181,8 @@ export async function initSessionFromSeed({
   // descriptor feeds the cascade-completion sweep fired further down.
   let activePuk = puk
   let rosterRead: PukRosterReadResult | null = null
+  const spaceId = accountPointer?.spaceId ?? deriveSpaceId(keyAgent.id)
   if (puk && !isGuest && WAS_SERVER_URL) {
-    const spaceId = accountPointer?.spaceId ?? deriveSpaceId(keyAgent.id)
     rosterRead = await checkPukRosterAtLogin({
       zcapClient: sessionZcapClient,
       spaceId,
@@ -285,7 +288,7 @@ export async function initSessionFromSeed({
   // guests (local only) and returning logins alike. The new-wallet flows opt
   // out (`provisionStorage: false`) and provision explicitly.
   if (provisionStorage) {
-    const storageReady = storage.ensureUserCollections({ user, profile })
+    const storageReady = storage.ensureUserCollections({ user, profile, idb })
     session.storageReady = storageReady
 
     // The cascade-completion sweep: with the roster in hand (the direct read
@@ -299,18 +302,50 @@ export async function initSessionFromSeed({
     // login, and the next login (or revocation) converges the same branch.
     const remoteStore = storage.remoteStore
     if (rosterRead && activePuk && remoteStore) {
-      const sweepPuk = activePuk
-      const rosterDescriptor = rosterRead.descriptor
+      const loginPuk = activePuk
+      const loginDescriptor = rosterRead.descriptor
       session.pukSweep = storageReady
         .catch(() => {})
-        .then(async () =>
-          cascadeCollectionsToPuk({
+        .then(async () => {
+          // The roster stage first: a disconnect torn between the document
+          // edit and the roster rotation leaves the roster still wrapping the
+          // CURRENT key to a recipient the document no longer keys -- durable
+          // and silent, since the disconnected client's document edit will
+          // never be re-run. Converging it here before the fan-out is what
+          // makes the collections below take a key the disconnected client
+          // cannot open.
+          const { puk: sweepPuk, rosterDescriptor } =
+            await convergeRosterToDocument({
+              session,
+              pointer: accountPointer,
+              zcapClient: sessionZcapClient,
+              spaceId,
+              puk: loginPuk,
+              descriptor: loginDescriptor,
+              clientKeyAgreementKey: keyAgreementKey,
+              idb,
+              onPukRotated
+            })
+          const result = await cascadeCollectionsToPuk({
             remoteStore,
             rosterDescriptor,
             clientKeyAgreementKey: keyAgreementKey,
             puk: sweepPuk
           })
-        )
+          // The session's ciphers were built before the sweep ran: when the
+          // sweep moved any collection's current epoch (`installed` or
+          // `rotated` -- an escrow leaves the current epoch in place), refresh
+          // the descriptors and ciphers so the rest of the session seals
+          // writes under the fresh epoch instead of the retired one.
+          if (
+            Object.values(result.outcomes).some(
+              outcome => outcome === 'installed' || outcome === 'rotated'
+            )
+          ) {
+            await storage.refreshEncryptedDescriptors()
+          }
+          return result
+        })
         .catch((err): null => {
           console.warn('The PUK cascade-completion sweep failed:', err)
           return null
@@ -319,6 +354,119 @@ export async function initSessionFromSeed({
   }
 
   return { session, userExists }
+}
+
+/**
+ * The roster stage of the cascade-completion sweep: converges the wrap-set
+ * roster onto the account's locally verified did:webvh document, so a
+ * revocation torn between its document edit and its roster rotation is
+ * finished here rather than leaving the current per-user key wrapped to a
+ * client the document no longer keys.
+ *
+ * When the convergence rotates, the fresh key is read back and adopted the
+ * ordinary way -- persisted into this client's client-key record, pinned, and
+ * swapped into the live session's vault keys and storage ciphers -- and
+ * handed back for the collection fan-out to run against. A healthy account
+ * reads the descriptor and writes nothing; a document that cannot be fetched
+ * or verified (offline, an unpromoted account) leaves the login's own roster
+ * read in place, since the sweep is best-effort by design.
+ *
+ * @param options {object}
+ * @param options.session {Session}   the live session, whose vault keys and
+ *   ciphers adopt a rotation
+ * @param [options.pointer] {AccountPointer}
+ * @param options.zcapClient {ZcapClient}   the session's signing client
+ * @param options.spaceId {string}   the data Space id
+ * @param options.puk {Puk}   the login's current per-user key
+ * @param options.descriptor {CollectionEncryption}   the login's roster read
+ * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
+ *   (identity) KAK -- its roster entry
+ * @param [options.idb] {IDBFactory}
+ * @param [options.onPukRotated] {function}
+ * @returns {Promise<{ puk: Puk, rosterDescriptor: CollectionEncryption }>}
+ *   the key and roster descriptor the collection fan-out should use
+ */
+async function convergeRosterToDocument({
+  session,
+  pointer,
+  zcapClient,
+  spaceId,
+  puk,
+  descriptor,
+  clientKeyAgreementKey,
+  idb,
+  onPukRotated
+}: {
+  session: Session
+  pointer?: AccountPointer
+  zcapClient: ZcapClient
+  spaceId: string
+  puk: Puk
+  descriptor: CollectionEncryption
+  clientKeyAgreementKey: IKeyAgreementKey
+  idb?: IDBFactory
+  onPukRotated?: (puk: Puk) => Promise<void>
+}): Promise<{ puk: Puk; rosterDescriptor: CollectionEncryption }> {
+  const unchanged = { puk, rosterDescriptor: descriptor }
+  if (!pointer || !isWebvhDid(pointer.did) || !WAS_SERVER_URL) {
+    return unchanged
+  }
+  try {
+    const { doc } = await verifyAccountLog({
+      did: pointer.did,
+      spaceId: pointer.spaceId,
+      host: pointer.host
+    })
+    const store = pukRosterDescriptorStore({
+      storageServerUrl: WAS_SERVER_URL,
+      zcapClient,
+      spaceId
+    })
+    const { rotated, staleRecipientIds } = await convergePukRosterToDocument({
+      store,
+      document: doc,
+      descriptor
+    })
+    if (!rotated) {
+      return unchanged
+    }
+    console.warn(
+      'The wrap-set roster still wrapped the current key to ' +
+        `${staleRecipientIds.length} recipient(s) the account document no ` +
+        'longer keys; the rotation has been completed.'
+    )
+    // Rotated: the fresh key is only readable from the roster, so re-read it
+    // and adopt it -- persisted for the next login, pinned, and swapped into
+    // the live session before the collection fan-out runs.
+    const read = await readPukRoster({
+      store,
+      puk,
+      clientKeyAgreementKey,
+      pinnedEpochId: await loadPukEpochPin({ spaceId, idb })
+    })
+    if (!read) {
+      return unchanged
+    }
+    await savePukEpochPin({
+      spaceId,
+      epochId: read.latestEpochId,
+      epochIds: (read.descriptor.epochs ?? []).map(epoch => epoch.id),
+      idb
+    })
+    await onPukRotated?.(read.puk)
+    const vaultKeys = pukVaultKeys({ puk: read.puk })
+    session.profile.puk = read.puk
+    session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
+    session.profile.keyResolver = vaultKeys.keyResolver
+    await session.storage.adoptRotatedVaultKeys(vaultKeys)
+    return { puk: read.puk, rosterDescriptor: read.descriptor }
+  } catch (err) {
+    console.warn(
+      'Could not converge the wrap-set roster onto the account document:',
+      err
+    )
+    return unchanged
+  }
 }
 
 /**
@@ -377,7 +525,12 @@ async function checkPukRosterAtLogin({
     if (!read) {
       return null
     }
-    await savePukEpochPin({ spaceId, epochId: read.latestEpochId, idb })
+    await savePukEpochPin({
+      spaceId,
+      epochId: read.latestEpochId,
+      epochIds: (read.descriptor.epochs ?? []).map(epoch => epoch.id),
+      idb
+    })
     return read
   } catch (err) {
     if (
@@ -569,6 +722,45 @@ async function sessionFromKeyringHit({
     type,
     unlockSpaceId: found.unlockSpaceId,
     manageCapability: found.manageCapability
+  }
+
+  // The did:webvh heal path: an account whose signup-time backfill never ran
+  // (a KMS or WAS hiccup -- the pointer still names a did:key) re-attempts
+  // the pointer backfill and controller promotion behind provisioning, which
+  // is where `ensureDidWebvh` publishes (or adopts) the log and sets
+  // `profile.didWebvh`. Signup was previously the ONLY site that ran these,
+  // so one transient provisioning failure left the account permanently
+  // unpromoted -- enrollment, recovery codes, and client revocation all
+  // refused forever. Best-effort like the signup original: a failed heal
+  // warns and the next login retries from durable state.
+  const persistAccountPointer = found.persistAccountPointer
+  if (
+    session.storageReady &&
+    persistAccountPointer &&
+    found.pointer &&
+    !isWebvhDid(found.pointer.did)
+  ) {
+    const staleServerPointer = found.pointer
+    session.storageReady = session.storageReady.then(async () => {
+      const did = session.profile.didWebvh?.did
+      if (!did || !isWebvhDid(did)) {
+        return
+      }
+      const fullPointer = { ...staleServerPointer, did }
+      try {
+        await persistAccountPointer(fullPointer)
+        session.profile.accountPointer = fullPointer
+        await session.storage.ensurePromotedController({
+          profile: session.profile
+        })
+      } catch (err) {
+        console.warn(
+          'Could not backfill the did:webvh pointer and promote the ' +
+            'controller; the next login retries:',
+          err
+        )
+      }
+    })
   }
   return { session, userExists }
 }

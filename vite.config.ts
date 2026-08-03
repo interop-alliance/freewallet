@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
-import path from 'path'
-import { execSync } from 'child_process'
+import path from 'node:path'
+import { execSync } from 'node:child_process'
 
 const appVersion = execSync('git describe --tags --always --dirty').toString().trim()
 
@@ -49,7 +49,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
+      '@': path.resolve(import.meta.dirname, './src')
     }
   },
   test: {

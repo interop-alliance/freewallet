@@ -1282,6 +1282,159 @@ describe('changePassphrase', () => {
     expect(found!.clientKeys!.puk!.id).toBe(puk.id)
   })
 
+  it("falls back to the old record's did:webvh update keys when the caller passes none", async () => {
+    const idb = createFakeIdb()
+    const clientSeed = randomSeed()
+    const webvhUpdateKeys = {
+      updateSeed: randomSeed(),
+      stagedSeed: randomSeed()
+    }
+    await bindPassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'webvh fallback old passphrase',
+      webvhUpdateKeys,
+      idb,
+      kdf: KDF
+    })
+
+    await changePassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      oldPassphrase: 'webvh fallback old passphrase',
+      newPassphrase: 'webvh fallback new passphrase',
+      idb,
+      kdf: KDF
+    })
+
+    // The rebind deletes the old client-key record, which held this client's
+    // only copy of its update-key seeds: dropping them here would strand the
+    // client's did:webvh update authority for good.
+    const found = await fetchKeyring({
+      passphrase: 'webvh fallback new passphrase',
+      idb,
+      kdf: KDF
+    })
+    const recovered = found!.clientKeys!.webvhUpdateKeys!
+    expect(Array.from(recovered.updateSeed)).toEqual(
+      Array.from(webvhUpdateKeys.updateSeed)
+    )
+    expect(Array.from(recovered.stagedSeed)).toEqual(
+      Array.from(webvhUpdateKeys.stagedSeed)
+    )
+  })
+
+  it("prefers the caller's did:webvh update keys over the old record's", async () => {
+    const idb = createFakeIdb()
+    const clientSeed = randomSeed()
+    const boundKeys = {
+      updateSeed: randomSeed(),
+      stagedSeed: randomSeed()
+    }
+    await bindPassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'webvh precedence old passphrase',
+      webvhUpdateKeys: boundKeys,
+      idb,
+      kdf: KDF
+    })
+
+    // The session's live copy has moved on since the bind (a rotation), just
+    // as the live PUK can have.
+    const liveKeys = {
+      updateSeed: boundKeys.stagedSeed,
+      stagedSeed: randomSeed(),
+      pendingStagedSeed: randomSeed()
+    }
+    await changePassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      oldPassphrase: 'webvh precedence old passphrase',
+      newPassphrase: 'webvh precedence new passphrase',
+      webvhUpdateKeys: liveKeys,
+      idb,
+      kdf: KDF
+    })
+
+    const found = await fetchKeyring({
+      passphrase: 'webvh precedence new passphrase',
+      idb,
+      kdf: KDF
+    })
+    const recovered = found!.clientKeys!.webvhUpdateKeys!
+    expect(Array.from(recovered.updateSeed)).toEqual(
+      Array.from(liveKeys.updateSeed)
+    )
+    expect(Array.from(recovered.stagedSeed)).toEqual(
+      Array.from(liveKeys.stagedSeed)
+    )
+    expect(Array.from(recovered.pendingStagedSeed!)).toEqual(
+      Array.from(liveKeys.pendingStagedSeed)
+    )
+  })
+
+  it('returns a persistClientKeys closure over the new client-key record', async () => {
+    const idb = createFakeIdb()
+    const clientSeed = randomSeed()
+    const puk = await mintPuk()
+    const webvhUpdateKeys = {
+      updateSeed: randomSeed(),
+      stagedSeed: randomSeed()
+    }
+    await bindPassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'persist closure old passphrase',
+      puk,
+      webvhUpdateKeys,
+      idb,
+      kdf: KDF
+    })
+    const oldSpace = (await unlockFor('persist closure old passphrase')).spaceId
+
+    const { persistClientKeys } = await changePassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      oldPassphrase: 'persist closure old passphrase',
+      newPassphrase: 'persist closure new passphrase',
+      puk,
+      webvhUpdateKeys,
+      idb,
+      kdf: KDF
+    })
+    expect(typeof persistClientKeys).toBe('function')
+
+    // The old client-key record is gone, so the pre-change closure would have
+    // had nothing to update: a later re-wrap has to run over the new record.
+    await expect(
+      loadClientKeyRecord({ spaceId: oldSpace, idb })
+    ).resolves.toBeNull()
+
+    const rolled = {
+      updateSeed: webvhUpdateKeys.stagedSeed,
+      stagedSeed: randomSeed()
+    }
+    await persistClientKeys({ webvhUpdateKeys: rolled })
+
+    const found = await fetchKeyring({
+      passphrase: 'persist closure new passphrase',
+      idb,
+      kdf: KDF
+    })
+    const persisted = found!.clientKeys!.webvhUpdateKeys!
+    expect(Array.from(persisted.updateSeed)).toEqual(
+      Array.from(rolled.updateSeed)
+    )
+    expect(Array.from(persisted.stagedSeed)).toEqual(
+      Array.from(rolled.stagedSeed)
+    )
+    expect(found!.clientKeys!.puk!.id).toBe(puk.id)
+    expect(Array.from(found!.clientKeys!.clientSeed)).toEqual(
+      Array.from(clientSeed)
+    )
+  })
+
   it('throws WrongPassphraseError when no keyring exists for the old passphrase', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
@@ -1353,6 +1506,44 @@ describe('changePassphrase', () => {
         kdf: KDF
       })
     ).rejects.toBeInstanceOf(WrongPassphraseError)
+  })
+
+  it('verifies against the account controller, not an enrolled client did:key', async () => {
+    const idb = createFakeIdb()
+    const clientSeed = randomSeed()
+    // Every keyring record carries the ACCOUNT controller (the first client's
+    // did:key). On an enrolled second client the session's own did:key is a
+    // different value, and passing it would fail the correct passphrase.
+    const secondClientDid = 'did:key:z6MkSecondClientDidKeyForTests'
+    await bindPassphrase({
+      clientSeed,
+      controller: DATA_CONTROLLER,
+      passphrase: 'second client old passphrase',
+      idb,
+      kdf: KDF
+    })
+
+    await expect(
+      changePassphrase({
+        clientSeed,
+        controller: secondClientDid,
+        oldPassphrase: 'second client old passphrase',
+        newPassphrase: 'second client new passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).rejects.toBeInstanceOf(WrongPassphraseError)
+
+    await expect(
+      changePassphrase({
+        clientSeed,
+        controller: DATA_CONTROLLER,
+        oldPassphrase: 'second client old passphrase',
+        newPassphrase: 'second client new passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).resolves.toMatchObject({ oldPassphraseRetired: true })
   })
 
   it('rethrows an unreachable remote during verify (not a wrong passphrase)', async () => {
@@ -1493,6 +1684,39 @@ describe('verifyPassphrase', () => {
       verifyPassphrase({
         controller: DATA_CONTROLLER,
         passphrase: 'verify mismatch passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).rejects.toBeInstanceOf(WrongPassphraseError)
+  })
+
+  it('accepts the account controller, not an enrolled client did:key', async () => {
+    const idb = createFakeIdb()
+    // The enrolled-second-client case: the record's controller is the account
+    // controller, so a session passing its own did:key would be told its
+    // correct passphrase is wrong.
+    const secondClientDid = 'did:key:z6MkSecondClientDidKeyForTests'
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'second client verify passphrase',
+      idb,
+      kdf: KDF
+    })
+
+    await expect(
+      verifyPassphrase({
+        controller: DATA_CONTROLLER,
+        passphrase: 'second client verify passphrase',
+        idb,
+        kdf: KDF
+      })
+    ).resolves.toBeUndefined()
+
+    await expect(
+      verifyPassphrase({
+        controller: secondClientDid,
+        passphrase: 'second client verify passphrase',
         idb,
         kdf: KDF
       })
