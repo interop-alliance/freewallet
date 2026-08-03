@@ -54,7 +54,7 @@ export function CredentialDetail({
   cid?: string
   actions?: CredentialDetailActions
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const hasActions = !!(actions?.onDelete || actions?.share)
   const fields = useMemo(() => getDisplayFields(vc), [vc])
   const createdDate = useMemo(() => getProofCreatedIso(vc), [vc])
@@ -165,7 +165,10 @@ export function CredentialDetail({
                 header={t('credential.createdDate')}
                 value={
                   createdDate
-                    ? formatDate({ isoDate: createdDate })
+                    ? formatDate({
+                        isoDate: createdDate,
+                        locale: i18n.language
+                      })
                     : t('common.na')
                 }
               />
@@ -174,7 +177,10 @@ export function CredentialDetail({
                   header={t('credential.expirationDate')}
                   value={
                     fields.expirationDate
-                      ? formatDate({ isoDate: fields.expirationDate })
+                      ? formatDate({
+                          isoDate: fields.expirationDate,
+                          locale: i18n.language
+                        })
                       : t('common.na')
                   }
                 />

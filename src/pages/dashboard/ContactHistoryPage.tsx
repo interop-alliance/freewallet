@@ -10,6 +10,7 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { formatDateTime } from '@/lib/viewMappers/formatDate'
 
 const ACTION_COLOR: Record<
   ContactRevisionPayload['action'],
@@ -22,7 +23,7 @@ const ACTION_COLOR: Record<
 }
 
 export function ContactHistoryPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { contactId } = useParams()
   const session = useAuthStore(state => state.session)
   const [revisions, setRevisions] = useState<ContactRevisionPayload[]>([])
@@ -121,7 +122,7 @@ export function ContactHistoryPage() {
                 color={ACTION_COLOR[revision.action]}
               />
               <Typography variant="body2" color="text.secondary">
-                {new Date(revision.timestamp).toLocaleString()}
+                {formatDateTime(new Date(revision.timestamp), i18n.language)}
               </Typography>
             </Stack>
             <Typography variant="body1" sx={{ mt: 1 }}>

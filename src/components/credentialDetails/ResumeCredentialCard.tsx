@@ -80,7 +80,7 @@ export function ResumeCredentialCard({
   rawJson,
   onToggleRaw
 }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const subject = asRecord(getSubject(vc)) ?? {}
   const personName =
     resolvePersonFullName(subject) || getIssuerDetails(vc.issuer).name
@@ -121,7 +121,7 @@ export function ResumeCredentialCard({
             </Typography>
             <Typography variant="body2" sx={{ display: 'inline' }}>
               {createdDate
-                ? formatDate({ isoDate: createdDate })
+                ? formatDate({ isoDate: createdDate, locale: i18n.language })
                 : t('common.na')}
             </Typography>
           </Box>

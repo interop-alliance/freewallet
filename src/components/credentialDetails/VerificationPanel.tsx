@@ -98,7 +98,7 @@ export function VerificationPanel({
 }: {
   verification: UseVerificationReturn
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { result, loading, error, lastCheckedAt } = verification
   const pending = loading || (!result && !error)
   const summaryMessage = summaryMessageFor(error, pending, result, t)
@@ -137,7 +137,7 @@ export function VerificationPanel({
               {lastCheckedAt && (
                 <Typography sx={sx.vpLastCheckedInline}>
                   {t('verification.lastChecked', {
-                    datetime: formatDateTime(lastCheckedAt)
+                    datetime: formatDateTime(lastCheckedAt, i18n.language)
                   })}
                 </Typography>
               )}
