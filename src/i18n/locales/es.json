@@ -174,7 +174,9 @@
       "cascadeIncomplete": "La cartera se desconectó, pero algunas colecciones aún no se pudieron recifrar. Tu próximo inicio de sesión completa el recifrado automáticamente, o desconecta de nuevo para reintentarlo ahora.",
       "disconnectConfirmAction": "Desconectar cartera",
       "disconnected": "La cartera se desconectó.",
-      "lastClientHint": "Este es el único navegador inscrito en esta cuenta, así que no puede desconectarse: eso abandonaría la autoridad de actualización de la cuenta. Si pudieras perder el acceso a él, genera en su lugar un código de recuperación más abajo."
+      "lastClientHint": "Este es el único navegador inscrito en esta cuenta, así que no puede desconectarse: eso abandonaría la autoridad de actualización de la cuenta. Si pudieras perder el acceso a él, genera en su lugar un código de recuperación más abajo.",
+      "applicationsCrossPointer": "Las aplicaciones que conectaste a este monedero no son monederos; revísalas y revócalas en la",
+      "applicationsCrossPointerLink": "página de Aplicaciones"
     },
     "recovery": {
       "section": "Códigos de recuperación",
@@ -324,6 +326,10 @@
     "connectedOn": "Conectada el {{date}}",
     "connectedDateUnknown": "Fecha de conexión desconocida",
     "revoke": "Revocar acceso de la aplicación",
+    "orphanedChip": "Requiere reconexión",
+    "orphanedNotice": "El acceso de almacenamiento concedido a {{name}} ya no funciona: se configuró desde un monedero que desde entonces se desconectó de esta cuenta. Para volver a usar esta aplicación, ábrala y conéctela de nuevo a su monedero. También puede revocarla aquí para eliminar su clave de aplicación e impedir que lea lo que se escriba a partir de ahora.",
+    "clientsCrossPointer": "¿Busca los navegadores y teléfonos conectados a esta cuenta? Se gestionan en",
+    "clientsCrossPointerLink": "Ajustes > Monederos conectados",
     "detailTitle": "Detalle de la aplicación: {{name}}",
     "connected": "Conectada",
     "origin": "Origen:",
@@ -339,9 +345,11 @@
     "revokeTitle": "¿Revocar acceso de la aplicación?",
     "revokeConfirm": "Revocar el acceso elimina la clave de aplicación de {{name}} de su monedero y revoca el acceso de almacenamiento que se le concedió. Para cada colección que aprovisionó, la clave de cifrado se rota para que todo lo que se escriba a partir de ahora le resulte ilegible, aunque es posible que aún conserve copias de los datos que ya obtuvo. La aplicación tendrá que conectarse de nuevo desde cero. Las conexiones antiguas sin un permiso revocable vencerán por sí solas. Esta acción no se puede deshacer.",
     "revokeConfirmAction": "Revocar acceso",
+    "revokeConfirmOrphaned": "El acceso de almacenamiento concedido a {{name}} ya dejó de funcionar cuando se desconectó el monedero que la conectó. Revocarla ahora elimina su clave de aplicación de su monedero y rota la clave de cifrado de cada colección que aprovisionó, de modo que todo lo que se escriba a partir de ahora le resulte ilegible, aunque es posible que aún conserve copias de los datos que ya obtuvo. Esta acción no se puede deshacer.",
     "revoking": "Revocando…",
     "revokeSuccess": "Acceso de la aplicación revocado.",
     "revokeSuccessLegacy": "Aplicación eliminada. Su acceso restante vencerá por sí solo.",
+    "revokeSuccessOrphaned": "Aplicación eliminada. Su acceso de almacenamiento ya había terminado cuando se desconectó su monedero.",
     "revokeFailed": "No se pudo revocar el acceso de la aplicación. Inténtelo de nuevo."
   },
   "dashboard": {

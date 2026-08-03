@@ -8,13 +8,19 @@
  * `listConnectedApps` joins those two sources into one entry per app-key
  * credential: the credential supplies the origin, subject DID, and connected
  * date; the latest matching Login activity supplies the raw display name, the
- * grant summaries, and the last-connected timestamp. `revokeAppAccess` retires
- * an app: for each app-provisioned encrypted collection it rotates the epoch to
- * drop the app's recipient key (so the app cannot decrypt future writes) and
- * revokes those pull-axis grants indivisibly, then revokes any remaining
- * storage grants, then removes the app-key credential and records the
- * revocation. The honest ceiling stands: ciphertext the app already fetched
- * stays readable to it -- rotation protects only prospective writes.
+ * grant summaries, and the last-connected timestamp. `deriveAppGrantsState`
+ * then reads each recorded grant's delegation signer against the account
+ * document's current key set: a grant signed by a since-disconnected wallet
+ * client is already dead (the current-key-set rule), so its app lists as
+ * orphaned -- "reconnect to use again" -- rather than as live.
+ * `revokeAppAccess` retires an app: for each app-provisioned encrypted
+ * collection it rotates the epoch to drop the app's recipient key (so the app
+ * cannot decrypt future writes) and revokes those pull-axis grants
+ * indivisibly, then revokes any remaining storage grants (skipped for an
+ * orphaned app, whose grants no longer verify anyway), then removes the
+ * app-key credential and records the revocation. The honest ceiling stands:
+ * ciphertext the app already fetched stays readable to it -- rotation
+ * protects only prospective writes.
  */
 import type { StorageManager } from '@/stores/storageManager'
 import type { User } from '@/types/auth'
@@ -30,7 +36,28 @@ export interface AppGrant {
   target: string
   allowedActions: string[]
   expires: string
+  /**
+   * The verification-method id that signed the recorded delegation
+   * (`zcap.proof.verificationMethod`), when the activity recorded the full
+   * capability. Absent on legacy summary-only records.
+   */
+  signerKeyId?: string
 }
+
+/**
+ * Whether a connected app's recorded grants still verify under the
+ * current-key-set rule:
+ *
+ * - `active` -- at least one recorded grant was signed by a verification
+ *   method the account's did:webvh document currently publishes.
+ * - `orphaned` -- signers were recorded but none is in the current document:
+ *   the wallet client that connected the app has since been disconnected, so
+ *   every grant already stopped verifying with that document edit. The app
+ *   must reconnect through the ordinary App Connect flow to be usable again.
+ * - `unknown` -- nothing to check against (no signers recorded, or no
+ *   verified document available this session).
+ */
+export type AppGrantsState = 'active' | 'orphaned' | 'unknown'
 
 /**
  * A connected application, joined from its app-key credential and the latest
@@ -127,6 +154,7 @@ function loginGrants(object: unknown): AppGrant[] {
       target?: unknown
       allowedActions?: unknown
       expires?: unknown
+      zcap?: unknown
     }
     return {
       id: typeof grant.id === 'string' ? grant.id : '',
@@ -136,9 +164,85 @@ function loginGrants(object: unknown): AppGrant[] {
             (action): action is string => typeof action === 'string'
           )
         : [],
-      expires: typeof grant.expires === 'string' ? grant.expires : ''
+      expires: typeof grant.expires === 'string' ? grant.expires : '',
+      signerKeyId: grantSignerKeyId(grant.zcap)
     }
   })
+}
+
+/**
+ * The verification-method id that signed a recorded grant capability's
+ * delegation proof, when the record carries the full zcap (a delegated zcap
+ * carries exactly one `capabilityDelegation` proof, but the wire shape allows
+ * an array).
+ *
+ * @param zcap {unknown}   the recorded full capability, if any
+ * @returns {string | undefined}
+ */
+function grantSignerKeyId(zcap: unknown): string | undefined {
+  if (!zcap || typeof zcap !== 'object' || !('proof' in zcap)) {
+    return undefined
+  }
+  const { proof } = zcap as { proof?: unknown }
+  const first = Array.isArray(proof) ? proof[0] : proof
+  if (first && typeof first === 'object' && 'verificationMethod' in first) {
+    const { verificationMethod } = first as { verificationMethod?: unknown }
+    return typeof verificationMethod === 'string'
+      ? verificationMethod
+      : undefined
+  }
+  return undefined
+}
+
+/**
+ * The key-multibase fragment of a verification-method id -- the part after
+ * `#`, which names the same Ed25519 key whether the id is the did:key form
+ * (`did:key:<mb>#<mb>`) or the promoted did:webvh form (`<did>#<mb>`).
+ *
+ * @param keyId {string}
+ * @returns {string | undefined}
+ */
+function signerKeyMultibase(keyId: string): string | undefined {
+  const fragment = keyId.split('#')[1]
+  return fragment || undefined
+}
+
+/**
+ * Derives a connected app's {@link AppGrantsState} by checking each recorded
+ * grant's delegation signer against the signing keys the account's locally
+ * verified did:webvh document currently publishes (the current-key-set rule:
+ * a delegation verifies iff its verification method is in the resolved
+ * document now). Matching is on the key-multibase fragment, so a grant signed
+ * under the did:key spelling of a still-enrolled client's key stays active.
+ *
+ * @param options {object}
+ * @param options.app {ConnectedApp}
+ * @param [options.currentSigningKeys] {Set<string>}   the enrolled clients'
+ *   signing-key multibases, or undefined when no verified document is
+ *   available this session
+ * @returns {AppGrantsState}
+ */
+export function deriveAppGrantsState({
+  app,
+  currentSigningKeys
+}: {
+  app: ConnectedApp
+  currentSigningKeys?: Set<string>
+}): AppGrantsState {
+  if (!currentSigningKeys) {
+    return 'unknown'
+  }
+  const signers = app.grants
+    .map(grant => grant.signerKeyId)
+    .filter((keyId): keyId is string => !!keyId)
+  if (signers.length === 0) {
+    return 'unknown'
+  }
+  const anyCurrent = signers.some(keyId => {
+    const multibase = signerKeyMultibase(keyId)
+    return !!multibase && currentSigningKeys.has(multibase)
+  })
+  return anyCurrent ? 'active' : 'orphaned'
 }
 
 /**
@@ -251,20 +355,30 @@ export async function listConnectedApps({
  * revoked/expired) are swallowed inside those methods; only a genuine failure
  * propagates.
  *
+ * An `orphaned` app (see {@link AppGrantsState}) skips the per-grant server
+ * revocation entirely: its grants already stopped verifying when the signing
+ * client's verification method left the account document, so the POSTs would
+ * only count into `skipped`. The epoch rotation and the credential deletion
+ * remain meaningful and still run.
+ *
  * @param options {object}
  * @param options.storage {StorageManager}
  * @param options.user {User}   the session user (activity actor)
  * @param options.app {ConnectedApp}
+ * @param [options.grantsState] {AppGrantsState}   the derived grant state
+ *   (default `unknown`, which revokes like `active`)
  * @returns {Promise<{ revoked: number; skipped: number }>}   the grant outcome
  */
 export async function revokeAppAccess({
   storage,
   user,
-  app
+  app,
+  grantsState = 'unknown'
 }: {
   storage: StorageManager
   user: User
   app: ConnectedApp
+  grantsState?: AppGrantsState
 }): Promise<{ revoked: number; skipped: number }> {
   // Rotate the epoch off the app for each app-provisioned encrypted collection
   // (and revoke those collections' pull-axis grants) before anything else, so a
@@ -273,10 +387,13 @@ export async function revokeAppAccess({
     origin: app.origin,
     subjectDid: app.subjectDid
   })
-  const outcome = await storage.revokeAppGrants({
-    origin: app.origin,
-    subjectDid: app.subjectDid
-  })
+  const outcome =
+    grantsState === 'orphaned'
+      ? { revoked: 0, skipped: 0 }
+      : await storage.revokeAppGrants({
+          origin: app.origin,
+          subjectDid: app.subjectDid
+        })
   await storage.deleteCredential({ cid: app.cid })
   await storage.addHistoryAppRevoke({
     user,
