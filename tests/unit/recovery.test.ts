@@ -5,7 +5,7 @@
  * miss, and a network failure are three DIFFERENT states -- "could not
  * check" must never read as "no account"), the round-trip through a real
  * recovery record (wallet-core's codec under the code's real unlock
- * identity), the issuance gate (`canIssueRecoveryCode` restates FW-10's
+ * identity), the issuance gate (`canIssueRecoveryCode` restates the retired
  * `profile.dataSeed` gate as "an enrolled client holding its key material"),
  * and the registry bookkeeping (add, replace-on-recovery). The remote unlock
  * Space read is mocked at the wallet-core seam; every derivation (HKDF, the

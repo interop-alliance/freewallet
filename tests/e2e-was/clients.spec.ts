@@ -21,13 +21,13 @@ const APP_URL = 'http://localhost:5274'
 
 /**
  * Opens a fresh, cold browser context (empty IndexedDB and localStorage) to
- * stand in for a second machine's browser. Callers must close the returned
- * page's context.
+ * stand in for a second wallet client (a fresh browser profile). Callers
+ * must close the returned page's context.
  *
  * @param browser {Browser}
  * @returns {Promise<Page>}
  */
-async function coldDevicePage(browser: Browser): Promise<Page> {
+async function coldClientPage(browser: Browser): Promise<Page> {
   const context = await browser.newContext({ baseURL: APP_URL })
   return context.newPage()
 }
@@ -76,20 +76,20 @@ test.describe('The Settings connected-wallets surface', () => {
 
     // Client 2 (cold profile): the not-enrolled login surfaces the connect
     // flow; the key set is minted locally and the code carries public halves.
-    const secondDevice = await coldDevicePage(browser)
+    const secondClient = await coldClientPage(browser)
     try {
-      await secondDevice.goto('/#/login')
+      await secondClient.goto('/#/login')
       await fillSettled(
-        secondDevice.locator('input[type="password"]'),
+        secondClient.locator('input[type="password"]'),
         passphrase
       )
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'Log in', exact: true })
         .click()
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'Connect this browser' })
         .click({ timeout: 30_000 })
-      const codeField = secondDevice.getByTestId('enroll-connect-code')
+      const codeField = secondClient.getByTestId('enroll-connect-code')
       await expect(codeField).toBeVisible({ timeout: 20_000 })
       const code = await codeField.inputValue()
 
@@ -109,10 +109,10 @@ test.describe('The Settings connected-wallets surface', () => {
       await expect(page.getByText('Office laptop')).toBeVisible()
 
       // Client 2 completes the ceremony and lands enrolled.
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'I approved it -- finish connecting' })
         .click()
-      await expect(secondDevice).toHaveURL(/#\/dashboard/, {
+      await expect(secondClient).toHaveURL(/#\/dashboard/, {
         timeout: 60_000
       })
 
@@ -133,20 +133,20 @@ test.describe('The Settings connected-wallets surface', () => {
       // The revoked client's next action fails: its stored keys no longer
       // appear in the document, so its login is refused rather than reaching
       // the dashboard.
-      await secondDevice.goto('/#/login')
+      await secondClient.goto('/#/login')
       await fillSettled(
-        secondDevice.locator('input[type="password"]'),
+        secondClient.locator('input[type="password"]'),
         passphrase
       )
-      await secondDevice
+      await secondClient
         .getByRole('button', { name: 'Log in', exact: true })
         .click()
-      await expect(secondDevice.getByRole('alert')).toBeVisible({
+      await expect(secondClient.getByRole('alert')).toBeVisible({
         timeout: 60_000
       })
-      expect(secondDevice.url()).not.toMatch(/#\/dashboard/)
+      expect(secondClient.url()).not.toMatch(/#\/dashboard/)
     } finally {
-      await secondDevice.context().close()
+      await secondClient.context().close()
     }
   })
 })

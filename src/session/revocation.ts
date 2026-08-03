@@ -41,17 +41,18 @@ import {
 import {
   pukVaultKeys,
   readPukRoster,
+  rosterRecipientKid,
   rotatePukRoster
 } from '@interop/wallet-core/keys'
 import { isWebvhDid } from '@interop/wallet-core/webvh'
 import { WAS_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
-import { savePukEpochPin } from '@/lib/sessionKey'
+import { loadPukEpochPin, savePukEpochPin } from '@/lib/sessionKey'
 import {
   getUnlockMethods,
   rewrapUnlockMethodsRecord
 } from '@/session/unlockMethods'
-import { remintRecoveryDelegations, verifyAccountLog } from '@/session/recovery'
+import { remintRecoveryDelegations } from '@/session/recovery'
 import {
   cascadeCollectionsToPuk,
   type PukCascadeResult
@@ -109,18 +110,6 @@ function requireRevocationPreconditions(session: Session) {
     clientWebvhKeys: profile.clientWebvhKeys,
     clientKeyAgreementKey: profile.clientKeyAgreementKey
   }
-}
-
-/**
- * The revoked client's roster kid: its key-agreement key's id exactly as its
- * own `agentsFromSeed` derives it (`did:key:<ed-multibase>#<x-multibase>`) --
- * the same shape the enrollment ceremony minted its wrap under.
- *
- * @param client {RevokedClientKeys}
- * @returns {string}
- */
-function revokedRosterKid(client: RevokedClientKeys): string {
-  return `did:key:${client.signingKeyMultibase}#${client.keyAgreementKeyMultibase}`
 }
 
 /**
@@ -185,9 +174,11 @@ export async function revokeEnrolledClient({
     )
   }
 
-  // 1. The document edit -- the pull axis everywhere, first.
-  await revokeWebvhClient({
-    idStore: remoteStore,
+  // 1. The document edit -- the pull axis everywhere, first. It resolves the
+  // document as it now stands, which is what step 2 resolves its remaining
+  // recipients from (no re-fetch of the log this call just extended).
+  const { doc } = await revokeWebvhClient({
+    idStore: remoteStore.webvhIdStore(),
     updateKeys: clientWebvhKeys,
     revokedClient: client,
     knownLatentHashes
@@ -195,17 +186,17 @@ export async function revokeEnrolledClient({
 
   // 2. The PUK rotation, recipients resolved from the just-updated verified
   // document.
-  const { doc } = await verifyAccountLog({ pointer })
   const rosterStore = remoteStore.pukRosterStore()
   await rotatePukRoster({
     store: rosterStore,
     document: doc,
-    retireRecipientId: revokedRosterKid(client)
+    retireRecipientId: rosterRecipientKid(client)
   })
   const read = await readPukRoster({
     store: rosterStore,
     puk: session.profile.puk,
-    clientKeyAgreementKey
+    clientKeyAgreementKey,
+    pinnedEpochId: await loadPukEpochPin({ spaceId: pointer.spaceId, idb })
   })
   if (!read) {
     throw new Error('The account has no PUK roster; nothing to rotate.')
@@ -213,6 +204,7 @@ export async function revokeEnrolledClient({
   await savePukEpochPin({
     spaceId: pointer.spaceId,
     epochId: read.latestEpochId,
+    epochIds: (read.descriptor.epochs ?? []).map(epoch => epoch.id),
     idb
   })
   if (read.rotated) {

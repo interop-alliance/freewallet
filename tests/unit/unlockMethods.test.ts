@@ -64,8 +64,10 @@ vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
 }))
 
 import {
+  adoptPassphraseRebind,
   backfillPassphraseUnlockMethod,
   getUnlockMethods,
+  managementZcapClient,
   putUnlockMethods,
   revokeUnlockMethod,
   rewrapUnlockMethodsRecord,
@@ -472,6 +474,61 @@ describe('revokeUnlockMethod', () => {
   })
 })
 
+describe('managementZcapClient', () => {
+  it('signs under the did:key for a grant delegated to this client', async () => {
+    const session = await makeSession()
+    const keyAgent = await CapabilityAgent.fromSeed({
+      seed: new Uint8Array(32).fill(9),
+      handle: 'test-client',
+      keyName: 'test-client-key'
+    })
+    session.profile.keyAgent = keyAgent as never
+    const capability = {
+      ...FAKE_CAP,
+      controller: keyAgent.id
+    } as unknown as IZcap
+
+    const client = managementZcapClient({ session, capability })
+    expect(client).not.toBe(session.profile.zcapClient)
+    const { invocationSigner } = client as unknown as {
+      invocationSigner: { id: string }
+    }
+    expect(invocationSigner.id.startsWith(keyAgent.id)).toBe(true)
+  })
+
+  it('signs with the session root client for an account-DID grant', async () => {
+    // A promoted account's grant names the did:webvh; the session's root
+    // zcapClient is what signs under the promoted verification method.
+    const session = await makeSession()
+    const keyAgent = await CapabilityAgent.fromSeed({
+      seed: new Uint8Array(32).fill(9),
+      handle: 'test-client',
+      keyName: 'test-client-key'
+    })
+    session.profile.keyAgent = keyAgent as never
+    const capability = {
+      ...FAKE_CAP,
+      controller: 'did:webvh:QmScid:was.example.test:space:space-1:id'
+    } as unknown as IZcap
+
+    expect(managementZcapClient({ session, capability })).toBe(
+      session.profile.zcapClient
+    )
+  })
+
+  it('falls back to the session root client with no keyAgent held', async () => {
+    const session = await makeSession()
+    const capability = {
+      ...FAKE_CAP,
+      controller: 'did:key:z6MkSomeoneElse'
+    } as unknown as IZcap
+
+    expect(managementZcapClient({ session, capability })).toBe(
+      session.profile.zcapClient
+    )
+  })
+})
+
 describe('backfillPassphraseUnlockMethod', () => {
   it('is a no-op without a passphrase unlockMethod in the profile', async () => {
     const idb = createFakeIdb()
@@ -591,6 +648,47 @@ describe('backfillPassphraseUnlockMethod', () => {
     const result = await backfillPassphraseUnlockMethod({ session, idb })
     expect(result).not.toBeNull()
     expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+  })
+})
+
+describe('adoptPassphraseRebind', () => {
+  it('repoints the session so the backfill follows the passphrase change', async () => {
+    const idb = createFakeIdb()
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'old-ps-space'
+    })
+    // The registry as it stood before the change: the passphrase entry names
+    // the (now deleted) old unlock Space.
+    await backfillPassphraseUnlockMethod({
+      session,
+      idb,
+      createIfMissing: true
+    })
+
+    const persistClientKeys = vi.fn(async () => {})
+    adoptPassphraseRebind({
+      session,
+      unlockSpaceId: 'new-ps-space',
+      manageCapability: FAKE_CAP,
+      persistClientKeys
+    })
+    // Later re-wraps run over the new client-key record, not the deleted one.
+    expect(session.profile.persistClientKeys).toBe(persistClientKeys)
+
+    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const entry = result!.methods.find(
+      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+    )
+    expect(entry!.unlockSpaceId).toBe('new-ps-space')
+    expect(entry!.manageCapability).toEqual(FAKE_CAP)
+
+    // A second run leaves it there: the entry is never rewritten back to the
+    // deleted unlock Space.
+    const again = await backfillPassphraseUnlockMethod({ session, idb })
+    const stillThere = again!.methods.find(
+      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+    )
+    expect(stillThere!.unlockSpaceId).toBe('new-ps-space')
   })
 })
 

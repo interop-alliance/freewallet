@@ -12,8 +12,8 @@
  *   session's own client.
  * - `renameAccountClient` -- writes one label (chosen at enrollment approval,
  *   editable afterwards; the document carries key material, never labels).
- * - `disconnectAccountClient` -- drives the FW-66 revocation cascade from a
- *   listed row (the row with all three key members present is exactly a
+ * - `disconnectAccountClient` -- drives the client-revocation epoch cascade
+ *   from a listed row (the row with all three key members present is exactly a
  *   `RevokedClientKeys`), then drops the disconnected client's label as
  *   hygiene.
  */
@@ -21,6 +21,7 @@ import {
   clientSigningKeyMultibase,
   isWebvhDid,
   listEnrolledWebvhClients,
+  verifyAccountLog,
   type EnrolledWebvhClient
 } from '@interop/wallet-core/webvh'
 import {
@@ -29,7 +30,6 @@ import {
   setClientLabel
 } from '@interop/wallet-core/keys'
 import type { Session } from '@/types/auth'
-import { verifyAccountLog } from '@/session/recovery'
 import {
   revokeEnrolledClient,
   type RevocationOutcome
@@ -78,7 +78,8 @@ function requireClientListing(session: Session) {
         'configured storage server.'
     )
   }
-  return { remoteStore, pointer }
+  // The did:webvh guard above is what makes `did` a string here.
+  return { remoteStore, pointer: { ...pointer, did: pointer.did } }
 }
 
 /**
@@ -97,7 +98,11 @@ export async function listAccountClients({
   session: Session
 }): Promise<AccountClientView[]> {
   const { remoteStore, pointer } = requireClientListing(session)
-  const { log } = await verifyAccountLog({ pointer })
+  const { log } = await verifyAccountLog({
+    did: pointer.did,
+    spaceId: pointer.spaceId,
+    host: pointer.host
+  })
   const clients = listEnrolledWebvhClients({ log })
 
   const { labels } = await readClientLabels({
@@ -142,7 +147,7 @@ export async function renameAccountClient({
 }
 
 /**
- * Disconnects an enrolled wallet client: the full FW-66 cascade
+ * Disconnects an enrolled wallet client: the full revocation cascade
  * (`revokeEnrolledClient` -- document edit, PUK rotation, collection
  * re-epoch, recovery re-mints, live adoption), then the label dropped as
  * best-effort hygiene. Refuses a row whose active update key the log

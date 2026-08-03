@@ -120,9 +120,10 @@ export interface ControllerProfile {
   // the PUK, whose recipient zero stays the seed-derived vault KAK until they
   // are re-provisioned. Never persisted unwrapped.
   puk?: Puk
-  // Which unlock method produced this session, and the management zcap it
-  // delegated to the data identity at bind time. In-memory only, never
-  // persisted: it lets Settings backfill the unlock-methods registry
+  // Which unlock method produced this session -- or, after a same-session
+  // passphrase change, the freshest passphrase bind -- and the management
+  // zcap it delegated to the data identity at bind time. In-memory only,
+  // never persisted: it lets Settings backfill the unlock-methods registry
   // (recording the passphrase entry's unlock Space and its management
   // capability) without re-prompting for the secret.
   unlockMethod?: {

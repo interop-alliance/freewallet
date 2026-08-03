@@ -140,7 +140,7 @@ async function publishDidDocument({
   did: string
   keys: DidWebKeyMap
 }): Promise<void> {
-  await remoteStore.putIdResource({
+  await remoteStore.webvhIdStore().putIdResource({
     resourceId: DID_DOCUMENT_RESOURCE,
     content: assembleDidDocument({ did, keys }),
     contentType: 'application/did+json'
@@ -201,7 +201,7 @@ export async function ensureDidWeb({
     // keys.json is the recovery anchor: the keys already exist. Confirm the
     // published document; republish it (from the same keys) if a torn earlier
     // run wrote keys.json but not did.json. Never regenerate here.
-    const didDoc = await remoteStore.getIdResource({
+    const didDoc = await remoteStore.webvhIdStore().getIdResource({
       resourceId: DID_DOCUMENT_RESOURCE
     })
     if (!didDoc) {
@@ -229,7 +229,7 @@ export async function ensureDidWeb({
       category: 'keyAgreement'
     })
   }
-  await remoteStore.putKeyMap({ content: keys })
+  await remoteStore.webvhIdStore().putKeyMap({ content: keys })
   await publishDidDocument({ remoteStore, did, keys })
   return keys
 }

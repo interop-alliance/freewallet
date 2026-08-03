@@ -63,14 +63,17 @@
   revoked client already fetched stays readable to it.
 
 - **The cascade-completion sweep**: every login now re-checks, in the
-  background, that each encrypted collection's current key epoch names the
-  roster's current per-user key, and re-epochs any that a crashed
-  revocation or recovery cascade left stranded. Staleness is detected from
+  background, that the account's per-user key is wrapped to exactly the
+  wallets its public account document keys, and that each encrypted
+  collection's current key epoch names the current per-user key -- rotating
+  away from a wallet that a crashed disconnect removed from the document but
+  not from the key roster, and re-epoching any collection a crashed
+  revocation or recovery cascade left stranded. Both are detected from
   durable state alone (no checkpoint resource anywhere), so a cascade one
   client never got to finish is completed by the next client to log in --
-  and on a healthy account the sweep reads the collection descriptors and
-  writes nothing. Best-effort by design: a failed sweep never fails the
-  login and simply converges on the next run.
+  and on a healthy account the sweep reads the descriptors and writes
+  nothing. Best-effort by design: a failed sweep never fails the login and
+  simply converges on the next run.
 
 - A **per-user key (PUK)** is now minted at wallet provisioning:
   client-side, never server-held, replacing the passphrase-seed-derived
@@ -98,6 +101,11 @@
   authorized-but-blind window, and every stage is idempotent -- re-running
   the same code after an interruption converges without forking the account
   log. See ARCHITECTURE.md ("The client enrollment ceremony").
+- The CHAPI popup pages now ask for unpartitioned IndexedDB through the
+  Storage Access API's handle extension (inside the login submit gesture),
+  so an enrolled browser's key record is reachable from the popup and it can
+  sign in normally. Browsers without the extension fall back to the
+  partitioned bucket and the popup's not-enrolled state, as before.
 - On signup, pre-seed the user's Contacts collection with default records
   (InteropAlliance.org and the user themselves) and their DIDs.
 - A capability request can now ask to **share** one of the wallet's own
@@ -133,6 +141,12 @@
   and revokes the capability together -- is the way a share ends.
 
 ### Changed
+
+- The account-log verification step, the WAS-backed stores behind the
+  did:webvh log and the connected-wallet names, and the roster kid a wallet's
+  key wrap is filed under now come from `@interop/wallet-core` instead of
+  this app's own copies, so every wallet on an account agrees on them by
+  construction. No behavior change.
 
 - **BREAKING**: All BYOE-layer wire vocabulary moves from the retired
   `urn:was:` / `urn:freewallet:vocab#` schemes to the shared

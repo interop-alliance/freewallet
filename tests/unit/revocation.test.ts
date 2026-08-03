@@ -29,7 +29,9 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
   revokeWebvhClient: vi.fn(async () => {
     state.calls.push('revokeWebvhClient')
-    return { did: 'did:webvh:unused' }
+    // The edit resolves the document as it now stands; the roster rotation
+    // that follows resolves its recipients from exactly this.
+    return { did: 'did:webvh:unused', doc: { id: 'did:webvh:doc' } }
   })
 }))
 
@@ -52,6 +54,11 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
 vi.mock('@/lib/sessionKey', () => ({
   savePukEpochPin: vi.fn(async () => {
     state.calls.push('savePukEpochPin')
+  }),
+  loadPukEpochPin: vi.fn(async () => {
+    state.calls.push('loadPukEpochPin')
+    // OLD_PUK.id, restated: the factory is hoisted above the consts.
+    return 'did:key:z6LSOldPuk'
   })
 }))
 
@@ -63,10 +70,6 @@ vi.mock('@/session/unlockMethods', () => ({
 }))
 
 vi.mock('@/session/recovery', () => ({
-  verifyAccountLog: vi.fn(async () => {
-    state.calls.push('verifyAccountLog')
-    return { doc: { id: 'did:webvh:doc' } }
-  }),
   remintRecoveryDelegations: vi.fn(async () => {
     state.calls.push('remintRecoveryDelegations')
     return { reminted: 0, skipped: 0 }
@@ -83,11 +86,12 @@ vi.mock('@/session/pukCascade', () => ({
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import { revokeWebvhClient } from '@interop/wallet-core/webvh'
 import {
+  PukRosterContinuityError,
   pukVaultKeys,
   readPukRoster,
   rotatePukRoster
 } from '@interop/wallet-core/keys'
-import { savePukEpochPin } from '@/lib/sessionKey'
+import { loadPukEpochPin, savePukEpochPin } from '@/lib/sessionKey'
 import {
   getUnlockMethods,
   rewrapUnlockMethodsRecord
@@ -150,7 +154,10 @@ function sessionWith(
   const remoteStore =
     'remoteStore' in overrides
       ? overrides.remoteStore
-      : { pukRosterStore: vi.fn(() => ({ rosterStore: true })) }
+      : {
+          pukRosterStore: vi.fn(() => ({ rosterStore: true })),
+          webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true }))
+        }
   return {
     user: { id: 'did:key:z6MkRevokingClient' },
     isGuest: false,
@@ -272,8 +279,8 @@ describe('the cascade, rotated path', () => {
 
     expect(state.calls).toEqual([
       'revokeWebvhClient',
-      'verifyAccountLog',
       'rotatePukRoster',
+      'loadPukEpochPin',
       'readPukRoster',
       'savePukEpochPin',
       'persistClientKeys',
@@ -301,13 +308,14 @@ describe('the cascade, rotated path', () => {
     await revokeEnrolledClient({ session, client: REVOKED })
 
     expect(vi.mocked(revokeWebvhClient)).toHaveBeenCalledWith({
-      idStore: session.storage.remoteStore,
+      idStore: { isWebvhIdStore: true },
       updateKeys: session.profile.clientWebvhKeys,
       revokedClient: REVOKED,
       knownLatentHashes: []
     })
     // The retired kid is the revoked client's own key-agreement key id, as
-    // its agentsFromSeed derives it.
+    // its agentsFromSeed derives it, and the rotation resolves its recipients
+    // from the document the edit itself resolved.
     expect(vi.mocked(rotatePukRoster)).toHaveBeenCalledWith(
       expect.objectContaining({
         document: { id: 'did:webvh:doc' },
@@ -379,6 +387,29 @@ describe('the cascade, rotated path', () => {
     await expect(
       revokeEnrolledClient({ session: sessionWith(), client: REVOKED })
     ).rejects.toThrow('no PUK roster')
+  })
+
+  it('threads the locally pinned epoch into the roster read', async () => {
+    await revokeEnrolledClient({ session: sessionWith(), client: REVOKED })
+    expect(vi.mocked(loadPukEpochPin)).toHaveBeenCalledWith(
+      expect.objectContaining({ spaceId: POINTER.spaceId })
+    )
+    expect(vi.mocked(readPukRoster)).toHaveBeenCalledWith(
+      expect.objectContaining({ pinnedEpochId: OLD_PUK.id })
+    )
+  })
+
+  it('a rolled-back roster refuses and never moves the pin', async () => {
+    // The threaded pin makes wallet-core's continuity check bite: a served
+    // roster older than the pinned epoch throws instead of being adopted.
+    vi.mocked(readPukRoster).mockImplementation(async () => {
+      state.calls.push('readPukRoster')
+      throw new PukRosterContinuityError({ pinnedEpochId: OLD_PUK.id })
+    })
+    await expect(
+      revokeEnrolledClient({ session: sessionWith(), client: REVOKED })
+    ).rejects.toBeInstanceOf(PukRosterContinuityError)
+    expect(vi.mocked(savePukEpochPin)).not.toHaveBeenCalled()
   })
 })
 

@@ -475,6 +475,22 @@ export class StorageManager {
     keyResolver: IKeyResolver
   }): Promise<void> {
     this.#vaultKeys = { keyAgreementKey, keyResolver }
+    await this.refreshEncryptedDescriptors()
+  }
+
+  /**
+   * Refetches every encrypted collection's descriptor and rebuilds + swaps
+   * the ciphers under the vault keys already held -- the tail of the
+   * cascade-completion sweep, which can move a collection's current epoch
+   * (completing a cascade another client crashed partway through) AFTER this
+   * session's ciphers were built at login: without the refresh, every later
+   * write would stay sealed under the retired epoch the revoked party can
+   * still decrypt. The app-collection cipher caches are dropped too and
+   * rebuild lazily on next decrypt.
+   *
+   * @returns {Promise<void>}
+   */
+  async refreshEncryptedDescriptors(): Promise<void> {
     this.#appCiphers = {}
     this.#appDescriptors = {}
     if (this.#remoteStore && this.#descriptorCache) {
@@ -766,7 +782,7 @@ export class StorageManager {
    * plaintext bodies, non-standard collections, a locked vault, or an
    * envelope that fails to decrypt (logged, not thrown), letting callers fall
    * back to showing the raw envelope. An `UnknownEpochError` (a rekey on
-   * another device the cached descriptor has not caught up to) drives the same
+   * another client the cached descriptor has not caught up to) drives the same
    * one-time descriptor refresh + retry `listCredentials` / `listHistoryItems` use,
    * so a freshly-rekeyed resource is not rendered as raw JWE until re-login.
    *
@@ -1051,16 +1067,21 @@ export class StorageManager {
    * @param options {object}
    * @param options.user {User}
    * @param [options.profile] {ControllerProfile}
+   * @param [options.idb] {IDBFactory}   an explicit IndexedDB factory for the
+   *   session-key caches (the pin stores), where the default first-party
+   *   database is not the right home
    * @returns {Promise<void>}
    */
   ensureUserCollections({
     user,
-    profile
+    profile,
+    idb
   }: {
     user: User
     profile?: ControllerProfile
+    idb?: IDBFactory
   }): Promise<void> {
-    this.#provisioning = this.#provisionUserCollections({ user, profile })
+    this.#provisioning = this.#provisionUserCollections({ user, profile, idb })
     return this.#provisioning
   }
 
@@ -1107,13 +1128,23 @@ export class StorageManager {
 
     if (remote.controller === did) {
       // Already bound to the promoted controller (the pointer path): one
-      // describe confirms the server agrees; a null answer (404-shaped for
-      // unauthorized) means the promotion PUT never landed -- retry it
-      // signed by the stored did:key controller, then rebind back.
-      const description = (await remote
-        .spaceHandle()
-        .describe()
-        .catch(() => null)) as { controller?: string } | null
+      // describe confirms the server agrees; a null answer (was-client maps
+      // 404 -- the shape unauthorized reads take -- to null) means the
+      // promotion PUT never landed, and the promotion is retried signed by
+      // the stored did:key controller. A THROWN describe (a 5xx, a network
+      // flake) is not evidence either way: re-PUTting with the demoted key
+      // on a hiccup would be wrong, and this is the one provisioning step
+      // awaited un-guarded -- so a transport failure warns and skips like
+      // the neighbouring steps, and the next login re-checks.
+      let description: { controller?: string } | null
+      try {
+        description = (await remote.spaceHandle().describe()) as {
+          controller?: string
+        } | null
+      } catch (err) {
+        console.warn('Could not confirm the promoted Space controller:', err)
+        return
+      }
       if (description?.controller === did) {
         this.#promoteKeystore({ profile, did })
         return
@@ -1199,10 +1230,12 @@ export class StorageManager {
 
   async #provisionUserCollections({
     user,
-    profile
+    profile,
+    idb
   }: {
     user: User
     profile?: ControllerProfile
+    idb?: IDBFactory
   }) {
     await this.#localStore.ensureUserCollections({ user })
     // Re-key any plaintext rows a pre-encryption version of the app left in
@@ -1220,8 +1253,15 @@ export class StorageManager {
       // start; confirm the server agrees before any signed upsert runs, and
       // heal a signup that tore between the pointer backfill and the
       // promotion PUT (the requests below would otherwise all be refused).
+      // Warn-and-continue like the neighbouring steps: an unpromoted
+      // controller degrades the signed requests below, but a promotion
+      // hiccup must not fail the whole login (the next login re-heals).
       if (profile && isWebvhDid(profile.accountPointer?.did)) {
-        await this.ensurePromotedController({ profile })
+        try {
+          await this.ensurePromotedController({ profile })
+        } catch (err) {
+          console.warn('Space controller promotion failed:', err)
+        }
       }
       await this.#remoteStore.ensureUserCollections({ user })
       // Ensure the PUK wrap-set roster (`key-map/puk.json`) exists,
@@ -1238,10 +1278,20 @@ export class StorageManager {
             puk: profile.puk,
             clientKeyAgreementKey: profile.clientKeyAgreementKey
           })
-          if (descriptor.currentEpoch) {
+          // Pin only an epoch this session already holds the key for: the
+          // ensure serves an existing roster back UNVALIDATED (no epochsMac
+          // check, no continuity check, no unwrap), so a served epoch id is
+          // not evidence. The session's own PUK is -- it came from the checked
+          // login-time read or the local client-key record -- and the save
+          // itself is monotonic, so a rolled-back descriptor can never drag
+          // the pin backward and a fabricated one can never push it onto an
+          // epoch no enrolled client authenticated.
+          if (descriptor.currentEpoch === profile.puk.id) {
             await savePukEpochPin({
               spaceId: this.#remoteStore.spaceId,
-              epochId: descriptor.currentEpoch
+              epochId: descriptor.currentEpoch,
+              epochIds: (descriptor.epochs ?? []).map(epoch => epoch.id),
+              idb
             })
           }
         } catch (err) {
@@ -1292,7 +1342,7 @@ export class StorageManager {
                 )
               }
               const { did: webvhDid } = await ensureDidWebvh({
-                idStore: this.#remoteStore,
+                idStore: this.#remoteStore.webvhIdStore(),
                 wasServerUrl: this.#remoteStore.storageServerUrl,
                 spaceId: this.#remoteStore.spaceId,
                 didWebKeys: keys as DidWebKeyMapV2,

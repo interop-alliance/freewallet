@@ -23,15 +23,17 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { useInfoBox } from '@/hooks/useInfoBox'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { getFileUrl } from '@interop/did-method-webvh'
-import { rotateWebvhUpdateKey } from '@interop/wallet-core/webvh'
+import { isWebvhDid, rotateWebvhUpdateKey } from '@interop/wallet-core/webvh'
 import {
   bindPassphrase,
   changePassphrase,
   deleteKeyring,
+  unlockManagementGrantee,
   verifyPassphrase,
   WrongPassphraseError
 } from '@/session/keyring'
 import {
+  adoptPassphraseRebind,
   backfillPassphraseUnlockMethod,
   canRevokeWithoutCeremony,
   enrollPasskey,
@@ -210,14 +212,32 @@ export function SettingsPage() {
     setPassphraseChangeSuccess(null)
     setPassphraseChangeError(null)
     try {
-      const { oldPassphraseRetired, unlockSpaceId, manageCapability } =
-        await changePassphrase({
-          clientSeed: seed,
-          controller: session.user.id,
-          oldPassphrase,
-          newPassphrase,
-          puk: profile.puk
-        })
+      // The keyring record is bound under the ACCOUNT controller (the first
+      // client's did:key) -- on an enrolled second client it differs from this
+      // client's `user.id`, so verification must match against it.
+      const {
+        oldPassphraseRetired,
+        unlockSpaceId,
+        manageCapability,
+        persistClientKeys
+      } = await changePassphrase({
+        clientSeed: seed,
+        controller: profile.accountController ?? session.user.id,
+        oldPassphrase,
+        newPassphrase,
+        puk: profile.puk,
+        webvhUpdateKeys: profile.clientWebvhKeys
+      })
+      // The rebind retired the unlock identity this session logged in under:
+      // swap the live profile onto the new one, so later re-wraps (rolled
+      // update-key seeds, a rotated PUK) hit the new client-key record and the
+      // registry backfill never repoints at the deleted unlock Space.
+      adoptPassphraseRebind({
+        session,
+        unlockSpaceId,
+        manageCapability,
+        persistClientKeys
+      })
       setOldPassphrase('')
       setNewPassphrase('')
       setPassphraseChangeSuccess(oldPassphraseRetired)
@@ -402,20 +422,28 @@ export function SettingsPage() {
 
       // Run the ceremony, bind this client's key set under the passkey's
       // unlock identity, and build the registry entry. Delegating management
-      // to the account did:key lets Settings later revoke this passkey
-      // without a tap on the (possibly lost) authenticator.
+      // to the account identity lets Settings later revoke this passkey
+      // without a tap on the (possibly lost) authenticator -- from any
+      // enrolled client, since a promoted account's grant names the
+      // did:webvh. The record still binds under the account controller (the
+      // FIRST client's did:key) -- on an enrolled second client it differs
+      // from this client's `user.id`.
+      const accountController = profile.accountController ?? session.user.id
       const { entry } = await enrollPasskey({
         clientSeed: seed,
         puk: profile.puk,
         webvhUpdateKeys: profile.clientWebvhKeys,
         pointer: profile.accountPointer,
-        controller: session.user.id,
+        controller: accountController,
         userHandle: base64urlnopad.decode(registry.userHandle),
         userName,
         locale: i18n.language,
         email: session.user.email,
         excludeCredentialIds,
-        delegateManagementTo: session.user.id,
+        delegateManagementTo: unlockManagementGrantee({
+          pointer: profile.accountPointer,
+          controller: accountController
+        }),
         promptForPrfRetry
       })
 
@@ -554,15 +582,25 @@ export function SettingsPage() {
     setAddPassphraseError(false)
     setAddPassphraseSuccess(false)
     try {
+      // Bind under the ACCOUNT controller -- the first client's did:key,
+      // which differs from this client's `user.id` on an enrolled second
+      // client. Management is delegated to the account identity (the
+      // did:webvh on a promoted account), so any enrolled client can later
+      // revoke this method.
+      const accountController =
+        session.profile.accountController ?? session.user.id
       const { unlockSpaceId, manageCapability } = await bindPassphrase({
         clientSeed: seed,
-        controller: session.user.id,
+        controller: accountController,
         passphrase: addPassphrase,
         email: session.user.email,
         puk: session.profile.puk,
         webvhUpdateKeys: session.profile.clientWebvhKeys,
         pointer: session.profile.accountPointer,
-        delegateManagementTo: session.user.id
+        delegateManagementTo: unlockManagementGrantee({
+          pointer: session.profile.accountPointer,
+          controller: accountController
+        })
       })
       const base: UnlockMethodsRecord = unlockRegistry ?? {
         version: 1,
@@ -697,7 +735,7 @@ export function SettingsPage() {
       // in-memory profile) before and after the log extends, so a crash
       // mid-rotation resumes from durable state.
       await rotateWebvhUpdateKey({
-        idStore: remoteStore,
+        idStore: remoteStore.webvhIdStore(),
         updateKeys,
         persistUpdateKeys: async next => {
           await persistClientKeys({ webvhUpdateKeys: next })
@@ -733,8 +771,10 @@ export function SettingsPage() {
       // must not delete data. Guests have no keyring, so this is skipped.
       if (!isGuest) {
         try {
+          // Match against the ACCOUNT controller the keyring record was bound
+          // under (differs from `user.id` on an enrolled second client).
           await verifyPassphrase({
-            controller: session.user.id,
+            controller: session.profile.accountController ?? session.user.id,
             passphrase: deletePassphrase
           })
         } catch (err) {
@@ -1198,6 +1238,10 @@ export function SettingsPage() {
         {session && !session.isGuest && (
           <>
             <Divider />
+            {hasRemoteStorage &&
+              !isWebvhDid(session.profile.accountPointer?.did) && (
+                <Alert severity="info">{t('settings.unpromotedAccount')}</Alert>
+              )}
             <EnrolledClientsSection session={session} />
             <Divider />
             <RecoveryCodesSection session={session} />

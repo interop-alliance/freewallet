@@ -34,7 +34,11 @@ import { AuthPageHeader } from '@/components/AuthPageHeader'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
 import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
-import { bindPassphrase, bindUnlockSecret } from '@/session/keyring'
+import {
+  bindPassphrase,
+  bindUnlockSecret,
+  unlockManagementGrantee
+} from '@/session/keyring'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import { mintClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
 import { mintPuk } from '@interop/wallet-core/keys'
@@ -220,7 +224,11 @@ export function SignupPage() {
         if (pointer && session.profile.didWebvh) {
           const fullPointer = { ...pointer, did: session.profile.didWebvh.did }
           try {
-            await bindUnlockSecret({
+            // The re-bind also re-delegates the management zcap to the
+            // just-published did:webvh, so the passkey entry recorded below
+            // is revocable from ANY enrolled client (the pre-promotion
+            // delegation named this first client's did:key alone).
+            const { manageCapability } = await bindUnlockSecret({
               clientSeed: seed,
               controller: session.user.id,
               secret: registration.prfOutput,
@@ -228,8 +236,15 @@ export function SignupPage() {
               email: email || undefined,
               puk,
               webvhUpdateKeys,
-              pointer: fullPointer
+              pointer: fullPointer,
+              delegateManagementTo: unlockManagementGrantee({
+                pointer: fullPointer,
+                controller: session.user.id
+              })
             })
+            if (manageCapability) {
+              entry.manageCapability = manageCapability
+            }
             session.profile.accountPointer = fullPointer
             await session.storage.ensurePromotedController({
               profile: session.profile

@@ -1,5 +1,5 @@
 /**
- * Settings section for the wallets connected to the account (FW-69): lists
+ * Settings section for the wallets connected to the account: lists
  * the enrolled wallet clients from the locally verified did:webvh log (a
  * recovery code's keyAgreement-only key never appears, and apps are never
  * enrolled -- they stay in the Applications surface), marks the client this

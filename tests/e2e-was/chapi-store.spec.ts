@@ -21,8 +21,13 @@ import {
  * seam (`window.__E2E_CHAPI_STORE_EVENT__`) so no mediator handshake is
  * involved. Same-origin popup entry is enough here: partitioning itself cannot
  * be reproduced in-test, and what this spec verifies is the remote-direct write
- * plus the replication pull, not the Storage Access API recognition (that lives
- * in `chapi-saved-session.spec.ts`).
+ * plus the replication pull. The partitioned-popup path (the Storage Access
+ * API handle request in `completePopupLogin`, and the not-enrolled fallback
+ * where the handle is unavailable) cannot be exercised by a same-origin
+ * Playwright popup at all -- it stays on the manual browser matrix: a real
+ * cross-origin CHAPI popup in Chrome (handle granted after a top-level
+ * wallet sign-in) and in Firefox/Safari (no handle; the popup must surface
+ * the not-enrolled guidance).
  */
 
 type InjectedResponse = { value: unknown } | undefined

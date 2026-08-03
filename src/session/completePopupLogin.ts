@@ -13,6 +13,7 @@
 import type { Session } from '@/types/auth'
 import { loginWithPassphrase } from '@/session/initSession'
 import { isStorageUnreachable } from '@/lib/storageErrors'
+import { requestUnpartitionedIdb } from '@/lib/storageAccess'
 
 /**
  * Maps a popup login/storage failure to its `chapi.*` message key -- the
@@ -47,12 +48,21 @@ export async function completePopupLogin({
   passphrase: string
 }): Promise<{ session: Session } | { errorKey: string }> {
   try {
-    // The popup's local IndexedDB is third-party partitioned and no sync
-    // controller runs here, so route credential + history operations straight
-    // to the remote WAS collections (remote-direct mode).
+    // The popup's own IndexedDB is third-party partitioned: ask for the
+    // unpartitioned factory first (the Storage Access API handle extension,
+    // still inside the submit gesture), so the keyring caches and this
+    // client's key record resolve to their first-party home and an enrolled
+    // client can log in from the popup. Browsers without the extension
+    // resolve undefined and the login proceeds against the partitioned
+    // bucket -- landing in the honest not-enrolled state.
+    const idb = await requestUnpartitionedIdb()
+    // The popup's local RxDB is partitioned either way and no sync
+    // controller runs here, so route credential + history operations
+    // straight to the remote WAS collections (remote-direct mode).
     const { session, userExists } = await loginWithPassphrase({
       passphrase,
-      remoteDirectStorage: true
+      remoteDirectStorage: true,
+      idb
     })
     if (!session && userExists) {
       // The account was located but this browser holds no client key set for
