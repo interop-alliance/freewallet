@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import {
   buildContact,
   getDids,
+  isDidUrl,
   type ContactData,
   type ContactFormRow
 } from '@interop/social-core'
@@ -56,6 +57,10 @@ export function ContactFormPage() {
   const [phoneNumbers, setPhoneNumbers] = useState<LabeledRow[]>([])
   const [emailAddresses, setEmailAddresses] = useState<LabeledRow[]>([])
   const [dids, setDids] = useState<string[]>([])
+  // Row positions of DID fields that failed validation on the last save
+  // attempt. Any edit to the DID list clears them, since a removal shifts the
+  // positions of every row after it.
+  const [invalidDidRows, setInvalidDidRows] = useState<number[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -96,10 +101,10 @@ export function ContactFormPage() {
             id: e.id
           }))
         )
-        // Deduped on load so a contact merged from another replica does not
+        // `getDids` dedupes, so a contact merged from another replica does not
         // present the same DID on two rows; `buildContact` dedupes again, for
         // the duplicate the user can still type in by hand.
-        setDids([...new Set(getDids(contact))])
+        setDids(getDids(contact))
       } catch (err) {
         console.error('Could not load contact:', err)
         setNotFound(true)
@@ -161,6 +166,20 @@ export function ContactFormPage() {
       setErrorMessage(t('contactForm.errors.nameRequired'))
       return
     }
+    // Reject anything the read side (`getDids`) would not surface: neither
+    // `setDids` nor `buildContact` validates a row, so a typo'd entry would be
+    // persisted and synced yet filtered out of every view, with no way to see
+    // or remove it again. A blank row is fine -- the assembly drops it.
+    const invalidRows = dids
+      .map((did, index) => ({ did: did.trim(), index }))
+      .filter(row => row.did && !isDidUrl(row.did))
+      .map(row => row.index)
+    if (invalidRows.length > 0) {
+      setInvalidDidRows(invalidRows)
+      setErrorMessage(t('contactForm.errors.invalidDid'))
+      return
+    }
+    setInvalidDidRows([])
     setSaving(true)
     setErrorMessage('')
     try {
@@ -241,6 +260,18 @@ export function ContactFormPage() {
   // buildContact()), so unlike renderRows() this only surfaces one text field
   // per row -- there's no user-editable label.
   function renderDids() {
+    /**
+     * Applies a DID-list edit and clears the standing validation state, so a
+     * row error goes away as soon as the user touches the list.
+     */
+    function applyDidEdit(next: string[]) {
+      setDids(next)
+      if (invalidDidRows.length > 0) {
+        setInvalidDidRows([])
+        setErrorMessage('')
+      }
+    }
+
     return (
       <Box sx={contactFormStyles.rowsSection}>
         <Typography variant="overline" color="text.secondary">
@@ -256,14 +287,22 @@ export function ContactFormPage() {
             <TextField
               value={did}
               onChange={e =>
-                setDids(dids.map((d, i) => (i === index ? e.target.value : d)))
+                applyDidEdit(
+                  dids.map((row, i) => (i === index ? e.target.value : row))
+                )
               }
               label={t('contactForm.did')}
               size="small"
               fullWidth
+              error={invalidDidRows.includes(index)}
+              helperText={
+                invalidDidRows.includes(index)
+                  ? t('contactForm.errors.invalidDid')
+                  : undefined
+              }
             />
             <IconButton
-              onClick={() => setDids(dids.filter((_, i) => i !== index))}
+              onClick={() => applyDidEdit(dids.filter((_, i) => i !== index))}
               aria-label={t('contactForm.removeRow')}
               size="small"
             >
@@ -273,7 +312,7 @@ export function ContactFormPage() {
         ))}
         <Button
           size="small"
-          onClick={() => setDids([...dids, ''])}
+          onClick={() => applyDidEdit([...dids, ''])}
           startIcon={<MdAddCircleOutline />}
           sx={contactFormStyles.addRowButton}
         >

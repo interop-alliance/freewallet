@@ -417,6 +417,7 @@
     "removeRow": "Eliminar",
     "errors": {
       "nameRequired": "Introduce un nombre.",
+      "invalidDid": "No es un DID -- se esperaba un identificador que empiece por \"did:\".",
       "saveFailed": "No se pudo guardar este contacto. Inténtalo de nuevo."
     }
   },
