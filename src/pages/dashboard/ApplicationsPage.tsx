@@ -1,22 +1,26 @@
 /**
  * The Applications settings section: lists the apps connected through the App
  * Connect flow (one per self-issued app-key credential), each with its origin
- * and connected date. Clicking a row opens the app detail page; a button on
- * the row revokes access. Revoking removes the app-key credential and records
- * the revocation.
+ * and connected date. An app whose recorded grants were all signed by a
+ * since-disconnected wallet client is marked as needing a reconnect (the
+ * current-key-set rule already killed those grants). Clicking a row opens the
+ * app detail page; a button on the row revokes access. Revoking removes the
+ * app-key credential and records the revocation.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { Link as RouterLink, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { MdChevronRight } from 'react-icons/md'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogContentText from '@mui/material/DialogContentText'
 import DialogTitle from '@mui/material/DialogTitle'
+import Link from '@mui/material/Link'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
 import ListItemButton from '@mui/material/ListItemButton'
@@ -28,7 +32,9 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { dashboardStyles } from '@/styles/appStyles'
+import { currentAccountSigningKeys } from '@/session/clients'
 import {
+  deriveAppGrantsState,
   listConnectedApps,
   revokeAppAccess,
   type ConnectedApp
@@ -40,6 +46,9 @@ export function ApplicationsPage() {
   const session = useAuthStore(state => state.session)
 
   const [apps, setApps] = useState<ConnectedApp[]>([])
+  // The enrolled clients' signing keys from the verified account log, for the
+  // per-app grant-state check; undefined when the check is unavailable.
+  const [signingKeys, setSigningKeys] = useState<Set<string> | undefined>()
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<ConnectedApp | null>(null)
@@ -54,13 +63,32 @@ export function ApplicationsPage() {
     return await listConnectedApps({ storage: session.storage })
   }, [session])
 
+  // The grant-state check is best-effort: a session without a promoted
+  // account (or a log that cannot be fetched right now) degrades to listing
+  // the apps without an orphaned marker, never to failing the page.
+  const fetchSigningKeys = useCallback(async () => {
+    if (!session) {
+      return undefined
+    }
+    try {
+      return await currentAccountSigningKeys({ session })
+    } catch (err) {
+      console.warn('Could not read the account key set for the app list:', err)
+      return undefined
+    }
+  }, [session])
+
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
-        const list = await fetchApps()
+        const [list, keys] = await Promise.all([
+          fetchApps(),
+          fetchSigningKeys()
+        ])
         if (!cancelled) {
           setApps(list)
+          setSigningKeys(keys)
           setLoadError(false)
         }
       } catch (err) {
@@ -78,7 +106,7 @@ export function ApplicationsPage() {
     return () => {
       cancelled = true
     }
-  }, [fetchApps])
+  }, [fetchApps, fetchSigningKeys])
 
   function openRevokeDialog(app: ConnectedApp) {
     setRevokeError(false)
@@ -90,21 +118,28 @@ export function ApplicationsPage() {
     if (!revokeTarget || !session) {
       return
     }
+    const grantsState = deriveAppGrantsState({
+      app: revokeTarget,
+      currentSigningKeys: signingKeys
+    })
     setRevoking(true)
     setRevokeError(false)
     try {
       const outcome = await revokeAppAccess({
         storage: session.storage,
         user: session.user,
-        app: revokeTarget
+        app: revokeTarget,
+        grantsState
       })
       setRevokeDialogOpen(false)
       setRevokeTarget(null)
       showToast({
         message:
-          outcome.revoked > 0
-            ? t('applications.revokeSuccess')
-            : t('applications.revokeSuccessLegacy')
+          grantsState === 'orphaned'
+            ? t('applications.revokeSuccessOrphaned')
+            : outcome.revoked > 0
+              ? t('applications.revokeSuccess')
+              : t('applications.revokeSuccessLegacy')
       })
       try {
         setApps(await fetchApps())
@@ -147,12 +182,27 @@ export function ApplicationsPage() {
                     onClick={() => navigate(`/applications/${app.cid}`)}
                   >
                     <Stack sx={{ gap: 0.5, minWidth: 0 }}>
-                      <Typography
-                        variant="subtitle1"
-                        sx={{ fontWeight: 'bold' }}
+                      <Stack
+                        direction="row"
+                        sx={{ gap: 1, alignItems: 'center', flexWrap: 'wrap' }}
                       >
-                        {app.name}
-                      </Typography>
+                        <Typography
+                          variant="subtitle1"
+                          sx={{ fontWeight: 'bold' }}
+                        >
+                          {app.name}
+                        </Typography>
+                        {deriveAppGrantsState({
+                          app,
+                          currentSigningKeys: signingKeys
+                        }) === 'orphaned' && (
+                          <Chip
+                            size="small"
+                            color="warning"
+                            label={t('applications.orphanedChip')}
+                          />
+                        )}
+                      </Stack>
                       <Typography
                         variant="body2"
                         sx={dashboardStyles.sharedRecipientDid}
@@ -192,6 +242,13 @@ export function ApplicationsPage() {
               ))}
             </List>
           )}
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            {t('applications.clientsCrossPointer')}{' '}
+            <Link component={RouterLink} to="/settings">
+              {t('applications.clientsCrossPointerLink')}
+            </Link>
+            .
+          </Typography>
         </Stack>
       )}
 
@@ -206,9 +263,17 @@ export function ApplicationsPage() {
         <DialogTitle>{t('applications.revokeTitle')}</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            {t('applications.revokeConfirm', {
-              name: revokeTarget?.name ?? ''
-            })}
+            {revokeTarget &&
+            deriveAppGrantsState({
+              app: revokeTarget,
+              currentSigningKeys: signingKeys
+            }) === 'orphaned'
+              ? t('applications.revokeConfirmOrphaned', {
+                  name: revokeTarget.name
+                })
+              : t('applications.revokeConfirm', {
+                  name: revokeTarget?.name ?? ''
+                })}
           </DialogContentText>
           {revokeError && (
             <Alert severity="error" sx={{ mt: 2 }}>

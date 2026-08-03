@@ -4,6 +4,33 @@
 
 ### Added
 
+- **Cross-replica sync conformance exercise** (`tests/conformance/`, run via
+  `pnpm run test:conformance`): both wallets' replication engines -- this
+  wallet's RxDB adapter and the mobile wallet's
+  `@interop/wallet-core/sync` `SyncEngine` -- driven against a real
+  in-process `was-teaching-server` on one shared Space, round-tripping
+  create / edit / delete in both directions across all three collection
+  models (mutable head, content-addressed, append-only), including LWW
+  edit-collision convergence and the EDV-sequence divergence between the
+  two update paths. Needs the sibling `was-teaching-server` checkout built
+  (`WAS_SERVER_DIR` overrides the location). The findings are written down
+  as the compatibility contract in
+  `wallet-core/docs/cross-replica-sync-compatibility.md`; one open defect
+  is pinned (the mobile wallet cannot in-place edit a web-authored,
+  uuid-keyed contact).
+
+- **Applications reconciliation with per-client keys**: the Applications
+  surface now checks each connected app's recorded storage grants against
+  the account's current key set (from the locally verified public account
+  log). An app whose grants were all signed by a since-disconnected wallet
+  is shown as needing a reconnect -- those grants already stopped verifying
+  when that wallet was disconnected -- instead of listing as live, and
+  revoking such an app skips the pointless per-grant server revocations
+  while still rotating the collection encryption keys and removing its app
+  key. The Applications page and the Connected wallets panel now
+  cross-reference each other, so "disconnect this phone" vs "disconnect
+  this app" is discoverable from either.
+
 - **Connected wallets** (Settings > "Connected wallets"): the management
   surface over the account's enrolled wallet clients, listed from the
   locally verified public account log -- so a recovery code (whose key is

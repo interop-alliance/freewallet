@@ -10,6 +10,10 @@
  *   are never enrolled -- cannot appear), merges the display labels from
  *   `key-map/client-labels.json`, and marks the row belonging to this
  *   session's own client.
+ * - `currentAccountSigningKeys` -- the same verified log reduced to the
+ *   enrolled clients' signing-key multibases, for the Applications surface to
+ *   check recorded App Connect grant signers against (the current-key-set
+ *   rule: a grant signed by a since-disconnected client no longer verifies).
  * - `renameAccountClient` -- writes one label (chosen at enrollment approval,
  *   editable afterwards; the document carries key material, never labels).
  * - `disconnectAccountClient` -- drives the client-revocation epoch cascade
@@ -118,6 +122,38 @@ export async function listAccountClients({
     label: labels[client.signingKeyMultibase],
     isCurrent: client.signingKeyMultibase === ownSigningKey
   }))
+}
+
+/**
+ * The signing-key multibases of the account's currently enrolled wallet
+ * clients, from the locally verified did:webvh log -- the key set an App
+ * Connect grant's delegation proof must name to still verify under the
+ * current-key-set rule. Resolves `undefined` when this session has no
+ * promoted did:webvh account to check against (a guest or no-storage
+ * session); throws when the log cannot be fetched or verified (callers
+ * treating the check as best-effort catch and degrade to "unknown").
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {Promise<Set<string> | undefined>}
+ */
+export async function currentAccountSigningKeys({
+  session
+}: {
+  session: Session
+}): Promise<Set<string> | undefined> {
+  if (!canManageAccountClients({ session })) {
+    return undefined
+  }
+  const { pointer } = requireClientListing(session)
+  const { log } = await verifyAccountLog({
+    did: pointer.did,
+    spaceId: pointer.spaceId,
+    host: pointer.host
+  })
+  return new Set(
+    listEnrolledWebvhClients({ log }).map(client => client.signingKeyMultibase)
+  )
 }
 
 /**

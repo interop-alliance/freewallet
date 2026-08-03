@@ -174,7 +174,9 @@
       "cascadeIncomplete": "The wallet was disconnected, but some collections could not be re-keyed yet. Your next login completes the re-keying automatically, or disconnect again to retry now.",
       "disconnectConfirmAction": "Disconnect wallet",
       "disconnected": "The wallet was disconnected.",
-      "lastClientHint": "This is the only browser enrolled for this account, so it cannot be disconnected -- that would abandon the account's update authority. If you might lose access to it, generate a recovery code below instead."
+      "lastClientHint": "This is the only browser enrolled for this account, so it cannot be disconnected -- that would abandon the account's update authority. If you might lose access to it, generate a recovery code below instead.",
+      "applicationsCrossPointer": "Apps you connected to this wallet are not wallets themselves; review and revoke them on the",
+      "applicationsCrossPointerLink": "Applications page"
     },
     "recovery": {
       "section": "Recovery codes",
@@ -324,6 +326,10 @@
     "connectedOn": "Connected {{date}}",
     "connectedDateUnknown": "Connection date unknown",
     "revoke": "Revoke App Access",
+    "orphanedChip": "Reconnect needed",
+    "orphanedNotice": "The storage access {{name}} was granted no longer works: it was set up from a wallet that has since been disconnected from this account. To use this app again, open it and connect it to your wallet again. You can also revoke it here to remove its app key and stop it from reading anything written from now on.",
+    "clientsCrossPointer": "Looking for the browsers and phones connected to this account? Those are managed under",
+    "clientsCrossPointerLink": "Settings > Connected wallets",
     "detailTitle": "App detail: {{name}}",
     "connected": "Connected",
     "origin": "Origin:",
@@ -339,9 +345,11 @@
     "revokeTitle": "Revoke app access?",
     "revokeConfirm": "Revoking access removes {{name}}'s app key from your wallet and revokes the storage access it was granted. For each collection it provisioned, the encryption key is rotated so anything written from now on is unreadable to it -- but it may still hold copies of data it already fetched. The app will need to connect again from scratch. Older connections without a revocable grant will lapse on their own. This cannot be undone.",
     "revokeConfirmAction": "Revoke access",
+    "revokeConfirmOrphaned": "The storage access {{name}} was granted already stopped working when the wallet that connected it was disconnected. Revoking now removes its app key from your wallet and rotates the encryption key of each collection it provisioned, so anything written from now on is unreadable to it -- but it may still hold copies of data it already fetched. This cannot be undone.",
     "revoking": "Revoking…",
     "revokeSuccess": "App access revoked.",
     "revokeSuccessLegacy": "App removed. Its remaining access will expire on its own.",
+    "revokeSuccessOrphaned": "App removed. Its storage access had already ended when its wallet was disconnected.",
     "revokeFailed": "Could not revoke app access. Please try again."
   },
   "dashboard": {

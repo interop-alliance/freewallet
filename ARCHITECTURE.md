@@ -445,6 +445,24 @@ the panel says so, pointing at recovery-code issuance instead. The
 enroll-another-wallet entry point (the enrollment ceremony's approving half)
 lives in this panel.
 
+**The Applications sibling knows the current-key-set rule.** The
+Applications page (`src/lib/connectedApps.ts`) is the other revocation
+surface of the account -- app grantees there, wallet clients here, with a
+cross-pointer in each panel to the other. Its listing checks each recorded
+App Connect grant's delegation signer (the full zcap, proof included, is
+recorded on the Login activity) against the same verified document, via
+`currentAccountSigningKeys` in `src/session/clients.ts`
+(`deriveAppGrantsState`, matched on the key-multibase fragment so the
+did:key and promoted did:webvh spellings of one key agree). An app whose
+recorded signers are all gone from the document is shown as orphaned --
+its grants already stopped verifying with that client's revocation, and
+reconnecting through the ordinary App Connect flow is the recovery path --
+and revoking it skips the pointless per-grant revocation POSTs while still
+rotating the app-provisioned collections' epochs and deleting the app key,
+which remain meaningful. The check is best-effort: no verified document
+this session (a guest, or the log unreachable) degrades to listing without
+the marker, never to failing the page.
+
 ## Storage model (local-first)
 
 The local `BrowserStore` (RxDB over Dexie/IndexedDB) is always the **active
