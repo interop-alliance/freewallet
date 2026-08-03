@@ -5,7 +5,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import type { ContactRevisionPayload } from '@interop/social-core'
+import { getDids, type ContactRevisionPayload } from '@interop/social-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
@@ -68,6 +68,32 @@ export function ContactHistoryPage() {
     return <NotFoundPage />
   }
 
+  /**
+   * The DIDs a revision's snapshot carried, listed under the display name so
+   * that an edit which only added or removed a DID reads as a distinct
+   * revision rather than as a repeat of the one before it.
+   */
+  function renderSnapshotDids(revision: ContactRevisionPayload) {
+    const dids = getDids(revision.snapshot)
+    if (dids.length === 0) {
+      return null
+    }
+    return (
+      <Stack spacing={0.25} sx={{ mt: 0.5 }}>
+        {dids.map(did => (
+          <Typography
+            key={did}
+            variant="caption"
+            color="text.secondary"
+            sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}
+          >
+            {did}
+          </Typography>
+        ))}
+      </Stack>
+    )
+  }
+
   function renderRevisions() {
     if (revisions.length === 0) {
       return (
@@ -101,6 +127,7 @@ export function ContactHistoryPage() {
             <Typography variant="body1" sx={{ mt: 1 }}>
               {revision.snapshot.displayName}
             </Typography>
+            {renderSnapshotDids(revision)}
           </Box>
         ))}
       </Stack>

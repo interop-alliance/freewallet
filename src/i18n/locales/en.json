@@ -417,6 +417,7 @@
     "removeRow": "Remove",
     "errors": {
       "nameRequired": "Please enter a name.",
+      "invalidDid": "Not a DID -- expected an identifier starting with \"did:\".",
       "saveFailed": "Could not save this contact. Please try again."
     }
   },

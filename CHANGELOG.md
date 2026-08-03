@@ -82,9 +82,16 @@
   remote copy previously won and the local edit was lost. Validation of both
   sides is also stricter: a payload is checked in full rather than by two of
   its fields.
+- The contact history now lists the DIDs each revision's snapshot carried,
+  under the display name, so an edit that only added or removed a DID reads as
+  a distinct revision instead of as a repeat of the one before it.
 
 ### Fixed
 
+- A contact's DID rows are now validated before the contact is saved: a row
+  that is not a DID blocks the save and is flagged inline, instead of being
+  stored and synced as an entry that every view then filters out -- leaving no
+  way to see or correct it. Blank rows are still dropped, as before.
 - Replicated deletes were being refused by the server with `412` whenever the
   local row's revision lagged the resource's ETag (a locally created row is
   pushed with the revision it was inserted with, while the server assigns its
