@@ -18,23 +18,22 @@ import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { MdContentCopy, MdDeleteOutline } from 'react-icons/md'
+import { MdDeleteOutline } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useState } from 'react'
-import { DATE_FMT } from '@/app.config'
 import type { Session } from '@/types/auth'
 import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
 import {
   canIssueRecoveryCode,
   checkRecoveryHealth,
-  formatRecoveryCode,
   generateRecoveryCode,
   issueRecoveryCode,
   listRecoveryCodeEntries,
   revokeRecoveryCode,
   type RecoveryHealthFlag
 } from '@/session/recovery'
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { RecoveryCodeDisplay } from '@/components/RecoveryCodeDisplay'
+import { formatDate } from '@/lib/viewMappers/formatDate'
 
 export function RecoveryCodesSection({ session }: { session: Session }) {
   const { t, i18n } = useTranslation()
@@ -48,12 +47,6 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
   const [isSaving, setIsSaving] = useState(false)
   const [revokingKid, setRevokingKid] = useState<string | null>(null)
   const [errorKey, setErrorKey] = useState<string | null>(null)
-  const { copied, copy } = useCopyToClipboard({
-    onError: (err: unknown) => {
-      console.error('Could not copy the recovery code:', err)
-    }
-  })
-
   const loadEntries = useCallback(
     async (): Promise<RecoveryCodeUnlockMethod[]> =>
       listRecoveryCodeEntries({ session }),
@@ -71,7 +64,10 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
       setEntries(loaded)
       if (loaded.length > 0) {
         try {
-          const flags = await checkRecoveryHealth({ session })
+          const flags = await checkRecoveryHealth({
+            session,
+            entries: loaded
+          })
           if (!cancelled) {
             setHealthFlags(flags)
           }
@@ -175,10 +171,10 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
                 {entry.label || t('settings.recovery.unlabeled')}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {new Date(entry.createdAt).toLocaleDateString(
-                  i18n.language,
-                  DATE_FMT
-                )}
+                {formatDate({
+                  isoDate: entry.createdAt,
+                  locale: i18n.language
+                })}
               </Typography>
               {flaggedKids.has(entry.recoveryKid) && (
                 <Chip
@@ -233,30 +229,12 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
         <DialogContent>
           <Stack sx={{ gap: 2, mt: 1 }}>
             <Alert severity="warning">{t('settings.recovery.shownOnce')}</Alert>
-            <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
-              <Typography
-                variant="h6"
-                component="code"
-                sx={{ fontFamily: 'monospace', letterSpacing: 1 }}
-              >
-                {pendingCode && formatRecoveryCode({ code: pendingCode })}
-              </Typography>
-              <IconButton
-                size="small"
-                aria-label={t('settings.recovery.copy')}
-                onClick={() =>
-                  pendingCode &&
-                  void copy(formatRecoveryCode({ code: pendingCode }))
-                }
-              >
-                <MdContentCopy />
-              </IconButton>
-              {copied && (
-                <Typography variant="body2" color="text.secondary">
-                  {t('common.copied')}
-                </Typography>
-              )}
-            </Stack>
+            {pendingCode && (
+              <RecoveryCodeDisplay
+                code={pendingCode}
+                copyLabel={t('settings.recovery.copy')}
+              />
+            )}
             <TextField
               label={t('settings.recovery.labelField')}
               value={label}

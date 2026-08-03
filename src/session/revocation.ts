@@ -17,20 +17,18 @@
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import {
   clientSigningKeyMultibase,
-  isWebvhDid,
   type RevokedClientKeys
 } from '@interop/wallet-core/webvh'
-import { pukVaultKeys, type Puk } from '@interop/wallet-core/keys'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
-import { WAS_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import { savePukEpochPin, loadPukEpochPin } from '@/lib/sessionKey'
-import {
-  getUnlockMethods,
-  rewrapUnlockMethodsRecord
-} from '@/session/unlockMethods'
+import { getUnlockMethods } from '@/session/unlockMethods'
+import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
+import { requireEnrolledClientContext } from '@/session/enrolledContext'
+import { adoptRotatedPuk } from '@/session/pukAdoption'
 import { remintRecoveryDelegations } from '@/session/recovery'
 import { cascadeCollections, type PukCascadeResult } from '@/session/pukCascade'
+import { invalidateVerifiedLog } from '@/session/verifiedLog'
 
 export type { RevokedClientKeys } from '@interop/wallet-core/webvh'
 
@@ -47,69 +45,28 @@ export interface RevocationOutcome {
 }
 
 /**
- * The revocation preconditions, resolved from a live session: a configured
- * WAS server and remote store, a promoted did:webvh account pointer, and
- * this client's own key material. Mirrors the recovery-issuance gate -- an
- * enrolled wallet client holding its key material is what can revoke.
- *
- * @param session {Session}
- * @returns {object}   the resolved pieces
- */
-function requireRevocationPreconditions(session: Session) {
-  const remoteStore = session.storage.remoteStore
-  if (!WAS_SERVER_URL || !remoteStore) {
-    throw new Error('Client revocation requires a configured storage server.')
-  }
-  const { profile } = session
-  const pointer = profile.accountPointer
-  if (!pointer || !isWebvhDid(pointer.did)) {
-    throw new Error(
-      'Client revocation requires a promoted did:webvh account; this ' +
-        'account has not finished provisioning.'
-    )
-  }
-  if (!profile.clientWebvhKeys) {
-    throw new Error(
-      "Client revocation requires this client's did:webvh update keys."
-    )
-  }
-  if (!profile.clientKeyAgreementKey) {
-    throw new Error(
-      "Client revocation requires this client's key-agreement key."
-    )
-  }
-  return {
-    remoteStore,
-    pointer,
-    clientWebvhKeys: profile.clientWebvhKeys,
-    clientKeyAgreementKey: profile.clientKeyAgreementKey
-  }
-}
-
-/**
- * The standing recovery codes' update-key hashes, so the document edit can
- * tell the revoked client's staged commitment apart from a latent recovery
- * commitment (the one ambiguous log shape). Best-effort: an unreadable
- * registry falls back to attribution without them.
+ * The account's recovery-code registry entries, read once for the whole
+ * cascade (the document edit's latent commitments, then the delegation
+ * re-mint). Best-effort: an unreadable registry degrades both stages rather
+ * than failing the revocation.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<string[]>}
+ * @returns {Promise<RecoveryCodeUnlockMethod[]>}
  */
-async function latentRecoveryHashes({
+async function recoveryEntries({
   session,
   idb
 }: {
   session: Session
   idb?: IDBFactory
-}): Promise<string[]> {
+}): Promise<RecoveryCodeUnlockMethod[]> {
   try {
     const record = await getUnlockMethods({ session, idb })
-    return await Promise.all(
-      (record?.methods ?? [])
-        .filter(method => method.type === 'recovery-code')
-        .map(method => deriveNextKeyHash(method.updateKeyMultibase))
+    return (record?.methods ?? []).filter(
+      (method): method is RecoveryCodeUnlockMethod =>
+        method.type === 'recovery-code'
     )
   } catch (err) {
     console.warn(
@@ -121,55 +78,22 @@ async function latentRecoveryHashes({
 }
 
 /**
- * Adopts a rotated PUK in the live session: the unlock-methods registry is
- * re-sealed to it, then the profile vault keys and the storage ciphers are
- * swapped, so this session keeps operating without a re-login.
+ * The standing recovery codes' update-key hashes, so the document edit can
+ * tell the revoked client's staged commitment apart from a latent recovery
+ * commitment (the one ambiguous log shape).
  *
  * @param options {object}
- * @param options.session {Session}
- * @param options.spaceId {string}
- * @param options.puk {Puk}   the freshly rotated per-user key
- * @returns {Promise<void>}
+ * @param options.entries {RecoveryCodeUnlockMethod[]}
+ * @returns {Promise<string[]>}
  */
-export async function adoptRotatedPuk({
-  session,
-  spaceId,
-  puk
+async function latentRecoveryHashes({
+  entries
 }: {
-  session: Session
-  spaceId: string
-  puk: Puk
-}): Promise<void> {
-  const { keyAgreementKey, keyResolver } = session.profile
-  if (keyAgreementKey && keyResolver && WAS_SERVER_URL) {
-    try {
-      await rewrapUnlockMethodsRecord({
-        storageServerUrl: WAS_SERVER_URL,
-        zcapClient: session.profile.zcapClient,
-        spaceId,
-        from: { keyAgreementKey, keyResolver },
-        to: pukVaultKeys({ puk })
-      })
-    } catch (err) {
-      console.warn(
-        'Could not re-wrap the unlock-methods registry to the rotated PUK:',
-        err
-      )
-    }
-  }
-  const vaultKeys = pukVaultKeys({ puk })
-  session.profile.puk = puk
-  session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
-  session.profile.keyResolver = vaultKeys.keyResolver
-  try {
-    await session.storage.adoptRotatedVaultKeys(vaultKeys)
-  } catch (err) {
-    console.warn(
-      'Could not rebuild the storage ciphers on the rotated PUK; the next ' +
-        'login adopts it instead:',
-      err
-    )
-  }
+  entries: RecoveryCodeUnlockMethod[]
+}): Promise<string[]> {
+  return await Promise.all(
+    entries.map(entry => deriveNextKeyHash(entry.updateKeyMultibase))
+  )
 }
 
 /**
@@ -201,14 +125,22 @@ export async function revokeEnrolledClient({
   idb?: IDBFactory
 }): Promise<RevocationOutcome> {
   const { remoteStore, pointer, clientWebvhKeys, clientKeyAgreementKey } =
-    requireRevocationPreconditions(session)
+    requireEnrolledClientContext({ session, action: 'Client revocation' })
   const { keyAgent } = session.profile
+  // One registry read for the whole cascade: the latent commitment hashes the
+  // document edit needs, and the entries the delegation re-mint walks.
+  const entries = await recoveryEntries({ session, idb })
 
+  // The cascade opens with a document edit, so nothing may keep reading a
+  // memo taken before it. Dropped up front (the edit lands early in the call)
+  // and again after, so neither a concurrent surface nor a later one sees the
+  // revoked client still listed.
+  invalidateVerifiedLog({ profile: session.profile })
   const result = await revokeAccountClient({
     idStore: remoteStore.webvhIdStore(),
     updateKeys: clientWebvhKeys,
     revokedClient: client,
-    knownLatentHashes: await latentRecoveryHashes({ session, idb }),
+    knownLatentHashes: await latentRecoveryHashes({ entries }),
     ...(keyAgent
       ? { ownSigningKeyMultibase: clientSigningKeyMultibase({ keyAgent }) }
       : {}),
@@ -232,11 +164,12 @@ export async function revokeEnrolledClient({
       await remintRecoveryDelegations({
         session,
         doc: document as Parameters<typeof remintRecoveryDelegations>[0]['doc'],
+        entries,
         idb
       }),
     onRotationAdopted: async ({ puk }) =>
       await adoptRotatedPuk({ session, spaceId: pointer.spaceId, puk })
-  })
+  }).finally(() => invalidateVerifiedLog({ profile: session.profile }))
 
   // The audit record, written after the adoption so it lands under the fresh
   // epoch. Best-effort.

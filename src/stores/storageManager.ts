@@ -74,6 +74,7 @@ import {
   type EncryptionDescriptorCache
 } from '@interop/wallet-core/descriptors'
 import { savePukEpochPin } from '@/lib/sessionKey'
+import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import {
   createEdvDocCipher,
   isEncryptedEnvelope,
@@ -1434,6 +1435,9 @@ export class StorageManager {
               if (webvhDid) {
                 profile.didWebvh = { did: webvhDid }
               }
+              // Provisioning publishes (or extends) the log, so any memo of
+              // an earlier verification is dropped.
+              invalidateVerifiedLog({ profile })
             } catch (err) {
               console.warn('did:webvh provisioning failed:', err)
             }

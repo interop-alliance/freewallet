@@ -8,9 +8,10 @@
  *   keys it needs.
  * - `completeEnrollment` -- the enrollee's half: the account pointer comes out
  *   of the keyring (the enrollee holds the passphrase), the portable core
- *   verifies and reads the roster, and the key set is persisted under the
- *   passphrase's unlock layer here, so the next ordinary login finds an
- *   enrolled client.
+ *   verifies and reads the roster, the key set is persisted under the
+ *   passphrase's unlock layer here, and the ordinary passphrase login it now
+ *   finds is run in the same call -- one derived unlock identity for all
+ *   three, so the ceremony runs its KDF once.
  *
  * Everything else in the ceremony -- the connect-code codec,
  * `mintEnrollmentRequest`, `EnrollmentPendingError` -- is imported from
@@ -25,8 +26,11 @@ import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
 import { setClientLabel } from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
 import { savePukEpochPin } from '@/lib/sessionKey'
+import { deriveUnlockIdentity, KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { bindPassphrase, fetchKeyring } from '@/session/keyring'
-import type { ControllerProfile } from '@/types/auth'
+import { loginWithPassphrase } from '@/session/initSession'
+import { invalidateVerifiedLog } from '@/session/verifiedLog'
+import type { ControllerProfile, Session } from '@/types/auth'
 import type { StorageManager } from '@/stores/storageManager'
 
 /**
@@ -77,13 +81,17 @@ export async function approveEnrollment({
     )
   }
 
+  // The approval publishes the new client's log entries (and a torn approval
+  // may have published the commit entry before failing), so this session's
+  // verified-log memo is dropped either way -- the listing that renders right
+  // afterwards must show the newly enrolled client.
   const approved = await approveEnrollmentCore({
     request,
     clientWebvhKeys: profile.clientWebvhKeys,
     clientKeyAgreementKey: profile.clientKeyAgreementKey,
     pukRosterStore: remoteStore.pukRosterStore(),
     idStore: remoteStore.webvhIdStore()
-  })
+  }).finally(() => invalidateVerifiedLog({ profile }))
   if (label?.trim()) {
     try {
       await setClientLabel({
@@ -102,13 +110,18 @@ export async function approveEnrollment({
  * ENROLLEE, step two (after the other browser approves): looks the account up
  * from the passphrase's keyring, runs the shared verification + first roster
  * read, and persists the whole key set into the local client-key record under
- * the passphrase's unlock layer. After this an ordinary passphrase login finds
- * an enrolled client.
+ * the passphrase's unlock layer, then performs the ordinary passphrase login
+ * that now finds an enrolled client and hands its session back.
  *
  * Throws `EnrollmentPendingError` while the add entry is not published yet
  * (complete again once the other browser finishes); any integrity failure
  * (a log that resolves to a different DID than the account pointer names, a
  * missing roster wrap) throws its own error.
+ *
+ * The unlock identity is derived ONCE here and threaded through all three
+ * unlock-layer steps (the keyring lookup, the key-set bind, and the login
+ * that ends the ceremony), so finishing an enrollment runs the 600k-iteration
+ * KDF a single time.
  *
  * @param options {object}
  * @param options.clientSeed {Uint8Array}   from `mintEnrollmentRequest`
@@ -117,7 +130,8 @@ export async function approveEnrollment({
  * @param options.passphrase {string}   the account passphrase (it located the
  *   account; enrollment is what makes it sufficient to act here)
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
+ * @returns {Promise<Session>}   the logged-in session of the newly enrolled
+ *   client, exactly as an ordinary passphrase login builds it
  */
 export async function completeEnrollment({
   clientSeed,
@@ -129,11 +143,15 @@ export async function completeEnrollment({
   webvhUpdateKeys: ClientWebvhUpdateKeys
   passphrase: string
   idb?: IDBFactory
-}): Promise<void> {
+}): Promise<Session> {
   if (!WAS_SERVER_URL) {
     throw new Error('Enrollment requires a configured WAS server.')
   }
-  const found = await fetchKeyring({ passphrase, idb })
+  const unlock = await deriveUnlockIdentity({
+    secret: passphrase,
+    kdf: KEYRING_KDF
+  })
+  const found = await fetchKeyring({ passphrase, unlock, idb })
   if (!found) {
     throw new Error('No account was found for this passphrase.')
   }
@@ -167,6 +185,18 @@ export async function completeEnrollment({
     puk,
     webvhUpdateKeys,
     pointer,
+    unlock,
     idb
   })
+
+  // The ordinary login the ceremony ends in, on the identity already derived:
+  // the caller gets the same session shape every other login path returns.
+  const { session } = await loginWithPassphrase({ passphrase, unlock, idb })
+  if (!session) {
+    throw new Error(
+      'The enrolled key set did not produce a session; connecting this ' +
+        'browser again mints a fresh key set.'
+    )
+  }
+  return session
 }

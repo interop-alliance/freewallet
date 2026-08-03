@@ -193,11 +193,15 @@ export function unlockManagementGrantee({
 /**
  * Delegates the long-lived management zcap on an unlock Space to the account
  * identity (see `unlockManagementGrantee`): GET/DELETE on the unlock Space
- * URL, expiring after `UNLOCK_MANAGE_ZCAP_TTL_MS`. Pure signing (no
+ * URL by default, expiring after `UNLOCK_MANAGE_ZCAP_TTL_MS`. Pure signing (no
  * server round trip); the chain roots at the Space's synthesized root
  * capability (the ezcap client generates it from the target). Only ever
  * called when a WAS server is configured -- the unlock Space, and thus the
  * capability, exist only then.
+ *
+ * A recovery code widens the actions to include PUT: that is what lets the
+ * revocation cascade re-PUT the code's record with a freshly minted
+ * delegation when the original's signing client is revoked.
  *
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the unlock identity's client (it can
@@ -205,16 +209,19 @@ export function unlockManagementGrantee({
  * @param options.spaceId {string}   the unlock Space id
  * @param options.controller {string}   the account DID to delegate to (a
  *   promoted account's did:webvh, or the account did:key)
+ * @param [options.allowedActions] {string[]}   default `['GET', 'DELETE']`
  * @returns {Promise<IZcap>}
  */
-async function delegateUnlockManagement({
+export async function delegateUnlockManagement({
   zcapClient,
   spaceId,
-  controller
+  controller,
+  allowedActions = ['GET', 'DELETE']
 }: {
   zcapClient: ZcapClient
   spaceId: string
   controller: string
+  allowedActions?: string[]
 }): Promise<IZcap> {
   const invocationTarget = new URL(
     `/space/${spaceId}`,
@@ -223,7 +230,7 @@ async function delegateUnlockManagement({
   return await zcapClient.delegate({
     invocationTarget,
     controller,
-    allowedActions: ['GET', 'DELETE'],
+    allowedActions,
     expires: new Date(Date.now() + UNLOCK_MANAGE_ZCAP_TTL_MS)
   })
 }
@@ -434,39 +441,6 @@ async function unwrapClientKeys({
 }
 
 /**
- * Replaces the PUK cached in this client's client-key record -- rotation
- * delivery landing locally: the roster read at login found a fresh epoch,
- * the session adopted the fresh PUK, and this persists it so the next login
- * starts from the rotated key. Re-derives the unlock identity from the
- * secret (the record is wrapped to the unlock KAK), re-wraps the stored
- * client seed with the new PUK, and saves the record back. A missing or
- * unusable record is left alone -- there is nothing to update, and this
- * function must never manufacture one.
- *
- * @param options {object}
- * @param options.secret {string | Uint8Array}   the unlock secret that
- *   produced the session
- * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
- * @param options.puk {Puk}   the freshly adopted per-user key
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
- */
-export async function updateClientKeyPuk({
-  secret,
-  kdf,
-  puk,
-  idb
-}: {
-  secret: string | Uint8Array
-  kdf: UnlockKdf
-  puk: Puk
-  idb?: IDBFactory
-}): Promise<void> {
-  const unlock = await deriveUnlockIdentity({ secret, kdf })
-  await clientKeysPersister({ unlock, idb })({ puk })
-}
-
-/**
  * Thrown by `fetchKeyring` when a keyring record was found under the
  * passphrase's unlock Space but could not be unwrapped or validated -- a
  * genuinely corrupt/malformed (or retired version-1) record. Distinct from
@@ -663,6 +637,9 @@ async function readCachedRecord({
  * @param [options.kdf] {UnlockKdf}   the unlock method's KDF parameters
  * @param [options.mintManageCapability] {boolean}   also delegate the unlock
  *   Space management zcap to the recovered controller; default false
+ * @param [options.unlock] {UnlockIdentity}   an already-derived unlock
+ *   identity for the same secret, so a flow that unlocks more than once
+ *   (finishing an enrollment) runs the KDF a single time
  * @returns {Promise<KeyringFetchResult | null>}
  */
 export async function fetchKeyring({
@@ -670,19 +647,26 @@ export async function fetchKeyring({
   passphrase,
   idb,
   kdf = KEYRING_KDF,
-  mintManageCapability = false
+  mintManageCapability = false,
+  unlock: derived
 }: {
   secret?: string | Uint8Array
   passphrase?: string
   idb?: IDBFactory
   kdf?: UnlockKdf
   mintManageCapability?: boolean
+  unlock?: UnlockIdentity
 }): Promise<KeyringFetchResult | null> {
   const unlockSecret = secret ?? passphrase
-  if (unlockSecret === undefined) {
+  if (!derived && unlockSecret === undefined) {
     throw new TypeError('An unlock secret is required.')
   }
-  const unlock = await deriveUnlockIdentity({ secret: unlockSecret, kdf })
+  const unlock =
+    derived ??
+    (await deriveUnlockIdentity({
+      secret: unlockSecret as string | Uint8Array,
+      kdf
+    }))
 
   if (!WAS_SERVER_URL) {
     // No remote: the cache is the keyring's only copy -- authoritative, no TTL.
@@ -852,6 +836,9 @@ async function buildFetchResult({
  *   a later Settings flow uses to retire this method (a lost passkey)
  *   without tapping or re-deriving from the secret.
  * @param [options.idb] {IDBFactory}
+ * @param [options.unlock] {UnlockIdentity}   an already-derived unlock
+ *   identity for the same secret and KDF, so a flow that unlocks more than
+ *   once runs the KDF a single time
  * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap }>}
  */
 export async function bindUnlockSecret({
@@ -864,7 +851,8 @@ export async function bindUnlockSecret({
   webvhUpdateKeys,
   pointer,
   delegateManagementTo,
-  idb
+  idb,
+  unlock: derived
 }: {
   clientSeed: Uint8Array
   controller: string
@@ -876,12 +864,13 @@ export async function bindUnlockSecret({
   pointer?: AccountPointer
   delegateManagementTo?: string
   idb?: IDBFactory
+  unlock?: UnlockIdentity
 }): Promise<{
   unlockSpaceId: string
   manageCapability?: IZcap
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
 }> {
-  const unlock = await deriveUnlockIdentity({ secret, kdf })
+  const unlock = derived ?? (await deriveUnlockIdentity({ secret, kdf }))
   const record = await wrapKeyringRecord({
     controller,
     email,
@@ -956,6 +945,8 @@ export async function bindUnlockSecret({
  *   delegate the unlock Space management zcap to (see `bindUnlockSecret`)
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
+ * @param [options.unlock] {UnlockIdentity}   an already-derived unlock
+ *   identity for the same passphrase (see `bindUnlockSecret`)
  * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap,
  *   persistClientKeys: Function }>}
  */
@@ -969,7 +960,8 @@ export async function bindPassphrase({
   pointer,
   delegateManagementTo,
   idb,
-  kdf = KEYRING_KDF
+  kdf = KEYRING_KDF,
+  unlock
 }: {
   clientSeed: Uint8Array
   controller: string
@@ -981,6 +973,7 @@ export async function bindPassphrase({
   delegateManagementTo?: string
   idb?: IDBFactory
   kdf?: UnlockKdf
+  unlock?: UnlockIdentity
 }): Promise<{
   unlockSpaceId: string
   manageCapability?: IZcap
@@ -996,7 +989,8 @@ export async function bindPassphrase({
     webvhUpdateKeys,
     pointer,
     delegateManagementTo,
-    idb
+    idb,
+    ...(unlock ? { unlock } : {})
   })
 }
 

@@ -31,30 +31,35 @@ import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 export type { PukCascadeResult } from '@interop/wallet-core/keys'
 
 /**
- * The encrypted collections the cascade covers: the standard collections that
- * declare encryption, plus every remotely listed collection whose Description
- * carries an encryption descriptor (the app-provisioned ones). The remote
- * listing is best-effort -- offline, the standard set still rotates and the
- * sweep covers the rest later.
+ * The Space's collection listing, reduced to what the cascade asks of it:
+ * which collections exist remotely and which of those the server declares
+ * encrypted. One listing answers both questions -- the enumeration and the
+ * per-collection `isEncrypted` probe -- so the fan-out no longer re-describes
+ * every collection it is about to rotate.
+ *
+ * The listing is best-effort: offline, `listed` is false, the standard
+ * encrypted set still rotates, and the probe falls back to a describe per
+ * collection (the sweep covers the rest at a later login).
  *
  * @param options {object}
  * @param options.remoteStore {WASRemoteStore}
- * @returns {Promise<string[]>}   collection ids, deduplicated
+ * @returns {Promise<{ listed: boolean, ids: Set<string>, encrypted: Set<string> }>}
  */
-async function encryptedCollectionIds({
+async function listedCollections({
   remoteStore
 }: {
   remoteStore: WASRemoteStore
-}): Promise<string[]> {
-  const ids = new Set<string>(
-    WALLET_STANDARD_COLLECTIONS.filter(spec => spec.encryption).map(
-      spec => spec.id
-    )
-  )
+}): Promise<{ listed: boolean; ids: Set<string>; encrypted: Set<string> }> {
+  const ids = new Set<string>()
+  const encrypted = new Set<string>()
   try {
     for (const item of await remoteStore.listCollections()) {
-      if (item.isEncrypted && item.id) {
-        ids.add(item.id)
+      if (!item.id) {
+        continue
+      }
+      ids.add(item.id)
+      if (item.isEncrypted) {
+        encrypted.add(item.id)
       }
     }
   } catch (err) {
@@ -63,34 +68,67 @@ async function encryptedCollectionIds({
         'standard collections only:',
       err
     )
+    return { listed: false, ids, encrypted }
   }
-  return [...ids]
+  return { listed: true, ids, encrypted }
 }
 
 /**
  * The fan-out's work, as the shared cascade orchestrator expects it: which
- * encrypted collections exist in this Space, and how each one's descriptor
- * store and encryption declaration are reached through the remote store.
+ * encrypted collections exist in this Space (the standard collections that
+ * declare encryption, plus every remotely listed encrypted collection,
+ * deduplicated), and how each one's descriptor store and encryption
+ * declaration are reached through the remote store.
+ *
+ * The remote listing is read once per cascade and memoized, since the
+ * orchestrator asks for the ids and then for each collection's encryption
+ * state.
  *
  * @param options {object}
  * @param options.remoteStore {WASRemoteStore}
- * @returns {CascadeCollections}
+ * @returns {CascadeCollections}   with `collectionIds` narrowed to the
+ *   resolver form, so callers driving the cascade themselves can await it
  */
 export function cascadeCollections({
   remoteStore
 }: {
   remoteStore: WASRemoteStore
-}): CascadeCollections {
+}): CascadeCollections & { collectionIds: () => Promise<string[]> } {
+  let listing: Promise<{
+    listed: boolean
+    ids: Set<string>
+    encrypted: Set<string>
+  }> | null = null
+  const listOnce = () => (listing ??= listedCollections({ remoteStore }))
+
   return {
-    collectionIds: async () => await encryptedCollectionIds({ remoteStore }),
+    collectionIds: async () => {
+      const { encrypted } = await listOnce()
+      const ids = new Set<string>(
+        WALLET_STANDARD_COLLECTIONS.filter(spec => spec.encryption).map(
+          spec => spec.id
+        )
+      )
+      for (const id of encrypted) {
+        ids.add(id)
+      }
+      return [...ids]
+    },
     storeFor: collectionId =>
       collectionDescriptorStore({
         collection: remoteStore.collectionHandle({ collectionId })
       }),
     // Skip a collection the server does not declare encrypted (e.g. a
-    // standard collection on an account that never provisioned it).
-    isEncrypted: async collectionId =>
-      Boolean(await remoteStore.collectionEncryption({ collectionId }))
+    // standard collection on an account that never provisioned it). Answered
+    // from the listing above; a collection the listing did not cover (or a
+    // listing that failed) still falls back to one describe.
+    isEncrypted: async collectionId => {
+      const { ids, encrypted } = await listOnce()
+      if (ids.has(collectionId)) {
+        return encrypted.has(collectionId)
+      }
+      return Boolean(await remoteStore.collectionEncryption({ collectionId }))
+    }
   }
 }
 
@@ -121,7 +159,7 @@ export async function cascadeCollectionsToPuk({
 }): Promise<PukCascadeResult> {
   const work = cascadeCollections({ remoteStore })
   const result = await driveCascade({
-    collectionIds: await encryptedCollectionIds({ remoteStore }),
+    collectionIds: await work.collectionIds(),
     storeFor: work.storeFor,
     ...(work.isEncrypted ? { isEncrypted: work.isEncrypted } : {}),
     rosterDescriptor,

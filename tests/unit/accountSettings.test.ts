@@ -60,6 +60,9 @@ vi.mock('@/session/unlockMethods', () => ({
 vi.mock('@/lib/sessionKey', () => ({
   deletePasskeySafetyNotice: vi.fn(async () => {
     state.calls.push('deletePasskeySafetyNotice')
+  }),
+  deletePukEpochPin: vi.fn(async () => {
+    state.calls.push('deletePukEpochPin')
   })
 }))
 
@@ -81,7 +84,12 @@ function makeSession() {
     isGuest: false,
     profile: {
       clientSeed: new Uint8Array(32),
-      accountController: 'did:key:zAccount'
+      accountController: 'did:key:zAccount',
+      accountPointer: {
+        did: 'did:webvh:QmScid:was.example.test:space:space-123:id',
+        spaceId: 'space-123',
+        host: 'https://was.example.test'
+      }
     },
     storage: {
       wipeStorage: vi.fn(async () => {
@@ -108,11 +116,14 @@ describe('deleteAccount', () => {
       passphrase: 'correct horse battery staple'
     })
     expect(result).toBe('deleted')
+    // The local continuity pins go with the account: the keyring retirement
+    // drops the pointer pin, and the key-roster epoch pin is cleared beside it.
     expect(state.calls).toEqual([
       'verifyPassphrase',
       'wipeStorage',
       'deleteKeyring',
-      'deletePasskeySafetyNotice'
+      'deletePasskeySafetyNotice',
+      'deletePukEpochPin'
     ])
   })
 

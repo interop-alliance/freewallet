@@ -196,14 +196,16 @@ describe('the login-time cascade-completion sweep', () => {
     vi.mocked(checkPukRosterAtLogin).mockResolvedValue(
       rosterRead({ rotated: true }) as never
     )
-    const onPukRotated = vi.fn(async () => undefined)
+    const persistClientKeys = vi.fn(async () => undefined)
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
       puk: OLD_PUK,
-      onPukRotated
+      persistClientKeys
     })
-    expect(onPukRotated).toHaveBeenCalledExactlyOnceWith(FRESH_PUK)
+    expect(persistClientKeys).toHaveBeenCalledExactlyOnceWith({
+      puk: FRESH_PUK
+    })
 
     fake.resolveProvisioning()
     await session.pukSweep
@@ -413,14 +415,14 @@ describe('the roster stage of the sweep', () => {
         descriptor: CONVERGED_DESCRIPTOR
       }
     }) as never)
-    const onPukRotated = vi.fn(async () => undefined)
+    const persistClientKeys = vi.fn(async () => undefined)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
       puk: OLD_PUK,
       accountPointer: POINTER,
-      onPukRotated
+      persistClientKeys
     })
     fake.resolveProvisioning()
     await session.pukSweep
@@ -440,7 +442,7 @@ describe('the roster stage of the sweep', () => {
     )
     // The fresh key is adopted -- persisted for the next login, swapped into
     // the live session -- and the fan-out runs against it.
-    expect(onPukRotated).toHaveBeenCalledWith(FRESH_PUK)
+    expect(persistClientKeys).toHaveBeenCalledWith({ puk: FRESH_PUK })
     expect(session.profile.puk).toEqual(FRESH_PUK)
     expect(fake.adoptRotatedVaultKeys).toHaveBeenCalledOnce()
     expect(vi.mocked(cascadeCollectionsToPuk)).toHaveBeenCalledExactlyOnceWith(

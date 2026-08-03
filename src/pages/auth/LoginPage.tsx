@@ -227,18 +227,13 @@ export function LoginPage() {
     setEnrollBusy(true)
     setEnrollErrorKey(null)
     try {
-      await completeEnrollment({
+      // One ceremony call: it derives the unlock identity once and hands
+      // back the logged-in session of the newly enrolled client.
+      const session = await completeEnrollment({
         clientSeed: enrollment.clientSeed,
         webvhUpdateKeys: enrollment.webvhUpdateKeys,
         passphrase: enrollment.passphrase
       })
-      const { session } = await loginWithPassphrase({
-        passphrase: enrollment.passphrase
-      })
-      if (!session) {
-        setEnrollErrorKey('auth.enroll.failed')
-        return
-      }
       await session.storageReady
       login(session)
       void backfillPassphraseUnlockMethod({ session }).catch(err =>

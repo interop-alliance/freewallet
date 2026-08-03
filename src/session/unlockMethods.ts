@@ -291,6 +291,24 @@ async function unwrapRecord({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<UnlockMethodsRecord | null>}
  */
+/**
+ * A fresh, empty unlock-methods registry: one wallet-wide user handle and no
+ * methods yet. The registry's shape is minted here alone, so every path that
+ * writes it first (a passkey enrollment, a recovery-code issuance, a
+ * Settings backfill) agrees on it.
+ *
+ * @returns {UnlockMethodsRecord}
+ */
+export function emptyUnlockMethodsRegistry(): UnlockMethodsRecord {
+  return {
+    version: 1,
+    userHandle: base64urlnopad.encode(
+      crypto.getRandomValues(new Uint8Array(16))
+    ),
+    methods: []
+  }
+}
+
 export async function getUnlockMethods({
   session,
   idb
@@ -688,13 +706,7 @@ export async function backfillPassphraseUnlockMethod({
     if (!createIfMissing) {
       return null
     }
-    record = {
-      version: 1,
-      userHandle: base64urlnopad.encode(
-        crypto.getRandomValues(new Uint8Array(16))
-      ),
-      methods: []
-    }
+    record = emptyUnlockMethodsRegistry()
   }
 
   const existing = record.methods.find(
