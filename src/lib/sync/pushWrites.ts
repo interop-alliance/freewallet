@@ -23,7 +23,9 @@
  * byte-identical). We deliberately do not capture the `204` ETag to short-circuit
  * that echo: doing so would require a side write to the local revision fields
  * from inside the push handler, which risks a re-push loop, for no correctness
- * gain on immutable content-addressed collections.
+ * gain on immutable content-addressed collections. The one place that drift
+ * does matter is a delete, which is conditional on a revision the local row may
+ * never have learned; see {@link deleteContent}.
  */
 import type { WithDeleted } from 'rxdb/plugins/core'
 import { canonicalize as jcsCanonicalize } from 'json-canonicalize'
@@ -113,6 +115,63 @@ async function assembleConflict({
 }
 
 /**
+ * Deletes a row's remote content, conditional on the assumed master revision,
+ * and recovers from the one benign `412`: a revision drift with an unchanged
+ * body. A locally created row is pushed with the revision it was inserted with,
+ * while the server assigns its own on the create, so until our own write echoes
+ * back on a pull the assumed revision can lag the resource's real ETag -- and a
+ * delete conditional on the stale revision would be refused forever, leaving
+ * the resource live on the server (a retracted public credential would stay
+ * world-readable). So on a `412` the current master is re-read, and a master
+ * whose body is byte-identical to the one we assumed is the same content under
+ * a drifted revision: the delete is re-issued against the fresh ETag. Every
+ * other `412` -- a body that actually differs, an absent or already-tombstoned
+ * resource -- is left to the caller's conflict handling unchanged.
+ *
+ * @param options {object}
+ * @param options.port {WasSyncPort}
+ * @param options.id {string}
+ * @param [options.assumedMasterState] {WithDeleted<SyncedDoc>}
+ * @returns {Promise<void>}
+ */
+async function deleteContent({
+  port,
+  id,
+  assumedMasterState
+}: {
+  port: WasSyncPort
+  id: string
+  assumedMasterState?: WithDeleted<SyncedDoc>
+}): Promise<void> {
+  const assumedVersion = assumedMasterState?.version
+  try {
+    await port.deleteContent({
+      id,
+      ...(assumedVersion !== undefined && {
+        ifMatch: formatEtag(assumedVersion)
+      })
+    })
+    return
+  } catch (err) {
+    if (
+      !(err instanceof WasSyncConflictError) ||
+      assumedVersion === undefined
+    ) {
+      throw err
+    }
+    const master = await port.get({ id })
+    if (
+      master === null ||
+      master.deleted ||
+      !bodiesEqual(master.data, assumedMasterState?.data)
+    ) {
+      throw err
+    }
+    await port.deleteContent({ id, ifMatch: formatEtag(master.version) })
+  }
+}
+
+/**
  * Sends one local change to the remote Collection as up to two conditional
  * writes (content, then metadata). Returns the master-state conflict entry on a
  * `412` at either step, or `null` on success.
@@ -138,12 +197,7 @@ async function pushRow({
   try {
     if (newDocumentState._deleted) {
       // Delete supersedes any metadata write: drop the content, tombstone wins.
-      await port.deleteContent({
-        id,
-        ...(assumedVersion !== undefined && {
-          ifMatch: formatEtag(assumedVersion)
-        })
-      })
+      await deleteContent({ port, id, assumedMasterState })
       return null
     }
 

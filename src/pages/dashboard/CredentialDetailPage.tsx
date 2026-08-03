@@ -81,7 +81,7 @@ export function CredentialDetailPage() {
       <Box sx={credentialDetailStyles.wrapper}>
         {deleteError && (
           <Alert severity="error" sx={{ mb: 2 }}>
-            {t('credential.deleteError')}
+            {deleteError}
           </Alert>
         )}
         {shareError && (

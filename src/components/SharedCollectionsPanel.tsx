@@ -29,23 +29,16 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 import { formatDate } from '@/lib/viewMappers/formatDate'
+import {
+  listSharedCollections,
+  removeCollectionShare,
+  SHAREABLE_COLLECTIONS,
+  type CollectionShare
+} from '@/session/shares'
 import { dashboardStyles } from '@/styles/appStyles'
 import { showToast } from '@/stores/toastStore'
 import type { Session } from '@/types/auth'
-
-/**
- * One reader a collection is shared with, as returned by
- * `StorageManager.listCollectionShares`.
- */
-type CollectionShare = {
-  recipientId: string
-  controller?: string
-  expires?: string
-  appName?: string
-  appOrigin?: string
-}
 
 /**
  * A connected app reader's label: its name paired with its origin ("Text
@@ -78,11 +71,6 @@ function hostOf(origin: string): string {
   }
 }
 
-// The encrypted standard collections -- the only ones that can be shared.
-const ENCRYPTED_COLLECTIONS = WALLET_STANDARD_COLLECTIONS.filter(
-  ({ encryption }) => encryption
-)
-
 /**
  * Renders the shared-collections settings section for the current session.
  *
@@ -110,18 +98,10 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
   // collection id. Pure (no state writes) so callers own their own setState --
   // the mount effect below guards against a stale write, the remove handler
   // just refreshes.
-  const fetchShares = useCallback(async () => {
-    const entries = await Promise.all(
-      ENCRYPTED_COLLECTIONS.map(
-        async ({ id }) =>
-          [
-            id,
-            await session.storage.listCollectionShares({ collectionId: id })
-          ] as const
-      )
-    )
-    return Object.fromEntries(entries) as Record<string, CollectionShare[]>
-  }, [session])
+  const fetchShares = useCallback(
+    async () => listSharedCollections({ session }),
+    [session]
+  )
 
   // Load the rosters on mount. Skipped without a remote store (nothing is
   // shared).
@@ -166,9 +146,8 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
     setRemoving(true)
     setRemoveError(false)
     try {
-      await session.storage.unshareCollection({
-        profile: session.profile,
-        user: session.user,
+      await removeCollectionShare({
+        session,
         collectionId: removeTarget.collectionId,
         recipientId: removeTarget.recipientId
       })
@@ -206,7 +185,7 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
           {loadError && (
             <Alert severity="warning">{t('settings.sharedLoadError')}</Alert>
           )}
-          {ENCRYPTED_COLLECTIONS.map(({ id, name }) => {
+          {SHAREABLE_COLLECTIONS.map(({ id, name }) => {
             const shares = sharesByCollection[id] ?? []
             const collectionName = t(`storage.collectionNames.${id}`, {
               defaultValue: name

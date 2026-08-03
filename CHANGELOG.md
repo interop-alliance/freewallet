@@ -1,6 +1,102 @@
 # History
 
-## 0.24.0 - TBD
+## 0.25.0 - TBD
+
+### Changed
+
+- **Deleting a credential now retracts its public copy first.** The
+  world-readable copy is retracted before the private credential is removed
+  (matching the mobile wallet's order): once the private credential is gone
+  there is nothing left to retract the public copy with, so the old order
+  could leave a credential the user believes is deleted still readable at its
+  public link. Retraction of a live public copy is blocking, not best-effort
+  -- a public copy that cannot be retracted (offline while a remote server is
+  configured, say) refuses the delete with a clear message instead of stranding
+  an orphan, and the delete can be retried once it can land. A credential with
+  no public copy still deletes normally offline, and the delete dialog's
+  deliberate "keep the public link" choice is unchanged.
+- **Ceremony orchestration moved out of the React components.** The ordered
+  sequences the pages drive -- the two signup provisioning paths, the Settings
+  ceremonies (passphrase change and bind, passkey add / rename / remove, the
+  did:webvh update-key rotation, and account deletion's verify-wipe-retire
+  phase order), the post-recovery registry updates, the connected-app and
+  shared-collection listings and revocations, and the CHAPI `get` approval
+  sequence -- now live in `src/session/` and `src/lib/walletRequest/`, with
+  each function's JSDoc stating the ordering it must keep. Behavior is
+  unchanged; the components keep rendering, form state, and confirmation
+  callbacks only, and the orderings are now testable without a DOM (new unit
+  tests cover the account-deletion phases and the
+  persist-before-deliver rule).
+- Unified the two CORS-proxy paths into a single module and a single config
+  key: `corsProxyFetch` and `fetchFromURL` both build their proxied URL
+  through one helper over `VITE_CORS_PROXY_URL`, so the known-registries fetch
+  and the pasted-credential-URL fetch are configured the same way.
+- **Code the two wallets had grown separate copies of now lives once, in the
+  shared packages, and freewallet consumes it.** Divergence in any of these
+  was a correctness risk rather than a tidiness one -- both wallets read and
+  write the same account, so a rule one implements differently is a rule that
+  breaks the other's data:
+  - The **client-key record** contents codec and its strict validation (the
+    client seed, the cached per-user key, this client's did:webvh update-key
+    seeds, the account controller) come from `@interop/wallet-core/keys`.
+    Freewallet keeps its own unlock-layer wrap and IndexedDB storage around
+    them; the stored bytes are unchanged.
+  - The **enrolled-client listing** and the **disconnect-eligibility policy**
+    (self-disconnect refused, the last connected wallet refused, disconnect
+    disabled on an ambiguous update-key attribution, a partial collection
+    fan-out reported as the resumable success it is) come from
+    `@interop/wallet-core/clients`. `src/session/clients.ts` is now a
+    session-shaped adapter, and the Settings panel consumes the policy
+    instead of re-deriving it as UI state.
+  - The **revocation cascade** and the **login-time roster policy** are the
+    shared orchestrators; freewallet supplies the stages only it knows (the
+    collections source, the recovery-delegation re-mint, and the adoption
+    side effects: epoch pin, client-key record, live vault keys and storage
+    ciphers).
+  - The **contacts conflict rule**, the **contact display helpers** (initials,
+    secondary line, list order), the headless **contact form assembly**, and
+    the generic **self-contact seed** come from `@interop/wallet-core/sync`
+    and `@interop/social-core`, so a contact edited on either wallet
+    serializes identically. The product's own seed contact stays in
+    `src/fixtures/defaultContacts.ts`: the shared package is team-neutral, and
+    the two wallets deliberately hold those display-name strings separately
+    but byte-for-byte identically, since the pull path matches a pulled seed
+    on its exact name.
+  - The `did:key`-to-X25519 **recipient derivation** behind a share comes from
+    `@interop/was-client/edv`.
+- **Free-form input is classified before it is resolved.** The Add Credential
+  paste box and the QR scanner now run text through the shared wallet-input
+  classifier instead of assuming everything is a credential or a URL, so a
+  pasted wallet connect code is recognized and pointed at Settings >
+  Connected wallets rather than failing as malformed credential JSON.
+- Freewallet's two conflicting initials implementations collapsed to the one
+  shared rule (first + last name token); the unused first-two-tokens variant
+  is deleted.
+- Disconnecting a wallet client from an account that has no key roster yet
+  now reports a completed cascade with nothing rotated instead of failing.
+  The account-log edit lands first and is what disconnects the client, so
+  there was never anything left to fail on -- an account whose collections
+  are not encrypted simply has no roster to rotate.
+- A contacts conflict between a valid local edit and a malformed remote copy
+  now keeps the local edit (which then repairs the server copy), where the
+  remote copy previously won and the local edit was lost. Validation of both
+  sides is also stricter: a payload is checked in full rather than by two of
+  its fields.
+
+### Fixed
+
+- Replicated deletes were being refused by the server with `412` whenever the
+  local row's revision lagged the resource's ETag (a locally created row is
+  pushed with the revision it was inserted with, while the server assigns its
+  own), leaving deleted resources -- including retracted public credentials --
+  live on the remote server. A refused delete whose remote body is unchanged is
+  now re-issued against the current ETag.
+- The issuer-registry loader no longer poisons its module cache: a failed
+  registries fetch used to serve the local fallback list for the rest of the
+  session. The fallback client is not cached and the rejected load is evicted,
+  so the next lookup retries.
+
+## 0.24.0 - 2026-08-03
 
 ### Changed
 

@@ -1,5 +1,6 @@
 import type { TFunction } from 'i18next'
 import { ResolveCredentialsInputError } from '@/lib/resolveCredentialsInput'
+import { WalletInputUnsupportedError } from '@/lib/resolveWalletInput'
 import {
   CredentialJsonFileError,
   CredentialJsonFileTooLargeError
@@ -10,6 +11,14 @@ export function resolveCredentialsInputErrorMessage(
   translate: TFunction,
   context?: { trimmed?: string }
 ): string {
+  if (err instanceof WalletInputUnsupportedError) {
+    return translate(
+      err.code === 'connect_code'
+        ? 'addCredential.errors.connectCode'
+        : 'addCredential.errors.unsupportedInput'
+    )
+  }
+
   if (err instanceof ResolveCredentialsInputError) {
     const keys = {
       empty: 'addCredential.errors.empty',

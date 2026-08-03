@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialJsonUploadPanel } from '@/components/CredentialJsonFileUpload'
 import { resolveCredentialsFromJsonFiles } from '@/lib/resolveCredentialJsonFiles'
-import { resolveCredentialsInput } from '@/lib/resolveCredentialsInput'
+import { resolveWalletInput } from '@/lib/resolveWalletInput'
 import { resolveCredentialsInputErrorMessage } from '@/lib/resolveCredentialsInputErrorMessage'
 import { dashboardStyles } from '@/styles/appStyles'
 
@@ -32,7 +32,7 @@ export function AddCredentialPage() {
 
     setLoading(true)
     try {
-      const credentials = await resolveCredentialsInput(trimmed)
+      const credentials = await resolveWalletInput(trimmed)
       navigate('/accept-credentials', { state: { credentials } })
     } catch (err: unknown) {
       setError(resolveCredentialsInputErrorMessage(err, t, { trimmed }))

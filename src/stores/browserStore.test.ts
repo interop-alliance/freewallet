@@ -13,7 +13,7 @@ import { cidFrom } from '@interop/was-client/sync'
 import type { Json } from '@/lib/sync'
 import { BrowserStore } from './browserStore'
 import { UnknownEpochError, type DocCipher } from '@interop/was-client/edv'
-import { StorageManager } from './storageManager'
+import { PublicCopyRetractionError, StorageManager } from './storageManager'
 import { RemoteDirectStore } from './remoteDirectStore'
 import type { WASRemoteStore } from './wasRemoteStore'
 
@@ -1009,6 +1009,92 @@ describe('StorageManager (local-first facade)', () => {
 
     expect(await storage.loadCredential({ cid })).toBeUndefined()
     expect(await storage.listCredentials()).toHaveLength(0)
+  })
+
+  it('retracts the public copy before deleting the credential', async () => {
+    const { localStore, user } = await initLocalStore()
+    const remoteStore = {
+      publicCredentialUrl: (cid: string) =>
+        `https://was.example/space/s/public-credentials/${cid}`
+    } as unknown as WASRemoteStore
+    const storage = new StorageManager({ localStore, remoteStore })
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+    await storage.addCredential({ credential, user })
+    await storage.createPublicLink({ credential })
+
+    const calls: string[] = []
+    const removePublicCredential =
+      localStore.removePublicCredential.bind(localStore)
+    const deleteCredential = localStore.deleteCredential.bind(localStore)
+    localStore.removePublicCredential = async options => {
+      calls.push('removePublicCredential')
+      return await removePublicCredential(options)
+    }
+    localStore.deleteCredential = async options => {
+      calls.push('deleteCredential')
+      return await deleteCredential(options)
+    }
+
+    await storage.deleteCredential({ cid })
+
+    expect(calls).toEqual(['removePublicCredential', 'deleteCredential'])
+    expect(await storage.isShared({ cid })).toBe(false)
+    expect(await storage.listCredentials()).toHaveLength(0)
+  })
+
+  it('refuses the delete when a live public copy cannot be retracted', async () => {
+    const { localStore, user } = await initLocalStore()
+    const remoteStore = {
+      publicCredentialUrl: (cid: string) =>
+        `https://was.example/space/s/public-credentials/${cid}`
+    } as unknown as WASRemoteStore
+    const storage = new StorageManager({ localStore, remoteStore })
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+    await storage.addCredential({ credential, user })
+    await storage.createPublicLink({ credential })
+
+    localStore.removePublicCredential = async () => {
+      throw new Error('offline')
+    }
+
+    await expect(storage.deleteCredential({ cid })).rejects.toThrow(
+      PublicCopyRetractionError
+    )
+    // The private credential is still there: no world-readable orphan.
+    expect(await storage.loadCredential({ cid })).toEqual(credential)
+  })
+
+  it('keeps the public copy when the user deliberately chose to', async () => {
+    const { localStore, user } = await initLocalStore()
+    const remoteStore = {
+      publicCredentialUrl: (cid: string) =>
+        `https://was.example/space/s/public-credentials/${cid}`
+    } as unknown as WASRemoteStore
+    const storage = new StorageManager({ localStore, remoteStore })
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+    await storage.addCredential({ credential, user })
+    await storage.createPublicLink({ credential })
+
+    await storage.deleteCredential({ cid, keepPublicCopy: true })
+
+    expect(await storage.loadCredential({ cid })).toBeUndefined()
+    expect(await storage.isShared({ cid })).toBe(true)
+  })
+
+  it('deletes a credential with no public copy offline', async () => {
+    // No remote store at all: the retraction step finds nothing to retract and
+    // the delete goes through.
+    const { storage, user } = await initManager()
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+    await storage.addCredential({ credential, user })
+
+    await storage.deleteCredential({ cid })
+
+    expect(await storage.loadCredential({ cid })).toBeUndefined()
   })
 
   it('surfaces and purges undecryptable credentials through the facade', async () => {

@@ -191,6 +191,25 @@ function warnDescriptorFetchError(
 }
 
 /**
+ * Thrown when a credential's live public copy could not be retracted, so the
+ * delete of the private credential was refused rather than left to strand a
+ * world-readable orphan. See {@link StorageManager.deleteCredential}.
+ */
+export class PublicCopyRetractionError extends Error {
+  cid: string
+
+  constructor({ cid, cause }: { cid: string; cause?: unknown }) {
+    super(
+      `Could not retract the public copy of credential "${cid}"; ` +
+        'the credential was not deleted.',
+      { cause }
+    )
+    this.name = 'PublicCopyRetractionError'
+    this.cid = cid
+  }
+}
+
+/**
  * Manages storage operations for the wallet and a logged-in user profile:
  * routes all wallet reads/writes to the local active replica and exposes the
  * optional remote WAS backend for replication and remote-only features.
@@ -680,8 +699,62 @@ export class StorageManager {
     return await this.#store.loadCredential({ cid })
   }
 
-  async deleteCredential({ cid }: { cid: string }) {
+  /**
+   * Deletes a credential, retracting its world-readable public copy FIRST when
+   * it has one. The order is load-bearing: once the private credential is gone
+   * there is no wallet-side handle left to retract the public copy with, so
+   * deleting it first can strand a world-readable orphan of a credential the
+   * user believes is deleted.
+   *
+   * Retraction of a live public copy is therefore BLOCKING, not best-effort:
+   * if the credential has a public copy that cannot be retracted (offline
+   * while a remote store is configured, say), the delete is refused with a
+   * {@link PublicCopyRetractionError} and the private credential is left in
+   * place, so the user can retry once the retraction can land. A credential
+   * with no public copy deletes normally, offline included.
+   *
+   * `keepPublicCopy` is the user's deliberate "keep the public link" choice
+   * from the delete dialog: a retention the user was asked about and chose, as
+   * distinct from the accidental orphan above. It skips the retraction (and
+   * therefore the refusal) entirely.
+   *
+   * @param options {object}
+   * @param options.cid {string}
+   * @param [options.keepPublicCopy] {boolean}
+   * @returns {Promise<void>}
+   */
+  async deleteCredential({
+    cid,
+    keepPublicCopy = false
+  }: {
+    cid: string
+    keepPublicCopy?: boolean
+  }): Promise<void> {
+    if (!keepPublicCopy) {
+      await this.#retractPublicCopy({ cid })
+    }
     await this.#store.deleteCredential({ cid })
+  }
+
+  /**
+   * Removes a credential's public copy, if it has one, ahead of deleting the
+   * credential itself. A failure to determine whether a public copy exists is
+   * treated exactly like a failed retraction -- an unknown public copy is
+   * indistinguishable from an unretracted one -- so both refuse the delete.
+   *
+   * @param options {object}
+   * @param options.cid {string}
+   * @returns {Promise<void>}
+   */
+  async #retractPublicCopy({ cid }: { cid: string }): Promise<void> {
+    try {
+      if (!(await this.#store.hasPublicCredential({ cid }))) {
+        return
+      }
+      await this.#store.removePublicCredential({ cid })
+    } catch (err) {
+      throw new PublicCopyRetractionError({ cid, cause: err })
+    }
   }
 
   /**

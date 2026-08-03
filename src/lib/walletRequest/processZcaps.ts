@@ -74,7 +74,7 @@ import {
 import {
   isEd25519DidKey,
   x25519RecipientFromDidKey
-} from '@/lib/didKeyRecipient'
+} from '@interop/was-client/edv'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 
 /**

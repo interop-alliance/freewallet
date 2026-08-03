@@ -17,41 +17,37 @@ import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import { MdContentCopy, MdEdit } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
-import { base64urlnopad } from '@scure/base'
 import type { IZcap } from '@interop/data-integrity-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { useInfoBox } from '@/hooks/useInfoBox'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { getFileUrl } from '@interop/did-method-webvh'
-import { isWebvhDid, rotateWebvhUpdateKey } from '@interop/wallet-core/webvh'
+import { isWebvhDid } from '@interop/wallet-core/webvh'
+import { WrongPassphraseError } from '@/session/keyring'
 import {
-  bindPassphrase,
-  changePassphrase,
-  deleteKeyring,
-  unlockManagementGrantee,
-  verifyPassphrase,
-  WrongPassphraseError
-} from '@/session/keyring'
-import {
-  adoptPassphraseRebind,
-  backfillPassphraseUnlockMethod,
   canRevokeWithoutCeremony,
-  enrollPasskey,
   getUnlockMethods,
-  putUnlockMethods,
-  revokeUnlockMethod,
-  revokeUnlockMethodByCeremony,
   type PasskeyUnlockMethod,
-  type PassphraseUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
+import {
+  addAccountPasskey,
+  addAccountPassphrase,
+  changeAccountPassphrase,
+  deleteAccount,
+  loadUnlockRegistry,
+  readLoginHandle,
+  removeAccountPasskey,
+  renameAccountPasskey,
+  repointPassphraseUnlockMethod,
+  rotateAccountUpdateKey
+} from '@/session/accountSettings'
 import {
   PasskeyCancelledError,
   PasskeyDuplicateError,
   PasskeyPrfUnsupportedError,
   passkeySupported
 } from '@/lib/passkey'
-import { deletePasskeySafetyNotice } from '@/lib/sessionKey'
 import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { RecoveryCodesSection } from '@/components/RecoveryCodesSection'
@@ -68,11 +64,7 @@ import {
   SYNCED_COLLECTIONS
 } from '@/app.config'
 import { useSyncStatusStore, type SyncStatus } from '@/stores/syncStatusStore'
-import {
-  findLoginCredential,
-  loginHandleOf,
-  setLoginHandle
-} from '@/lib/loginCredential'
+import { setLoginHandle } from '@/lib/loginCredential'
 
 const SYNC_CHIP_COLOR: Record<
   SyncStatus,
@@ -147,9 +139,7 @@ export function SettingsPage() {
         return
       }
       try {
-        const credentials = await session.storage.listCredentials()
-        const found = findLoginCredential({ credentials })
-        const current = found ? (loginHandleOf(found.vc) ?? '') : ''
+        const current = await readLoginHandle({ session })
         if (!cancelled) {
           setHandle(current)
           setSavedHandle(current)
@@ -212,32 +202,12 @@ export function SettingsPage() {
     setPassphraseChangeSuccess(null)
     setPassphraseChangeError(null)
     try {
-      // The keyring record is bound under the ACCOUNT controller (the first
-      // client's did:key) -- on an enrolled second client it differs from this
-      // client's `user.id`, so verification must match against it.
-      const {
-        oldPassphraseRetired,
-        unlockSpaceId,
-        manageCapability,
-        persistClientKeys
-      } = await changePassphrase({
-        clientSeed: seed,
-        controller: profile.accountController ?? session.user.id,
-        oldPassphrase,
-        newPassphrase,
-        puk: profile.puk,
-        webvhUpdateKeys: profile.clientWebvhKeys
-      })
-      // The rebind retired the unlock identity this session logged in under:
-      // swap the live profile onto the new one, so later re-wraps (rolled
-      // update-key seeds, a rotated PUK) hit the new client-key record and the
-      // registry backfill never repoints at the deleted unlock Space.
-      adoptPassphraseRebind({
-        session,
-        unlockSpaceId,
-        manageCapability,
-        persistClientKeys
-      })
+      const { oldPassphraseRetired, unlockSpaceId, manageCapability } =
+        await changeAccountPassphrase({
+          session,
+          oldPassphrase,
+          newPassphrase
+        })
       setOldPassphrase('')
       setNewPassphrase('')
       setPassphraseChangeSuccess(oldPassphraseRetired)
@@ -257,43 +227,21 @@ export function SettingsPage() {
   }
 
   // Repoints the registry's passphrase entry at the unlock Space a passphrase
-  // change (or bind) produced, preserving the entry's original creation date.
-  // Best-effort: the passphrase change itself has already succeeded.
-  const updatePassphraseEntry = async ({
-    unlockSpaceId,
-    manageCapability
-  }: {
+  // change (or bind) produced. Best-effort: the passphrase change itself has
+  // already succeeded, so a null result is simply left on screen as-is.
+  const updatePassphraseEntry = async (options: {
     unlockSpaceId: string
     manageCapability?: IZcap
   }) => {
     if (!session) {
       return
     }
-    try {
-      const current = await getUnlockMethods({ session })
-      if (!current) {
-        return
-      }
-      const existing = current.methods.find(
-        (method): method is PassphraseUnlockMethod =>
-          method.type === 'passphrase'
-      )
-      const entry: PassphraseUnlockMethod = {
-        type: 'passphrase',
-        createdAt: existing?.createdAt ?? new Date().toISOString(),
-        unlockSpaceId,
-        manageCapability
-      }
-      const methods = existing
-        ? current.methods.map(method =>
-            method.type === 'passphrase' ? entry : method
-          )
-        : [...current.methods, entry]
-      const updated: UnlockMethodsRecord = { ...current, methods }
-      await putUnlockMethods({ session, record: updated })
+    const updated = await repointPassphraseUnlockMethod({
+      session,
+      ...options
+    })
+    if (updated) {
       setUnlockRegistry(updated)
-    } catch (err) {
-      console.warn('Could not update the passphrase unlock-method entry:', err)
     }
   }
   // Passkeys (keyring v2 unlock methods). The section is shown only where
@@ -399,77 +347,23 @@ export function SettingsPage() {
     setAddingPasskey(true)
     setPasskeyError(null)
     try {
-      // Reuse the registry already loaded into state (it may already carry the
-      // backfilled passphrase entry) so the new passkey shares the one
-      // wallet-wide user handle and excludes any authenticator already holding
-      // a passkey for this wallet. Fall back to a fresh registry when none has
-      // been written yet.
-      const registry: UnlockMethodsRecord = unlockRegistry ?? {
-        version: 1,
-        userHandle: base64urlnopad.encode(
-          crypto.getRandomValues(new Uint8Array(16))
-        ),
-        methods: []
-      }
-      const excludeCredentialIds = registry.methods
-        .filter(
-          (method): method is PasskeyUnlockMethod => method.type === 'passkey'
-        )
-        .map(method => base64urlnopad.decode(method.credentialId))
       const userName =
         session.user.email ??
         `Freewallet ${new Date().toLocaleDateString(i18n.language, DATE_FMT)}`
-
-      // Run the ceremony, bind this client's key set under the passkey's
-      // unlock identity, and build the registry entry. Delegating management
-      // to the account identity lets Settings later revoke this passkey
-      // without a tap on the (possibly lost) authenticator -- from any
-      // enrolled client, since a promoted account's grant names the
-      // did:webvh. The record still binds under the account controller (the
-      // FIRST client's did:key) -- on an enrolled second client it differs
-      // from this client's `user.id`.
-      const accountController = profile.accountController ?? session.user.id
-      const { entry } = await enrollPasskey({
-        clientSeed: seed,
-        puk: profile.puk,
-        webvhUpdateKeys: profile.clientWebvhKeys,
-        pointer: profile.accountPointer,
-        controller: accountController,
-        userHandle: base64urlnopad.decode(registry.userHandle),
-        userName,
+      const { record, recorded } = await addAccountPasskey({
+        session,
+        registry: unlockRegistry,
         locale: i18n.language,
-        email: session.user.email,
-        excludeCredentialIds,
-        delegateManagementTo: unlockManagementGrantee({
-          pointer: profile.accountPointer,
-          controller: accountController
-        }),
+        userName,
         promptForPrfRetry
       })
-
-      const updated: UnlockMethodsRecord = {
-        ...registry,
-        methods: [...registry.methods, entry]
-      }
-      try {
-        await putUnlockMethods({ session, record: updated })
-      } catch (err) {
+      if (!recorded) {
         // The passkey is already bound and will log in; only the registry
         // listing entry failed to persist.
-        console.error('Could not record the new passkey in the registry:', err)
         setPasskeyError('failed')
         return
       }
-      setUnlockRegistry(updated)
-      // The account now has a second unlock method, so the dashboard's
-      // passkey-only safety prompt is resolved. Non-fatal.
-      if (updated.methods.length > 1) {
-        try {
-          await deletePasskeySafetyNotice({ controller: session.user.id })
-        } catch (err) {
-          console.warn('Could not clear the passkey-safety notice:', err)
-        }
-      }
+      setUnlockRegistry(record)
       showToast({ message: t('settings.passkeyAdded') })
       await reloadRegistry()
     } catch (err) {
@@ -499,16 +393,12 @@ export function SettingsPage() {
     }
     setLabelSaving(true)
     try {
-      const updated: UnlockMethodsRecord = {
-        ...unlockRegistry,
-        methods: unlockRegistry.methods.map(method =>
-          method.type === 'passkey' &&
-          method.credentialId === entry.credentialId
-            ? { ...method, label: trimmed }
-            : method
-        )
-      }
-      await putUnlockMethods({ session, record: updated })
+      const updated = await renameAccountPasskey({
+        session,
+        registry: unlockRegistry,
+        entry,
+        label: trimmed
+      })
       setUnlockRegistry(updated)
       setEditingCredentialId(null)
       showToast({ message: t('settings.passkeyLabelSaved') })
@@ -538,11 +428,7 @@ export function SettingsPage() {
     setRemoving(true)
     setRemoveError(false)
     try {
-      if (canRevokeWithoutCeremony(entry)) {
-        await revokeUnlockMethod({ session, entry })
-      } else {
-        await revokeUnlockMethodByCeremony({ session, entry })
-      }
+      await removeAccountPasskey({ session, entry })
       setRemoveDialogOpen(false)
       setRemoveTarget(null)
       showToast({ message: t('settings.passkeyRemoved') })
@@ -582,52 +468,12 @@ export function SettingsPage() {
     setAddPassphraseError(false)
     setAddPassphraseSuccess(false)
     try {
-      // Bind under the ACCOUNT controller -- the first client's did:key,
-      // which differs from this client's `user.id` on an enrolled second
-      // client. Management is delegated to the account identity (the
-      // did:webvh on a promoted account), so any enrolled client can later
-      // revoke this method.
-      const accountController =
-        session.profile.accountController ?? session.user.id
-      const { unlockSpaceId, manageCapability } = await bindPassphrase({
-        clientSeed: seed,
-        controller: accountController,
-        passphrase: addPassphrase,
-        email: session.user.email,
-        puk: session.profile.puk,
-        webvhUpdateKeys: session.profile.clientWebvhKeys,
-        pointer: session.profile.accountPointer,
-        delegateManagementTo: unlockManagementGrantee({
-          pointer: session.profile.accountPointer,
-          controller: accountController
-        })
+      const updated = await addAccountPassphrase({
+        session,
+        registry: unlockRegistry,
+        passphrase: addPassphrase
       })
-      const base: UnlockMethodsRecord = unlockRegistry ?? {
-        version: 1,
-        userHandle: base64urlnopad.encode(
-          crypto.getRandomValues(new Uint8Array(16))
-        ),
-        methods: []
-      }
-      const entry: PassphraseUnlockMethod = {
-        type: 'passphrase',
-        createdAt: new Date().toISOString(),
-        unlockSpaceId,
-        manageCapability
-      }
-      const updated: UnlockMethodsRecord = {
-        ...base,
-        methods: [...base.methods, entry]
-      }
-      await putUnlockMethods({ session, record: updated })
       setUnlockRegistry(updated)
-      // The account now has a passphrase backup, so the passkey-only safety
-      // prompt is resolved. Best-effort.
-      try {
-        await deletePasskeySafetyNotice({ controller: session.user.id })
-      } catch (err) {
-        console.warn('Could not clear the passkey-safety notice:', err)
-      }
       setAddPassphrase('')
       setAddPassphraseSuccess(true)
       showToast({ message: t('settings.passphraseAdded') })
@@ -653,30 +499,17 @@ export function SettingsPage() {
         return
       }
       try {
-        const record = await backfillPassphraseUnlockMethod({
-          session,
-          createIfMissing: true
-        })
+        const record = await loadUnlockRegistry({ session })
         if (!cancelled) {
           setUnlockRegistry(record)
           setRegistryLoaded(true)
           setRegistryLoadError(false)
         }
       } catch (err) {
-        console.warn('Could not backfill the unlock methods; reading:', err)
-        try {
-          const fallback = await getUnlockMethods({ session })
-          if (!cancelled) {
-            setUnlockRegistry(fallback)
-            setRegistryLoaded(true)
-            setRegistryLoadError(false)
-          }
-        } catch (readErr) {
-          console.error('Could not load the unlock methods:', readErr)
-          if (!cancelled) {
-            setRegistryLoaded(true)
-            setRegistryLoadError(true)
-          }
+        console.error('Could not load the unlock methods:', err)
+        if (!cancelled) {
+          setRegistryLoaded(true)
+          setRegistryLoadError(true)
         }
       }
     }
@@ -719,10 +552,12 @@ export function SettingsPage() {
   }
 
   const handleRotate = async () => {
-    const remoteStore = session?.storage.remoteStore
-    const updateKeys = session?.profile.clientWebvhKeys
-    const persistClientKeys = session?.profile.persistClientKeys
-    if (!session || !remoteStore || !updateKeys || !persistClientKeys) {
+    if (
+      !session ||
+      !session.storage.remoteStore ||
+      !session.profile.clientWebvhKeys ||
+      !session.profile.persistClientKeys
+    ) {
       return
     }
     setRotateDialogOpen(false)
@@ -730,18 +565,7 @@ export function SettingsPage() {
     setRotateDone(false)
     setRotateError(false)
     try {
-      // Per-client self-rotation with the client-held seeds: every changed
-      // seed set is persisted into the wrapped client-key record (and the
-      // in-memory profile) before and after the log extends, so a crash
-      // mid-rotation resumes from durable state.
-      await rotateWebvhUpdateKey({
-        idStore: remoteStore.webvhIdStore(),
-        updateKeys,
-        persistUpdateKeys: async next => {
-          await persistClientKeys({ webvhUpdateKeys: next })
-          session.profile.clientWebvhKeys = next
-        }
-      })
+      await rotateAccountUpdateKey({ session })
       setRotateDone(true)
     } catch (err) {
       console.error('Could not rotate the did:webvh update key:', err)
@@ -762,68 +586,26 @@ export function SettingsPage() {
     if (!session) {
       return
     }
-    const isGuest = !!session.isGuest
     setDeleteError(false)
     setDeletePassphraseIncorrect(false)
     setDeleting(true)
     try {
-      // (a) Confirm the passphrase before wiping anything -- a wrong passphrase
-      // must not delete data. Guests have no keyring, so this is skipped.
-      if (!isGuest) {
-        try {
-          // Match against the ACCOUNT controller the keyring record was bound
-          // under (differs from `user.id` on an enrolled second client).
-          await verifyPassphrase({
-            controller: session.profile.accountController ?? session.user.id,
-            passphrase: deletePassphrase
-          })
-        } catch (err) {
-          if (err instanceof WrongPassphraseError) {
-            setDeletePassphraseIncorrect(true)
-            return
-          }
-          // Any other failure (e.g. the remote is unreachable) is a generic
-          // delete failure -- do not touch the user's data.
-          console.error('Could not verify the passphrase for deletion:', err)
-          setDeleteError(true)
-          setDeleteDialogOpen(false)
-          return
-        }
+      // Phases (a) confirm the passphrase, (b) wipe the data, and (c) retire
+      // the keyring run in `deleteAccount`, which states the order they must
+      // keep. A failure in (a) or (b) leaves the data intact, so the page
+      // reports it and stays put.
+      const result = await deleteAccount({
+        session,
+        passphrase: deletePassphrase
+      })
+      if (result === 'wrong-passphrase') {
+        setDeletePassphraseIncorrect(true)
+        return
       }
-      // (b) Wipe the data Space and the local replica. On failure keep the old
-      // semantics: surface the error, do not log out (the data is still there).
-      try {
-        console.log('Wiping user data...')
-        await session.storage?.wipeStorage()
-      } catch (err) {
-        console.error('Error wiping user data:', err)
+      if (result === 'failed') {
         setDeleteError(true)
         setDeleteDialogOpen(false)
         return
-      }
-      // (c) Retire the passphrase keyring only after a successful wipe -- if the
-      // keyring died first and the wipe then failed, the data Space would be
-      // orphaned unrecoverably. Non-fatal: the data is already gone, so a
-      // leftover record is only a hygiene residue. Guests have no keyring.
-      if (!isGuest) {
-        try {
-          const { unlockSpaceDeleted } = await deleteKeyring({
-            passphrase: deletePassphrase
-          })
-          if (!unlockSpaceDeleted) {
-            console.warn(
-              'Could not delete the unlock Space during account deletion.'
-            )
-          }
-        } catch (err) {
-          console.warn('Could not retire the passphrase keyring:', err)
-        }
-        // Best-effort cleanup of the local passkey-safety notice for hygiene.
-        try {
-          await deletePasskeySafetyNotice({ controller: session.user.id })
-        } catch (err) {
-          console.warn('Could not delete the passkey-safety notice:', err)
-        }
       }
       // (d) Clear the session, then (e) hard-reload to the landing page.
       await logout()

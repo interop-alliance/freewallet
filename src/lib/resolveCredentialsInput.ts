@@ -13,7 +13,7 @@
  */
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { resolveCredentialsInput as sharedResolveCredentialsInput } from '@interop/wallet-core/display'
-import { fetchFromURL } from '@/lib/fetchFromURL'
+import { fetchFromURL } from '@/lib/corsProxy'
 
 export { ResolveCredentialsInputError } from '@interop/wallet-core/display'
 

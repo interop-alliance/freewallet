@@ -97,6 +97,7 @@ import {
 import type { Session } from '@/types/auth'
 import { bindPassphrase, unlockManagementGrantee } from '@/session/keyring'
 import {
+  backfillPassphraseUnlockMethod,
   getUnlockMethods,
   managementZcapClient,
   putUnlockMethods,
@@ -1020,6 +1021,66 @@ export async function recoverAccountWithCode({
     replacementEntry,
     spentRecoveryKid: spent.recipientKid,
     email: contents.email
+  }
+}
+
+/**
+ * The account's issued recovery codes, read off the unlock-methods registry.
+ * A read failure is reported as an empty listing (the panel is informational;
+ * issuing and revoking each read the registry again).
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {Promise<RecoveryCodeUnlockMethod[]>}
+ */
+export async function listRecoveryCodeEntries({
+  session
+}: {
+  session: Session
+}): Promise<RecoveryCodeUnlockMethod[]> {
+  try {
+    const record = await getUnlockMethods({ session })
+    return (record?.methods ?? []).filter(
+      (method): method is RecoveryCodeUnlockMethod =>
+        method.type === 'recovery-code'
+    )
+  } catch (err) {
+    console.warn('Could not load the recovery-code entries:', err)
+    return []
+  }
+}
+
+/**
+ * The two post-login registry updates a recovery owes, run in sequence.
+ *
+ * Sequenced, not concurrent: both are read-modify-writes over the same
+ * registry resource with last-write-wins puts, so firing them together races
+ * -- the loser's read goes stale and its put silently drops the winner's
+ * update (losing the replacement code's entry, or repointing the passphrase
+ * entry at the deleted pre-recovery unlock Space). Both halves are
+ * best-effort: the account is already recovered and logged in.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.outcome {RecoveryOutcome}
+ * @returns {Promise<void>}
+ */
+export async function updateRegistryAfterRecovery({
+  session,
+  outcome
+}: {
+  session: Session
+  outcome: RecoveryOutcome
+}): Promise<void> {
+  try {
+    await recordRecoveryOutcome({ session, outcome })
+  } catch (err) {
+    console.warn('Could not update the unlock-methods registry:', err)
+  }
+  try {
+    await backfillPassphraseUnlockMethod({ session })
+  } catch (err) {
+    console.warn('Could not backfill the unlock-methods registry:', err)
   }
 }
 

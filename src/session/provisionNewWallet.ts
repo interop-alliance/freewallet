@@ -24,10 +24,8 @@
  */
 import type { Session } from '@/types/auth'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
-import {
-  interopAllianceTeamContact,
-  selfContact
-} from '@/fixtures/defaultContacts'
+import { selfContact } from '@interop/social-core'
+import { interopAllianceTeamContact } from '@/fixtures/defaultContacts'
 
 /**
  * Provisions a freshly created wallet: collections, initial history, default
@@ -68,9 +66,10 @@ export async function provisionNewWallet({
     await storage.addContact({ contact: interopAllianceTeamContact })
     await storage.addContact({
       contact: selfContact({
-        didWeb: profile.didWeb?.did,
-        didWebvh: profile.didWebvh?.did,
-        email: session.isGuest ? undefined : user.email
+        dids: [profile.didWeb?.did, profile.didWebvh?.did].filter(
+          (did): did is string => Boolean(did)
+        ),
+        ...(session.isGuest ? {} : { email: user.email })
       })
     })
   } catch (err) {

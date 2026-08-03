@@ -19,16 +19,15 @@ import { authStyles } from '@/styles/appStyles'
 import { useAuthStore } from '@/stores/authStore'
 import { PASSWORD_RULES } from '@/app.config'
 import { loginWithPassphrase } from '@/session/initSession'
-import { backfillPassphraseUnlockMethod } from '@/session/unlockMethods'
 import {
   formatRecoveryCode,
   locateRecoveryAccount,
-  recordRecoveryOutcome,
   recoverAccountWithCode,
   RecoveryCodeInvalidError,
   RecoveryCodeNotFoundError,
   RecoveryKeyNotCommittedError,
   RecoveryUnavailableError,
+  updateRegistryAfterRecovery,
   type RecoveryOutcome
 } from '@/session/recovery'
 import { isStorageUnreachable } from '@/lib/storageErrors'
@@ -160,19 +159,9 @@ export function RecoverPage() {
       }
       await session.storageReady
       login(session)
-      // Sequenced, not concurrent: both are read-modify-writes over the same
-      // registry resource with last-write-wins puts, so firing them together
-      // races -- the loser's read goes stale and its put silently drops the
-      // winner's update (losing the replacement code's entry, or repointing
-      // the passphrase entry at the deleted pre-recovery unlock Space).
-      void recordRecoveryOutcome({ session, outcome })
-        .catch(err =>
-          console.warn('Could not update the unlock-methods registry:', err)
-        )
-        .then(() => backfillPassphraseUnlockMethod({ session }))
-        .catch(err =>
-          console.warn('Could not backfill the unlock-methods registry:', err)
-        )
+      // Fire-and-forget: the sequencing the two registry updates need lives in
+      // `updateRegistryAfterRecovery`, and both halves are best-effort.
+      void updateRegistryAfterRecovery({ session, outcome })
       navigate('/dashboard', { replace: true })
     } catch (err) {
       console.error('Recovery login failed:', err)

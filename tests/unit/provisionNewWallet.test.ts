@@ -10,10 +10,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/auth'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
-import {
-  interopAllianceTeamContact,
-  selfContact
-} from '@/fixtures/defaultContacts'
+import { selfContact } from '@interop/social-core'
+import { interopAllianceTeamContact } from '@/fixtures/defaultContacts'
 import { provisionNewWallet } from '@/session/provisionNewWallet'
 
 /**
@@ -63,8 +61,9 @@ describe('provisionNewWallet', () => {
     })
     expect(storage.addContact).toHaveBeenCalledWith({
       contact: selfContact({
-        didWeb: profile.didWeb?.did,
-        didWebvh: profile.didWebvh?.did,
+        dids: [profile.didWeb?.did, profile.didWebvh?.did].filter(
+          (did): did is string => Boolean(did)
+        ),
         email: user.email
       })
     })
@@ -94,9 +93,9 @@ describe('provisionNewWallet', () => {
 
     expect(storage.addContact).toHaveBeenCalledWith({
       contact: selfContact({
-        didWeb: profile.didWeb?.did,
-        didWebvh: profile.didWebvh?.did,
-        email: undefined
+        dids: [profile.didWeb?.did, profile.didWebvh?.did].filter(
+          (did): did is string => Boolean(did)
+        )
       })
     })
   })

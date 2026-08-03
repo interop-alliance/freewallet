@@ -23,10 +23,9 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
-import { initialsFor } from '@/lib/contactDisplay'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { contactDetailStyles } from '@/styles/appStyles'
-import { getDids, type ContactData } from '@interop/social-core'
+import { getDids, initialsFor, type ContactData } from '@interop/social-core'
 
 function FieldSection({
   label,

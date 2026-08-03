@@ -290,6 +290,80 @@ describe('createPushHandler routing', () => {
       { kind: 'deleteContent', id: 'r1', ifMatch: formatEtag(7) }
     ])
   })
+
+  it('re-issues a 412-refused delete against the current ETag when the body is unchanged', async () => {
+    // The locally-assumed revision lags the server's (our own create echoed
+    // back on no pull yet), so the first conditional delete is refused.
+    const writes: Array<string | undefined> = []
+    const port: WasSyncPort = {
+      async query() {
+        return { documents: [], checkpoint: null }
+      },
+      async putContent() {},
+      async deleteContent({ ifMatch }) {
+        writes.push(ifMatch)
+        if (ifMatch === formatEtag(0)) {
+          throw new WasSyncConflictError()
+        }
+      },
+      async putMeta() {},
+      async get() {
+        return {
+          version: 1,
+          updatedAt: '2026-02-02T00:00:00Z',
+          deleted: false,
+          data: { a: 1 }
+        }
+      }
+    }
+    const push = createPushHandler(port)
+
+    const conflicts = await push([
+      {
+        assumedMasterState: newDoc({ version: 0, data: { a: 1 } }),
+        newDocumentState: newDoc({ version: 0, _deleted: true })
+      }
+    ])
+
+    // No conflict reported: the resource is gone, under the fresh ETag.
+    expect(conflicts).toEqual([])
+    expect(writes).toEqual([formatEtag(0), formatEtag(1)])
+  })
+
+  it('reports a conflict when a 412-refused delete finds a changed body', async () => {
+    const master: MasterState = {
+      version: 1,
+      updatedAt: '2026-02-02T00:00:00Z',
+      deleted: false,
+      data: { a: 99 }
+    }
+    const port = fakePushPort({
+      conflictOn: { kind: 'deleteContent', id: 'r1' },
+      master
+    })
+    const push = createPushHandler(port)
+
+    const conflicts = await push([
+      {
+        assumedMasterState: newDoc({ version: 0, data: { a: 1 } }),
+        newDocumentState: newDoc({ version: 0, _deleted: true })
+      }
+    ])
+
+    // The body really changed remotely, so the delete is not re-issued.
+    expect(port.writes).toEqual([
+      { kind: 'deleteContent', id: 'r1', ifMatch: formatEtag(0) }
+    ])
+    expect(conflicts).toEqual([
+      {
+        id: 'r1',
+        updatedAt: '2026-02-02T00:00:00Z',
+        version: 1,
+        data: { a: 99 },
+        _deleted: false
+      }
+    ])
+  })
 })
 
 describe('createPushHandler conflicts', () => {
