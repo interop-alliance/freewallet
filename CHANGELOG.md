@@ -1,179 +1,151 @@
 # History
 
-## Unreleased - TBD
+## 0.23.0 - 2026-08-03
 
 ### Added
 
-- **Cross-replica sync conformance exercise** (`tests/conformance/`, run via
-  `pnpm run test:conformance`): both wallets' replication engines -- this
-  wallet's RxDB adapter and the mobile wallet's
-  `@interop/wallet-core/sync` `SyncEngine` -- driven against a real
-  in-process `was-teaching-server` on one shared Space, round-tripping
-  create / edit / delete in both directions across all three collection
-  models (mutable head, content-addressed, append-only), including LWW
-  edit-collision convergence and the EDV-sequence divergence between the
-  two update paths. Needs the sibling `was-teaching-server` checkout built
-  (`WAS_SERVER_DIR` overrides the location). The findings are written down
-  as the compatibility contract in
+- **Cross-replica sync conformance exercise** (`tests/conformance/`,
+  `pnpm run test:conformance`): drives both wallets' replication engines --
+  this wallet's RxDB adapter and the mobile wallet's
+  `@interop/wallet-core/sync` `SyncEngine` -- against a real in-process
+  `was-teaching-server` on one shared Space, round-tripping create / edit /
+  delete both ways across all three collection models, including LWW
+  edit-collision convergence. Needs the sibling `was-teaching-server`
+  checkout built (`WAS_SERVER_DIR` overrides). Findings are the
+  compatibility contract in
   `wallet-core/docs/cross-replica-sync-compatibility.md`; one open defect
   is pinned (the mobile wallet cannot in-place edit a web-authored,
   uuid-keyed contact).
 
 - **Applications reconciliation with per-client keys**: the Applications
   surface now checks each connected app's recorded storage grants against
-  the account's current key set (from the locally verified public account
-  log). An app whose grants were all signed by a since-disconnected wallet
-  is shown as needing a reconnect -- those grants already stopped verifying
-  when that wallet was disconnected -- instead of listing as live, and
-  revoking such an app skips the pointless per-grant server revocations
-  while still rotating the collection encryption keys and removing its app
-  key. The Applications page and the Connected wallets panel now
-  cross-reference each other, so "disconnect this phone" vs "disconnect
-  this app" is discoverable from either.
+  the account's current key set (from the locally verified account log). An
+  app whose grants were all signed by a since-disconnected wallet is shown
+  as needing a reconnect instead of listing as live, and revoking it skips
+  the pointless per-grant server revocations while still rotating the
+  collection encryption keys and removing its app key. The Applications
+  page and the Connected wallets panel now cross-reference each other.
 
 - **Connected wallets** (Settings > "Connected wallets"): the management
   surface over the account's enrolled wallet clients, listed from the
-  locally verified public account log -- so a recovery code (whose key is
-  published for decryption only) and connected apps (which are never
-  enrolled) can never appear in it. The wallet this browser runs is marked;
-  each wallet gets a human-readable name, chosen when its enrollment is
-  approved and editable inline afterwards (names live in the account's
-  private key-map, never in the public document). "Disconnect" runs the
-  full client-revocation cascade with resumable-failure messaging, and the
-  last enrolled wallet cannot be disconnected -- that would abandon the
-  account's update authority -- with the panel pointing at recovery-code
-  issuance instead. The "Enroll another wallet" entry point moved into this
-  panel (from the DID section) and now asks for the new wallet's name at
-  approval.
+  locally verified account log -- so a recovery code (decryption-only key)
+  and connected apps (never enrolled) can never appear in it. The current
+  browser is marked; each wallet gets a human-readable name, chosen at
+  enrollment approval and editable inline (names live in the private
+  key-map, never the public document). "Disconnect" runs the full
+  client-revocation cascade with resumable-failure messaging; the last
+  enrolled wallet cannot be disconnected (that would abandon the account's
+  update authority) -- the panel points at recovery-code issuance instead.
+  The "Enroll another wallet" entry point moved here from the DID section.
 
 - **Recovery codes** (`/recover`, Settings > "Recovery codes"): a 16-byte
-  base58 code, shown exactly once at issuance, that restores the whole
-  account from a fresh browser when the passphrase and every connected
-  browser are lost. A code is a minimal always-enrolled wallet client whose
-  entire key set derives from its bytes: its decryption standing (a
-  published key-agreement entry in the DID document plus a per-user-key
-  wrap) is maintained for free by rotation, while its authority stays
-  latent until the code is typed -- so any use of a code must first extend
-  the world-readable account log. Recovering enrolls a brand-new ordinary
-  client, retires the spent code (a typed code is a spent credential,
-  presumed compromised), rotates the per-user key off it, and pushes a
-  replacement code that must be confirmed saved -- ending in an ordinary
-  enrolled login under a freshly chosen passphrase. Entry points: "Forgot
-  your passphrase?" on the login page and a pointer on the signup page.
-  Revoking a code from Settings is a real revocation -- the code resolves
-  to nothing afterwards, everywhere -- and a login-time health check warns
-  when a stored recovery delegation has rotted and would brick recovery.
-  Spending or revoking a code re-epochs every encrypted collection onto
-  the fresh per-user key (the same cascade client revocation runs), so
-  writes stop landing under epochs the spent or revoked code could read;
-  revoking from Settings also adopts the rotated key into the live session
-  in place. Design details in ARCHITECTURE.md ("Recovery codes").
+  base58 code, shown exactly once, that restores the whole account from a
+  fresh browser when the passphrase and every connected browser are lost. A
+  code is a minimal always-enrolled wallet client derived entirely from its
+  bytes: its decryption standing is maintained for free by rotation, while
+  its authority stays latent -- any use of a code must first extend the
+  world-readable account log. Recovering enrolls a brand-new ordinary
+  client, retires the spent code (presumed compromised), rotates the
+  per-user key off it, re-epochs every encrypted collection onto the fresh
+  key (the same cascade client revocation runs), and pushes a replacement
+  code that must be confirmed saved, ending in an ordinary enrolled login
+  under a fresh passphrase. Entry points: "Forgot your passphrase?" on the
+  login page and a signup pointer. Revoking a code from Settings is a real
+  revocation and runs the same re-epoch, adopting the rotated key into the
+  live session; a login-time health check warns when a stored recovery
+  delegation has rotted. Details in ARCHITECTURE.md ("Recovery codes").
 
-- **Client revocation** (`revokeEnrolledClient` in `src/session/revocation.ts`):
-  disconnecting an enrolled wallet client from the account, run entirely in
-  the revoking client as one synchronous cascade in dependency order. The
-  revoked client's verification methods, update key, and standing
-  commitments leave the account's DID document in a single log entry --
-  under the current-key-set rule that one edit stops the revoked client's
+- **Client revocation** (`revokeEnrolledClient` in
+  `src/session/revocation.ts`): disconnecting an enrolled wallet client,
+  run in the revoking client as one synchronous cascade in dependency
+  order. One log entry removes the revoked client's keys from the account's
+  DID document -- under the current-key-set rule that single edit stops its
   requests, and every delegation and app grant it ever signed, from
-  verifying anywhere. The per-user key then rotates off the revoked
-  client's wrap in the roster, every encrypted collection re-epochs onto
-  the fresh key in parallel (revoked key generations retired, history
-  escrowed, so every other replica keeps decrypting across the rotation),
-  and the recovery delegations the revoked client had signed -- which
-  stopped chaining at the document edit -- are re-minted by the revoking
-  client. The revoking session adopts the fresh key in place (no re-login),
-  a wallet-activity record is written, and the cascade converges under a
-  naive full re-run: every stage detects completion from durable state
-  alone, so a mid-cascade crash strands nothing. The Settings surface for
-  it ships separately; the honest ceiling is unchanged -- ciphertext the
-  revoked client already fetched stays readable to it.
+  verifying anywhere. The per-user key then rotates off its roster wrap,
+  every encrypted collection re-epochs onto the fresh key in parallel
+  (revoked generations retired, history escrowed, so other replicas keep
+  decrypting), and the recovery delegations it had signed are re-minted.
+  The revoking session adopts the fresh key in place (no re-login), and the
+  cascade converges under a naive full re-run, so a mid-cascade crash
+  strands nothing. The honest ceiling is unchanged: ciphertext the revoked
+  client already fetched stays readable to it.
 
-- **The cascade-completion sweep**: every login now re-checks, in the
-  background, that the account's per-user key is wrapped to exactly the
-  wallets its public account document keys, and that each encrypted
-  collection's current key epoch names the current per-user key -- rotating
-  away from a wallet that a crashed disconnect removed from the document but
-  not from the key roster, and re-epoching any collection a crashed
-  revocation or recovery cascade left stranded. Both are detected from
-  durable state alone (no checkpoint resource anywhere), so a cascade one
-  client never got to finish is completed by the next client to log in --
-  and on a healthy account the sweep reads the descriptors and writes
-  nothing. Best-effort by design: a failed sweep never fails the login and
-  simply converges on the next run.
+- **The cascade-completion sweep**: every login re-checks, in the
+  background, that the per-user key is wrapped to exactly the wallets the
+  account document keys and that each encrypted collection's current epoch
+  names the current per-user key -- completing any disconnect, revocation,
+  or recovery cascade another client crashed partway through. Both checks
+  read durable state alone (no checkpoint resource), so on a healthy
+  account the sweep writes nothing; best-effort, a failed sweep never fails
+  the login.
 
 - A **per-user key (PUK)** is now minted at wallet provisioning:
   client-side, never server-held, replacing the passphrase-seed-derived
-  vault KAK as "recipient zero" of every encrypted collection. It is cached
-  locally under the unlock layer, so every unlock method recovers it at
-  login and a passphrase change preserves it. Its one remote home is a
-  **wrap-set roster** (`key-map/puk.json`, outside the synced collections):
-  the roster's current key epoch IS the current PUK, wrapped once per
-  enrolled client, and login confirms the cached copy current or adopts a
-  rotated one. Three client-side guards defend the roster against a
-  tampering host: an authenticated epoch configuration (`epochsMac`), a
-  locally pinned latest-seen epoch (a rolled-back roster is refused), and
-  rotation recipients resolved only from the locally verified did:webvh
-  document. Accounts provisioned before the PUK keep the seed-derived key
-  until re-provisioned. See ARCHITECTURE.md ("The PUK wrap-set roster").
+  vault KAK as "recipient zero" of every encrypted collection. Cached
+  locally under the unlock layer (every unlock method recovers it; a
+  passphrase change preserves it), with one remote home: a **wrap-set
+  roster** (`key-map/puk.json`) whose current key epoch IS the current PUK,
+  wrapped once per enrolled client -- login confirms the cached copy
+  current or adopts a rotated one. Client-side guards (`epochsMac`, a
+  pinned latest-seen epoch, rotation recipients resolved only from the
+  locally verified did:webvh document) defend the roster against a
+  tampering host. Pre-PUK accounts keep the seed-derived key until
+  re-provisioned. See ARCHITECTURE.md ("The PUK wrap-set roster").
 
 - **A second browser can now be connected to an existing account** -- the
   client enrollment ceremony. The new browser's "not enrolled" login offers
-  "Connect this browser": it mints its whole key set locally and displays a
+  "Connect this browser": it mints its key set locally and displays a
   compact **connect code** carrying only public halves (QR-renderable
-  unchanged); an already-connected browser approves it from Settings >
-  "Enroll another wallet", both screens showing the new client's did:key
-  fingerprint for comparison first. Any single enrolled client can enroll,
-  no secret ever transits a server or the code, there is no
-  authorized-but-blind window, and every stage is idempotent -- re-running
-  the same code after an interruption converges without forking the account
-  log. See ARCHITECTURE.md ("The client enrollment ceremony").
+  unchanged); an already-connected browser approves it from Settings, both
+  screens showing the new client's did:key fingerprint for comparison. Any
+  single enrolled client can enroll, no secret ever transits a server or
+  the code, there is no authorized-but-blind window, and every stage is
+  idempotent -- re-running the same code after an interruption converges
+  without forking the account log. See ARCHITECTURE.md ("The client
+  enrollment ceremony").
 - The CHAPI popup pages now ask for unpartitioned IndexedDB through the
   Storage Access API's handle extension (inside the login submit gesture),
-  so an enrolled browser's key record is reachable from the popup and it can
-  sign in normally. Browsers without the extension fall back to the
+  so an enrolled browser's key record is reachable from the popup and it
+  can sign in normally. Browsers without the extension fall back to the
   partitioned bucket and the popup's not-enrolled state, as before.
 - On signup, pre-seed the user's Contacts collection with default records
   (InteropAlliance.org and the user themselves) and their DIDs.
 - A capability request can now ask to **share** one of the wallet's own
-  encrypted collections: a `urn:was:shared-collection` invocation-target
-  descriptor grants read _and decrypt_ access, where the ordinary
-  collection grant only ever hands over ciphertext. Approving it makes the
-  grantee a recipient of the collection's key epochs and delegates it a
-  read-only capability in a single indivisible step, so the two halves can
-  never come apart. Only the encrypted standard collections can be shared
-  (today: `private-credentials`, `wallet-activity`, `contacts`, and
-  `contacts-history`); a share of a plaintext collection, an app collection,
-  or the whole Space is refused, as is a request whose grantee's DID has no
-  key the wallet can derive a recipient key from. The grantee's
-  decryption key is never carried in the request -- it is derived locally from
-  the `did:key` the request already names as the capability's controller, so a
-  request cannot pair one entity's DID with another's key.
+  encrypted collections: a `https://w3id.org/byoe#shared-collection`
+  invocation-target descriptor grants read _and decrypt_ access, where the
+  ordinary collection grant only ever hands over ciphertext. Approval makes
+  the grantee a key-epoch recipient and delegates a read-only capability in
+  one indivisible step. Only the encrypted standard collections can be
+  shared (`private-credentials`, `wallet-activity`, `contacts`,
+  `contacts-history`); anything else is refused. The decryption key is
+  never carried in the request -- it is derived locally from the `did:key`
+  the request already names as controller, so a request cannot pair one
+  entity's DID with another's key (a DID with no derivable key is
+  unsatisfiable).
 - The CHAPI consent screen renders a share request unmistakably differently
-  from an ordinary storage grant: a heavier border and a filled callout saying
-  the grant covers reading _and_ decrypting, that it covers the collection's
-  contents from the moment of approval rather than only future writes, and --
-  stated before approval, not after -- that removing access later stops future
-  reads but cannot take back anything already read. The expiry line is
-  share-specific: it says the _fetch_ permission expires, since the ability to
-  decrypt does not lapse on its own. Both the generic and the App Connect
-  consent panels get it (English and Spanish).
+  from an ordinary storage grant: a heavier border and a filled callout
+  saying the grant covers reading _and_ decrypting, covers the collection's
+  contents from the moment of approval, and -- stated before approval --
+  that removing access later stops future reads but cannot take back
+  anything already read. The expiry line says the _fetch_ permission
+  expires, since the ability to decrypt does not lapse on its own. Both the
+  generic and App Connect consent panels get it (English and Spanish).
 - A share granted through App Connect records the app's name and origin, so
   Settings > Shared collections lists "Text Editor (app.example)" above the
-  reader's DID instead of showing the DID alone.
-- `VITE_SHARE_ZCAP_TTL_HOURS` (default 365 days) sets the lifetime of a share's
-  capability. It is deliberately long: expiry is the wrong removal mechanism
-  for a share (it would end the fetch axis while leaving the grantee in the key
-  roster), so the Settings panel's "Remove access" -- which rotates the epoch
-  and revokes the capability together -- is the way a share ends.
+  reader's DID instead of the DID alone.
+- `VITE_SHARE_ZCAP_TTL_HOURS` (default 365 days) sets a share capability's
+  lifetime. Deliberately long: expiry is the wrong removal mechanism for a
+  share (it would end the fetch axis while leaving the grantee in the key
+  roster), so the Settings panel's "Remove access" -- rotating the epoch
+  and revoking the capability together -- is the way a share ends.
 
 ### Changed
 
 - The account-log verification step, the WAS-backed stores behind the
-  did:webvh log and the connected-wallet names, and the roster kid a wallet's
-  key wrap is filed under now come from `@interop/wallet-core` instead of
-  this app's own copies, so every wallet on an account agrees on them by
-  construction. No behavior change.
+  did:webvh log and the connected-wallet names, and the roster kid a
+  wallet's key wrap is filed under now come from `@interop/wallet-core`
+  instead of this app's own copies, so every wallet on an account agrees on
+  them by construction. No behavior change.
 
 - **BREAKING**: All BYOE-layer wire vocabulary moves from the retired
   `urn:was:` / `urn:freewallet:vocab#` schemes to the shared
@@ -181,173 +153,147 @@
   and claim terms (`#AppKeyCredential` / `#seed` / `#origin`, now imported
   from the published `byoe-context` package), the capability-descriptor
   types matched by `processZcaps` (`#collection` / `#public-collection` /
-  `#shared-collection` / `#space`), and -- via the shared `composeVp`
-  default -- the response VP's embedded `#zcap` / `#appConnect` terms.
-  Token spellings and JSON keys are unchanged; matching is literal string
-  equality on both sides, so this lands in lockstep with the
-  `@interop/was-react` release carrying the app-side renames. Pre-release,
-  no migration path: test accounts re-provision.
+  `#shared-collection` / `#space`), and the response VP's embedded `#zcap`
+  / `#appConnect` terms. Token spellings and JSON keys are unchanged;
+  matching is literal string equality on both sides, so this lands in
+  lockstep with the `@interop/was-react` release carrying the app-side
+  renames. Pre-release, no migration path: test accounts re-provision.
 
 - The Collection Description's `encryption` member is now called an
   **encryption descriptor** throughout (previously "marker"), following the
-  spec wording: identifiers (`localStorageDescriptorCache`,
-  `#refreshDescriptors`, the `descriptors` constructor option, the
-  `{ descriptor, zcap }` share return shape), prose, and the consumed
-  `@interop/wallet-core` `/descriptors` subpath and
-  `@interop/was-client` `/edv` descriptor-store exports. The app-key
-  credential marker type, the App Connect response marker, and the local
-  one-time-migration markers are unrelated senses and keep their names; the
-  `freewallet:collection-encryption:` localStorage keys are term-neutral
-  and unchanged.
+  spec wording -- identifiers, prose, and the consumed
+  `@interop/wallet-core` `/descriptors` and `@interop/was-client` `/edv`
+  exports. The app-key credential marker type, the App Connect response
+  marker, and the local one-time-migration markers are unrelated senses and
+  keep their names; the `freewallet:collection-encryption:` localStorage
+  keys are unchanged.
 
 - **The account identity, unlock, and enrollment machinery now comes from
-  `@interop/wallet-core`** instead of being maintained here: did:webvh
-  hosting and its ZCap signing identities (`/webvh`), the per-user key, its
-  wrap-set roster, and the rotation cascade's collection fan-out (`/keys` --
-  the wallet keeps only the enumeration of which collections exist and the
-  per-collection store adapters), the unlock derivation and unlock Space
-  lifecycle (`/keyring`), the enrollment ceremony (`/enrollment`), recovery
-  codes (`/recovery`), the collection-encryption descriptor acquisition and
-  its unknown-epoch refresh policy (`/descriptors`), and the shared
-  system-collection and resource names (`/space`). Behavior, wire formats,
-  and stored records are unchanged --
-  they are shared contracts now, so a second wallet reading the same account
-  agrees with this one by construction. The freewallet-specific glue (the
-  `freewallet-session` IndexedDB layer, the unlock-methods registry, the
-  KMS-driven did:web provisioning) stays here.
+  `@interop/wallet-core`**: did:webvh hosting and its ZCap signing
+  identities (`/webvh`), the per-user key, wrap-set roster, and rotation
+  fan-out (`/keys`), the unlock derivation and unlock Space lifecycle
+  (`/keyring`), the enrollment ceremony (`/enrollment`), recovery codes
+  (`/recovery`), descriptor acquisition and the unknown-epoch refresh
+  policy (`/descriptors`), and the shared system-collection names
+  (`/space`). Behavior, wire formats, and stored records are unchanged --
+  they are shared contracts now, so a second wallet reading the same
+  account agrees with this one by construction. The freewallet-specific
+  glue (the `freewallet-session` IndexedDB layer, the unlock-methods
+  registry, the KMS-driven did:web provisioning) stays here.
 
 - **The shared account data seed is retired; each client now holds its own
-  key set**, minted locally on first run, with private halves that never
-  leave the client. The keyring record in each unlock Space now carries only
-  an encrypted **account pointer** `{ did, spaceId, host }` in place of the
-  retired wrapped seed; the unlock layer (whose shape is unchanged) protects
-  the local client-key record instead. Logging in therefore stops being
-  sufficient to BE the account: a passphrase on a fresh browser locates the
-  account but surfaces a distinct "this browser does not hold the account's
-  keys" state, from which the login page offers the enrollment ceremony (a
-  storage-partitioned CHAPI popup stays degraded). Each client also pins the
-  account pointer it has seen and refuses a substituted one. Records written
-  under the old seed-carrying shape are refused as unusable (accounts are
-  re-provisioned, not migrated).
+  key set**, minted locally on first run, private halves never leaving the
+  client. The keyring record in each unlock Space now carries only an
+  encrypted **account pointer** `{ did, spaceId, host }`; the unlock layer
+  (shape unchanged) protects the local client-key record instead. Logging
+  in therefore stops being sufficient to BE the account: a passphrase on a
+  fresh browser locates the account but surfaces a distinct "this browser
+  does not hold the account's keys" state offering the enrollment ceremony
+  (a storage-partitioned CHAPI popup stays degraded). Each client pins the
+  account pointer it has seen and refuses a substituted one. Records
+  written under the old seed-carrying shape are refused as unusable
+  (accounts are re-provisioned, not migrated).
 
-- **The account's stable identity is now a `did:webvh`, and its DID document
-  is the roster of that account's enrolled wallet clients** -- a
+- **The account's stable identity is now a `did:webvh`, and its DID
+  document is the roster of the account's enrolled wallet clients** -- a
   hash-chained log, world-readable in the `id` collection, that anyone can
-  fetch and fully verify. The log's update keys are client-held (one per
-  enrolled client, prerotation on), so the storage server can never extend
-  the account's own history, and no server-held key is ever a recipient of
-  an encrypted collection. The Space's controller -- and the KMS keystore's,
-  non-fatally -- is promoted to the did:webvh at signup (a signup
-  interrupted mid-promotion heals on the next login), after which the server
-  authorizes by verifying the published log: a capability verifies only
-  against the keys the document lists _now_, so dropping a client from the
-  roster stops everything it signed from verifying. Sessions on a promoted
-  account sign with the client key under its did:webvh verification-method
-  id; the user id shown to connecting apps stays the client's `did:key`, and
-  the unlock layer stays `did:key` end to end. See ARCHITECTURE.md ("The
-  did:webvh identity").
+  fetch and fully verify. Update keys are client-held (one per enrolled
+  client, prerotation on), so the storage server can never extend the
+  account's own history, and no server-held key is ever a recipient of an
+  encrypted collection. The Space's controller -- and the KMS keystore's,
+  non-fatally -- is promoted to the did:webvh at signup (an interrupted
+  promotion heals on the next login), after which the server authorizes by
+  verifying the published log against the keys the document lists _now_ --
+  dropping a client from the roster stops everything it signed from
+  verifying. Sessions on a promoted account sign under the did:webvh
+  verification-method id; the user id shown to connecting apps, and the
+  unlock layer, stay `did:key`. See ARCHITECTURE.md ("The did:webvh
+  identity").
 - One rule now decides who a key-epoch recipient is: the X25519 twin of a
   controller `did:key`, for an app and a person alike. An App
-  Connect-provisioned private collection now admits the app with its identity
-  key, derived from the subject DID the wallet is already delegating to,
-  instead of a per-collection key derived from the app-key seed -- the seed no
-  longer enters the grant path at all. Apps must be on `@interop/was-react`
-  with the matching change; collections encrypted under the old
-  per-collection keys are not migrated.
-- What a delegated capability may be granted is now a per-target-class table
-  rather than a single read-only/pass-through switch. Every target a request
-  resolves onto falls into exactly one class, and each class has a ceiling the
-  requested actions are intersected against: the whole Space, a protected
-  wallet collection (the standard collections plus the `id` and `key-map`
-  collections), and a share stay read-only, an app-provisioned **public**
-  collection is now add-only (`GET`/`HEAD`/`POST`), and an app-provisioned
-  private collection keeps the full vocabulary under the consent screen and
-  the shorter write TTL. The public cap is the user-visible change: a
-  world-readable plaintext collection is a publication surface, not a data
-  store, and a write there is irreversible in practice (retracting removes the
-  link, not the copies already fetched), so an app may add to what it
-  published but can no longer be granted `PUT` or `DELETE` to rewrite or
-  retract it.
-- Requested actions are now intersected against the closed action vocabulary
-  the WAS spec fixes (`GET`, `POST`, `PUT`, `DELETE`, plus `HEAD` kept as a
-  tolerated read alias, since the spec authorizes a `HEAD` request as a `GET`
-  and the wallet has always minted it alongside `GET` in every read grant).
-  Previously a requested token was array-wrapped and stringified, so anything a
-  site put in `allowedAction` became the `allowedAction` of a capability the
-  user's root key signs -- including every action a server might grow support
-  for later, retroactively and with no wallet-side review. Unknown verbs and
-  non-string entries are now dropped, the same fail-closed treatment an unknown
-  invocation-target descriptor type already got; the surviving actions are
-  uppercased, deduplicated, and emitted in a stable order, so an equivalent
-  request always yields the same grant.
-- A request asking only for actions its target forbids is now refused visibly
-  instead of being silently downgraded. Where such a request previously came
-  back as a read grant nobody asked for, the consent screen now shows it as
-  "cannot fulfill" and nothing is delegated -- which is both more honest to the
-  user and necessary, since an empty `allowedAction` array means "every action"
+  Connect-provisioned private collection now admits the app with its
+  identity key, derived from the subject DID the wallet is already
+  delegating to, instead of a per-collection key derived from the app-key
+  seed -- the seed no longer enters the grant path at all. Apps must be on
+  `@interop/was-react` with the matching change; collections encrypted
+  under the old per-collection keys are not migrated.
+- What a delegated capability may be granted is now a per-target-class
+  table rather than a single read-only/pass-through switch: the whole
+  Space, a protected wallet collection (the standard collections plus `id`
+  and `key-map`), and a share stay read-only; an app-provisioned **public**
+  collection is now add-only (`GET`/`HEAD`/`POST`); an app-provisioned
+  private collection keeps the full vocabulary. The public cap is the
+  user-visible change: a world-readable plaintext collection is a
+  publication surface, and a write there is irreversible in practice, so an
+  app may add to what it published but can no longer be granted `PUT` or
+  `DELETE` to rewrite or retract it.
+- Requested actions are now intersected against the closed action
+  vocabulary the WAS spec fixes (`GET`, `POST`, `PUT`, `DELETE`, plus
+  `HEAD` as a tolerated read alias). Previously anything a site put in
+  `allowedAction` became the `allowedAction` of a capability the user's
+  root key signs -- including every action a server might grow support for
+  later. Unknown verbs and non-string entries are now dropped (the same
+  fail-closed treatment an unknown descriptor type already got); the
+  surviving actions are uppercased, deduplicated, and emitted in a stable
+  order, so an equivalent request always yields the same grant.
+- A request asking only for actions its target forbids is now refused
+  visibly instead of being silently downgraded to a read grant nobody asked
+  for: the consent screen shows "cannot fulfill" and nothing is delegated.
+  Also necessary, since an empty `allowedAction` array means "every action"
   in the capability model and must never be signed.
 - The wallet now refuses to store a credential that claims to be an app key
-  but is not one. Every app key it mints carries a shared `AppKeyCredential`
-  marker type (one stable IRI for every app), and a credential carrying that
-  marker is stored only when its subject DID derives from the seed the
-  credential itself carries -- so a planted app key is turned away at the door
-  rather than sitting in the credential list, showing up in the storage
-  browser, and replicating to the user's Space while being quietly ignored.
-  The refusal applies to every path a credential can arrive on from outside:
-  the CHAPI store popup, and the URL / QR / manual-paste import. The marker is
-  also required at match time, so a credential can only reach the delegation
-  path by carrying it. An ordinary credential that merely happens to have a
-  `seed` or `origin` claim carries no marker and is never caught, and a
-  genuine app key still stores.
-- An app-key credential's `seed` and `origin` claims now carry shared
-  `urn:was:seed` / `urn:was:origin` IRIs instead of ones namespaced under each
-  app's `vocabBase`: they mean the same thing in every app, so two apps' keys
-  no longer make semantically identical claims under different IRIs. The JSON
-  shape is unchanged (`credentialSubject.seed` / `.origin` keep their keys);
-  the app's `vocabBase` now namespaces only its own type term.
+  but is not one. Every minted app key carries a shared `AppKeyCredential`
+  marker type, and a credential carrying the marker is stored only when its
+  subject DID derives from the seed the credential itself carries -- a
+  planted app key is turned away at the door rather than stored and quietly
+  ignored. The refusal covers every outside arrival path (the CHAPI store
+  popup, the URL / QR / manual-paste import); the marker is also required
+  at match time, so a credential can only reach the delegation path by
+  carrying it. An ordinary credential with a `seed` or `origin` claim
+  carries no marker and is never caught; a genuine app key still stores.
+- An app-key credential's `seed` and `origin` claims now carry shared IRIs
+  instead of ones namespaced under each app's `vocabBase`: they mean the
+  same thing in every app. The JSON shape is unchanged; `vocabBase` now
+  namespaces only the app's own type term.
 - An App Connect request now only matches a stored app-key credential whose
   subject DID is the one its own seed derives. Previously any self-issued
-  credential carrying the right type and origin qualified, and candidates were
-  ranked newest-first on an issuance date the credential itself states -- so a
-  credential planted through the store popup or a manual import could win the
-  match and have its DID become the identity the wallet delegates capabilities
-  to. The check is local (the credential carries the seed, so the wallet
-  re-derives and compares) and fails closed: an absent, malformed, or
-  wrong-length seed simply does not match.
+  credential with the right type and origin qualified, ranked newest-first
+  on a self-stated issuance date -- so a planted credential could win the
+  match and have its DID become the identity the wallet delegates to. The
+  check is local (re-derive from the carried seed and compare) and fails
+  closed: an absent, malformed, or wrong-length seed does not match.
 - Aligned with the current `@interop/social-core` contact model: a postal
   address spells its fields `postalCode` and `poBox`, and carries the
-  administrative subdivision as `region` only (a separate `state` folds into
-  `region` when `region` is absent). Stored contact head and revision
-  documents are upgraded to the current shape as they are read, so contacts
-  written by an earlier version compare cleanly against a fresh write and
-  last-write-wins sees no spurious edit; writes always produce the current
-  shape.
-- Editing a contact no longer strips the extra phone/email fields an importer
-  recorded (`digits`, `countryCode`, entry ids): they are carried through a
-  save, and the number-derived `digits` / `countryCode` are dropped only when
-  the number itself is edited.
-- Updated `@interop/did-method-webvh` to 5.0.0. Newly created did:webvh DID
+  administrative subdivision as `region` only (a separate `state` folds
+  into `region` when `region` is absent). Stored contact documents are
+  upgraded to the current shape as they are read, so contacts written by an
+  earlier version compare cleanly against a fresh write and last-write-wins
+  sees no spurious edit.
+- Editing a contact no longer strips the extra phone/email fields an
+  importer recorded (`digits`, `countryCode`, entry ids): they are carried
+  through a save, and the number-derived `digits` / `countryCode` are
+  dropped only when the number itself is edited.
+- Updated `@interop/did-method-webvh` to 5.0.0. Newly created did:webvh
   documents no longer carry empty verification-relationship arrays, so a
-  freshly provisioned Space gets a different self-certifying identifier (SCID)
-  than an earlier version would have minted for the same keys. Already
-  published logs are unaffected -- they keep resolving, and a Space whose log
-  is already published adopts that log's DID rather than re-creating it.
+  freshly provisioned Space gets a different SCID than an earlier version
+  would have minted for the same keys. Already published logs keep
+  resolving, and a Space whose log is published adopts that log's DID
+  rather than re-creating it.
 
 ### Fixed
 
-- A capability request naming a plain URL is now parsed and normalized against
-  the user's Space instead of being matched by string prefix. The prefix test
-  could be walked past: `<space URL>/private-credentials?x=1` starts with the
-  Space URL and so classified as the requesting site's own collection, earning
-  the full write ceiling on the user's own credentials collection -- the exact
-  target the read-only cap exists to protect. A target must now parse as a URL
-  on the Space's origin, resolve to a path inside the Space (dot segments that
-  escape it are refused), carry no query string or fragment, and name a valid
-  collection in its first path segment; the Space URL itself, with or without a
-  trailing slash, is a whole-Space grant. A target carrying a query or fragment
-  is refused outright rather than quietly rewritten, since showing the user one
-  target on the consent screen and delegating another would defeat the point of
-  asking.
+- A capability request naming a plain URL is now parsed and normalized
+  against the user's Space instead of being matched by string prefix. The
+  prefix test could be walked past:
+  `<space URL>/private-credentials?x=1` starts with the Space URL and so
+  classified as the requesting site's own collection, earning the full
+  write ceiling on the user's own credentials collection. A target must now
+  parse as a URL on the Space's origin, resolve to a path inside the Space
+  (escaping dot segments refused), carry no query string or fragment, and
+  name a valid collection in its first path segment; the Space URL itself
+  is a whole-Space grant. A target with a query or fragment is refused
+  outright rather than quietly rewritten, since showing the user one target
+  and delegating another would defeat the point of asking.
 
 ## 0.22.0 - 2026-07-23
 
