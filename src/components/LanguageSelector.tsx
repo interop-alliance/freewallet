@@ -8,6 +8,7 @@ import {
   UI_LANGUAGES,
   languageOptionLabel,
   normalizeToUiLanguageCode,
+  persistUiLanguage,
   type UiLanguageCode
 } from '@/i18n/uiLanguages'
 import { languageSelectorStyles } from '@/styles/languageSelectorStyles'
@@ -35,7 +36,10 @@ export function LanguageSelector({ showLabel = true }: LanguageSelectorProps) {
         {...(showLabel ? { label } : {})}
         value={normalizeToUiLanguageCode(i18n.language)}
         renderValue={(value: UiLanguageCode) => languageOptionLabel(value)}
-        onChange={e => void i18n.changeLanguage(e.target.value)}
+        onChange={e => {
+          void i18n.changeLanguage(e.target.value)
+          persistUiLanguage(e.target.value)
+        }}
         inputProps={showLabel ? undefined : { 'aria-label': label }}
         MenuProps={{
           slotProps: {
