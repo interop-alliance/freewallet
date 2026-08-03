@@ -103,7 +103,13 @@ partitioned CHAPI popup stays a degraded state). Each client also **pins**
 the account pointer it has seen
 (plaintext local state, the first-fetch trust bound); a fetched record whose
 pointer conflicts with the pin is refused (`AccountPointerChangedError`)
-rather than followed. The `Session` object is stored in the Zustand
+rather than followed. The pin exists because the keyring record is
+confidential but not origin-authenticated: its JWE is sealed to the unlock
+KAK, whose public half is derivable from the unlock did:key the server
+stores as the unlock Space's controller -- so a malicious server can
+substitute a record it encrypted itself at a client's first contact, and no
+record signature can fix that bootstrap (a fresh client has no prior to
+verify against); continuity via the pin is the bound. The `Session` object is stored in the Zustand
 `authStore`; it is **in-memory only** (the passphrase is never persisted), so
 reloading the browser logs the user out and they must log in again. Guest
 sessions use a random 32-byte seed directly and never touch the WAS server or
@@ -157,7 +163,12 @@ live server-side.
 identifier minted at signup (`mintSpaceId`) and carried in the account
 pointer -- deliberately not a hash of any controller, since the did:webvh id
 embeds the Space id and a derivation would be circular (unlock Spaces keep
-their `hash(unlock did:key)` addressing -- discovery, not identity).
+their `hash(unlock did:key)` addressing -- discovery, not identity). That
+deterministic unlock address is an accepted existence oracle for passphrase
+guessing (derive a candidate address, probe the server); the bound is KDF
+strength, not placement. The DID's embedded Space id also need not equal a
+controlled Space's id -- one did:webvh may control several Spaces on the
+host; a feature, not a check to add.
 Provisioning creates the Space under the first client's did:key, publishes
 the log, and then -- once the pointer durably names the did -- PUTs the
 Space Description with `controller: <did:webvh>`, authorized by the stored
@@ -334,6 +345,14 @@ signing client's verification method leaves the document (current-key-set
 rule), which would brick recovery exactly when it is needed -- and nudges
 regeneration; a client revocation re-mints the affected delegations itself
 as part of its cascade.
+
+Two standing boundary rules: **the passphrase must never become a recovery
+entry** -- a standing document VM for the primary low-entropy credential
+would resurrect "unlock is the account", the exact property the per-client
+key model removed -- while a passkey (high-entropy, hardware-bound) would
+make a good future one; and the unlock-methods registry's additive `method`
+enum is the explicit seam for a later quorum recovery method (rejected for
+v1 as presupposing a contact roster most accounts lack).
 
 ## Client revocation and the epoch cascade
 
