@@ -1,5 +1,31 @@
 # History
 
+## 0.24.0 - TBD
+
+### Changed
+
+- **Contacts rows are now keyed by the cipher-minted EDV id.** The encrypted
+  collections' ciphers are built with each collection spec's `idDerivation`
+  (`'random'` for the mutable `contacts` head, `'content'` for the
+  content-addressed collections) instead of all defaulting to `'content'`,
+  and `addContact` adopts the cipher-minted random EDV id as the row id --
+  so the server resource id a new contact replicates under is a spec-format
+  EDV id, like every other replica's, instead of an app-minted uuidv7.
+  Fixes the cross-replica defect where the mobile wallet could not in-place
+  edit a web-authored contact (its client rejected the uuid resource id on
+  the update path). Existing uuid-keyed rows are untouched and stay fully
+  editable everywhere -- `@interop/was-client` >= 0.25.0 accepts a
+  pre-existing resource id verbatim on updates -- so no migration runs.
+- `updateContact` re-encrypts through the cipher's in-place update path
+  (`encryptUpdate`) when the stored head is an envelope: the rewritten
+  envelope stays bound to the row's real resource id and its EDV `sequence`
+  advances from the prior envelope instead of resetting to 0 on every save.
+  (A plaintext prior row keeps the fresh-encrypt fallback.)
+- The cross-replica conformance exercise's pinned-defect test now exercises
+  the full edit round trip, plus a legacy-row test proving uuid-keyed,
+  sequence-0 contacts authored by the pre-fix write path remain readable and
+  editable from both replicas.
+
 ## 0.23.0 - 2026-08-03
 
 ### Added

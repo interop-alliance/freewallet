@@ -394,12 +394,16 @@ export class StorageManager {
   }) {
     const cipherEntries = await Promise.all(
       WALLET_STANDARD_COLLECTIONS.filter(({ encryption }) => encryption).map(
-        async ({ key, id }) => [
+        async ({ key, id, idDerivation }) => [
           key,
           await createEdvDocCipher({
             keyAgreementKey,
             keyResolver,
             collectionId: id,
+            // The collection spec's id mint ('random' for the mutable contacts
+            // head, 'content' for the content-addressed collections), so a
+            // minted id follows the spec and can key the row.
+            idDerivation,
             encryption: descriptors?.[id]
           })
         ]

@@ -440,34 +440,30 @@ export class BrowserStore {
 
   /**
    * Inserts a document into one collection, folding cipher selection,
-   * encryption, and the key-epoch stamp (see {@link _encrypt}). The row id is
-   * the passed `id` unless `contentAddressed` is set AND the write encrypted, in
-   * which case the cipher's content-derived envelope-hash id keys the row (the
-   * append-only content-addressed collections) -- `id` then serves only as the
-   * plaintext-store key. A stable-id collection (`contacts`) leaves
-   * `contentAddressed` false so its row keeps the caller's stable id even when
-   * encrypted. Returns the row id actually written and the stamped epoch.
+   * encryption, and the key-epoch stamp (see {@link _encrypt}). When the write
+   * encrypted, the cipher-minted id keys the row -- the envelope-hash id on a
+   * content-addressed collection, the random EDV id on the stable-id `contacts`
+   * head (each cipher mints per its collection spec's `idDerivation`) -- and
+   * the passed `id` serves only as the plaintext-store fallback key. Returns
+   * the row id actually written and the stamped epoch.
    *
    * @param options {object}
    * @param options.logicalKey {string}
    * @param options.id {string}
    * @param options.data {Json}
-   * @param [options.contentAddressed] {boolean}
    * @returns {Promise<{ rowId: string; epoch?: string }>}
    */
   async #insertEncrypted({
     logicalKey,
     id,
-    data,
-    contentAddressed = false
+    data
   }: {
     logicalKey: string
     id: string
     data: Json
-    contentAddressed?: boolean
   }): Promise<{ rowId: string; epoch?: string }> {
     const { body, mintedId, epoch } = await this.#encrypt({ logicalKey, data })
-    const rowId = contentAddressed && mintedId !== undefined ? mintedId : id
+    const rowId = mintedId ?? id
     await this.#insertDoc({ logicalKey, id: rowId, data: body, epoch })
     return { rowId, epoch }
   }
@@ -678,8 +674,7 @@ export class BrowserStore {
     const { rowId } = await this.#insertEncrypted({
       logicalKey: 'privateCredentials',
       id: cid,
-      data: credential as unknown as Json,
-      contentAddressed: true
+      data: credential as unknown as Json
     })
     // Maintain the caches and index incrementally so the next insert in a batch
     // sees this one without another scan, and a subsequent read need not decrypt
@@ -870,8 +865,7 @@ export class BrowserStore {
     await this.#insertEncrypted({
       logicalKey: 'walletActivity',
       id: resourceId,
-      data: activity as Json,
-      contentAddressed: true
+      data: activity as Json
     })
   }
 
@@ -1007,7 +1001,6 @@ export class BrowserStore {
     contact: ContactHeadPayload['contact']
     deviceId: string
   }): Promise<StoredContact> {
-    const id = uuidv7()
     const contactId = uuidv7()
     const updatedAt = new Date().toISOString()
     const head: ContactHeadPayload = {
@@ -1016,14 +1009,19 @@ export class BrowserStore {
       deviceId,
       contact
     }
-    // `contacts` is stable-id (mutable, updated in place), so the row keeps this
-    // freshly minted id even when encrypted; `contentAddressed` stays false.
-    await this.#insertEncrypted({
+    // `contacts` is stable-id (mutable, updated in place): an encrypted write
+    // keys the row with the cipher-minted random EDV id (the collection spec's
+    // `idDerivation: 'random'`), which the sync layer pushes as the server
+    // resource id -- an EDV-format id like every other replica's. The uuid is
+    // only the plaintext-fallback row key. Rows created before this cipher
+    // change keep their uuid ids; every reader and updater (here and on other
+    // replicas) accepts both id universes.
+    const { rowId } = await this.#insertEncrypted({
       logicalKey: 'contacts',
-      id,
+      id: uuidv7(),
       data: head as unknown as Json
     })
-    return { id, contactId, contact, updatedAt }
+    return { id: rowId, contactId, contact, updatedAt }
   }
 
   /**
@@ -1078,14 +1076,32 @@ export class BrowserStore {
       deviceId,
       contact
     }
-    // Same choose-cipher / encrypt / epoch seam as the inserters, but written in
-    // place (a stable-id row): re-stamp the epoch so replication pushes the
-    // current `WAS-Key-Epoch` for the rewritten body.
-    const { body, epoch } = await this.#encrypt({
-      logicalKey: 'contacts',
-      data: head as unknown as Json
-    })
-    await this.#updateDoc({ logicalKey: 'contacts', id, data: body, epoch })
+    // Re-encrypt in place through the cipher's update path: it keeps the row's
+    // existing id verbatim (binding the envelope to the true resource id --
+    // including a legacy uuid row id) and advances the EDV `sequence` from the
+    // prior envelope, then re-stamp the epoch so replication pushes the current
+    // `WAS-Key-Epoch` for the rewritten body. A plaintext prior row (or no
+    // cipher) falls back to the inserters' encrypt seam -- `encryptUpdate`
+    // needs a prior envelope to advance from.
+    if (cipherForRead?.encryptUpdate && isEncryptedEnvelope(data)) {
+      const { envelope, epoch } = await cipherForRead.encryptUpdate({
+        id,
+        data: head as unknown as Json,
+        current: data!
+      })
+      await this.#updateDoc({
+        logicalKey: 'contacts',
+        id,
+        data: envelope,
+        epoch
+      })
+    } else {
+      const { body, epoch } = await this.#encrypt({
+        logicalKey: 'contacts',
+        data: head as unknown as Json
+      })
+      await this.#updateDoc({ logicalKey: 'contacts', id, data: body, epoch })
+    }
     return { id, contactId, contact, updatedAt }
   }
 
@@ -1125,8 +1141,7 @@ export class BrowserStore {
     await this.#insertEncrypted({
       logicalKey: 'contactsHistory',
       id: uuidv7(),
-      data: revision as unknown as Json,
-      contentAddressed: true
+      data: revision as unknown as Json
     })
   }
 

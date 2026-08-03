@@ -5,7 +5,9 @@
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
 import {
   CONTACTS_COLLECTION,
-  CONTACTS_HISTORY_COLLECTION
+  CONTACTS_COLLECTION_SPEC,
+  CONTACTS_HISTORY_COLLECTION,
+  CONTACTS_HISTORY_COLLECTION_SPEC
 } from '@interop/social-core'
 import {
   PRIVATE_CREDENTIALS_COLLECTION_SPEC,
@@ -75,6 +77,12 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
   // making it self-describing (a future client/delegate can discover that it is
   // encrypted and supply its own keys). Set-once / immutable on the server.
   encryption?: { scheme: 'edv' }
+  // How the collection's cipher mints a document id, from the collection spec:
+  // 'content' (content-addressed, immutable) or 'random' (the mutable
+  // stable-id head model -- `contacts`). Only meaningful on an encrypted
+  // collection; the ciphers are built with it so the minted ids follow the
+  // spec (a `'random'` mint becomes the row id, see `browserStore.addContact`).
+  idDerivation?: 'content' | 'random'
 }> = [
   // Collection ids and their public/encryption config come from
   // `@interop/wallet-core/space` so this list matches Freewallet mobile's Space
@@ -89,7 +97,8 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
     encryption:
       PRIVATE_CREDENTIALS_COLLECTION_SPEC.encryption === 'edv'
         ? { scheme: 'edv' }
-        : undefined
+        : undefined,
+    idDerivation: PRIVATE_CREDENTIALS_COLLECTION_SPEC.idDerivation
   },
   {
     key: 'publicCredentials',
@@ -104,7 +113,8 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
     encryption:
       WALLET_ACTIVITY_COLLECTION_SPEC.encryption === 'edv'
         ? { scheme: 'edv' }
-        : undefined
+        : undefined,
+    idDerivation: WALLET_ACTIVITY_COLLECTION_SPEC.idDerivation
   },
   // Ids come from `@interop/social-core` (not hardcoded) so this collection
   // matches Freewallet mobile's byte-for-byte -- a disagreement here would
@@ -113,13 +123,15 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
     key: 'contacts',
     id: CONTACTS_COLLECTION,
     name: 'Contacts',
-    encryption: { scheme: 'edv' }
+    encryption: { scheme: 'edv' },
+    idDerivation: CONTACTS_COLLECTION_SPEC.idDerivation
   },
   {
     key: 'contactsHistory',
     id: CONTACTS_HISTORY_COLLECTION,
     name: 'Contacts History',
-    encryption: { scheme: 'edv' }
+    encryption: { scheme: 'edv' },
+    idDerivation: CONTACTS_HISTORY_COLLECTION_SPEC.idDerivation
   }
 ]
 
