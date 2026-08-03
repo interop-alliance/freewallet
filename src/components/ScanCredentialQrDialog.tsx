@@ -13,7 +13,7 @@ import {
 import QrScanner from 'qr-scanner'
 import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import { resolveCredentialsInput } from '@/lib/resolveCredentialsInput'
+import { resolveWalletInput } from '@/lib/resolveWalletInput'
 import { resolveCredentialsInputErrorMessage } from '@/lib/resolveCredentialsInputErrorMessage'
 import {
   scanCredentialQrStyles,
@@ -69,7 +69,7 @@ export function ScanCredentialQrDialog({
       const data = typeof result === 'string' ? result : result.data
       try {
         sc.stop()
-        const credentials = await resolveCredentialsInput(data)
+        const credentials = await resolveWalletInput(data)
         onCredentialsReady(credentials)
       } catch (err) {
         setDecodeError(

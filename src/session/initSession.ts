@@ -21,23 +21,21 @@ import { ensureKeystore } from '@/lib/kms'
 import { assertPasskeyPrf } from '@/lib/passkey'
 import {
   isWebvhDid,
-  verifyAccountLog,
   webvhCapabilityAgent,
   webvhZcapClient,
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
 import {
-  convergePukRosterToDocument,
   mintPuk,
   pukRosterDescriptorStore,
   pukVaultKeys,
-  PukRosterContinuityError,
-  PukRosterIntegrityError,
-  PukRosterUnwrapError,
-  readPukRoster,
   type Puk,
   type PukRosterReadResult
 } from '@interop/wallet-core/keys'
+import {
+  checkPukRosterAtLogin as sharedCheckPukRosterAtLogin,
+  convergePukRosterToAccount
+} from '@interop/wallet-core/clients'
 import { cascadeCollectionsToPuk } from '@/session/pukCascade'
 import { loadPukEpochPin, savePukEpochPin } from '@/lib/sessionKey'
 import { StorageManager } from '@/stores/storageManager'
@@ -407,66 +405,48 @@ async function convergeRosterToDocument({
   idb?: IDBFactory
   onPukRotated?: (puk: Puk) => Promise<void>
 }): Promise<{ puk: Puk; rosterDescriptor: CollectionEncryption }> {
-  const unchanged = { puk, rosterDescriptor: descriptor }
   if (!pointer || !isWebvhDid(pointer.did) || !WAS_SERVER_URL) {
-    return unchanged
+    return { puk, rosterDescriptor: descriptor }
   }
-  try {
-    const { doc } = await verifyAccountLog({
-      did: pointer.did,
-      spaceId: pointer.spaceId,
-      host: pointer.host
-    })
-    const store = pukRosterDescriptorStore({
-      storageServerUrl: WAS_SERVER_URL,
-      zcapClient,
-      spaceId
-    })
-    const { rotated, staleRecipientIds } = await convergePukRosterToDocument({
-      store,
-      document: doc,
-      descriptor
-    })
-    if (!rotated) {
-      return unchanged
-    }
-    console.warn(
-      'The wrap-set roster still wrapped the current key to ' +
-        `${staleRecipientIds.length} recipient(s) the account document no ` +
-        'longer keys; the rotation has been completed.'
-    )
-    // Rotated: the fresh key is only readable from the roster, so re-read it
-    // and adopt it -- persisted for the next login, pinned, and swapped into
-    // the live session before the collection fan-out runs.
-    const read = await readPukRoster({
-      store,
+  const { puk: convergedPuk, descriptor: convergedDescriptor } =
+    await convergePukRosterToAccount({
+      pointer: {
+        did: pointer.did,
+        spaceId: pointer.spaceId,
+        host: pointer.host
+      },
+      store: pukRosterDescriptorStore({
+        storageServerUrl: WAS_SERVER_URL,
+        zcapClient,
+        spaceId
+      }),
       puk,
+      descriptor,
       clientKeyAgreementKey,
-      pinnedEpochId: await loadPukEpochPin({ spaceId, idb })
+      pinnedEpochId: await loadPukEpochPin({ spaceId, idb }),
+      // Adoption is app-side: persisted for the next login, pinned, and
+      // swapped into the live session -- all before the collection fan-out
+      // runs against it.
+      onPukAdopted: async ({
+        puk: adopted,
+        latestEpochId,
+        descriptor: read
+      }) => {
+        await savePukEpochPin({
+          spaceId,
+          epochId: latestEpochId,
+          epochIds: (read.epochs ?? []).map(epoch => epoch.id),
+          idb
+        })
+        await onPukRotated?.(adopted)
+        const vaultKeys = pukVaultKeys({ puk: adopted })
+        session.profile.puk = adopted
+        session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
+        session.profile.keyResolver = vaultKeys.keyResolver
+        await session.storage.adoptRotatedVaultKeys(vaultKeys)
+      }
     })
-    if (!read) {
-      return unchanged
-    }
-    await savePukEpochPin({
-      spaceId,
-      epochId: read.latestEpochId,
-      epochIds: (read.descriptor.epochs ?? []).map(epoch => epoch.id),
-      idb
-    })
-    await onPukRotated?.(read.puk)
-    const vaultKeys = pukVaultKeys({ puk: read.puk })
-    session.profile.puk = read.puk
-    session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
-    session.profile.keyResolver = vaultKeys.keyResolver
-    await session.storage.adoptRotatedVaultKeys(vaultKeys)
-    return { puk: read.puk, rosterDescriptor: read.descriptor }
-  } catch (err) {
-    console.warn(
-      'Could not converge the wrap-set roster onto the account document:',
-      err
-    )
-    return unchanged
-  }
+  return { puk: convergedPuk, rosterDescriptor: convergedDescriptor }
 }
 
 /**
@@ -509,45 +489,26 @@ async function checkPukRosterAtLogin({
   clientKeyAgreementKey: IKeyAgreementKey
   idb?: IDBFactory
 }): Promise<PukRosterReadResult | null> {
-  try {
-    const store = pukRosterDescriptorStore({
+  return await sharedCheckPukRosterAtLogin({
+    store: pukRosterDescriptorStore({
       storageServerUrl: WAS_SERVER_URL,
       zcapClient,
       spaceId
-    })
-    const pinnedEpochId = await loadPukEpochPin({ spaceId, idb })
-    const read = await readPukRoster({
-      store,
-      puk,
-      clientKeyAgreementKey,
-      pinnedEpochId
-    })
-    if (!read) {
-      return null
+    }),
+    puk,
+    clientKeyAgreementKey,
+    pinnedEpochId: await loadPukEpochPin({ spaceId, idb }),
+    // The pin advances to the epoch just authenticated, atomically with the
+    // key that authenticated it.
+    onRosterRead: async ({ latestEpochId, descriptor }) => {
+      await savePukEpochPin({
+        spaceId,
+        epochId: latestEpochId,
+        epochIds: (descriptor.epochs ?? []).map(epoch => epoch.id),
+        idb
+      })
     }
-    await savePukEpochPin({
-      spaceId,
-      epochId: read.latestEpochId,
-      epochIds: (read.descriptor.epochs ?? []).map(epoch => epoch.id),
-      idb
-    })
-    return read
-  } catch (err) {
-    if (
-      err instanceof PukRosterContinuityError ||
-      err instanceof PukRosterIntegrityError ||
-      err instanceof PukRosterUnwrapError
-    ) {
-      throw err
-    }
-    // An unreachable server (or any transport hiccup) must not lock the
-    // user out of an offline login: the cached PUK stays authoritative.
-    console.warn(
-      'PUK roster check failed; continuing with the cached PUK:',
-      err
-    )
-    return null
-  }
+  })
 }
 
 /**

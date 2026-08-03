@@ -37,7 +37,9 @@ import {
 import type { Session } from '@/types/auth'
 import {
   canManageAccountClients,
+  cascadeCompletion,
   disconnectAccountClient,
+  disconnectEligibility,
   listAccountClients,
   renameAccountClient,
   type AccountClientView
@@ -167,7 +169,12 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
         client: target
       })
       setDisconnectTarget(null)
-      if (outcome.collections.failed.length > 0) {
+      // A partial collection fan-out is a resumable success, never an error:
+      // the wallet IS disconnected (the document edit landed first), and the
+      // login-time sweep finishes the re-keying.
+      if (
+        cascadeCompletion({ collections: outcome.collections }) === 'partial'
+      ) {
         setCascadeWarning(true)
       } else {
         showToast({ message: t('settings.clients.disconnected') })
@@ -260,6 +267,9 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
           {clients.map(client => {
             const editing = editingKey === client.signingKeyMultibase
             const displayName = client.label ?? t('settings.clients.unlabeled')
+            // The shared policy, not UI state: self and last-wallet hide the
+            // button entirely, an unattributed update key disables it.
+            const eligibility = disconnectEligibility({ client, clients })
             return (
               <Card
                 key={client.signingKeyMultibase}
@@ -346,22 +356,23 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
                     })}
                   </Typography>
                 )}
-                {!client.isCurrent && !lastClient && (
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    color="error"
-                    sx={{ borderRadius: 2, alignSelf: 'flex-start' }}
-                    disabled={disconnecting || !client.updateKeyMultibase}
-                    onClick={() => {
-                      setDisconnectError(false)
-                      setCascadeWarning(false)
-                      setDisconnectTarget(client)
-                    }}
-                  >
-                    {t('settings.clients.disconnect')}
-                  </Button>
-                )}
+                {eligibility.refusal !== 'self' &&
+                  eligibility.refusal !== 'last-client' && (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      color="error"
+                      sx={{ borderRadius: 2, alignSelf: 'flex-start' }}
+                      disabled={disconnecting || !eligibility.allowed}
+                      onClick={() => {
+                        setDisconnectError(false)
+                        setCascadeWarning(false)
+                        setDisconnectTarget(client)
+                      }}
+                    >
+                      {t('settings.clients.disconnect')}
+                    </Button>
+                  )}
               </Card>
             )
           })}

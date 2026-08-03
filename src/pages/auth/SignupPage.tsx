@@ -29,41 +29,19 @@ import {
   useSearchParams
 } from 'react-router'
 import { Trans, useTranslation } from 'react-i18next'
-import { base64urlnopad } from '@scure/base'
 import { AuthPageHeader } from '@/components/AuthPageHeader'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
-import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
-import {
-  bindPassphrase,
-  bindUnlockSecret,
-  unlockManagementGrantee
-} from '@/session/keyring'
-import type { AccountPointer } from '@interop/wallet-core/keyring'
-import { mintClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
-import { mintPuk } from '@interop/wallet-core/keys'
-import { mintSpaceId } from '@/stores/wasRemoteStore'
-import {
-  enrollPasskey,
-  putUnlockMethods,
-  type UnlockMethodsRecord
-} from '@/session/unlockMethods'
-import { provisionNewWallet } from '@/session/provisionNewWallet'
+import { signUpWithPasskey, signUpWithPassphrase } from '@/session/signup'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import {
   PasskeyCancelledError,
   PasskeyPrfUnsupportedError,
   passkeySupported
 } from '@/lib/passkey'
-import { savePasskeySafetyNotice } from '@/lib/sessionKey'
 import { useAuthStore } from '@/stores/authStore'
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
-import {
-  DATE_FMT,
-  PASSKEY_KDF,
-  PASSWORD_RULES,
-  WAS_SERVER_URL
-} from '@/app.config'
+import { DATE_FMT, PASSWORD_RULES } from '@/app.config'
 import { registerWallet } from '@/lib/registerWallet'
 import type { AuthLocationState } from '@/types/auth'
 
@@ -148,142 +126,15 @@ export function SignupPage() {
 
     if (method === 'passkey') {
       try {
-        // No `userExists` probe: a fresh credential cannot collide with an
-        // existing account, so there is nothing to probe (unlike the
-        // passphrase path). The seed minted here is THIS CLIENT's key set --
-        // random, local, never derived from any secret and never leaving the
-        // browser; the PUK minted beside it is the account's roster identity
-        // (recipient zero of every encrypted collection), cached locally
-        // under the unlock layer.
-        const seed = crypto.getRandomValues(new Uint8Array(32))
-        const puk = await mintPuk()
-        // This client's did:webvh update-key seeds, minted beside the rest
-        // of its key set and persisted in the client-key record: the
-        // identity log can only ever be extended with client-held keys.
-        const webvhUpdateKeys = await mintClientWebvhUpdateKeys()
-        // The account pointer the keyring record carries in place of the
-        // retired data seed: where the account lives. The Space id is an
-        // independent random identifier minted here (nothing about the
-        // account derives from any key); the did:webvh half is backfilled
-        // after provisioning publishes it. Built before session creation so
-        // the storage clients bind to the minted id.
-        const pointer: AccountPointer | undefined = WAS_SERVER_URL
-          ? { spaceId: mintSpaceId(), host: WAS_SERVER_URL }
-          : undefined
-        const { session } = await initSessionFromSeed({
-          seed,
-          puk,
-          webvhUpdateKeys,
-          accountPointer: pointer,
-          email: email || undefined,
-          provisionStorage: false
-        })
-
-        // Register the passkey and bind its PRF output to the client key set
-        // BEFORE creating the data Space: an account whose keyring failed to
-        // publish must not be created, and binding first means a failed signup
-        // leaves no orphaned data Space behind. A brand-new wallet has no
-        // authenticator credentials yet, so there is nothing to exclude.
-        // Delegating this passkey's unlock Space management zcap to the
-        // account identity keeps a lost passkey revocable tap-free from
-        // Settings.
-        const userHandle = crypto.getRandomValues(new Uint8Array(16))
         const userName =
           email ||
           `Freewallet ${new Date().toLocaleDateString(i18n.language, DATE_FMT)}`
-        const { registration, entry, persistClientKeys } = await enrollPasskey({
-          clientSeed: seed,
-          puk,
-          webvhUpdateKeys,
-          pointer,
-          controller: session.user.id,
-          userHandle,
-          userName,
-          locale: i18n.language,
-          // Carried inside the wrapped record so any unlock method recovers the
-          // account email.
+        const { session } = await signUpWithPasskey({
           email: email || undefined,
-          delegateManagementTo: session.user.id,
+          locale: i18n.language,
+          userName,
           promptForPrfRetry
         })
-        session.profile.persistClientKeys = persistClientKeys
-
-        // Provision collections, record the initial history, and seed the
-        // welcome credential.
-        await provisionNewWallet({ session })
-
-        // Provisioning published the did:webvh id; backfill it into the
-        // account pointer (the record and the local pin) by re-binding with
-        // the PRF output still in hand -- no second ceremony, and THEN
-        // promote the Space controller to the did:webvh: the pointer must
-        // durably name the did before the promotion PUT, since the pointer
-        // is what tells the next login to sign under the promoted keyId (a
-        // tear between the two is healed at the next login). Best-effort:
-        // the pointer's spaceId + host already locate the account.
-        session.profile.accountPointer = pointer
-        if (pointer && session.profile.didWebvh) {
-          const fullPointer = { ...pointer, did: session.profile.didWebvh.did }
-          try {
-            // The re-bind also re-delegates the management zcap to the
-            // just-published did:webvh, so the passkey entry recorded below
-            // is revocable from ANY enrolled client (the pre-promotion
-            // delegation named this first client's did:key alone).
-            const { manageCapability } = await bindUnlockSecret({
-              clientSeed: seed,
-              controller: session.user.id,
-              secret: registration.prfOutput,
-              kdf: PASSKEY_KDF,
-              email: email || undefined,
-              puk,
-              webvhUpdateKeys,
-              pointer: fullPointer,
-              delegateManagementTo: unlockManagementGrantee({
-                pointer: fullPointer,
-                controller: session.user.id
-              })
-            })
-            if (manageCapability) {
-              entry.manageCapability = manageCapability
-            }
-            session.profile.accountPointer = fullPointer
-            await session.storage.ensurePromotedController({
-              profile: session.profile
-            })
-          } catch (err) {
-            console.warn(
-              'Could not backfill the did:webvh and promote the controller:',
-              err
-            )
-          }
-        }
-
-        // Write the initial unlock-methods registry only now: it lives in the
-        // data Space, which `provisionNewWallet` just created, so this must run
-        // after provisioning (`putUnlockMethods` needs the Space to exist).
-        // Non-fatal -- the passkey already logs in.
-        const record: UnlockMethodsRecord = {
-          version: 1,
-          userHandle: base64urlnopad.encode(userHandle),
-          methods: [entry]
-        }
-        try {
-          await putUnlockMethods({ session, record })
-        } catch (err) {
-          console.warn('Could not record the new passkey in the registry:', err)
-        }
-
-        // Mark this as a passkey-only account so the dashboard can prompt the
-        // user to add a second unlock method. Non-fatal.
-        try {
-          await savePasskeySafetyNotice({
-            controller: session.user.id,
-            backupEligibility: registration.backupEligibility,
-            backupState: registration.backupState
-          })
-        } catch (err) {
-          console.warn('Could not save the passkey-safety notice:', err)
-        }
-
         login(session)
         navigate('/dashboard')
       } catch (err) {
@@ -305,103 +156,14 @@ export function SignupPage() {
     }
 
     try {
-      // Probe for an existing account first. loginWithPassphrase resolves the
-      // passphrase through the keyring and reports whether this identity already
-      // has a wallet; probing (rather than binding a raw seed straight away) is
-      // what prevents a re-signup with an existing passphrase from overwriting
-      // that account's keyring and orphaning the wallet. The probe session is
-      // discarded after reading `userExists`, so it must not provision.
-      const probe = await loginWithPassphrase({
+      const { session, userExists } = await signUpWithPassphrase({
         passphrase,
-        email: email || undefined,
-        provisionStorage: false
+        email: email || undefined
       })
-      if (probe.userExists) {
+      if (userExists || !session) {
         return navigate('/login', {
           state: { authMessageKey: 'auth.errors.profileExists' }
         })
-      }
-
-      // This is a new user. The seed minted here is THIS CLIENT's key set --
-      // random, local, never derived from the passphrase and never leaving
-      // the browser -- so bind the passphrase BEFORE creating the data Space:
-      // an account whose keyring failed to publish must not be created, and
-      // binding first means a failed signup leaves no orphaned data Space
-      // behind. Session creation therefore does not provision
-      // (`provisionStorage: false`); `provisionNewWallet` runs the ordered
-      // provisioning sequence only after the bind succeeds. The PUK minted
-      // beside the seed is the account's roster identity (recipient zero of
-      // every encrypted collection), cached locally under the unlock layer.
-      const seed = crypto.getRandomValues(new Uint8Array(32))
-      const puk = await mintPuk()
-      // This client's did:webvh update-key seeds, minted beside the rest of
-      // its key set and persisted in the client-key record: the identity log
-      // can only ever be extended with client-held keys.
-      const webvhUpdateKeys = await mintClientWebvhUpdateKeys()
-      // The account pointer the keyring record carries in place of the
-      // retired data seed: where the account lives. The Space id is an
-      // independent random identifier minted here (nothing about the account
-      // derives from any key); the did:webvh half is backfilled after
-      // provisioning publishes it. Built before session creation so the
-      // storage clients bind to the minted id.
-      const pointer: AccountPointer | undefined = WAS_SERVER_URL
-        ? { spaceId: mintSpaceId(), host: WAS_SERVER_URL }
-        : undefined
-      const { session } = await initSessionFromSeed({
-        seed,
-        puk,
-        webvhUpdateKeys,
-        accountPointer: pointer,
-        email: email || undefined,
-        provisionStorage: false
-      })
-      const { persistClientKeys } = await bindPassphrase({
-        clientSeed: seed,
-        controller: session.user.id,
-        passphrase,
-        // Carried inside the wrapped record so any unlock method (a passkey
-        // login has no form to ask on) recovers the account email.
-        email: email || undefined,
-        puk,
-        webvhUpdateKeys,
-        pointer
-      })
-      session.profile.persistClientKeys = persistClientKeys
-
-      // Provision collections, record the initial history, and seed the
-      // welcome credential.
-      await provisionNewWallet({ session })
-
-      // Provisioning published the did:webvh id; backfill it into the account
-      // pointer (the record and the local pin) with a re-bind, and THEN
-      // promote the Space controller to the did:webvh: the pointer must
-      // durably name the did before the promotion PUT, since the pointer is
-      // what tells the next login to sign under the promoted keyId (a tear
-      // between the two is healed at the next login). Best-effort: the
-      // pointer's spaceId + host already locate the account.
-      session.profile.accountPointer = pointer
-      if (pointer && session.profile.didWebvh) {
-        const fullPointer = { ...pointer, did: session.profile.didWebvh.did }
-        try {
-          await bindPassphrase({
-            clientSeed: seed,
-            controller: session.user.id,
-            passphrase,
-            email: email || undefined,
-            puk,
-            webvhUpdateKeys,
-            pointer: fullPointer
-          })
-          session.profile.accountPointer = fullPointer
-          await session.storage.ensurePromotedController({
-            profile: session.profile
-          })
-        } catch (err) {
-          console.warn(
-            'Could not backfill the did:webvh and promote the controller:',
-            err
-          )
-        }
       }
       login(session)
       navigate('/dashboard')

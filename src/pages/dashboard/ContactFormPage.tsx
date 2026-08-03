@@ -9,10 +9,10 @@ import { MdAddCircleOutline, MdRemoveCircleOutline } from 'react-icons/md'
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import {
-  normalizeLabel,
+  buildContact,
   getDids,
-  unmangleDidUrl,
-  type ContactData
+  type ContactData,
+  type ContactFormRow
 } from '@interop/social-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
@@ -21,19 +21,14 @@ import { NotFoundPage } from '@/pages/NotFoundPage'
 import { contactFormStyles } from '@/styles/appStyles'
 
 /**
- * One editable phone / email row. `label` and `value` are the only fields the
- * form surfaces; `digits`, `countryCode` and `id` are carried through from the
- * loaded contact so an edit does not strip what an importer recorded. `digits`
- * / `countryCode` are derived from the number, so editing the value clears
- * them rather than leaving a stale pair behind.
+ * One editable phone / email row: the shared form row, with `label` and
+ * `value` narrowed to required strings because they are bound straight to
+ * controlled text fields. `digits`, `countryCode` and `id` are carried through
+ * from the loaded contact so an edit does not strip what an importer recorded;
+ * `digits` / `countryCode` are derived from the number, so editing the value
+ * clears them rather than leaving a stale pair behind.
  */
-type LabeledRow = {
-  label: string
-  value: string
-  digits?: string
-  countryCode?: string
-  id?: string
-}
+type LabeledRow = ContactFormRow & { label: string; value: string }
 
 export function ContactFormPage() {
   const { t } = useTranslation()
@@ -143,74 +138,25 @@ export function ContactFormPage() {
     )
   }
 
-  /**
-   * Emits `key` only when the carried-through value is present, so a row that
-   * never had one stays byte-identical to what the other replica writes.
-   */
-  function carried<K extends string>(
-    key: K,
-    value: string | undefined
-  ): Partial<Record<K, string>> {
-    return value === undefined ? {} : ({ [key]: value } as Record<K, string>)
-  }
-
-  function buildContact(): ContactData {
-    const trimmedName =
-      displayName.trim() || `${givenName.trim()} ${familyName.trim()}`.trim()
-    // The form surfaces only the `did:` entries of `urlAddresses` (that is what
-    // `getDids` loaded), so the non-DID entries -- a homepage URL an importer
-    // recorded, say -- are carried through verbatim rather than being dropped
-    // when the rebuilt DID rows replace the array.
-    const urlAddresses = [
-      ...(existingContact?.urlAddresses ?? []).filter(
-        entry => !unmangleDidUrl(entry.url.trim()).startsWith('did:')
-      ),
-      // Deduped, first occurrence winning: the user can type the same DID
-      // twice and a merge from another replica can land two copies, and a
-      // contact holding one DID twice means nothing beyond holding it once.
-      // The comparison is exact -- method-specific ids are case-sensitive.
-      ...[...new Set(dids.map(did => did.trim()).filter(Boolean))].map(did => ({
-        label: 'did',
-        url: did
-      }))
-    ]
-    return {
-      // Carry over every field the form does not edit (extended
-      // @interop/social-core fields and nativeId); the form-bound fields below
-      // override, with `undefined` clearing a field the user emptied.
-      ...existingContact,
-      displayName: trimmedName,
-      givenName: givenName.trim() || undefined,
-      familyName: familyName.trim() || undefined,
-      organization: organization.trim() || undefined,
-      phoneNumbers: phoneNumbers
-        .filter(row => row.value.trim())
-        .map(row => ({
-          // Shared normalization (lowercase, 'other' fallback) so web and
-          // mobile store byte-identical labels.
-          label: normalizeLabel(row.label),
-          number: row.value.trim(),
-          ...carried('digits', row.digits),
-          ...carried('countryCode', row.countryCode),
-          ...carried('id', row.id)
-        })),
-      emailAddresses: emailAddresses
-        .filter(row => row.value.trim())
-        .map(row => ({
-          label: normalizeLabel(row.label),
-          email: row.value.trim(),
-          ...carried('id', row.id)
-        })),
-      urlAddresses: urlAddresses.length > 0 ? urlAddresses : undefined,
-      note: note.trim() || undefined
-    }
-  }
-
   async function onSave() {
     if (!session?.storage) {
       return
     }
-    const contact = buildContact()
+    // The shared assembly: trimming, label normalization, the carried-through
+    // members, and folding the DID rows back into `urlAddresses` (non-DID
+    // entries an importer recorded survive) all live in social-core, so an
+    // edit made here serializes byte-identically to the same edit on mobile.
+    const contact = buildContact({
+      ...(existingContact ? { existing: existingContact } : {}),
+      displayName,
+      givenName,
+      familyName,
+      organization,
+      note,
+      phoneNumbers,
+      emailAddresses,
+      dids
+    })
     if (!contact.displayName) {
       setErrorMessage(t('contactForm.errors.nameRequired'))
       return

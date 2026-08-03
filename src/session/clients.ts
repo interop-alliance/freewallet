@@ -1,51 +1,49 @@
 /**
- * The Settings "wallets connected to this account" listing: Freewallet's glue
- * over the wallet-core enrolled-client enumeration and display labels.
+ * The Settings "wallets connected to this account" listing: Freewallet's
+ * session-shaped glue over the shared enrolled-client surface in
+ * `@interop/wallet-core/clients`. The listing, the label merge, and the
+ * disconnect-eligibility policy live there, so both wallets show the same rows
+ * and refuse the same ones for the same reasons; what stays here is only what
+ * a `Session` knows -- whether this account is manageable at all, where its
+ * log lives, which key is this browser's, and dropping a disconnected client's
+ * label afterwards.
  *
- * - `listAccountClients` -- fetches and locally verifies the account's
- *   world-readable did:webvh log (the same `verifyAccountLog` step every
- *   ceremony uses), enumerates the enrolled clients from it
- *   (`listEnrolledWebvhClients`: keyed on `capabilityInvocation`, so a
- *   recovery code's keyAgreement-only method never appears and apps -- which
- *   are never enrolled -- cannot appear), merges the display labels from
- *   `key-map/client-labels.json`, and marks the row belonging to this
- *   session's own client.
+ * - `listAccountClients` -- the shared listing, with this session's own client
+ *   marked and the label store supplied.
  * - `currentAccountSigningKeys` -- the same verified log reduced to the
  *   enrolled clients' signing-key multibases, for the Applications surface to
  *   check recorded App Connect grant signers against (the current-key-set
  *   rule: a grant signed by a since-disconnected client no longer verifies).
+ *   The gating on whether a session HAS a promoted account is app-side, so
+ *   this wrapper resolves `undefined` rather than throwing for a guest.
  * - `renameAccountClient` -- writes one label (chosen at enrollment approval,
  *   editable afterwards; the document carries key material, never labels).
  * - `disconnectAccountClient` -- drives the client-revocation epoch cascade
- *   from a listed row (the row with all three key members present is exactly a
- *   `RevokedClientKeys`), then drops the disconnected client's label as
- *   hygiene.
+ *   from a listed row, then drops the disconnected client's label as hygiene.
  */
 import {
   clientSigningKeyMultibase,
-  isWebvhDid,
-  listEnrolledWebvhClients,
-  verifyAccountLog,
-  type EnrolledWebvhClient
+  isWebvhDid
 } from '@interop/wallet-core/webvh'
+import { removeClientLabel, setClientLabel } from '@interop/wallet-core/keys'
 import {
-  readClientLabels,
-  removeClientLabel,
-  setClientLabel
-} from '@interop/wallet-core/keys'
+  currentAccountSigningKeys as sharedCurrentAccountSigningKeys,
+  listAccountClients as sharedListAccountClients,
+  revokedClientKeysFor
+} from '@interop/wallet-core/clients'
+import type { AccountClientView } from '@interop/wallet-core/clients'
 import type { Session } from '@/types/auth'
 import {
   revokeEnrolledClient,
   type RevocationOutcome
 } from '@/session/revocation'
 
-/**
- * One row of the listing: the log-stated client plus its display state.
- */
-export interface AccountClientView extends EnrolledWebvhClient {
-  label?: string
-  isCurrent: boolean
-}
+export type { AccountClientView } from '@interop/wallet-core/clients'
+export {
+  cascadeCompletion,
+  disconnectEligibility,
+  type DisconnectRefusal
+} from '@interop/wallet-core/clients'
 
 /**
  * Whether this session can list and manage the account's enrolled clients: a
@@ -102,36 +100,26 @@ export async function listAccountClients({
   session: Session
 }): Promise<AccountClientView[]> {
   const { remoteStore, pointer } = requireClientListing(session)
-  const { log } = await verifyAccountLog({
-    did: pointer.did,
-    spaceId: pointer.spaceId,
-    host: pointer.host
-  })
-  const clients = listEnrolledWebvhClients({ log })
-
-  const { labels } = await readClientLabels({
-    store: remoteStore.clientLabelsStore()
-  })
   const { keyAgent } = session.profile
-  const ownSigningKey = keyAgent
-    ? clientSigningKeyMultibase({ keyAgent })
-    : undefined
-
-  return clients.map(client => ({
-    ...client,
-    label: labels[client.signingKeyMultibase],
-    isCurrent: client.signingKeyMultibase === ownSigningKey
-  }))
+  return await sharedListAccountClients({
+    pointer: {
+      did: pointer.did,
+      spaceId: pointer.spaceId,
+      host: pointer.host
+    },
+    labelsStore: remoteStore.clientLabelsStore(),
+    ...(keyAgent
+      ? { ownSigningKeyMultibase: clientSigningKeyMultibase({ keyAgent }) }
+      : {})
+  })
 }
 
 /**
  * The signing-key multibases of the account's currently enrolled wallet
- * clients, from the locally verified did:webvh log -- the key set an App
- * Connect grant's delegation proof must name to still verify under the
- * current-key-set rule. Resolves `undefined` when this session has no
- * promoted did:webvh account to check against (a guest or no-storage
- * session); throws when the log cannot be fetched or verified (callers
- * treating the check as best-effort catch and degrade to "unknown").
+ * clients. Resolves `undefined` when this session has no promoted did:webvh
+ * account to check against (a guest or no-storage session); throws when the
+ * log cannot be fetched or verified (callers treating the check as
+ * best-effort catch and degrade to "unknown").
  *
  * @param options {object}
  * @param options.session {Session}
@@ -146,14 +134,13 @@ export async function currentAccountSigningKeys({
     return undefined
   }
   const { pointer } = requireClientListing(session)
-  const { log } = await verifyAccountLog({
-    did: pointer.did,
-    spaceId: pointer.spaceId,
-    host: pointer.host
+  return await sharedCurrentAccountSigningKeys({
+    pointer: {
+      did: pointer.did,
+      spaceId: pointer.spaceId,
+      host: pointer.host
+    }
   })
-  return new Set(
-    listEnrolledWebvhClients({ log }).map(client => client.signingKeyMultibase)
-  )
 }
 
 /**
@@ -186,9 +173,9 @@ export async function renameAccountClient({
  * Disconnects an enrolled wallet client: the full revocation cascade
  * (`revokeEnrolledClient` -- document edit, PUK rotation, collection
  * re-epoch, recovery re-mints, live adoption), then the label dropped as
- * best-effort hygiene. Refuses a row whose active update key the log
- * attribution could not isolate -- disconnecting with a guessed key could
- * revoke another party's authority.
+ * best-effort hygiene. `revokedClientKeysFor` refuses a row whose active
+ * update key the log attribution could not isolate -- disconnecting with a
+ * guessed key could revoke another party's authority.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -203,20 +190,10 @@ export async function disconnectAccountClient({
   client: AccountClientView
 }): Promise<RevocationOutcome> {
   const { remoteStore } = requireClientListing(session)
-  if (!client.updateKeyMultibase) {
-    throw new Error(
-      "This client's update key could not be attributed from the account " +
-        'log, so it cannot be disconnected from here.'
-    )
-  }
   const outcome = await revokeEnrolledClient({
     session,
-    client: {
-      signingKeyMultibase: client.signingKeyMultibase,
-      keyAgreementKeyMultibase: client.keyAgreementKeyMultibase,
-      updateKeyMultibase: client.updateKeyMultibase
-    },
-    label: client.label
+    client: revokedClientKeysFor({ client }),
+    ...(client.label !== undefined ? { label: client.label } : {})
   })
   try {
     await removeClientLabel({

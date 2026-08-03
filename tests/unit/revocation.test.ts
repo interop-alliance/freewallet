@@ -1,15 +1,16 @@
 // @vitest-environment node
 /**
- * Unit tests for the client-revocation cascade (`src/session/revocation.ts`):
- * the preconditions gate (a configured storage server, a promoted did:webvh
- * pointer, this client's key material), the self-revocation refusal (thrown
- * before anything durable is touched), the dependency order of the cascade
- * stages (document edit, roster rotation, epoch cascade, recovery re-mints,
- * live adoption, history), the `knownLatentHashes` hand-off from the
- * recovery registry, and re-run convergence (an already-rotated roster still
- * drives the collection cascade and the re-mints, but never re-persists or
- * re-adopts). Every remote/durable seam is mocked; the roster-kid and
- * latent-hash derivations run for real.
+ * Unit tests for freewallet's half of the client-revocation cascade
+ * (`src/session/revocation.ts`). The cascade itself -- stage order,
+ * convergence, the roster read -- is `revokeAccountClient` in
+ * `@interop/wallet-core/clients` and is covered by that package's own tests;
+ * what is exercised here is the glue this wallet supplies: the preconditions
+ * gate, the self-revocation refusal, the `knownLatentHashes` hand-off from the
+ * recovery registry, the options handed to the shared orchestrator, the
+ * adoption side effects its callbacks perform (epoch pin, client-key record,
+ * unlock-methods re-wrap, live vault keys and storage ciphers), the audit
+ * record, and the no-roster outcome. Every remote/durable seam is mocked; the
+ * latent-hash derivation runs for real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -25,26 +26,12 @@ vi.mock('@/app.config', async importOriginal => ({
   }
 }))
 
-vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
-  revokeWebvhClient: vi.fn(async () => {
-    state.calls.push('revokeWebvhClient')
-    // The edit resolves the document as it now stands; the roster rotation
-    // that follows resolves its recipients from exactly this.
-    return { did: 'did:webvh:unused', doc: { id: 'did:webvh:doc' } }
-  })
+vi.mock('@interop/wallet-core/clients', () => ({
+  revokeAccountClient: vi.fn()
 }))
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
-  rotatePukRoster: vi.fn(async () => {
-    state.calls.push('rotatePukRoster')
-    return {}
-  }),
-  readPukRoster: vi.fn(async () => {
-    state.calls.push('readPukRoster')
-    return null
-  }),
   pukVaultKeys: vi.fn(({ puk }: { puk: { id: string } }) => ({
     keyAgreementKey: { id: `${puk.id}#kak` },
     keyResolver: async () => ({})
@@ -77,27 +64,23 @@ vi.mock('@/session/recovery', () => ({
 }))
 
 vi.mock('@/session/pukCascade', () => ({
-  cascadeCollectionsToPuk: vi.fn(async () => {
-    state.calls.push('cascadeCollectionsToPuk')
-    return { outcomes: {}, failed: [] }
-  })
+  cascadeCollections: vi.fn(() => ({
+    collectionIds: async () => ['private-credentials'],
+    storeFor: () => ({ isDescriptorStore: true }),
+    isEncrypted: async () => true
+  }))
 }))
 
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
-import { revokeWebvhClient } from '@interop/wallet-core/webvh'
-import {
-  PukRosterContinuityError,
-  pukVaultKeys,
-  readPukRoster,
-  rotatePukRoster
-} from '@interop/wallet-core/keys'
+import { revokeAccountClient } from '@interop/wallet-core/clients'
+import { pukVaultKeys } from '@interop/wallet-core/keys'
 import { loadPukEpochPin, savePukEpochPin } from '@/lib/sessionKey'
 import {
   getUnlockMethods,
   rewrapUnlockMethodsRecord
 } from '@/session/unlockMethods'
 import { remintRecoveryDelegations } from '@/session/recovery'
-import { cascadeCollectionsToPuk } from '@/session/pukCascade'
+import { cascadeCollections } from '@/session/pukCascade'
 import {
   revokeEnrolledClient,
   type RevokedClientKeys
@@ -121,18 +104,53 @@ const FRESH_PUK = {
   id: 'did:key:z6LSFreshPuk',
   secret: new Uint8Array(32).fill(2)
 }
-const ROSTER_DESCRIPTOR = { rosterDescriptor: true }
+const ROSTER_DESCRIPTOR = { epochs: [{ id: FRESH_PUK.id }] }
+const DOCUMENT = { id: 'did:webvh:doc' }
 
 /**
- * A rotated-read roster result: another epoch id, a fresh PUK unwrapped with
- * this client's own key.
+ * A stand-in for the shared orchestrator that drives its callbacks in the
+ * documented order, so the freewallet-side stages are exercised exactly where
+ * the real cascade runs them.
+ *
+ * @param options {object}
+ * @param [options.rotated] {boolean}   whether the roster rotated on this run
+ * @param [options.failedCollections] {number}
+ * @returns {Function}
  */
-function rotatedRead() {
-  return {
-    descriptor: ROSTER_DESCRIPTOR,
-    puk: FRESH_PUK,
-    rotated: true,
-    latestEpochId: FRESH_PUK.id
+function orchestratorDriving({ rotated = true, failedCollections = 0 } = {}) {
+  return async (options: Parameters<typeof revokeAccountClient>[0]) => {
+    state.calls.push('revokeAccountClient')
+    const puk = rotated ? FRESH_PUK : OLD_PUK
+    if (rotated) {
+      await options.onPukAdopted?.({
+        puk,
+        latestEpochId: puk.id,
+        descriptor: ROSTER_DESCRIPTOR as never
+      })
+    }
+    state.calls.push('cascadeCollections')
+    const recovery = await options.remintRecoveryDelegations?.({
+      document: DOCUMENT
+    })
+    if (rotated) {
+      await options.onRotationAdopted?.({ puk })
+    }
+    return {
+      rotated,
+      collections: {
+        outcomes: {
+          'private-credentials': 'rotated',
+          'wallet-activity': 'escrowed'
+        },
+        failed: Array.from({ length: failedCollections }, (_unused, index) => ({
+          collectionId: `broken-${index}`,
+          error: new Error('down')
+        }))
+      },
+      document: DOCUMENT,
+      puk,
+      ...(recovery ? { recovery } : {})
+    } as never
   }
 }
 
@@ -199,20 +217,7 @@ beforeEach(() => {
   state.wasUrl = 'https://was.example.test'
   state.calls = []
   vi.clearAllMocks()
-  vi.mocked(readPukRoster).mockImplementation(async () => {
-    state.calls.push('readPukRoster')
-    return rotatedRead() as never
-  })
-  vi.mocked(cascadeCollectionsToPuk).mockImplementation(async () => {
-    state.calls.push('cascadeCollectionsToPuk')
-    return {
-      outcomes: {
-        'private-credentials': 'rotated',
-        'wallet-activity': 'escrowed'
-      },
-      failed: []
-    } as never
-  })
+  vi.mocked(revokeAccountClient).mockImplementation(orchestratorDriving())
   vi.mocked(remintRecoveryDelegations).mockImplementation(async () => {
     state.calls.push('remintRecoveryDelegations')
     return { reminted: 2, skipped: 1 }
@@ -233,6 +238,7 @@ describe('the preconditions gate', () => {
         client: REVOKED
       })
     ).rejects.toThrow('configured storage server')
+    expect(vi.mocked(revokeAccountClient)).not.toHaveBeenCalled()
   })
 
   it('refuses an unpromoted pointer and missing client key material', async () => {
@@ -254,22 +260,21 @@ describe('the preconditions gate', () => {
         client: REVOKED
       })
     ).rejects.toThrow('key-agreement key')
+    expect(vi.mocked(revokeAccountClient)).not.toHaveBeenCalled()
   })
 
-  it('refuses self-revocation before touching anything durable', async () => {
-    await expect(
-      revokeEnrolledClient({
-        session: sessionWith(),
-        client: { ...REVOKED, signingKeyMultibase: 'z6MkRevokingClient' }
+  it('hands its own signing key over, so self-revocation is refused', async () => {
+    await revokeEnrolledClient({ session: sessionWith(), client: REVOKED })
+    expect(vi.mocked(revokeAccountClient)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownSigningKeyMultibase: 'z6MkRevokingClient'
       })
-    ).rejects.toThrow('cannot disconnect itself')
-    expect(vi.mocked(revokeWebvhClient)).not.toHaveBeenCalled()
-    expect(vi.mocked(rotatePukRoster)).not.toHaveBeenCalled()
+    )
   })
 })
 
 describe('the cascade, rotated path', () => {
-  it('runs the stages in dependency order and reports the outcome', async () => {
+  it('runs the wallet-side stages in dependency order and reports the outcome', async () => {
     const session = sessionWith()
     const outcome = await revokeEnrolledClient({
       session,
@@ -278,13 +283,11 @@ describe('the cascade, rotated path', () => {
     })
 
     expect(state.calls).toEqual([
-      'revokeWebvhClient',
-      'rotatePukRoster',
       'loadPukEpochPin',
-      'readPukRoster',
+      'revokeAccountClient',
       'savePukEpochPin',
       'persistClientKeys',
-      'cascadeCollectionsToPuk',
+      'cascadeCollections',
       'remintRecoveryDelegations',
       'rewrapUnlockMethodsRecord',
       'adoptRotatedVaultKeys',
@@ -303,38 +306,42 @@ describe('the cascade, rotated path', () => {
     })
   })
 
-  it('retires the revoked roster kid and pins the fresh epoch', async () => {
+  it('supplies the stores, key material, and collections source', async () => {
     const session = sessionWith()
     await revokeEnrolledClient({ session, client: REVOKED })
 
-    expect(vi.mocked(revokeWebvhClient)).toHaveBeenCalledWith({
-      idStore: { isWebvhIdStore: true },
-      updateKeys: session.profile.clientWebvhKeys,
-      revokedClient: REVOKED,
-      knownLatentHashes: []
-    })
-    // The retired kid is the revoked client's own key-agreement key id, as
-    // its agentsFromSeed derives it, and the rotation resolves its recipients
-    // from the document the edit itself resolved.
-    expect(vi.mocked(rotatePukRoster)).toHaveBeenCalledWith(
+    expect(vi.mocked(revokeAccountClient)).toHaveBeenCalledWith(
       expect.objectContaining({
-        document: { id: 'did:webvh:doc' },
-        retireRecipientId: 'did:key:z6MkRevokedClient#z6LSRevokedClient'
+        idStore: { isWebvhIdStore: true },
+        rosterStore: { rosterStore: true },
+        updateKeys: session.profile.clientWebvhKeys,
+        revokedClient: REVOKED,
+        knownLatentHashes: [],
+        puk: OLD_PUK,
+        clientKeyAgreementKey: session.profile.clientKeyAgreementKey,
+        pinnedEpochId: OLD_PUK.id
       })
     )
+    expect(vi.mocked(cascadeCollections)).toHaveBeenCalledWith({
+      remoteStore: session.storage.remoteStore
+    })
+    expect(vi.mocked(loadPukEpochPin)).toHaveBeenCalledWith(
+      expect.objectContaining({ spaceId: POINTER.spaceId })
+    )
+  })
+
+  it('pins the fresh epoch and persists the rotated PUK together', async () => {
+    const session = sessionWith()
+    await revokeEnrolledClient({ session, client: REVOKED })
+
     expect(vi.mocked(savePukEpochPin)).toHaveBeenCalledWith(
       expect.objectContaining({
         spaceId: POINTER.spaceId,
-        epochId: FRESH_PUK.id
+        epochId: FRESH_PUK.id,
+        epochIds: [FRESH_PUK.id]
       })
     )
     expect(session.profile.persistClientKeys).toHaveBeenCalledWith({
-      puk: FRESH_PUK
-    })
-    expect(vi.mocked(cascadeCollectionsToPuk)).toHaveBeenCalledWith({
-      remoteStore: session.storage.remoteStore,
-      rosterDescriptor: ROSTER_DESCRIPTOR,
-      clientKeyAgreementKey: session.profile.clientKeyAgreementKey,
       puk: FRESH_PUK
     })
   })
@@ -382,34 +389,24 @@ describe('the cascade, rotated path', () => {
     })
   })
 
-  it('throws when the account has no roster to rotate', async () => {
-    vi.mocked(readPukRoster).mockResolvedValue(null)
-    await expect(
-      revokeEnrolledClient({ session: sessionWith(), client: REVOKED })
-    ).rejects.toThrow('no PUK roster')
-  })
+  it('reports a completed-but-unrotated cascade when there is no roster', async () => {
+    // The shared orchestrator returns rather than throwing: the document edit
+    // has landed, so the wallet IS disconnected with nothing to rotate.
+    vi.mocked(revokeAccountClient).mockResolvedValue({
+      rotated: false,
+      collections: { outcomes: {}, failed: [] },
+      document: DOCUMENT
+    } as never)
 
-  it('threads the locally pinned epoch into the roster read', async () => {
-    await revokeEnrolledClient({ session: sessionWith(), client: REVOKED })
-    expect(vi.mocked(loadPukEpochPin)).toHaveBeenCalledWith(
-      expect.objectContaining({ spaceId: POINTER.spaceId })
-    )
-    expect(vi.mocked(readPukRoster)).toHaveBeenCalledWith(
-      expect.objectContaining({ pinnedEpochId: OLD_PUK.id })
-    )
-  })
+    const session = sessionWith()
+    const outcome = await revokeEnrolledClient({ session, client: REVOKED })
 
-  it('a rolled-back roster refuses and never moves the pin', async () => {
-    // The threaded pin makes wallet-core's continuity check bite: a served
-    // roster older than the pinned epoch throws instead of being adopted.
-    vi.mocked(readPukRoster).mockImplementation(async () => {
-      state.calls.push('readPukRoster')
-      throw new PukRosterContinuityError({ pinnedEpochId: OLD_PUK.id })
+    expect(outcome).toEqual({
+      rotated: false,
+      collections: { outcomes: {}, failed: [] },
+      recovery: { reminted: 0, skipped: 0 }
     })
-    await expect(
-      revokeEnrolledClient({ session: sessionWith(), client: REVOKED })
-    ).rejects.toBeInstanceOf(PukRosterContinuityError)
-    expect(vi.mocked(savePukEpochPin)).not.toHaveBeenCalled()
+    expect(session.storage.addHistoryClientRevoked).toHaveBeenCalledOnce()
   })
 })
 
@@ -424,7 +421,7 @@ describe('the knownLatentHashes hand-off', () => {
       ]
     } as never)
     await revokeEnrolledClient({ session: sessionWith(), client: REVOKED })
-    expect(vi.mocked(revokeWebvhClient)).toHaveBeenCalledWith(
+    expect(vi.mocked(revokeAccountClient)).toHaveBeenCalledWith(
       expect.objectContaining({
         knownLatentHashes: [await deriveNextKeyHash('z6MkCodeUpdate')]
       })
@@ -435,7 +432,7 @@ describe('the knownLatentHashes hand-off', () => {
     vi.mocked(getUnlockMethods).mockRejectedValue(new Error('offline'))
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     await revokeEnrolledClient({ session: sessionWith(), client: REVOKED })
-    expect(vi.mocked(revokeWebvhClient)).toHaveBeenCalledWith(
+    expect(vi.mocked(revokeAccountClient)).toHaveBeenCalledWith(
       expect.objectContaining({ knownLatentHashes: [] })
     )
     warn.mockRestore()
@@ -443,16 +440,14 @@ describe('the knownLatentHashes hand-off', () => {
 })
 
 describe('re-run convergence and best-effort stages', () => {
-  it('still cascades and re-mints on an already-rotated roster', async () => {
-    vi.mocked(readPukRoster).mockImplementation(async () => {
-      state.calls.push('readPukRoster')
-      return { ...rotatedRead(), puk: OLD_PUK, rotated: false } as never
-    })
+  it('still re-mints on an already-rotated roster without re-adopting', async () => {
+    vi.mocked(revokeAccountClient).mockImplementation(
+      orchestratorDriving({ rotated: false })
+    )
     const session = sessionWith()
     const outcome = await revokeEnrolledClient({ session, client: REVOKED })
 
     expect(outcome.rotated).toBe(false)
-    expect(vi.mocked(cascadeCollectionsToPuk)).toHaveBeenCalledOnce()
     expect(vi.mocked(remintRecoveryDelegations)).toHaveBeenCalledOnce()
     expect(session.storage.addHistoryClientRevoked).toHaveBeenCalledOnce()
     // Nothing re-persists or re-adopts: the session already holds this PUK.
@@ -480,5 +475,19 @@ describe('re-run convergence and best-effort stages', () => {
     // cipher rebuild failed (the next login converges).
     expect(session.profile.puk).toBe(FRESH_PUK)
     warn.mockRestore()
+  })
+
+  it('reports a partial collection fan-out as a resumable success', async () => {
+    vi.mocked(revokeAccountClient).mockImplementation(
+      orchestratorDriving({ failedCollections: 2 })
+    )
+    const session = sessionWith()
+    const outcome = await revokeEnrolledClient({ session, client: REVOKED })
+
+    expect(outcome.rotated).toBe(true)
+    expect(outcome.collections.failed).toHaveLength(2)
+    expect(session.storage.addHistoryClientRevoked).toHaveBeenCalledWith(
+      expect.objectContaining({ rotated: 1, failed: 2 })
+    )
   })
 })

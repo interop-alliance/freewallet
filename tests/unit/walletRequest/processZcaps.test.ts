@@ -5,7 +5,7 @@ import * as vc from '@interop/vc'
 import { securityLoader } from '@interop/security-document-loader'
 import type { Session } from '@/types/auth'
 import type { ICapabilityQueryDetail, IZcap } from '@/lib/walletRequest'
-import { x25519RecipientFromDidKey } from '@/lib/didKeyRecipient'
+import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
 import {
   resolveInvocationTarget,
   resolveGrant,

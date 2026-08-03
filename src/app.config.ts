@@ -247,11 +247,11 @@ export const KEYRING_CACHE_TTL_MS =
   (Number(env.VITE_KEYRING_CACHE_TTL_HOURS) || 7 * 24) * 60 * 60 * 1000
 
 export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
-// CORS proxy base URL for fetching remote credential URLs from
-// AddCredentialPage. The target URL is appended as a `?url=` query parameter
-// (see `src/lib/fetchFromURL.ts`). When a WAS server is configured, its
-// built-in proxy facet at `/api/cors` is the default -- matching how
-// `src/lib/corsProxy.ts` reaches the same endpoint.
+// CORS proxy base URL for every cross-origin fetch on a user-supplied URL --
+// remote credential URLs from AddCredentialPage and the known-registries
+// fetch. The target URL is appended as a `?url=` query parameter (the single
+// proxy path lives in `src/lib/corsProxy.ts`). When a WAS server is
+// configured, its built-in proxy facet at `/api/cors` is the default.
 export const CORS_PROXY_URL =
   env.VITE_CORS_PROXY_URL ||
   (WAS_SERVER_URL ? `${WAS_SERVER_URL}/api/cors` : 'https://corsproxy.io')

@@ -10,10 +10,14 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import {
+  compareContactsByName,
+  initialsFor,
+  secondaryLineFor
+} from '@interop/social-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
-import { initialsFor, secondaryLineFor } from '@/lib/contactDisplay'
 import type { StoredContact } from '@/types/contact'
 
 export function ContactsPage() {
@@ -33,7 +37,13 @@ export function ContactsPage() {
       try {
         const stored = await session.storage.listContacts()
         if (!cancelled) {
-          setContacts(stored)
+          // The shared list order, so the same account lists identically on
+          // every replica.
+          setContacts(
+            [...stored].sort((left, right) =>
+              compareContactsByName(left.contact, right.contact)
+            )
+          )
           setLoadError(false)
         }
       } catch (err) {

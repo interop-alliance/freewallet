@@ -18,26 +18,40 @@ src/components/     Shared React components
   storage/          Storage browser sub-components
 src/lib/            Pure business logic (no React)
   appKey.ts         App Connect app-key credential (match + mint)
-  didKeyRecipient.ts  A grantee's X25519 recipient key, derived from its
-                    did:key controller (the share flow)
   kms.ts            WebKMS keystore provisioning (ensureKeystore)
+  resolveWalletInput.ts  The one door for free-form text (paste box, QR),
+                    over the shared wallet-input classifier
   sessionKey.ts     freewallet-session IndexedDB caches (keyring, unlock
                     methods, passkey-safety notices)
+  corsProxy.ts      The one CORS-proxy path (`VITE_CORS_PROXY_URL`), used by
+                    the pasted-URL credential fetch and the registries fetch
   viewMappers/      Transform raw credential data into display-ready values
   walletRequest/    VPR classification + response assembly for CHAPI requests
+    respond.ts      Compose, persist the Login activity, then deliver (the
+                    CHAPI `get` approval sequence)
 src/lib/sync/       Collection-agnostic WAS replication adapter (RxDB-based)
 src/stores/         Global state
   authStore.ts      Zustand store — holds the live Session object
   storageManager.ts StorageManager facade (local-first routing)
   browserStore.ts   BrowserStore — the local RxDB active replica
   wasRemoteStore.ts WASRemoteStore — the remote WAS backend
-  edvDocCipher.ts   Per-collection EDV document cipher (encrypt/decrypt seam)
   syncController.ts Background replication lifecycle (start/stop/reSync)
   toastStore.ts     Transient success/info messages (`showToast`), rendered as a
                     Snackbar by DashboardLayout. Global, not page-local state:
                     an action often redirects (delete returns to the dashboard)
                     before a local message could render.
-src/session/        Session bootstrap (initSession.ts)
+src/session/        Session bootstrap (initSession.ts) and the account
+                    ceremonies -- the ordered sequences the pages drive but do
+                    not own (React components keep rendering and confirmation
+                    callbacks only)
+  signup.ts         The two new-account provisioning sequences
+  accountSettings.ts  The Settings ceremonies (passphrase, passkeys, update-key
+                    rotation, account deletion's phase order)
+  clients.ts        Enrolled-client listing + disconnect (a session-shaped
+                    adapter over the shared clients surface)
+  recovery.ts       Recovery-code issuance, spend, revocation
+  shares.ts         Shared-collection listing + removal
+  applications.ts   Connected-app listing + revocation
 src/types/          Shared TypeScript interfaces
 src/i18n/           i18next config + locale JSON files
 src/styles/         MUI sx-object style constants (co-located by feature)
@@ -323,10 +337,14 @@ as part of its cascade.
 
 ## Client revocation and the epoch cascade
 
-Disconnecting an enrolled wallet client from the account
-(`revokeEnrolledClient` in `src/session/revocation.ts`, driven from the
-Settings "Connected wallets" panel -- see "The Settings clients surface"
-below). Run in the revoking client, synchronously, in dependency order:
+Disconnecting an enrolled wallet client from the account. The cascade is
+`revokeAccountClient` in `@interop/wallet-core/clients` -- one orchestrator
+for every wallet -- and `revokeEnrolledClient` in
+`src/session/revocation.ts` supplies the freewallet-shaped stages around it
+(the session preconditions, the collections source, the recovery re-mint,
+and the adoption side effects), driven from the Settings "Connected wallets"
+panel -- see "The Settings clients surface" below. Run in the revoking
+client, synchronously, in dependency order:
 
 1. **The document edit** (`revokeWebvhClient` in
    `@interop/wallet-core/webvh`): the revoked client's two verification
@@ -343,9 +361,11 @@ below). Run in the revoking client, synchronously, in dependency order:
 2. **The PUK rotation** in the `key-map/puk.json` roster
    (`rotatePukRoster`), recipients resolved from the just-updated verified
    document -- the roster delivers, never sources, so the revoked client's
-   entry is dropped even before the retire filter.
-3. **The epoch cascade** (`cascadeCollectionsToPuk` in
-   `src/session/pukCascade.ts`): every encrypted collection -- the
+   entry is dropped even before the retire filter. An account with no roster
+   yet stops here: the document edit has landed, so the wallet IS
+   disconnected, with nothing to rotate.
+3. **The epoch cascade** (driven by wallet-core over the collections
+   `src/session/pukCascade.ts` enumerates): every encrypted collection -- the
    encrypted standard collections plus every remotely listed collection
    whose Description carries an encryption descriptor -- is re-epoch'd onto
    the fresh PUK in parallel, via was-client's `replaceRecipient` (~2
@@ -406,9 +426,12 @@ The management surface over the enrolled-client roster
 of the Applications page (apps are grantees, never enrolled, and stay in
 their own revocation surface).
 
-The listing is a read over the locally verified did:webvh log -- the same
-`verifyAccountLog` step every ceremony runs, then wallet-core's
-`listEnrolledWebvhClients`, keyed on `capabilityInvocation`. That keying is
+The listing is wallet-core's `listAccountClients`, which
+`src/session/clients.ts` wraps with only what a session knows (where the log
+lives, which key is this browser's, the label store): a read over the
+locally verified did:webvh log -- the same `verifyAccountLog` step every
+ceremony runs -- then `listEnrolledWebvhClients`, keyed on
+`capabilityInvocation`. That keying is
 the exclusion story: a recovery code's key is published under `keyAgreement`
 only (deliberately unmarked), and the KMS-held conveniences under
 `authentication` / `assertionMethod`, so neither can appear, structurally
@@ -420,8 +443,12 @@ retiring the attributed key while revealing exactly one replacement is that
 client's self-rotation -- an ambiguous attribution disables disconnect for
 the row rather than guessing) and its enrollment moment (`versionTime` of
 the publishing entry). A listed row with all three key members is exactly a
-`RevokedClientKeys`, so Disconnect drives the client-revocation epoch cascade
-verbatim.
+`RevokedClientKeys` (`revokedClientKeysFor`), so Disconnect drives the
+client-revocation epoch cascade verbatim. Which rows can be disconnected at
+all is the shared `disconnectEligibility` policy (self, last-wallet, and
+unattributed-update-key refusals) rather than UI state, and a partial
+collection fan-out is reported through `cascadeCompletion` as the resumable
+success it is.
 
 **Labels live beside the keys, not in the document.** The document carries
 key material only, so display labels go in `key-map/client-labels.json`
@@ -451,8 +478,9 @@ surface of the account -- app grantees there, wallet clients here, with a
 cross-pointer in each panel to the other. Its listing checks each recorded
 App Connect grant's delegation signer (the full zcap, proof included, is
 recorded on the Login activity) against the same verified document, via
-`currentAccountSigningKeys` in `src/session/clients.ts`
-(`deriveAppGrantsState`, matched on the key-multibase fragment so the
+`currentAccountSigningKeys` (wallet-core's, wrapped in
+`src/session/clients.ts` so a guest degrades rather than throws) plus
+`deriveAppGrantsState`, matched on the key-multibase fragment so the
 did:key and promoted did:webvh spellings of one key agree). An app whose
 recorded signers are all gone from the document is shown as orphaned --
 its grants already stopped verifying with that client's revocation, and
@@ -474,8 +502,8 @@ standard collections (`private-credentials`, `public-credentials`,
 
 The encrypted collections (`private-credentials`, `wallet-activity`) store
 **EDV envelopes**, not plaintext -- encrypted-at-rest locally and opaque to
-the server. A per-collection document cipher (`src/stores/edvDocCipher.ts`,
-built from the session's passphrase-derived X25519 key) encrypts at write
+the server. A per-collection document cipher (`createEdvDocCipher` from
+`@interop/was-client/edv`, built from the session's vault KAK) encrypts at write
 time and decrypts at read time; the row id is content-derived (a hash of the
 JWE ciphertext), so it is identical on every replica. Page-facing identity
 stays the credential `cid` / activity `id`, recovered by decrypting at read
@@ -498,6 +526,15 @@ and quotas.
 
 `StorageManager` is the facade; pages and components always talk to it, never
 directly to a backend class.
+
+Deleting a credential retracts its world-readable public copy before removing
+the private credential (`StorageManager.deleteCredential`, matching the mobile
+wallet's order): once the private credential is gone nothing is left to retract
+the public copy with, so the reverse order can strand a world-readable orphan.
+Retraction of a live public copy is blocking -- a public copy that cannot be
+retracted refuses the delete (`PublicCopyRetractionError`) rather than deleting
+anyway -- while the delete dialog's deliberate "keep public copy" choice skips
+it, and a credential with no public copy deletes normally offline.
 
 A user's remote Space is identified by an independent random `spaceId`
 minted at signup and carried in the account pointer (unlock Spaces keep
@@ -697,8 +734,8 @@ carrying an `encryption` descriptor, so today `private-credentials`,
 `wallet-activity`, `contacts`, and `contacts-history` -- since sharing is
 meaningless where no epoch roster exists. The grantee's X25519 key is derived
 from the `did:key` the request
-already names as `controller` (`x25519RecipientFromDidKey` in
-`src/lib/didKeyRecipient.ts`, the same Ed25519-to-Montgomery conversion the
+already names as `controller` (`x25519RecipientFromDidKey` from
+`@interop/was-client/edv`, the same Ed25519-to-Montgomery conversion the
 wallet applies to its own vault KAK). An explicit key field would let a request
 pair controller DID A with recipient key B; deriving makes that substitution
 impossible by construction. A controller with no Ed25519 twin (a did:web, an

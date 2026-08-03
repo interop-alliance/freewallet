@@ -23,16 +23,14 @@ import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useState } from 'react'
 import { DATE_FMT } from '@/app.config'
 import type { Session } from '@/types/auth'
-import {
-  getUnlockMethods,
-  type RecoveryCodeUnlockMethod
-} from '@/session/unlockMethods'
+import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
 import {
   canIssueRecoveryCode,
   checkRecoveryHealth,
   formatRecoveryCode,
   generateRecoveryCode,
   issueRecoveryCode,
+  listRecoveryCodeEntries,
   revokeRecoveryCode,
   type RecoveryHealthFlag
 } from '@/session/recovery'
@@ -56,20 +54,11 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
     }
   })
 
-  const loadEntries = useCallback(async (): Promise<
-    RecoveryCodeUnlockMethod[]
-  > => {
-    try {
-      const record = await getUnlockMethods({ session })
-      return (record?.methods ?? []).filter(
-        (method): method is RecoveryCodeUnlockMethod =>
-          method.type === 'recovery-code'
-      )
-    } catch (err) {
-      console.warn('Could not load the recovery-code entries:', err)
-      return []
-    }
-  }, [session])
+  const loadEntries = useCallback(
+    async (): Promise<RecoveryCodeUnlockMethod[]> =>
+      listRecoveryCodeEntries({ session }),
+    [session]
+  )
 
   useEffect(() => {
     let cancelled = false

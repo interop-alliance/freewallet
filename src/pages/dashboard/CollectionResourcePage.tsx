@@ -317,7 +317,7 @@ export function CollectionResourcePage() {
           <>
             {deleteError && (
               <Alert severity="error" sx={{ mb: 2 }}>
-                {t('credential.deleteError')}
+                {deleteError}
               </Alert>
             )}
 

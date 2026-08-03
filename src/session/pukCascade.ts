@@ -24,6 +24,7 @@ import {
   type Puk,
   type PukCascadeResult
 } from '@interop/wallet-core/keys'
+import type { CascadeCollections } from '@interop/wallet-core/clients'
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
@@ -67,6 +68,33 @@ async function encryptedCollectionIds({
 }
 
 /**
+ * The fan-out's work, as the shared cascade orchestrator expects it: which
+ * encrypted collections exist in this Space, and how each one's descriptor
+ * store and encryption declaration are reached through the remote store.
+ *
+ * @param options {object}
+ * @param options.remoteStore {WASRemoteStore}
+ * @returns {CascadeCollections}
+ */
+export function cascadeCollections({
+  remoteStore
+}: {
+  remoteStore: WASRemoteStore
+}): CascadeCollections {
+  return {
+    collectionIds: async () => await encryptedCollectionIds({ remoteStore }),
+    storeFor: collectionId =>
+      collectionDescriptorStore({
+        collection: remoteStore.collectionHandle({ collectionId })
+      }),
+    // Skip a collection the server does not declare encrypted (e.g. a
+    // standard collection on an account that never provisioned it).
+    isEncrypted: async collectionId =>
+      Boolean(await remoteStore.collectionEncryption({ collectionId }))
+  }
+}
+
+/**
  * Re-epochs every encrypted collection onto the roster's current PUK, in
  * parallel. Collections not declared encrypted server-side are skipped; a
  * collection that fails is reported in `failed` and the rest proceed.
@@ -91,16 +119,11 @@ export async function cascadeCollectionsToPuk({
   clientKeyAgreementKey: IKeyAgreementKey
   puk: Puk
 }): Promise<PukCascadeResult> {
+  const work = cascadeCollections({ remoteStore })
   const result = await driveCascade({
     collectionIds: await encryptedCollectionIds({ remoteStore }),
-    storeFor: collectionId =>
-      collectionDescriptorStore({
-        collection: remoteStore.collectionHandle({ collectionId })
-      }),
-    // Skip a collection the server does not declare encrypted (e.g. a
-    // standard collection on an account that never provisioned it).
-    isEncrypted: async collectionId =>
-      Boolean(await remoteStore.collectionEncryption({ collectionId })),
+    storeFor: work.storeFor,
+    ...(work.isEncrypted ? { isEncrypted: work.isEncrypted } : {}),
     rosterDescriptor,
     clientKeyAgreementKey,
     puk

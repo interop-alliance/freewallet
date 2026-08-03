@@ -32,11 +32,10 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { dashboardStyles } from '@/styles/appStyles'
-import { currentAccountSigningKeys } from '@/session/clients'
+import { listApplicationsView, revokeApplication } from '@/session/applications'
 import {
   deriveAppGrantsState,
   listConnectedApps,
-  revokeAppAccess,
   type ConnectedApp
 } from '@/lib/connectedApps'
 
@@ -63,31 +62,19 @@ export function ApplicationsPage() {
     return await listConnectedApps({ storage: session.storage })
   }, [session])
 
-  // The grant-state check is best-effort: a session without a promoted
-  // account (or a log that cannot be fetched right now) degrades to listing
-  // the apps without an orphaned marker, never to failing the page.
-  const fetchSigningKeys = useCallback(async () => {
-    if (!session) {
-      return undefined
-    }
-    try {
-      return await currentAccountSigningKeys({ session })
-    } catch (err) {
-      console.warn('Could not read the account key set for the app list:', err)
-      return undefined
-    }
-  }, [session])
-
   useEffect(() => {
     let cancelled = false
     async function load() {
+      if (!session) {
+        setLoading(false)
+        return
+      }
       try {
-        const [list, keys] = await Promise.all([
-          fetchApps(),
-          fetchSigningKeys()
-        ])
+        const { apps: listed, signingKeys: keys } = await listApplicationsView({
+          session
+        })
         if (!cancelled) {
-          setApps(list)
+          setApps(listed)
           setSigningKeys(keys)
           setLoadError(false)
         }
@@ -106,7 +93,7 @@ export function ApplicationsPage() {
     return () => {
       cancelled = true
     }
-  }, [fetchApps, fetchSigningKeys])
+  }, [session])
 
   function openRevokeDialog(app: ConnectedApp) {
     setRevokeError(false)
@@ -118,18 +105,13 @@ export function ApplicationsPage() {
     if (!revokeTarget || !session) {
       return
     }
-    const grantsState = deriveAppGrantsState({
-      app: revokeTarget,
-      currentSigningKeys: signingKeys
-    })
     setRevoking(true)
     setRevokeError(false)
     try {
-      const outcome = await revokeAppAccess({
-        storage: session.storage,
-        user: session.user,
+      const { grantsState, revoked } = await revokeApplication({
+        session,
         app: revokeTarget,
-        grantsState
+        signingKeys
       })
       setRevokeDialogOpen(false)
       setRevokeTarget(null)
@@ -137,7 +119,7 @@ export function ApplicationsPage() {
         message:
           grantsState === 'orphaned'
             ? t('applications.revokeSuccessOrphaned')
-            : outcome.revoked > 0
+            : revoked > 0
               ? t('applications.revokeSuccess')
               : t('applications.revokeSuccessLegacy')
       })

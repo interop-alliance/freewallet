@@ -60,18 +60,21 @@
  */
 import type { ZcapClient } from '@interop/ezcap'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
-import { base64urlnopad } from '@scure/base'
 import {
   KEYRING_CACHE_TTL_MS,
   UNLOCK_MANAGE_ZCAP_TTL_MS,
   WAS_SERVER_URL
 } from '@/app.config'
-import { bufferToBase64Url } from '@/lib/cidFrom'
 import {
   isWebvhDid,
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
-import type { Puk } from '@interop/wallet-core/keys'
+import {
+  decodeClientKeyRecord,
+  encodeClientKeyRecord,
+  type ClientKeyRecord,
+  type Puk
+} from '@interop/wallet-core/keys'
 import {
   deleteUnlockSpace,
   deriveUnlockIdentity,
@@ -117,13 +120,11 @@ const CLIENT_KEYS_CIPHER_ID = 'client-keys'
  * the account controller the record was bound for (absent on records written
  * before multi-client enrollment; those were necessarily written by the
  * first client, whose own did:key IS the controller).
+ *
+ * The contents are the shared record both wallets encode and validate
+ * identically; only the unlock-layer wrap around them is freewallet's.
  */
-export interface ClientKeySet {
-  clientSeed: Uint8Array
-  puk?: Puk
-  webvhUpdateKeys?: ClientWebvhUpdateKeys
-  controller?: string
-}
+export type ClientKeySet = ClientKeyRecord
 
 /**
  * The re-wrappable members of a client-key record -- what a live session may
@@ -264,39 +265,13 @@ async function saveClientKeys({
     keyResolver: unlock.keyResolver,
     collectionId: CLIENT_KEYS_CIPHER_ID
   })
-  const { envelope } = await cipher.encrypt({
-    data: {
-      clientSeed: bufferToBase64Url(clientSeed),
-      ...(puk
-        ? {
-            puk: {
-              id: puk.id,
-              secret: bufferToBase64Url(puk.secret),
-              ...(puk.signingSeed
-                ? { signingSeed: bufferToBase64Url(puk.signingSeed) }
-                : {})
-            }
-          }
-        : {}),
-      ...(webvhUpdateKeys
-        ? {
-            webvh: {
-              updateSeed: bufferToBase64Url(webvhUpdateKeys.updateSeed),
-              stagedSeed: bufferToBase64Url(webvhUpdateKeys.stagedSeed),
-              ...(webvhUpdateKeys.pendingStagedSeed
-                ? {
-                    pendingStagedSeed: bufferToBase64Url(
-                      webvhUpdateKeys.pendingStagedSeed
-                    )
-                  }
-                : {})
-            }
-          }
-        : {}),
-      ...(controller ? { controller } : {}),
-      createdAt: new Date().toISOString()
-    }
+  const contents = encodeClientKeyRecord({
+    clientSeed,
+    ...(puk ? { puk } : {}),
+    ...(webvhUpdateKeys ? { webvhUpdateKeys } : {}),
+    ...(controller ? { controller } : {})
   })
+  const { envelope } = await cipher.encrypt({ data: { ...contents } })
   await saveClientKeyRecord({
     spaceId: unlock.spaceId,
     record: { version: CLIENT_KEYS_RECORD_VERSION, wrapped: envelope },
@@ -422,8 +397,8 @@ async function loadClientKeys({
 
 /**
  * Unwraps and validates a stored client-key record: rejects an unknown outer
- * `version`, decrypts the payload, and sanity-checks the key material
- * (32-byte client seed, well-formed PUK when present).
+ * `version`, decrypts the payload, and hands the contents to the shared
+ * record codec, which throws on any malformed member.
  *
  * @param options {object}
  * @param options.record {unknown}   the stored `{ version, wrapped }` envelope
@@ -454,128 +429,8 @@ async function unwrapClientKeys({
     keyResolver: unlock.keyResolver,
     collectionId: CLIENT_KEYS_CIPHER_ID
   })
-  const plaintext = (await cipher.decrypt({
-    envelope: wrapped as never
-  })) as {
-    clientSeed?: unknown
-    puk?: unknown
-    webvh?: unknown
-    controller?: unknown
-  }
-
-  if (typeof plaintext.clientSeed !== 'string') {
-    throw new Error('Client-key record is missing the client seed.')
-  }
-  const clientSeed = base64urlnopad.decode(plaintext.clientSeed)
-  if (clientSeed.length !== 32) {
-    throw new Error('Client-key record client seed is not 32 bytes.')
-  }
-  if (
-    plaintext.controller !== undefined &&
-    (typeof plaintext.controller !== 'string' || !plaintext.controller)
-  ) {
-    throw new Error('Client-key record has a malformed controller.')
-  }
-  const puk = parseRecordPuk(plaintext.puk)
-  const webvhUpdateKeys = parseRecordWebvhKeys(plaintext.webvh)
-  return {
-    clientSeed,
-    ...(puk ? { puk } : {}),
-    ...(webvhUpdateKeys ? { webvhUpdateKeys } : {}),
-    ...(plaintext.controller ? { controller: plaintext.controller } : {})
-  }
-}
-
-/**
- * Parses and validates the optional `webvh` member of a client-key record
- * plaintext: this client's did:webvh update-key seeds. An absent member
- * returns undefined (a record written before the update keys became
- * client-held); a present-but-malformed one throws -- the account's identity
- * log can only be extended with these seeds, so proceeding without them
- * would silently strand update authority.
- *
- * @param value {unknown}   the record's `webvh` member
- * @returns {ClientWebvhUpdateKeys | undefined}
- */
-function parseRecordWebvhKeys(
-  value: unknown
-): ClientWebvhUpdateKeys | undefined {
-  if (value === undefined) {
-    return undefined
-  }
-  if (value === null || typeof value !== 'object') {
-    throw new Error('Client-key record has malformed did:webvh update keys.')
-  }
-  const { updateSeed, stagedSeed, pendingStagedSeed } = value as {
-    updateSeed?: unknown
-    stagedSeed?: unknown
-    pendingStagedSeed?: unknown
-  }
-  const decodeSeed = (member: unknown, name: string): Uint8Array => {
-    if (typeof member !== 'string') {
-      throw new Error(`Client-key record did:webvh ${name} is missing.`)
-    }
-    const bytes = base64urlnopad.decode(member)
-    if (bytes.length !== 32) {
-      throw new Error(`Client-key record did:webvh ${name} is not 32 bytes.`)
-    }
-    return bytes
-  }
-  return {
-    updateSeed: decodeSeed(updateSeed, 'update seed'),
-    stagedSeed: decodeSeed(stagedSeed, 'staged seed'),
-    ...(pendingStagedSeed !== undefined
-      ? { pendingStagedSeed: decodeSeed(pendingStagedSeed, 'pending seed') }
-      : {})
-  }
-}
-
-/**
- * Parses and validates the optional `puk` member of a client-key record
- * plaintext. An absent member returns undefined (a record written for an
- * account minted before the PUK); a present-but-malformed one throws -- the
- * account's encrypted collections are keyed on the PUK, so proceeding without
- * it would silently orphan them.
- *
- * @param value {unknown}   the record's `puk` member
- * @returns {Puk | undefined}
- */
-function parseRecordPuk(value: unknown): Puk | undefined {
-  if (value === undefined) {
-    return undefined
-  }
-  if (value === null || typeof value !== 'object') {
-    throw new Error('Client-key record has a malformed PUK.')
-  }
-  const { id, secret, signingSeed } = value as {
-    id?: unknown
-    secret?: unknown
-    signingSeed?: unknown
-  }
-  if (typeof id !== 'string' || !id) {
-    throw new Error('Client-key record PUK is missing its key id.')
-  }
-  if (typeof secret !== 'string') {
-    throw new Error('Client-key record PUK is missing its key material.')
-  }
-  const secretBytes = base64urlnopad.decode(secret)
-  if (secretBytes.length !== 32) {
-    throw new Error('Client-key record PUK key material is not 32 bytes.')
-  }
-  // The signing seed is absent on a PUK adopted from a roster rotation (the
-  // roster wraps the key-agreement secret alone); when present it must be
-  // well-formed.
-  if (signingSeed === undefined) {
-    return { id, secret: secretBytes }
-  }
-  if (typeof signingSeed !== 'string') {
-    throw new Error('Client-key record PUK is missing its key material.')
-  }
-  const signingSeedBytes = base64urlnopad.decode(signingSeed)
-  if (signingSeedBytes.length !== 32) {
-    throw new Error('Client-key record PUK key material is not 32 bytes.')
-  }
-  return { id, secret: secretBytes, signingSeed: signingSeedBytes }
+  const contents = await cipher.decrypt({ envelope: wrapped as never })
+  return decodeClientKeyRecord({ contents })
 }
 
 /**

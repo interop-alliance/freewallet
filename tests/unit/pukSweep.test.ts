@@ -28,25 +28,24 @@ vi.mock('@/app.config', async importOriginal => ({
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
   pukRosterDescriptorStore: vi.fn(() => ({ isFakeRosterStore: true })),
-  readPukRoster: vi.fn(async () => null),
-  convergePukRosterToDocument: vi.fn(async () => ({
-    rotated: false,
-    staleRecipientIds: [],
-    descriptor: null
-  })),
   pukVaultKeys: vi.fn(({ puk }: { puk: { id: string } }) => ({
     keyAgreementKey: { id: `${puk.id}#kak` },
     keyResolver: async () => ({})
   }))
 }))
 
-vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
-  verifyAccountLog: vi.fn(async () => ({
-    doc: { id: 'did:webvh:doc' },
-    log: [],
-    updateKeys: [],
-    nextKeyHashes: []
+// The roster policy itself lives in wallet-core (`clients`): the login read and
+// the convergence onto the account document are the two seams this file drives,
+// and their internals (the roster read, the log verification, the offline
+// swallow) are that package's own tests to keep.
+vi.mock('@interop/wallet-core/clients', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/wallet-core/clients')>()),
+  checkPukRosterAtLogin: vi.fn(async () => null),
+  convergePukRosterToAccount: vi.fn(async () => ({
+    rotated: false,
+    staleRecipientIds: [],
+    puk: null,
+    descriptor: null
   }))
 }))
 
@@ -64,10 +63,9 @@ vi.mock('@/stores/storageManager', () => ({
 }))
 
 import {
-  convergePukRosterToDocument,
-  readPukRoster
-} from '@interop/wallet-core/keys'
-import { verifyAccountLog } from '@interop/wallet-core/webvh'
+  checkPukRosterAtLogin,
+  convergePukRosterToAccount
+} from '@interop/wallet-core/clients'
 import { cascadeCollectionsToPuk } from '@/session/pukCascade'
 import { StorageManager } from '@/stores/storageManager'
 import { initSessionFromSeed } from '@/session/initSession'
@@ -131,15 +129,31 @@ function randomSeed(): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(32))
 }
 
+/**
+ * The convergence's own best-effort default: a healthy roster (and equally a
+ * document that could not be fetched or verified) hands the fan-out back the
+ * key and descriptor the login already had.
+ */
+function convergenceLeavesInputUnchanged() {
+  vi.mocked(convergePukRosterToAccount).mockImplementation((async ({
+    puk,
+    descriptor
+  }: {
+    puk: unknown
+    descriptor: unknown
+  }) => ({
+    rotated: false,
+    staleRecipientIds: [],
+    puk,
+    descriptor
+  })) as never)
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   state.wasUrl = 'https://was.example.test'
-  vi.mocked(readPukRoster).mockResolvedValue(null)
-  vi.mocked(convergePukRosterToDocument).mockResolvedValue({
-    rotated: false,
-    staleRecipientIds: [],
-    descriptor: null
-  })
+  vi.mocked(checkPukRosterAtLogin).mockResolvedValue(null)
+  convergenceLeavesInputUnchanged()
 })
 
 describe('the login-time cascade-completion sweep', () => {
@@ -149,7 +163,7 @@ describe('the login-time cascade-completion sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockResolvedValue(rosterRead() as never)
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(rosterRead() as never)
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
@@ -179,7 +193,7 @@ describe('the login-time cascade-completion sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockResolvedValue(
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(
       rosterRead({ rotated: true }) as never
     )
     const onPukRotated = vi.fn(async () => undefined)
@@ -204,7 +218,7 @@ describe('the login-time cascade-completion sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockResolvedValue(rosterRead() as never)
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(rosterRead() as never)
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
@@ -224,7 +238,7 @@ describe('the login-time cascade-completion sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockResolvedValue(rosterRead() as never)
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(rosterRead() as never)
     // The sweep completed a crashed cascade: one collection took a fresh
     // epoch. The ciphers were built before the sweep, so a post-sweep write
     // would otherwise stay sealed under the retired epoch.
@@ -251,7 +265,7 @@ describe('the login-time cascade-completion sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockResolvedValue(rosterRead() as never)
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(rosterRead() as never)
     // noop keeps the epoch; an escrow adds a recipient without moving it.
     vi.mocked(cascadeCollectionsToPuk).mockResolvedValue({
       outcomes: {
@@ -276,7 +290,7 @@ describe('the login-time cascade-completion sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockResolvedValue(rosterRead() as never)
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(rosterRead() as never)
     vi.mocked(cascadeCollectionsToPuk).mockRejectedValue(
       new Error('sweep broke')
     )
@@ -295,7 +309,7 @@ describe('the login-time cascade-completion sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockResolvedValue(null)
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(null)
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
@@ -310,7 +324,9 @@ describe('the login-time cascade-completion sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockRejectedValue(new Error('network down'))
+    // An unreachable server is the roster policy's own swallow: it keeps the
+    // cached key authoritative and reports no read at all.
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(null)
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
@@ -326,7 +342,7 @@ describe('the login-time cascade-completion sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockResolvedValue(rosterRead() as never)
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(rosterRead() as never)
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
@@ -347,7 +363,7 @@ describe('the login-time cascade-completion sweep', () => {
       puk: OLD_PUK,
       isGuest: true
     })
-    expect(vi.mocked(readPukRoster)).not.toHaveBeenCalled()
+    expect(vi.mocked(checkPukRosterAtLogin)).not.toHaveBeenCalled()
     expect(session.pukSweep).toBeUndefined()
   })
 
@@ -357,7 +373,7 @@ describe('the login-time cascade-completion sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockResolvedValue(rosterRead() as never)
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(rosterRead() as never)
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
@@ -376,20 +392,27 @@ describe('the roster stage of the sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    // The login read, then the read-back after the convergence rotated.
-    vi.mocked(readPukRoster)
-      .mockResolvedValueOnce(rosterRead() as never)
-      .mockResolvedValueOnce({
-        descriptor: CONVERGED_DESCRIPTOR,
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(rosterRead() as never)
+    // The convergence found the roster still wrapping the current key to a
+    // recipient the document no longer keys, rotated it, and handed back the
+    // fresh key through the adoption callback.
+    vi.mocked(convergePukRosterToAccount).mockImplementation((async ({
+      onPukAdopted
+    }: {
+      onPukAdopted?: (adopted: unknown) => Promise<void>
+    }) => {
+      await onPukAdopted?.({
         puk: FRESH_PUK,
+        latestEpochId: FRESH_PUK.id,
+        descriptor: CONVERGED_DESCRIPTOR
+      })
+      return {
         rotated: true,
-        latestEpochId: FRESH_PUK.id
-      } as never)
-    vi.mocked(convergePukRosterToDocument).mockResolvedValue({
-      rotated: true,
-      staleRecipientIds: ['did:key:z6MkGone#z6LSGone'],
-      descriptor: CONVERGED_DESCRIPTOR as never
-    })
+        staleRecipientIds: ['did:key:z6MkGone#z6LSGone'],
+        puk: FRESH_PUK,
+        descriptor: CONVERGED_DESCRIPTOR
+      }
+    }) as never)
     const onPukRotated = vi.fn(async () => undefined)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
@@ -402,15 +425,17 @@ describe('the roster stage of the sweep', () => {
     fake.resolveProvisioning()
     await session.pukSweep
 
-    expect(vi.mocked(verifyAccountLog)).toHaveBeenCalledExactlyOnceWith({
-      did: POINTER.did,
-      spaceId: POINTER.spaceId,
-      host: POINTER.host
-    })
-    expect(vi.mocked(convergePukRosterToDocument)).toHaveBeenCalledWith(
+    expect(
+      vi.mocked(convergePukRosterToAccount)
+    ).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
-        document: { id: 'did:webvh:doc' },
-        descriptor: ROSTER_DESCRIPTOR
+        pointer: {
+          did: POINTER.did,
+          spaceId: POINTER.spaceId,
+          host: POINTER.host
+        },
+        descriptor: ROSTER_DESCRIPTOR,
+        puk: OLD_PUK
       })
     )
     // The fresh key is adopted -- persisted for the next login, swapped into
@@ -433,7 +458,7 @@ describe('the roster stage of the sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockResolvedValue(rosterRead() as never)
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(rosterRead() as never)
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
@@ -443,7 +468,7 @@ describe('the roster stage of the sweep', () => {
     fake.resolveProvisioning()
     await session.pukSweep
 
-    expect(vi.mocked(convergePukRosterToDocument)).toHaveBeenCalledOnce()
+    expect(vi.mocked(convergePukRosterToAccount)).toHaveBeenCalledOnce()
     expect(fake.adoptRotatedVaultKeys).not.toHaveBeenCalled()
     expect(vi.mocked(cascadeCollectionsToPuk)).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
@@ -459,8 +484,10 @@ describe('the roster stage of the sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockResolvedValue(rosterRead() as never)
-    vi.mocked(verifyAccountLog).mockRejectedValue(new Error('offline'))
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(rosterRead() as never)
+    // An unfetchable or unverifiable document is swallowed inside the
+    // convergence, which hands back the login's own key and descriptor.
+    convergenceLeavesInputUnchanged()
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     const { session } = await initSessionFromSeed({
@@ -471,9 +498,12 @@ describe('the roster stage of the sweep', () => {
     fake.resolveProvisioning()
     await session.pukSweep
 
-    expect(vi.mocked(convergePukRosterToDocument)).not.toHaveBeenCalled()
+    expect(fake.adoptRotatedVaultKeys).not.toHaveBeenCalled()
     expect(vi.mocked(cascadeCollectionsToPuk)).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ puk: OLD_PUK })
+      expect.objectContaining({
+        rosterDescriptor: ROSTER_DESCRIPTOR,
+        puk: OLD_PUK
+      })
     )
     warn.mockRestore()
   })
@@ -484,7 +514,7 @@ describe('the roster stage of the sweep', () => {
       storage: fake.storage,
       userExists: true
     })
-    vi.mocked(readPukRoster).mockResolvedValue(rosterRead() as never)
+    vi.mocked(checkPukRosterAtLogin).mockResolvedValue(rosterRead() as never)
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
@@ -494,8 +524,7 @@ describe('the roster stage of the sweep', () => {
     fake.resolveProvisioning()
     await session.pukSweep
 
-    expect(vi.mocked(verifyAccountLog)).not.toHaveBeenCalled()
-    expect(vi.mocked(convergePukRosterToDocument)).not.toHaveBeenCalled()
+    expect(vi.mocked(convergePukRosterToAccount)).not.toHaveBeenCalled()
     expect(vi.mocked(cascadeCollectionsToPuk)).toHaveBeenCalledOnce()
   })
 })
