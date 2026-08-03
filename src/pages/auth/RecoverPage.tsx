@@ -3,12 +3,10 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
-import IconButton from '@mui/material/IconButton'
 import Link from '@mui/material/Link'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { MdContentCopy } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
 import { Link as RouterLink, useNavigate } from 'react-router'
 import type { SubmitEvent } from 'react'
@@ -20,7 +18,6 @@ import { useAuthStore } from '@/stores/authStore'
 import { PASSWORD_RULES } from '@/app.config'
 import { loginWithPassphrase } from '@/session/initSession'
 import {
-  formatRecoveryCode,
   locateRecoveryAccount,
   recoverAccountWithCode,
   RecoveryCodeInvalidError,
@@ -31,7 +28,7 @@ import {
   type RecoveryOutcome
 } from '@/session/recovery'
 import { isStorageUnreachable } from '@/lib/storageErrors'
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { RecoveryCodeDisplay } from '@/components/RecoveryCodeDisplay'
 
 /**
  * The recovery-code recover page (`/recover`, public) -- the "lost my only
@@ -57,12 +54,6 @@ export function RecoverPage() {
   const [passphraseScore, setPassphraseScore] = useState(0)
   const [outcome, setOutcome] = useState<RecoveryOutcome | null>(null)
   const [replacementSaved, setReplacementSaved] = useState(false)
-  const { copied, copy } = useCopyToClipboard({
-    onError: (err: unknown) => {
-      console.error('Could not copy the replacement code:', err)
-    }
-  })
-
   /**
    * Maps a recovery failure onto the page's honest error states: a mistyped
    * code, a code that resolves to nothing (never issued, revoked, or spent),
@@ -289,32 +280,11 @@ export function RecoverPage() {
                 <Alert severity="warning">
                   {t('auth.recover.replacementExplain')}
                 </Alert>
-                <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
-                  <Typography
-                    variant="h6"
-                    component="code"
-                    data-testid="replacement-recovery-code"
-                    sx={{ fontFamily: 'monospace', letterSpacing: 1 }}
-                  >
-                    {formatRecoveryCode({ code: outcome.replacementCode })}
-                  </Typography>
-                  <IconButton
-                    size="small"
-                    aria-label={t('auth.recover.copyCode')}
-                    onClick={() =>
-                      void copy(
-                        formatRecoveryCode({ code: outcome.replacementCode })
-                      )
-                    }
-                  >
-                    <MdContentCopy />
-                  </IconButton>
-                  {copied && (
-                    <Typography variant="body2" color="text.secondary">
-                      {t('common.copied')}
-                    </Typography>
-                  )}
-                </Stack>
+                <RecoveryCodeDisplay
+                  code={outcome.replacementCode}
+                  copyLabel={t('auth.recover.copyCode')}
+                  testId="replacement-recovery-code"
+                />
 
                 {errorKey && (
                   <Alert severity="error" sx={authStyles.userMessage}>

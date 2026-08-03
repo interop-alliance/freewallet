@@ -19,6 +19,7 @@ import {
 } from '@/session/keyring'
 import {
   adoptPassphraseRebind,
+  emptyUnlockMethodsRegistry,
   backfillPassphraseUnlockMethod,
   canRevokeWithoutCeremony,
   enrollPasskey,
@@ -30,7 +31,8 @@ import {
   type PassphraseUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
-import { deletePasskeySafetyNotice } from '@/lib/sessionKey'
+import { deletePasskeySafetyNotice, deletePukEpochPin } from '@/lib/sessionKey'
+import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import { findLoginCredential, loginHandleOf } from '@/lib/loginCredential'
 import type { Session } from '@/types/auth'
 
@@ -50,22 +52,6 @@ export async function readLoginHandle({
   const credentials = await session.storage.listCredentials()
   const found = findLoginCredential({ credentials })
   return found ? (loginHandleOf(found.vc) ?? '') : ''
-}
-
-/**
- * A fresh, empty unlock-methods registry: one wallet-wide user handle and no
- * methods yet. Used when a mutation is the first thing to write the registry.
- *
- * @returns {UnlockMethodsRecord}
- */
-function emptyUnlockRegistry(): UnlockMethodsRecord {
-  return {
-    version: 1,
-    userHandle: base64urlnopad.encode(
-      crypto.getRandomValues(new Uint8Array(16))
-    ),
-    methods: []
-  }
 }
 
 /**
@@ -253,7 +239,7 @@ export async function addAccountPasskey({
   // passphrase entry) so the new passkey shares the one wallet-wide user
   // handle and excludes any authenticator already holding a passkey for this
   // wallet. Fall back to a fresh registry when none has been written yet.
-  const base = registry ?? emptyUnlockRegistry()
+  const base = registry ?? emptyUnlockMethodsRegistry()
   const excludeCredentialIds = base.methods
     .filter(
       (method): method is PasskeyUnlockMethod => method.type === 'passkey'
@@ -415,7 +401,7 @@ export async function addAccountPassphrase({
       controller: accountController
     })
   })
-  const base = registry ?? emptyUnlockRegistry()
+  const base = registry ?? emptyUnlockMethodsRegistry()
   const entry: PassphraseUnlockMethod = {
     type: 'passphrase',
     createdAt: new Date().toISOString(),
@@ -459,14 +445,21 @@ export async function rotateAccountUpdateKey({
   if (!remoteStore || !updateKeys || !persistClientKeys) {
     throw new Error('Rotating the update key needs an enrolled remote account.')
   }
-  await rotateWebvhUpdateKey({
-    idStore: remoteStore.webvhIdStore(),
-    updateKeys,
-    persistUpdateKeys: async next => {
-      await persistClientKeys({ webvhUpdateKeys: next })
-      session.profile.clientWebvhKeys = next
-    }
-  })
+  try {
+    await rotateWebvhUpdateKey({
+      idStore: remoteStore.webvhIdStore(),
+      updateKeys,
+      persistUpdateKeys: async next => {
+        await persistClientKeys({ webvhUpdateKeys: next })
+        session.profile.clientWebvhKeys = next
+      }
+    })
+  } finally {
+    // The rotation publishes a log entry (and a torn rotation may have
+    // published one before failing), so the session's verified-log memo is
+    // dropped either way.
+    invalidateVerifiedLog({ profile: session.profile })
+  }
 }
 
 /**
@@ -553,6 +546,18 @@ export async function deleteAccount({
       await deletePasskeySafetyNotice({ controller: session.user.id })
     } catch (err) {
       console.warn('Could not delete the passkey-safety notice:', err)
+    }
+    // The pinned key-roster epoch is continuity state about the Space just
+    // wiped: clear it beside the pointer pin `deleteKeyring` drops, so a
+    // re-provisioned account is never refused against a pin from the deleted
+    // one.
+    const dataSpaceId = session.profile.accountPointer?.spaceId
+    if (dataSpaceId) {
+      try {
+        await deletePukEpochPin({ spaceId: dataSpaceId })
+      } catch (err) {
+        console.warn('Could not delete the key-roster epoch pin:', err)
+      }
     }
   }
   return 'deleted'

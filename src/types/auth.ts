@@ -22,6 +22,7 @@ import type { Puk } from '@interop/wallet-core/keys'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
 import type { PukCascadeResult } from '@/session/pukCascade'
+import type { VerifiedLogCache } from '@/session/verifiedLog'
 
 /**
  * Minimal interface over @interop/webkms-client's CapabilityAgent.
@@ -131,6 +132,12 @@ export interface ControllerProfile {
     unlockSpaceId: string
     manageCapability?: IZcap
   }
+  // The session-lifetime memo of this account's locally verified did:webvh
+  // log (`src/session/verifiedLog.ts`): one verification per session instead
+  // of one per surface, keyed on the account pointer and invalidated by every
+  // ceremony that extends the log. Created on first use; absent until then,
+  // and on sessions that never read the log (guests, no-WAS).
+  verifiedLog?: VerifiedLogCache
 }
 
 /**

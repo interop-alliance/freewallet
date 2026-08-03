@@ -40,12 +40,7 @@ import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
-import { base64urlnopad } from '@scure/base'
-import {
-  RECOVERY_ZCAP_TTL_MS,
-  UNLOCK_MANAGE_ZCAP_TTL_MS,
-  WAS_SERVER_URL
-} from '@/app.config'
+import { RECOVERY_ZCAP_TTL_MS, WAS_SERVER_URL } from '@/app.config'
 import {
   DID_LOG_RESOURCE,
   ID_COLLECTION,
@@ -62,8 +57,7 @@ import {
   getUnlockKeyring,
   putUnlockKeyring,
   putUnlockKeyringWithCapability,
-  type AccountPointer,
-  type UnlockIdentity
+  type AccountPointer
 } from '@interop/wallet-core/keyring'
 import {
   addPukRosterRecipient,
@@ -76,6 +70,8 @@ import {
 } from '@interop/wallet-core/keys'
 import { cascadeCollectionsToPuk } from '@/session/pukCascade'
 import {
+  delegationKeyInDocument,
+  documentKeyMultibases,
   isWebvhDid,
   mintClientWebvhUpdateKeys,
   updateKeyMultibase,
@@ -95,17 +91,33 @@ import {
   type RecoveryLogStore
 } from '@interop/wallet-core/recovery'
 import type { Session } from '@/types/auth'
-import { bindPassphrase, unlockManagementGrantee } from '@/session/keyring'
+import {
+  bindPassphrase,
+  delegateUnlockManagement,
+  unlockManagementGrantee
+} from '@/session/keyring'
 import {
   backfillPassphraseUnlockMethod,
+  emptyUnlockMethodsRegistry,
   getUnlockMethods,
   managementZcapClient,
   putUnlockMethods,
   revokeUnlockMethod,
-  rewrapUnlockMethodsRecord,
   type RecoveryCodeUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
+import {
+  enrolledClientContext,
+  requireEnrolledClientContext
+} from '@/session/enrolledContext'
+import {
+  invalidateVerifiedLog,
+  verifiedAccountLog
+} from '@/session/verifiedLog'
+import {
+  adoptRotatedPuk,
+  rewrapUnlockRegistryToPuk
+} from '@/session/pukAdoption'
 import {
   deleteAccountPointerPin,
   deleteClientKeyRecord,
@@ -220,41 +232,6 @@ async function delegateLogWrite({
 }
 
 /**
- * Delegates the unlock-Space management zcap (GET/PUT/DELETE) from a code's
- * unlock identity to the account identity (see `unlockManagementGrantee`),
- * so the code stays revocable from Settings without re-typing it (the same
- * bridge every other unlock method records). PUT is what lets the revocation
- * cascade re-PUT the code's record with a freshly minted delegation when the
- * original's signing client is revoked -- the record's JWE recipient stays
- * the code's unlock KAK, so the re-wrap needs only the public half the
- * registry records.
- *
- * @param options {object}
- * @param options.unlock {UnlockIdentity}
- * @param options.controller {string}   the account DID to delegate to (a
- *   promoted account's did:webvh, or the account did:key)
- * @returns {Promise<IZcap>}
- */
-async function delegateUnlockManagement({
-  unlock,
-  controller
-}: {
-  unlock: UnlockIdentity
-  controller: string
-}): Promise<IZcap> {
-  const invocationTarget = new URL(
-    `/space/${unlock.spaceId}`,
-    WAS_SERVER_URL
-  ).toString()
-  return await unlock.zcapClient.delegate({
-    invocationTarget,
-    controller,
-    allowedActions: ['GET', 'PUT', 'DELETE'],
-    expires: new Date(Date.now() + UNLOCK_MANAGE_ZCAP_TTL_MS)
-  })
-}
-
-/**
  * Writes a code's unlock Space and recovery record: ensure the Space, wrap
  * the pointer + delegation to the code's unlock KAK, PUT the record, and
  * delegate the management zcap to the account identity. No local cache and
@@ -313,9 +290,16 @@ async function bindRecoveryRecord({
     spaceId: unlock.spaceId,
     record
   })
+  // GET/PUT/DELETE, not the default GET/DELETE: PUT is what lets the
+  // revocation cascade re-PUT the code's record with a freshly minted
+  // delegation when the original's signing client is revoked -- the record's
+  // JWE recipient stays the code's unlock KAK, so the re-wrap needs only the
+  // public half the registry records.
   const manageCapability = await delegateUnlockManagement({
-    unlock,
-    controller: unlockManagementGrantee({ pointer, controller })
+    zcapClient: unlock.zcapClient,
+    spaceId: unlock.spaceId,
+    controller: unlockManagementGrantee({ pointer, controller }),
+    allowedActions: ['GET', 'PUT', 'DELETE']
   })
   // The unlock KAK's public identity, recorded so the revocation cascade can
   // later re-wrap the record without the code (encryption needs no secret).
@@ -384,37 +368,57 @@ function recoveryRegistryEntry({
 }
 
 /**
+ * The recovery-code entries of an unlock-methods registry record (an absent
+ * registry has none).
+ *
+ * @param options {object}
+ * @param [options.record] {UnlockMethodsRecord | null}
+ * @returns {RecoveryCodeUnlockMethod[]}
+ */
+function recoveryEntriesOf({
+  record
+}: {
+  record?: UnlockMethodsRecord | null
+}): RecoveryCodeUnlockMethod[] {
+  return (record?.methods ?? []).filter(
+    (method): method is RecoveryCodeUnlockMethod =>
+      method.type === 'recovery-code'
+  )
+}
+
+/**
  * Appends (or replaces, matching on `recoveryKid`) a recovery entry in the
- * unlock-methods registry, minting the registry when absent.
+ * unlock-methods registry, minting the registry when absent. `dropKids` drops
+ * further recovery entries in the same write -- the post-recovery update,
+ * which records the replacement code and retires the spent one together (two
+ * writes would race: both are read-modify-writes over one resource with
+ * last-write-wins puts).
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.entry {RecoveryCodeUnlockMethod}
+ * @param [options.dropKids] {string[]}   recovery kids to remove
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 export async function recordRecoveryMethod({
   session,
   entry,
+  dropKids = [],
   idb
 }: {
   session: Session
   entry: RecoveryCodeUnlockMethod
+  dropKids?: string[]
   idb?: IDBFactory
 }): Promise<void> {
   const existing = await getUnlockMethods({ session, idb })
-  const record: UnlockMethodsRecord = existing ?? {
-    version: 1,
-    userHandle: base64urlnopad.encode(
-      crypto.getRandomValues(new Uint8Array(16))
-    ),
-    methods: []
-  }
+  const record = existing ?? emptyUnlockMethodsRegistry()
+  const dropped = new Set([entry.recoveryKid, ...dropKids])
   const methods = [
     ...record.methods.filter(
       method =>
-        method.type !== 'recovery-code' ||
-        method.recoveryKid !== entry.recoveryKid
+        method.type !== 'recovery-code' || !dropped.has(method.recoveryKid)
     ),
     entry
   ]
@@ -422,57 +426,12 @@ export async function recordRecoveryMethod({
 }
 
 /**
- * The issuance preconditions, resolved from a live session: a configured WAS
- * server and remote store, a promoted did:webvh account pointer, and this
- * client's own key material (update keys + identity KAK). Throws with a
- * specific message on each miss -- the Settings section gates on
- * `canIssueRecoveryCode` first, so these are defensive.
- *
- * @param session {Session}
- * @returns {object}   the resolved pieces
- */
-function requireIssuancePreconditions(session: Session) {
-  if (!WAS_SERVER_URL) {
-    throw new RecoveryUnavailableError()
-  }
-  const remoteStore = session.storage.remoteStore
-  if (!remoteStore) {
-    throw new RecoveryUnavailableError()
-  }
-  const { profile } = session
-  const pointer = profile.accountPointer
-  if (!pointer || !isWebvhDid(pointer.did)) {
-    throw new Error(
-      'Recovery codes require a promoted did:webvh account; this account ' +
-        'has not finished provisioning.'
-    )
-  }
-  if (!profile.clientWebvhKeys) {
-    throw new Error(
-      "Recovery-code issuance requires this client's did:webvh update keys."
-    )
-  }
-  if (!profile.clientKeyAgreementKey) {
-    throw new Error(
-      "Recovery-code issuance requires this client's key-agreement key."
-    )
-  }
-  return {
-    remoteStore,
-    // The did:webvh guard above is what makes `did` a string here, so the
-    // pointer handed back names the account the log must resolve to.
-    pointer: { ...pointer, did: pointer.did },
-    clientWebvhKeys: profile.clientWebvhKeys,
-    clientKeyAgreementKey: profile.clientKeyAgreementKey,
-    controller: profile.accountController ?? session.user.id
-  }
-}
-
-/**
  * Whether this session can issue (and revoke) recovery codes: an enrolled
- * wallet client on a promoted account with a remote store -- the issuance
- * gate, "an enrolled wallet client holding its key material" (the roster
- * model's restatement of the retired you-must-hold-the-seed gate).
+ * wallet client on a promoted account with a remote store, holding the
+ * account's current per-user key -- the issuance gate, "an enrolled wallet
+ * client holding its key material" (the roster model's restatement of the
+ * retired you-must-hold-the-seed gate). Derived from the shared
+ * enrolled-client context, so the gate and the ceremony cannot disagree.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -483,16 +442,7 @@ export function canIssueRecoveryCode({
 }: {
   session: Session
 }): boolean {
-  const { profile } = session
-  return !!(
-    WAS_SERVER_URL &&
-    !session.isGuest &&
-    session.storage.remoteStore &&
-    isWebvhDid(profile.accountPointer?.did) &&
-    profile.clientWebvhKeys &&
-    profile.clientKeyAgreementKey &&
-    profile.puk
-  )
+  return !!enrolledClientContext({ session }) && !!session.profile.puk
 }
 
 /**
@@ -530,7 +480,10 @@ export async function issueRecoveryCode({
     clientWebvhKeys,
     clientKeyAgreementKey,
     controller
-  } = requireIssuancePreconditions(session)
+  } = requireEnrolledClientContext({
+    session,
+    action: 'Recovery-code issuance'
+  })
 
   const client = await recoveryClientFromCode({ code })
 
@@ -553,6 +506,7 @@ export async function issueRecoveryCode({
       updateKeyMultibase: client.updateKeyMultibase
     }
   })
+  invalidateVerifiedLog({ profile: session.profile })
 
   // 3. The authorization bridge and the record that carries it.
   const delegation = await delegateLogWrite({
@@ -935,20 +889,13 @@ export async function recoverAccountWithCode({
   // a failure leaves the registry sealed to the old PUK, which the post-login
   // update then surfaces as a warning.
   if (oldPuk.id !== newPuk.id) {
-    try {
-      await rewrapUnlockMethodsRecord({
-        storageServerUrl: pointer.host,
-        zcapClient: newZcapClient,
-        spaceId: pointer.spaceId,
-        from: pukVaultKeys({ puk: oldPuk }),
-        to: pukVaultKeys({ puk: newPuk })
-      })
-    } catch (err) {
-      console.warn(
-        'Could not re-wrap the unlock-methods registry to the rotated PUK:',
-        err
-      )
-    }
+    await rewrapUnlockRegistryToPuk({
+      storageServerUrl: pointer.host,
+      zcapClient: newZcapClient,
+      spaceId: pointer.spaceId,
+      from: pukVaultKeys({ puk: oldPuk }),
+      to: pukVaultKeys({ puk: newPuk })
+    })
   }
 
   // Retire the spent code's unlock Space -- a typed code is a spent
@@ -1039,11 +986,7 @@ export async function listRecoveryCodeEntries({
   session: Session
 }): Promise<RecoveryCodeUnlockMethod[]> {
   try {
-    const record = await getUnlockMethods({ session })
-    return (record?.methods ?? []).filter(
-      (method): method is RecoveryCodeUnlockMethod =>
-        method.type === 'recovery-code'
-    )
+    return recoveryEntriesOf({ record: await getUnlockMethods({ session }) })
   } catch (err) {
     console.warn('Could not load the recovery-code entries:', err)
     return []
@@ -1073,7 +1016,12 @@ export async function updateRegistryAfterRecovery({
   outcome: RecoveryOutcome
 }): Promise<void> {
   try {
-    await recordRecoveryOutcome({ session, outcome })
+    // The replacement recorded and the spent code dropped in one write.
+    await recordRecoveryMethod({
+      session,
+      entry: outcome.replacementEntry,
+      dropKids: [outcome.spentRecoveryKid]
+    })
   } catch (err) {
     console.warn('Could not update the unlock-methods registry:', err)
   }
@@ -1082,46 +1030,6 @@ export async function updateRegistryAfterRecovery({
   } catch (err) {
     console.warn('Could not backfill the unlock-methods registry:', err)
   }
-}
-
-/**
- * The post-login registry update after a recovery: drops the spent code's
- * entry and records the replacement's. Runs on the recovered session (the
- * registry is wrapped to the vault KAK, which only a session holds).
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.outcome {RecoveryOutcome}
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
- */
-export async function recordRecoveryOutcome({
-  session,
-  outcome,
-  idb
-}: {
-  session: Session
-  outcome: RecoveryOutcome
-  idb?: IDBFactory
-}): Promise<void> {
-  const existing = await getUnlockMethods({ session, idb })
-  const record: UnlockMethodsRecord = existing ?? {
-    version: 1,
-    userHandle: base64urlnopad.encode(
-      crypto.getRandomValues(new Uint8Array(16))
-    ),
-    methods: []
-  }
-  const methods = [
-    ...record.methods.filter(
-      method =>
-        method.type !== 'recovery-code' ||
-        (method.recoveryKid !== outcome.spentRecoveryKid &&
-          method.recoveryKid !== outcome.replacementEntry.recoveryKid)
-    ),
-    outcome.replacementEntry
-  ]
-  await putUnlockMethods({ session, record: { ...record, methods }, idb })
 }
 
 /**
@@ -1157,7 +1065,10 @@ export async function revokeRecoveryCode({
   idb?: IDBFactory
 }): Promise<void> {
   const { remoteStore, pointer, clientWebvhKeys, clientKeyAgreementKey } =
-    requireIssuancePreconditions(session)
+    requireEnrolledClientContext({
+      session,
+      action: 'Recovery-code revocation'
+    })
 
   // 1. The document entry out (idempotent).
   await removeRecoveryKey({
@@ -1170,11 +1081,13 @@ export async function revokeRecoveryCode({
   })
 
   // 2. The PUK rotation off the code's wrap, recipients resolved from the
-  // just-updated document (the pull axis already ran there).
-  const { doc } = await verifyAccountLog({
-    did: pointer.did,
-    spaceId: pointer.spaceId,
-    host: pointer.host
+  // just-updated document (the pull axis already ran there) -- so the memo
+  // from before the edit is dropped first, and the re-read refills it with
+  // the document every later surface should see.
+  invalidateVerifiedLog({ profile: session.profile })
+  const { doc } = await verifiedAccountLog({
+    profile: session.profile,
+    pointer
   })
   const rosterStore = remoteStore.pukRosterStore()
   await rotatePukRoster({
@@ -1223,35 +1136,12 @@ export async function revokeRecoveryCode({
   // session keeps reading and writing the re-epoch'd collections without a
   // re-login. Best-effort: a failed re-seal leaves the registry sealed to
   // the old PUK, which the next login surfaces as a warning.
-  const { keyAgreementKey, keyResolver } = session.profile
-  if (rotatedPuk && keyAgreementKey && keyResolver) {
-    try {
-      await rewrapUnlockMethodsRecord({
-        storageServerUrl: WAS_SERVER_URL,
-        zcapClient: session.profile.zcapClient,
-        spaceId: pointer.spaceId,
-        from: { keyAgreementKey, keyResolver },
-        to: pukVaultKeys({ puk: rotatedPuk })
-      })
-    } catch (err) {
-      console.warn(
-        'Could not re-wrap the unlock-methods registry to the rotated PUK:',
-        err
-      )
-    }
-    const vaultKeys = pukVaultKeys({ puk: rotatedPuk })
-    session.profile.puk = rotatedPuk
-    session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
-    session.profile.keyResolver = vaultKeys.keyResolver
-    try {
-      await session.storage.adoptRotatedVaultKeys(vaultKeys)
-    } catch (err) {
-      console.warn(
-        'Could not rebuild the storage ciphers on the rotated PUK; the next ' +
-          'login adopts it instead:',
-        err
-      )
-    }
+  if (rotatedPuk) {
+    await adoptRotatedPuk({
+      session,
+      spaceId: pointer.spaceId,
+      puk: rotatedPuk
+    })
   }
 }
 
@@ -1276,42 +1166,46 @@ export async function revokeRecoveryCode({
  * @param options.session {Session}
  * @param options.doc {RosterRecipientDocument}   the locally verified
  *   did:webvh document, AFTER the revocation edit
+ * @param [options.entries] {RecoveryCodeUnlockMethod[]}   the registry's
+ *   recovery entries, when the caller already read them (the revocation
+ *   cascade reads the registry once for its document edit and this stage)
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<{ reminted: number; skipped: number }>}
  */
 export async function remintRecoveryDelegations({
   session,
   doc,
+  entries: prefetched,
   idb
 }: {
   session: Session
   doc: RosterRecipientDocument
+  entries?: RecoveryCodeUnlockMethod[]
   idb?: IDBFactory
 }): Promise<{ reminted: number; skipped: number }> {
   const pointer = session.profile.accountPointer
   if (!WAS_SERVER_URL || !pointer) {
     return { reminted: 0, skipped: 0 }
   }
-  const record = await getUnlockMethods({ session, idb })
-  const entries = (record?.methods ?? []).filter(
-    (method): method is RecoveryCodeUnlockMethod =>
-      method.type === 'recovery-code'
-  )
+  const entries =
+    prefetched ??
+    recoveryEntriesOf({ record: await getUnlockMethods({ session, idb }) })
   if (entries.length === 0) {
     return { reminted: 0, skipped: 0 }
   }
-  const publishedMultibases = new Set(
-    (doc.verificationMethod ?? [])
-      .map(method => method.publicKeyMultibase)
-      .filter((multibase): multibase is string => !!multibase)
-  )
   let reminted = 0
   let skipped = 0
   for (const entry of entries) {
-    const delegationMultibase = entry.delegationKeyId?.split('#').pop()
-    const rotted =
-      !delegationMultibase || !publishedMultibases.has(delegationMultibase)
-    if (!rotted) {
+    // The current-key-set rule, decided once in wallet-core: an entry whose
+    // recorded signing key the document no longer publishes -- or that
+    // records no signing key at all -- is rotted.
+    const stands = delegationKeyInDocument({
+      doc,
+      ...(entry.delegationKeyId
+        ? { delegationKeyId: entry.delegationKeyId }
+        : {})
+    })
+    if (stands) {
       continue
     }
     if (
@@ -1398,20 +1292,28 @@ export interface RecoveryHealthFlag {
  * cascade re-mints rotted delegations automatically
  * (`remintRecoveryDelegations`); this check is the backstop for entries that
  * predate the re-mint fields, whose flag nudges the user to regenerate the
- * code.
+ * code. Both stages ask the one shared predicate
+ * (`delegationKeyInDocument`), so an entry recording no delegation key at
+ * all -- uncheckable, and therefore not assumed healthy -- is flagged here
+ * rather than being simultaneously "fine" and "needs re-minting".
  * Returns only the flagged entries; resolves `[]` when there is nothing to
  * check or the account has no recovery codes.
  *
  * @param options {object}
  * @param options.session {Session}
+ * @param [options.entries] {RecoveryCodeUnlockMethod[]}   the registry's
+ *   recovery entries, when the caller already read them (the Settings panel
+ *   lists them immediately before checking their health)
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<RecoveryHealthFlag[]>}
  */
 export async function checkRecoveryHealth({
   session,
+  entries: prefetched,
   idb
 }: {
   session: Session
+  entries?: RecoveryCodeUnlockMethod[]
   idb?: IDBFactory
 }): Promise<RecoveryHealthFlag[]> {
   const remoteStore = session.storage.remoteStore
@@ -1419,29 +1321,29 @@ export async function checkRecoveryHealth({
   if (!remoteStore || !pointer || !isWebvhDid(pointer.did)) {
     return []
   }
-  const record = await getUnlockMethods({ session, idb })
-  const entries = (record?.methods ?? []).filter(
-    (method): method is RecoveryCodeUnlockMethod =>
-      method.type === 'recovery-code'
-  )
+  const entries =
+    prefetched ??
+    recoveryEntriesOf({ record: await getUnlockMethods({ session, idb }) })
   if (entries.length === 0) {
     return []
   }
-  const { doc, nextKeyHashes } = await verifyAccountLog({
-    did: pointer.did,
-    spaceId: pointer.spaceId,
-    host: pointer.host
+  const { doc, nextKeyHashes } = await verifiedAccountLog({
+    profile: session.profile,
+    pointer
   })
-  const publishedMultibases = new Set(
-    (doc.verificationMethod ?? [])
-      .map(method => method.publicKeyMultibase)
-      .filter((multibase): multibase is string => !!multibase)
-  )
+  const publishedMultibases = documentKeyMultibases({ doc })
   const flags: RecoveryHealthFlag[] = []
   for (const entry of entries) {
-    const delegationMultibase = entry.delegationKeyId?.split('#').pop()
-    const delegationRotted =
-      !!delegationMultibase && !publishedMultibases.has(delegationMultibase)
+    // The same predicate the re-mint stage uses, so one registry entry can no
+    // longer be "needs re-minting" here and "fine" there: an entry recording
+    // no delegation key is uncheckable, so it is flagged (the documented
+    // fallback to the regenerate nudge).
+    const delegationRotted = !delegationKeyInDocument({
+      doc,
+      ...(entry.delegationKeyId
+        ? { delegationKeyId: entry.delegationKeyId }
+        : {})
+    })
     const postureMissing =
       !publishedMultibases.has(entry.keyAgreementKeyMultibase) ||
       !nextKeyHashes.includes(await deriveNextKeyHash(entry.updateKeyMultibase))

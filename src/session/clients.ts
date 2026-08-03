@@ -20,11 +20,13 @@
  *   editable afterwards; the document carries key material, never labels).
  * - `disconnectAccountClient` -- drives the client-revocation epoch cascade
  *   from a listed row, then drops the disconnected client's label as hygiene.
+ *
+ * Both read paths take their log from the session's verified-log memo
+ * (`src/session/verifiedLog.ts`) instead of re-verifying `did.jsonl` per
+ * surface, so a label rename -- which reloads the listing afterwards -- costs
+ * a labels read and nothing else.
  */
-import {
-  clientSigningKeyMultibase,
-  isWebvhDid
-} from '@interop/wallet-core/webvh'
+import { clientSigningKeyMultibase } from '@interop/wallet-core/webvh'
 import { removeClientLabel, setClientLabel } from '@interop/wallet-core/keys'
 import {
   currentAccountSigningKeys as sharedCurrentAccountSigningKeys,
@@ -34,9 +36,14 @@ import {
 import type { AccountClientView } from '@interop/wallet-core/clients'
 import type { Session } from '@/types/auth'
 import {
+  enrolledClientContext,
+  requireEnrolledClientContext
+} from '@/session/enrolledContext'
+import {
   revokeEnrolledClient,
   type RevocationOutcome
 } from '@/session/revocation'
+import { verifiedAccountLog } from '@/session/verifiedLog'
 
 export type { AccountClientView } from '@interop/wallet-core/clients'
 export {
@@ -46,8 +53,12 @@ export {
 } from '@interop/wallet-core/clients'
 
 /**
- * Whether this session can list and manage the account's enrolled clients: a
- * configured remote store and a promoted did:webvh account pointer.
+ * Whether this session can list and manage the account's enrolled clients:
+ * the shared enrolled-client context -- a configured remote store, a promoted
+ * did:webvh account pointer, AND this client's own key material, since
+ * Disconnect drives the revocation cascade with exactly that material.
+ * Deriving the gate from the same resolution the cascade requires is what
+ * stops the panel from enabling a Disconnect that then throws.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -58,10 +69,7 @@ export function canManageAccountClients({
 }: {
   session: Session
 }): boolean {
-  return (
-    !!session.storage.remoteStore &&
-    isWebvhDid(session.profile.accountPointer?.did)
-  )
+  return !!enrolledClientContext({ session })
 }
 
 /**
@@ -69,19 +77,13 @@ export function canManageAccountClients({
  * `canManageAccountClients` first, so a throw here is a programming error).
  *
  * @param session {Session}
- * @returns {object}   the remote store and the account pointer
+ * @returns {object}   the enrolled-client context
  */
 function requireClientListing(session: Session) {
-  const remoteStore = session.storage.remoteStore
-  const pointer = session.profile.accountPointer
-  if (!remoteStore || !pointer || !isWebvhDid(pointer.did)) {
-    throw new Error(
-      'Listing enrolled clients requires a promoted did:webvh account and a ' +
-        'configured storage server.'
-    )
-  }
-  // The did:webvh guard above is what makes `did` a string here.
-  return { remoteStore, pointer: { ...pointer, did: pointer.did } }
+  return requireEnrolledClientContext({
+    session,
+    action: 'Listing enrolled clients'
+  })
 }
 
 /**
@@ -107,6 +109,10 @@ export async function listAccountClients({
       spaceId: pointer.spaceId,
       host: pointer.host
     },
+    verifiedLog: await verifiedAccountLog({
+      profile: session.profile,
+      pointer
+    }),
     labelsStore: remoteStore.clientLabelsStore(),
     ...(keyAgent
       ? { ownSigningKeyMultibase: clientSigningKeyMultibase({ keyAgent }) }
@@ -139,7 +145,11 @@ export async function currentAccountSigningKeys({
       did: pointer.did,
       spaceId: pointer.spaceId,
       host: pointer.host
-    }
+    },
+    verifiedLog: await verifiedAccountLog({
+      profile: session.profile,
+      pointer
+    })
   })
 }
 

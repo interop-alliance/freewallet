@@ -133,7 +133,29 @@ describe('cascadeCollectionsToPuk', () => {
     })
   })
 
-  it('adapts isEncrypted to the encryption-descriptor read', async () => {
+  it('lists the Space once and answers isEncrypted from that listing', async () => {
+    const remoteStore = makeFakeRemoteStore({
+      remoteItems: [
+        { id: 'app-notes', isEncrypted: true },
+        { id: 'public-credentials', isEncrypted: false }
+      ]
+    })
+    await cascadeCollectionsToPuk({
+      remoteStore,
+      rosterDescriptor: ROSTER_DESCRIPTOR,
+      clientKeyAgreementKey: CLIENT_KAK,
+      puk: PUK
+    })
+    const { isEncrypted } = driverArgs()
+    await expect(isEncrypted!('app-notes')).resolves.toBe(true)
+    await expect(isEncrypted!('public-credentials')).resolves.toBe(false)
+    // One listing for the enumeration and both probes, and no describe at all
+    // for a collection the listing already covered.
+    expect(remoteStore.listCollections).toHaveBeenCalledOnce()
+    expect(remoteStore.collectionEncryption).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the encryption-descriptor read off the listing', async () => {
     const remoteStore = makeFakeRemoteStore()
     await cascadeCollectionsToPuk({
       remoteStore,

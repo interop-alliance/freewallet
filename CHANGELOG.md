@@ -27,6 +27,18 @@
   callbacks only, and the orderings are now testable without a DOM (new unit
   tests cover the account-deletion phases and the
   persist-before-deliver rule).
+- The account's key log is fetched and fully verified once per session
+  instead of once per screen that reads it. Signing in and opening Settings
+  used to re-verify it three or four times over, and renaming a connected
+  wallet re-verified the whole log again; the result is now reused for the
+  session and re-read after any ceremony that changes it (connecting or
+  disconnecting a wallet, issuing or revoking a recovery code, rotating this
+  browser's update key).
+- Finishing "connect this browser" is faster: the ceremony derived the
+  passphrase's unlock key three times over (looking the account up, saving the
+  key set, and logging in). It now derives it once and ends in the logged-in
+  session directly, removing two of the deliberately slow key derivations from
+  the flow.
 - Unified the two CORS-proxy paths into a single module and a single config
   key: `corsProxyFetch` and `fetchFromURL` both build their proxied URL
   through one helper over `VITE_CORS_PROXY_URL`, so the known-registries fetch
@@ -88,6 +100,18 @@
 
 ### Fixed
 
+- A recovery code whose entry records no signing key for its stored
+  authorization now gets the "regenerate this code" nudge. The login-time
+  health check treated such an entry as fine while the client-disconnect
+  cascade already treated the same entry as needing re-minting, so a code
+  that could not be checked was silently reported healthy; both now ask one
+  shared question about the account's current keys.
+
+- Settings no longer offers "Disconnect" on a session that cannot complete it.
+  The button was enabled whenever the account was promoted and a storage
+  server was configured, so a browser whose stored key set predates the
+  per-client update keys could start the disconnect and only then fail; the
+  panel now enables it exactly when the ceremony's own preconditions are met.
 - A contact's DID rows are now validated before the contact is saved: a row
   that is not a DID blocks the save and is flagged inline, instead of being
   stored and synced as an entry that every view then filters out -- leaving no

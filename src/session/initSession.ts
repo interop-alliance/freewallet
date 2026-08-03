@@ -16,7 +16,6 @@ import { agentsFromSeed } from '@interop/wallet-core/identity'
 import { deriveSpaceId } from '@interop/was-client/sync'
 import type { ControllerProfile, Session, User } from '@/types/auth'
 import { KMS_SERVER_URL, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
-import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { ensureKeystore } from '@/lib/kms'
 import { assertPasskeyPrf } from '@/lib/passkey'
 import {
@@ -39,12 +38,11 @@ import {
 import { cascadeCollectionsToPuk } from '@/session/pukCascade'
 import { loadPukEpochPin, savePukEpochPin } from '@/lib/sessionKey'
 import { StorageManager } from '@/stores/storageManager'
-import {
-  fetchKeyring,
-  KeyringRecordUnusableError,
-  updateClientKeyPuk
-} from '@/session/keyring'
-import type { AccountPointer } from '@interop/wallet-core/keyring'
+import { fetchKeyring, KeyringRecordUnusableError } from '@/session/keyring'
+import type {
+  AccountPointer,
+  UnlockIdentity
+} from '@interop/wallet-core/keyring'
 import type {
   KeyringFetchResult,
   PersistableClientKeys
@@ -129,9 +127,6 @@ export async function initGuestSession() {
  *   true. Set false for the new-wallet flows that provision explicitly.
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the PUK
  *   roster-epoch pin (CHAPI popups thread the Storage Access API handle here)
- * @param [options.onPukRotated] {function}   called with the fresh PUK when
- *   the roster check finds a rotated epoch, so the login path can persist it
- *   into this client's client-key record (the session adopts it either way)
  * @returns {Promise<{ session: Session, userExists: boolean }>}
  */
 export async function initSessionFromSeed({
@@ -144,8 +139,7 @@ export async function initSessionFromSeed({
   isGuest = false,
   remoteDirectStorage = false,
   provisionStorage = true,
-  idb,
-  onPukRotated
+  idb
 }: {
   seed: Uint8Array
   puk?: Puk
@@ -157,7 +151,6 @@ export async function initSessionFromSeed({
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
   idb?: IDBFactory
-  onPukRotated?: (puk: Puk) => Promise<void>
 }) {
   const { keyAgent, zcapClient, keyAgreementKey, keyResolver } =
     await agentsFromSeed({ seed })
@@ -173,8 +166,8 @@ export async function initSessionFromSeed({
 
   // The direct PUK roster read (`key-map/puk.json`): confirms the cached PUK
   // current, or -- on an epoch mismatch (a rotation by another client) --
-  // delivers the fresh PUK, which the session adopts and `onPukRotated`
-  // persists. Runs before the storage clients are built, since the vault
+  // delivers the fresh PUK, which the session adopts and `persistClientKeys`
+  // writes into this client's client-key record. Runs before the storage clients are built, since the vault
   // keys below must be the CURRENT PUK's. The read result is retained: its
   // descriptor feeds the cascade-completion sweep fired further down.
   let activePuk = puk
@@ -190,7 +183,7 @@ export async function initSessionFromSeed({
     })
     if (rosterRead?.rotated) {
       activePuk = rosterRead.puk
-      await onPukRotated?.(rosterRead.puk)
+      await persistClientKeys?.({ puk: rosterRead.puk })
     }
   }
 
@@ -322,7 +315,7 @@ export async function initSessionFromSeed({
               descriptor: loginDescriptor,
               clientKeyAgreementKey: keyAgreementKey,
               idb,
-              onPukRotated
+              persistClientKeys
             })
           const result = await cascadeCollectionsToPuk({
             remoteStore,
@@ -380,7 +373,8 @@ export async function initSessionFromSeed({
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) KAK -- its roster entry
  * @param [options.idb] {IDBFactory}
- * @param [options.onPukRotated] {function}
+ * @param [options.persistClientKeys] {function}   re-wraps this client's
+ *   client-key record with the adopted PUK
  * @returns {Promise<{ puk: Puk, rosterDescriptor: CollectionEncryption }>}
  *   the key and roster descriptor the collection fan-out should use
  */
@@ -393,7 +387,7 @@ async function convergeRosterToDocument({
   descriptor,
   clientKeyAgreementKey,
   idb,
-  onPukRotated
+  persistClientKeys
 }: {
   session: Session
   pointer?: AccountPointer
@@ -403,7 +397,7 @@ async function convergeRosterToDocument({
   descriptor: CollectionEncryption
   clientKeyAgreementKey: IKeyAgreementKey
   idb?: IDBFactory
-  onPukRotated?: (puk: Puk) => Promise<void>
+  persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
 }): Promise<{ puk: Puk; rosterDescriptor: CollectionEncryption }> {
   if (!pointer || !isWebvhDid(pointer.did) || !WAS_SERVER_URL) {
     return { puk, rosterDescriptor: descriptor }
@@ -438,7 +432,7 @@ async function convergeRosterToDocument({
           epochIds: (read.epochs ?? []).map(epoch => epoch.id),
           idb
         })
-        await onPukRotated?.(adopted)
+        await persistClientKeys?.({ puk: adopted })
         const vaultKeys = pukVaultKeys({ puk: adopted })
         session.profile.puk = adopted
         session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
@@ -553,6 +547,9 @@ async function checkPukRosterAtLogin({
  *   from session creation and expose it as `session.storageReady`; default
  *   true. Signup's existence probe passes false (it discards the session after
  *   reading `userExists`, so nothing should provision on its behalf).
+ * @param [options.unlock] {UnlockIdentity}   an already-derived unlock
+ *   identity for this passphrase, so a caller that has just unlocked (the
+ *   enrollment ceremony) does not run the KDF again
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 export async function loginWithPassphrase({
@@ -560,18 +557,21 @@ export async function loginWithPassphrase({
   email,
   idb,
   remoteDirectStorage = false,
-  provisionStorage = true
+  provisionStorage = true,
+  unlock
 }: {
   passphrase: string
   email?: string
   idb?: IDBFactory
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
+  unlock?: UnlockIdentity
 }): Promise<{ session: Session | null; userExists: boolean }> {
   const found = await fetchKeyring({
     passphrase,
     idb,
-    mintManageCapability: true
+    mintManageCapability: true,
+    ...(unlock ? { unlock } : {})
   })
 
   if (!found) {
@@ -584,11 +584,7 @@ export async function loginWithPassphrase({
     email,
     remoteDirectStorage,
     provisionStorage,
-    idb,
-    // A roster rotation adopted at login is persisted into this client's
-    // client-key record, so the next login starts from the rotated PUK.
-    onPukRotated: async puk =>
-      updateClientKeyPuk({ secret: passphrase, kdf: KEYRING_KDF, puk, idb })
+    idb
   })
 }
 
@@ -616,9 +612,6 @@ export async function loginWithPassphrase({
  * @param [options.provisionStorage] {boolean}
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the PUK
  *   roster-epoch pin
- * @param [options.onPukRotated] {function}   persists a roster-rotated PUK
- *   into this client's client-key record (supplied by the login path, which
- *   holds the unlock secret)
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 async function sessionFromKeyringHit({
@@ -627,8 +620,7 @@ async function sessionFromKeyringHit({
   email,
   remoteDirectStorage = false,
   provisionStorage = true,
-  idb,
-  onPukRotated
+  idb
 }: {
   found: KeyringFetchResult
   type: 'passphrase' | 'passkey'
@@ -636,7 +628,6 @@ async function sessionFromKeyringHit({
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
   idb?: IDBFactory
-  onPukRotated?: (puk: Puk) => Promise<void>
 }): Promise<{ session: Session | null; userExists: boolean }> {
   if (!found.clientKeys) {
     // The account was located (the keyring record exists) but this client
@@ -653,8 +644,7 @@ async function sessionFromKeyringHit({
     email: email ?? found.email,
     remoteDirectStorage,
     provisionStorage,
-    idb,
-    onPukRotated
+    idb
   })
   // The local key set must have been bound for THIS account: an enrolled
   // client's record carries the controller it was bound under; a legacy
@@ -783,10 +773,6 @@ export async function loginWithPasskey({
     type: 'passkey',
     remoteDirectStorage,
     provisionStorage,
-    idb,
-    // A roster rotation adopted at login is persisted into this client's
-    // client-key record, so the next login starts from the rotated PUK.
-    onPukRotated: async puk =>
-      updateClientKeyPuk({ secret: prfOutput, kdf: PASSKEY_KDF, puk, idb })
+    idb
   })
 }

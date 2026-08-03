@@ -7,7 +7,10 @@
  * recovery record (wallet-core's codec under the code's real unlock
  * identity), the issuance gate (`canIssueRecoveryCode` restates the retired
  * `profile.dataSeed` gate as "an enrolled client holding its key material"),
- * and the registry bookkeeping (add, replace-on-recovery). The remote unlock
+ * the registry bookkeeping (add, replace-on-recovery), and the login-time
+ * health check's agreement with the re-mint stage on the current-key-set
+ * rule (an entry recording no delegation key is uncheckable, so it is
+ * flagged). The remote unlock
  * Space read is mocked at the wallet-core seam; every derivation (HKDF, the
  * unlock identity, the EDV record cipher) runs for real.
  */
@@ -41,6 +44,25 @@ const registryState = vi.hoisted(() => ({
   record: null as null | { version: 1; userHandle: string; methods: unknown[] }
 }))
 
+const logState = vi.hoisted(() => ({
+  verificationMethod: [] as Array<{ id: string; publicKeyMultibase: string }>,
+  nextKeyHashes: [] as string[],
+  verifications: 0
+}))
+
+vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
+  verifyAccountLog: vi.fn(async () => {
+    logState.verifications += 1
+    return {
+      doc: { verificationMethod: logState.verificationMethod },
+      log: [],
+      updateKeys: [],
+      nextKeyHashes: logState.nextKeyHashes
+    }
+  })
+}))
+
 vi.mock('@/session/unlockMethods', async importOriginal => ({
   ...(await importOriginal<typeof import('@/session/unlockMethods')>()),
   getUnlockMethods: vi.fn(async () => registryState.record),
@@ -50,6 +72,7 @@ vi.mock('@/session/unlockMethods', async importOriginal => ({
   revokeUnlockMethod: vi.fn(async () => {})
 }))
 
+import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import {
   deriveUnlockIdentity,
   type AccountPointer
@@ -62,9 +85,9 @@ import {
 } from '@interop/wallet-core/recovery'
 import {
   canIssueRecoveryCode,
+  checkRecoveryHealth,
   locateRecoveryAccount,
   recordRecoveryMethod,
-  recordRecoveryOutcome,
   RecoveryCodeInvalidError,
   RecoveryCodeNotFoundError
 } from '@/session/recovery'
@@ -138,6 +161,9 @@ beforeEach(() => {
   wasState.records.clear()
   wasState.getError = undefined
   registryState.record = null
+  logState.verificationMethod = []
+  logState.nextKeyHashes = []
+  logState.verifications = 0
 })
 
 describe('locateRecoveryAccount error discipline', () => {
@@ -266,14 +292,100 @@ describe('the registry bookkeeping', () => {
       client: replacement,
       label: 'Replacement'
     })
-    await recordRecoveryOutcome({
+    await recordRecoveryMethod({
       session,
-      outcome: {
-        replacementCode: 'unused-here',
-        replacementEntry,
-        spentRecoveryKid: spent.recipientKid
-      }
+      entry: replacementEntry,
+      dropKids: [spent.recipientKid]
     })
     expect(registryState.record?.methods).toEqual([replacementEntry])
+  })
+})
+
+describe('checkRecoveryHealth and the current-key-set rule', () => {
+  const SIGNING_KEY = 'z6MkIssuingClient'
+
+  /**
+   * A session whose profile carries a promoted pointer and the verified-log
+   * memo the health check reads through.
+   */
+  function healthSession(): Session {
+    return {
+      user: { id: 'did:key:z6MkTest' },
+      isGuest: false,
+      storage: { remoteStore: {} },
+      profile: { accountPointer: POINTER }
+    } as unknown as Session
+  }
+
+  /**
+   * A registry entry whose posture (keyAgreement VM + committed update-key
+   * hash) stands in the mocked document, so only the delegation axis varies.
+   */
+  async function standingEntry({
+    delegationKeyId
+  }: {
+    delegationKeyId?: string
+  }) {
+    const client = await recoveryClientFromCode({
+      code: generateRecoveryCode()
+    })
+    const entry = {
+      ...entryFor({ client, label: 'Code' }),
+      ...(delegationKeyId ? { delegationKeyId } : {})
+    }
+    logState.verificationMethod = [
+      { id: `${POINTER.did}#${SIGNING_KEY}`, publicKeyMultibase: SIGNING_KEY },
+      {
+        id: `${POINTER.did}#${entry.keyAgreementKeyMultibase}`,
+        publicKeyMultibase: entry.keyAgreementKeyMultibase
+      }
+    ]
+    logState.nextKeyHashes = [await deriveNextKeyHash(entry.updateKeyMultibase)]
+    return entry
+  }
+
+  it('passes an entry whose delegation key the document still publishes', async () => {
+    const entry = await standingEntry({
+      delegationKeyId: `${POINTER.did}#${SIGNING_KEY}`
+    })
+    expect(
+      await checkRecoveryHealth({ session: healthSession(), entries: [entry] })
+    ).toEqual([])
+  })
+
+  it('flags an entry whose delegation key has left the document', async () => {
+    const entry = await standingEntry({
+      delegationKeyId: `${POINTER.did}#z6MkRevokedClient`
+    })
+    const flags = await checkRecoveryHealth({
+      session: healthSession(),
+      entries: [entry]
+    })
+    expect(flags).toHaveLength(1)
+    expect(flags[0]?.delegationRotted).toBe(true)
+    expect(flags[0]?.postureMissing).toBe(false)
+  })
+
+  // The FW-86 agreement: an entry recording no delegation key is uncheckable,
+  // and the re-mint stage already treats it as rotted. The health check now
+  // agrees and nudges, instead of calling the same entry fine.
+  it('flags an entry that records no delegation key at all', async () => {
+    const entry = await standingEntry({})
+    const flags = await checkRecoveryHealth({
+      session: healthSession(),
+      entries: [entry]
+    })
+    expect(flags).toHaveLength(1)
+    expect(flags[0]?.delegationRotted).toBe(true)
+  })
+
+  it('verifies the log once per session across repeated checks', async () => {
+    const entry = await standingEntry({
+      delegationKeyId: `${POINTER.did}#${SIGNING_KEY}`
+    })
+    const session = healthSession()
+    await checkRecoveryHealth({ session, entries: [entry] })
+    await checkRecoveryHealth({ session, entries: [entry] })
+    expect(logState.verifications).toBe(1)
   })
 })
