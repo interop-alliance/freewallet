@@ -4,6 +4,11 @@
 
 ### Changed
 
+- The UI language is auto-detected from the browser locale on first visit;
+  an explicit choice in the language selector is persisted and wins on later
+  visits.
+- Timestamp formatting (`formatDate` / `formatDateTime`) is locale-aware:
+  dates render in the active UI language instead of a fixed locale.
 - **Contacts rows are now keyed by the cipher-minted EDV id.** The encrypted
   collections' ciphers are built with each collection spec's `idDerivation`
   (`'random'` for the mutable `contacts` head, `'content'` for the

@@ -36,9 +36,9 @@ export function LanguageSelector({ showLabel = true }: LanguageSelectorProps) {
         {...(showLabel ? { label } : {})}
         value={normalizeToUiLanguageCode(i18n.language)}
         renderValue={(value: UiLanguageCode) => languageOptionLabel(value)}
-        onChange={e => {
-          void i18n.changeLanguage(e.target.value)
-          persistUiLanguage(e.target.value)
+        onChange={event => {
+          void i18n.changeLanguage(event.target.value)
+          persistUiLanguage(event.target.value)
         }}
         inputProps={showLabel ? undefined : { 'aria-label': label }}
         MenuProps={{
