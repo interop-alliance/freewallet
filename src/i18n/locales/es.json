@@ -434,8 +434,16 @@
   "history": {
     "title": "Historial",
     "empty": "No hay elementos en el historial.",
+    "noResults": "Ninguna actividad coincide con su búsqueda.",
+    "searchPlaceholder": "Buscar actividad...",
     "viewSource": "Ver origen",
-    "dialogTitle": "Origen del historial"
+    "dialogTitle": "Origen del historial",
+    "tabs": {
+      "all": "Todo",
+      "credentials": "Credenciales",
+      "login": "Actividad de inicio de sesión",
+      "applications": "Aplicaciones"
+    }
   },
   "storage": {
     "title": "Almacenamiento",
