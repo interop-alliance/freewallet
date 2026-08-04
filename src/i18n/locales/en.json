@@ -434,8 +434,16 @@
   "history": {
     "title": "History",
     "empty": "No history items found.",
+    "noResults": "No activity matches your search.",
+    "searchPlaceholder": "Search activity...",
     "viewSource": "View source",
-    "dialogTitle": "History source"
+    "dialogTitle": "History source",
+    "tabs": {
+      "all": "All",
+      "credentials": "Credentials",
+      "login": "Login activity",
+      "applications": "Applications"
+    }
   },
   "storage": {
     "title": "Storage",

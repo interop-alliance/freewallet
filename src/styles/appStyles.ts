@@ -523,6 +523,20 @@ export const infoBoxStyles = {
 } as const
 
 export const historyStyles = {
+  toolbar: {
+    mt: 3,
+    display: 'flex',
+    flexDirection: { xs: 'column', sm: 'row' },
+    alignItems: { sm: 'center' },
+    justifyContent: 'space-between',
+    gap: 2
+  },
+  tabs: {
+    minHeight: 'auto'
+  },
+  searchField: {
+    width: { xs: '100%', sm: 260 }
+  },
   timestampRow: {
     mt: 0.5,
     display: 'flex',
