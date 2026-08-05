@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from 'react'
+import type { FuseOptionKey } from 'fuse.js'
 import {
   Box,
   Typography,
@@ -29,23 +30,27 @@ import { historyStyles, infoBoxStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
 import { useTranslation } from 'react-i18next'
 import { classifyActivity, type HistoryTab } from '@/lib/historyActivity'
+import { useSearch } from '@/hooks/useSearch'
+
+type HistoryItem = { id: string; doc: WalletActivity }
+
+// Module-level so it's referentially stable across renders -- it feeds
+// `useSearch`'s memoized index, which is keyed on this array.
+const HISTORY_SEARCH_KEYS: FuseOptionKey<HistoryItem>[] = [
+  { name: 'doc.summary', weight: 0.7 },
+  { name: 'doc.type', weight: 0.3 }
+]
 
 export function HistoryPage() {
   const { t, i18n } = useTranslation()
   const session = useAuthStore(state => state.session)
-  const [historyItems, setHistoryItems] = useState<
-    Array<{ id: string; doc: WalletActivity }>
-  >([])
+  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([])
   const [loading, setLoading] = useState(true)
 
   const [tab, setTab] = useState<HistoryTab>('all')
-  const [query, setQuery] = useState('')
 
   const [sourceOpen, setSourceOpen] = useState(false)
-  const [selectedItem, setSelectedItem] = useState<{
-    id: string
-    doc: WalletActivity
-  } | null>(null)
+  const [selectedItem, setSelectedItem] = useState<HistoryItem | null>(null)
 
   const sourceJson = useMemo(() => {
     if (!selectedItem) {
@@ -58,7 +63,11 @@ export function HistoryPage() {
     return selectedItem?.doc?.summary ?? ''
   }, [selectedItem])
 
-  const normalizedQuery = query.trim().toLowerCase()
+  const {
+    query,
+    setQuery,
+    results: searchedItems
+  } = useSearch({ items: historyItems, keys: HISTORY_SEARCH_KEYS })
 
   const { tabCounts, filteredItems } = useMemo(() => {
     const counts: Record<HistoryTab, number> = {
@@ -67,25 +76,20 @@ export function HistoryPage() {
       login: 0,
       applications: 0
     }
-    const filtered: Array<{ id: string; doc: WalletActivity }> = []
     for (const item of historyItems) {
       const category = classifyActivity(item.doc)
       if (category !== 'other') {
         counts[category] += 1
       }
-      if (tab !== 'all' && category !== tab) {
-        continue
-      }
-      if (
-        normalizedQuery &&
-        !item.doc.summary?.toLowerCase().includes(normalizedQuery)
-      ) {
-        continue
-      }
-      filtered.push(item)
     }
+
+    const filtered = searchedItems.filter(item => {
+      const category = classifyActivity(item.doc)
+      return tab === 'all' || category === tab
+    })
+
     return { tabCounts: counts, filteredItems: filtered }
-  }, [historyItems, tab, normalizedQuery])
+  }, [historyItems, searchedItems, tab])
 
   useEffect(() => {
     let cancelled = false
@@ -116,6 +120,25 @@ export function HistoryPage() {
       ) : (
         <>
           <Box sx={historyStyles.toolbar}>
+            <TextField
+              size="small"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder={t('history.searchPlaceholder')}
+              sx={historyStyles.searchField}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <Box
+                      component="span"
+                      sx={{ display: 'flex', color: 'text.secondary', mr: 1 }}
+                    >
+                      <MdSearch />
+                    </Box>
+                  )
+                }
+              }}
+            />
             <Tabs
               value={tab}
               onChange={(_event, value: HistoryTab) => setTab(value)}
@@ -138,25 +161,6 @@ export function HistoryPage() {
                 label={`${t('history.tabs.applications')} (${tabCounts.applications})`}
               />
             </Tabs>
-            <TextField
-              size="small"
-              value={query}
-              onChange={event => setQuery(event.target.value)}
-              placeholder={t('history.searchPlaceholder')}
-              sx={historyStyles.searchField}
-              slotProps={{
-                input: {
-                  startAdornment: (
-                    <Box
-                      component="span"
-                      sx={{ display: 'flex', color: 'text.secondary', mr: 1 }}
-                    >
-                      <MdSearch />
-                    </Box>
-                  )
-                }
-              }}
-            />
           </Box>
 
           {filteredItems.length === 0 ? (

@@ -526,16 +526,14 @@ export const historyStyles = {
   toolbar: {
     mt: 3,
     display: 'flex',
-    flexDirection: { xs: 'column', sm: 'row' },
-    alignItems: { sm: 'center' },
-    justifyContent: 'space-between',
+    flexDirection: 'column',
     gap: 2
   },
   tabs: {
     minHeight: 'auto'
   },
   searchField: {
-    width: { xs: '100%', sm: 260 }
+    width: { xs: '100%', sm: 320 }
   },
   timestampRow: {
     mt: 0.5,

@@ -56,6 +56,7 @@
     "@zxcvbn-ts/language-es-es": "^4.1.0",
     "byoe-context": "^0.2.0",
     "credential-handler-polyfill": "^4.0.1",
+    "fuse.js": "^7.5.0",
     "i18next": "^26.3.0",
     "json-canonicalize": "^2.0.0",
     "nanotar": "^0.3.0",
