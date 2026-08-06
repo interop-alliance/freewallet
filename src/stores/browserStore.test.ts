@@ -966,14 +966,22 @@ describe('StorageManager (local-first facade)', () => {
 
     await storage.addHistoryNewAccount({ user })
     await storage.addHistorySpaceCreated({ user })
-    await storage.addHistoryCredentialCreated({ cid: 'abc', user })
+    await storage.addHistoryCredentialCreated({
+      cid: 'abc',
+      title: 'Test Credential',
+      user
+    })
 
     const items = await storage.listHistoryItems()
     expect(items).toHaveLength(3)
     expect(items[0].doc.summary).toMatch(/Sign Up/)
     // The no-remote branch records the local collections, not a remote Space.
     expect(items[1].doc.summary).toMatch(/local storage/)
-    expect(items[2].doc.summary).toBe('Credential created: abc')
+    expect(items[2].doc.summary).toBe('Credential created: Test Credential')
+    expect(items[2].doc.object).toEqual({
+      cid: 'abc',
+      title: 'Test Credential'
+    })
   })
 
   it('disables sharing without a remote replica', async () => {
