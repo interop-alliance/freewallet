@@ -1,5 +1,11 @@
 # History
 
+## 0.26.1 - 2026-08-06
+
+### Added
+
+- Add search bar and tabs to History page.
+
 ## 0.26.0 - 2026-08-06
 
 ### Changed
