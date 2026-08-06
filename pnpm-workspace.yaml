@@ -7,3 +7,8 @@ allowedDeprecatedVersions:
 minimumReleaseAgeExclude:
   - '@interop/*'
   - 'byoe-context*'
+  - '@mui/core-downloads-tracker@9.3.1'
+  - '@mui/lab@9.0.0-beta.8'
+  - '@mui/material@9.3.1'
+  - query-string@9.5.0
+  - vite@8.2.1

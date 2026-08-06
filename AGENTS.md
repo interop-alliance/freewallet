@@ -36,9 +36,11 @@ model, and ZCap authorization model.
 ## Architecture
 
 The layer map, session and auth flow, storage model (local-first), CHAPI and
-App Connect flows, route map, domain glossary (VC / VP / DID / Space /
-Collection / Resource), and ZCap authorization structure live in
-@ARCHITECTURE.md -- read it before making changes.
+App Connect flows, route map, the shared-logic map (what lives in
+`@interop/wallet-core` and the other `@interop/*` packages rather than
+app-side), domain glossary (VC / VP / DID / Space / Collection / Resource),
+and ZCap authorization structure live in @ARCHITECTURE.md -- read it before
+making changes.
 
 ## Environment Variables
 

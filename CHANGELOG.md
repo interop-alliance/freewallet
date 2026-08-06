@@ -17,6 +17,10 @@
 - The local roster-epoch pin moved from the `puk-epoch/<spaceId>` key to
   `user-key-epoch/<spaceId>`. No carry-over from the former key: a
   pre-rename profile re-establishes its pin on the next roster read.
+- Updated dependencies to latest (MUI 9.3.1, React 19.2.8, Vite 8.2.1,
+  RxDB 17.4.0, and others). TypeScript moves to 6.0.3, the last
+  JS-compiler line; the 7.x native compiler is deferred until its stable
+  API lands (7.1) and typescript-eslint supports it.
 
 ## 0.26.1 - 2026-08-06
 

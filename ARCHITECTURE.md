@@ -1,8 +1,8 @@
 # Architecture
 
 How Freewallet is structured -- the layer map, session and auth flow, storage
-model, CHAPI and App Connect flows, the domain model, and the ZCap
-authorization structure. For contribution conventions see
+model, CHAPI and App Connect flows, the domain model, where shared logic
+lives, and the ZCap authorization structure. For contribution conventions see
 [CONTRIBUTING.md](CONTRIBUTING.md); for agent-facing rules (tech stack, env
 vars) see [AGENTS.md](AGENTS.md).
 
@@ -852,6 +852,43 @@ Security notes:
 | `/history`                               | `HistoryPage`            | Wallet activity log (protected)      |
 | `/settings`                              | `SettingsPage`           | Account settings (protected)         |
 | `/docs/:fileName`                        | `DocsPage`               | Renders `public/docs/*.md`           |
+
+## What lives elsewhere (do not reimplement here)
+
+Every `@interop/*` package is in-house (their checkouts sit beside this repo,
+e.g. `../wallet-core`); a change needed in one of them is an in-house change --
+export it from the owning package and import it, never copy or re-derive it
+app-side. The map of the shared wallet layer is
+[`../wallet-core/ARCHITECTURE.md`](../wallet-core/ARCHITECTURE.md) -- module
+layers and dependency direction, the key hierarchy, the ceremonies and
+cascades, and the permanent wire-level constants.
+
+- **`@interop/wallet-core`** -- the correctness-critical logic shared with the
+  DCW mobile wallet, imported by subpath. The sections above name them where
+  they surface; the full set used here: `/webvh` (the did:webvh log and the
+  document halves of the ceremonies), `/keys` (+ `/keys/clientKeyRecord`; the
+  user key, its wrap-set roster, the client-key record codec, client labels),
+  `/keyring` (the unlock layer), `/enrollment`, `/recovery`, `/clients`
+  (listing, disconnect policy, the revocation cascade orchestrator, the
+  login-time roster policy), `/descriptors`, `/identity`, `/space` (collection
+  layout, activity builders, `was-link`), `/request` (classification,
+  matching, VP composition, exchanges), `/display`, and `/sync` (only the
+  contacts LWW conflict resolution -- freewallet keeps its own RxDB
+  replication driver in `src/lib/sync/`, over the wire contract from
+  `@interop/was-client/sync`).
+- **`@interop/was-client`** (+ `/edv`, `/sync`) -- the WAS HTTP client, the
+  sync wire contract the RxDB driver speaks, the EDV envelope cipher and
+  key-epoch construction (`createEdvDocCipher`, `x25519RecipientFromDidKey`),
+  and the descriptor-store seam.
+- **`@interop/social-core`** -- the contacts collection specs and the
+  `remotePayloadWins` LWW comparison.
+- **`@interop/webkms-client`** and **`@interop/ezcap`** -- `CapabilityAgent`,
+  `KmsClient` / `KeystoreAgent`, and `ZcapClient`.
+- **`@interop/data-integrity-core`** -- loose VC/VP shape guards and the VPR
+  type vocabulary.
+- **`@interop/did-method-webvh`** -- the webvh log primitives (normally
+  reached through `wallet-core/webvh`).
+- **`@interop/verifier-core`** -- credential verification.
 
 ## Glossary
 
