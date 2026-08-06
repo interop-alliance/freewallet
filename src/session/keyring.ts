@@ -9,7 +9,7 @@
  *
  * - The **client identity** is this client's local root: the Ed25519 key pair
  *   behind its did:key and the X25519 twin. The client also caches the
- *   account's per-user key (PUK, the roster identity for encrypted
+ *   account's per-user key (user key, the roster identity for encrypted
  *   collections) beside its own keys, under the same unlock layer.
  * - The **unlock identity** is derived from an unlock secret at login -- the
  *   passphrase today; a passkey PRF output or a recovery code are further
@@ -35,7 +35,7 @@
  *   no-WAS deployments and, within `KEYRING_CACHE_TTL_MS`, offline logins.
  * - The **client-key record** lives only in the `freewallet-session`
  *   IndexedDB: this client's key set (the client seed) and its cached copy of
- *   the PUK, wrapped to the same unlock KAK. It is primary state, not a cache
+ *   the user key, wrapped to the same unlock KAK. It is primary state, not a cache
  *   -- the private keys exist nowhere else -- so it is deleted only by the
  *   explicit unlock-method lifecycle flows, never on a server answer.
  *
@@ -73,7 +73,7 @@ import {
   decodeClientKeyRecord,
   encodeClientKeyRecord,
   type ClientKeyRecord,
-  type Puk
+  type UserKey
 } from '@interop/wallet-core/keys'
 import {
   deleteUnlockSpace,
@@ -114,8 +114,8 @@ const CLIENT_KEYS_CIPHER_ID = 'client-keys'
 /**
  * This client's key set as recovered from the local client-key record: the
  * random 32-byte client seed behind the client's Ed25519 + X25519 pair, the
- * locally cached PUK (absent only on records written for accounts minted
- * before the PUK existed), this client's did:webvh update-key seeds
+ * locally cached user key (absent only on records written for accounts minted
+ * before the user key existed), this client's did:webvh update-key seeds
  * (absent on records written before the update keys became client-held), and
  * the account controller the record was bound for (absent on records written
  * before multi-client enrollment; those were necessarily written by the
@@ -128,11 +128,11 @@ export type ClientKeySet = ClientKeyRecord
 
 /**
  * The re-wrappable members of a client-key record -- what a live session may
- * change after login (a roster-rotated PUK, rolled did:webvh update-key
+ * change after login (a roster-rotated user key, rolled did:webvh update-key
  * seeds). The client seed itself is immutable for the record's lifetime.
  */
 export interface PersistableClientKeys {
-  puk?: Puk
+  userKey?: UserKey
   webvhUpdateKeys?: ClientWebvhUpdateKeys
 }
 
@@ -236,14 +236,14 @@ export async function delegateUnlockManagement({
 }
 
 /**
- * Wraps this client's key set (+ the cached PUK) into a client-key record
+ * Wraps this client's key set (+ the cached user key) into a client-key record
  * under the unlock KAK, and saves it to the `freewallet-session` IndexedDB
  * keyed by the unlock Space id.
  *
  * @param options {object}
  * @param options.unlock {UnlockIdentity}
  * @param options.clientSeed {Uint8Array}   the 32-byte client seed
- * @param [options.puk] {Puk}   the per-user key, cached beside the client keys
+ * @param [options.userKey] {UserKey}   the per-user key, cached beside the client keys
  * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
  *   did:webvh update-key seeds, cached beside the client keys
  * @param [options.controller] {string}   the account controller this key set
@@ -255,14 +255,14 @@ export async function delegateUnlockManagement({
 async function saveClientKeys({
   unlock,
   clientSeed,
-  puk,
+  userKey,
   webvhUpdateKeys,
   controller,
   idb
 }: {
   unlock: UnlockIdentity
   clientSeed: Uint8Array
-  puk?: Puk
+  userKey?: UserKey
   webvhUpdateKeys?: ClientWebvhUpdateKeys
   controller?: string
   idb?: IDBFactory
@@ -274,7 +274,7 @@ async function saveClientKeys({
   })
   const contents = encodeClientKeyRecord({
     clientSeed,
-    ...(puk ? { puk } : {}),
+    ...(userKey ? { userKey } : {}),
     ...(webvhUpdateKeys ? { webvhUpdateKeys } : {}),
     ...(controller ? { controller } : {})
   })
@@ -315,7 +315,7 @@ function clientKeysPersister({
     await saveClientKeys({
       unlock,
       clientSeed: clientKeys.clientSeed,
-      puk: changes.puk ?? clientKeys.puk,
+      userKey: changes.userKey ?? clientKeys.userKey,
       webvhUpdateKeys: changes.webvhUpdateKeys ?? clientKeys.webvhUpdateKeys,
       controller: clientKeys.controller,
       idb
@@ -805,7 +805,7 @@ async function buildFetchResult({
  * Binds an unlock secret to this client's key set and the account it belongs
  * to: derives the unlock identity for the method's KDF, ensures the unlock
  * Space (when WAS is configured), wraps and PUTs the account-pointer keyring
- * record, wraps the client seed + PUK into the local client-key record, pins
+ * record, wraps the client seed + user key into the local client-key record, pins
  * the pointer, and saves the local cache. Throws on failure (the caller
  * decides fatality -- fatal for signups). With no WAS server configured the
  * keyring is cache-only, so the account is then only recoverable in this
@@ -813,7 +813,7 @@ async function buildFetchResult({
  * registry) can record which Space this method resolves to. Also returns a
  * `persistClientKeys` closure over the just-derived unlock identity, so the
  * caller can later re-wrap the record (rolled update-key seeds, a rotated
- * PUK) without re-prompting for the secret.
+ * user key) without re-prompting for the secret.
  *
  * @param options {object}
  * @param options.clientSeed {Uint8Array}   this client's 32-byte seed
@@ -822,7 +822,7 @@ async function buildFetchResult({
  * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
  * @param [options.email] {string}   the account email, carried in the wrapped
  *   record so any unlock method recovers it at login
- * @param [options.puk] {Puk}   the per-user key, cached in the local
+ * @param [options.userKey] {UserKey}   the per-user key, cached in the local
  *   client-key record so any unlock method recovers it at login
  * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
  *   did:webvh update-key seeds, cached in the local client-key record so any
@@ -847,7 +847,7 @@ export async function bindUnlockSecret({
   secret,
   kdf,
   email,
-  puk,
+  userKey,
   webvhUpdateKeys,
   pointer,
   delegateManagementTo,
@@ -859,7 +859,7 @@ export async function bindUnlockSecret({
   secret: string | Uint8Array
   kdf: UnlockKdf
   email?: string
-  puk?: Puk
+  userKey?: UserKey
   webvhUpdateKeys?: ClientWebvhUpdateKeys
   pointer?: AccountPointer
   delegateManagementTo?: string
@@ -909,7 +909,7 @@ export async function bindUnlockSecret({
   await saveClientKeys({
     unlock,
     clientSeed,
-    puk,
+    userKey,
     webvhUpdateKeys,
     controller,
     idb
@@ -935,7 +935,7 @@ export async function bindUnlockSecret({
  * @param options.passphrase {string}
  * @param [options.email] {string}   the account email, carried in the wrapped
  *   record
- * @param [options.puk] {Puk}   the per-user key, cached in the local
+ * @param [options.userKey] {UserKey}   the per-user key, cached in the local
  *   client-key record
  * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
  *   did:webvh update-key seeds, cached in the local client-key record
@@ -955,7 +955,7 @@ export async function bindPassphrase({
   controller,
   passphrase,
   email,
-  puk,
+  userKey,
   webvhUpdateKeys,
   pointer,
   delegateManagementTo,
@@ -967,7 +967,7 @@ export async function bindPassphrase({
   controller: string
   passphrase: string
   email?: string
-  puk?: Puk
+  userKey?: UserKey
   webvhUpdateKeys?: ClientWebvhUpdateKeys
   pointer?: AccountPointer
   delegateManagementTo?: string
@@ -985,7 +985,7 @@ export async function bindPassphrase({
     secret: passphrase,
     kdf,
     email,
-    puk,
+    userKey,
     webvhUpdateKeys,
     pointer,
     delegateManagementTo,
@@ -1204,7 +1204,7 @@ export async function deleteKeyring({
  * its keyring (the remote copy when a WAS server is configured -- the source
  * of truth -- else the local cache) and matching the recovered controller
  * against the account did:key, binds the new passphrase (re-wrapping this
- * client's key set, the PUK, and the did:webvh update-key seeds, and carrying
+ * client's key set, the user key, and the did:webvh update-key seeds, and carrying
  * the verified record's email and pointer forward), then deletes the old
  * unlock Space and this method's old local records.
  *
@@ -1222,7 +1222,7 @@ export async function deleteKeyring({
  * new bind delegates the management zcap to `controller`), so Settings can
  * update the unlock-methods registry's passphrase entry to the new Space and
  * its revocation authority -- along with the new bind's `persistClientKeys`
- * closure, so the live session can re-wrap the new record (a rotated PUK,
+ * closure, so the live session can re-wrap the new record (a rotated user key,
  * rolled update-key seeds) without re-prompting for the passphrase.
  *
  * @param options {object}
@@ -1230,7 +1230,7 @@ export async function deleteKeyring({
  * @param options.controller {string}   the account did:key
  * @param options.oldPassphrase {string}
  * @param options.newPassphrase {string}
- * @param [options.puk] {Puk}   the per-user key to carry into the new
+ * @param [options.userKey] {UserKey}   the per-user key to carry into the new
  *   client-key record (the session's copy; falls back to the old record's)
  * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
  *   did:webvh update-key seeds to carry into the new client-key record (the
@@ -1245,7 +1245,7 @@ export async function changePassphrase({
   controller,
   oldPassphrase,
   newPassphrase,
-  puk,
+  userKey,
   webvhUpdateKeys,
   idb,
   kdf = KEYRING_KDF
@@ -1254,7 +1254,7 @@ export async function changePassphrase({
   controller: string
   oldPassphrase: string
   newPassphrase: string
-  puk?: Puk
+  userKey?: UserKey
   webvhUpdateKeys?: ClientWebvhUpdateKeys
   idb?: IDBFactory
   kdf?: UnlockKdf
@@ -1281,7 +1281,7 @@ export async function changePassphrase({
     idb
   })
 
-  // Prefer the caller's live PUK and update-key seeds; fall back to the ones
+  // Prefer the caller's live user key and update-key seeds; fall back to the ones
   // cached in the old client-key record, so a rebind can never silently drop
   // them.
   const oldClientKeys = await loadClientKeys({ unlock: oldUnlock, idb })
@@ -1292,10 +1292,10 @@ export async function changePassphrase({
       controller,
       passphrase: newPassphrase,
       // Preserve the account email and pointer carried by the old record, and
-      // the PUK and did:webvh update-key seeds, across the rebind.
+      // the user key and did:webvh update-key seeds, across the rebind.
       email: verified.email,
       pointer: verified.pointer,
-      puk: puk ?? oldClientKeys?.puk,
+      userKey: userKey ?? oldClientKeys?.userKey,
       webvhUpdateKeys: webvhUpdateKeys ?? oldClientKeys?.webvhUpdateKeys,
       // Delegate the new unlock Space's management zcap to the account
       // identity, so Settings can record it in the registry (and revoke this

@@ -25,19 +25,19 @@ import {
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
 import {
-  mintPuk,
-  pukRosterDescriptorStore,
-  pukRosterEpochsSigner,
-  pukVaultKeys,
-  type Puk,
-  type PukRosterReadResult
+  mintUserKey,
+  userKeyRosterDescriptorStore,
+  userKeyRosterEpochsSigner,
+  userKeyVaultKeys,
+  type UserKey,
+  type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
 import {
-  checkPukRosterAtLogin as sharedCheckPukRosterAtLogin,
-  convergePukRosterToAccount
+  checkUserKeyRosterAtLogin as sharedCheckUserKeyRosterAtLogin,
+  convergeUserKeyRosterToAccount
 } from '@interop/wallet-core/clients'
-import { cascadeCollectionsToPuk } from '@/session/pukCascade'
-import { loadPukEpochPin, savePukEpochPin } from '@/lib/sessionKey'
+import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
+import { loadUserKeyEpochPin, saveUserKeyEpochPin } from '@/lib/sessionKey'
 import { StorageManager } from '@/stores/storageManager'
 import { fetchKeyring, KeyringRecordUnusableError } from '@/session/keyring'
 import type {
@@ -62,11 +62,11 @@ export async function initGuestSession() {
   // step). A guest identity is ephemeral and never keyring-bound.
   // Guest is a new-wallet flow: `provisionNewWallet` owns collection
   // provisioning (plus the initial history + welcome credential), so session
-  // creation must not also fire it. The guest PUK is minted fresh like the
+  // creation must not also fire it. The guest user key is minted fresh like the
   // rest of the guest identity and, being keyring-less, dies with the session.
   const { session } = await initSessionFromSeed({
     seed: randomGuestSecret,
-    puk: await mintPuk(),
+    userKey: await mintUserKey(),
     email: guestEmail,
     isGuest: true,
     provisionStorage: false
@@ -94,7 +94,7 @@ export async function initGuestSession() {
  * provisioning yet still `await session.storageReady` when it needs the
  * collections ready. On the same seam, when the login's roster read
  * succeeded and a remote store is attached, the cascade-completion sweep is
- * fired behind provisioning and exposed as `session.pukSweep` (best-effort;
+ * fired behind provisioning and exposed as `session.userKeySweep` (best-effort;
  * see the Session type). The new-wallet flows (signup, guest) pass
  * `provisionStorage: false`: their provisioning is a deliberately ordered
  * sequence owned by `provisionNewWallet` (signup must bind the passphrase
@@ -102,17 +102,17 @@ export async function initGuestSession() {
  *
  * @param options {object}
  * @param options.seed {Uint8Array}   this client's 32-byte seed
- * @param [options.puk] {Puk}   the per-user key -- recovered from the local
+ * @param [options.userKey] {UserKey}   the per-user key -- recovered from the local
  *   client-key record on login, or freshly minted by a provisioning flow.
  *   When present, its KAK (not the seed-derived vault KAK) becomes the
  *   profile's key-agreement key, i.e. recipient zero of every encrypted
- *   collection. Absent only on legacy accounts provisioned before the PUK,
+ *   collection. Absent only on legacy accounts provisioned before the user key,
  *   which keep the seed-derived KAK until re-provisioned.
  * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
  *   did:webvh update-key seeds (from the client-key record, or freshly minted
  *   by a provisioning flow), stamped on the profile for log maintenance
  * @param [options.persistClientKeys] {function}   re-wraps the client-key
- *   record with changed members (rotated PUK, rolled update-key seeds)
+ *   record with changed members (rotated user key, rolled update-key seeds)
  *   without the unlock secret; stamped on the profile
  * @param [options.accountPointer] {AccountPointer}   the account pointer this
  *   client holds as local state, stamped on the profile. A pointer naming a
@@ -126,13 +126,13 @@ export async function initGuestSession() {
  * @param [options.provisionStorage] {boolean}   fire `ensureUserCollections`
  *   from session creation and expose it as `session.storageReady`; default
  *   true. Set false for the new-wallet flows that provision explicitly.
- * @param [options.idb] {IDBFactory}   first-party IndexedDB for the PUK
+ * @param [options.idb] {IDBFactory}   first-party IndexedDB for the user key
  *   roster-epoch pin (CHAPI popups thread the Storage Access API handle here)
  * @returns {Promise<{ session: Session, userExists: boolean }>}
  */
 export async function initSessionFromSeed({
   seed,
-  puk,
+  userKey,
   webvhUpdateKeys,
   persistClientKeys,
   accountPointer,
@@ -143,7 +143,7 @@ export async function initSessionFromSeed({
   idb
 }: {
   seed: Uint8Array
-  puk?: Puk
+  userKey?: UserKey
   webvhUpdateKeys?: ClientWebvhUpdateKeys
   persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
   accountPointer?: AccountPointer
@@ -165,36 +165,36 @@ export async function initSessionFromSeed({
     ? webvhZcapClient({ keyAgent, did: accountDid })
     : zcapClient
 
-  // The direct PUK roster read (`key-map/puk.json`): confirms the cached PUK
+  // The direct user key roster read (`key-map/user-key.json`): confirms the cached user key
   // current, or -- on an epoch mismatch (a rotation by another client) --
-  // delivers the fresh PUK, which the session adopts and `persistClientKeys`
+  // delivers the fresh user key, which the session adopts and `persistClientKeys`
   // writes into this client's client-key record. Runs before the storage clients are built, since the vault
-  // keys below must be the CURRENT PUK's. The read result is retained: its
+  // keys below must be the CURRENT user key's. The read result is retained: its
   // descriptor feeds the cascade-completion sweep fired further down.
-  let activePuk = puk
-  let rosterRead: PukRosterReadResult | null = null
+  let activeUserKey = userKey
+  let rosterRead: UserKeyRosterReadResult | null = null
   const spaceId = accountPointer?.spaceId ?? deriveSpaceId(keyAgent.id)
-  if (puk && !isGuest && WAS_SERVER_URL && accountPointer?.did) {
-    rosterRead = await checkPukRosterAtLogin({
+  if (userKey && !isGuest && WAS_SERVER_URL && accountPointer?.did) {
+    rosterRead = await checkUserKeyRosterAtLogin({
       zcapClient: sessionZcapClient,
       pointer: { ...accountPointer, did: accountPointer.did },
       spaceId,
-      puk,
+      userKey,
       clientKeyAgreementKey: keyAgreementKey,
       idb
     })
     if (rosterRead?.rotated) {
-      activePuk = rosterRead.puk
-      await persistClientKeys?.({ puk: rosterRead.puk })
+      activeUserKey = rosterRead.userKey
+      await persistClientKeys?.({ userKey: rosterRead.userKey })
     }
   }
 
-  // Recipient zero becomes the PUK: when the account carries one, the vault
-  // key pair the storage layer consumes is the PUK's KAK + resolver in place
+  // Recipient zero becomes the user key: when the account carries one, the vault
+  // key pair the storage layer consumes is the user key's KAK + resolver in place
   // of the seed-derived pair. The rest of the profile (signing identity,
   // zcap client) is untouched.
-  const vaultKeys = activePuk
-    ? pukVaultKeys({ puk: activePuk })
+  const vaultKeys = activeUserKey
+    ? userKeyVaultKeys({ userKey: activeUserKey })
     : { keyAgreementKey, keyResolver }
 
   // Ensure a KMS keystore exists for this controller (list-by-controller,
@@ -239,10 +239,10 @@ export async function initSessionFromSeed({
     zcapClient: sessionZcapClient,
     keyAgreementKey: vaultKeys.keyAgreementKey,
     keyResolver: vaultKeys.keyResolver,
-    // This client's own (identity) KAK, distinct from the PUK-backed vault
-    // KAK above: its entry in the PUK wrap-set roster.
+    // This client's own (identity) KAK, distinct from the user-key-backed vault
+    // KAK above: its entry in the user key wrap-set roster.
     clientKeyAgreementKey: keyAgreementKey,
-    ...(activePuk ? { puk: activePuk } : {}),
+    ...(activeUserKey ? { userKey: activeUserKey } : {}),
     ...(webvhUpdateKeys ? { clientWebvhKeys: webvhUpdateKeys } : {}),
     ...(persistClientKeys ? { persistClientKeys } : {}),
     ...(accountPointer ? { accountPointer } : {})
@@ -286,18 +286,18 @@ export async function initSessionFromSeed({
 
     // The cascade-completion sweep: with the roster in hand (the direct read
     // above) and a remote store attached, re-run the collection fan-out of
-    // the PUK cascade in the background. A collection is stale exactly when
-    // its current epoch names a non-current PUK generation -- durable state
+    // the user key cascade in the background. A collection is stale exactly when
+    // its current epoch names a non-current user key generation -- durable state
     // alone -- so a cascade another client crashed partway is completed
     // here, and a healthy account's sweep reads descriptors and writes
     // nothing. Chained behind provisioning (so freshly ensured collections
     // are visible) and strictly best-effort: a failed sweep never fails the
     // login, and the next login (or revocation) converges the same branch.
     const remoteStore = storage.remoteStore
-    if (rosterRead && activePuk && remoteStore) {
-      const loginPuk = activePuk
+    if (rosterRead && activeUserKey && remoteStore) {
+      const loginUserKey = activeUserKey
       const loginDescriptor = rosterRead.descriptor
-      session.pukSweep = storageReady
+      session.userKeySweep = storageReady
         .catch(() => {})
         .then(async () => {
           // The roster stage first: a disconnect torn between the document
@@ -307,23 +307,23 @@ export async function initSessionFromSeed({
           // never be re-run. Converging it here before the fan-out is what
           // makes the collections below take a key the disconnected client
           // cannot open.
-          const { puk: sweepPuk, rosterDescriptor } =
+          const { userKey: sweepUserKey, rosterDescriptor } =
             await convergeRosterToDocument({
               session,
               pointer: accountPointer,
               zcapClient: sessionZcapClient,
               spaceId,
-              puk: loginPuk,
+              userKey: loginUserKey,
               descriptor: loginDescriptor,
               clientKeyAgreementKey: keyAgreementKey,
               idb,
               persistClientKeys
             })
-          const result = await cascadeCollectionsToPuk({
+          const result = await cascadeCollectionsToUserKey({
             remoteStore,
             rosterDescriptor,
             clientKeyAgreementKey: keyAgreementKey,
-            puk: sweepPuk
+            userKey: sweepUserKey
           })
           // The session's ciphers were built before the sweep ran: when the
           // sweep moved any collection's current epoch (`installed` or
@@ -340,7 +340,7 @@ export async function initSessionFromSeed({
           return result
         })
         .catch((err): null => {
-          console.warn('The PUK cascade-completion sweep failed:', err)
+          console.warn('The user key cascade-completion sweep failed:', err)
           return null
         })
     }
@@ -370,14 +370,14 @@ export async function initSessionFromSeed({
  * @param [options.pointer] {AccountPointer}
  * @param options.zcapClient {ZcapClient}   the session's signing client
  * @param options.spaceId {string}   the data Space id
- * @param options.puk {Puk}   the login's current per-user key
+ * @param options.userKey {UserKey}   the login's current per-user key
  * @param options.descriptor {CollectionEncryption}   the login's roster read
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) KAK -- its roster entry
  * @param [options.idb] {IDBFactory}
  * @param [options.persistClientKeys] {function}   re-wraps this client's
- *   client-key record with the adopted PUK
- * @returns {Promise<{ puk: Puk, rosterDescriptor: CollectionEncryption }>}
+ *   client-key record with the adopted user key
+ * @returns {Promise<{ userKey: UserKey, rosterDescriptor: CollectionEncryption }>}
  *   the key and roster descriptor the collection fan-out should use
  */
 async function convergeRosterToDocument({
@@ -385,7 +385,7 @@ async function convergeRosterToDocument({
   pointer,
   zcapClient,
   spaceId,
-  puk,
+  userKey,
   descriptor,
   clientKeyAgreementKey,
   idb,
@@ -395,63 +395,63 @@ async function convergeRosterToDocument({
   pointer?: AccountPointer
   zcapClient: ZcapClient
   spaceId: string
-  puk: Puk
+  userKey: UserKey
   descriptor: CollectionEncryption
   clientKeyAgreementKey: IKeyAgreementKey
   idb?: IDBFactory
   persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
-}): Promise<{ puk: Puk; rosterDescriptor: CollectionEncryption }> {
+}): Promise<{ userKey: UserKey; rosterDescriptor: CollectionEncryption }> {
   const { keyAgent } = session.profile
   if (!pointer || !isWebvhDid(pointer.did) || !WAS_SERVER_URL || !keyAgent) {
-    return { puk, rosterDescriptor: descriptor }
+    return { userKey, rosterDescriptor: descriptor }
   }
-  const { puk: convergedPuk, descriptor: convergedDescriptor } =
-    await convergePukRosterToAccount({
+  const { userKey: convergedUserKey, descriptor: convergedDescriptor } =
+    await convergeUserKeyRosterToAccount({
       pointer: {
         did: pointer.did,
         spaceId: pointer.spaceId,
         host: pointer.host
       },
-      store: pukRosterDescriptorStore({
+      store: userKeyRosterDescriptorStore({
         storageServerUrl: WAS_SERVER_URL,
         zcapClient,
         spaceId
       }),
-      puk,
+      userKey,
       descriptor,
       clientKeyAgreementKey,
-      signEpochs: pukRosterEpochsSigner({ keyAgent }),
-      pinnedEpochId: await loadPukEpochPin({ spaceId, idb }),
+      signEpochs: userKeyRosterEpochsSigner({ keyAgent }),
+      pinnedEpochId: await loadUserKeyEpochPin({ spaceId, idb }),
       // Adoption is app-side: persisted for the next login, pinned, and
       // swapped into the live session -- all before the collection fan-out
       // runs against it.
-      onPukAdopted: async ({
-        puk: adopted,
+      onUserKeyAdopted: async ({
+        userKey: adopted,
         latestEpochId,
         descriptor: read
       }) => {
-        await savePukEpochPin({
+        await saveUserKeyEpochPin({
           spaceId,
           epochId: latestEpochId,
           epochIds: (read.epochs ?? []).map(epoch => epoch.id),
           idb
         })
-        await persistClientKeys?.({ puk: adopted })
-        const vaultKeys = pukVaultKeys({ puk: adopted })
-        session.profile.puk = adopted
+        await persistClientKeys?.({ userKey: adopted })
+        const vaultKeys = userKeyVaultKeys({ userKey: adopted })
+        session.profile.userKey = adopted
         session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
         session.profile.keyResolver = vaultKeys.keyResolver
         await session.storage.adoptRotatedVaultKeys(vaultKeys)
       }
     })
-  return { puk: convergedPuk, rosterDescriptor: convergedDescriptor }
+  return { userKey: convergedUserKey, rosterDescriptor: convergedDescriptor }
 }
 
 /**
- * The login-time PUK roster check: one direct compare-and-swap-style read of
- * `key-map/puk.json` with the session's root signing key, before any storage
+ * The login-time user key roster check: one direct compare-and-swap-style read of
+ * `key-map/user-key.json` with the session's root signing key, before any storage
  * client exists. Returns the full roster read -- `rotated` marks whether the
- * roster's current epoch differs from the cached PUK (a rotation by another
+ * roster's current epoch differs from the cached user key (a rotation by another
  * client), and the descriptor feeds the cascade-completion sweep -- or
  * `null` when no roster exists yet (an account whose provisioning has not
  * created it -- the idempotent ensure will). Either way the served roster is
@@ -463,34 +463,34 @@ async function convergeRosterToDocument({
  * this client cannot unwrap -- rethrow and refuse the login (the same
  * continuity class as a substituted account pointer). Anything else (an
  * unreachable server, offline) warns and returns `null`, so offline logins
- * keep working from the cached PUK.
+ * keep working from the cached user key.
  *
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the session's root signing client
  * @param options.spaceId {string}   the data Space id
- * @param options.puk {Puk}   the cached per-user key
+ * @param options.userKey {UserKey}   the cached per-user key
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) KAK -- its roster entry
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<PukRosterReadResult | null>}   the roster read, or null
+ * @returns {Promise<UserKeyRosterReadResult | null>}   the roster read, or null
  */
-async function checkPukRosterAtLogin({
+async function checkUserKeyRosterAtLogin({
   zcapClient,
   pointer,
   spaceId,
-  puk,
+  userKey,
   clientKeyAgreementKey,
   idb
 }: {
   zcapClient: ZcapClient
   pointer: AccountPointer & { did: string }
   spaceId: string
-  puk: Puk
+  userKey: UserKey
   clientKeyAgreementKey: IKeyAgreementKey
   idb?: IDBFactory
-}): Promise<PukRosterReadResult | null> {
-  return await sharedCheckPukRosterAtLogin({
-    store: pukRosterDescriptorStore({
+}): Promise<UserKeyRosterReadResult | null> {
+  return await sharedCheckUserKeyRosterAtLogin({
+    store: userKeyRosterDescriptorStore({
       storageServerUrl: WAS_SERVER_URL,
       zcapClient,
       spaceId
@@ -500,13 +500,13 @@ async function checkPukRosterAtLogin({
       spaceId: pointer.spaceId,
       host: pointer.host
     },
-    puk,
+    userKey,
     clientKeyAgreementKey,
-    pinnedEpochId: await loadPukEpochPin({ spaceId, idb }),
+    pinnedEpochId: await loadUserKeyEpochPin({ spaceId, idb }),
     // The pin advances to the epoch just authenticated, atomically with the
     // key that authenticated it.
     onRosterRead: async ({ latestEpochId, descriptor }) => {
-      await savePukEpochPin({
+      await saveUserKeyEpochPin({
         spaceId,
         epochId: latestEpochId,
         epochIds: (descriptor.epochs ?? []).map(epoch => epoch.id),
@@ -621,7 +621,7 @@ export async function loginWithPassphrase({
  * @param [options.email] {string}   caller-supplied email, when any
  * @param [options.remoteDirectStorage] {boolean}
  * @param [options.provisionStorage] {boolean}
- * @param [options.idb] {IDBFactory}   first-party IndexedDB for the PUK
+ * @param [options.idb] {IDBFactory}   first-party IndexedDB for the user key
  *   roster-epoch pin
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
@@ -648,7 +648,7 @@ async function sessionFromKeyringHit({
   }
   const { session, userExists } = await initSessionFromSeed({
     seed: found.clientKeys.clientSeed,
-    puk: found.clientKeys.puk,
+    userKey: found.clientKeys.userKey,
     webvhUpdateKeys: found.clientKeys.webvhUpdateKeys,
     persistClientKeys: found.persistClientKeys,
     accountPointer: found.pointer,

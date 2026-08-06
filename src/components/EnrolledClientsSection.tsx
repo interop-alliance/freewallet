@@ -209,7 +209,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
 
   /**
    * Runs the enrollment ceremony for the pasted connect code, in the push
-   * order (the PUK wrap into the roster first, then the two log entries),
+   * order (the user key wrap into the roster first, then the two log entries),
    * saving the chosen label once the ceremony lands. Idempotent -- approving
    * the same code again after a failure resumes.
    */

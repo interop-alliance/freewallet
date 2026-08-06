@@ -1,5 +1,23 @@
 # History
 
+## 0.26.2 - TBD
+
+### Changed
+
+- The "PUK" abbreviation is retired: the concept is unchanged (the
+  account-wide key that is recipient zero of every encrypted collection,
+  delivered through the wrap-set roster), but identifiers are now `userKey` /
+  `UserKey` / `USER_KEY` and prose says "user key". `Session.pukSweep` is
+  `Session.userKeySweep` and `profile.puk` is `profile.userKey`.
+  User-facing copy is unchanged.
+- Upgraded `@interop/wallet-core` (0.18.0), whose matching rename moves the
+  roster resource to `key-map/user-key.json` and the client-key record's key
+  member to `userKey`. No read fallback onto the former names: accounts
+  provisioned before the rename must be re-provisioned.
+- The local roster-epoch pin moved from the `puk-epoch/<spaceId>` key to
+  `user-key-epoch/<spaceId>`. No carry-over from the former key: a
+  pre-rename profile re-establishes its pin on the next roster read.
+
 ## 0.26.1 - 2026-08-06
 
 ### Added

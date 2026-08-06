@@ -61,8 +61,8 @@ vi.mock('@/lib/sessionKey', () => ({
   deletePasskeySafetyNotice: vi.fn(async () => {
     state.calls.push('deletePasskeySafetyNotice')
   }),
-  deletePukEpochPin: vi.fn(async () => {
-    state.calls.push('deletePukEpochPin')
+  deleteUserKeyEpochPin: vi.fn(async () => {
+    state.calls.push('deleteUserKeyEpochPin')
   })
 }))
 
@@ -123,7 +123,7 @@ describe('deleteAccount', () => {
       'wipeStorage',
       'deleteKeyring',
       'deletePasskeySafetyNotice',
-      'deletePukEpochPin'
+      'deleteUserKeyEpochPin'
     ])
   })
 

@@ -51,7 +51,7 @@ import {
   didKeyZcapClient,
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
-import type { Puk } from '@interop/wallet-core/keys'
+import type { UserKey } from '@interop/wallet-core/keys'
 import { createEdvDocCipher } from '@interop/was-client/edv'
 import {
   deleteAccountPointerPin,
@@ -105,7 +105,7 @@ export interface PasskeyUnlockMethod {
  * A recovery-code unlock method (the code is a minimal
  * always-enrolled client). Beside the shared members, the entry records the
  * code's public posture so Settings can correlate it with the document and
- * roster without the code: `recoveryKid` (its PUK-roster kid),
+ * roster without the code: `recoveryKid` (its user-key roster kid),
  * `keyAgreementKeyMultibase` / `updateKeyMultibase` (the published
  * `keyAgreement` VM and the `nextKeyHashes` commitment), and
  * `delegationKeyId` (the verification method that signed the record's
@@ -396,10 +396,10 @@ export async function putUnlockMethods({
 
 /**
  * Re-seals the remote unlock-methods record from one set of vault keys to
- * another -- the PUK-rotation bridge. The stored record is a single-recipient
- * envelope to the vault KAK, so whichever client rotates the PUK must re-wrap
+ * another -- the user-key-rotation bridge. The stored record is a single-recipient
+ * envelope to the vault KAK, so whichever client rotates the user key must re-wrap
  * the registry to the new one, or every later session (holding only the
- * rotated PUK) meets an envelope it cannot decrypt and the registry is lost
+ * rotated user key) meets an envelope it cannot decrypt and the registry is lost
  * for good. Reads the remote copy (the source of truth), decrypts with the
  * pre-rotation keys, re-encrypts to the post-rotation keys, and PUTs it back;
  * a registry that does not exist yet is a no-op. The local cache is left
@@ -745,7 +745,7 @@ export async function backfillPassphraseUnlockMethod({
  * Swaps the live session onto the unlock identity a passphrase change just
  * produced. The change deleted the old unlock Space and its client-key
  * record, so the profile's `persistClientKeys` closure would otherwise
- * silently no-op (losing rolled update-key seeds or a rotated PUK), and the
+ * silently no-op (losing rolled update-key seeds or a rotated user key), and the
  * stale `profile.unlockMethod` would let the registry backfill repoint the
  * passphrase entry at the deleted Space. Mutates `session.profile` in place;
  * the session keeps operating without a re-login.
@@ -802,7 +802,7 @@ export function adoptPassphraseRebind({
  * @param options.promptForPrfRetry {() => boolean | Promise<boolean>}   PRF-retry
  *   consent callback (see `registerPasskey`)
  * @param [options.email] {string}   account email, carried in the wrapped record
- * @param [options.puk] {Puk}   the account's per-user key, cached in the local
+ * @param [options.userKey] {UserKey}   the account's per-user key, cached in the local
  *   client-key record so a passkey login recovers it
  * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
  *   did:webvh update-key seeds, cached in the local client-key record so a
@@ -823,7 +823,7 @@ export async function enrollPasskey({
   locale,
   promptForPrfRetry,
   email,
-  puk,
+  userKey,
   webvhUpdateKeys,
   pointer,
   excludeCredentialIds,
@@ -836,7 +836,7 @@ export async function enrollPasskey({
   locale: string
   promptForPrfRetry: () => boolean | Promise<boolean>
   email?: string
-  puk?: Puk
+  userKey?: UserKey
   webvhUpdateKeys?: ClientWebvhUpdateKeys
   pointer?: AccountPointer
   excludeCredentialIds?: Uint8Array[]
@@ -864,7 +864,7 @@ export async function enrollPasskey({
       secret: registration.prfOutput,
       kdf: PASSKEY_KDF,
       email,
-      puk,
+      userKey,
       webvhUpdateKeys,
       pointer,
       delegateManagementTo

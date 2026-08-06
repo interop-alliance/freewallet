@@ -28,7 +28,7 @@ import { fetchKeyring, KeyringRecordUnusableError } from '@/session/keyring'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
 import { ensureKeystore } from '@/lib/kms'
-import { mintPuk } from '@interop/wallet-core/keys'
+import { mintUserKey } from '@interop/wallet-core/keys'
 import { epochKeyIdFor } from '@interop/was-client/edv'
 
 const PASSPHRASE = 'correct horse battery staple'
@@ -122,13 +122,13 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
     expect(session!.profile.accountPointer).toEqual(POINTER)
   })
 
-  it('makes the recovered PUK recipient zero (the profile KAK) and carries it on the profile', async () => {
+  it('makes the recovered user key recipient zero (the profile KAK) and carries it on the profile', async () => {
     const clientSeed = randomSeed()
     const controller = await didFromSeed(clientSeed)
-    const puk = await mintPuk()
+    const userKey = await mintUserKey()
     vi.mocked(fetchKeyring).mockResolvedValue({
       controller,
-      clientKeys: { clientSeed, puk },
+      clientKeys: { clientSeed, userKey },
       unlockSpaceId: 'unlock-space-test'
     })
 
@@ -136,11 +136,11 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
 
     const { profile } = vi.mocked(StorageManager.initStorageClients).mock
       .calls[0][0]
-    expect(profile.keyAgreementKey!.id).toBe(epochKeyIdFor(puk.id))
-    expect(session!.profile.puk).toBe(puk)
+    expect(profile.keyAgreementKey!.id).toBe(epochKeyIdFor(userKey.id))
+    expect(session!.profile.userKey).toBe(userKey)
   })
 
-  it('keeps the seed-derived KAK for a legacy record with no PUK', async () => {
+  it('keeps the seed-derived KAK for a legacy record with no user key', async () => {
     const clientSeed = randomSeed()
     const controller = await didFromSeed(clientSeed)
     vi.mocked(fetchKeyring).mockResolvedValue({
@@ -156,7 +156,7 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
     // The legacy vault KAK is the Montgomery twin of the signing key, so its
     // id is rooted in the account's own did:key controller.
     expect(profile.keyAgreementKey!.id.startsWith(controller)).toBe(true)
-    expect(session!.profile.puk).toBeUndefined()
+    expect(session!.profile.userKey).toBeUndefined()
   })
 
   it('fires ensureUserCollections as storageReady by default', async () => {

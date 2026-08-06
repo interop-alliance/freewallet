@@ -1,6 +1,6 @@
 /**
  * Client revocation: disconnecting an enrolled wallet client from the
- * account. The cascade itself -- document edit, PUK rotation, collection
+ * account. The cascade itself -- document edit, user key rotation, collection
  * fan-out, recovery re-mints, in that dependency order, with its convergence
  * story -- is `revokeAccountClient` in `@interop/wallet-core/clients`, run
  * once for every wallet. This module supplies the freewallet-shaped stages
@@ -20,15 +20,18 @@ import {
   type RevokedClientKeys
 } from '@interop/wallet-core/webvh'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
-import { pukRosterEpochsSigner } from '@interop/wallet-core/keys'
+import { userKeyRosterEpochsSigner } from '@interop/wallet-core/keys'
 import type { Session } from '@/types/auth'
-import { savePukEpochPin, loadPukEpochPin } from '@/lib/sessionKey'
+import { saveUserKeyEpochPin, loadUserKeyEpochPin } from '@/lib/sessionKey'
 import { getUnlockMethods } from '@/session/unlockMethods'
 import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
 import { requireEnrolledClientContext } from '@/session/enrolledContext'
-import { adoptRotatedPuk } from '@/session/pukAdoption'
+import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
 import { remintRecoveryDelegations } from '@/session/recovery'
-import { cascadeCollections, type PukCascadeResult } from '@/session/pukCascade'
+import {
+  cascadeCollections,
+  type UserKeyCascadeResult
+} from '@/session/userKeyCascade'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 
 export type { RevokedClientKeys } from '@interop/wallet-core/webvh'
@@ -41,7 +44,7 @@ export type { RevokedClientKeys } from '@interop/wallet-core/webvh'
  */
 export interface RevocationOutcome {
   rotated: boolean
-  collections: PukCascadeResult
+  collections: UserKeyCascadeResult
   recovery: { reminted: number; skipped: number }
 }
 
@@ -103,7 +106,7 @@ async function latentRecoveryHashes({
  * missing key material); once the document edit lands, every later stage is
  * best-effort-but-resumable -- a thrown stage leaves durable state a naive
  * re-run (or the login-time completion sweep) converges from. An account with
- * no PUK roster yet reports a completed cascade with nothing rotated: the
+ * no user key roster yet reports a completed cascade with nothing rotated: the
  * document edit has landed, so the client IS disconnected.
  *
  * @param options {object}
@@ -147,21 +150,21 @@ export async function revokeEnrolledClient({
     revokedClient: client,
     knownLatentHashes: await latentRecoveryHashes({ entries }),
     ownSigningKeyMultibase: clientSigningKeyMultibase({ keyAgent }),
-    signEpochs: pukRosterEpochsSigner({ keyAgent }),
-    rosterStore: remoteStore.pukRosterStore(),
-    ...(session.profile.puk ? { puk: session.profile.puk } : {}),
+    signEpochs: userKeyRosterEpochsSigner({ keyAgent }),
+    rosterStore: remoteStore.userKeyRosterStore(),
+    ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
     clientKeyAgreementKey,
-    pinnedEpochId: await loadPukEpochPin({ spaceId: pointer.spaceId, idb }),
-    onPukAdopted: async ({ puk, latestEpochId, descriptor }) => {
-      // The PUK and the epoch pin persist together: the pin must never advance
+    pinnedEpochId: await loadUserKeyEpochPin({ spaceId: pointer.spaceId, idb }),
+    onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) => {
+      // The user key and the epoch pin persist together: the pin must never advance
       // without the key that authenticated the roster it advanced to.
-      await savePukEpochPin({
+      await saveUserKeyEpochPin({
         spaceId: pointer.spaceId,
         epochId: latestEpochId,
         epochIds: (descriptor.epochs ?? []).map(epoch => epoch.id),
         idb
       })
-      await session.profile.persistClientKeys?.({ puk })
+      await session.profile.persistClientKeys?.({ userKey })
     },
     collections: cascadeCollections({ remoteStore }),
     remintRecoveryDelegations: async ({ document }) =>
@@ -171,8 +174,8 @@ export async function revokeEnrolledClient({
         entries,
         idb
       }),
-    onRotationAdopted: async ({ puk }) =>
-      await adoptRotatedPuk({ session, spaceId: pointer.spaceId, puk })
+    onRotationAdopted: async ({ userKey }) =>
+      await adoptRotatedUserKey({ session, spaceId: pointer.spaceId, userKey })
   }).finally(() => invalidateVerifiedLog({ profile: session.profile }))
 
   // The audit record, written after the adoption so it lands under the fresh

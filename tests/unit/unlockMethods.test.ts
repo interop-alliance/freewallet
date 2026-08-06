@@ -695,7 +695,7 @@ describe('adoptPassphraseRebind', () => {
 describe('rewrapUnlockMethodsRecord', () => {
   /**
    * A second, distinct vault key set (a different seed), standing in for the
-   * post-rotation PUK's vault keys.
+   * post-rotation user key's vault keys.
    */
   async function makeVaultKeys(fillByte: number) {
     const seed = new Uint8Array(32)

@@ -1,5 +1,5 @@
 /**
- * Adopting a rotated per-user key in a live session -- the tail every PUK
+ * Adopting a rotated per-user key in a live session -- the tail every user key
  * rotation shares (a client disconnected, a recovery code spent or revoked):
  * the remote unlock-methods registry is re-sealed from the old vault keys to
  * the new ones, then the profile's vault keys and the storage ciphers are
@@ -16,14 +16,14 @@ import type {
   IKeyResolver
 } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
-import { pukVaultKeys, type Puk } from '@interop/wallet-core/keys'
+import { userKeyVaultKeys, type UserKey } from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import { rewrapUnlockMethodsRecord } from '@/session/unlockMethods'
 
 /**
  * Re-seals the unlock-methods registry from one set of vault keys to another,
- * best-effort: a failure leaves the registry sealed to the old PUK, which the
+ * best-effort: a failure leaves the registry sealed to the old user key, which the
  * next login surfaces as a warning rather than losing the rotation.
  *
  * @param options {object}
@@ -38,7 +38,7 @@ import { rewrapUnlockMethodsRecord } from '@/session/unlockMethods'
  * @param options.to.keyResolver {IKeyResolver}
  * @returns {Promise<void>}
  */
-export async function rewrapUnlockRegistryToPuk({
+export async function rewrapUnlockRegistryToUserKey({
   storageServerUrl,
   zcapClient,
   spaceId,
@@ -61,14 +61,14 @@ export async function rewrapUnlockRegistryToPuk({
     })
   } catch (err) {
     console.warn(
-      'Could not re-wrap the unlock-methods registry to the rotated PUK:',
+      'Could not re-wrap the unlock-methods registry to the rotated user key:',
       err
     )
   }
 }
 
 /**
- * Adopts a rotated PUK in the live session: the unlock-methods registry is
+ * Adopts a rotated user key in the live session: the unlock-methods registry is
  * re-sealed to it, then the profile vault keys and the storage ciphers are
  * swapped, so this session keeps operating without a re-login.
  *
@@ -82,37 +82,37 @@ export async function rewrapUnlockRegistryToPuk({
  * @param options {object}
  * @param options.session {Session}
  * @param options.spaceId {string}
- * @param options.puk {Puk}   the freshly rotated per-user key
+ * @param options.userKey {UserKey}   the freshly rotated per-user key
  * @returns {Promise<void>}
  */
-export async function adoptRotatedPuk({
+export async function adoptRotatedUserKey({
   session,
   spaceId,
-  puk
+  userKey
 }: {
   session: Session
   spaceId: string
-  puk: Puk
+  userKey: UserKey
 }): Promise<void> {
   const { keyAgreementKey, keyResolver } = session.profile
   if (keyAgreementKey && keyResolver && WAS_SERVER_URL) {
-    await rewrapUnlockRegistryToPuk({
+    await rewrapUnlockRegistryToUserKey({
       storageServerUrl: WAS_SERVER_URL,
       zcapClient: session.profile.zcapClient,
       spaceId,
       from: { keyAgreementKey, keyResolver },
-      to: pukVaultKeys({ puk })
+      to: userKeyVaultKeys({ userKey })
     })
   }
-  const vaultKeys = pukVaultKeys({ puk })
-  session.profile.puk = puk
+  const vaultKeys = userKeyVaultKeys({ userKey })
+  session.profile.userKey = userKey
   session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
   session.profile.keyResolver = vaultKeys.keyResolver
   try {
     await session.storage.adoptRotatedVaultKeys(vaultKeys)
   } catch (err) {
     console.warn(
-      'Could not rebuild the storage ciphers on the rotated PUK; the next ' +
+      'Could not rebuild the storage ciphers on the rotated user key; the next ' +
         'login adopts it instead:',
       err
     )

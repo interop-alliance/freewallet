@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
- * Unit tests for the collection fan-out of the PUK cascade
- * (`src/session/pukCascade.ts`): the enumeration (encrypted standard
+ * Unit tests for the collection fan-out of the user key cascade
+ * (`src/session/userKeyCascade.ts`): the enumeration (encrypted standard
  * collections plus every remotely listed encrypted collection, deduplicated,
  * degrading to the standard set when the remote listing fails) and the
  * remote-store adapters handed to the `@interop/wallet-core/keys` driver
@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
-  cascadeCollectionsToPuk: vi.fn(async () => ({ outcomes: {}, failed: [] }))
+  cascadeCollectionsToUserKey: vi.fn(async () => ({ outcomes: {}, failed: [] }))
 }))
 
 vi.mock('@interop/was-client/edv', async importOriginal => ({
@@ -23,13 +23,16 @@ vi.mock('@interop/was-client/edv', async importOriginal => ({
   )
 }))
 
-import { cascadeCollectionsToPuk as driveCascade } from '@interop/wallet-core/keys'
+import { cascadeCollectionsToUserKey as driveCascade } from '@interop/wallet-core/keys'
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
-import { cascadeCollectionsToPuk } from '@/session/pukCascade'
+import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 import type { CollectionEncryption } from '@interop/was-client'
 
-const PUK = { id: 'did:key:z6LSFreshPuk', secret: new Uint8Array(32).fill(2) }
+const USER_KEY = {
+  id: 'did:key:z6LSFreshUserKey',
+  secret: new Uint8Array(32).fill(2)
+}
 const ROSTER_DESCRIPTOR = {
   rosterDescriptor: true
 } as unknown as CollectionEncryption
@@ -78,7 +81,7 @@ beforeEach(() => {
   vi.mocked(driveCascade).mockResolvedValue({ outcomes: {}, failed: [] })
 })
 
-describe('cascadeCollectionsToPuk', () => {
+describe('cascadeCollectionsToUserKey', () => {
   it('names the encrypted standard collections plus the remotely listed encrypted ones, deduplicated', async () => {
     const remoteStore = makeFakeRemoteStore({
       remoteItems: [
@@ -89,11 +92,11 @@ describe('cascadeCollectionsToPuk', () => {
         { id: 'public-credentials', isEncrypted: false }
       ]
     })
-    await cascadeCollectionsToPuk({
+    await cascadeCollectionsToUserKey({
       remoteStore,
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: CLIENT_KAK,
-      puk: PUK
+      userKey: USER_KEY
     })
 
     const args = driverArgs()
@@ -102,16 +105,16 @@ describe('cascadeCollectionsToPuk', () => {
     )
     expect(args.rosterDescriptor).toBe(ROSTER_DESCRIPTOR)
     expect(args.clientKeyAgreementKey).toBe(CLIENT_KAK)
-    expect(args.puk).toBe(PUK)
+    expect(args.userKey).toBe(USER_KEY)
   })
 
   it('degrades to the standard set when the remote listing fails', async () => {
     const remoteStore = makeFakeRemoteStore({ listFails: true })
-    await cascadeCollectionsToPuk({
+    await cascadeCollectionsToUserKey({
       remoteStore,
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: CLIENT_KAK,
-      puk: PUK
+      userKey: USER_KEY
     })
     expect([...driverArgs().collectionIds].sort()).toEqual(
       [...STANDARD_ENCRYPTED_IDS].sort()
@@ -120,11 +123,11 @@ describe('cascadeCollectionsToPuk', () => {
 
   it("adapts storeFor to the collection handle's descriptor store", async () => {
     const remoteStore = makeFakeRemoteStore()
-    await cascadeCollectionsToPuk({
+    await cascadeCollectionsToUserKey({
       remoteStore,
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: CLIENT_KAK,
-      puk: PUK
+      userKey: USER_KEY
     })
     const store = driverArgs().storeFor('app-notes')
     expect(store).toEqual({ collection: { collectionId: 'app-notes' } })
@@ -140,11 +143,11 @@ describe('cascadeCollectionsToPuk', () => {
         { id: 'public-credentials', isEncrypted: false }
       ]
     })
-    await cascadeCollectionsToPuk({
+    await cascadeCollectionsToUserKey({
       remoteStore,
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: CLIENT_KAK,
-      puk: PUK
+      userKey: USER_KEY
     })
     const { isEncrypted } = driverArgs()
     await expect(isEncrypted!('app-notes')).resolves.toBe(true)
@@ -157,11 +160,11 @@ describe('cascadeCollectionsToPuk', () => {
 
   it('falls back to the encryption-descriptor read off the listing', async () => {
     const remoteStore = makeFakeRemoteStore()
-    await cascadeCollectionsToPuk({
+    await cascadeCollectionsToUserKey({
       remoteStore,
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: CLIENT_KAK,
-      puk: PUK
+      userKey: USER_KEY
     })
     const { isEncrypted } = driverArgs()
     await expect(isEncrypted!('private-credentials')).resolves.toBe(true)
@@ -181,15 +184,15 @@ describe('cascadeCollectionsToPuk', () => {
     }
     vi.mocked(driveCascade).mockResolvedValue(driverResult)
 
-    const result = await cascadeCollectionsToPuk({
+    const result = await cascadeCollectionsToUserKey({
       remoteStore: makeFakeRemoteStore(),
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: CLIENT_KAK,
-      puk: PUK
+      userKey: USER_KEY
     })
     expect(result).toBe(driverResult)
     expect(warn).toHaveBeenCalledWith(
-      'Could not rotate collection "app-notes" onto the current PUK:',
+      'Could not rotate collection "app-notes" onto the current user key:',
       driverResult.failed[0]!.error
     )
     warn.mockRestore()

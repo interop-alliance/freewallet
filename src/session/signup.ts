@@ -9,7 +9,7 @@
 import { base64urlnopad } from '@scure/base'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import { mintClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
-import { mintPuk } from '@interop/wallet-core/keys'
+import { mintUserKey } from '@interop/wallet-core/keys'
 import { PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { savePasskeySafetyNotice } from '@/lib/sessionKey'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
@@ -30,7 +30,7 @@ import type { Session } from '@/types/auth'
 /**
  * This client's freshly minted key set for a brand-new account: the client
  * seed (random, local, never derived from any secret and never leaving the
- * browser), the account's PUK (its roster identity -- recipient zero of every
+ * browser), the account's user key (its roster identity -- recipient zero of every
  * encrypted collection, cached locally under the unlock layer), this client's
  * did:webvh update-key seeds (the identity log can only ever be extended with
  * client-held keys), and the account pointer the keyring record carries in
@@ -40,17 +40,17 @@ import type { Session } from '@/types/auth'
  * it. Built before session creation so the storage clients bind to the minted
  * id.
  *
- * @returns {Promise<{ seed: Uint8Array, puk: object, webvhUpdateKeys: object,
+ * @returns {Promise<{ seed: Uint8Array, userKey: object, webvhUpdateKeys: object,
  *   pointer?: AccountPointer }>}
  */
 async function mintAccountKeySet() {
   const seed = crypto.getRandomValues(new Uint8Array(32))
-  const puk = await mintPuk()
+  const userKey = await mintUserKey()
   const webvhUpdateKeys = await mintClientWebvhUpdateKeys()
   const pointer: AccountPointer | undefined = WAS_SERVER_URL
     ? { spaceId: mintSpaceId(), host: WAS_SERVER_URL }
     : undefined
-  return { seed, puk, webvhUpdateKeys, pointer }
+  return { seed, userKey, webvhUpdateKeys, pointer }
 }
 
 /**
@@ -96,10 +96,10 @@ export async function signUpWithPassphrase({
   // This is a new user. Session creation does not provision
   // (`provisionStorage: false`); `provisionNewWallet` runs the ordered
   // provisioning sequence only after the bind succeeds.
-  const { seed, puk, webvhUpdateKeys, pointer } = await mintAccountKeySet()
+  const { seed, userKey, webvhUpdateKeys, pointer } = await mintAccountKeySet()
   const { session } = await initSessionFromSeed({
     seed,
-    puk,
+    userKey,
     webvhUpdateKeys,
     accountPointer: pointer,
     email,
@@ -112,7 +112,7 @@ export async function signUpWithPassphrase({
     // Carried inside the wrapped record so any unlock method (a passkey
     // login has no form to ask on) recovers the account email.
     email,
-    puk,
+    userKey,
     webvhUpdateKeys,
     pointer
   })
@@ -138,7 +138,7 @@ export async function signUpWithPassphrase({
         controller: session.user.id,
         passphrase,
         email,
-        puk,
+        userKey,
         webvhUpdateKeys,
         pointer: fullPointer
       })
@@ -189,10 +189,10 @@ export async function signUpWithPasskey({
   // No `userExists` probe: a fresh credential cannot collide with an
   // existing account, so there is nothing to probe (unlike the
   // passphrase path).
-  const { seed, puk, webvhUpdateKeys, pointer } = await mintAccountKeySet()
+  const { seed, userKey, webvhUpdateKeys, pointer } = await mintAccountKeySet()
   const { session } = await initSessionFromSeed({
     seed,
-    puk,
+    userKey,
     webvhUpdateKeys,
     accountPointer: pointer,
     email,
@@ -210,7 +210,7 @@ export async function signUpWithPasskey({
   const userHandle = crypto.getRandomValues(new Uint8Array(16))
   const { registration, entry, persistClientKeys } = await enrollPasskey({
     clientSeed: seed,
-    puk,
+    userKey,
     webvhUpdateKeys,
     pointer,
     controller: session.user.id,
@@ -251,7 +251,7 @@ export async function signUpWithPasskey({
         secret: registration.prfOutput,
         kdf: PASSKEY_KDF,
         email,
-        puk,
+        userKey,
         webvhUpdateKeys,
         pointer: fullPointer,
         delegateManagementTo: unlockManagementGrantee({

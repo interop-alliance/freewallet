@@ -46,7 +46,7 @@ function sessionWith(
     clientWebvhKeys: unknown
     clientKeyAgreementKey: unknown
     keyAgent: unknown
-    puk: unknown
+    userKey: unknown
   }> = {}
 ): Session {
   return {
@@ -74,7 +74,10 @@ function sessionWith(
         'keyAgent' in overrides
           ? overrides.keyAgent
           : { id: 'did:key:z6MkThisClient' },
-      puk: 'puk' in overrides ? overrides.puk : { id: 'did:key:z6LSPuk' }
+      userKey:
+        'userKey' in overrides
+          ? overrides.userKey
+          : { id: 'did:key:z6LSUserKey' }
     }
   } as unknown as Session
 }
@@ -166,7 +169,7 @@ describe('the gates derived from it', () => {
   })
 
   it('additionally requires the per-user key to issue a recovery code', () => {
-    const session = sessionWith({ puk: undefined })
+    const session = sessionWith({ userKey: undefined })
     // Nothing else is missing: the clients surface stays enabled.
     expect(canManageAccountClients({ session })).toBe(true)
     expect(canIssueRecoveryCode({ session })).toBe(false)

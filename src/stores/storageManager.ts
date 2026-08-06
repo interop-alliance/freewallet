@@ -67,8 +67,8 @@ import {
 } from '@interop/wallet-core/webvh'
 import { promoteKeystoreController, rebindKeystoreAgent } from '@/lib/kms'
 import {
-  ensurePukRoster,
-  pukRosterEpochsSigner
+  ensureUserKeyRoster,
+  userKeyRosterEpochsSigner
 } from '@interop/wallet-core/keys'
 import {
   acquireDescriptor,
@@ -76,7 +76,7 @@ import {
   DescriptorRefreshPolicy,
   type EncryptionDescriptorCache
 } from '@interop/wallet-core/descriptors'
-import { savePukEpochPin } from '@/lib/sessionKey'
+import { saveUserKeyEpochPin } from '@/lib/sessionKey'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import {
   createEdvDocCipher,
@@ -481,16 +481,16 @@ export class StorageManager {
   }
 
   /**
-   * Adopts a rotated PUK's vault keys into the live session's storage -- the
+   * Adopts a rotated user key's vault keys into the live session's storage -- the
    * tail of the revocation cascade: once the roster and the collections have
-   * moved to a fresh PUK, the session that drove the rotation (it minted the
+   * moved to a fresh user key, the session that drove the rotation (it minted the
    * key, so it holds it) swaps its vault key material, refetches the rotated
    * descriptors, and rebuilds the ciphers, so it keeps reading and writing
    * without a re-login. The app-collection cipher caches are dropped too (they
    * were built from the old vault KAK) and rebuild lazily on next decrypt.
    *
    * @param options {object}
-   * @param options.keyAgreementKey {IKeyAgreementKey}   the fresh PUK's KAK
+   * @param options.keyAgreementKey {IKeyAgreementKey}   the fresh user key's KAK
    * @param options.keyResolver {IKeyResolver}
    * @returns {Promise<void>}
    */
@@ -1345,31 +1345,37 @@ export class StorageManager {
         }
       }
       await this.#remoteStore.ensureUserCollections({ user })
-      // Ensure the PUK wrap-set roster (`key-map/puk.json`) exists,
+      // Ensure the user key wrap-set roster (`key-map/user-key.json`) exists,
       // create-if-absent through the descriptor-store seam: an absent roster is
-      // initialized with the account's PUK as its first epoch, wrapped to
+      // initialized with the account's user key as its first epoch, wrapped to
       // this client's own key-agreement key, and the created epoch is pinned
       // as the latest seen. An existing roster is left untouched (the
       // login-time read authenticates it). Non-fatal like DID provisioning:
       // the idempotent ensure resumes on the next login.
-      if (profile?.puk && profile?.clientKeyAgreementKey && profile?.keyAgent) {
+      if (
+        profile?.userKey &&
+        profile?.clientKeyAgreementKey &&
+        profile?.keyAgent
+      ) {
         try {
-          const descriptor = await ensurePukRoster({
-            store: this.#remoteStore.pukRosterStore(),
-            puk: profile.puk,
+          const descriptor = await ensureUserKeyRoster({
+            store: this.#remoteStore.userKeyRosterStore(),
+            userKey: profile.userKey,
             clientKeyAgreementKey: profile.clientKeyAgreementKey,
-            signEpochs: pukRosterEpochsSigner({ keyAgent: profile.keyAgent })
+            signEpochs: userKeyRosterEpochsSigner({
+              keyAgent: profile.keyAgent
+            })
           })
           // Pin only an epoch this session already holds the key for: the
           // ensure serves an existing roster back UNVALIDATED (no epochsMac
           // check, no continuity check, no unwrap), so a served epoch id is
-          // not evidence. The session's own PUK is -- it came from the checked
+          // not evidence. The session's own user key is -- it came from the checked
           // login-time read or the local client-key record -- and the save
           // itself is monotonic, so a rolled-back descriptor can never drag
           // the pin backward and a fabricated one can never push it onto an
           // epoch no enrolled client authenticated.
-          if (descriptor.currentEpoch === profile.puk.id) {
-            await savePukEpochPin({
+          if (descriptor.currentEpoch === profile.userKey.id) {
+            await saveUserKeyEpochPin({
               spaceId: this.#remoteStore.spaceId,
               epochId: descriptor.currentEpoch,
               epochIds: (descriptor.epochs ?? []).map(epoch => epoch.id),
@@ -1377,7 +1383,7 @@ export class StorageManager {
             })
           }
         } catch (err) {
-          console.warn('PUK roster provisioning failed:', err)
+          console.warn('user key roster provisioning failed:', err)
         }
       }
       // Provision and publish the user's did:web DID (only when a keystore

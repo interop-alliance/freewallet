@@ -4,7 +4,7 @@
  * wallet-storage decisions independently and is shared across tabs) holding
  * what ordinary login relies on -- the keyring cache (the offline / no-WAS
  * copy of the account-pointer record), this client's wrapped client-key
- * records, the account-pointer pins, the PUK roster-epoch pins, the
+ * records, the account-pointer pins, the user key roster-epoch pins, the
  * unlock-methods registry cache, and the passkey-safety notices. None of it
  * is secret on its own: the keyring, client-key, and unlock-methods records
  * are ciphertext, inert without the passphrase-derived key; the pointer and
@@ -220,7 +220,7 @@ function clientKeyRecordKey(spaceId: string): string {
 }
 
 /**
- * Saves a wrapped client-key record (this client's key set + cached PUK,
+ * Saves a wrapped client-key record (this client's key set + cached user key,
  * JWE-wrapped to an unlock method's KAK), keyed by that method's unlock Space
  * id. Unlike the keyring cache this is primary state, not a cache of anything
  * remote: the client's private keys exist nowhere else.
@@ -395,19 +395,19 @@ export async function deleteAccountPointerPin({
 }
 
 /**
- * The object-store key under which an account's PUK roster-epoch pin lives --
- * keyed by the data Space id, which identifies the roster resource the pin
- * guards (`key-map/puk.json` in that Space).
+ * The object-store key under which an account's user key roster-epoch pin
+ * lives -- keyed by the data Space id, which identifies the roster resource
+ * the pin guards (`key-map/user-key.json` in that Space).
  *
  * @param spaceId {string}   the data Space id
  * @returns {string}
  */
-function pukEpochPinKey(spaceId: string): string {
-  return `puk-epoch/${spaceId}`
+function userKeyEpochPinKey(spaceId: string): string {
+  return `user-key-epoch/${spaceId}`
 }
 
 /**
- * Pins the latest-seen PUK roster epoch for an account -- the continuity
+ * Pins the latest-seen user key roster epoch for an account -- the continuity
  * prior beside the account-pointer pin. The roster lives as an opaque
  * resource the server enforces no descriptor invariants on, so a served roster
  * whose epochs no longer contain (or precede) the pinned epoch is refused as
@@ -430,7 +430,7 @@ function pukEpochPinKey(spaceId: string): string {
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function savePukEpochPin({
+export async function saveUserKeyEpochPin({
   spaceId,
   epochId,
   epochIds,
@@ -441,7 +441,7 @@ export async function savePukEpochPin({
   epochIds?: string[]
   idb?: IDBFactory
 }): Promise<void> {
-  const stored = await loadPukEpochPin({ spaceId, idb })
+  const stored = await loadUserKeyEpochPin({ spaceId, idb })
   if (stored === epochId) {
     return
   }
@@ -450,7 +450,7 @@ export async function savePukEpochPin({
     const nextIndex = epochIds ? epochIds.indexOf(epochId) : -1
     if (storedIndex === -1 || nextIndex === -1 || nextIndex < storedIndex) {
       console.warn(
-        'Refusing to move the PUK epoch pin backward (or off the served ' +
+        'Refusing to move the user key epoch pin backward (or off the served ' +
           'epoch order); keeping the stored pin.',
         { storedEpochId: stored, epochId }
       )
@@ -460,13 +460,13 @@ export async function savePukEpochPin({
   await withSessionStore(
     'readwrite',
     store =>
-      store.put({ epochId, pinnedAt: Date.now() }, pukEpochPinKey(spaceId)),
+      store.put({ epochId, pinnedAt: Date.now() }, userKeyEpochPinKey(spaceId)),
     idb
   )
 }
 
 /**
- * Loads the pinned PUK roster epoch for an account, or `null` when this
+ * Loads the pinned user key roster epoch for an account, or `null` when this
  * client has never seen the roster.
  *
  * @param options {object}
@@ -474,7 +474,7 @@ export async function savePukEpochPin({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<string | null>}
  */
-export async function loadPukEpochPin({
+export async function loadUserKeyEpochPin({
   spaceId,
   idb
 }: {
@@ -483,7 +483,7 @@ export async function loadPukEpochPin({
 }): Promise<string | null> {
   const stored = await withSessionStore(
     'readonly',
-    store => store.get(pukEpochPinKey(spaceId)),
+    store => store.get(userKeyEpochPinKey(spaceId)),
     idb
   )
   if (stored === null || stored === undefined) {
@@ -494,15 +494,15 @@ export async function loadPukEpochPin({
 }
 
 /**
- * Deletes the pinned PUK roster epoch for an account -- account deletion and
- * Space wipes, where the continuity prior is deliberately reset.
+ * Deletes the pinned user key roster epoch for an account -- account deletion
+ * and Space wipes, where the continuity prior is deliberately reset.
  *
  * @param options {object}
  * @param options.spaceId {string}   the data Space id
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function deletePukEpochPin({
+export async function deleteUserKeyEpochPin({
   spaceId,
   idb
 }: {
@@ -511,7 +511,7 @@ export async function deletePukEpochPin({
 }): Promise<void> {
   await withSessionStore(
     'readwrite',
-    store => store.delete(pukEpochPinKey(spaceId)),
+    store => store.delete(userKeyEpochPinKey(spaceId)),
     idb
   )
 }

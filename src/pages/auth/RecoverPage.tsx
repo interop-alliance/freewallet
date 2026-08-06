@@ -35,7 +35,7 @@ import { RecoveryCodeDisplay } from '@/components/RecoveryCodeDisplay'
  * client" flow on the roster identity model. The typed code locates the
  * account (its unlock record), a new passphrase is chosen for THIS browser,
  * and the recovery ceremony runs end to end: the code's pre-minted
- * delegation writes the self-enrolling log continuation, the PUK comes out
+ * delegation writes the self-enrolling log continuation, the user key comes out
  * of the code's standing roster wrap and is rotated off the spent code, and
  * a replacement code is pushed hard -- the typed code is a spent credential.
  * The final step is an ordinary passphrase login as a freshly enrolled

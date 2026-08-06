@@ -48,7 +48,7 @@ import {
   DID_KEYS_RESOURCE,
   ID_COLLECTION,
   KEY_MAP_COLLECTION,
-  PUK_ROSTER_RESOURCE,
+  USER_KEY_ROSTER_RESOURCE,
   UNLOCK_METHODS_COLLECTION,
   UNLOCK_METHODS_RESOURCE,
   WALLET_STANDARD_COLLECTIONS
@@ -453,8 +453,8 @@ export class WASRemoteStore {
   }
 
   /**
-   * Returns the descriptor store over the PUK wrap-set roster
-   * (`key-map/puk.json`): the `resourceDescriptorStore` adapter, so the was-client
+   * Returns the descriptor store over the user key wrap-set roster
+   * (`key-map/user-key.json`): the `resourceDescriptorStore` adapter, so the was-client
    * recipient primitives read/CAS-write the roster through the seam. The
    * `plaintext` handle override skips the collection describe -- the roster is
    * read before/independently of the collection's description, and the
@@ -464,12 +464,12 @@ export class WASRemoteStore {
    *
    * @returns {EncryptionDescriptorStore}
    */
-  pukRosterStore(): EncryptionDescriptorStore {
+  userKeyRosterStore(): EncryptionDescriptorStore {
     return resourceDescriptorStore({
       resource: this.was
         .space(this.spaceId)
         .collection(KEY_MAP_COLLECTION.id, { encryption: 'plaintext' })
-        .resource(PUK_ROSTER_RESOURCE)
+        .resource(USER_KEY_ROSTER_RESOURCE)
     })
   }
 

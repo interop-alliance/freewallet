@@ -25,7 +25,7 @@ import {
 import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
 import { setClientLabel } from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
-import { savePukEpochPin } from '@/lib/sessionKey'
+import { saveUserKeyEpochPin } from '@/lib/sessionKey'
 import { deriveUnlockIdentity, KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { bindPassphrase, fetchKeyring } from '@/session/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
@@ -38,7 +38,7 @@ import type { StorageManager } from '@/stores/storageManager'
  * the enrollee's screen. Guards that this session can actually run the
  * ceremony (a configured WAS server, and this client's own did:webvh update
  * keys and key-agreement key in memory), then runs the shared push-order
- * ceremony: the PUK wrap lands in `key-map/puk.json` first, and only then the
+ * ceremony: the user key wrap lands in `key-map/user-key.json` first, and only then the
  * two did:webvh log entries publish.
  *
  * @param options {object}
@@ -89,7 +89,7 @@ export async function approveEnrollment({
     request,
     clientWebvhKeys: profile.clientWebvhKeys,
     clientKeyAgreementKey: profile.clientKeyAgreementKey,
-    pukRosterStore: remoteStore.pukRosterStore(),
+    userKeyRosterStore: remoteStore.userKeyRosterStore(),
     idStore: remoteStore.webvhIdStore()
   }).finally(() => invalidateVerifiedLog({ profile }))
   if (label?.trim()) {
@@ -163,12 +163,12 @@ export async function completeEnrollment({
     )
   }
 
-  const { puk, latestEpochId } = await completeEnrollmentCore({
+  const { userKey, latestEpochId } = await completeEnrollmentCore({
     clientSeed,
     webvhUpdateKeys,
     pointer
   })
-  await savePukEpochPin({
+  await saveUserKeyEpochPin({
     spaceId: pointer.spaceId,
     epochId: latestEpochId,
     idb
@@ -182,7 +182,7 @@ export async function completeEnrollment({
     controller: found.controller,
     passphrase,
     email: found.email,
-    puk,
+    userKey,
     webvhUpdateKeys,
     pointer,
     unlock,

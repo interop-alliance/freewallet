@@ -70,17 +70,17 @@ jobs at login: it fetches the **keyring record** from its own minimal unlock
 Space -- carrying the encrypted account pointer `{ did, spaceId, host }`, the
 controller, and the email, never key material -- and it unwraps the local
 **client-key record** in the `freewallet-session` IndexedDB, which holds this
-client's seed, a cached copy of the PUK, and this client's did:webvh
+client's seed, a cached copy of the user key, and this client's did:webvh
 update-key seeds:
 
 ```
 unlock secret (passphrase | passkey PRF output)
   → deriveUnlockIdentity(KDF)      → unlock Space → keyring record
                                       { controller, email, pointer }
-  → unwrap local client-key record → { clientSeed, puk, webvhUpdateKeys }
+  → unwrap local client-key record → { clientSeed, userKey, webvhUpdateKeys }
   → agentsFromSeed(clientSeed)     → keyAgent  (keyAgent.id === a did:key DID)
   → ZcapClient(invocationSigner)   → zcapClient (signs HTTP requests with ZCap)
-  → { user: { id: did:key }, profile: { keyAgent, zcapClient, puk } }
+  → { user: { id: did:key }, profile: { keyAgent, zcapClient, userKey } }
   → StorageManager.initStorageClients()
   → Session { user, profile, storage, isGuest }
 ```
@@ -140,12 +140,12 @@ contributes its Ed25519 verification method (published under
 `<did:webvh>#<multibase>` with `controller: <did:webvh>`. Two KMS-held VMs
 (`authentication` / `assertionMethod`) remain as server-side conveniences;
 the KMS-held `keyAgreement` VM is deliberately NOT in the document -- the
-`keyAgreement` relation is the source of record for PUK-wrap recipients, and
-no server-held key may ever be a wrap target.
+`keyAgreement` relation is the source of record for user-key wrap
+recipients, and no server-held key may ever be a wrap target.
 
 **Update keys are client-held.** `updateKeys` carries one update key per
 enrolled client (apps never), derived from 32-byte seeds that live in the
-wrapped client-key record beside the client seed and the PUK -- so the
+wrapped client-key record beside the client seed and the user key -- so the
 server cannot extend the log, which is what makes it the one
 self-certifying artifact the server hosts. Prerotation stays on with a
 **carry-over commitment convention**: `nextKeyHashes` commits each client's
@@ -185,39 +185,40 @@ verifying the moment its VM leaves the document.
 ## Session persistence
 
 Sessions are **in-memory only**. A fresh login builds the whole `Session` --
-the root `keyAgent` (from this client's locally stored seed), the PUK-backed
-vault KAK, and the `zcapClient` that signs every WAS request with the root
-key. Nothing about the live session is written to disk unwrapped (the client
-seed and PUK persist only inside the wrapped client-key record, under the
-unlock layer), so there is no refresh-survival: reloading the browser drops
+the root `keyAgent` (from this client's locally stored seed), the
+user-key-backed vault KAK, and the `zcapClient` that signs every WAS request
+with the root key. Nothing about the live session is written to disk
+unwrapped (the client seed and user key persist only inside the wrapped
+client-key record, under the unlock layer), so there is no refresh-survival:
+reloading the browser drops
 the session and the user logs in again. The vault is
 therefore always unlocked while a session exists (the KAK is present) and
 simply gone once it ends; there is no "locked vault" state.
 
-## The PUK wrap-set roster (`key-map/puk.json`)
+## The user key wrap-set roster (`key-map/user-key.json`)
 
-The per-user key (PUK) -- recipient zero of every encrypted collection -- has
-one remote home: a roster resource in the private, capability-gated `key-map`
+The user key (formerly PUK) -- recipient zero of every encrypted collection --
+has one remote home: a roster resource in the private, capability-gated `key-map`
 collection (deliberately outside the synced collections; no local replica, no
 background replication). Its body is a `CollectionEncryption` descriptor stored
-verbatim, and **the roster's current key epoch IS the current PUK**: the
-epoch id is the PUK's did:key, and the epoch secret -- the PUK's raw 32-byte
-key -- is wrapped once per enrolled wallet client, to that client's own
-(identity) key-agreement key (`profile.clientKeyAgreementKey`, the X25519
-twin of the client's did:key). The roster is a delivery channel, not a
-source of authority: each client keeps the PUK in its own local state under
-the unlock layer (the client-key record), and the roster's epoch stamp marks
-a cached copy stale.
+verbatim, and **the roster's current key epoch IS the current user key**:
+the epoch id is the user key's did:key, and the epoch secret -- the user
+key's raw 32-byte key -- is wrapped once per enrolled wallet client, to that
+client's own (identity) key-agreement key (`profile.clientKeyAgreementKey`,
+the X25519 twin of the client's did:key). The roster is a delivery channel,
+not a source of authority: each client keeps the user key in its own local
+state under the unlock layer (the client-key record), and the roster's epoch
+stamp marks a cached copy stale.
 
 Everything goes through was-client's descriptor-store seam (the plain-JSON-
 resource adapter): read-with-etag, compare-and-swap writes, and a guarded
 create for the initially-absent roster -- no descriptor logic is reimplemented
 wallet-side (`@interop/wallet-core/keys`; the store handles live in
 `wasRemoteStore.ts`). Provisioning (`ensureUserCollections`) initializes the
-roster idempotently with the account's existing PUK as the first epoch;
+roster idempotently with the account's existing user key as the first epoch;
 login performs one direct read (`initSessionFromSeed`, before the storage
-clients are built) that either confirms the cached PUK current or -- on an
-epoch mismatch, a rotation by another client -- unwraps the fresh PUK with
+clients are built) that either confirms the cached user key current or -- on an
+epoch mismatch, a rotation by another client -- unwraps the fresh user key with
 this client's own key, adopts it for the session, and persists it into the
 client-key record.
 
@@ -244,7 +245,7 @@ only PUBLIC halves travel, as a compact **connect code**
 between two browsers today, and QR-renderable unchanged for a camera-holding
 wallet later. A rendezvous-server transport remains future work. Nothing
 travels back over the channel: the account pointer comes out of the keyring
-(the enrollee holds the passphrase), and the PUK comes back through the
+(the enrollee holds the passphrase), and the user key comes back through the
 wrap-set roster. Both screens display the new client's did:key fingerprint,
 and the person running the ceremony compares them before approving -- the
 point-to-point verification the roster wrap and the document VM then inherit.
@@ -257,9 +258,10 @@ The flow, quorum-of-one (any single enrolled client can enroll):
 2. **Enrolling client** (Settings > Enroll another wallet): pastes the code,
    compares the fingerprint, approves (`approveEnrollment`). Push, not pull,
    in the recovery-anchor order -- decryption material before authorization:
-   the PUK is wrapped to the new client's key-agreement key in
-   `key-map/puk.json` FIRST (`addPukRosterRecipient`, escrow semantics: every
-   epoch, so pre-enrollment history decrypts), and only then the two
+   the user key is wrapped to the new client's key-agreement key in
+   `key-map/user-key.json` FIRST (`addUserKeyRosterRecipient`, escrow
+   semantics: every epoch, so pre-enrollment history decrypts), and only then
+   the two
    did:webvh log entries (`enrollWebvhClient`) -- a sparse **commit** entry
    extending `nextKeyHashes` with the new client's update- and staged-key
    hashes (prerotation demands the commitment land one entry early), then the
@@ -269,7 +271,7 @@ The flow, quorum-of-one (any single enrolled client can enroll):
    world-readable log (resolved locally, checked against the pointer's DID),
    performs its first roster read -- signed with its just-published
    `<did:webvh>#<multibase>` key, authorized by the current-key-set rule --
-   unwraps the PUK, persists the key set into the local client-key record
+   unwraps the user key, persists the key set into the local client-key record
    under the passphrase's unlock layer (stamping the account controller, so
    the login-time identity check binds the record to the account), and logs
    in as an ordinary enrolled client.
@@ -296,8 +298,8 @@ Its posture is deliberately split. **Decryption stands**: the code's
 (an ordinary, deliberately unmarked Multikey entry -- a recovery key is the
 keyAgreement-only case, so client listings keyed on `capabilityInvocation`
 never see it, and the document does not label which keyAgreement key is the
-recovery one), and its PUK wrap stands in the `key-map/puk.json` roster --
-both maintained for free by rotation fan-out. **Authority stays latent**:
+recovery one), and its user key wrap stands in the `key-map/user-key.json`
+roster -- both maintained for free by rotation fan-out. **Authority stays latent**:
 the code's update key joins `updateKeys` nowhere; only its hash is committed
 in `nextKeyHashes`, and the one bridge into the zcap profile is a pre-minted
 PUT-on-`did.jsonl` delegation carried inside the code's unlock record beside
@@ -324,22 +326,22 @@ entry's `nextKeyHashes` -- which is exactly what lets a committed key reveal
 itself), then an **add-and-retire** entry signed by the new client's update
 key: new client in (both VMs, all four signing relations, update authority),
 the spent code's VM, update key, and hash out, and a replacement code's
-posture in. The PUK is unwrapped from the code's standing wrap and
+posture in. The user key is unwrapped from the code's standing wrap and
 **mandatorily rotated** off the spent code (recipients of the fresh epoch
 resolved from the just-updated verified document); a replacement code is
 pushed hard (shown once, must be confirmed saved before login unlocks); the
 spent code's unlock Space is deleted (a typed code is a spent credential --
 it thereafter fails with wording distinct from "wrong code"); and the new
 client binds under a freshly chosen passphrase, ending in an ordinary
-enrolled login. The fresh PUK then fans out through the epoch cascade (see
+enrolled login. The fresh user key then fans out through the epoch cascade (see
 "Client revocation" below): every encrypted collection re-epochs onto it,
 so writes stop landing under epochs the spent code could read.
 
 Revoking a code from Settings is the issuance reversal and is REAL (the
-secret was only ever a pointer to the record): document entry out, PUK
+secret was only ever a pointer to the record): document entry out, user key
 rotated off the code's wrap and the collections re-epoch'd by the same
 cascade, unlock Space deleted, registry entry dropped; the live session
-adopts the rotated PUK in place. A login-time health check watches for
+adopts the rotated user key in place. A login-time health check watches for
 **delegation rot** -- the stored delegation stops chaining the moment its
 signing client's verification method leaves the document (current-key-set
 rule), which would brick recovery exactly when it is needed -- and nudges
@@ -377,31 +379,31 @@ client, synchronously, in dependency order:
    verification method leaves the document. There are no per-collection
    revoke calls anywhere in the cascade; apps a revoked client had
    connected reconnect through the ordinary App Connect flow.
-2. **The PUK rotation** in the `key-map/puk.json` roster
-   (`rotatePukRoster`), recipients resolved from the just-updated verified
+2. **The user key rotation** in the `key-map/user-key.json` roster
+   (`rotateUserKeyRoster`), recipients resolved from the just-updated verified
    document -- the roster delivers, never sources, so the revoked client's
    entry is dropped even before the retire filter. An account with no roster
    yet stops here: the document edit has landed, so the wallet IS
    disconnected, with nothing to rotate.
 3. **The epoch cascade** (driven by wallet-core over the collections
-   `src/session/pukCascade.ts` enumerates): every encrypted collection -- the
+   `src/session/userKeyCascade.ts` enumerates): every encrypted collection -- the
    encrypted standard collections plus every remotely listed collection
    whose Description carries an encryption descriptor -- is re-epoch'd onto
-   the fresh PUK in parallel, via was-client's `replaceRecipient` (~2
-   requests per collection): the revoked PUK generations are retired from
-   the epoch rosters and the fresh PUK is escrowed into every prior epoch,
+   the fresh user key in parallel, via was-client's `replaceRecipient` (~2
+   requests per collection): the revoked user key generations are retired from
+   the epoch rosters and the fresh user key is escrowed into every prior epoch,
    so every other replica keeps decrypting across the rotation. A
    collection is stale exactly when its current epoch names a non-current
-   PUK generation -- staleness is detected from durable state alone -- and
+   user key generation -- staleness is detected from durable state alone -- and
    a never-epoch'd collection gets the newest prior generation installed as
-   its first epoch (the PUK is the epoch construction, so pre-epoch
-   envelopes ARE epoch-`oldPuk` envelopes). Failures are collected per
+   its first epoch (the user key is the epoch construction, so pre-epoch
+   envelopes ARE epoch-`oldUserKey` envelopes). Failures are collected per
    collection, never aborting the fan-out.
 4. **The recovery re-PUTs** (`remintRecoveryDelegations`): recovery
    delegations the revoked client had signed stopped chaining at step 1;
    the revoking client re-mints them and re-PUTs the unlock records.
 
-The revoking session then adopts the fresh PUK in place -- profile vault
+The revoking session then adopts the fresh user key in place -- profile vault
 keys swapped, storage ciphers rebuilt (`adoptRotatedVaultKeys`), the
 unlock-methods registry re-wrapped -- so it keeps operating without a
 re-login, and a wallet-activity record is written under the fresh epoch.
@@ -416,8 +418,8 @@ stays readable to it, and old epochs open to keys it already held.
 The standing backstop is the **cascade-completion sweep**: session creation
 re-runs stages 2 and 3 in the background on every login whose roster read
 succeeded, chained behind collection provisioning and exposed as
-`session.pukSweep` (best-effort -- a failed sweep never fails the login).
-The roster stage runs first (`convergePukRosterToDocument`): a cascade torn
+`session.userKeySweep` (best-effort -- a failed sweep never fails the login).
+The roster stage runs first (`convergeUserKeyRosterToDocument`): a cascade torn
 between its document edit and its rotation leaves the roster wrapping the
 CURRENT key to a recipient the locally verified document no longer keys --
 durable and silent, since the revoked client's document edit will never be
@@ -428,7 +430,7 @@ fan-out runs against it. Because staleness is durable-state-only, the fan-out
 then completes a cascade another client crashed partway through, and on a
 healthy account both stages read descriptors and write nothing. Together they
 are the standing invariant check that the roster keys exactly the document's
-clients and that no collection's current epoch names a retired PUK
+clients and that no collection's current epoch names a retired user key
 generation.
 
 Recovery-code spend and revocation drive stages 2 and 3 of the same
@@ -944,11 +946,12 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   client-side only. Accessed via `KmsClient`/`KeystoreAgent` from
   `@interop/webkms-client`; provisioned at login by `src/lib/kms.ts`.
 - **Vault KAK** — the X25519 key-agreement key that encrypts/decrypts the
-  EDV envelopes: the PUK's key-agreement key, recovered at login from the
-  local client-key record with the unlock-derived key (legacy accounts minted
-  before the PUK fall back to the seed-derived twin), then checked against
-  the PUK wrap-set roster (`key-map/puk.json`), which confirms the cached
-  copy current or delivers a rotated one. Never replicated in unwrapped form
+  EDV envelopes: the user key's (formerly PUK's) key-agreement key, recovered
+  at login from the local client-key record with the unlock-derived key
+  (legacy accounts minted before the user key fall back to the seed-derived
+  twin), then checked against the user key wrap-set roster
+  (`key-map/user-key.json`), which confirms the cached copy current or
+  delivers a rotated one. Never replicated in unwrapped form
   and never held by the KMS; it is present for the life of every session.
 - **Session** — the in-memory object (`src/types/auth.ts`) holding the logged-in
   user, their `ControllerProfile` (keyAgent + zcapClient), and their

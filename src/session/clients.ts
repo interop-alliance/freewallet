@@ -181,7 +181,7 @@ export async function renameAccountClient({
 
 /**
  * Disconnects an enrolled wallet client: the full revocation cascade
- * (`revokeEnrolledClient` -- document edit, PUK rotation, collection
+ * (`revokeEnrolledClient` -- document edit, user key rotation, collection
  * re-epoch, recovery re-mints, live adoption), then the label dropped as
  * best-effort hygiene. `revokedClientKeysFor` refuses a row whose active
  * update key the log attribution could not isolate -- disconnecting with a

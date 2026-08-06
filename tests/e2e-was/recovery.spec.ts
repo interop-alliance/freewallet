@@ -11,7 +11,7 @@ import { fillSettled, signupViaWizard } from './helpers'
  * Settings (the split posture: roster wrap, the code's `keyAgreement`
  * VM, `nextKeyHashes` commitment, delegated unlock record), then recovery on
  * a COLD browser profile holding nothing but the code -- the delegated log
- * write enrolls a brand-new client, the PUK comes out of the code's standing
+ * write enrolls a brand-new client, the user key comes out of the code's standing
  * wrap and is rotated off the spent code, a replacement code is pushed hard,
  * and the recovered session decrypts pre-recovery encrypted writes (the
  * welcome credential) across the rotation. The spent code then fails with
@@ -91,7 +91,7 @@ test.describe('Recovery codes', () => {
     test.setTimeout(360_000)
 
     // Client 1: a fresh signup; the welcome credential is an encrypted write
-    // sealed BEFORE any recovery, under the pre-rotation PUK -- the escrow
+    // sealed BEFORE any recovery, under the pre-rotation user key -- the escrow
     // assertion at the end depends on it.
     const { passphrase } = await signupViaWizard(page, testInfo)
     await expect(
@@ -218,8 +218,8 @@ test.describe('Recovery codes', () => {
         timeout: 60_000
       })
 
-      // The recovered client decrypts pre-recovery history across the PUK
-      // rotation: the welcome credential (sealed under the old PUK's epoch)
+      // The recovered client decrypts pre-recovery history across the user key
+      // rotation: the welcome credential (sealed under the old user key's epoch)
       // renders via the escrowed wraps.
       await expect(
         secondClient.getByRole('link', { name: 'Your First Credential' })

@@ -60,8 +60,8 @@ importers:
         specifier: ^3.5.3
         version: 3.5.3
       '@interop/wallet-core':
-        specifier: ^0.17.1
-        version: 0.17.1(@interop/jsonld-signatures@11.8.4)
+        specifier: link:../wallet-core
+        version: link:../wallet-core
       '@interop/was-client':
         specifier: ^0.27.0
         version: 0.27.0(@interop/jsonld-signatures@11.8.4)
@@ -668,10 +668,6 @@ packages:
     resolution: {integrity: sha512-3cFFlZZz8mKwLiT8GFLeL3Nr49UOO7fP77Cwj7mEXWh15S/OKEpqpAHEePQ9p1T7fusbUVVmk7W+/AVHU1r1Fw==}
     engines: {node: '>=24.0'}
 
-  '@interop/wallet-core@0.17.1':
-    resolution: {integrity: sha512-TIwLcf8KZL7aa7Xti+VwuRETUJ0h7jpBjTsAl4UAcKVDy+AW4wpHbNJ5BkZnMTUztsGNAhQDlzJJpqin5qcBuQ==}
-    engines: {node: '>=24.0'}
-
   '@interop/was-client@0.27.0':
     resolution: {integrity: sha512-tP3DSQsML/5gjeEV72bsxt2/4YdJVQIpCP8mLJfCkU7Ol26GQTUha96W38WJZtz2ey16ZuAIgpGHkRQxWXPMmg==}
     engines: {node: '>=24.0'}
@@ -703,18 +699,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
-
-  '@jsep-plugin/assignment@1.3.0':
-    resolution: {integrity: sha512-VVgV+CXrhbMI3aSusQyclHkenWSAm95WaiKrMxRFam3JSUiIaQjoMIw2sEs/OX4XifnqeQUN4DYbJjlA8EfktQ==}
-    engines: {node: '>= 10.16.0'}
-    peerDependencies:
-      jsep: ^0.4.0||^1.0.0
-
-  '@jsep-plugin/regex@1.0.4':
-    resolution: {integrity: sha512-q7qL4Mgjs1vByCaTnDFcBnV9HS7GVPJX5vyVoCgZHNSC9rjwIlmbXG5sUuorR5ndfHAIlJ8pVStxvjXHbNvtUg==}
-    engines: {node: '>= 10.16.0'}
-    peerDependencies:
-      jsep: ^0.4.0||^1.0.0
 
   '@mui/core-downloads-tracker@9.2.0':
     resolution: {integrity: sha512-+XMav+ZaXkZKUFUgzjrfMEedfyJKxxviAske2q8N8CWDMeqZdDU2lWMkiUPiB388hGaDqhwvOAwkrsc/pUyp8g==}
@@ -949,9 +933,6 @@ packages:
 
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
-
-  '@scure/base@1.2.6':
-    resolution: {integrity: sha512-g/nm5FgUa//MCj1gV09zTJTaM6KBAHqLN907YVQqf7zC49+DcO4B1so4ZX07Ef10Twr6nuqYEH9GEggFXA4Fmg==}
 
   '@scure/base@2.2.0':
     resolution: {integrity: sha512-b8XEupJibegiXV+tDUseI8oLQc8ei3d/4Jkb2RpbHh3MfE054ov3uIz2dhFkB3FI8iwYkEh0gGCApkrYggkPNg==}
@@ -1511,6 +1492,7 @@ packages:
 
   crypto-js@4.2.0:
     resolution: {integrity: sha512-KALDyEYgpY+Rlob/iriUtjV6d5Eq+Y191A5g4UqLAi8CyGP9N1+FdVbkc1SxKc2r4YAYqG8JzO2KGL+AizD70Q==}
+    deprecated: Active development of CryptoJS has been discontinued. This library is no longer maintained.
 
   crypto-ld@7.0.0:
     resolution: {integrity: sha512-RrXy6aB0TOhSiqsgavTQt1G8mKomKIaNLb2JZxj7A/Vi0EwmXguuBQoeiAvePfK6bDR3uQbqYnaLLs4irTWwgw==}
@@ -2207,10 +2189,6 @@ packages:
       canvas:
         optional: true
 
-  jsep@1.4.0:
-    resolution: {integrity: sha512-B7qPcEVE3NVkmSJbaYxvv4cHkVW7DQsZz13pUMrfS8z8Q/BuShN+gcTXrUlPiGqM2/t/EEaI030bpxMqY8gMlw==}
-    engines: {node: '>= 10.16.0'}
-
   jsesc@3.1.0:
     resolution: {integrity: sha512-/sM3dO2FOzXjKQhJuo0Q173wf2KOo8t4I8vHy6lF9poUp7bKT0/NHE8fPX23PwfhnykfqnC2xRxOnVw5XuGIaA==}
     engines: {node: '>=6'}
@@ -2242,11 +2220,6 @@ packages:
   jsonld-document-loader@2.3.0:
     resolution: {integrity: sha512-u06N5O5sCewgXyxFnnRSm0w3o47ps834QjYzpOMc13Nq+AJQd/JGYrW/WZnz5D+8NEvnKXph7AFi6MA7ZJ8Q0Q==}
     engines: {node: '>=18'}
-
-  jsonpath-plus@10.4.0:
-    resolution: {integrity: sha512-T92WWatJXmhBbKsgH/0hl+jxjdXrifi5IKeMY02DWggRxX0UElcbVzPlmgLTbvsPeW1PasQ6xE2Q75stkhGbsA==}
-    engines: {node: '>=18.0.0'}
-    hasBin: true
 
   jsonpointer@5.0.1:
     resolution: {integrity: sha512-p/nXbhSEcu3pZRdkW1OfJhpsVtW1gd4Wa1fnQc9YLiTfAjn0312eMKimbdIQzuZl9aa9xUGaRlP9T/CJE/ditQ==}
@@ -4076,28 +4049,6 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/wallet-core@0.17.1(@interop/jsonld-signatures@11.8.4)':
-    dependencies:
-      '@interop/data-integrity-core': 8.4.0
-      '@interop/data-integrity-proof': 3.4.3
-      '@interop/did-method-webvh': 5.0.0
-      '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.4)
-      '@interop/ed25519-verification-key': 8.0.3
-      '@interop/ezcap': 7.4.1
-      '@interop/security-document-loader': 9.5.1
-      '@interop/social-core': 0.8.0
-      '@interop/vc': 11.0.6
-      '@interop/was-client': 0.27.0(@interop/jsonld-signatures@11.8.4)
-      '@interop/webkms-client': 14.7.1
-      '@interop/x25519-key-agreement-key': 5.2.1
-      '@noble/hashes': 2.2.0
-      '@scure/base': 1.2.6
-      jsonpath-plus: 10.4.0
-    transitivePeerDependencies:
-      - '@interop/jsonld-signatures'
-      - expo-crypto
-      - react-native-get-random-values
-
   '@interop/was-client@0.27.0(@interop/jsonld-signatures@11.8.4)':
     dependencies:
       '@interop/data-integrity-core': 8.4.0
@@ -4158,14 +4109,6 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
-
-  '@jsep-plugin/assignment@1.3.0(jsep@1.4.0)':
-    dependencies:
-      jsep: 1.4.0
-
-  '@jsep-plugin/regex@1.0.4(jsep@1.4.0)':
-    dependencies:
-      jsep: 1.4.0
 
   '@mui/core-downloads-tracker@9.2.0': {}
 
@@ -4339,8 +4282,6 @@ snapshots:
     optional: true
 
   '@rolldown/pluginutils@1.0.1': {}
-
-  '@scure/base@1.2.6': {}
 
   '@scure/base@2.2.0': {}
 
@@ -5751,8 +5692,6 @@ snapshots:
     transitivePeerDependencies:
       - '@noble/hashes'
 
-  jsep@1.4.0: {}
-
   jsesc@3.1.0: {}
 
   json-buffer@3.0.1: {}
@@ -5770,12 +5709,6 @@ snapshots:
   json5@2.2.3: {}
 
   jsonld-document-loader@2.3.0: {}
-
-  jsonpath-plus@10.4.0:
-    dependencies:
-      '@jsep-plugin/assignment': 1.3.0(jsep@1.4.0)
-      '@jsep-plugin/regex': 1.0.4(jsep@1.4.0)
-      jsep: 1.4.0
 
   jsonpointer@5.0.1: {}
 

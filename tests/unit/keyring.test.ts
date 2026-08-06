@@ -3,7 +3,7 @@
  * Unit tests for the keyring v2 module (`src/session/keyring.ts`): the unlock
  * derivation (deterministic, secret-sensitive), the record wrap/unwrap
  * round-trip and its validation, the local client-key record (this client's
- * key set + cached PUK under the unlock layer), account-pointer continuity
+ * key set + cached user key under the unlock layer), account-pointer continuity
  * (the local pin and its refusal), and the `fetchKeyring` / `bindPassphrase`
  * / `changePassphrase` public contract across the WAS-configured and
  * cache-only branches. The module is method-agnostic -- unlock derivation
@@ -91,7 +91,7 @@ import {
   KEYRING_KDF,
   type AccountPointer
 } from '@interop/wallet-core/keyring'
-import { mintPuk } from '@interop/wallet-core/keys'
+import { mintUserKey } from '@interop/wallet-core/keys'
 
 const KDF = {
   version: 1,
@@ -383,13 +383,13 @@ describe('wrap / unwrap', () => {
   it('writes a record that carries no key material of any kind', async () => {
     const idb = createFakeIdb()
     const clientSeed = randomSeed()
-    const puk = await mintPuk()
+    const userKey = await mintUserKey()
 
     await bindPassphrase({
       clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'no key material passphrase',
-      puk,
+      userKey,
       pointer: POINTER,
       idb,
       kdf: KDF
@@ -487,16 +487,16 @@ describe('wrap / unwrap', () => {
 })
 
 describe('the client key set under the unlock layer', () => {
-  it('round-trips the client seed and the cached PUK through bind + fetch', async () => {
+  it('round-trips the client seed and the cached user key through bind + fetch', async () => {
     const idb = createFakeIdb()
     const clientSeed = randomSeed()
-    const puk = await mintPuk()
+    const userKey = await mintUserKey()
 
     await bindPassphrase({
       clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'client keys round-trip passphrase',
-      puk,
+      userKey,
       idb,
       kdf: KDF
     })
@@ -510,19 +510,19 @@ describe('the client key set under the unlock layer', () => {
     expect(Array.from(found!.clientKeys!.clientSeed)).toEqual(
       Array.from(clientSeed)
     )
-    expect(found!.clientKeys!.puk!.id).toBe(puk.id)
-    expect(Array.from(found!.clientKeys!.puk!.secret)).toEqual(
-      Array.from(puk.secret)
+    expect(found!.clientKeys!.userKey!.id).toBe(userKey.id)
+    expect(Array.from(found!.clientKeys!.userKey!.secret)).toEqual(
+      Array.from(userKey.secret)
     )
-    expect(Array.from(found!.clientKeys!.puk!.signingSeed!)).toEqual(
-      Array.from(puk.signingSeed)
+    expect(Array.from(found!.clientKeys!.userKey!.signingSeed!)).toEqual(
+      Array.from(userKey.signingSeed)
     )
   })
 
   it('round-trips the did:webvh update-key seeds and re-wraps via persistClientKeys', async () => {
     const idb = createFakeIdb()
     const clientSeed = randomSeed()
-    const puk = await mintPuk()
+    const userKey = await mintUserKey()
     const webvhUpdateKeys = {
       updateSeed: randomSeed(),
       stagedSeed: randomSeed()
@@ -532,7 +532,7 @@ describe('the client key set under the unlock layer', () => {
       clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'webvh keys round-trip passphrase',
-      puk,
+      userKey,
       webvhUpdateKeys,
       idb,
       kdf: KDF
@@ -576,7 +576,7 @@ describe('the client key set under the unlock layer', () => {
     expect(Array.from(persisted.pendingStagedSeed!)).toEqual(
       Array.from(rolled.pendingStagedSeed)
     )
-    expect(after!.clientKeys!.puk!.id).toBe(puk.id)
+    expect(after!.clientKeys!.userKey!.id).toBe(userKey.id)
     expect(Array.from(after!.clientKeys!.clientSeed)).toEqual(
       Array.from(clientSeed)
     )
@@ -1214,16 +1214,16 @@ describe('changePassphrase', () => {
     ).resolves.not.toBeNull()
   })
 
-  it('preserves the client seed, PUK, email, and pointer across the rebind', async () => {
+  it('preserves the client seed, user key, email, and pointer across the rebind', async () => {
     const idb = createFakeIdb()
     const clientSeed = randomSeed()
-    const puk = await mintPuk()
+    const userKey = await mintUserKey()
     await bindPassphrase({
       clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'carry rebind old passphrase',
       email: 'holder@example.com',
-      puk,
+      userKey,
       pointer: POINTER,
       idb,
       kdf: KDF
@@ -1234,7 +1234,7 @@ describe('changePassphrase', () => {
       controller: DATA_CONTROLLER,
       oldPassphrase: 'carry rebind old passphrase',
       newPassphrase: 'carry rebind new passphrase',
-      puk,
+      userKey,
       idb,
       kdf: KDF
     })
@@ -1249,18 +1249,18 @@ describe('changePassphrase', () => {
     expect(Array.from(found!.clientKeys!.clientSeed)).toEqual(
       Array.from(clientSeed)
     )
-    expect(found!.clientKeys!.puk!.id).toBe(puk.id)
+    expect(found!.clientKeys!.userKey!.id).toBe(userKey.id)
   })
 
-  it("falls back to the old record's PUK when the caller passes none", async () => {
+  it("falls back to the old record's user key when the caller passes none", async () => {
     const idb = createFakeIdb()
     const clientSeed = randomSeed()
-    const puk = await mintPuk()
+    const userKey = await mintUserKey()
     await bindPassphrase({
       clientSeed,
       controller: DATA_CONTROLLER,
-      passphrase: 'puk fallback old passphrase',
-      puk,
+      passphrase: 'userKey fallback old passphrase',
+      userKey,
       idb,
       kdf: KDF
     })
@@ -1268,18 +1268,18 @@ describe('changePassphrase', () => {
     await changePassphrase({
       clientSeed,
       controller: DATA_CONTROLLER,
-      oldPassphrase: 'puk fallback old passphrase',
-      newPassphrase: 'puk fallback new passphrase',
+      oldPassphrase: 'userKey fallback old passphrase',
+      newPassphrase: 'userKey fallback new passphrase',
       idb,
       kdf: KDF
     })
 
     const found = await fetchKeyring({
-      passphrase: 'puk fallback new passphrase',
+      passphrase: 'userKey fallback new passphrase',
       idb,
       kdf: KDF
     })
-    expect(found!.clientKeys!.puk!.id).toBe(puk.id)
+    expect(found!.clientKeys!.userKey!.id).toBe(userKey.id)
   })
 
   it("falls back to the old record's did:webvh update keys when the caller passes none", async () => {
@@ -1341,7 +1341,7 @@ describe('changePassphrase', () => {
     })
 
     // The session's live copy has moved on since the bind (a rotation), just
-    // as the live PUK can have.
+    // as the live user key can have.
     const liveKeys = {
       updateSeed: boundKeys.stagedSeed,
       stagedSeed: randomSeed(),
@@ -1377,7 +1377,7 @@ describe('changePassphrase', () => {
   it('returns a persistClientKeys closure over the new client-key record', async () => {
     const idb = createFakeIdb()
     const clientSeed = randomSeed()
-    const puk = await mintPuk()
+    const userKey = await mintUserKey()
     const webvhUpdateKeys = {
       updateSeed: randomSeed(),
       stagedSeed: randomSeed()
@@ -1386,7 +1386,7 @@ describe('changePassphrase', () => {
       clientSeed,
       controller: DATA_CONTROLLER,
       passphrase: 'persist closure old passphrase',
-      puk,
+      userKey,
       webvhUpdateKeys,
       idb,
       kdf: KDF
@@ -1398,7 +1398,7 @@ describe('changePassphrase', () => {
       controller: DATA_CONTROLLER,
       oldPassphrase: 'persist closure old passphrase',
       newPassphrase: 'persist closure new passphrase',
-      puk,
+      userKey,
       webvhUpdateKeys,
       idb,
       kdf: KDF
@@ -1429,7 +1429,7 @@ describe('changePassphrase', () => {
     expect(Array.from(persisted.stagedSeed)).toEqual(
       Array.from(rolled.stagedSeed)
     )
-    expect(found!.clientKeys!.puk!.id).toBe(puk.id)
+    expect(found!.clientKeys!.userKey!.id).toBe(userKey.id)
     expect(Array.from(found!.clientKeys!.clientSeed)).toEqual(
       Array.from(clientSeed)
     )

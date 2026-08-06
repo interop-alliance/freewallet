@@ -31,7 +31,10 @@ import {
   type PassphraseUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
-import { deletePasskeySafetyNotice, deletePukEpochPin } from '@/lib/sessionKey'
+import {
+  deletePasskeySafetyNotice,
+  deleteUserKeyEpochPin
+} from '@/lib/sessionKey'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import { findLoginCredential, loginHandleOf } from '@/lib/loginCredential'
 import type { Session } from '@/types/auth'
@@ -86,7 +89,7 @@ export async function loadUnlockRegistry({
  *
  * Ordering: the rebind retires the unlock identity this session logged in
  * under, so the live profile is swapped onto the new one immediately -- later
- * re-wraps (rolled update-key seeds, a rotated PUK) must hit the new
+ * re-wraps (rolled update-key seeds, a rotated user key) must hit the new
  * client-key record, and the registry backfill must never repoint at the
  * deleted unlock Space. Repointing the registry's passphrase entry is a
  * separate, best-effort follow-up (`repointPassphraseUnlockMethod`), because
@@ -131,12 +134,12 @@ export async function changeAccountPassphrase({
     controller: profile.accountController ?? session.user.id,
     oldPassphrase,
     newPassphrase,
-    puk: profile.puk,
+    userKey: profile.userKey,
     webvhUpdateKeys: profile.clientWebvhKeys
   })
   // The rebind retired the unlock identity this session logged in under:
   // swap the live profile onto the new one, so later re-wraps (rolled
-  // update-key seeds, a rotated PUK) hit the new client-key record and the
+  // update-key seeds, a rotated user key) hit the new client-key record and the
   // registry backfill never repoints at the deleted unlock Space.
   adoptPassphraseRebind({
     session,
@@ -257,7 +260,7 @@ export async function addAccountPasskey({
   const accountController = profile.accountController ?? session.user.id
   const { entry } = await enrollPasskey({
     clientSeed,
-    puk: profile.puk,
+    userKey: profile.userKey,
     webvhUpdateKeys: profile.clientWebvhKeys,
     pointer: profile.accountPointer,
     controller: accountController,
@@ -393,7 +396,7 @@ export async function addAccountPassphrase({
     controller: accountController,
     passphrase,
     email: session.user.email,
-    puk: session.profile.puk,
+    userKey: session.profile.userKey,
     webvhUpdateKeys: session.profile.clientWebvhKeys,
     pointer: session.profile.accountPointer,
     delegateManagementTo: unlockManagementGrantee({
@@ -554,7 +557,7 @@ export async function deleteAccount({
     const dataSpaceId = session.profile.accountPointer?.spaceId
     if (dataSpaceId) {
       try {
-        await deletePukEpochPin({ spaceId: dataSpaceId })
+        await deleteUserKeyEpochPin({ spaceId: dataSpaceId })
       } catch (err) {
         console.warn('Could not delete the key-roster epoch pin:', err)
       }

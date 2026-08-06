@@ -208,7 +208,7 @@ describe('canIssueRecoveryCode', () => {
     pointerDid?: string
     clientWebvhKeys?: unknown
     clientKeyAgreementKey?: unknown
-    puk?: unknown
+    userKey?: unknown
   }): Session {
     return {
       user: { id: 'did:key:z6MkTest' },
@@ -235,7 +235,10 @@ describe('canIssueRecoveryCode', () => {
           id: 'did:key:z6MkThisClient',
           getSigner: () => ({ sign: async () => new Uint8Array(64) })
         },
-        puk: 'puk' in overrides ? overrides.puk : { id: 'did:key:z6LSpuk' }
+        userKey:
+          'userKey' in overrides
+            ? overrides.userKey
+            : { id: 'did:key:z6LSuserKey' }
       }
     } as unknown as Session
   }
@@ -259,7 +262,7 @@ describe('canIssueRecoveryCode', () => {
       })
     ).toBe(false)
     expect(
-      canIssueRecoveryCode({ session: sessionWith({ puk: undefined }) })
+      canIssueRecoveryCode({ session: sessionWith({ userKey: undefined }) })
     ).toBe(false)
   })
 })

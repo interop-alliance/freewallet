@@ -18,10 +18,10 @@ import type {
   ClientWebvhUpdateKeys,
   DidWebKeyMap
 } from '@interop/wallet-core/webvh'
-import type { Puk } from '@interop/wallet-core/keys'
+import type { UserKey } from '@interop/wallet-core/keys'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
-import type { PukCascadeResult } from '@/session/pukCascade'
+import type { UserKeyCascadeResult } from '@/session/userKeyCascade'
 import type { VerifiedLogCache } from '@/session/verifiedLog'
 
 /**
@@ -62,15 +62,15 @@ export interface ControllerProfile {
   zcapClient: ZcapClient
   // X25519 key agreement key used to encrypt/decrypt the EDV-over-WAS
   // encrypted collections (recipient zero of every key-epoch roster): the
-  // PUK's KAK when the account carries one, else the legacy seed-derived
+  // user key's KAK when the account carries one, else the legacy seed-derived
   // vault KAK (the Montgomery form of the Ed25519 signing key).
   keyAgreementKey?: IKeyAgreementKey
   // Resolves `keyAgreementKey.id` to its public form during encrypt.
   keyResolver?: IKeyResolver
   // This client's own (identity) X25519 key-agreement key -- the Montgomery
   // twin of the client's Ed25519 did:key pair, kept distinct from the
-  // PUK-backed `keyAgreementKey` above. It is the client's entry in the PUK
-  // wrap-set roster (`key-map/puk.json`): rotation wraps the fresh PUK to it,
+  // user-key-backed `keyAgreementKey` above. It is the client's entry in the user key
+  // wrap-set roster (`key-map/user-key.json`): rotation wraps the fresh user key to it,
   // and a roster read unwraps with it.
   clientKeyAgreementKey?: IKeyAgreementKey
   // WebKMS keystore agent, bound to the user's keystore on the configured
@@ -94,7 +94,7 @@ export interface ControllerProfile {
   // the wrapped client-key record).
   clientWebvhKeys?: ClientWebvhUpdateKeys
   // Re-wraps this client's client-key record with changed members (a rotated
-  // PUK, rolled update-key seeds) without re-prompting for the unlock
+  // user key, rolled update-key seeds) without re-prompting for the unlock
   // secret: a closure over the unlock identity that produced this session
   // (login) or the freshest bind (signup). In-memory only, same trust class
   // as `clientSeed` above. Absent for guests and not-enrolled states.
@@ -115,12 +115,12 @@ export interface ControllerProfile {
   // state (recovered from the keyring record at login, or stamped at
   // provisioning). Discovery only; absent for guests and no-WAS sessions.
   accountPointer?: AccountPointer
-  // The per-user key (PUK) recovered from the local client-key record (or
+  // The per-user key (user key) recovered from the local client-key record (or
   // freshly minted at provisioning), held in memory so bind flows can carry
   // it into new client-key records. Absent on legacy accounts minted before
-  // the PUK, whose recipient zero stays the seed-derived vault KAK until they
+  // the user key, whose recipient zero stays the seed-derived vault KAK until they
   // are re-provisioned. Never persisted unwrapped.
-  puk?: Puk
+  userKey?: UserKey
   // Which unlock method produced this session -- or, after a same-session
   // passphrase change, the freshest passphrase bind -- and the management
   // zcap it delegated to the data identity at bind time. In-memory only,
@@ -168,12 +168,12 @@ export interface Session {
   storageReady?: Promise<void>
   // The cascade-completion sweep fired by session creation when the login's
   // roster read succeeded and a remote store is attached: re-runs the
-  // collection fan-out of the PUK cascade (staleness detected from durable
+  // collection fan-out of the user key cascade (staleness detected from durable
   // state alone), so a cascade another client crashed partway completes on
   // the next login. Chained behind `storageReady`, strictly best-effort --
   // resolves `null` when the sweep itself failed (never rejects) -- and
   // absent when there was nothing to sweep from (guest, no WAS, no roster).
-  pukSweep?: Promise<PukCascadeResult | null>
+  userKeySweep?: Promise<UserKeyCascadeResult | null>
   expires?: string // ISO date string, matches Auth.js convention
   isGuest: boolean
 }

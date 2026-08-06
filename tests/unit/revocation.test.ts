@@ -32,20 +32,20 @@ vi.mock('@interop/wallet-core/clients', () => ({
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
-  pukVaultKeys: vi.fn(({ puk }: { puk: { id: string } }) => ({
-    keyAgreementKey: { id: `${puk.id}#kak` },
+  userKeyVaultKeys: vi.fn(({ userKey }: { userKey: { id: string } }) => ({
+    keyAgreementKey: { id: `${userKey.id}#kak` },
     keyResolver: async () => ({})
   }))
 }))
 
 vi.mock('@/lib/sessionKey', () => ({
-  savePukEpochPin: vi.fn(async () => {
-    state.calls.push('savePukEpochPin')
+  saveUserKeyEpochPin: vi.fn(async () => {
+    state.calls.push('saveUserKeyEpochPin')
   }),
-  loadPukEpochPin: vi.fn(async () => {
-    state.calls.push('loadPukEpochPin')
-    // OLD_PUK.id, restated: the factory is hoisted above the consts.
-    return 'did:key:z6LSOldPuk'
+  loadUserKeyEpochPin: vi.fn(async () => {
+    state.calls.push('loadUserKeyEpochPin')
+    // OLD_USER_KEY.id, restated: the factory is hoisted above the consts.
+    return 'did:key:z6LSOldUserKey'
   })
 }))
 
@@ -63,7 +63,7 @@ vi.mock('@/session/recovery', () => ({
   })
 }))
 
-vi.mock('@/session/pukCascade', () => ({
+vi.mock('@/session/userKeyCascade', () => ({
   cascadeCollections: vi.fn(() => ({
     collectionIds: async () => ['private-credentials'],
     storeFor: () => ({ isDescriptorStore: true }),
@@ -73,14 +73,14 @@ vi.mock('@/session/pukCascade', () => ({
 
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
-import { pukVaultKeys } from '@interop/wallet-core/keys'
-import { loadPukEpochPin, savePukEpochPin } from '@/lib/sessionKey'
+import { userKeyVaultKeys } from '@interop/wallet-core/keys'
+import { loadUserKeyEpochPin, saveUserKeyEpochPin } from '@/lib/sessionKey'
 import {
   getUnlockMethods,
   rewrapUnlockMethodsRecord
 } from '@/session/unlockMethods'
 import { remintRecoveryDelegations } from '@/session/recovery'
-import { cascadeCollections } from '@/session/pukCascade'
+import { cascadeCollections } from '@/session/userKeyCascade'
 import {
   revokeEnrolledClient,
   type RevokedClientKeys
@@ -99,12 +99,15 @@ const REVOKED: RevokedClientKeys = {
   updateKeyMultibase: 'z6MkRevokedUpdate'
 }
 
-const OLD_PUK = { id: 'did:key:z6LSOldPuk', secret: new Uint8Array(32).fill(1) }
-const FRESH_PUK = {
-  id: 'did:key:z6LSFreshPuk',
+const OLD_USER_KEY = {
+  id: 'did:key:z6LSOldUserKey',
+  secret: new Uint8Array(32).fill(1)
+}
+const FRESH_USER_KEY = {
+  id: 'did:key:z6LSFreshUserKey',
   secret: new Uint8Array(32).fill(2)
 }
-const ROSTER_DESCRIPTOR = { epochs: [{ id: FRESH_PUK.id }] }
+const ROSTER_DESCRIPTOR = { epochs: [{ id: FRESH_USER_KEY.id }] }
 const DOCUMENT = { id: 'did:webvh:doc' }
 
 /**
@@ -120,11 +123,11 @@ const DOCUMENT = { id: 'did:webvh:doc' }
 function orchestratorDriving({ rotated = true, failedCollections = 0 } = {}) {
   return async (options: Parameters<typeof revokeAccountClient>[0]) => {
     state.calls.push('revokeAccountClient')
-    const puk = rotated ? FRESH_PUK : OLD_PUK
+    const userKey = rotated ? FRESH_USER_KEY : OLD_USER_KEY
     if (rotated) {
-      await options.onPukAdopted?.({
-        puk,
-        latestEpochId: puk.id,
+      await options.onUserKeyAdopted?.({
+        userKey,
+        latestEpochId: userKey.id,
         descriptor: ROSTER_DESCRIPTOR as never
       })
     }
@@ -133,7 +136,7 @@ function orchestratorDriving({ rotated = true, failedCollections = 0 } = {}) {
       document: DOCUMENT
     })
     if (rotated) {
-      await options.onRotationAdopted?.({ puk })
+      await options.onRotationAdopted?.({ userKey })
     }
     return {
       rotated,
@@ -148,7 +151,7 @@ function orchestratorDriving({ rotated = true, failedCollections = 0 } = {}) {
         }))
       },
       document: DOCUMENT,
-      puk,
+      userKey,
       ...(recovery ? { recovery } : {})
     } as never
   }
@@ -173,7 +176,7 @@ function sessionWith(
     'remoteStore' in overrides
       ? overrides.remoteStore
       : {
-          pukRosterStore: vi.fn(() => ({ rosterStore: true })),
+          userKeyRosterStore: vi.fn(() => ({ rosterStore: true })),
           webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true }))
         }
   return {
@@ -206,8 +209,8 @@ function sessionWith(
         'clientKeyAgreementKey' in overrides
           ? overrides.clientKeyAgreementKey
           : { id: 'did:key:z6MkRevokingClient#z6LSRevokingClient' },
-      puk: OLD_PUK,
-      keyAgreementKey: { id: `${OLD_PUK.id}#kak` },
+      userKey: OLD_USER_KEY,
+      keyAgreementKey: { id: `${OLD_USER_KEY.id}#kak` },
       keyResolver: async () => ({}),
       persistClientKeys: vi.fn(async () => {
         state.calls.push('persistClientKeys')
@@ -286,9 +289,9 @@ describe('the cascade, rotated path', () => {
     })
 
     expect(state.calls).toEqual([
-      'loadPukEpochPin',
+      'loadUserKeyEpochPin',
       'revokeAccountClient',
-      'savePukEpochPin',
+      'saveUserKeyEpochPin',
       'persistClientKeys',
       'cascadeCollections',
       'remintRecoveryDelegations',
@@ -320,36 +323,36 @@ describe('the cascade, rotated path', () => {
         updateKeys: session.profile.clientWebvhKeys,
         revokedClient: REVOKED,
         knownLatentHashes: [],
-        puk: OLD_PUK,
+        userKey: OLD_USER_KEY,
         clientKeyAgreementKey: session.profile.clientKeyAgreementKey,
-        pinnedEpochId: OLD_PUK.id
+        pinnedEpochId: OLD_USER_KEY.id
       })
     )
     expect(vi.mocked(cascadeCollections)).toHaveBeenCalledWith({
       remoteStore: session.storage.remoteStore
     })
-    expect(vi.mocked(loadPukEpochPin)).toHaveBeenCalledWith(
+    expect(vi.mocked(loadUserKeyEpochPin)).toHaveBeenCalledWith(
       expect.objectContaining({ spaceId: POINTER.spaceId })
     )
   })
 
-  it('pins the fresh epoch and persists the rotated PUK together', async () => {
+  it('pins the fresh epoch and persists the rotated user key together', async () => {
     const session = sessionWith()
     await revokeEnrolledClient({ session, client: REVOKED })
 
-    expect(vi.mocked(savePukEpochPin)).toHaveBeenCalledWith(
+    expect(vi.mocked(saveUserKeyEpochPin)).toHaveBeenCalledWith(
       expect.objectContaining({
         spaceId: POINTER.spaceId,
-        epochId: FRESH_PUK.id,
-        epochIds: [FRESH_PUK.id]
+        epochId: FRESH_USER_KEY.id,
+        epochIds: [FRESH_USER_KEY.id]
       })
     )
     expect(session.profile.persistClientKeys).toHaveBeenCalledWith({
-      puk: FRESH_PUK
+      userKey: FRESH_USER_KEY
     })
   })
 
-  it('adopts the rotated PUK into the live session', async () => {
+  it('adopts the rotated user key into the live session', async () => {
     const session = sessionWith()
     const previousVaultKeys = {
       keyAgreementKey: session.profile.keyAgreementKey,
@@ -357,23 +360,25 @@ describe('the cascade, rotated path', () => {
     }
     await revokeEnrolledClient({ session, client: REVOKED })
 
-    expect(session.profile.puk).toBe(FRESH_PUK)
-    expect(session.profile.keyAgreementKey?.id).toBe(`${FRESH_PUK.id}#kak`)
+    expect(session.profile.userKey).toBe(FRESH_USER_KEY)
+    expect(session.profile.keyAgreementKey?.id).toBe(`${FRESH_USER_KEY.id}#kak`)
     expect(vi.mocked(rewrapUnlockMethodsRecord)).toHaveBeenCalledWith(
       expect.objectContaining({
         spaceId: POINTER.spaceId,
         from: previousVaultKeys,
         to: expect.objectContaining({
-          keyAgreementKey: { id: `${FRESH_PUK.id}#kak` }
+          keyAgreementKey: { id: `${FRESH_USER_KEY.id}#kak` }
         })
       })
     )
     expect(session.storage.adoptRotatedVaultKeys).toHaveBeenCalledWith(
       expect.objectContaining({
-        keyAgreementKey: { id: `${FRESH_PUK.id}#kak` }
+        keyAgreementKey: { id: `${FRESH_USER_KEY.id}#kak` }
       })
     )
-    expect(vi.mocked(pukVaultKeys)).toHaveBeenCalledWith({ puk: FRESH_PUK })
+    expect(vi.mocked(userKeyVaultKeys)).toHaveBeenCalledWith({
+      userKey: FRESH_USER_KEY
+    })
   })
 
   it('records the audit history with the per-collection tallies', async () => {
@@ -453,11 +458,11 @@ describe('re-run convergence and best-effort stages', () => {
     expect(outcome.rotated).toBe(false)
     expect(vi.mocked(remintRecoveryDelegations)).toHaveBeenCalledOnce()
     expect(session.storage.addHistoryClientRevoked).toHaveBeenCalledOnce()
-    // Nothing re-persists or re-adopts: the session already holds this PUK.
+    // Nothing re-persists or re-adopts: the session already holds this user key.
     expect(session.profile.persistClientKeys).not.toHaveBeenCalled()
     expect(vi.mocked(rewrapUnlockMethodsRecord)).not.toHaveBeenCalled()
     expect(session.storage.adoptRotatedVaultKeys).not.toHaveBeenCalled()
-    expect(session.profile.puk).toBe(OLD_PUK)
+    expect(session.profile.userKey).toBe(OLD_USER_KEY)
   })
 
   it('tolerates failing adoption, re-wrap, and history stages', async () => {
@@ -474,9 +479,9 @@ describe('re-run convergence and best-effort stages', () => {
     )
     const outcome = await revokeEnrolledClient({ session, client: REVOKED })
     expect(outcome.rotated).toBe(true)
-    // The live profile still adopted the fresh PUK even though the storage
+    // The live profile still adopted the fresh user key even though the storage
     // cipher rebuild failed (the next login converges).
-    expect(session.profile.puk).toBe(FRESH_PUK)
+    expect(session.profile.userKey).toBe(FRESH_USER_KEY)
     warn.mockRestore()
   })
 

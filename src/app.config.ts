@@ -153,7 +153,7 @@ export const SYNCED_COLLECTIONS: Array<{ key: string; id: string }> =
   WALLET_STANDARD_COLLECTIONS.map(({ key, id }) => ({ key, id }))
 // The system collections and resource names that carry the account's identity
 // and key material -- the world-readable `id` collection (`did.json`,
-// `did.jsonl`), the private `key-map` collection (`keys.json`, `puk.json`,
+// `did.jsonl`), the private `key-map` collection (`keys.json`, `user-key.json`,
 // `client-labels.json`),
 // and the unlock Space's `keyring` collection (`keyring.json`). They are
 // shared wallet Space layout, declared once in `@interop/wallet-core/space`
@@ -167,7 +167,7 @@ export {
   KEY_MAP_COLLECTION,
   KEYRING_COLLECTION,
   KEYRING_RESOURCE,
-  PUK_ROSTER_RESOURCE
+  USER_KEY_ROSTER_RESOURCE
 } from '@interop/wallet-core/space'
 
 // Whether to provision and publish the user's did:webvh DID log alongside the

@@ -1,6 +1,6 @@
 /**
- * The collection fan-out of the PUK rotation cascade: after the `key-map`
- * roster has moved to a fresh PUK (a client revoked, a recovery code spent or
+ * The collection fan-out of the user key rotation cascade: after the `key-map`
+ * roster has moved to a fresh user key (a client revoked, a recovery code spent or
  * revoked), every encrypted collection in the Space -- the encrypted standard
  * collections AND the app-provisioned ones -- is re-epoch'd onto the fresh
  * key in parallel, so writes stop landing under epochs the revoked party can
@@ -11,7 +11,7 @@
  *
  * Convergence is the design, not an afterthought: staleness is detected from
  * durable data alone (a collection is stale exactly when its current epoch
- * names a non-current PUK generation), so a mid-cascade crash followed by a
+ * names a non-current user key generation), so a mid-cascade crash followed by a
  * naive full re-run rotates only what is still stranded, with zero redundant
  * epochs. Failures are collected per collection rather than aborting the
  * fan-out; the cascade-completion sweep is the standing backstop.
@@ -20,15 +20,15 @@ import { collectionDescriptorStore } from '@interop/was-client/edv'
 import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import {
-  cascadeCollectionsToPuk as driveCascade,
-  type Puk,
-  type PukCascadeResult
+  cascadeCollectionsToUserKey as driveCascade,
+  type UserKey,
+  type UserKeyCascadeResult
 } from '@interop/wallet-core/keys'
 import type { CascadeCollections } from '@interop/wallet-core/clients'
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
-export type { PukCascadeResult } from '@interop/wallet-core/keys'
+export type { UserKeyCascadeResult } from '@interop/wallet-core/keys'
 
 /**
  * The Space's collection listing, reduced to what the cascade asks of it:
@@ -64,7 +64,7 @@ async function listedCollections({
     }
   } catch (err) {
     console.warn(
-      'Could not list remote collections for the PUK cascade; rotating the ' +
+      'Could not list remote collections for the user key cascade; rotating the ' +
         'standard collections only:',
       err
     )
@@ -133,30 +133,30 @@ export function cascadeCollections({
 }
 
 /**
- * Re-epochs every encrypted collection onto the roster's current PUK, in
+ * Re-epochs every encrypted collection onto the roster's current user key, in
  * parallel. Collections not declared encrypted server-side are skipped; a
  * collection that fails is reported in `failed` and the rest proceed.
  *
  * @param options {object}
  * @param options.remoteStore {WASRemoteStore}
  * @param options.rosterDescriptor {CollectionEncryption}   the freshly read
- *   `key-map/puk.json` roster (the source of the PUK generations)
+ *   `key-map/user-key.json` roster (the source of the user key generations)
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) key-agreement key, unwrapping the generations
- * @param options.puk {Puk}   the roster's current PUK
- * @returns {Promise<PukCascadeResult>}
+ * @param options.userKey {UserKey}   the roster's current user key
+ * @returns {Promise<UserKeyCascadeResult>}
  */
-export async function cascadeCollectionsToPuk({
+export async function cascadeCollectionsToUserKey({
   remoteStore,
   rosterDescriptor,
   clientKeyAgreementKey,
-  puk
+  userKey
 }: {
   remoteStore: WASRemoteStore
   rosterDescriptor: CollectionEncryption
   clientKeyAgreementKey: IKeyAgreementKey
-  puk: Puk
-}): Promise<PukCascadeResult> {
+  userKey: UserKey
+}): Promise<UserKeyCascadeResult> {
   const work = cascadeCollections({ remoteStore })
   const result = await driveCascade({
     collectionIds: await work.collectionIds(),
@@ -164,11 +164,11 @@ export async function cascadeCollectionsToPuk({
     ...(work.isEncrypted ? { isEncrypted: work.isEncrypted } : {}),
     rosterDescriptor,
     clientKeyAgreementKey,
-    puk
+    userKey
   })
   for (const { collectionId, error } of result.failed) {
     console.warn(
-      `Could not rotate collection "${collectionId}" onto the current PUK:`,
+      `Could not rotate collection "${collectionId}" onto the current user key:`,
       error
     )
   }

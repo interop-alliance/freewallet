@@ -1,11 +1,11 @@
 /**
  * Recovery codes on the roster identity model. A code is a minimal always-enrolled wallet client: its unlock
  * record carries the account pointer plus a pre-minted PUT-on-`did.jsonl`
- * delegation (never a seed, never a PUK wrap), its `keyAgreement`
+ * delegation (never a seed, never a user key wrap), its `keyAgreement`
  * verification method stands in the did:webvh document (unmarked -- a
  * recovery key is the keyAgreement-only case, so client listings keyed on
- * `capabilityInvocation` never see it), its PUK wrap stands in the
- * `key-map/puk.json`
+ * `capabilityInvocation` never see it), its user key wrap stands in the
+ * `key-map/user-key.json`
  * roster (maintained for free by rotation fan-out), and its update-key hash
  * stands committed in `nextKeyHashes` -- decryption standing, authority
  * latent, the key material existing nowhere until the code is typed.
@@ -19,12 +19,12 @@
  * - `recoverAccountWithCode` -- the `/recover` flow end to end on a fresh
  *   browser: unlock record decrypted, log verified, a new ordinary client
  *   key set minted, the delegation invoked to write the self-enrolling
- *   continuation, the PUK unwrapped from the code's standing wrap, the
- *   mandatory PUK rotation in the roster (the spent code presumed
+ *   continuation, the user key unwrapped from the code's standing wrap, the
+ *   mandatory user key rotation in the roster (the spent code presumed
  *   compromised), the epoch cascade re-keying every encrypted collection off
  *   the spent code's reach, a replacement code issued hard, and the new
  *   client bound under a fresh passphrase.
- * - `revokeRecoveryCode` -- the Settings removal: document entry out, PUK
+ * - `revokeRecoveryCode` -- the Settings removal: document entry out, user key
  *   rotated off the code's wrap, the same collection cascade, unlock Space
  *   deleted, registry entry dropped, and the live session adopting the
  *   rotated key in place.
@@ -60,16 +60,16 @@ import {
   type AccountPointer
 } from '@interop/wallet-core/keyring'
 import {
-  addPukRosterRecipient,
-  pukRosterDescriptorStore,
-  pukRosterEpochsSigner,
-  pukVaultKeys,
-  readPukRoster,
-  rotatePukRoster,
-  type Puk,
+  addUserKeyRosterRecipient,
+  userKeyRosterDescriptorStore,
+  userKeyRosterEpochsSigner,
+  userKeyVaultKeys,
+  readUserKeyRoster,
+  rotateUserKeyRoster,
+  type UserKey,
   type RosterRecipientDocument
 } from '@interop/wallet-core/keys'
-import { cascadeCollectionsToPuk } from '@/session/pukCascade'
+import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
   delegationKeyInDocument,
   documentKeyMultibases,
@@ -116,15 +116,15 @@ import {
   verifiedAccountLog
 } from '@/session/verifiedLog'
 import {
-  adoptRotatedPuk,
-  rewrapUnlockRegistryToPuk
-} from '@/session/pukAdoption'
+  adoptRotatedUserKey,
+  rewrapUnlockRegistryToUserKey
+} from '@/session/userKeyAdoption'
 import {
   deleteAccountPointerPin,
   deleteClientKeyRecord,
   deleteKeyringCache,
-  loadPukEpochPin,
-  savePukEpochPin
+  loadUserKeyEpochPin,
+  saveUserKeyEpochPin
 } from '@/lib/sessionKey'
 import { WASRemoteStore } from '@/stores/wasRemoteStore'
 
@@ -443,12 +443,12 @@ export function canIssueRecoveryCode({
 }: {
   session: Session
 }): boolean {
-  return !!enrolledClientContext({ session }) && !!session.profile.puk
+  return !!enrolledClientContext({ session }) && !!session.profile.userKey
 }
 
 /**
  * Issues a recovery code from a live enrolled session, in the
- * recovery-anchor order (decryption material before authorization): the PUK
+ * recovery-anchor order (decryption material before authorization): the user key
  * wrap lands in the roster FIRST (escrow: every epoch, so recovery decrypts
  * pre-issuance history), then the document entry (the recovery-marked
  * `keyAgreement` VM and the update-key hash commitment), then the delegation
@@ -489,8 +489,8 @@ export async function issueRecoveryCode({
   const client = await recoveryClientFromCode({ code })
 
   // 1. Decryption material first: the code's wrap into every roster epoch.
-  await addPukRosterRecipient({
-    store: remoteStore.pukRosterStore(),
+  await addUserKeyRosterRecipient({
+    store: remoteStore.userKeyRosterStore(),
     recipient: {
       id: client.recipientKid,
       publicKeyMultibase: client.keyAgreementKeyMultibase
@@ -800,14 +800,14 @@ export async function recoverAccountWithCode({
 
   // The roster: escrow the new client and the replacement code into every
   // epoch (owner: the spent code's KAK, whose wraps stand since issuance),
-  // read the standing PUK, then the mandatory rotation off the spent code --
+  // read the standing user key, then the mandatory rotation off the spent code --
   // it is presumed compromised the moment it is typed.
-  const rosterStore = pukRosterDescriptorStore({
+  const rosterStore = userKeyRosterDescriptorStore({
     storageServerUrl: pointer.host,
     zcapClient: newZcapClient,
     spaceId: pointer.spaceId
   })
-  await addPukRosterRecipient({
+  await addUserKeyRosterRecipient({
     store: rosterStore,
     recipient: {
       id: newClientAgents.keyAgreementKey.id,
@@ -815,7 +815,7 @@ export async function recoverAccountWithCode({
     },
     ownerKeyAgreementKey: spent.agents.keyAgreementKey
   })
-  await addPukRosterRecipient({
+  await addUserKeyRosterRecipient({
     store: rosterStore,
     recipient: {
       id: replacement.recipientKid,
@@ -823,20 +823,20 @@ export async function recoverAccountWithCode({
     },
     ownerKeyAgreementKey: spent.agents.keyAgreementKey
   })
-  const pinnedEpochId = await loadPukEpochPin({
+  const pinnedEpochId = await loadUserKeyEpochPin({
     spaceId: pointer.spaceId,
     idb
   })
   // The just-updated, locally verified document: the root of trust the roster
   // reads verify the epoch-configuration signature against (this client holds
-  // no cached PUK, so every read here adopts an epoch from the roster), and
+  // no cached user key, so every read here adopts an epoch from the roster), and
   // the recipient source for the rotation below.
   const { doc } = await verifyAccountLog({
     did: pointer.did,
     spaceId: pointer.spaceId,
     host: pointer.host
   })
-  const preRotation = await readPukRoster({
+  const preRotation = await readUserKeyRoster({
     store: rosterStore,
     clientKeyAgreementKey: newClientAgents.keyAgreementKey,
     pinnedEpochId,
@@ -844,34 +844,36 @@ export async function recoverAccountWithCode({
   })
   if (!preRotation) {
     throw new Error(
-      'The account has no PUK roster; it must finish provisioning before ' +
+      'The account has no user key roster; it must finish provisioning before ' +
         'it can be recovered.'
     )
   }
-  const oldPuk = preRotation.puk
+  const oldUserKey = preRotation.userKey
 
   // The rotation wraps the fresh epoch only to recipients the just-updated
   // document backs -- the spent code's VM is gone, so its entry is dropped
   // even before the recipient filter. The pull axis already ran at the
   // document: the spent code's VM and update-key hash left in the
   // continuation's add-and-retire entry.
-  await rotatePukRoster({
+  await rotateUserKeyRoster({
     store: rosterStore,
     document: doc,
     retireRecipientId: spent.recipientKid,
-    signEpochs: pukRosterEpochsSigner({ keyAgent: newClientAgents.keyAgent })
+    signEpochs: userKeyRosterEpochsSigner({
+      keyAgent: newClientAgents.keyAgent
+    })
   })
-  const postRotation = await readPukRoster({
+  const postRotation = await readUserKeyRoster({
     store: rosterStore,
     clientKeyAgreementKey: newClientAgents.keyAgreementKey,
     pinnedEpochId,
     document: doc
   })
   if (!postRotation) {
-    throw new Error('The PUK roster vanished during recovery.')
+    throw new Error('The user key roster vanished during recovery.')
   }
-  const newPuk = postRotation.puk
-  await savePukEpochPin({
+  const newUserKey = postRotation.userKey
+  await saveUserKeyEpochPin({
     spaceId: pointer.spaceId,
     epochId: postRotation.latestEpochId,
     epochIds: (postRotation.descriptor.epochs ?? []).map(epoch => epoch.id),
@@ -879,30 +881,30 @@ export async function recoverAccountWithCode({
   })
 
   // The epoch cascade: every encrypted collection takes a fresh epoch naming
-  // the rotated PUK, the spent code's generation retired, history escrowed --
+  // the rotated user key, the spent code's generation retired, history escrowed --
   // so new writes are sealed away from the spent code, not just future
   // rotations. Best-effort per collection; the completion sweep backstops a
   // partial run, and a stranded collection stays readable meanwhile (the old
-  // epochs remain, escrowed to the fresh PUK).
-  await cascadeCollectionsToPuk({
+  // epochs remain, escrowed to the fresh user key).
+  await cascadeCollectionsToUserKey({
     remoteStore,
     rosterDescriptor: postRotation.descriptor,
     clientKeyAgreementKey: newClientAgents.keyAgreementKey,
-    puk: newPuk
+    userKey: newUserKey
   })
 
-  // Re-seal the unlock-methods registry to the rotated PUK: its record is a
+  // Re-seal the unlock-methods registry to the rotated user key: its record is a
   // single-recipient envelope to the vault KAK, and the post-login registry
-  // update (`recordRecoveryOutcome`) runs on the new-PUK session. Best-effort:
-  // a failure leaves the registry sealed to the old PUK, which the post-login
+  // update (`recordRecoveryOutcome`) runs on the new-user key session. Best-effort:
+  // a failure leaves the registry sealed to the old user key, which the post-login
   // update then surfaces as a warning.
-  if (oldPuk.id !== newPuk.id) {
-    await rewrapUnlockRegistryToPuk({
+  if (oldUserKey.id !== newUserKey.id) {
+    await rewrapUnlockRegistryToUserKey({
       storageServerUrl: pointer.host,
       zcapClient: newZcapClient,
       spaceId: pointer.spaceId,
-      from: pukVaultKeys({ puk: oldPuk }),
-      to: pukVaultKeys({ puk: newPuk })
+      from: userKeyVaultKeys({ userKey: oldUserKey }),
+      to: userKeyVaultKeys({ userKey: newUserKey })
     })
   }
 
@@ -949,7 +951,7 @@ export async function recoverAccountWithCode({
   })
 
   // Bind the new client under the new passphrase: the keyring record, the
-  // local client-key record (client seed + rotated PUK + update-key seeds),
+  // local client-key record (client seed + rotated user key + update-key seeds),
   // the pointer pin, and the management zcap. An ordinary passphrase login
   // now finds an enrolled client.
   await bindPassphrase({
@@ -957,7 +959,7 @@ export async function recoverAccountWithCode({
     controller: contents.controller,
     passphrase: newPassphrase,
     email: contents.email,
-    puk: newPuk,
+    userKey: newUserKey,
     webvhUpdateKeys: newClientUpdateSeeds,
     pointer: replacementPointer,
     // The account controller stamp above is an identity label; management
@@ -1044,14 +1046,14 @@ export async function updateRegistryAfterRecovery({
  * Revokes a recovery code from a live enrolled session -- the issuance
  * reversal, in the cascade order: the document entry out first (the pull
  * axis: the code's VM and commitment leave, so the doc-backed resolver drops
- * its roster entry), then the mandatory PUK rotation off the code's wrap,
+ * its roster entry), then the mandatory user key rotation off the code's wrap,
  * then the epoch cascade re-keying every encrypted collection, then the
  * unlock Space (whose deletion is what makes the code resolve to nothing
  * afterwards) and the registry entry. The revocation is REAL -- the secret
  * was only ever a pointer to the record -- which is stronger than what the
  * sharing layer can promise.
  *
- * The rotated PUK is persisted into this client's client-key record and
+ * The rotated user key is persisted into this client's client-key record and
  * epoch pin, and the live session ADOPTS it in place (it drove the rotation,
  * so it holds the fresh key): profile vault keys swapped, storage ciphers
  * rebuilt -- no re-login. Other clients adopt the rotation at their next
@@ -1093,7 +1095,7 @@ export async function revokeRecoveryCode({
     }
   })
 
-  // 2. The PUK rotation off the code's wrap, recipients resolved from the
+  // 2. The user key rotation off the code's wrap, recipients resolved from the
   // just-updated document (the pull axis already ran there) -- so the memo
   // from before the edit is dropped first, and the re-read refills it with
   // the document every later surface should see.
@@ -1102,39 +1104,39 @@ export async function revokeRecoveryCode({
     profile: session.profile,
     pointer
   })
-  const rosterStore = remoteStore.pukRosterStore()
-  await rotatePukRoster({
+  const rosterStore = remoteStore.userKeyRosterStore()
+  await rotateUserKeyRoster({
     store: rosterStore,
     document: doc,
     retireRecipientId: entry.recoveryKid,
-    signEpochs: pukRosterEpochsSigner({ keyAgent })
+    signEpochs: userKeyRosterEpochsSigner({ keyAgent })
   })
-  const read = await readPukRoster({
+  const read = await readUserKeyRoster({
     store: rosterStore,
-    puk: session.profile.puk,
+    userKey: session.profile.userKey,
     clientKeyAgreementKey,
-    pinnedEpochId: await loadPukEpochPin({ spaceId: pointer.spaceId, idb }),
+    pinnedEpochId: await loadUserKeyEpochPin({ spaceId: pointer.spaceId, idb }),
     document: doc
   })
-  let rotatedPuk: Puk | undefined
+  let rotatedUserKey: UserKey | undefined
   if (read) {
-    await savePukEpochPin({
+    await saveUserKeyEpochPin({
       spaceId: pointer.spaceId,
       epochId: read.latestEpochId,
       epochIds: (read.descriptor.epochs ?? []).map(epoch => epoch.id),
       idb
     })
     if (read.rotated) {
-      // Persist the rotated PUK for the next login, then re-epoch every
+      // Persist the rotated user key for the next login, then re-epoch every
       // encrypted collection onto it (best-effort per collection; the
       // completion sweep backstops a partial run).
-      rotatedPuk = read.puk
-      await session.profile.persistClientKeys?.({ puk: read.puk })
-      await cascadeCollectionsToPuk({
+      rotatedUserKey = read.userKey
+      await session.profile.persistClientKeys?.({ userKey: read.userKey })
+      await cascadeCollectionsToUserKey({
         remoteStore,
         rosterDescriptor: read.descriptor,
         clientKeyAgreementKey,
-        puk: read.puk
+        userKey: read.userKey
       })
     }
   }
@@ -1145,17 +1147,17 @@ export async function revokeRecoveryCode({
   // reads/writes decrypt the stored record.
   await revokeUnlockMethod({ session, entry, idb })
 
-  // 4. Re-seal the registry to the rotated PUK (step 3's write went out
+  // 4. Re-seal the registry to the rotated user key (step 3's write went out
   // under the old vault KAK), then adopt the rotation in the live session:
   // profile vault keys swapped and the storage ciphers rebuilt, so this
   // session keeps reading and writing the re-epoch'd collections without a
   // re-login. Best-effort: a failed re-seal leaves the registry sealed to
-  // the old PUK, which the next login surfaces as a warning.
-  if (rotatedPuk) {
-    await adoptRotatedPuk({
+  // the old user key, which the next login surfaces as a warning.
+  if (rotatedUserKey) {
+    await adoptRotatedUserKey({
       session,
       spaceId: pointer.spaceId,
-      puk: rotatedPuk
+      userKey: rotatedUserKey
     })
   }
 }

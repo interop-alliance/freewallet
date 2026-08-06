@@ -11,9 +11,9 @@ import { fillSettled, signupViaWizard } from './helpers'
  * profile to an existing account. The cold profile's passphrase login is
  * refused (not enrolled), the "Connect this browser" flow mints its key set
  * locally and shows a connect code, the first client approves the code from
- * Settings (the PUK roster wrap, then the two-entry did:webvh ceremony), and
+ * Settings (the user key roster wrap, then the two-entry did:webvh ceremony), and
  * the cold profile completes: its first roster read -- signed with its
- * freshly published `<did:webvh>#<multibase>` key -- delivers the PUK, and
+ * freshly published `<did:webvh>#<multibase>` key -- delivers the user key, and
  * the session decrypts the encrypted collections INCLUDING pre-enrollment
  * writes (the escrow-every-epoch semantics; the welcome credential was
  * sealed before the second client existed). The enrollment itself is two
@@ -130,7 +130,7 @@ test.describe('Client enrollment ceremony', () => {
         timeout: 60_000
       })
 
-      // The escrowed PUK decrypts the pre-enrollment epoch: the welcome
+      // The escrowed user key decrypts the pre-enrollment epoch: the welcome
       // credential (an encrypted private-credentials write from before this
       // client existed) renders.
       await expect(

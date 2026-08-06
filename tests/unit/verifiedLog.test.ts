@@ -84,7 +84,7 @@ function sessionWith({ pointer = POINTER } = {}): Session {
     storage: {
       remoteStore: {
         clientLabelsStore: () => ({}),
-        pukRosterStore: () => ({}),
+        userKeyRosterStore: () => ({}),
         webvhIdStore: () => ({})
       }
     },
@@ -96,7 +96,7 @@ function sessionWith({ pointer = POINTER } = {}): Session {
       },
       clientKeyAgreementKey: { id: 'did:key:z6LSx#z6LSx' },
       keyAgent: { id: 'did:key:z6MkThisClient' },
-      puk: { id: 'did:key:z6LSpuk' }
+      userKey: { id: 'did:key:z6LSuserKey' }
     }
   } as unknown as Session
 }
