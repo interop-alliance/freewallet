@@ -1006,7 +1006,7 @@ export class BrowserStore {
     const head: ContactHeadPayload = {
       contactId,
       updatedAt,
-      deviceId,
+      writerId: deviceId,
       contact
     }
     // `contacts` is stable-id (mutable, updated in place): an encrypted write
@@ -1073,7 +1073,7 @@ export class BrowserStore {
     const head: ContactHeadPayload = {
       contactId,
       updatedAt,
-      deviceId,
+      writerId: deviceId,
       contact
     }
     // Re-encrypt in place through the cipher's update path: it keeps the row's

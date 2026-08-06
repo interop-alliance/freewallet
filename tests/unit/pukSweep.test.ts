@@ -167,7 +167,8 @@ describe('the login-time cascade-completion sweep', () => {
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
-      puk: OLD_PUK
+      puk: OLD_PUK,
+      accountPointer: POINTER
     })
     expect(session.pukSweep).toBeDefined()
 
@@ -201,6 +202,7 @@ describe('the login-time cascade-completion sweep', () => {
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
       puk: OLD_PUK,
+      accountPointer: POINTER,
       persistClientKeys
     })
     expect(persistClientKeys).toHaveBeenCalledExactlyOnceWith({
@@ -224,7 +226,8 @@ describe('the login-time cascade-completion sweep', () => {
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
-      puk: OLD_PUK
+      puk: OLD_PUK,
+      accountPointer: POINTER
     })
     session.storageReady?.catch(() => {})
     fake.rejectProvisioning(new Error('provisioning down'))
@@ -254,7 +257,8 @@ describe('the login-time cascade-completion sweep', () => {
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
-      puk: OLD_PUK
+      puk: OLD_PUK,
+      accountPointer: POINTER
     })
     fake.resolveProvisioning()
     await session.pukSweep
@@ -279,7 +283,8 @@ describe('the login-time cascade-completion sweep', () => {
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
-      puk: OLD_PUK
+      puk: OLD_PUK,
+      accountPointer: POINTER
     })
     fake.resolveProvisioning()
     await session.pukSweep
@@ -299,7 +304,8 @@ describe('the login-time cascade-completion sweep', () => {
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
-      puk: OLD_PUK
+      puk: OLD_PUK,
+      accountPointer: POINTER
     })
     fake.resolveProvisioning()
     await expect(session.pukSweep).resolves.toBeNull()
@@ -315,7 +321,8 @@ describe('the login-time cascade-completion sweep', () => {
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
-      puk: OLD_PUK
+      puk: OLD_PUK,
+      accountPointer: POINTER
     })
     expect(session.pukSweep).toBeUndefined()
   })
@@ -332,7 +339,8 @@ describe('the login-time cascade-completion sweep', () => {
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
-      puk: OLD_PUK
+      puk: OLD_PUK,
+      accountPointer: POINTER
     })
     expect(session.pukSweep).toBeUndefined()
     expect(session.profile.puk).toEqual(OLD_PUK)
@@ -348,7 +356,8 @@ describe('the login-time cascade-completion sweep', () => {
 
     const { session } = await initSessionFromSeed({
       seed: randomSeed(),
-      puk: OLD_PUK
+      puk: OLD_PUK,
+      accountPointer: POINTER
     })
     expect(session.pukSweep).toBeUndefined()
   })
@@ -510,7 +519,7 @@ describe('the roster stage of the sweep', () => {
     warn.mockRestore()
   })
 
-  it('does not run for an account whose pointer names no did:webvh', async () => {
+  it('does not run for an account whose pointer names no DID', async () => {
     const fake = makeFakeStorage()
     vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
       storage: fake.storage,
@@ -524,9 +533,14 @@ describe('the roster stage of the sweep', () => {
       accountPointer: { ...POINTER, did: undefined }
     })
     fake.resolveProvisioning()
-    await session.pukSweep
 
+    // The roster read itself requires a pointer that names the account DID
+    // (the epoch-signature check resolves the signer against the account
+    // log), so a did-less pointer skips the read -- and with no roster in
+    // hand there is no sweep at all.
+    expect(vi.mocked(checkPukRosterAtLogin)).not.toHaveBeenCalled()
+    expect(session.pukSweep).toBeUndefined()
     expect(vi.mocked(convergePukRosterToAccount)).not.toHaveBeenCalled()
-    expect(vi.mocked(cascadeCollectionsToPuk)).toHaveBeenCalledOnce()
+    expect(vi.mocked(cascadeCollectionsToPuk)).not.toHaveBeenCalled()
   })
 })

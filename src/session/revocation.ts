@@ -20,6 +20,7 @@ import {
   type RevokedClientKeys
 } from '@interop/wallet-core/webvh'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
+import { pukRosterEpochsSigner } from '@interop/wallet-core/keys'
 import type { Session } from '@/types/auth'
 import { savePukEpochPin, loadPukEpochPin } from '@/lib/sessionKey'
 import { getUnlockMethods } from '@/session/unlockMethods'
@@ -124,9 +125,13 @@ export async function revokeEnrolledClient({
   label?: string
   idb?: IDBFactory
 }): Promise<RevocationOutcome> {
-  const { remoteStore, pointer, clientWebvhKeys, clientKeyAgreementKey } =
-    requireEnrolledClientContext({ session, action: 'Client revocation' })
-  const { keyAgent } = session.profile
+  const {
+    remoteStore,
+    pointer,
+    clientWebvhKeys,
+    clientKeyAgreementKey,
+    keyAgent
+  } = requireEnrolledClientContext({ session, action: 'Client revocation' })
   // One registry read for the whole cascade: the latent commitment hashes the
   // document edit needs, and the entries the delegation re-mint walks.
   const entries = await recoveryEntries({ session, idb })
@@ -141,9 +146,8 @@ export async function revokeEnrolledClient({
     updateKeys: clientWebvhKeys,
     revokedClient: client,
     knownLatentHashes: await latentRecoveryHashes({ entries }),
-    ...(keyAgent
-      ? { ownSigningKeyMultibase: clientSigningKeyMultibase({ keyAgent }) }
-      : {}),
+    ownSigningKeyMultibase: clientSigningKeyMultibase({ keyAgent }),
+    signEpochs: pukRosterEpochsSigner({ keyAgent }),
     rosterStore: remoteStore.pukRosterStore(),
     ...(session.profile.puk ? { puk: session.profile.puk } : {}),
     clientKeyAgreementKey,

@@ -1,10 +1,11 @@
 /**
  * The enrolled-client context: the preconditions shared by every ceremony that
  * acts AS the account -- recovery-code issuance and revocation, client
- * revocation, and the Settings clients surface. All of them need the same four
+ * revocation, and the Settings clients surface. All of them need the same five
  * things (a configured storage server with a remote store, a promoted
- * did:webvh account pointer, this client's did:webvh update keys, and this
- * client's identity key-agreement key), so they are resolved once here.
+ * did:webvh account pointer, this client's did:webvh update keys, this
+ * client's identity key-agreement key, and this client's signing key agent),
+ * so they are resolved once here.
  *
  * The boolean gates the UI enables its buttons on are DERIVED from the same
  * resolution rather than restating it, so a gate and its ceremony cannot
@@ -18,7 +19,7 @@ import {
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
 import { WAS_SERVER_URL } from '@/app.config'
-import type { Session } from '@/types/auth'
+import type { ICapabilityAgent, Session } from '@/types/auth'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
 /**
@@ -32,6 +33,7 @@ export interface EnrolledClientContext {
   pointer: AccountPointer & { did: string }
   clientWebvhKeys: ClientWebvhUpdateKeys
   clientKeyAgreementKey: IKeyAgreementKey
+  keyAgent: ICapabilityAgent
   controller: string
 }
 
@@ -39,7 +41,7 @@ export interface EnrolledClientContext {
  * Which precondition a session misses, in the order they are checked.
  */
 type MissingPrecondition =
-  'storage' | 'pointer' | 'updateKeys' | 'keyAgreementKey'
+  'storage' | 'pointer' | 'updateKeys' | 'keyAgreementKey' | 'keyAgent'
 
 /**
  * Resolves the enrolled-client context, or names the first precondition the
@@ -69,6 +71,9 @@ function resolveEnrolledClientContext({
   if (!profile.clientKeyAgreementKey) {
     return { missing: 'keyAgreementKey' }
   }
+  if (!profile.keyAgent) {
+    return { missing: 'keyAgent' }
+  }
   return {
     context: {
       remoteStore,
@@ -77,6 +82,7 @@ function resolveEnrolledClientContext({
       pointer: { ...pointer, did: pointer.did },
       clientWebvhKeys: profile.clientWebvhKeys,
       clientKeyAgreementKey: profile.clientKeyAgreementKey,
+      keyAgent: profile.keyAgent,
       controller: profile.accountController ?? session.user.id
     }
   }
@@ -131,6 +137,8 @@ export function requireEnrolledClientContext({
       )
     case 'updateKeys':
       throw new Error(`${action} requires this client's did:webvh update keys.`)
+    case 'keyAgent':
+      throw new Error(`${action} requires this client's signing key.`)
     default:
       throw new Error(`${action} requires this client's key-agreement key.`)
   }

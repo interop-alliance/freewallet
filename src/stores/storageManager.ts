@@ -66,7 +66,10 @@ import {
   type DidWebKeyMapV2
 } from '@interop/wallet-core/webvh'
 import { promoteKeystoreController, rebindKeystoreAgent } from '@/lib/kms'
-import { ensurePukRoster } from '@interop/wallet-core/keys'
+import {
+  ensurePukRoster,
+  pukRosterEpochsSigner
+} from '@interop/wallet-core/keys'
 import {
   acquireDescriptor,
   acquireDescriptors,
@@ -1349,12 +1352,13 @@ export class StorageManager {
       // as the latest seen. An existing roster is left untouched (the
       // login-time read authenticates it). Non-fatal like DID provisioning:
       // the idempotent ensure resumes on the next login.
-      if (profile?.puk && profile?.clientKeyAgreementKey) {
+      if (profile?.puk && profile?.clientKeyAgreementKey && profile?.keyAgent) {
         try {
           const descriptor = await ensurePukRoster({
             store: this.#remoteStore.pukRosterStore(),
             puk: profile.puk,
-            clientKeyAgreementKey: profile.clientKeyAgreementKey
+            clientKeyAgreementKey: profile.clientKeyAgreementKey,
+            signEpochs: pukRosterEpochsSigner({ keyAgent: profile.keyAgent })
           })
           // Pin only an epoch this session already holds the key for: the
           // ensure serves an existing roster back UNVALIDATED (no epochsMac
@@ -2560,7 +2564,7 @@ export class StorageManager {
           contactId,
           action,
           timestamp: new Date().toISOString(),
-          deviceId,
+          writerId: deviceId,
           snapshot
         }
       })

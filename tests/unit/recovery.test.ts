@@ -231,6 +231,10 @@ describe('canIssueRecoveryCode', () => {
           'clientKeyAgreementKey' in overrides
             ? overrides.clientKeyAgreementKey
             : { id: 'did:key:z6LSx#z6LSx' },
+        keyAgent: {
+          id: 'did:key:z6MkThisClient',
+          getSigner: () => ({ sign: async () => new Uint8Array(64) })
+        },
         puk: 'puk' in overrides ? overrides.puk : { id: 'did:key:z6LSpuk' }
       }
     } as unknown as Session

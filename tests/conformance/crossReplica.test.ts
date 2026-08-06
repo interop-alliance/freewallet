@@ -517,7 +517,7 @@ describeConformance('cross-replica round-trip conformance', () => {
     const head: ContactHeadPayload = {
       contactId: uuidv7(),
       updatedAt: new Date().toISOString(),
-      deviceId,
+      writerId: deviceId,
       contact
     }
     const { id, envelope } = await fwCiphers[CONTACTS_COLLECTION].encrypt({
@@ -545,7 +545,7 @@ describeConformance('cross-replica round-trip conformance', () => {
     const head: ContactHeadPayload = {
       contactId: uuidv7(),
       updatedAt: new Date().toISOString(),
-      deviceId,
+      writerId: deviceId,
       contact
     }
     const { envelope } = await fwLegacyContactsCipher.encrypt({
@@ -583,7 +583,7 @@ describeConformance('cross-replica round-trip conformance', () => {
     const head: ContactHeadPayload = {
       contactId: existing.contactId ?? id,
       updatedAt,
-      deviceId,
+      writerId: deviceId,
       contact
     }
     const { envelope } = await fwCiphers[CONTACTS_COLLECTION].encryptUpdate!({
@@ -649,7 +649,7 @@ describeConformance('cross-replica round-trip conformance', () => {
     const head: ContactHeadPayload = {
       contactId: uuidv7(),
       updatedAt,
-      deviceId,
+      writerId: deviceId,
       contact
     }
     const { id, envelope } = await dcwCiphers[CONTACTS_COLLECTION].encrypt({
@@ -682,7 +682,7 @@ describeConformance('cross-replica round-trip conformance', () => {
     const head: ContactHeadPayload = {
       contactId: existing.contactId ?? id,
       updatedAt,
-      deviceId,
+      writerId: deviceId,
       contact
     }
     if (!cipher.encryptUpdate) {
@@ -1187,14 +1187,14 @@ describeConformance('cross-replica round-trip conformance', () => {
       contactId,
       action: 'create',
       timestamp: new Date().toISOString(),
-      deviceId: 'dcw-writer',
+      writerId: 'dcw-writer',
       snapshot: { displayName: 'Rev from mobile' }
     }
     const fwRevision: ContactRevisionPayload = {
       contactId,
       action: 'update',
       timestamp: new Date(Date.now() + 1_000).toISOString(),
-      deviceId: 'fw-writer',
+      writerId: 'fw-writer',
       snapshot: { displayName: 'Rev from web' }
     }
 

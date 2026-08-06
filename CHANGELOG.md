@@ -1,5 +1,23 @@
 # History
 
+## 0.26.0 - TBD
+
+### Changed
+
+- Upgraded `@interop/wallet-core` (0.17.1), `@interop/was-client` (0.27.0),
+  `@interop/storage-core` (0.3.13), and `@interop/social-core` (0.8.0): the
+  PUK roster's epoch configuration is now signed by an enrolled client and
+  verified at login against the locally verified did:webvh document -- a
+  fabricated, spliced, or unsigned epoch configuration is refused instead of
+  adopted. Every roster write (provisioning, the login read, client and
+  recovery-code revocation, recovery) signs its epoch configuration with the
+  client's enrolled signing key, and the login roster read requires an
+  account pointer naming the account DID. The enrolled-client ceremonies'
+  shared preconditions now include the session's signing key.
+- Contact head and revision payloads carry `writerId` (renamed from
+  `deviceId`, following the shared contact-payload types).
+- Upgraded `@interop/verifier-core` to 3.5.3.
+
 ## 0.25.0 - 2026-08-04
 
 ### Changed

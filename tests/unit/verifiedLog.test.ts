@@ -95,6 +95,7 @@ function sessionWith({ pointer = POINTER } = {}): Session {
         stagedSeed: new Uint8Array(32)
       },
       clientKeyAgreementKey: { id: 'did:key:z6LSx#z6LSx' },
+      keyAgent: { id: 'did:key:z6MkThisClient' },
       puk: { id: 'did:key:z6LSpuk' }
     }
   } as unknown as Session

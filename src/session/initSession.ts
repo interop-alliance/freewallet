@@ -27,6 +27,7 @@ import {
 import {
   mintPuk,
   pukRosterDescriptorStore,
+  pukRosterEpochsSigner,
   pukVaultKeys,
   type Puk,
   type PukRosterReadResult
@@ -173,9 +174,10 @@ export async function initSessionFromSeed({
   let activePuk = puk
   let rosterRead: PukRosterReadResult | null = null
   const spaceId = accountPointer?.spaceId ?? deriveSpaceId(keyAgent.id)
-  if (puk && !isGuest && WAS_SERVER_URL) {
+  if (puk && !isGuest && WAS_SERVER_URL && accountPointer?.did) {
     rosterRead = await checkPukRosterAtLogin({
       zcapClient: sessionZcapClient,
+      pointer: { ...accountPointer, did: accountPointer.did },
       spaceId,
       puk,
       clientKeyAgreementKey: keyAgreementKey,
@@ -399,7 +401,8 @@ async function convergeRosterToDocument({
   idb?: IDBFactory
   persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
 }): Promise<{ puk: Puk; rosterDescriptor: CollectionEncryption }> {
-  if (!pointer || !isWebvhDid(pointer.did) || !WAS_SERVER_URL) {
+  const { keyAgent } = session.profile
+  if (!pointer || !isWebvhDid(pointer.did) || !WAS_SERVER_URL || !keyAgent) {
     return { puk, rosterDescriptor: descriptor }
   }
   const { puk: convergedPuk, descriptor: convergedDescriptor } =
@@ -417,6 +420,7 @@ async function convergeRosterToDocument({
       puk,
       descriptor,
       clientKeyAgreementKey,
+      signEpochs: pukRosterEpochsSigner({ keyAgent }),
       pinnedEpochId: await loadPukEpochPin({ spaceId, idb }),
       // Adoption is app-side: persisted for the next login, pinned, and
       // swapped into the live session -- all before the collection fan-out
@@ -472,12 +476,14 @@ async function convergeRosterToDocument({
  */
 async function checkPukRosterAtLogin({
   zcapClient,
+  pointer,
   spaceId,
   puk,
   clientKeyAgreementKey,
   idb
 }: {
   zcapClient: ZcapClient
+  pointer: AccountPointer & { did: string }
   spaceId: string
   puk: Puk
   clientKeyAgreementKey: IKeyAgreementKey
@@ -489,6 +495,11 @@ async function checkPukRosterAtLogin({
       zcapClient,
       spaceId
     }),
+    pointer: {
+      did: pointer.did,
+      spaceId: pointer.spaceId,
+      host: pointer.host
+    },
     puk,
     clientKeyAgreementKey,
     pinnedEpochId: await loadPukEpochPin({ spaceId, idb }),

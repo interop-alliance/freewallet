@@ -193,7 +193,10 @@ function sessionWith(
         'pointerDid' in overrides && overrides.pointerDid === undefined
           ? undefined
           : { ...POINTER, did: overrides.pointerDid ?? POINTER.did },
-      keyAgent: { id: overrides.keyAgentId ?? 'did:key:z6MkRevokingClient' },
+      keyAgent: {
+        id: overrides.keyAgentId ?? 'did:key:z6MkRevokingClient',
+        getSigner: () => ({ sign: async () => new Uint8Array(64) })
+      },
       zcapClient: { isZcapClient: true },
       clientWebvhKeys:
         'clientWebvhKeys' in overrides

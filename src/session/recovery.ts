@@ -62,6 +62,7 @@ import {
 import {
   addPukRosterRecipient,
   pukRosterDescriptorStore,
+  pukRosterEpochsSigner,
   pukVaultKeys,
   readPukRoster,
   rotatePukRoster,
@@ -826,10 +827,20 @@ export async function recoverAccountWithCode({
     spaceId: pointer.spaceId,
     idb
   })
+  // The just-updated, locally verified document: the root of trust the roster
+  // reads verify the epoch-configuration signature against (this client holds
+  // no cached PUK, so every read here adopts an epoch from the roster), and
+  // the recipient source for the rotation below.
+  const { doc } = await verifyAccountLog({
+    did: pointer.did,
+    spaceId: pointer.spaceId,
+    host: pointer.host
+  })
   const preRotation = await readPukRoster({
     store: rosterStore,
     clientKeyAgreementKey: newClientAgents.keyAgreementKey,
-    pinnedEpochId
+    pinnedEpochId,
+    document: doc
   })
   if (!preRotation) {
     throw new Error(
@@ -839,25 +850,22 @@ export async function recoverAccountWithCode({
   }
   const oldPuk = preRotation.puk
 
-  // The rotation wraps the fresh epoch only to recipients the just-updated,
-  // locally verified document backs -- the spent code's VM is gone, so its
-  // entry is dropped even before the recipient filter. The pull axis already
-  // ran at the document: the spent code's VM and update-key hash left in the
+  // The rotation wraps the fresh epoch only to recipients the just-updated
+  // document backs -- the spent code's VM is gone, so its entry is dropped
+  // even before the recipient filter. The pull axis already ran at the
+  // document: the spent code's VM and update-key hash left in the
   // continuation's add-and-retire entry.
-  const { doc } = await verifyAccountLog({
-    did: pointer.did,
-    spaceId: pointer.spaceId,
-    host: pointer.host
-  })
   await rotatePukRoster({
     store: rosterStore,
     document: doc,
-    retireRecipientId: spent.recipientKid
+    retireRecipientId: spent.recipientKid,
+    signEpochs: pukRosterEpochsSigner({ keyAgent: newClientAgents.keyAgent })
   })
   const postRotation = await readPukRoster({
     store: rosterStore,
     clientKeyAgreementKey: newClientAgents.keyAgreementKey,
-    pinnedEpochId
+    pinnedEpochId,
+    document: doc
   })
   if (!postRotation) {
     throw new Error('The PUK roster vanished during recovery.')
@@ -1064,11 +1072,16 @@ export async function revokeRecoveryCode({
   entry: RecoveryCodeUnlockMethod
   idb?: IDBFactory
 }): Promise<void> {
-  const { remoteStore, pointer, clientWebvhKeys, clientKeyAgreementKey } =
-    requireEnrolledClientContext({
-      session,
-      action: 'Recovery-code revocation'
-    })
+  const {
+    remoteStore,
+    pointer,
+    clientWebvhKeys,
+    clientKeyAgreementKey,
+    keyAgent
+  } = requireEnrolledClientContext({
+    session,
+    action: 'Recovery-code revocation'
+  })
 
   // 1. The document entry out (idempotent).
   await removeRecoveryKey({
@@ -1093,13 +1106,15 @@ export async function revokeRecoveryCode({
   await rotatePukRoster({
     store: rosterStore,
     document: doc,
-    retireRecipientId: entry.recoveryKid
+    retireRecipientId: entry.recoveryKid,
+    signEpochs: pukRosterEpochsSigner({ keyAgent })
   })
   const read = await readPukRoster({
     store: rosterStore,
     puk: session.profile.puk,
     clientKeyAgreementKey,
-    pinnedEpochId: await loadPukEpochPin({ spaceId: pointer.spaceId, idb })
+    pinnedEpochId: await loadPukEpochPin({ spaceId: pointer.spaceId, idb }),
+    document: doc
   })
   let rotatedPuk: Puk | undefined
   if (read) {

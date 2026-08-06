@@ -45,6 +45,7 @@ function sessionWith(
     pointerDid: string | undefined
     clientWebvhKeys: unknown
     clientKeyAgreementKey: unknown
+    keyAgent: unknown
     puk: unknown
   }> = {}
 ): Session {
@@ -69,6 +70,10 @@ function sessionWith(
         'clientKeyAgreementKey' in overrides
           ? overrides.clientKeyAgreementKey
           : { id: 'did:key:z6MkThisClient#z6LSThisClient' },
+      keyAgent:
+        'keyAgent' in overrides
+          ? overrides.keyAgent
+          : { id: 'did:key:z6MkThisClient' },
       puk: 'puk' in overrides ? overrides.puk : { id: 'did:key:z6LSPuk' }
     }
   } as unknown as Session
