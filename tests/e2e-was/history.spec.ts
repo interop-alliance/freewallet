@@ -48,7 +48,7 @@ test.describe('Wallet activity history', () => {
     await addCredentialViaPaste(page)
     await goToHistory(page)
 
-    await expectHistoryEntry(page, /^Credential created: /)
+    await expectHistoryEntry(page, 'E2E Test Credential created')
   })
 
   test('deleting a credential records a delete entry on the history page', async ({
@@ -59,6 +59,6 @@ test.describe('Wallet activity history', () => {
     await deleteCredential(page)
 
     await goToHistory(page)
-    await expectHistoryEntry(page, /^Credential deleted: /)
+    await expectHistoryEntry(page, 'E2E Test Credential deleted')
   })
 })

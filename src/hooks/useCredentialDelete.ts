@@ -17,10 +17,12 @@ import type { Session } from '@/types/auth'
 export function useCredentialDelete({
   session,
   cid,
+  title,
   onSuccess
 }: {
   session: Session | null
   cid?: string
+  title?: string
   onSuccess: () => void
 }) {
   const { t } = useTranslation()
@@ -51,6 +53,7 @@ export function useCredentialDelete({
         await session.storage.deleteCredential({ cid, keepPublicCopy })
         await session.storage.addHistoryCredentialDeleted({
           cid,
+          title: title ?? cid,
           user: session.user
         })
       } catch (err) {
@@ -75,7 +78,7 @@ export function useCredentialDelete({
       })
       onSuccess()
     },
-    [session, cid, onSuccess, t]
+    [session, cid, title, onSuccess, t]
   )
 
   const runDelete = useCallback(

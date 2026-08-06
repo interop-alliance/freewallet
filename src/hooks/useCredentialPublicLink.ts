@@ -5,6 +5,7 @@ import { showToast } from '@/stores/toastStore'
 import { cidFrom } from '@interop/was-client/sync'
 import type { Session } from '@/types/auth'
 import type { CredentialShareActions } from '@/types/credentialActions'
+import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 
 /**
  * Drives a credential's public-link (sharing) state. Sharing is
@@ -65,6 +66,7 @@ export function useCredentialPublicLink({
       setIsShared(true)
       await session.storage.addHistoryCredentialShared({
         cid,
+        title: credentialTitle(credential),
         user: session.user
       })
       showToast({ message: t('credential.publicLinkCreated') })
@@ -77,7 +79,7 @@ export function useCredentialPublicLink({
   }, [cid, credential, session, t])
 
   const remove = useCallback(async () => {
-    if (!session || !cid) {
+    if (!session || !cid || !credential) {
       return
     }
     setBusy(true)
@@ -87,6 +89,7 @@ export function useCredentialPublicLink({
       setIsShared(false)
       await session.storage.addHistoryCredentialUnshared({
         cid,
+        title: credentialTitle(credential),
         user: session.user
       })
       showToast({ message: t('credential.publicLinkRemoved') })
@@ -96,7 +99,7 @@ export function useCredentialPublicLink({
     } finally {
       setBusy(false)
     }
-  }, [cid, session, t])
+  }, [cid, credential, session, t])
 
   const toggle = useCallback(() => {
     if (isShared) {

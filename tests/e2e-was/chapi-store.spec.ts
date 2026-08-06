@@ -128,15 +128,10 @@ test('a credential stored via the CHAPI popup lands in the wallet and history', 
     await expect(card).toBeVisible({ timeout: 5_000 })
   }).toPass({ timeout: 60_000 })
 
-  // The card links to /credential/<cid>; the cid is what the credential-created
-  // history summary keys on, so read it here to assert the popup credential's
-  // own entry (signup self-issues a credential too, so a bare "Credential
-  // created:" match is ambiguous).
-  const href = await card.getAttribute('href')
-  const cid = href!.split('/credential/')[1]
-
   // 5. History shows the credential-created entry recorded on the remote-direct
-  // insert, pulled by the same replication.
+  // insert, pulled by the same replication. The row renders as "<title>
+  // created"; matched by title (signup self-issues its own "Your First
+  // Credential", so a bare "created" match would be ambiguous).
   await goToHistory(page)
-  await expectHistoryEntry(page, `Credential created: ${cid}`)
+  await expectHistoryEntry(page, 'E2E Test Credential created')
 })

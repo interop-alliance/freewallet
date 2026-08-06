@@ -196,6 +196,7 @@ export function CollectionResourcePage() {
   } = useCredentialDelete({
     session: session ?? null,
     cid: credentialCid ?? undefined,
+    title: vc ? credentialTitle(vc) : undefined,
     onSuccess: () => navigate(collectionPath)
   })
 
