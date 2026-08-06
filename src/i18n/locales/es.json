@@ -443,6 +443,12 @@
       "credentials": "Credenciales",
       "login": "Actividad de inicio de sesión",
       "applications": "Aplicaciones"
+    },
+    "credentialVerbs": {
+      "created": "creada",
+      "deleted": "eliminada",
+      "shared": "compartida",
+      "unshared": "dejada de compartir"
     }
   },
   "storage": {

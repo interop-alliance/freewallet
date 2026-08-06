@@ -10,7 +10,8 @@ import {
   DialogTitle,
   DialogContent,
   IconButton,
-  Button
+  Button,
+  Link
 } from '@mui/material'
 import {
   Timeline,
@@ -20,6 +21,7 @@ import {
   TimelineConnector,
   TimelineContent
 } from '@mui/lab'
+import { Link as RouterLink } from 'react-router'
 import { useAuthStore } from '@/stores/authStore'
 import type { WalletActivity } from '@/stores/storageManager'
 import { DashboardLayout } from '@/components/DashboardLayout'
@@ -29,7 +31,11 @@ import { formatRelativeTime } from '@/lib/formatRelativeTime'
 import { historyStyles, infoBoxStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
 import { useTranslation } from 'react-i18next'
-import { classifyActivity, type HistoryTab } from '@/lib/historyActivity'
+import {
+  classifyActivity,
+  credentialActivityInfo,
+  type HistoryTab
+} from '@/lib/historyActivity'
 import { useSearch } from '@/hooks/useSearch'
 
 type HistoryItem = { id: string; doc: WalletActivity }
@@ -62,6 +68,35 @@ export function HistoryPage() {
   const selectedSummary = useMemo(() => {
     return selectedItem?.doc?.summary ?? ''
   }, [selectedItem])
+
+  // Single-credential activities (create/share/unshare) get a title link to
+  // the credential; a deleted credential has nothing left to link to, so its
+  // title renders as plain text. Every other activity (login, app revoke,
+  // collection share) falls back to its plain `summary` line.
+  function renderActivityLine(doc: WalletActivity) {
+    const info = credentialActivityInfo(doc)
+    if (!info) {
+      return doc?.summary ?? doc?.type?.join(', ') ?? t('common.activity')
+    }
+    const titleText = info.title ?? info.cid
+    const verbText = t(`history.credentialVerbs.${info.verb}`)
+    return (
+      <>
+        {info.verb === 'deleted' ? (
+          titleText
+        ) : (
+          <Link
+            component={RouterLink}
+            to={`/credential/${info.cid}`}
+            underline="hover"
+          >
+            {titleText}
+          </Link>
+        )}{' '}
+        {verbText}
+      </>
+    )
+  }
 
   const {
     query,
@@ -180,9 +215,7 @@ export function HistoryPage() {
                   </TimelineSeparator>
                   <TimelineContent>
                     <Typography variant="body1">
-                      {doc?.summary ??
-                        doc?.type?.join(', ') ??
-                        t('common.activity')}
+                      {renderActivityLine(doc)}
                     </Typography>
                     {doc?.created && (
                       <Box sx={historyStyles.timestampRow}>
