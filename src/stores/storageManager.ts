@@ -54,7 +54,8 @@ import {
   WAS_SERVER_URL
 } from '@/app.config'
 import { assertStorableAppKey } from '@/lib/appKey'
-import { getOrCreateWriterId } from '@/lib/writerId'
+import { getOrCreateDeviceId } from '@/lib/deviceId'
+import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
 import {
   clientSigningKeyMultibase,
@@ -750,7 +751,11 @@ export class StorageManager {
       // log line beats reporting the whole store as failed (in remote-direct
       // mode the history entry is its own remote write and can fail alone).
       try {
-        await this.addHistoryCredentialCreated({ cid, user })
+        await this.addHistoryCredentialCreated({
+          cid,
+          title: credentialTitle(credential),
+          user
+        })
       } catch (err) {
         console.warn('Could not record the credential-created activity:', err)
       }
@@ -1558,23 +1563,106 @@ export class StorageManager {
   }
 
   /**
+   * Records (in the `wallet-activity` collection) a credential activity,
+   * stamping the shared-package summary/object with the credential's
+   * display title so the History page can render a title link without
+   * re-deriving it from the (possibly already-deleted) credential.
+   *
+   * @param options {object}
+   * @param options.cid {string} - CID of the credential (used as history object id).
+   * @param options.title {string} - Display title of the credential at the time of the event.
+   * @param options.user {User} - Session user object (used to record history object actor).
+   * @param options.verb {string} - Past-tense verb for the summary line (e.g. "created").
+   * @param options.buildActivity {function} - The `@interop/wallet-core` builder for this event.
+   * @returns {Promise<void>}
+   */
+  async #recordCredentialActivity({
+    cid,
+    title,
+    user,
+    verb,
+    buildActivity
+  }: {
+    cid: string
+    title: string
+    user: User
+    verb: string
+    buildActivity: (options: {
+      cid: string
+      user: User
+      id: string
+    }) => WalletActivity
+  }) {
+    const resourceId = uuidv7()
+    const activity = buildActivity({ cid, user, id: resourceId })
+    activity.summary = `Credential ${verb}: ${title}`
+    activity.object = { cid, title }
+    await this.#addHistoryItem({ resourceId, activity })
+  }
+
+  /**
+   * Records (in the `wallet-activity` collection) a credential activity,
+   * stamping the shared-package summary/object with the credential's
+   * display title so the History page can render a title link without
+   * re-deriving it from the (possibly already-deleted) credential.
+   *
+   * @param options {object}
+   * @param options.cid {string} - CID of the credential (used as history object id).
+   * @param options.title {string} - Display title of the credential at the time of the event.
+   * @param options.user {User} - Session user object (used to record history object actor).
+   * @param options.verb {string} - Past-tense verb for the summary line (e.g. "created").
+   * @param options.buildActivity {function} - The `@interop/wallet-core` builder for this event.
+   * @returns {Promise<void>}
+   */
+  async #recordCredentialActivity({
+    cid,
+    title,
+    user,
+    verb,
+    buildActivity
+  }: {
+    cid: string
+    title: string
+    user: User
+    verb: string
+    buildActivity: (options: {
+      cid: string
+      user: User
+      id: string
+    }) => WalletActivity
+  }) {
+    const resourceId = uuidv7()
+    const activity = buildActivity({ cid, user, id: resourceId })
+    activity.summary = `Credential ${verb}: ${title}`
+    activity.object = { cid, title }
+    await this.#addHistoryItem({ resourceId, activity })
+  }
+
+  /**
    * Records (in the `wallet-activity` collection) the Create activity for
    * a credential.
    *
    * @param cid {string} - CID of the credential (used as history object id).
+   * @param title {string} - Display title of the credential.
    * @param user {User} - Session user object (used to record history object actor).
    * @returns {Promise<void>}
    */
   async addHistoryCredentialCreated({
     cid,
+    title,
     user
   }: {
     cid: string
+    title: string
     user: User
   }) {
-    await this.#recordActivity(id =>
-      buildHistoryCredentialCreated({ cid, user, id })
-    )
+    await this.#recordCredentialActivity({
+      cid,
+      title,
+      user,
+      verb: 'created',
+      buildActivity: buildHistoryCredentialCreated
+    })
   }
 
   /**
@@ -1582,51 +1670,78 @@ export class StorageManager {
    * a credential.
    *
    * @param cid {string} - CID of the credential (used as history object id).
+   * @param title {string} - Display title of the credential (captured before deletion).
    * @param user {User} - Session user object (used to record history object actor).
    * @returns {Promise<void>}
    */
   async addHistoryCredentialDeleted({
     cid,
+    title,
     user
   }: {
     cid: string
+    title: string
     user: User
   }) {
-    await this.#recordActivity(id =>
-      buildHistoryCredentialDeleted({ cid, user, id })
-    )
+    await this.#recordCredentialActivity({
+      cid,
+      title,
+      user,
+      verb: 'deleted',
+      buildActivity: buildHistoryCredentialDeleted
+    })
   }
 
   /**
    * Records (in the `wallet-activity` collection) the Share activity for a credential.
    *
    * @param cid {string} - CID of the credential (used as history object id).
+   * @param title {string} - Display title of the credential.
    * @param user {User} - Session user object (used to record history object actor).
    * @returns {Promise<void>}
    */
-  async addHistoryCredentialShared({ cid, user }: { cid: string; user: User }) {
-    await this.#recordActivity(id =>
-      buildHistoryCredentialShared({ cid, user, id })
-    )
+  async addHistoryCredentialShared({
+    cid,
+    title,
+    user
+  }: {
+    cid: string
+    title: string
+    user: User
+  }) {
+    await this.#recordCredentialActivity({
+      cid,
+      title,
+      user,
+      verb: 'shared',
+      buildActivity: buildHistoryCredentialShared
+    })
   }
 
   /**
    * Records (in the `wallet-activity` collection) the Unshare activity for a credential.
    *
    * @param cid {string} - CID of the credential (used as history object id).
+   * @param title {string} - Display title of the credential.
    * @param user {User} - Session user object (used to record history object actor).
    * @returns {Promise<void>}
    */
   async addHistoryCredentialUnshared({
     cid,
+    title,
     user
   }: {
     cid: string
+    title: string
     user: User
   }) {
-    await this.#recordActivity(id =>
-      buildHistoryCredentialUnshared({ cid, user, id })
-    )
+    await this.#recordCredentialActivity({
+      cid,
+      title,
+      user,
+      verb: 'unshared',
+      buildActivity: buildHistoryCredentialUnshared
+    })
   }
 
   /**

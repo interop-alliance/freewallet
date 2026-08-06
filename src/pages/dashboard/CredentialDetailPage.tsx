@@ -14,6 +14,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
 import type { StoredCredential } from '@/types/credential'
 import { isResumeCredential } from '@/lib/isResumeCredential'
+import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 
 export function CredentialDetailPage() {
   const { t } = useTranslation()
@@ -38,6 +39,7 @@ export function CredentialDetailPage() {
   } = useCredentialDelete({
     session,
     cid,
+    title: credential ? credentialTitle(credential.vc) : undefined,
     onSuccess: () => navigate('/dashboard')
   })
 
