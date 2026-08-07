@@ -7,42 +7,26 @@
  * keys generated later live server-side (never update keys or encryption
  * recipients).
  */
-import type { AsymmetricKey, CapabilityAgent } from '@interop/webkms-client'
+import type { CapabilityAgent } from '@interop/webkms-client'
 import { KeystoreAgent, KmsClient } from '@interop/webkms-client'
 import type { ZcapClient } from '@interop/ezcap'
 import type { ICapabilityAgent } from '@/types/auth'
 
 /**
  * The WebKMS key type of the Ed25519 signing keys the wallet fetches to sign
- * with (the did:web `authentication` key and the did:webvh update key). The
- * single home for the constant both signer sites pass to `getAsymmetricKey`.
+ * with (the did:web `authentication` key and the did:webvh update key).
  */
-export const KMS_ED25519_KEY_TYPE = 'Ed25519VerificationKey2020'
-
-/**
- * Wraps a WebKMS `AsymmetricKey.sign` as a plain own-property closure. The
- * data-integrity suites and the did:webvh library shallow-spread the signer
- * (`{ ...signer }`), which would drop `AsymmetricKey.sign` (a prototype
- * method); a closure survives the spread. The single home for that workaround.
- *
- * @param options {object}
- * @param options.key {AsymmetricKey}   a WebKMS key (fetched or constructed).
- * @returns {(input: { data: Uint8Array }) => Promise<Uint8Array>}
- */
-export function kmsSignFunction({
-  key
-}: {
-  key: AsymmetricKey
-}): (input: { data: Uint8Array }) => Promise<Uint8Array> {
-  return ({ data }) => key.sign({ data })
-}
+const KMS_ED25519_KEY_TYPE = 'Ed25519VerificationKey2020'
 
 /**
  * Fetches a KMS-held Ed25519 `AsymmetricKey` from the keystore agent by its id
- * and KMS key id, and returns a shallow-spread-safe sign closure over it (see
- * {@link kmsSignFunction}). The single home for the "get an AsymmetricKey from
- * the KMS and wrap a signer" seam shared by the did:web authentication signer
- * and the did:webvh update-key signer; each caller keeps its own signer shape
+ * and KMS key id, and returns a shallow-spread-safe sign closure over it: the
+ * data-integrity suites and the did:webvh library shallow-spread the signer
+ * (`{ ...signer }`), which would drop `AsymmetricKey.sign` (a prototype
+ * method), while a closure survives the spread. The single home for the "get
+ * an AsymmetricKey from the KMS and wrap a signer" seam shared by the did:web
+ * authentication signer and the did:webvh update-key signer; each caller keeps
+ * its own signer shape
  * (the did:web `{ id, algorithm, sign }` wrapper, the did:webvh library bridge)
  * around the returned closure.
  *
@@ -68,7 +52,7 @@ export async function getKmsSignFunction({
     kmsId: kmsKeyId,
     type: KMS_ED25519_KEY_TYPE
   })
-  return kmsSignFunction({ key })
+  return ({ data }) => key.sign({ data })
 }
 
 /**

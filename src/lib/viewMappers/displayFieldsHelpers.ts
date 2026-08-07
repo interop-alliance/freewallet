@@ -19,6 +19,3 @@ export {
   getAchievementType,
   normalizeAlignments
 } from '@interop/wallet-core/display'
-
-/** A credential subject read as a loose record. */
-export type SubjectRecord = Record<string, unknown>

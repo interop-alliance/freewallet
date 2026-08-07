@@ -487,7 +487,6 @@ describe('BrowserStore (encrypted collections)', () => {
       const items = await localStore.listHistoryItems()
 
       expect(items.map(({ doc }) => doc.summary)).toEqual(['one'])
-      expect(localStore.undecryptableHistory).toBe(1)
     })
   })
 

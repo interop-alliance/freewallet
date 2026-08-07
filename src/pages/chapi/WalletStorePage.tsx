@@ -33,6 +33,7 @@ import { AppKeyRefusedError } from '@/lib/appKey'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
 import { chapiStyles } from '@/styles/appStyles'
+import { ChapiInitializing } from '@/pages/chapi/ChapiInitializing'
 import {
   beginExchange,
   classifyCHAPIStoreEvent,
@@ -88,6 +89,21 @@ function injectedCHAPIStoreEvent(): CHAPIStoreEvent | undefined {
     .__E2E_CHAPI_STORE_EVENT__
 }
 
+/**
+ * Logs one of the store flow's verbose payload dumps. Pretty-printing a whole
+ * presentation is only worth the cost when someone is watching the console, so
+ * the call is a no-op in a production build.
+ *
+ * @param message {string}
+ * @param payload {unknown}
+ * @returns {void}
+ */
+function devLogPayload(message: string, payload: unknown): void {
+  if (import.meta.env.DEV) {
+    console.log(`${message}\n%s`, JSON.stringify(payload, null, 2))
+  }
+}
+
 export function WalletStorePage() {
   const { t } = useTranslation()
   const [pageState, setPageState] = useState<PageState>('initializing')
@@ -129,13 +145,15 @@ export function WalletStorePage() {
       const event =
         injected ?? ((await receiveCredentialEvent()) as CHAPIStoreEvent)
       const { dataType, data, options } = event.credential ?? {}
-      console.log(
-        '[CHAPI store] incoming event from %s, dataType: %s, protocols: %s\n%s',
-        event.credentialRequestOrigin ?? '(unknown origin)',
-        dataType ?? '(none)',
-        JSON.stringify(options?.protocols ?? {}),
-        JSON.stringify(data, null, 2)
-      )
+      if (import.meta.env.DEV) {
+        console.log(
+          '[CHAPI store] incoming event from %s, dataType: %s, protocols: %s\n%s',
+          event.credentialRequestOrigin ?? '(unknown origin)',
+          dataType ?? '(none)',
+          JSON.stringify(options?.protocols ?? {}),
+          JSON.stringify(data, null, 2)
+        )
+      }
 
       // An issuer that names a VC API exchange sends an empty payload and keeps
       // the credentials it is offering on the exchange server.
@@ -146,10 +164,7 @@ export function WalletStorePage() {
         setViaExchange(true)
         console.log('[CHAPI store] fetching the offer from %s', exchange)
         const opening = await beginExchange({ exchangeUrl: exchange })
-        console.log(
-          '[CHAPI store] the exchange answered:\n%s',
-          JSON.stringify(opening, null, 2)
-        )
+        devLogPayload('[CHAPI store] the exchange answered:', opening)
 
         // Holder binding: the issuer wants a DID-Auth presentation before it
         // hands over the credentials. Signing it needs the user's key, so the
@@ -183,8 +198,8 @@ export function WalletStorePage() {
       const credentials = credentialsOf(incomingVp)
       if (credentials.length === 0) {
         console.warn(
-          '[CHAPI store] the offered presentation carries no credential:\n%s',
-          JSON.stringify(incomingVp, null, 2)
+          '[CHAPI store] the offered presentation carries no credential:',
+          incomingVp
         )
       }
       setCHAPIEvent(event)
@@ -254,24 +269,21 @@ export function WalletStorePage() {
         domain: request.domain ?? new URL(exchangeUrl).origin,
         cryptosuite: negotiateCryptosuite(queriesOf(request))
       })
-      console.log(
-        '[CHAPI store] authenticating to the exchange with:\n%s',
-        JSON.stringify(verifiablePresentation, null, 2)
+      devLogPayload(
+        '[CHAPI store] authenticating to the exchange with:',
+        verifiablePresentation
       )
       const offeredVp = await collectIssuedPresentation({
         request: request as ISpecVPRDetails,
         exchangeUrl,
         verifiablePresentation
       })
-      console.log(
-        '[CHAPI store] the exchange offered:\n%s',
-        JSON.stringify(offeredVp, null, 2)
-      )
+      devLogPayload('[CHAPI store] the exchange offered:', offeredVp)
       const credentials = credentialsOf(offeredVp)
       if (credentials.length === 0) {
         console.warn(
-          '[CHAPI store] the offered presentation carries no credential:\n%s',
-          JSON.stringify(offeredVp, null, 2)
+          '[CHAPI store] the offered presentation carries no credential:',
+          offeredVp
         )
       }
       setVp(offeredVp)
@@ -359,14 +371,7 @@ export function WalletStorePage() {
   }
 
   if (pageState === 'initializing') {
-    return (
-      <Box
-        className="fw-page"
-        sx={{ ...chapiStyles.page, alignItems: 'center' }}
-      >
-        <CircularProgress />
-      </Box>
-    )
+    return <ChapiInitializing />
   }
 
   return (

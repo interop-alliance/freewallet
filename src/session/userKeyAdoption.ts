@@ -68,6 +68,31 @@ export async function rewrapUnlockRegistryToUserKey({
 }
 
 /**
+ * Swaps a user key into a live session: the profile's vault keys are derived
+ * from it and the storage ciphers rebuilt on them. The one place the swap is
+ * spelled out -- both the rotation tail below and the login-time roster
+ * convergence go through it.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.userKey {UserKey}   the user key to operate under
+ * @returns {Promise<void>}
+ */
+export async function swapSessionVaultKeys({
+  session,
+  userKey
+}: {
+  session: Session
+  userKey: UserKey
+}): Promise<void> {
+  const vaultKeys = userKeyVaultKeys({ userKey })
+  session.profile.userKey = userKey
+  session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
+  session.profile.keyResolver = vaultKeys.keyResolver
+  await session.storage.adoptRotatedVaultKeys(vaultKeys)
+}
+
+/**
  * Adopts a rotated user key in the live session: the unlock-methods registry is
  * re-sealed to it, then the profile vault keys and the storage ciphers are
  * swapped, so this session keeps operating without a re-login.
@@ -104,12 +129,8 @@ export async function adoptRotatedUserKey({
       to: userKeyVaultKeys({ userKey })
     })
   }
-  const vaultKeys = userKeyVaultKeys({ userKey })
-  session.profile.userKey = userKey
-  session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
-  session.profile.keyResolver = vaultKeys.keyResolver
   try {
-    await session.storage.adoptRotatedVaultKeys(vaultKeys)
+    await swapSessionVaultKeys({ session, userKey })
   } catch (err) {
     console.warn(
       'Could not rebuild the storage ciphers on the rotated user key; the next ' +

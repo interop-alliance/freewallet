@@ -22,12 +22,15 @@ import {
 import { revokeAccountClient } from '@interop/wallet-core/clients'
 import { userKeyRosterEpochsSigner } from '@interop/wallet-core/keys'
 import type { Session } from '@/types/auth'
-import { saveUserKeyEpochPin, loadUserKeyEpochPin } from '@/lib/sessionKey'
+import { savePinFromDescriptor, loadUserKeyEpochPin } from '@/lib/sessionKey'
 import { getUnlockMethods } from '@/session/unlockMethods'
 import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
 import { requireEnrolledClientContext } from '@/session/enrolledContext'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
-import { remintRecoveryDelegations } from '@/session/recovery'
+import {
+  recoveryEntriesOf,
+  remintRecoveryDelegations
+} from '@/session/recovery'
 import {
   cascadeCollections,
   type UserKeyCascadeResult
@@ -67,11 +70,9 @@ async function recoveryEntries({
   idb?: IDBFactory
 }): Promise<RecoveryCodeUnlockMethod[]> {
   try {
-    const record = await getUnlockMethods({ session, idb })
-    return (record?.methods ?? []).filter(
-      (method): method is RecoveryCodeUnlockMethod =>
-        method.type === 'recovery-code'
-    )
+    return recoveryEntriesOf({
+      record: await getUnlockMethods({ session, idb })
+    })
   } catch (err) {
     console.warn(
       'Could not read the recovery registry for the revocation edit:',
@@ -79,25 +80,6 @@ async function recoveryEntries({
     )
     return []
   }
-}
-
-/**
- * The standing recovery codes' update-key hashes, so the document edit can
- * tell the revoked client's staged commitment apart from a latent recovery
- * commitment (the one ambiguous log shape).
- *
- * @param options {object}
- * @param options.entries {RecoveryCodeUnlockMethod[]}
- * @returns {Promise<string[]>}
- */
-async function latentRecoveryHashes({
-  entries
-}: {
-  entries: RecoveryCodeUnlockMethod[]
-}): Promise<string[]> {
-  return await Promise.all(
-    entries.map(entry => deriveNextKeyHash(entry.updateKeyMultibase))
-  )
 }
 
 /**
@@ -136,8 +118,12 @@ export async function revokeEnrolledClient({
     keyAgent
   } = requireEnrolledClientContext({ session, action: 'Client revocation' })
   // One registry read for the whole cascade: the latent commitment hashes the
-  // document edit needs, and the entries the delegation re-mint walks.
-  const entries = await recoveryEntries({ session, idb })
+  // document edit needs, and the entries the delegation re-mint walks. It is
+  // independent of the epoch pin read, so the two round trips run together.
+  const [entries, pinnedEpochId] = await Promise.all([
+    recoveryEntries({ session, idb }),
+    loadUserKeyEpochPin({ spaceId: pointer.spaceId, idb })
+  ])
 
   // The cascade opens with a document edit, so nothing may keep reading a
   // memo taken before it. Dropped up front (the edit lands early in the call)
@@ -148,20 +134,25 @@ export async function revokeEnrolledClient({
     idStore: remoteStore.webvhIdStore(),
     updateKeys: clientWebvhKeys,
     revokedClient: client,
-    knownLatentHashes: await latentRecoveryHashes({ entries }),
+    // The standing recovery codes' update-key hashes, so the document edit can
+    // tell the revoked client's staged commitment apart from a latent recovery
+    // commitment (the one ambiguous log shape).
+    knownLatentHashes: await Promise.all(
+      entries.map(entry => deriveNextKeyHash(entry.updateKeyMultibase))
+    ),
     ownSigningKeyMultibase: clientSigningKeyMultibase({ keyAgent }),
     signEpochs: userKeyRosterEpochsSigner({ keyAgent }),
     rosterStore: remoteStore.userKeyRosterStore(),
     ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
     clientKeyAgreementKey,
-    pinnedEpochId: await loadUserKeyEpochPin({ spaceId: pointer.spaceId, idb }),
+    pinnedEpochId,
     onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) => {
       // The user key and the epoch pin persist together: the pin must never advance
       // without the key that authenticated the roster it advanced to.
-      await saveUserKeyEpochPin({
+      await savePinFromDescriptor({
         spaceId: pointer.spaceId,
         epochId: latestEpochId,
-        epochIds: (descriptor.epochs ?? []).map(epoch => epoch.id),
+        descriptor,
         idb
       })
       await session.profile.persistClientKeys?.({ userKey })

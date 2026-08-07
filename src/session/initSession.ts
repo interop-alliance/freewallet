@@ -36,8 +36,9 @@ import {
   checkUserKeyRosterAtLogin as sharedCheckUserKeyRosterAtLogin,
   convergeUserKeyRosterToAccount
 } from '@interop/wallet-core/clients'
+import { swapSessionVaultKeys } from '@/session/userKeyAdoption'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
-import { loadUserKeyEpochPin, saveUserKeyEpochPin } from '@/lib/sessionKey'
+import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
 import { StorageManager } from '@/stores/storageManager'
 import { fetchKeyring, KeyringRecordUnusableError } from '@/session/keyring'
 import type {
@@ -165,6 +166,40 @@ export async function initSessionFromSeed({
     ? webvhZcapClient({ keyAgent, did: accountDid })
     : zcapClient
 
+  // Ensure a KMS keystore exists for this controller (list-by-controller,
+  // create on first login) and bind a KeystoreAgent to it. Guests skip the
+  // KMS entirely, as they skip WAS. This provisioning round trip is started
+  // here and awaited at the `Promise.all` below, so it runs concurrently with
+  // the roster read and with storage init -- nothing in either depends on the
+  // keystore, so the independent trips need not be serialized.
+  // Failure is non-fatal for now: no wallet feature depends on
+  // the keystore yet, so a KMS outage must not lock users out -- the settings
+  // page surfaces the unprovisioned state.
+  const keystorePromise =
+    !isGuest && KMS_SERVER_URL
+      ? ensureKeystore({
+          kmsServerUrl: KMS_SERVER_URL,
+          keyAgent,
+          // Once promoted, the keystore is looked up under (and invoked as)
+          // the account's did:webvh; before promotion, the did:key defaults
+          // apply.
+          zcapClient: sessionZcapClient,
+          ...(isWebvhDid(accountDid)
+            ? {
+                controller: accountDid,
+                capabilityAgent: webvhCapabilityAgent({
+                  keyAgent,
+                  did: accountDid
+                }),
+                fallbackZcapClient: zcapClient
+              }
+            : {})
+        }).catch(err => {
+          console.warn('KMS keystore provisioning failed:', err)
+          return undefined
+        })
+      : Promise.resolve(undefined)
+
   // The direct user key roster read (`key-map/user-key.json`): confirms the cached user key
   // current, or -- on an epoch mismatch (a rotation by another client) --
   // delivers the fresh user key, which the session adopts and `persistClientKeys`
@@ -196,39 +231,6 @@ export async function initSessionFromSeed({
   const vaultKeys = activeUserKey
     ? userKeyVaultKeys({ userKey: activeUserKey })
     : { keyAgreementKey, keyResolver }
-
-  // Ensure a KMS keystore exists for this controller (list-by-controller,
-  // create on first login) and bind a KeystoreAgent to it. Guests skip the
-  // KMS entirely, as they skip WAS. This provisioning round trip runs
-  // concurrently with storage init below -- nothing in the storage bootstrap
-  // depends on the keystore, so the two independent trips need not be
-  // serialized. Failure is non-fatal for now: no wallet feature depends on
-  // the keystore yet, so a KMS outage must not lock users out -- the settings
-  // page surfaces the unprovisioned state.
-  const keystorePromise =
-    !isGuest && KMS_SERVER_URL
-      ? ensureKeystore({
-          kmsServerUrl: KMS_SERVER_URL,
-          keyAgent,
-          // Once promoted, the keystore is looked up under (and invoked as)
-          // the account's did:webvh; before promotion, the did:key defaults
-          // apply.
-          zcapClient: sessionZcapClient,
-          ...(isWebvhDid(accountDid)
-            ? {
-                controller: accountDid,
-                capabilityAgent: webvhCapabilityAgent({
-                  keyAgent,
-                  did: accountDid
-                }),
-                fallbackZcapClient: zcapClient
-              }
-            : {})
-        }).catch(err => {
-          console.warn('KMS keystore provisioning failed:', err)
-          return undefined
-        })
-      : Promise.resolve(undefined)
 
   const user: User = {
     id: keyAgent.id, // a did:key DID
@@ -430,18 +432,14 @@ async function convergeRosterToDocument({
         latestEpochId,
         descriptor: read
       }) => {
-        await saveUserKeyEpochPin({
+        await savePinFromDescriptor({
           spaceId,
           epochId: latestEpochId,
-          epochIds: (read.epochs ?? []).map(epoch => epoch.id),
+          descriptor: read,
           idb
         })
         await persistClientKeys?.({ userKey: adopted })
-        const vaultKeys = userKeyVaultKeys({ userKey: adopted })
-        session.profile.userKey = adopted
-        session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
-        session.profile.keyResolver = vaultKeys.keyResolver
-        await session.storage.adoptRotatedVaultKeys(vaultKeys)
+        await swapSessionVaultKeys({ session, userKey: adopted })
       }
     })
   return { userKey: convergedUserKey, rosterDescriptor: convergedDescriptor }
@@ -506,10 +504,10 @@ async function checkUserKeyRosterAtLogin({
     // The pin advances to the epoch just authenticated, atomically with the
     // key that authenticated it.
     onRosterRead: async ({ latestEpochId, descriptor }) => {
-      await saveUserKeyEpochPin({
+      await savePinFromDescriptor({
         spaceId,
         epochId: latestEpochId,
-        epochIds: (descriptor.epochs ?? []).map(epoch => epoch.id),
+        descriptor,
         idb
       })
     }

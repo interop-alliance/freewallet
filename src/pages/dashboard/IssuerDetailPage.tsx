@@ -22,10 +22,6 @@ import { issuerDetailStyles as sx } from '@/styles/credentialStyles'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 
-type IssuerDetailLocationState = {
-  issuerRegistry?: IssuerRegistryInfo | null
-}
-
 function imageUriFrom(img?: string | { id?: string }): string | undefined {
   if (!img) {
     return undefined
@@ -184,7 +180,9 @@ export function IssuerDetailPage() {
   const session = useAuthStore(state => state.session)
   const { cid } = useParams()
   const location = useLocation()
-  const locationState = location.state as IssuerDetailLocationState | null
+  const locationState = location.state as {
+    issuerRegistry?: IssuerRegistryInfo | null
+  } | null
   const cachedRegistry =
     locationState && 'issuerRegistry' in locationState
       ? (locationState.issuerRegistry ?? null)

@@ -25,7 +25,7 @@ import {
   type UserKeyCascadeResult
 } from '@interop/wallet-core/keys'
 import type { CascadeCollections } from '@interop/wallet-core/clients'
-import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
+import { SHAREABLE_COLLECTIONS as ENCRYPTED_STANDARD_COLLECTIONS } from '@/session/shares'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
 export type { UserKeyCascadeResult } from '@interop/wallet-core/keys'
@@ -105,9 +105,7 @@ export function cascadeCollections({
     collectionIds: async () => {
       const { encrypted } = await listOnce()
       const ids = new Set<string>(
-        WALLET_STANDARD_COLLECTIONS.filter(spec => spec.encryption).map(
-          spec => spec.id
-        )
+        ENCRYPTED_STANDARD_COLLECTIONS.map(spec => spec.id)
       )
       for (const id of encrypted) {
         ids.add(id)

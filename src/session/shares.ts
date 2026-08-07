@@ -21,7 +21,9 @@ export interface CollectionShare {
 /**
  * The encrypted standard collections -- the only ones that can be shared,
  * since a share adds the reader to a key-epoch roster and there is no roster
- * where nothing is encrypted.
+ * where nothing is encrypted. The one home of that predicate: the cipher
+ * build and the user-key cascade fan-out import this set rather than re-running
+ * the filter.
  */
 export const SHAREABLE_COLLECTIONS = WALLET_STANDARD_COLLECTIONS.filter(
   ({ encryption }) => encryption
@@ -40,12 +42,18 @@ export async function listSharedCollections({
 }: {
   session: Session
 }): Promise<Record<string, CollectionShare[]>> {
+  // One history scan for the whole panel: every shareable collection's reader
+  // labels come out of the same activity list.
+  const items = await session.storage.listHistoryItems()
   const entries = await Promise.all(
     SHAREABLE_COLLECTIONS.map(
       async ({ id }) =>
         [
           id,
-          await session.storage.listCollectionShares({ collectionId: id })
+          await session.storage.listCollectionShares({
+            collectionId: id,
+            items
+          })
         ] as const
     )
   )

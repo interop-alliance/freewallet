@@ -3,8 +3,7 @@ import { htmlToPlainText } from '@/lib/viewMappers/htmlToPlainText'
 import {
   asRecord,
   getTrimmedString,
-  resolvePersonFullName,
-  type SubjectRecord
+  resolvePersonFullName
 } from '@/lib/viewMappers/displayFieldsHelpers'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type {
@@ -26,6 +25,32 @@ function pickStr(obj: unknown, keys: string[]): string | undefined {
     }
   }
   return undefined
+}
+
+/**
+ * A raw HTML-ish string reduced to plain text, or undefined when there is
+ * nothing left after cleaning. The one "pick a raw string, strip its markup,
+ * collapse an empty result" step every row mapper below shares.
+ *
+ * @param [raw] {string}
+ * @returns {string | undefined}
+ */
+function cleanedText(raw: string | undefined): string | undefined {
+  if (!raw) {
+    return undefined
+  }
+  const cleaned = htmlToPlainText(raw)
+  return cleaned.length > 0 ? cleaned : undefined
+}
+
+/**
+ * A subject member read as an array, or `[]` when it is anything else.
+ *
+ * @param value {unknown}
+ * @returns {unknown[]}
+ */
+function arrayField(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
 }
 
 function summaryFromProfessionalSummary(professionalSummary: unknown): string {
@@ -76,12 +101,9 @@ function mapExperience(raw: unknown, index: number): ResumeExperienceRow {
       pickStr(raw, ['startDate', 'start', 'from']),
       pickStr(raw, ['endDate', 'end', 'to'])
     )
-  const rawDescription = pickStr(raw, ['description', 'summary', 'narrative'])
-  const descriptionCleaned = rawDescription
-    ? htmlToPlainText(rawDescription)
-    : ''
-  const description =
-    descriptionCleaned.length > 0 ? descriptionCleaned : undefined
+  const description = cleanedText(
+    pickStr(raw, ['description', 'summary', 'narrative'])
+  )
   const id = pickStr(raw, ['id']) ?? `exp-${index}`
   return { id, title, company, duration, description }
 }
@@ -89,21 +111,12 @@ function mapExperience(raw: unknown, index: number): ResumeExperienceRow {
 function mapEducation(raw: unknown, index: number): ResumeEducationRow {
   const type = pickStr(raw, ['type', 'degree', 'level'])
   const program = pickStr(raw, ['programName', 'program', 'fieldOfStudy'])
-  let title: string
-  if (type && program) {
-    title = `${type} in ${program}`
-  } else {
-    const byName = pickStr(raw, ['name', 'title'])
-    if (type) {
-      title = type
-    } else if (program) {
-      title = program
-    } else if (byName) {
-      title = byName
-    } else {
-      title = 'Education'
-    }
-  }
+  let title =
+    (type && program ? `${type} in ${program}` : undefined) ??
+    type ??
+    program ??
+    pickStr(raw, ['name', 'title']) ??
+    'Education'
   const institution = pickStr(raw, ['institution', 'school', 'organization'])
   if (institution && !title.includes(institution)) {
     title = `${title}, ${institution}`
@@ -112,36 +125,16 @@ function mapEducation(raw: unknown, index: number): ResumeEducationRow {
     pickStr(raw, ['startDate', 'start']),
     pickStr(raw, ['endDate', 'end'])
   )
-  const rawEducationDescription = pickStr(raw, ['description', 'narrative'])
-  const educationDescriptionCleaned = rawEducationDescription
-    ? htmlToPlainText(rawEducationDescription)
-    : ''
-  const description =
-    educationDescriptionCleaned.length > 0
-      ? educationDescriptionCleaned
-      : undefined
+  const description = cleanedText(pickStr(raw, ['description', 'narrative']))
   const id = pickStr(raw, ['id']) ?? `edu-${index}`
   return { id, title, dates, description }
 }
 
 function mapSkill(raw: unknown): string | undefined {
   if (typeof raw === 'string') {
-    const cleaned = htmlToPlainText(raw)
-    return cleaned.length > 0 ? cleaned : undefined
+    return cleanedText(raw)
   }
-  if (!raw || typeof raw !== 'object') {
-    return undefined
-  }
-  const record = raw as Record<string, unknown>
-  if (typeof record.skills === 'string' && record.skills.trim()) {
-    const cleaned = htmlToPlainText(record.skills)
-    return cleaned.length > 0 ? cleaned : undefined
-  }
-  if (typeof record.name === 'string' && record.name.trim()) {
-    const cleaned = htmlToPlainText(record.name)
-    return cleaned.length > 0 ? cleaned : undefined
-  }
-  return undefined
+  return cleanedText(pickStr(raw, ['skills', 'name']))
 }
 
 function mapAffiliation(raw: unknown, index: number): ResumeAffiliationRow {
@@ -158,7 +151,7 @@ function mapAffiliation(raw: unknown, index: number): ResumeAffiliationRow {
   return { id, title, duration }
 }
 
-function contactFromSubject(subject: SubjectRecord): {
+function contactFromSubject(subject: Record<string, unknown>): {
   fullName: string
   city?: string
   email?: string
@@ -188,35 +181,19 @@ export function resumeSubjectToPreviewData(
   const contact = contactFromSubject(subject)
   const summary = summaryFromProfessionalSummary(subject.professionalSummary)
 
-  let employmentRaw: unknown[] = []
-  if (Array.isArray(subject.employmentHistory)) {
-    employmentRaw = subject.employmentHistory
-  }
-  const experience = employmentRaw
+  const experience = arrayField(subject.employmentHistory)
     .filter(Boolean)
     .map((item, index) => mapExperience(item, index))
 
-  let educationRaw: unknown[] = []
-  if (Array.isArray(subject.educationAndLearning)) {
-    educationRaw = subject.educationAndLearning
-  }
-  const education = educationRaw
+  const education = arrayField(subject.educationAndLearning)
     .filter(Boolean)
     .map((item, index) => mapEducation(item, index))
 
-  let skillsRaw: unknown[] = []
-  if (Array.isArray(subject.skills)) {
-    skillsRaw = subject.skills
-  }
-  const skills = skillsRaw
+  const skills = arrayField(subject.skills)
     .map(mapSkill)
     .filter((skill): skill is string => !!skill)
 
-  let affiliationsRaw: unknown[] = []
-  if (Array.isArray(subject.professionalAffiliations)) {
-    affiliationsRaw = subject.professionalAffiliations
-  }
-  const affiliations = affiliationsRaw
+  const affiliations = arrayField(subject.professionalAffiliations)
     .filter(Boolean)
     .map((item, index) => mapAffiliation(item, index))
 

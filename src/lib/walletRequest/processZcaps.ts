@@ -114,7 +114,7 @@ type WasAction = (typeof WAS_ACTIONS)[number]
  * The class of target a grant resolves onto. Every satisfiable target has
  * exactly one, and it is what `ACTION_CEILINGS` keys on.
  */
-export type TargetClass =
+type TargetClass =
   | 'space'
   | 'protected-collection'
   | 'share'
@@ -189,7 +189,7 @@ const COLLECTION_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
  * foreign URL, an invalid collection name, or an unknown descriptor type); it
  * is skipped at delegation time and shown as "cannot fulfill" on consent.
  */
-export interface ResolvedTarget {
+interface ResolvedTarget {
   satisfiable: boolean
   // The concrete WAS URL to delegate against (absent when unsatisfiable).
   invocationTarget?: string
@@ -262,6 +262,39 @@ const UNSATISFIABLE: ResolvedTarget = Object.freeze({
   isPublic: false,
   isShare: false
 })
+
+// The satisfiable counterpart: the flags every resolved target states, spread
+// into each literal below so only the members that differ are written out.
+const SATISFIABLE_DEFAULTS: ResolvedTarget = Object.freeze({
+  satisfiable: true,
+  wholeSpace: false,
+  needsProvisioning: false,
+  encrypted: false,
+  isPublic: false,
+  isShare: false
+})
+
+/**
+ * The standard-collection entry a name refers to, when it is one.
+ *
+ * @param [name] {string}
+ * @returns {(typeof WALLET_STANDARD_COLLECTIONS)[number] | undefined}
+ */
+function standardCollection(
+  name: string | undefined
+): (typeof WALLET_STANDARD_COLLECTIONS)[number] | undefined {
+  return WALLET_STANDARD_COLLECTIONS.find(entry => entry.id === name)
+}
+
+/**
+ * Whether a descriptor's `name` can be a collection id at all.
+ *
+ * @param [name] {string}
+ * @returns {boolean}
+ */
+function isCollectionName(name: string | undefined): name is string {
+  return !!name && COLLECTION_NAME_RE.test(name)
+}
 
 /**
  * Parses a plain-URL invocation target against the Space URL, returning the
@@ -367,36 +400,25 @@ export function resolveInvocationTarget({
     // trailing slash), which is a whole-Space grant.
     if (!segment) {
       return {
-        satisfiable: true,
+        ...SATISFIABLE_DEFAULTS,
         invocationTarget: url,
         wholeSpace: true,
-        needsProvisioning: false,
-        encrypted: false,
-        isPublic: false,
-        isShare: false,
         targetClass: 'space'
       }
     }
     // A segment that cannot be a collection id names nothing the Space can
     // hold, so there is nothing to delegate against.
-    if (!COLLECTION_NAME_RE.test(segment)) {
+    if (!isCollectionName(segment)) {
       return UNSATISFIABLE
     }
     // The collection id is the first path segment after the Space URL, so a
     // URL under a standard collection (or at a resource inside one) is capped
     // exactly like its `https://w3id.org/byoe#collection` descriptor form.
-    const standard = WALLET_STANDARD_COLLECTIONS.find(
-      entry => entry.id === segment
-    )
     return {
-      satisfiable: true,
+      ...SATISFIABLE_DEFAULTS,
       invocationTarget: url,
-      wholeSpace: false,
-      needsProvisioning: false,
       collectionId: segment,
-      encrypted: !!standard?.encryption,
-      isPublic: false,
-      isShare: false,
+      encrypted: !!standardCollection(segment)?.encryption,
       targetClass: isProtectedCollection(segment)
         ? 'protected-collection'
         : 'collection'
@@ -405,29 +427,22 @@ export function resolveInvocationTarget({
 
   if (descriptor?.type === 'https://w3id.org/byoe#space') {
     return {
-      satisfiable: true,
+      ...SATISFIABLE_DEFAULTS,
       invocationTarget: spaceUrl,
       wholeSpace: true,
-      needsProvisioning: false,
-      encrypted: false,
-      isPublic: false,
-      isShare: false,
       targetClass: 'space'
     }
   }
 
   if (descriptor?.type === 'https://w3id.org/byoe#collection') {
     const { name } = descriptor
-    if (!name || !COLLECTION_NAME_RE.test(name)) {
+    if (!isCollectionName(name)) {
       return UNSATISFIABLE
     }
-    const standard = WALLET_STANDARD_COLLECTIONS.find(
-      entry => entry.id === name
-    )
+    const standard = standardCollection(name)
     return {
-      satisfiable: true,
+      ...SATISFIABLE_DEFAULTS,
       invocationTarget: `${spaceUrl}/${name}`,
-      wholeSpace: false,
       // The `id` and `key-map` collections are provisioned at login, like the
       // standard ones.
       needsProvisioning:
@@ -436,8 +451,6 @@ export function resolveInvocationTarget({
         name !== KEY_MAP_COLLECTION.id,
       collectionId: name,
       encrypted: !!standard?.encryption,
-      isPublic: false,
-      isShare: false,
       targetClass: isProtectedCollection(name)
         ? 'protected-collection'
         : 'collection'
@@ -446,7 +459,7 @@ export function resolveInvocationTarget({
 
   if (descriptor?.type === 'https://w3id.org/byoe#public-collection') {
     const { name } = descriptor
-    if (!name || !COLLECTION_NAME_RE.test(name)) {
+    if (!isCollectionName(name)) {
       return UNSATISFIABLE
     }
     // A public grant on a protected wallet collection is refused
@@ -455,40 +468,31 @@ export function resolveInvocationTarget({
     if (isProtectedCollection(name)) {
       return UNSATISFIABLE
     }
+    // Public implies plaintext: the collection is provisioned without an
+    // encryption descriptor, so a ciphertext note never applies.
     return {
-      satisfiable: true,
+      ...SATISFIABLE_DEFAULTS,
       invocationTarget: `${spaceUrl}/${name}`,
-      wholeSpace: false,
       needsProvisioning: true,
       collectionId: name,
-      // Public implies plaintext: the collection is provisioned without an
-      // encryption descriptor, so a ciphertext note never applies.
-      encrypted: false,
       isPublic: true,
-      isShare: false,
       targetClass: 'public-collection'
     }
   }
 
   if (descriptor?.type === 'https://w3id.org/byoe#shared-collection') {
     const { name } = descriptor
-    const standard = WALLET_STANDARD_COLLECTIONS.find(
-      entry => entry.id === name
-    )
     // Only the encrypted standard collections have a key-epoch roster to
     // escrow a reader into; everything else (a plaintext collection, an RP
     // collection, a made-up name) cannot be shared.
-    if (!standard?.encryption) {
+    if (!standardCollection(name)?.encryption) {
       return UNSATISFIABLE
     }
     return {
-      satisfiable: true,
+      ...SATISFIABLE_DEFAULTS,
       invocationTarget: `${spaceUrl}/${name}`,
-      wholeSpace: false,
-      needsProvisioning: false,
       collectionId: name,
       encrypted: true,
-      isPublic: false,
       isShare: true,
       targetClass: 'share'
     }
@@ -692,6 +696,72 @@ export async function processZcaps({
   const now = Date.now()
   const { zcapClient } = session.profile
 
+  /**
+   * The grantee's X25519 recipient key, derived from the did:key the wallet is
+   * delegating to -- the one recipient derivation in the system, for an app and
+   * a person alike. Throws when the controller has no Ed25519 twin to derive
+   * from (`resolveGrant` already rejected a named controller that cannot; this
+   * covers the App Connect path, which fills the controller after resolution).
+   *
+   * @param options {object}
+   * @param [options.controller] {string}
+   * @param options.requirement {string}   what needs the recipient key, for
+   *   the refusal message
+   * @returns {ReturnType<typeof x25519RecipientFromDidKey>}
+   */
+  function recipientFor({
+    controller,
+    requirement
+  }: {
+    controller?: string
+    requirement: string
+  }) {
+    if (!controller || !isEd25519DidKey(controller)) {
+      throw new Error(
+        `${requirement} requires an Ed25519 did:key controller to derive the ` +
+          'recipient key from.'
+      )
+    }
+    return x25519RecipientFromDidKey({ did: controller })
+  }
+
+  /**
+   * Provisions a collection a grant needs before it can be delegated against:
+   * an App Connect PRIVATE collection multi-recipient (the user's vault KAK as
+   * recipient zero plus the app's identity KAK), anything else plaintext -- a
+   * public-collection grant additionally getting the collection-level
+   * PublicCanRead policy, which the wallet (holding the Space root) sets
+   * because the RP's delegated zcap could not.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}
+   * @param options.isPublic {boolean}
+   * @param [options.controller] {string}   the grantee did:key, for the app
+   *   recipient derivation
+   * @returns {Promise<void>}
+   */
+  async function provisionFor({
+    collectionId,
+    isPublic,
+    controller
+  }: {
+    collectionId: string
+    isPublic: boolean
+    controller?: string
+  }): Promise<void> {
+    if (appProvisioning && !isPublic) {
+      await session.storage.provisionAppCollection({
+        collectionId,
+        appRecipient: recipientFor({
+          controller,
+          requirement: 'Provisioning an encrypted app collection'
+        })
+      })
+      return
+    }
+    await session.storage.ensureCollection({ id: collectionId, isPublic })
+  }
+
   const zcaps: IZcap[] = []
   for (const descriptor of zcapRequests) {
     const { target, allowedActions, write } = resolveGrant({
@@ -704,22 +774,17 @@ export async function processZcaps({
     if (target.isShare && target.collectionId) {
       // A share leaves the plain delegation loop: `shareCollection` grants the
       // pull axis (a read-only zcap) and the read axis (an epoch roster entry)
-      // in one call, so the two can never come apart. `resolveGrant` already
-      // rejected a controller whose recipient key cannot be derived when one
-      // was named; this guard covers the App Connect path, which fills the
-      // controller after resolution.
-      if (!isEd25519DidKey(descriptor.controller)) {
-        throw new Error(
-          'A shared-collection grant requires an Ed25519 did:key controller ' +
-            'to derive the recipient key from.'
-        )
-      }
+      // in one call, so the two can never come apart.
+      const recipient = recipientFor({
+        controller: descriptor.controller,
+        requirement: 'A shared-collection grant'
+      })
       const { zcap } = await session.storage.shareCollection({
         profile: session.profile,
         user: session.user,
         collectionId: target.collectionId,
-        recipient: x25519RecipientFromDidKey({ did: descriptor.controller }),
-        controller: descriptor.controller,
+        recipient,
+        controller: descriptor.controller!,
         expires: new Date(now + shareTtlMs),
         app
       })
@@ -727,36 +792,11 @@ export async function processZcaps({
       continue
     }
     if (target.needsProvisioning && target.collectionId) {
-      if (appProvisioning && !target.isPublic) {
-        // App Connect PRIVATE collection: provision multi-recipient EDV, with
-        // the user's vault KAK as recipient zero and the app's identity KAK
-        // alongside it, so both can read what the app writes. The recipient is
-        // derived from the controller DID the wallet is already delegating to
-        // -- the same rule a share uses, so there is one recipient derivation
-        // in the system and the wallet never touches the app's seed here.
-        if (!isEd25519DidKey(descriptor.controller)) {
-          throw new Error(
-            'Provisioning an encrypted app collection requires an Ed25519 ' +
-              'did:key controller to derive the recipient key from.'
-          )
-        }
-        const appRecipient = x25519RecipientFromDidKey({
-          did: descriptor.controller
-        })
-        await session.storage.provisionAppCollection({
-          collectionId: target.collectionId,
-          appRecipient
-        })
-      } else {
-        // A public-collection grant provisions plaintext plus a collection-level
-        // PublicCanRead policy; the wallet (holding the space root) sets the
-        // policy -- the RP's delegated zcap could not. A non-App-Connect grant
-        // provisions a plaintext RP collection.
-        await session.storage.ensureCollection({
-          id: target.collectionId,
-          isPublic: target.isPublic
-        })
-      }
+      await provisionFor({
+        collectionId: target.collectionId,
+        isPublic: target.isPublic,
+        controller: descriptor.controller
+      })
     }
     // Write grants live for the shorter write TTL; read-only grants for the
     // longer read TTL.

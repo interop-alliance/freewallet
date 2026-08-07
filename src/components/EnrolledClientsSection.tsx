@@ -222,8 +222,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
     try {
       await approveEnrollment({
         request: enrollRequest,
-        profile: session.profile,
-        storage: session.storage,
+        session,
         label: enrollLabel
       })
       setEnrollDone(true)
@@ -239,10 +238,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
     }
   }
 
-  const canEnroll =
-    canManage &&
-    !!session.profile.clientWebvhKeys &&
-    !!session.profile.clientKeyAgreementKey
+  const canEnroll = canManage
   const lastClient = (clients?.length ?? 0) <= 1
 
   return (

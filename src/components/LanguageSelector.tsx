@@ -13,14 +13,14 @@ import {
 } from '@/i18n/uiLanguages'
 import { languageSelectorStyles } from '@/styles/languageSelectorStyles'
 
-type LanguageSelectorProps = {
+export function LanguageSelector({
+  showLabel = true
+}: {
   /**
    * Use a section heading in the parent instead of the floating label.
    */
   showLabel?: boolean
-}
-
-export function LanguageSelector({ showLabel = true }: LanguageSelectorProps) {
+}) {
   const reactId = useId()
   const labelId = `${reactId}-language-label`
   const selectId = `${reactId}-language-select`

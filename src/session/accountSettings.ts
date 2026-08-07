@@ -9,6 +9,7 @@
 import { base64urlnopad } from '@scure/base'
 import type { IZcap } from '@interop/data-integrity-core'
 import { rotateWebvhUpdateKey } from '@interop/wallet-core/webvh'
+import { deriveUnlockIdentity, KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
   bindPassphrase,
   changePassphrase,
@@ -27,8 +28,9 @@ import {
   putUnlockMethods,
   revokeUnlockMethod,
   revokeUnlockMethodByCeremony,
-  type PasskeyUnlockMethod,
+  upsertPassphraseUnlockMethod,
   type PassphraseUnlockMethod,
+  type PasskeyUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
 import {
@@ -177,21 +179,14 @@ export async function repointPassphraseUnlockMethod({
     if (!current) {
       return null
     }
-    const existing = current.methods.find(
-      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
-    )
-    const entry: PassphraseUnlockMethod = {
-      type: 'passphrase',
-      createdAt: existing?.createdAt ?? new Date().toISOString(),
+    // The repoint sets `manageCapability` unconditionally: a change that
+    // minted none must clear the one the retired unlock Space's entry carried.
+    const updated = upsertPassphraseUnlockMethod({
+      record: current,
       unlockSpaceId,
-      manageCapability
-    }
-    const methods = existing
-      ? current.methods.map(method =>
-          method.type === 'passphrase' ? entry : method
-        )
-      : [...current.methods, entry]
-    const updated: UnlockMethodsRecord = { ...current, methods }
+      manageCapability,
+      keepAbsentManageCapability: true
+    })
     await putUnlockMethods({ session, record: updated })
     return updated
   } catch (err) {
@@ -500,6 +495,11 @@ export async function deleteAccount({
   passphrase: string
 }): Promise<AccountDeletionResult> {
   const isGuest = !!session.isGuest
+  // One derivation for both unlock-layer steps below (the confirmation and
+  // the retirement), rather than running the 600k-iteration KDF twice.
+  const unlock = isGuest
+    ? undefined
+    : await deriveUnlockIdentity({ secret: passphrase, kdf: KEYRING_KDF })
   // (a) Confirm the passphrase before wiping anything -- a wrong passphrase
   // must not delete data. Guests have no keyring, so this is skipped.
   if (!isGuest) {
@@ -508,7 +508,8 @@ export async function deleteAccount({
       // under (differs from `user.id` on an enrolled second client).
       await verifyPassphrase({
         controller: session.profile.accountController ?? session.user.id,
-        passphrase
+        passphrase,
+        unlock
       })
     } catch (err) {
       if (err instanceof WrongPassphraseError) {
@@ -535,7 +536,10 @@ export async function deleteAccount({
   // leftover record is only a hygiene residue. Guests have no keyring.
   if (!isGuest) {
     try {
-      const { unlockSpaceDeleted } = await deleteKeyring({ passphrase })
+      const { unlockSpaceDeleted } = await deleteKeyring({
+        passphrase,
+        unlock
+      })
       if (!unlockSpaceDeleted) {
         console.warn(
           'Could not delete the unlock Space during account deletion.'

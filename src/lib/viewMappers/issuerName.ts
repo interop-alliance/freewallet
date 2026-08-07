@@ -4,4 +4,3 @@
  * unaffected.
  */
 export { issuerName, getIssuerDetails } from '@interop/wallet-core/display'
-export type { IssuerDetails } from '@interop/wallet-core/display'

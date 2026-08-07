@@ -25,7 +25,7 @@ import type {
   IKeyAgreementKey
 } from '@interop/data-integrity-core'
 import { WasError } from '@interop/was-client'
-import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
+import { deriveSpaceId } from '@interop/was-client/sync'
 import { createEdvDocCipher } from '@interop/was-client/edv'
 import { loadClientKeyRecord, loadKeyringCache } from '@/lib/sessionKey'
 import {
@@ -247,7 +247,7 @@ async function unlockFor(passphrase: string) {
     type: keyAgreementKey.type,
     publicKeyMultibase: keyAgreementKey.publicKeyMultibase
   })
-  const spaceId = bufferToBase64Url(await digestHash(agent.id))
+  const spaceId = deriveSpaceId(agent.id)
   return { agent, keyAgreementKey, keyResolver, spaceId }
 }
 

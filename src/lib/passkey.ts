@@ -25,17 +25,6 @@ export interface PasskeyRegistration {
 }
 
 /**
- * Result of a passkey assertion ceremony. `userHandle` is the discoverable
- * credential's stored user handle when the authenticator returns one, else
- * null. `prfOutput` is exactly 32 bytes.
- */
-export interface PasskeyAssertion {
-  credentialId: Uint8Array
-  userHandle: Uint8Array | null
-  prfOutput: Uint8Array
-}
-
-/**
  * Raised when the user dismisses or aborts a passkey ceremony
  * (`NotAllowedError` / `AbortError`, or a declined PRF retry).
  */
@@ -197,19 +186,26 @@ export function buildRegistrationOptions({
  *
  * @param options {object}
  * @param [options.credentialIds] {Uint8Array[]}   restrict to these credentials
+ * @param [options.transports] {string[]}   the transports advertised for those
+ *   credentials, when known (a fresh registration's `getTransports()`)
  * @returns {PublicKeyCredentialRequestOptions}
  */
 export function buildAssertionOptions({
-  credentialIds = []
+  credentialIds = [],
+  transports
 }: {
   credentialIds?: Uint8Array[]
+  transports?: string[]
 }): PublicKeyCredentialRequestOptions {
   return {
     rpId: PASSKEY_RP_ID,
     challenge: randomChallenge(),
     allowCredentials: credentialIds.map(id => ({
       type: 'public-key',
-      id: id as BufferSource
+      id: id as BufferSource,
+      ...(transports
+        ? { transports: transports as AuthenticatorTransport[] }
+        : {})
     })),
     userVerification: 'required',
     extensions: PRF_EXTENSION
@@ -249,36 +245,6 @@ export function parseBackupFlags(authenticatorData: ArrayBuffer | Uint8Array): {
 function prfResult(credential: PublicKeyCredential): Uint8Array | null {
   const first = credential.getClientExtensionResults().prf?.results?.first
   return first ? copyBytes(first) : null
-}
-
-/**
- * Reads the authenticator transports advertised by a just-created credential,
- * guarding against older browsers that lack `getTransports()`.
- *
- * @param response {AuthenticatorAttestationResponse}
- * @returns {string[]}
- */
-function readTransports(response: AuthenticatorAttestationResponse): string[] {
-  return typeof response.getTransports === 'function'
-    ? response.getTransports()
-    : []
-}
-
-/**
- * Reads the BE / BS flags from a just-created credential, guarding against
- * older browsers that lack `getAuthenticatorData()` (both default to false).
- *
- * @param response {AuthenticatorAttestationResponse}
- * @returns {{ backupEligibility: boolean, backupState: boolean }}
- */
-function readBackupFlags(response: AuthenticatorAttestationResponse): {
-  backupEligibility: boolean
-  backupState: boolean
-} {
-  if (typeof response.getAuthenticatorData !== 'function') {
-    return { backupEligibility: false, backupState: false }
-  }
-  return parseBackupFlags(response.getAuthenticatorData())
 }
 
 /**
@@ -329,8 +295,14 @@ export async function registerPasskey({
   }
 
   const response = credential.response as AuthenticatorAttestationResponse
-  const transports = readTransports(response)
-  const { backupEligibility, backupState } = readBackupFlags(response)
+  // Both accessors are guarded: older browsers lack `getTransports()` /
+  // `getAuthenticatorData()`, in which case the flags default to false.
+  const transports =
+    typeof response.getTransports === 'function' ? response.getTransports() : []
+  const { backupEligibility, backupState } =
+    typeof response.getAuthenticatorData === 'function'
+      ? parseBackupFlags(response.getAuthenticatorData())
+      : { backupEligibility: false, backupState: false }
   const credentialId = copyBytes(credential.rawId)
 
   let prfOutput = prfResult(credential)
@@ -393,19 +365,10 @@ async function resolvePrfViaAssertion({
   let assertion: PublicKeyCredential
   try {
     assertion = (await navigator.credentials.get({
-      publicKey: {
-        rpId: PASSKEY_RP_ID,
-        challenge: randomChallenge(),
-        allowCredentials: [
-          {
-            type: 'public-key',
-            id: credential.rawId,
-            transports: transports as AuthenticatorTransport[]
-          }
-        ],
-        userVerification: 'required',
-        extensions: PRF_EXTENSION
-      },
+      publicKey: buildAssertionOptions({
+        credentialIds: [copyBytes(credential.rawId)],
+        transports
+      }),
       signal
     })) as PublicKeyCredential
   } catch (err) {
@@ -429,7 +392,10 @@ async function resolvePrfViaAssertion({
  * @param options {object}
  * @param [options.credentialIds] {Uint8Array[]}   restrict to these credentials
  * @param [options.signal] {AbortSignal}   aborts the ceremony
- * @returns {Promise<PasskeyAssertion>}
+ * @returns {Promise<{ credentialId: Uint8Array, userHandle: Uint8Array | null,
+ *   prfOutput: Uint8Array }>}   `userHandle` is the discoverable credential's
+ *   stored user handle when the authenticator returns one, else null;
+ *   `prfOutput` is exactly 32 bytes
  */
 export async function assertPasskeyPrf({
   credentialIds = [],
@@ -437,7 +403,11 @@ export async function assertPasskeyPrf({
 }: {
   credentialIds?: Uint8Array[]
   signal?: AbortSignal
-}): Promise<PasskeyAssertion> {
+}): Promise<{
+  credentialId: Uint8Array
+  userHandle: Uint8Array | null
+  prfOutput: Uint8Array
+}> {
   const publicKey = buildAssertionOptions({ credentialIds })
 
   let assertion: PublicKeyCredential

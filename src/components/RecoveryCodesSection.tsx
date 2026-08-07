@@ -20,7 +20,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { MdDeleteOutline } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Session } from '@/types/auth'
 import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
 import {
@@ -47,17 +47,12 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
   const [isSaving, setIsSaving] = useState(false)
   const [revokingKid, setRevokingKid] = useState<string | null>(null)
   const [errorKey, setErrorKey] = useState<string | null>(null)
-  const loadEntries = useCallback(
-    async (): Promise<RecoveryCodeUnlockMethod[]> =>
-      listRecoveryCodeEntries({ session }),
-    [session]
-  )
 
   useEffect(() => {
     let cancelled = false
 
     async function initialLoad() {
-      const loaded = await loadEntries()
+      const loaded = await listRecoveryCodeEntries({ session })
       if (cancelled) {
         return
       }
@@ -81,7 +76,7 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
     return () => {
       cancelled = true
     }
-  }, [loadEntries, session])
+  }, [session])
 
   const handleGenerate = () => {
     setErrorKey(null)
@@ -112,7 +107,7 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
         label: label.trim() || t('settings.recovery.unlabeled')
       })
       setPendingCode(null)
-      setEntries(await loadEntries())
+      setEntries(await listRecoveryCodeEntries({ session }))
     } catch (err) {
       console.error('Could not issue the recovery code:', err)
       setErrorKey('settings.recovery.saveError')
@@ -132,7 +127,7 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
     setErrorKey(null)
     try {
       await revokeRecoveryCode({ session, entry })
-      setEntries(await loadEntries())
+      setEntries(await listRecoveryCodeEntries({ session }))
       setHealthFlags(flags =>
         flags.filter(flag => flag.entry.recoveryKid !== entry.recoveryKid)
       )

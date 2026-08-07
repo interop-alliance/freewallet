@@ -21,7 +21,6 @@ export function useCredentialPublicLink({
 }) {
   const { t } = useTranslation()
   const [isShared, setIsShared] = useState(false)
-  const [publicLink, setPublicLink] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(false)
 
@@ -49,9 +48,6 @@ export function useCredentialPublicLink({
       .isShared({ cid })
       .then(shared => {
         setIsShared(shared)
-        setPublicLink(
-          shared ? (session.storage.publicLinkUrl({ cid }) ?? null) : null
-        )
       })
       .catch((err: unknown) => {
         console.error('Error checking public link status:', err)
@@ -65,8 +61,7 @@ export function useCredentialPublicLink({
     setBusy(true)
     setError(false)
     try {
-      const url = await session.storage.createPublicLink({ credential })
-      setPublicLink(url)
+      await session.storage.createPublicLink({ credential })
       setIsShared(true)
       await session.storage.addHistoryCredentialShared({
         cid,
@@ -89,7 +84,6 @@ export function useCredentialPublicLink({
     setError(false)
     try {
       await session.storage.removePublicLink({ cid })
-      setPublicLink(null)
       setIsShared(false)
       await session.storage.addHistoryCredentialUnshared({
         cid,
@@ -111,6 +105,11 @@ export function useCredentialPublicLink({
       void create()
     }
   }, [create, isShared, remove])
+
+  // The public copy's URL is a pure function of the cid, so it derives from the
+  // shared flag rather than being tracked alongside it.
+  const publicLink =
+    isShared && cid ? (session?.storage.publicLinkUrl({ cid }) ?? null) : null
 
   const share: CredentialShareActions | undefined = canShare
     ? { isShared, publicLink, busy, toggle }

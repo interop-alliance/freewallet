@@ -124,7 +124,7 @@ import {
   deleteClientKeyRecord,
   deleteKeyringCache,
   loadUserKeyEpochPin,
-  saveUserKeyEpochPin
+  savePinFromDescriptor
 } from '@/lib/sessionKey'
 import { WASRemoteStore } from '@/stores/wasRemoteStore'
 
@@ -376,7 +376,7 @@ function recoveryRegistryEntry({
  * @param [options.record] {UnlockMethodsRecord | null}
  * @returns {RecoveryCodeUnlockMethod[]}
  */
-function recoveryEntriesOf({
+export function recoveryEntriesOf({
   record
 }: {
   record?: UnlockMethodsRecord | null
@@ -873,10 +873,10 @@ export async function recoverAccountWithCode({
     throw new Error('The user key roster vanished during recovery.')
   }
   const newUserKey = postRotation.userKey
-  await saveUserKeyEpochPin({
+  await savePinFromDescriptor({
     spaceId: pointer.spaceId,
     epochId: postRotation.latestEpochId,
-    epochIds: (postRotation.descriptor.epochs ?? []).map(epoch => epoch.id),
+    descriptor: postRotation.descriptor,
     idb
   })
 
@@ -1120,10 +1120,10 @@ export async function revokeRecoveryCode({
   })
   let rotatedUserKey: UserKey | undefined
   if (read) {
-    await saveUserKeyEpochPin({
+    await savePinFromDescriptor({
       spaceId: pointer.spaceId,
       epochId: read.latestEpochId,
-      epochIds: (read.descriptor.epochs ?? []).map(epoch => epoch.id),
+      descriptor: read.descriptor,
       idb
     })
     if (read.rotated) {
@@ -1349,8 +1349,13 @@ export async function checkRecoveryHealth({
     pointer
   })
   const publishedMultibases = documentKeyMultibases({ doc })
+  // Each entry's update-key hash is an independent derivation; run them
+  // together rather than one per loop turn.
+  const updateKeyHashes = await Promise.all(
+    entries.map(entry => deriveNextKeyHash(entry.updateKeyMultibase))
+  )
   const flags: RecoveryHealthFlag[] = []
-  for (const entry of entries) {
+  for (const [position, entry] of entries.entries()) {
     // The same predicate the re-mint stage uses, so one registry entry can no
     // longer be "needs re-minting" here and "fine" there: an entry recording
     // no delegation key is uncheckable, so it is flagged (the documented
@@ -1363,7 +1368,7 @@ export async function checkRecoveryHealth({
     })
     const postureMissing =
       !publishedMultibases.has(entry.keyAgreementKeyMultibase) ||
-      !nextKeyHashes.includes(await deriveNextKeyHash(entry.updateKeyMultibase))
+      !nextKeyHashes.includes(updateKeyHashes[position])
     if (delegationRotted || postureMissing) {
       flags.push({ entry, delegationRotted, postureMissing })
     }

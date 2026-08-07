@@ -8,13 +8,6 @@ import { useAppTheme } from '@/context/appThemeContext'
 import { APP_THEME_IDS, type AppThemeId } from '@/themes/appTheme'
 import { languageSelectorStyles } from '@/styles/languageSelectorStyles'
 
-type ThemePickerProps = {
-  /**
-   * Use a section heading in the parent instead of the floating label.
-   */
-  showLabel?: boolean
-}
-
 function themeOptionLabel(
   themeId: AppThemeId,
   t: (key: string) => string
@@ -22,7 +15,14 @@ function themeOptionLabel(
   return t(`common.themes.${themeId}`)
 }
 
-export function ThemePicker({ showLabel = true }: ThemePickerProps) {
+export function ThemePicker({
+  showLabel = true
+}: {
+  /**
+   * Use a section heading in the parent instead of the floating label.
+   */
+  showLabel?: boolean
+}) {
   const { themeId, setThemeId } = useAppTheme()
   const reactId = useId()
   const labelId = `${reactId}-theme-label`

@@ -44,6 +44,63 @@ import { registerWallet } from '@/lib/registerWallet'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import type { AuthLocationState } from '@/types/auth'
 
+/**
+ * Maps a login failure to the i18n key its message lives under, logging the
+ * arms that warrant it. Shared by the passphrase and the passkey handler,
+ * which differ only in their log label and in the side effects they add on
+ * top of the returned key.
+ *
+ * @param options {object}
+ * @param options.err {unknown}   the caught failure
+ * @param options.label {string}   the log prefix ("Login", "Passkey login")
+ * @returns {string}
+ */
+function loginErrorKey({
+  err,
+  label
+}: {
+  err: unknown
+  label: string
+}): string {
+  // The WAS storage server is unreachable -- offer a guest-mode fallback.
+  if (isStorageUnreachable(err)) {
+    return 'auth.errors.storageUnreachable'
+  }
+  // The continuity refusal: the server returned an account pointer that
+  // conflicts with the one this browser has pinned.
+  if (err instanceof AccountPointerChangedError) {
+    console.error(`${label} refused:`, err)
+    return 'auth.errors.accountPointerChanged'
+  }
+  // The rollback refusal: the served key roster sits behind the epoch this
+  // browser has already seen.
+  if (err instanceof UserKeyRosterContinuityError) {
+    console.error(`${label} refused:`, err)
+    return 'auth.errors.userKeyRosterContinuity'
+  }
+  // The served key roster failed authentication -- a fabricated or tampered
+  // epoch configuration.
+  if (err instanceof UserKeyRosterIntegrityError) {
+    console.error(`${label} refused:`, err)
+    return 'auth.errors.userKeyRosterIntegrity'
+  }
+  // A torn enrollment: this browser's key is published for the account, but
+  // the key roster holds no wrap for it, so the session cannot recover the
+  // account key.
+  if (err instanceof UserKeyRosterUnwrapError) {
+    console.error(`${label} failed:`, err)
+    return 'auth.errors.userKeyRosterUnwrap'
+  }
+  // A keyring record was found but is corrupt -- not a server outage and not
+  // a wrong passphrase; surface it with recovery guidance.
+  if (err instanceof KeyringRecordUnusableError) {
+    console.error(`${label} failed:`, err)
+    return 'auth.errors.keyringUnusable'
+  }
+  console.error(`${label} failed:`, err)
+  return 'auth.errors.setupFailed'
+}
+
 export function LoginPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -147,44 +204,14 @@ export function LoginPage() {
         .catch(err => console.warn('Recovery health check failed:', err))
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      // The WAS storage server is unreachable -- offer a guest-mode fallback.
-      if (isStorageUnreachable(err)) {
-        setErrorKey('auth.errors.storageUnreachable')
-      } else if (err instanceof AccountPointerChangedError) {
-        // The continuity refusal: the server returned an account pointer that
-        // conflicts with the one this browser has pinned.
-        console.error('Login refused:', err)
-        setErrorKey('auth.errors.accountPointerChanged')
-      } else if (err instanceof UserKeyRosterContinuityError) {
-        // The rollback refusal: the served key roster sits behind the epoch
-        // this browser has already seen.
-        console.error('Login refused:', err)
-        setErrorKey('auth.errors.userKeyRosterContinuity')
-      } else if (err instanceof UserKeyRosterIntegrityError) {
-        // The served key roster failed authentication -- a fabricated or
-        // tampered epoch configuration.
-        console.error('Login refused:', err)
-        setErrorKey('auth.errors.userKeyRosterIntegrity')
-      } else if (err instanceof UserKeyRosterUnwrapError) {
-        // A torn enrollment: this browser's key is published for the account,
-        // but the key roster holds no wrap for it, so the session cannot
-        // recover the account key. Connecting this browser again mints a
-        // fresh key set and redoes the wrap, so offer that flow.
-        console.error('Login failed:', err)
-        setErrorKey('auth.errors.userKeyRosterUnwrap')
-        if (passphrase) {
-          setNotEnrolledPassphrase(passphrase)
-          setEnrollment(null)
-          setEnrollErrorKey(null)
-        }
-      } else if (err instanceof KeyringRecordUnusableError) {
-        // A keyring record was found but is corrupt -- not a server outage
-        // and not a wrong passphrase; surface it with recovery guidance.
-        console.error('Login failed:', err)
-        setErrorKey('auth.errors.keyringUnusable')
-      } else {
-        console.error('Login failed:', err)
-        setErrorKey('auth.errors.setupFailed')
+      const key = loginErrorKey({ err, label: 'Login' })
+      setErrorKey(key)
+      // A torn enrollment: connecting this browser again mints a fresh key set
+      // and redoes the wrap, so offer that flow.
+      if (key === 'auth.errors.userKeyRosterUnwrap' && passphrase) {
+        setNotEnrolledPassphrase(passphrase)
+        setEnrollment(null)
+        setEnrollErrorKey(null)
       }
     } finally {
       setIsSubmitting(false)
@@ -287,38 +314,11 @@ export function LoginPage() {
       } else if (err instanceof PasskeyPrfUnsupportedError) {
         // This passkey or browser cannot evaluate the PRF extension.
         setErrorKey('auth.errors.passkeyPrfUnsupported')
-      } else if (isStorageUnreachable(err)) {
-        // The WAS storage server is unreachable -- offer a guest-mode fallback.
-        setErrorKey('auth.errors.storageUnreachable')
-      } else if (err instanceof AccountPointerChangedError) {
-        // The continuity refusal: the server returned an account pointer that
-        // conflicts with the one this browser has pinned.
-        console.error('Passkey login refused:', err)
-        setErrorKey('auth.errors.accountPointerChanged')
-      } else if (err instanceof UserKeyRosterContinuityError) {
-        // The rollback refusal: the served key roster sits behind the epoch
-        // this browser has already seen.
-        console.error('Passkey login refused:', err)
-        setErrorKey('auth.errors.userKeyRosterContinuity')
-      } else if (err instanceof UserKeyRosterIntegrityError) {
-        // The served key roster failed authentication -- a fabricated or
-        // tampered epoch configuration.
-        console.error('Passkey login refused:', err)
-        setErrorKey('auth.errors.userKeyRosterIntegrity')
-      } else if (err instanceof UserKeyRosterUnwrapError) {
-        // A torn enrollment: this browser's key is published for the account,
-        // but the key roster holds no wrap for it. The connect-this-browser
-        // flow starts from a passphrase, so the copy asks for one here.
-        console.error('Passkey login failed:', err)
-        setErrorKey('auth.errors.userKeyRosterUnwrap')
-      } else if (err instanceof KeyringRecordUnusableError) {
-        // A keyring record was found but is corrupt -- not a server outage;
-        // surface it with recovery guidance.
-        console.error('Passkey login failed:', err)
-        setErrorKey('auth.errors.keyringUnusable')
       } else {
-        console.error('Passkey login failed:', err)
-        setErrorKey('auth.errors.setupFailed')
+        // The connect-this-browser flow starts from a passphrase, so a torn
+        // enrollment only surfaces its message here; the passphrase handler
+        // offers the flow itself.
+        setErrorKey(loginErrorKey({ err, label: 'Passkey login' }))
       }
     } finally {
       setIsPasskeySubmitting(false)

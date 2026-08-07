@@ -14,27 +14,11 @@
  * EXACT display name. The two wallets must therefore hold these strings
  * byte-for-byte identically -- 'Interop Alliance Team' and
  * 'did:web:interopalliance.org'. A drift of one character duplicates both
- * seeds on every install, forever. The self seed's name is the one that does
- * NOT need retyping: it belongs to the generic `selfContact`, so social-core
- * exports it and this list references it.
+ * seeds on every install, forever.
  */
-import {
-  normalizeContact,
-  SELF_CONTACT_NAME,
-  type ContactData
-} from '@interop/social-core'
+import { normalizeContact, type ContactData } from '@interop/social-core'
 
 const INTEROP_ALLIANCE_TEAM_NAME = 'Interop Alliance Team'
-
-/**
- * The display names of the default contacts, in seeding order -- the strings a
- * pull path matches on to absorb another replica's copy of a seed instead of
- * inserting a duplicate.
- */
-export const DEFAULT_CONTACT_NAMES: string[] = [
-  INTEROP_ALLIANCE_TEAM_NAME,
-  SELF_CONTACT_NAME
-]
 
 /**
  * Runs a seed literal through `normalizeContact`, so the stored row has the

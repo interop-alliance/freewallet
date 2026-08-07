@@ -31,7 +31,12 @@ import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type { StoredCredential } from '@/types/credential'
 import type { IAppConnectApp } from '@/lib/walletRequest'
 import { documentLoader } from '@/lib/walletRequest/composeVP'
-import { issuerId, subjectId, typeArray } from '@/lib/vcShape'
+import {
+  byIssuanceDateDesc,
+  isSelfIssued,
+  subjectId,
+  typeArray
+} from '@/lib/vcShape'
 
 /**
  * The app identity an App Connect request presents (display `name`, plus the
@@ -45,7 +50,7 @@ export type AppConnectApp = IAppConnectApp
  * does not affect the derived key (the seed already encodes it), so it is
  * cosmetic; kept in sync with was-react's `deriveIdentity` for legibility.
  */
-export const APP_KEY_HANDLE = 'freewallet-app-key'
+const APP_KEY_HANDLE = 'freewallet-app-key'
 
 /**
  * The key name mixed into seed derivation. Unlike the handle this is
@@ -232,28 +237,43 @@ export async function appKeyCredentialsIn({
   credentialType: string
   origin: string
 }): Promise<StoredCredential[]> {
-  // Cheap, synchronous predicates first, so only plausible candidates pay for
-  // a key derivation.
-  const candidates = credentials.filter(({ vc: credential }) => {
-    const issuer = issuerId(credential.issuer)
-    return (
-      presentsAsAppKey(credential) &&
-      typeArray(credential.type).includes(credentialType) &&
-      !!issuer &&
-      issuer === subjectId(credential) &&
-      appKeyOrigin(credential) === origin
-    )
-  })
+  const candidates = appKeyCandidates({ credentials, credentialType, origin })
   const bound = await Promise.all(
     candidates.map(({ vc: credential }) => appKeySeedBindsSubject(credential))
   )
-  return candidates
-    .filter((_candidate, index) => bound[index])
-    .sort((first, second) => {
-      const firstDate = (first.vc.issuanceDate as string) ?? ''
-      const secondDate = (second.vc.issuanceDate as string) ?? ''
-      return secondDate.localeCompare(firstDate)
-    })
+  return candidates.filter((_candidate, index) => bound[index])
+}
+
+/**
+ * The app-key candidates for an app + origin, latest-first: everything the
+ * cheap, synchronous predicates accept, so only plausible candidates pay for a
+ * key derivation. Sorting here (rather than after the binding check) lets
+ * {@link findAppKeyCredential} stop at the newest credential that binds.
+ *
+ * @param options {object}
+ * @param options.credentials {StoredCredential[]}
+ * @param options.credentialType {string}
+ * @param options.origin {string}
+ * @returns {StoredCredential[]}
+ */
+function appKeyCandidates({
+  credentials,
+  credentialType,
+  origin
+}: {
+  credentials: StoredCredential[]
+  credentialType: string
+  origin: string
+}): StoredCredential[] {
+  return credentials
+    .filter(
+      ({ vc: credential }) =>
+        presentsAsAppKey(credential) &&
+        typeArray(credential.type).includes(credentialType) &&
+        isSelfIssued(credential) &&
+        appKeyOrigin(credential) === origin
+    )
+    .sort(byIssuanceDateDesc)
 }
 
 /**
@@ -275,7 +295,19 @@ export async function findAppKeyCredential({
   credentialType: string
   origin: string
 }): Promise<StoredCredential | undefined> {
-  return (await appKeyCredentialsIn({ credentials, credentialType, origin }))[0]
+  // Newest-first, returning at the first credential that binds: a planted one
+  // ranked above it by its own `issuanceDate` is discarded on the way, and the
+  // credentials below it never pay for a key derivation.
+  for (const candidate of appKeyCandidates({
+    credentials,
+    credentialType,
+    origin
+  })) {
+    if (await appKeySeedBindsSubject(candidate.vc)) {
+      return candidate
+    }
+  }
+  return undefined
 }
 
 /**
@@ -357,7 +389,7 @@ export function appKeySubjectDid(
  * @param credential {IVerifiableCredential}
  * @returns {Uint8Array | undefined}
  */
-export function appKeySeedBytes(
+function appKeySeedBytes(
   credential: IVerifiableCredential
 ): Uint8Array | undefined {
   const subject = credential.credentialSubject as { seed?: unknown } | undefined

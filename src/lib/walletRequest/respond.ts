@@ -22,7 +22,7 @@ import { ZcapUnavailableError } from './processZcaps'
  * reasons so the page can render the matching message without re-deriving it
  * from the underlying error.
  */
-export type WalletResponseFailureReason =
+type WalletResponseFailureReason =
   'zcapUnavailable' | 'processFailed' | 'exchangeFailed'
 
 /**

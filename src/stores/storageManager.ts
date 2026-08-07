@@ -76,8 +76,9 @@ import {
   DescriptorRefreshPolicy,
   type EncryptionDescriptorCache
 } from '@interop/wallet-core/descriptors'
-import { saveUserKeyEpochPin } from '@/lib/sessionKey'
+import { savePinFromDescriptor } from '@/lib/sessionKey'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
+import { SHAREABLE_COLLECTIONS as ENCRYPTED_STANDARD_COLLECTIONS } from '@/session/shares'
 import {
   createEdvDocCipher,
   isEncryptedEnvelope,
@@ -124,12 +125,72 @@ export type ImportSpaceSummary = {
   resourcesSkipped: number
 }
 
+/**
+ * The recipient kids of a descriptor's CURRENT key epoch, minus the owner's
+ * own key-agreement key when one is given (the owner is recipient zero of
+ * every epoch, so dropping it leaves exactly the other readers). Empty when the
+ * descriptor carries no epochs, or none matching `currentEpoch`.
+ *
+ * @param options {object}
+ * @param [options.descriptor] {CollectionEncryption | null}
+ * @param [options.ownerKid] {string}   the owner's key-agreement key id
+ * @returns {string[]}
+ */
+function currentEpochRecipientKids({
+  descriptor,
+  ownerKid
+}: {
+  descriptor?: CollectionEncryption | null
+  ownerKid?: string
+}): string[] {
+  const epoch = descriptor?.epochs?.find(
+    entry => entry.id === descriptor.currentEpoch
+  )
+  return (epoch?.recipients ?? [])
+    .map(entry => entry.header.kid)
+    .filter(kid => kid !== ownerKid)
+}
+
+/**
+ * Decrypts one EDV envelope into the `{ value, unknownEpoch }` shape the
+ * epoch-refresh readers bucket on: an `UnknownEpochError` (a rekey the cached
+ * descriptor has not caught up to) becomes the refresh signal, and any other
+ * failure is logged and degrades to `undefined`, so the caller can fall back
+ * to the raw envelope.
+ *
+ * @param options {object}
+ * @param options.cipher {DocCipher}
+ * @param options.envelope {Json}
+ * @param options.source {string}   how the failure names the collection, e.g.
+ *   `collection "private-credentials"`
+ * @returns {Promise<{ value: Json | undefined, unknownEpoch: boolean }>}
+ */
+async function decryptEnvelope({
+  cipher,
+  envelope,
+  source
+}: {
+  cipher: DocCipher
+  envelope: Json
+  source: string
+}): Promise<{ value: Json | undefined; unknownEpoch: boolean }> {
+  try {
+    return { value: await cipher.decrypt({ envelope }), unknownEpoch: false }
+  } catch (err) {
+    if (err instanceof UnknownEpochError) {
+      return { value: undefined, unknownEpoch: true }
+    }
+    console.warn(`Could not decrypt resource envelope from ${source}:`, err)
+    return { value: undefined, unknownEpoch: false }
+  }
+}
+
 // The WAS collection ids of the encrypted standard collections -- the set
 // whose descriptors are acquired at session start and refreshed on an
 // unknown-epoch read.
-const ENCRYPTED_COLLECTION_IDS = WALLET_STANDARD_COLLECTIONS.filter(
-  ({ encryption }) => encryption
-).map(({ id }) => id)
+const ENCRYPTED_COLLECTION_IDS = ENCRYPTED_STANDARD_COLLECTIONS.map(
+  ({ id }) => id
+)
 
 /**
  * The localStorage-backed `EncryptionDescriptorCache` for one account's Space: a collection's
@@ -331,6 +392,22 @@ export class StorageManager {
   }
 
   /**
+   * The remote backend, or a throw naming what needed it. The one place a
+   * remote-only operation states its precondition; the operations that
+   * degrade to an empty result without a remote keep their own `if` instead.
+   *
+   * @param action {string}   what the caller was doing, as the message opens
+   *   ("Sharing a collection requires remote storage.")
+   * @returns {WASRemoteStore}
+   */
+  #requireRemote(action: string): WASRemoteStore {
+    if (!this.#remoteStore) {
+      throw new Error(`${action} requires remote storage.`)
+    }
+    return this.#remoteStore
+  }
+
+  /**
    * Whether a remote WAS backend is configured for this session. Pages use this
    * instead of reaching into the backend directly.
    */
@@ -416,21 +493,19 @@ export class StorageManager {
     descriptors?: Record<string, CollectionEncryption>
   }) {
     const cipherEntries = await Promise.all(
-      WALLET_STANDARD_COLLECTIONS.filter(({ encryption }) => encryption).map(
-        async ({ key, id, idDerivation }) => [
-          key,
-          await createEdvDocCipher({
-            keyAgreementKey,
-            keyResolver,
-            collectionId: id,
-            // The collection spec's id mint ('random' for the mutable contacts
-            // head, 'content' for the content-addressed collections), so a
-            // minted id follows the spec and can key the row.
-            idDerivation,
-            encryption: descriptors?.[id]
-          })
-        ]
-      )
+      ENCRYPTED_STANDARD_COLLECTIONS.map(async ({ key, id, idDerivation }) => [
+        key,
+        await createEdvDocCipher({
+          keyAgreementKey,
+          keyResolver,
+          collectionId: id,
+          // The collection spec's id mint ('random' for the mutable contacts
+          // head, 'content' for the content-addressed collections), so a
+          // minted id follows the spec and can key the row.
+          idDerivation,
+          encryption: descriptors?.[id]
+        })
+      ])
     )
     return Object.fromEntries(cipherEntries)
   }
@@ -811,10 +886,7 @@ export class StorageManager {
   }
 
   async exportSpace(): Promise<ReadableStream<Uint8Array>> {
-    if (!this.#remoteStore) {
-      throw new Error('Remote storage is not configured for this session.')
-    }
-    return await this.#remoteStore.exportSpace()
+    return await this.#requireRemote('Exporting a Space').exportSpace()
   }
 
   async importSpace({
@@ -822,10 +894,9 @@ export class StorageManager {
   }: {
     tarFile: File
   }): Promise<ImportSpaceSummary> {
-    if (!this.#remoteStore) {
-      throw new Error('Remote storage is not configured for this session.')
-    }
-    return await this.#remoteStore.importSpace({ tarFile })
+    return await this.#requireRemote('Importing a Space').importSpace({
+      tarFile
+    })
   }
 
   async listCollections(): Promise<Array<StorageCollection>> {
@@ -849,10 +920,9 @@ export class StorageManager {
   async fetchCollectionResource(
     resource: StorageResource
   ): Promise<FetchedCollectionResource> {
-    if (!this.#remoteStore) {
-      throw new Error('Remote storage is not configured for this session.')
-    }
-    return await this.#remoteStore.fetchCollectionResource(resource)
+    return await this.#requireRemote(
+      'Fetching a storage resource'
+    ).fetchCollectionResource(resource)
   }
 
   /**
@@ -900,22 +970,11 @@ export class StorageManager {
         if (!cipher) {
           return { value: undefined, unknownEpoch: false }
         }
-        try {
-          return {
-            value: await cipher.decrypt({ envelope: data }),
-            unknownEpoch: false
-          }
-        } catch (err) {
-          if (err instanceof UnknownEpochError) {
-            return { value: undefined, unknownEpoch: true }
-          }
-          console.warn(
-            `Could not decrypt resource envelope from collection ` +
-              `"${collectionId}":`,
-            err
-          )
-          return { value: undefined, unknownEpoch: false }
-        }
+        return await decryptEnvelope({
+          cipher,
+          envelope: data,
+          source: `collection "${collectionId}"`
+        })
       }
     })
   }
@@ -989,31 +1048,19 @@ export class StorageManager {
           })
           this.#appCiphers[collectionId] = cipher
         }
-        try {
-          return {
-            value: await cipher.decrypt({ envelope: data }),
-            unknownEpoch: false
-          }
-        } catch (err) {
-          if (err instanceof UnknownEpochError) {
-            return { value: undefined, unknownEpoch: true }
-          }
-          console.warn(
-            `Could not decrypt resource envelope from app collection ` +
-              `"${collectionId}":`,
-            err
-          )
-          return { value: undefined, unknownEpoch: false }
-        }
+        return await decryptEnvelope({
+          cipher,
+          envelope: data,
+          source: `app collection "${collectionId}"`
+        })
       }
     })
   }
 
   async deleteCollectionResource(resource: StorageResource): Promise<void> {
-    if (!this.#remoteStore) {
-      throw new Error('Remote storage is not configured for this session.')
-    }
-    await this.#remoteStore.deleteCollectionResource({
+    await this.#requireRemote(
+      'Deleting a storage resource'
+    ).deleteCollectionResource({
       relativeUrl: resource.url
     })
   }
@@ -1040,17 +1087,15 @@ export class StorageManager {
     name?: string
     isPublic?: boolean
   }): Promise<void> {
-    if (!this.#remoteStore) {
-      throw new Error('Provisioning a collection requires remote storage.')
-    }
-    await this.#remoteStore.ensureCollection({ id, name, isPublic })
+    await this.#requireRemote('Provisioning a collection').ensureCollection({
+      id,
+      name,
+      isPublic
+    })
   }
 
   async deleteCollection({ id }: { id: string }): Promise<void> {
-    if (!this.#remoteStore) {
-      throw new Error('Deleting a collection requires remote storage.')
-    }
-    await this.#remoteStore.deleteCollection({ id })
+    await this.#requireRemote('Deleting a collection').deleteCollection({ id })
   }
 
   /**
@@ -1086,10 +1131,7 @@ export class StorageManager {
     collectionId: string
     appRecipient: RecipientPublicKey
   }): Promise<CollectionEncryption> {
-    const remote = this.#remoteStore
-    if (!remote) {
-      throw new Error('Provisioning an app collection requires remote storage.')
-    }
+    const remote = this.#requireRemote('Provisioning an app collection')
     if (!this.#vaultKeys) {
       throw new Error(
         'Provisioning an app collection requires the vault key material.'
@@ -1111,12 +1153,9 @@ export class StorageManager {
         recipients: [ownerRecipient({ keyAgreementKey }), appRecipient]
       })
     } else {
-      const epoch = current.epochs.find(
-        entry => entry.id === current.currentEpoch
-      )
-      const present = !!epoch?.recipients.some(
-        entry => entry.header.kid === appRecipient.id
-      )
+      const present = currentEpochRecipientKids({
+        descriptor: current
+      }).includes(appRecipient.id)
       if (present) {
         // The app already reads the current epoch: nothing to do.
         return current
@@ -1375,10 +1414,10 @@ export class StorageManager {
           // the pin backward and a fabricated one can never push it onto an
           // epoch no enrolled client authenticated.
           if (descriptor.currentEpoch === profile.userKey.id) {
-            await saveUserKeyEpochPin({
+            await savePinFromDescriptor({
               spaceId: this.#remoteStore.spaceId,
               epochId: descriptor.currentEpoch,
-              epochIds: (descriptor.epochs ?? []).map(epoch => epoch.id),
+              descriptor,
               idb
             })
           }
@@ -1460,22 +1499,25 @@ export class StorageManager {
   }
 
   /**
-   * Writes one activity to the local `wallet-activity` collection -- the
-   * shared tail of every `addHistory*` method.
+   * Mints the activity id and writes the built activity to the local
+   * `wallet-activity` collection -- the shared body of every `addHistory*`
+   * method below.
    *
-   * @param options {object}
-   * @param options.resourceId {string}
-   * @param options.activity {WalletActivity}
+   * A locally-minted, time-monotonic `uuidv7` is injected as the activity id
+   * (rather than the builder's random default) so it doubles as the record's
+   * resource id: on the guest / offline path that id is the RxDB primary key,
+   * and its monotonicity keeps history ordering stable when two writes share
+   * an `updatedAt` millisecond.
+   *
+   * @param build {function}   builds the activity from the minted id
    * @returns {Promise<void>}
    */
-  async #addHistoryItem({
-    resourceId,
-    activity
-  }: {
-    resourceId: string
-    activity: WalletActivity
-  }): Promise<void> {
-    await this.#store.addHistoryItem({ resourceId, activity })
+  async #recordActivity(build: (id: string) => WalletActivity): Promise<void> {
+    const resourceId = uuidv7()
+    await this.#store.addHistoryItem({
+      resourceId,
+      activity: build(resourceId)
+    })
   }
 
   /**
@@ -1483,14 +1525,7 @@ export class StorageManager {
    * the bootstrap did:key DID.
    */
   async addHistoryNewAccount({ user }: { user: User }) {
-    // A locally-minted, time-monotonic `uuidv7` is injected as the activity id
-    // (rather than the builder's random default) so it doubles as the record's
-    // resource id: on the guest / offline path that id is the RxDB primary key,
-    // and its monotonicity keeps history ordering stable when two writes share
-    // an `updatedAt` millisecond. Every `addHistory*` wrapper below does the same.
-    const resourceId = uuidv7()
-    const activity = buildHistoryNewAccount({ user, id: resourceId })
-    await this.#addHistoryItem({ resourceId, activity })
+    await this.#recordActivity(id => buildHistoryNewAccount({ user, id }))
   }
 
   /**
@@ -1512,14 +1547,14 @@ export class StorageManager {
           type: ['Collection'],
           id
         }))
-    const resourceId = uuidv7()
-    const activity = buildHistorySpaceCreated({
-      actor: user.id,
-      object,
-      remote: !!remote,
-      id: resourceId
-    })
-    await this.#addHistoryItem({ resourceId, activity })
+    await this.#recordActivity(id =>
+      buildHistorySpaceCreated({
+        actor: user.id,
+        object,
+        remote: !!remote,
+        id
+      })
+    )
   }
 
   /**
@@ -1537,13 +1572,9 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    const resourceId = uuidv7()
-    const activity = buildHistoryCredentialCreated({
-      cid,
-      user,
-      id: resourceId
-    })
-    await this.#addHistoryItem({ resourceId, activity })
+    await this.#recordActivity(id =>
+      buildHistoryCredentialCreated({ cid, user, id })
+    )
   }
 
   /**
@@ -1561,13 +1592,9 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    const resourceId = uuidv7()
-    const activity = buildHistoryCredentialDeleted({
-      cid,
-      user,
-      id: resourceId
-    })
-    await this.#addHistoryItem({ resourceId, activity })
+    await this.#recordActivity(id =>
+      buildHistoryCredentialDeleted({ cid, user, id })
+    )
   }
 
   /**
@@ -1578,9 +1605,9 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async addHistoryCredentialShared({ cid, user }: { cid: string; user: User }) {
-    const resourceId = uuidv7()
-    const activity = buildHistoryCredentialShared({ cid, user, id: resourceId })
-    await this.#addHistoryItem({ resourceId, activity })
+    await this.#recordActivity(id =>
+      buildHistoryCredentialShared({ cid, user, id })
+    )
   }
 
   /**
@@ -1597,13 +1624,9 @@ export class StorageManager {
     cid: string
     user: User
   }) {
-    const resourceId = uuidv7()
-    const activity = buildHistoryCredentialUnshared({
-      cid,
-      user,
-      id: resourceId
-    })
-    await this.#addHistoryItem({ resourceId, activity })
+    await this.#recordActivity(id =>
+      buildHistoryCredentialUnshared({ cid, user, id })
+    )
   }
 
   /**
@@ -1642,15 +1665,9 @@ export class StorageManager {
     }>
     appConnect?: { name: string; firstRun: boolean }
   }) {
-    const resourceId = uuidv7()
-    const activity = buildHistoryLogin({
-      user,
-      origin,
-      grants,
-      appConnect,
-      id: resourceId
-    })
-    await this.#addHistoryItem({ resourceId, activity })
+    await this.#recordActivity(id =>
+      buildHistoryLogin({ user, origin, grants, appConnect, id })
+    )
   }
 
   /**
@@ -1685,17 +1702,9 @@ export class StorageManager {
     revoked?: number
     skipped?: number
   }) {
-    const resourceId = uuidv7()
-    const activity = buildHistoryAppRevoke({
-      user,
-      origin,
-      name,
-      cid,
-      revoked,
-      skipped,
-      id: resourceId
-    })
-    await this.#addHistoryItem({ resourceId, activity })
+    await this.#recordActivity(id =>
+      buildHistoryAppRevoke({ user, origin, name, cid, revoked, skipped, id })
+    )
   }
 
   /**
@@ -1726,16 +1735,16 @@ export class StorageManager {
     rotated?: number
     failed?: number
   }) {
-    const resourceId = uuidv7()
-    const activity = buildHistoryClientRevoked({
-      user,
-      signingKeyMultibase,
-      label,
-      rotated,
-      failed,
-      id: resourceId
-    })
-    await this.#addHistoryItem({ resourceId, activity })
+    await this.#recordActivity(id =>
+      buildHistoryClientRevoked({
+        user,
+        signingKeyMultibase,
+        label,
+        rotated,
+        failed,
+        id
+      })
+    )
   }
 
   /**
@@ -1759,26 +1768,30 @@ export class StorageManager {
    * @param options.origin {string}   the connected app's origin
    * @param options.subjectDid {string}   the app-key credential's subject DID,
    *   the controller the grants were delegated to
+   * @param [options.items] {Array<{ id: string; doc: WalletActivity }>}   a
+   *   pre-fetched history scan, when the caller already holds one
    * @returns {Promise<{ revoked: number; skipped: number }>}
    */
   async revokeAppGrants({
     origin,
-    subjectDid
+    subjectDid,
+    items
   }: {
     origin: string
     subjectDid: string
+    items?: Array<{ id: string; doc: WalletActivity }>
   }): Promise<{ revoked: number; skipped: number }> {
     const remote = this.#remoteStore
     if (!remote) {
       return { revoked: 0, skipped: 0 }
     }
     // Scan the history once and pass it through, so the grant lookup does not
-    // re-await and re-scan it.
-    const items = await this.listHistoryItems()
+    // re-await and re-scan it. A caller that already holds the history (the
+    // revoke orchestration, which drives several of these) passes it in.
     const { zcaps, skipped: nonRevocable } = this.#recordedAppGrantZcaps({
       origin,
       subjectDid,
-      items
+      items: items ?? (await this.listHistoryItems())
     })
     const space = remote.spaceHandle()
     let revoked = 0
@@ -1861,14 +1874,18 @@ export class StorageManager {
    * @param options {object}
    * @param options.origin {string}   the connected app's origin
    * @param options.subjectDid {string}   the app-key credential's subject DID
+   * @param [options.items] {Array<{ id: string; doc: WalletActivity }>}   a
+   *   pre-fetched history scan, when the caller already holds one
    * @returns {Promise<{ collections: number; rotated: number; failed: number }>}
    */
   async revokeAppCollectionRecipients({
     origin,
-    subjectDid
+    subjectDid,
+    items
   }: {
     origin: string
     subjectDid: string
+    items?: Array<{ id: string; doc: WalletActivity }>
   }): Promise<{ collections: number; rotated: number; failed: number }> {
     const remote = this.#remoteStore
     if (!remote || !this.#vaultKeys) {
@@ -1876,8 +1893,11 @@ export class StorageManager {
     }
     const ownerKid = this.#vaultKeys.keyAgreementKey.id
     const spaceUrl = remote.spaceUrl
-    const items = await this.listHistoryItems()
-    const { zcaps } = this.#recordedAppGrantZcaps({ origin, subjectDid, items })
+    const { zcaps } = this.#recordedAppGrantZcaps({
+      origin,
+      subjectDid,
+      items: items ?? (await this.listHistoryItems())
+    })
 
     // Group the pull-axis zcaps by the app-provisioned collection they target,
     // dropping whole-Space and protected-collection grants.
@@ -1909,15 +1929,7 @@ export class StorageManager {
         if (!descriptor?.epochs?.length || !descriptor.currentEpoch) {
           continue
         }
-        const epoch = descriptor.epochs.find(
-          entry => entry.id === descriptor.currentEpoch
-        )
-        if (!epoch) {
-          continue
-        }
-        const nonOwner = epoch.recipients
-          .map(entry => entry.header.kid)
-          .filter(kid => kid !== ownerKid)
+        const nonOwner = currentEpochRecipientKids({ descriptor, ownerKid })
         if (nonOwner.length === 0) {
           continue
         }
@@ -2057,12 +2069,10 @@ export class StorageManager {
   }: {
     credential: IVerifiableCredential
   }): Promise<string> {
-    if (!this.#remoteStore) {
-      throw new Error('Public links require remote storage.')
-    }
+    const remote = this.#requireRemote('Creating a public link')
     const cid = await cidFrom({ doc: credential })
     await this.#store.addPublicCredential({ cid, credential })
-    return this.#remoteStore.publicCredentialUrl(cid)
+    return remote.publicCredentialUrl(cid)
   }
 
   /**
@@ -2148,10 +2158,7 @@ export class StorageManager {
     expires?: Date
     app?: { name: string; origin: string }
   }): Promise<{ descriptor: CollectionEncryption; zcap: IDelegatedZcap }> {
-    const remote = this.#remoteStore
-    if (!remote) {
-      throw new Error('Sharing a collection requires remote storage.')
-    }
+    const remote = this.#requireRemote('Sharing a collection')
     const { keyAgreementKey, keyResolver, zcapClient } = profile
     if (!keyAgreementKey || !keyResolver) {
       throw new Error('Sharing a collection requires the vault key material.')
@@ -2195,32 +2202,28 @@ export class StorageManager {
 
     // Record the share -- the full delegated zcap document is the revocation
     // hook `unshareCollection` reads back.
-    const resourceId = uuidv7()
-    await this.#addHistoryItem({
-      resourceId,
-      activity: {
-        id: resourceId,
-        type: [ACTIVITY_TYPE.CollectionShare],
-        summary: `Shared collection "${collectionId}" with ${controller}.`,
-        actor: { email: user.email },
-        object: {
-          collectionId,
-          recipientId: recipient.id,
-          controller,
-          zcap,
-          expires: expiresAt.toISOString(),
-          ...(app && { appName: app.name, appOrigin: app.origin })
-        },
-        created: new Date().toISOString()
-      }
-    })
+    await this.#recordActivity(id => ({
+      id,
+      type: [ACTIVITY_TYPE.CollectionShare],
+      summary: `Shared collection "${collectionId}" with ${controller}.`,
+      actor: { email: user.email },
+      object: {
+        collectionId,
+        recipientId: recipient.id,
+        controller,
+        zcap,
+        expires: expiresAt.toISOString(),
+        ...(app && { appName: app.name, appOrigin: app.origin })
+      },
+      created: new Date().toISOString()
+    }))
 
     // Update the descriptor cache and rebuild + swap the ciphers under it.
-    await this.#descriptorCache?.writeDescriptor({ collectionId, descriptor })
-    this.#descriptors = { ...this.#descriptors, [collectionId]: descriptor }
-    this.#refreshPolicy.reset()
-    this.#vaultKeys = { keyAgreementKey, keyResolver }
-    await this.#rebuildCiphers()
+    await this.#adoptCollectionDescriptor({
+      collectionId,
+      descriptor,
+      vaultKeys: { keyAgreementKey, keyResolver }
+    })
     return { descriptor, zcap }
   }
 
@@ -2257,10 +2260,7 @@ export class StorageManager {
     collectionId: string
     recipientId: string
   }): Promise<CollectionEncryption> {
-    const remote = this.#remoteStore
-    if (!remote) {
-      throw new Error('Unsharing a collection requires remote storage.')
-    }
+    const remote = this.#requireRemote('Unsharing a collection')
     const { keyAgreementKey, keyResolver } = profile
     if (!keyAgreementKey || !keyResolver) {
       throw new Error('Unsharing a collection requires the vault key material.')
@@ -2284,25 +2284,51 @@ export class StorageManager {
       revoke
     })
 
-    const resourceId = uuidv7()
-    await this.#addHistoryItem({
-      resourceId,
-      activity: {
-        id: resourceId,
-        type: [ACTIVITY_TYPE.CollectionUnshare],
-        summary: `Stopped sharing collection "${collectionId}".`,
-        actor: { email: user.email },
-        object: { collectionId, recipientId },
-        created: new Date().toISOString()
-      }
-    })
+    await this.#recordActivity(id => ({
+      id,
+      type: [ACTIVITY_TYPE.CollectionUnshare],
+      summary: `Stopped sharing collection "${collectionId}".`,
+      actor: { email: user.email },
+      object: { collectionId, recipientId },
+      created: new Date().toISOString()
+    }))
 
+    await this.#adoptCollectionDescriptor({
+      collectionId,
+      descriptor,
+      vaultKeys: { keyAgreementKey, keyResolver }
+    })
+    return descriptor
+  }
+
+  /**
+   * Adopts a freshly rotated collection descriptor into this session: cached,
+   * swapped into the in-memory descriptor map, the refresh policy reset, and
+   * the ciphers rebuilt under the given vault keys. The shared tail of
+   * `shareCollection` and `unshareCollection`.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}
+   * @param options.descriptor {CollectionEncryption}
+   * @param options.vaultKeys {object}
+   * @param options.vaultKeys.keyAgreementKey {IKeyAgreementKey}
+   * @param options.vaultKeys.keyResolver {IKeyResolver}
+   * @returns {Promise<void>}
+   */
+  async #adoptCollectionDescriptor({
+    collectionId,
+    descriptor,
+    vaultKeys
+  }: {
+    collectionId: string
+    descriptor: CollectionEncryption
+    vaultKeys: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
+  }): Promise<void> {
     await this.#descriptorCache?.writeDescriptor({ collectionId, descriptor })
     this.#descriptors = { ...this.#descriptors, [collectionId]: descriptor }
     this.#refreshPolicy.reset()
-    this.#vaultKeys = { keyAgreementKey, keyResolver }
+    this.#vaultKeys = vaultKeys
     await this.#rebuildCiphers()
-    return descriptor
   }
 
   /**
@@ -2360,13 +2386,18 @@ export class StorageManager {
    *
    * @param options {object}
    * @param options.collectionId {string}
+   * @param [options.items] {Array<{ id: string; doc: WalletActivity }>}   a
+   *   pre-fetched history scan, when the caller already holds one (the
+   *   settings panel lists every shareable collection off one read)
    * @returns {Promise<Array<{ recipientId: string; controller?: string;
    *   expires?: string; appName?: string; appOrigin?: string }>>}
    */
   async listCollectionShares({
-    collectionId
+    collectionId,
+    items
   }: {
     collectionId: string
+    items?: Array<{ id: string; doc: WalletActivity }>
   }): Promise<
     Array<{
       recipientId: string
@@ -2389,18 +2420,15 @@ export class StorageManager {
     if (!descriptor?.currentEpoch || !descriptor.epochs) {
       return []
     }
-    const epoch = descriptor.epochs.find(
-      entry => entry.id === descriptor!.currentEpoch
-    )
-    if (!epoch) {
-      return []
-    }
     // The owner's own key-agreement key is recipient zero on every epoch; drop
     // it so the list is only the other readers.
-    const ownerKid = this.#vaultKeys?.keyAgreementKey.id
-    const recipientIds = epoch.recipients
-      .map(entry => entry.header.kid)
-      .filter(kid => kid !== ownerKid)
+    const recipientIds = currentEpochRecipientKids({
+      descriptor,
+      ownerKid: this.#vaultKeys?.keyAgreementKey.id
+    })
+    if (recipientIds.length === 0) {
+      return []
+    }
 
     // Best-effort labels from history: the latest CollectionShare per recipient
     // for its controller / expiry.
@@ -2413,7 +2441,7 @@ export class StorageManager {
         appOrigin?: string
       }
     >()
-    for (const { doc } of await this.listHistoryItems()) {
+    for (const { doc } of items ?? (await this.listHistoryItems())) {
       if (!doc.type?.includes('CollectionShare')) {
         continue
       }

@@ -212,48 +212,19 @@ export async function ensureDidWeb({
 
   // Fresh provisioning: mint the three keys with their aliases, then write
   // keys.json before did.json so the flow is crash-resumable.
+  const [authentication, assertionMethod, keyAgreement] = await Promise.all([
+    generateDidKey({ keystoreAgent, did, category: 'asymmetric' }),
+    generateDidKey({ keystoreAgent, did, category: 'asymmetric' }),
+    generateDidKey({ keystoreAgent, did, category: 'keyAgreement' })
+  ])
   const keys: DidWebKeyMap = {
-    authentication: await generateDidKey({
-      keystoreAgent,
-      did,
-      category: 'asymmetric'
-    }),
-    assertionMethod: await generateDidKey({
-      keystoreAgent,
-      did,
-      category: 'asymmetric'
-    }),
-    keyAgreement: await generateDidKey({
-      keystoreAgent,
-      did,
-      category: 'keyAgreement'
-    })
+    authentication,
+    assertionMethod,
+    keyAgreement
   }
   await remoteStore.webvhIdStore().putKeyMap({ content: keys })
   await publishDidDocument({ remoteStore, did, keys })
   return keys
-}
-
-/**
- * Wraps a KMS-backed `sign` closure as a plain `{ id, algorithm, sign }`
- * signer. `id` is overridden to the verification-method id so the proof names
- * the right `verificationMethod`; `algorithm` satisfies the suite's `Ed25519`
- * check. The `sign` closure comes from `kmsSignFunction`, which re-expresses the
- * KMS key's prototype `sign` method as an own property so the data-integrity
- * suites' shallow spread (`{ ...signer }`) preserves it.
- */
-function signerFromKey({
-  sign,
-  vmId
-}: {
-  sign: (input: { data: Uint8Array }) => Promise<Uint8Array>
-  vmId: string
-}): ISigner {
-  return {
-    id: vmId,
-    algorithm: 'Ed25519',
-    sign
-  } as unknown as ISigner
 }
 
 /**
@@ -276,16 +247,18 @@ export async function kmsAuthenticationSigner({
   if (!didWeb) {
     return undefined
   }
+  if (!keystoreAgent) {
+    return undefined
+  }
   const { vmId, kmsKeyId } = didWeb.keys.authentication
 
-  if (keystoreAgent) {
-    const sign = await getKmsSignFunction({
-      keystoreAgent,
-      id: vmId,
-      kmsKeyId
-    })
-    return signerFromKey({ sign, vmId })
-  }
-
-  return undefined
+  // `id` is the verification-method id so the proof names the right
+  // `verificationMethod`; `algorithm` satisfies the suite's `Ed25519` check.
+  // `getKmsSignFunction` returns the sign closure as an own property, so the
+  // data-integrity suites' shallow spread (`{ ...signer }`) preserves it.
+  return {
+    id: vmId,
+    algorithm: 'Ed25519',
+    sign: await getKmsSignFunction({ keystoreAgent, id: vmId, kmsKeyId })
+  } as unknown as ISigner
 }

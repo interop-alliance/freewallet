@@ -51,7 +51,8 @@ vi.mock('@interop/wallet-core/clients', async importOriginal => ({
 
 vi.mock('@/lib/sessionKey', () => ({
   loadUserKeyEpochPin: vi.fn(async () => null),
-  saveUserKeyEpochPin: vi.fn(async () => undefined)
+  saveUserKeyEpochPin: vi.fn(async () => undefined),
+  savePinFromDescriptor: vi.fn(async () => undefined)
 }))
 
 vi.mock('@/session/userKeyCascade', () => ({

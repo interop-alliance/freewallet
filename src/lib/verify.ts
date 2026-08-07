@@ -87,15 +87,14 @@ function mapCoreResultToLegacyPayload(
   }
 
   const status = byCheck(CHECK_ID.status)
-  if (status && status.outcome.status !== 'skipped') {
-    const entry = legacyEntryFromCheck('revocation_status', status)
-    if (
-      status.outcome.status === 'failure' &&
-      status.outcome.problems[0]?.type === ProblemTypes.STATUS_LIST_NOT_FOUND
-    ) {
-      entry.error = { ...entry.error, name: 'status_list_not_found' }
-    }
-    log.push(entry)
+  // A status check that failed only because the status list could not be
+  // fetched says nothing about the credential, so it is left out of the log
+  // entirely rather than counting as a failed check.
+  const statusListMissing =
+    status?.outcome.status === 'failure' &&
+    status.outcome.problems[0]?.type === ProblemTypes.STATUS_LIST_NOT_FOUND
+  if (status && status.outcome.status !== 'skipped' && !statusListMissing) {
+    log.push(legacyEntryFromCheck('revocation_status', status))
   }
 
   const expiration = byCheck(CHECK_ID.expiration)
@@ -112,15 +111,6 @@ function mapCoreResultToLegacyPayload(
       ? { error: { message: CredentialErrorTypes.DidNotInRegistry } }
       : {})
   })
-
-  const revocationIndex = log.findIndex(
-    entry =>
-      entry.id === 'revocation_status' &&
-      entry.error?.name === 'status_list_not_found'
-  )
-  if (revocationIndex !== -1) {
-    log.splice(revocationIndex, 1)
-  }
 
   const hasStatusError = log.some(
     entry => entry.id === 'revocation_status' && !!entry.error
@@ -173,7 +163,7 @@ function createFatalErrorResult(
   credential: IVerifiableCredential,
   message: string
 ): VerifyCredentialPayload {
-  const result: VerifyCredentialPayload = {
+  return {
     verified: false,
     results: [
       {
@@ -184,28 +174,14 @@ function createFatalErrorResult(
           { id: 'valid_signature', valid: false },
           { id: 'issuer_did_resolves', valid: false },
           { id: 'revocation_status', valid: false }
-        ]
+        ],
+        error: {
+          details: { cause: { message, name: 'Error' } },
+          message,
+          name: 'Error',
+          isFatal: true
+        }
       }
     ]
-  }
-  addErrorToResult(result as { results: unknown[] }, message, true)
-  return result
-}
-
-function addErrorToResult(
-  result: { results: unknown[] },
-  message: string,
-  isFatal = true
-) {
-  ;(result.results[0] as Record<string, unknown>).error = {
-    details: {
-      cause: {
-        message,
-        name: 'Error'
-      }
-    },
-    message,
-    name: 'Error',
-    isFatal
   }
 }

@@ -19,6 +19,7 @@
  * hand-built ezcap requests. The `WasClient` wraps the ezcap `ZcapClient` that
  * carries the user's invocation signer.
  */
+import { base64urlnopad } from '@scure/base'
 import type { ZcapClient } from '@interop/ezcap'
 import {
   WasClient,
@@ -53,9 +54,6 @@ import {
   UNLOCK_METHODS_RESOURCE,
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
-// Deep import (bypassing the `@/lib/sync` barrel) so this eagerly loaded module
-// does not drag the barrel's RxDB replication machinery into the entry chunk.
-import { bufferToBase64Url } from '@/lib/cidFrom'
 import type { Json } from '@/lib/sync/types.js'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
@@ -78,16 +76,6 @@ import {
 export type ICollectionsSet = Map<string, string>
 
 /**
- * The parsed components of a WAS resource/collection URL
- * (`/space/:spaceId/:collectionId/:resourceId`).
- */
-interface ParsedWasPath {
-  spaceId: string
-  collectionId?: string
-  resourceId?: string
-}
-
-/**
  * @see https://digitalcredentials.github.io/wallet-attached-storage-spec/
  * @see https://github.com/interop-alliance/zcap-developer-guide
  */
@@ -103,7 +91,7 @@ interface ParsedWasPath {
  * @returns {string}
  */
 export function mintSpaceId(): string {
-  return bufferToBase64Url(crypto.getRandomValues(new Uint8Array(32)))
+  return base64urlnopad.encode(crypto.getRandomValues(new Uint8Array(32)))
 }
 
 export class WASRemoteStore {
@@ -162,9 +150,13 @@ export class WASRemoteStore {
    * server) into its `spaceId` / `collectionId` / `resourceId` components.
    *
    * @param url {string}
-   * @returns {ParsedWasPath}
+   * @returns {{ spaceId: string, collectionId?: string, resourceId?: string }}
    */
-  #parsePath(url: string): ParsedWasPath {
+  #parsePath(url: string): {
+    spaceId: string
+    collectionId?: string
+    resourceId?: string
+  } {
     const { pathname } = new URL(url, this.storageServerUrl)
     const [root, spaceId, collectionId, resourceId] = pathname
       .split('/')
@@ -699,11 +691,15 @@ export class WASRemoteStore {
   }: {
     collectionUrl: string
   }): Promise<Array<StorageResource>> {
-    let collection
     let listing
+    let collectionIsPublic: boolean
     try {
-      collection = this.#collectionFromUrl(collectionUrl)
-      listing = await collection.list()
+      const collection = this.#collectionFromUrl(collectionUrl)
+      // Two independent round trips over the same collection handle.
+      ;[listing, collectionIsPublic] = await Promise.all([
+        collection.list(),
+        collection.isPublic()
+      ])
     } catch (err) {
       console.error('Error listing collection resources:', err)
       throw new Error('Failed to list remote storage collection resources.', {
@@ -712,7 +708,6 @@ export class WASRemoteStore {
     }
 
     const items = (listing?.items ?? []) as Array<StorageResource>
-    const collectionIsPublic = await collection.isPublic()
     if (collectionIsPublic) {
       return items.map(item => ({ ...item, isPublic: true }))
     }
@@ -997,9 +992,7 @@ export class WASRemoteStore {
 
       return response.data as SpaceQuotaReport
     } catch (err) {
-      const status =
-        (err as { status?: number }).status ??
-        (err as { response?: { status?: number } }).response?.status
+      const status = errorStatus(err)
 
       if (status === 404 || status === 501) {
         return null
@@ -1084,114 +1077,6 @@ function unlockSpaceClient({
 }
 
 /**
- * Ensures a plaintext collection exists in a Space (upsert -- idempotent),
- * running with the invoking client's root capability so `force` lets the upsert
- * treat a 404 from the pre-merge describe as genuinely absent rather than
- * unreadable. Shared by the keyring and unlock-methods collection provisioning.
- *
- * @param options {object}
- * @param options.storageServerUrl {string}
- * @param options.zcapClient {ZcapClient}
- * @param options.spaceId {string}
- * @param options.collectionId {string}
- * @param options.name {string}
- * @returns {Promise<void>}
- */
-async function ensurePlaintextCollection({
-  storageServerUrl,
-  zcapClient,
-  spaceId,
-  collectionId,
-  name
-}: {
-  storageServerUrl: string
-  zcapClient: ZcapClient
-  spaceId: string
-  collectionId: string
-  name: string
-}): Promise<void> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  await was
-    .space(spaceId)
-    .collection(collectionId)
-    .configure({ name, force: true })
-}
-
-/**
- * Reads a single plaintext JSON record from a Space collection, or `null` when
- * it does not exist yet (a missing Space, collection, or resource all surface
- * as a 404-shaped `null` from `resource.get()`). A network / unreachable error
- * propagates, so callers can distinguish "no record" from "could not check".
- * The explicit `plaintext` override is load-bearing (see {@link unlockSpaceClient}).
- *
- * @param options {object}
- * @param options.storageServerUrl {string}
- * @param options.zcapClient {ZcapClient}
- * @param options.spaceId {string}
- * @param options.collectionId {string}
- * @param options.resourceId {string}
- * @returns {Promise<unknown | null>}
- */
-async function getPlaintextRecord({
-  storageServerUrl,
-  zcapClient,
-  spaceId,
-  collectionId,
-  resourceId
-}: {
-  storageServerUrl: string
-  zcapClient: ZcapClient
-  spaceId: string
-  collectionId: string
-  resourceId: string
-}): Promise<unknown | null> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  const result = await was
-    .space(spaceId)
-    .collection(collectionId, { encryption: 'plaintext' })
-    .resource(resourceId)
-    .get()
-  return result === null ? null : result
-}
-
-/**
- * Writes (upserts) a single plaintext JSON record into a Space collection.
- * Serialized to bytes with an explicit `application/json` content-type.
- *
- * @param options {object}
- * @param options.storageServerUrl {string}
- * @param options.zcapClient {ZcapClient}
- * @param options.spaceId {string}
- * @param options.collectionId {string}
- * @param options.resourceId {string}
- * @param options.record {object}
- * @returns {Promise<void>}
- */
-async function putPlaintextRecord({
-  storageServerUrl,
-  zcapClient,
-  spaceId,
-  collectionId,
-  resourceId,
-  record
-}: {
-  storageServerUrl: string
-  zcapClient: ZcapClient
-  spaceId: string
-  collectionId: string
-  resourceId: string
-  record: object
-}): Promise<void> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  const body = new TextEncoder().encode(JSON.stringify(record))
-  await was
-    .space(spaceId)
-    .collection(collectionId, { encryption: 'plaintext' })
-    .resource(resourceId)
-    .put(body, { contentType: 'application/json' })
-}
-
-/**
  * Ensures the `unlock-methods` collection exists in the user's DATA Space
  * (upsert -- idempotent), so the first registry PUT has somewhere to land. The
  * data Space itself already exists (provisioned at signup), so only the
@@ -1215,13 +1100,11 @@ export async function ensureUnlockMethodsCollection({
   zcapClient: ZcapClient
   spaceId: string
 }): Promise<void> {
-  await ensurePlaintextCollection({
-    storageServerUrl,
-    zcapClient,
-    spaceId,
-    collectionId: UNLOCK_METHODS_COLLECTION.id,
-    name: UNLOCK_METHODS_COLLECTION.name
-  })
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  await was
+    .space(spaceId)
+    .collection(UNLOCK_METHODS_COLLECTION.id)
+    .configure({ name: UNLOCK_METHODS_COLLECTION.name, force: true })
 }
 
 /**
@@ -1243,13 +1126,12 @@ export async function getUnlockMethodsRecord({
   zcapClient: ZcapClient
   spaceId: string
 }): Promise<unknown | null> {
-  return getPlaintextRecord({
-    storageServerUrl,
-    zcapClient,
-    spaceId,
-    collectionId: UNLOCK_METHODS_COLLECTION.id,
-    resourceId: UNLOCK_METHODS_RESOURCE
-  })
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  return await was
+    .space(spaceId)
+    .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
+    .resource(UNLOCK_METHODS_RESOURCE)
+    .get()
 }
 
 /**
@@ -1274,12 +1156,11 @@ export async function putUnlockMethodsRecord({
   spaceId: string
   record: object
 }): Promise<void> {
-  await putPlaintextRecord({
-    storageServerUrl,
-    zcapClient,
-    spaceId,
-    collectionId: UNLOCK_METHODS_COLLECTION.id,
-    resourceId: UNLOCK_METHODS_RESOURCE,
-    record
-  })
+  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  const body = new TextEncoder().encode(JSON.stringify(record))
+  await was
+    .space(spaceId)
+    .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
+    .resource(UNLOCK_METHODS_RESOURCE)
+    .put(body, { contentType: 'application/json' })
 }

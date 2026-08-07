@@ -63,15 +63,6 @@ function CheckRow({
   )
 }
 
-interface Props {
-  vc: IVerifiableCredential
-  createdDate: string | null
-  verification: UseVerificationReturn
-  showRaw: boolean
-  rawJson: string
-  onToggleRaw: () => void
-}
-
 export function ResumeCredentialCard({
   vc,
   createdDate,
@@ -79,7 +70,14 @@ export function ResumeCredentialCard({
   showRaw,
   rawJson,
   onToggleRaw
-}: Props) {
+}: {
+  vc: IVerifiableCredential
+  createdDate: string | null
+  verification: UseVerificationReturn
+  showRaw: boolean
+  rawJson: string
+  onToggleRaw: () => void
+}) {
   const { t, i18n } = useTranslation()
   const subject = asRecord(getSubject(vc)) ?? {}
   const personName =
@@ -141,12 +139,12 @@ export function ResumeCredentialCard({
           />
           <CheckRow
             label={t('resumeCard.notExpired')}
-            valid={result?.expiry.valid}
+            valid={result?.expiration.valid}
             loading={loading}
           />
           <CheckRow
             label={t('resumeCard.notRevoked')}
-            valid={result?.status.valid}
+            valid={result?.revocation.valid}
             loading={loading}
           />
         </Stack>

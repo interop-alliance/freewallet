@@ -7,7 +7,7 @@
  * app detail page; a button on the row revokes access. Revoking removes the
  * app-key credential and records the revocation.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link as RouterLink, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { MdChevronRight } from 'react-icons/md'
@@ -15,11 +15,6 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import Dialog from '@mui/material/Dialog'
-import DialogActions from '@mui/material/DialogActions'
-import DialogContent from '@mui/material/DialogContent'
-import DialogContentText from '@mui/material/DialogContentText'
-import DialogTitle from '@mui/material/DialogTitle'
 import Link from '@mui/material/Link'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
@@ -29,15 +24,12 @@ import Typography from '@mui/material/Typography'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { RevokeAppDialog } from '@/components/RevokeAppDialog'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { dashboardStyles } from '@/styles/appStyles'
 import { listApplicationsView, revokeApplication } from '@/session/applications'
-import {
-  deriveAppGrantsState,
-  listConnectedApps,
-  type ConnectedApp
-} from '@/lib/connectedApps'
+import { deriveAppGrantsState, type ConnectedApp } from '@/lib/connectedApps'
 
 export function ApplicationsPage() {
   const { t, i18n } = useTranslation()
@@ -51,16 +43,8 @@ export function ApplicationsPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<ConnectedApp | null>(null)
-  const [revokeDialogOpen, setRevokeDialogOpen] = useState(false)
   const [revoking, setRevoking] = useState(false)
   const [revokeError, setRevokeError] = useState(false)
-
-  const fetchApps = useCallback(async () => {
-    if (!session?.storage) {
-      return []
-    }
-    return await listConnectedApps({ storage: session.storage })
-  }, [session])
 
   useEffect(() => {
     let cancelled = false
@@ -98,7 +82,6 @@ export function ApplicationsPage() {
   function openRevokeDialog(app: ConnectedApp) {
     setRevokeError(false)
     setRevokeTarget(app)
-    setRevokeDialogOpen(true)
   }
 
   async function handleRevoke() {
@@ -113,7 +96,6 @@ export function ApplicationsPage() {
         app: revokeTarget,
         signingKeys
       })
-      setRevokeDialogOpen(false)
       setRevokeTarget(null)
       showToast({
         message:
@@ -124,7 +106,11 @@ export function ApplicationsPage() {
               : t('applications.revokeSuccessLegacy')
       })
       try {
-        setApps(await fetchApps())
+        const { apps: listed, signingKeys: keys } = await listApplicationsView({
+          session
+        })
+        setApps(listed)
+        setSigningKeys(keys)
         setLoadError(false)
       } catch (err) {
         console.error('Could not reload connected applications:', err)
@@ -234,52 +220,21 @@ export function ApplicationsPage() {
         </Stack>
       )}
 
-      <Dialog
-        open={revokeDialogOpen}
-        onClose={() => {
-          if (!revoking) {
-            setRevokeDialogOpen(false)
-          }
-        }}
-      >
-        <DialogTitle>{t('applications.revokeTitle')}</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            {revokeTarget &&
-            deriveAppGrantsState({
-              app: revokeTarget,
-              currentSigningKeys: signingKeys
-            }) === 'orphaned'
-              ? t('applications.revokeConfirmOrphaned', {
-                  name: revokeTarget.name
-                })
-              : t('applications.revokeConfirm', {
-                  name: revokeTarget?.name ?? ''
-                })}
-          </DialogContentText>
-          {revokeError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {t('applications.revokeFailed')}
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => setRevokeDialogOpen(false)}
-            disabled={revoking}
-          >
-            {t('common.cancel')}
-          </Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={handleRevoke}
-            loading={revoking}
-          >
-            {t('applications.revokeConfirmAction')}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <RevokeAppDialog
+        open={revokeTarget !== null}
+        appName={revokeTarget?.name ?? ''}
+        orphaned={
+          !!revokeTarget &&
+          deriveAppGrantsState({
+            app: revokeTarget,
+            currentSigningKeys: signingKeys
+          }) === 'orphaned'
+        }
+        revoking={revoking}
+        error={revokeError}
+        onCancel={() => setRevokeTarget(null)}
+        onConfirm={handleRevoke}
+      />
     </DashboardLayout>
   )
 }

@@ -19,7 +19,7 @@ import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type { Session } from '@/types/auth'
 import type { StoredCredential } from '@/types/credential'
 import { documentLoader } from '@/lib/walletRequest/composeVP'
-import { issuerId, subjectId, typeArray } from '@/lib/vcShape'
+import { byIssuanceDateDesc, isSelfIssued, typeArray } from '@/lib/vcShape'
 
 /**
  * The `type` term identifying a Login Credential (both the wallet-defined type
@@ -85,25 +85,18 @@ export async function issueLoginCredential({
  * @param options.credentials {StoredCredential[]}
  * @returns {StoredCredential[]}
  */
-export function loginCredentialsIn({
+function loginCredentialsIn({
   credentials
 }: {
   credentials: StoredCredential[]
 }): StoredCredential[] {
   return credentials
-    .filter(({ vc: credential }) => {
-      const issuer = issuerId(credential.issuer)
-      return (
+    .filter(
+      ({ vc: credential }) =>
         typeArray(credential.type).includes(LOGIN_CREDENTIAL_TYPE) &&
-        !!issuer &&
-        issuer === subjectId(credential)
-      )
-    })
-    .sort((first, second) => {
-      const firstDate = (first.vc.issuanceDate as string) ?? ''
-      const secondDate = (second.vc.issuanceDate as string) ?? ''
-      return secondDate.localeCompare(firstDate)
-    })
+        isSelfIssued(credential)
+    )
+    .sort(byIssuanceDateDesc)
 }
 
 /**
@@ -157,9 +150,9 @@ export async function setLoginHandle({
 }): Promise<void> {
   const existing = await session.storage.listCredentials()
   const prior = loginCredentialsIn({ credentials: existing })
-  for (const { cid } of prior) {
-    await session.storage.deleteCredential({ cid })
-  }
+  await Promise.all(
+    prior.map(({ cid }) => session.storage.deleteCredential({ cid }))
+  )
   const trimmed = username.trim()
   if (!trimmed) {
     return

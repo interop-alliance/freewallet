@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
-import ToggleButton from '@mui/material/ToggleButton'
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -21,22 +20,111 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { JsonHighlight } from '@/components/JsonHighlight'
 import { DeleteCredentialDialog } from '@/components/credentialDetails/DeleteCredentialDialog'
 import { useCredentialDelete } from '@/hooks/useCredentialDelete'
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { useAuthStore } from '@/stores/authStore'
 import { storageStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
 import type { StorageResource } from '@/lib/storage'
-import type { Json } from '@/lib/sync'
 import {
   isVerifiableCredentialData,
   type FetchedCollectionResource
 } from '@/lib/storageResource'
 import { getResourceDisplayName } from '@/components/storage/displayUtils'
-import { PublicAccessIcon } from '@/components/storage/PublicAccessIcon'
+import { PublicAccessIcon } from '@/components/storage/AccessIcon'
+import { SourceViewToggle } from '@/components/storage/SourceViewToggle'
+import {
+  decryptResourceBody,
+  useResourceSourceCopy
+} from '@/components/storage/useResourceSource'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
 import { cidFrom } from '@interop/was-client/sync'
 import { downloadBlob } from '@/lib/downloadBlob'
+
+/**
+ * The resource preview shell shared by this page's two branches (a Verifiable
+ * Credential body and any other JSON/text body): the resource id heading, the
+ * titled card with its public marker and action buttons, and the source view
+ * beneath it. The branches differ only in the description line and in which
+ * actions they offer.
+ *
+ * @param options {object}
+ * @param options.resourceId {string}
+ * @param options.title {string}   the display title inside the card
+ * @param options.isPublic {boolean}   whether to show the public-access marker
+ * @param [options.description] {string}
+ * @param options.actions {ReactNode}   the card's action buttons
+ * @param options.sourceToggle {ReactNode}   the decrypted/envelope switch
+ * @param options.sourceText {string}   the code block's contents
+ * @returns {JSX.Element}
+ */
+function ResourcePreview({
+  resourceId,
+  title,
+  isPublic,
+  description,
+  actions,
+  sourceToggle,
+  sourceText
+}: {
+  resourceId: string
+  title: string
+  isPublic: boolean
+  description?: string
+  actions: ReactNode
+  sourceToggle: ReactNode
+  sourceText: string
+}) {
+  return (
+    <>
+      <Typography
+        variant="h5"
+        component="h2"
+        sx={storageStyles.resourceDetailId}
+      >
+        {resourceId}
+      </Typography>
+
+      <Paper variant="outlined" sx={storageStyles.vcPreviewCard}>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          sx={storageStyles.vcPreviewCardInner}
+        >
+          <Box sx={storageStyles.vcPreviewMain}>
+            <Typography variant="h6" sx={storageStyles.vcPreviewTitle}>
+              {title}
+            </Typography>
+            {isPublic && (
+              <Box sx={storageStyles.vcPreviewPublicMeta}>
+                <PublicAccessIcon />
+              </Box>
+            )}
+            {description ? (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={storageStyles.vcPreviewDescription}
+              >
+                {description}
+              </Typography>
+            ) : null}
+          </Box>
+
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={storageStyles.vcPreviewActions}
+          >
+            {actions}
+          </Stack>
+        </Stack>
+      </Paper>
+
+      {sourceToggle}
+      <JsonHighlight code={sourceText} sx={credentialDetailStyles.codeBlock} />
+    </>
+  )
+}
 
 export function CollectionResourcePage() {
   const { t } = useTranslation()
@@ -67,17 +155,7 @@ export function CollectionResourcePage() {
   const [isLoading, setIsLoading] = useState(true)
   const [errorKey, setErrorKey] = useState<string | null>(null)
 
-  const {
-    copied,
-    copy,
-    reset: resetCopied
-  } = useCopyToClipboard({
-    resetDelay: 2000,
-    fallbackToExecCommand: true,
-    onError: (err: unknown) => {
-      console.warn('Copy to clipboard failed:', err)
-    }
-  })
+  const { copied, copy, reset: resetCopied } = useResourceSourceCopy()
 
   // A Verifiable Credential body renders the rich credential card; any other
   // JSON (or text) body renders the generic viewer. `vc` is null in the latter
@@ -169,16 +247,12 @@ export function CollectionResourcePage() {
           return
         }
 
-        // An encrypted-collection resource arrives as an EDV envelope; with an
-        // unlocked vault, recover the document behind it and keep the envelope
-        // source around for the alternate view.
-        const decrypted =
-          body.kind === 'json'
-            ? await storage.decryptCollectionResource({
-                collectionId,
-                data: body.data as Json
-              })
-            : undefined
+        // The envelope source is kept around for the alternate view.
+        const decrypted = await decryptResourceBody({
+          storage,
+          collectionId,
+          body
+        })
         if (cancelled) {
           return
         }
@@ -276,22 +350,11 @@ export function CollectionResourcePage() {
     : null
 
   const sourceToggle = envelopeText !== null && (
-    <ToggleButtonGroup
-      size="small"
-      exclusive
+    <SourceViewToggle
       value={sourceView}
-      onChange={(_event, view: 'decrypted' | 'envelope' | null) => {
-        if (view) {
-          setSourceView(view)
-        }
-      }}
+      onChange={setSourceView}
       sx={{ mb: 1 }}
-    >
-      <ToggleButton value="decrypted">
-        {t('storage.viewDecrypted')}
-      </ToggleButton>
-      <ToggleButton value="envelope">{t('storage.viewEnvelope')}</ToggleButton>
-    </ToggleButtonGroup>
+    />
   )
 
   return (
@@ -321,45 +384,15 @@ export function CollectionResourcePage() {
               </Alert>
             )}
 
-            <Typography
-              variant="h5"
-              component="h2"
-              sx={storageStyles.resourceDetailId}
-            >
-              {resource.id}
-            </Typography>
-
-            <Paper variant="outlined" sx={storageStyles.vcPreviewCard}>
-              <Stack
-                direction={{ xs: 'column', sm: 'row' }}
-                spacing={2}
-                sx={storageStyles.vcPreviewCardInner}
-              >
-                <Box sx={storageStyles.vcPreviewMain}>
-                  <Typography variant="h6" sx={storageStyles.vcPreviewTitle}>
-                    {displayTitle}
-                  </Typography>
-                  {resource.isPublic && (
-                    <Box sx={storageStyles.vcPreviewPublicMeta}>
-                      <PublicAccessIcon />
-                    </Box>
-                  )}
-                  {description ? (
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                      sx={storageStyles.vcPreviewDescription}
-                    >
-                      {description}
-                    </Typography>
-                  ) : null}
-                </Box>
-
-                <Stack
-                  direction="row"
-                  spacing={1}
-                  sx={storageStyles.vcPreviewActions}
-                >
+            <ResourcePreview
+              resourceId={resource.id}
+              title={displayTitle}
+              isPublic={!!resource.isPublic}
+              description={description}
+              sourceToggle={sourceToggle}
+              sourceText={shownSourceText}
+              actions={
+                <>
                   {credentialDetailHref ? (
                     <Button
                       variant="outlined"
@@ -389,78 +422,42 @@ export function CollectionResourcePage() {
                   >
                     {t('storage.deleteResource')}
                   </Button>
-                </Stack>
-              </Stack>
-            </Paper>
-
-            {sourceToggle}
-            <JsonHighlight
-              code={shownSourceText}
-              sx={credentialDetailStyles.codeBlock}
+                </>
+              }
             />
           </>
         )}
 
         {!isLoading && !errorKey && resource && !vc && payload && (
-          <>
-            <Typography
-              variant="h5"
-              component="h2"
-              sx={storageStyles.resourceDetailId}
-            >
-              {resource.id}
-            </Typography>
-
-            <Paper variant="outlined" sx={storageStyles.vcPreviewCard}>
-              <Stack
-                direction={{ xs: 'column', sm: 'row' }}
-                spacing={2}
-                sx={storageStyles.vcPreviewCardInner}
-              >
-                <Box sx={storageStyles.vcPreviewMain}>
-                  <Typography variant="h6" sx={storageStyles.vcPreviewTitle}>
-                    {displayTitle}
-                  </Typography>
-                  {resource.isPublic && (
-                    <Box sx={storageStyles.vcPreviewPublicMeta}>
-                      <PublicAccessIcon />
-                    </Box>
-                  )}
-                </Box>
-
-                <Stack
-                  direction="row"
-                  spacing={1}
-                  sx={storageStyles.vcPreviewActions}
+          <ResourcePreview
+            resourceId={resource.id}
+            title={displayTitle}
+            isPublic={!!resource.isPublic}
+            sourceToggle={sourceToggle}
+            sourceText={shownSourceText}
+            actions={
+              <>
+                <Button
+                  variant="outlined"
+                  startIcon={<MdContentCopy />}
+                  onClick={() => {
+                    void handleCopy()
+                  }}
+                  sx={storageStyles.vcPreviewActionButton}
                 >
-                  <Button
-                    variant="outlined"
-                    startIcon={<MdContentCopy />}
-                    onClick={() => {
-                      void handleCopy()
-                    }}
-                    sx={storageStyles.vcPreviewActionButton}
-                  >
-                    {copied ? t('storage.copied') : t('storage.copySnippet')}
-                  </Button>
-                  <Button
-                    variant="contained"
-                    startIcon={<MdDownload />}
-                    onClick={handleDownload}
-                    sx={storageStyles.vcPreviewActionButton}
-                  >
-                    {t('storage.download')}
-                  </Button>
-                </Stack>
-              </Stack>
-            </Paper>
-
-            {sourceToggle}
-            <JsonHighlight
-              code={shownSourceText}
-              sx={credentialDetailStyles.codeBlock}
-            />
-          </>
+                  {copied ? t('storage.copied') : t('storage.copySnippet')}
+                </Button>
+                <Button
+                  variant="contained"
+                  startIcon={<MdDownload />}
+                  onClick={handleDownload}
+                  sx={storageStyles.vcPreviewActionButton}
+                >
+                  {t('storage.download')}
+                </Button>
+              </>
+            }
+          />
         )}
       </Box>
 

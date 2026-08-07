@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import type { ZcapClient } from '@interop/ezcap'
 import type { WasClient } from '@interop/was-client'
 import { mintSpaceId, WASRemoteStore } from '../../src/stores/wasRemoteStore'
-import { bufferToBase64Url, digestHash } from '../../src/lib/cidFrom'
+import { deriveSpaceId } from '@interop/was-client/sync'
 import type { ControllerProfile, User } from '../../src/types/auth'
 
 // Stub only `ensureSpaceAndCollection` (the library's Space + Collection
@@ -338,7 +338,7 @@ describe('WASRemoteStore.initClient', () => {
       } as unknown as ControllerProfile
     })
 
-    const expectedSpaceId = bufferToBase64Url(await digestHash(controller))
+    const expectedSpaceId = deriveSpaceId(controller)
     expect(remoteStore.controller).toBe(controller)
     expect(remoteStore.spaceId).toBe(expectedSpaceId)
   })

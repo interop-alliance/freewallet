@@ -8,7 +8,7 @@
  * jsdom (see the note in `passwordScorer.ts`). Exercise the meter via the
  * Playwright (browser) signup tests instead.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 import { getCachedScorer, loadScorer, type Scorer } from '@/lib/passwordScorer'
@@ -36,13 +36,6 @@ const SCORE_COLORS = [
   'success.main'
 ] as const
 
-interface PasswordStrengthMeterProps {
-  password: string
-  onChangeScore: (score: number) => void
-  scoreWords: string[]
-  shortScoreWord: string
-}
-
 /**
  * Renders a segmented strength bar plus a textual label for a passphrase.
  *
@@ -58,7 +51,12 @@ export function PasswordStrengthMeter({
   onChangeScore,
   scoreWords,
   shortScoreWord
-}: PasswordStrengthMeterProps) {
+}: {
+  password: string
+  onChangeScore: (score: number) => void
+  scoreWords: string[]
+  shortScoreWord: string
+}) {
   const { i18n } = useTranslation()
   // Lazy initializer: a bare `useState(cachedScorer)` would treat the cached
   // scorer function as an initializer and call it with no arguments (scoring
@@ -88,14 +86,19 @@ export function PasswordStrengthMeter({
     }
   }, [i18n.language])
 
+  // Scoring is a synchronous zxcvbn pass, heavy enough to be felt between
+  // keystrokes, so it runs against a deferred copy of the passphrase: the field
+  // stays responsive and the meter catches up a render later.
+  const deferredPassword = useDeferredValue(password)
+
   // The score is a pure function of the passphrase and the loaded engine, so
   // it is derived during render rather than held in state.
   const score = useMemo(() => {
-    if (!scorer || !password) {
+    if (!scorer || !deferredPassword) {
       return 0
     }
-    return scorer(password)
-  }, [scorer, password])
+    return scorer(deferredPassword)
+  }, [scorer, deferredPassword])
 
   // Report the latest score to the parent (an external system from this
   // component's point of view) whenever it changes. When the engine failed to
@@ -109,7 +112,7 @@ export function PasswordStrengthMeter({
   // A failed engine renders as an inert meter (no fill, neutral label): the
   // component cannot honestly grade strength, so it shows nothing rather than a
   // misleading colour.
-  const hasInput = password.length > 0 && !loadFailed
+  const hasInput = deferredPassword.length > 0 && !loadFailed
   const activeColor = hasInput ? SCORE_COLORS[score] : 'text.secondary'
   const label = hasInput ? (scoreWords[score] ?? '') : shortScoreWord
 

@@ -1,125 +1,126 @@
 import { lazy, Suspense } from 'react'
+import type { ComponentType } from 'react'
 import { Route, Routes } from 'react-router'
 import { LandingPage } from '@/pages/LandingPage'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { RouteFallback } from '@/components/RouteFallback'
 
+/**
+ * `React.lazy` over a module's named export. The dynamic `import()` call stays
+ * a literal at each call site so the bundler can still statically see it and
+ * split the chunk.
+ *
+ * @param load {Function}   the dynamic import
+ * @param name {string}     the exported component's name
+ * @returns {LazyExoticComponent}
+ */
+function lazyNamed<
+  Name extends string,
+  Module extends Record<Name, ComponentType<unknown>>
+>(load: () => Promise<Module>, name: Name) {
+  return lazy(async () => ({ default: (await load())[name] }))
+}
+
 // LandingPage and ProtectedRoute are eager: LandingPage is the lightweight
 // unauthenticated entry point, and ProtectedRoute is a tiny auth gate. Every
 // other route is lazily code-split so its (often heavy) dependencies — rxdb,
 // jsonld, verifier-core, qr-scanner — stay out of the initial bundle.
-const LoginPage = lazy(() =>
-  import('@/pages/auth/LoginPage').then(m => ({ default: m.LoginPage }))
+const LoginPage = lazyNamed(() => import('@/pages/auth/LoginPage'), 'LoginPage')
+const SignupPage = lazyNamed(
+  () => import('@/pages/auth/SignupPage'),
+  'SignupPage'
 )
-const SignupPage = lazy(() =>
-  import('@/pages/auth/SignupPage').then(m => ({ default: m.SignupPage }))
+const RecoverPage = lazyNamed(
+  () => import('@/pages/auth/RecoverPage'),
+  'RecoverPage'
 )
-const RecoverPage = lazy(() =>
-  import('@/pages/auth/RecoverPage').then(m => ({ default: m.RecoverPage }))
+const GuestLoginPage = lazyNamed(
+  () => import('@/pages/auth/GuestLoginPage'),
+  'GuestLoginPage'
 )
-const GuestLoginPage = lazy(() =>
-  import('@/pages/auth/GuestLoginPage').then(m => ({
-    default: m.GuestLoginPage
-  }))
+const LogoutPage = lazyNamed(
+  () => import('@/pages/auth/LogoutPage'),
+  'LogoutPage'
 )
-const LogoutPage = lazy(() =>
-  import('@/pages/auth/LogoutPage').then(m => ({ default: m.LogoutPage }))
+const WalletGetPage = lazyNamed(
+  () => import('@/pages/chapi/WalletGetPage'),
+  'WalletGetPage'
 )
-const WalletGetPage = lazy(() =>
-  import('@/pages/chapi/WalletGetPage').then(m => ({
-    default: m.WalletGetPage
-  }))
+const WalletStorePage = lazyNamed(
+  () => import('@/pages/chapi/WalletStorePage'),
+  'WalletStorePage'
 )
-const WalletStorePage = lazy(() =>
-  import('@/pages/chapi/WalletStorePage').then(m => ({
-    default: m.WalletStorePage
-  }))
+const DashboardPage = lazyNamed(
+  () => import('@/pages/dashboard/DashboardPage'),
+  'DashboardPage'
 )
-const DashboardPage = lazy(() =>
-  import('@/pages/dashboard/DashboardPage').then(m => ({
-    default: m.DashboardPage
-  }))
+const ContactsPage = lazyNamed(
+  () => import('@/pages/dashboard/ContactsPage'),
+  'ContactsPage'
 )
-const ContactsPage = lazy(() =>
-  import('@/pages/dashboard/ContactsPage').then(m => ({
-    default: m.ContactsPage
-  }))
+const ContactDetailPage = lazyNamed(
+  () => import('@/pages/dashboard/ContactDetailPage'),
+  'ContactDetailPage'
 )
-const ContactDetailPage = lazy(() =>
-  import('@/pages/dashboard/ContactDetailPage').then(m => ({
-    default: m.ContactDetailPage
-  }))
+const ContactFormPage = lazyNamed(
+  () => import('@/pages/dashboard/ContactFormPage'),
+  'ContactFormPage'
 )
-const ContactFormPage = lazy(() =>
-  import('@/pages/dashboard/ContactFormPage').then(m => ({
-    default: m.ContactFormPage
-  }))
+const ContactHistoryPage = lazyNamed(
+  () => import('@/pages/dashboard/ContactHistoryPage'),
+  'ContactHistoryPage'
 )
-const ContactHistoryPage = lazy(() =>
-  import('@/pages/dashboard/ContactHistoryPage').then(m => ({
-    default: m.ContactHistoryPage
-  }))
+const StoragePage = lazyNamed(
+  () => import('@/pages/dashboard/StoragePage'),
+  'StoragePage'
 )
-const StoragePage = lazy(() =>
-  import('@/pages/dashboard/StoragePage').then(m => ({
-    default: m.StoragePage
-  }))
+const CollectionContentsPage = lazyNamed(
+  () => import('@/pages/dashboard/CollectionContentsPage'),
+  'CollectionContentsPage'
 )
-const CollectionContentsPage = lazy(() =>
-  import('@/pages/dashboard/CollectionContentsPage').then(m => ({
-    default: m.CollectionContentsPage
-  }))
+const CollectionResourcePage = lazyNamed(
+  () => import('@/pages/dashboard/CollectionResourcePage'),
+  'CollectionResourcePage'
 )
-const CollectionResourcePage = lazy(() =>
-  import('@/pages/dashboard/CollectionResourcePage').then(m => ({
-    default: m.CollectionResourcePage
-  }))
+const ApplicationsPage = lazyNamed(
+  () => import('@/pages/dashboard/ApplicationsPage'),
+  'ApplicationsPage'
 )
-const ApplicationsPage = lazy(() =>
-  import('@/pages/dashboard/ApplicationsPage').then(m => ({
-    default: m.ApplicationsPage
-  }))
+const ApplicationDetailPage = lazyNamed(
+  () => import('@/pages/dashboard/ApplicationDetailPage'),
+  'ApplicationDetailPage'
 )
-const ApplicationDetailPage = lazy(() =>
-  import('@/pages/dashboard/ApplicationDetailPage').then(m => ({
-    default: m.ApplicationDetailPage
-  }))
+const HistoryPage = lazyNamed(
+  () => import('@/pages/dashboard/HistoryPage'),
+  'HistoryPage'
 )
-const HistoryPage = lazy(() =>
-  import('@/pages/dashboard/HistoryPage').then(m => ({
-    default: m.HistoryPage
-  }))
+const SettingsPage = lazyNamed(
+  () => import('@/pages/dashboard/SettingsPage'),
+  'SettingsPage'
 )
-const SettingsPage = lazy(() =>
-  import('@/pages/dashboard/SettingsPage').then(m => ({
-    default: m.SettingsPage
-  }))
+const CredentialDetailPage = lazyNamed(
+  () => import('@/pages/dashboard/CredentialDetailPage'),
+  'CredentialDetailPage'
 )
-const CredentialDetailPage = lazy(() =>
-  import('@/pages/dashboard/CredentialDetailPage').then(m => ({
-    default: m.CredentialDetailPage
-  }))
+const IssuerDetailPage = lazyNamed(
+  () => import('@/pages/dashboard/IssuerDetailPage'),
+  'IssuerDetailPage'
 )
-const IssuerDetailPage = lazy(() =>
-  import('@/pages/dashboard/IssuerDetailPage').then(m => ({
-    default: m.IssuerDetailPage
-  }))
+const AddCredentialPage = lazyNamed(
+  () => import('@/pages/dashboard/AddCredentialPage'),
+  'AddCredentialPage'
 )
-const AddCredentialPage = lazy(() =>
-  import('@/pages/dashboard/AddCredentialPage').then(m => ({
-    default: m.AddCredentialPage
-  }))
+const AcceptCredentialsPage = lazyNamed(
+  () => import('@/pages/dashboard/AcceptCredentialsPage'),
+  'AcceptCredentialsPage'
 )
-const AcceptCredentialsPage = lazy(() =>
-  import('@/pages/dashboard/AcceptCredentialsPage').then(m => ({
-    default: m.AcceptCredentialsPage
-  }))
+const DocsPage = lazyNamed(
+  () => import('@/pages/dashboard/DocsPage'),
+  'DocsPage'
 )
-const DocsPage = lazy(() =>
-  import('@/pages/dashboard/DocsPage').then(m => ({ default: m.DocsPage }))
-)
-const NotFoundPage = lazy(() =>
-  import('@/pages/NotFoundPage').then(m => ({ default: m.NotFoundPage }))
+const NotFoundPage = lazyNamed(
+  () => import('@/pages/NotFoundPage'),
+  'NotFoundPage'
 )
 
 function App() {

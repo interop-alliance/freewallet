@@ -280,18 +280,6 @@ async function unwrapRecord({
 }
 
 /**
- * Loads the account's unlock-methods registry, or `null` when none has been
- * written yet. When a WAS server is configured the remote copy in the data
- * Space is the source of truth: it is read first, refreshes the local cache on
- * a hit, and drops the cache on a 404-shaped miss. A remote read failure
- * rethrows. With no WAS server the cache is the only copy.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<UnlockMethodsRecord | null>}
- */
-/**
  * A fresh, empty unlock-methods registry: one wallet-wide user handle and no
  * methods yet. The registry's shape is minted here alone, so every path that
  * writes it first (a passkey enrollment, a recovery-code issuance, a
@@ -309,6 +297,18 @@ export function emptyUnlockMethodsRegistry(): UnlockMethodsRecord {
   }
 }
 
+/**
+ * Loads the account's unlock-methods registry, or `null` when none has been
+ * written yet. When a WAS server is configured the remote copy in the data
+ * Space is the source of truth: it is read first, refreshes the local cache on
+ * a hit, and drops the cache on a 404-shaped miss. A remote read failure
+ * rethrows. With no WAS server the cache is the only copy.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<UnlockMethodsRecord | null>}
+ */
 export async function getUnlockMethods({
   session,
   idb
@@ -654,6 +654,55 @@ export async function revokeUnlockMethodByCeremony({
 }
 
 /**
+ * Upserts the registry's single passphrase entry, preserving the existing
+ * entry's creation date and leaving every other method untouched. Pure -- the
+ * caller writes the returned record.
+ *
+ * `keepAbsentManageCapability` is the one behavioural fork between the two
+ * callers: the login-time backfill omits the key entirely when no capability
+ * is in hand (never storing `manageCapability: undefined`), while the
+ * passphrase-change repoint sets it unconditionally, so a change that minted
+ * no capability CLEARS the stale one the old unlock Space's entry carried.
+ *
+ * @param options {object}
+ * @param options.record {UnlockMethodsRecord}   the registry to update
+ * @param options.unlockSpaceId {string}   the passphrase's unlock Space
+ * @param [options.manageCapability] {IZcap}
+ * @param [options.keepAbsentManageCapability] {boolean}   write the
+ *   `manageCapability` key even when there is none; default false
+ * @returns {UnlockMethodsRecord}   the updated registry
+ */
+export function upsertPassphraseUnlockMethod({
+  record,
+  unlockSpaceId,
+  manageCapability,
+  keepAbsentManageCapability = false
+}: {
+  record: UnlockMethodsRecord
+  unlockSpaceId: string
+  manageCapability?: IZcap
+  keepAbsentManageCapability?: boolean
+}): UnlockMethodsRecord {
+  const existing = record.methods.find(
+    (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+  )
+  const entry: PassphraseUnlockMethod = {
+    type: 'passphrase',
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
+    unlockSpaceId,
+    ...(manageCapability || keepAbsentManageCapability
+      ? { manageCapability }
+      : {})
+  }
+  const methods = existing
+    ? record.methods.map(method =>
+        method.type === 'passphrase' ? entry : method
+      )
+    : [...record.methods, entry]
+  return { ...record, methods }
+}
+
+/**
  * Backfills the registry's passphrase entry from the current full session,
  * without re-prompting for the passphrase. When this session was produced by a
  * passphrase login (`profile.unlockMethod.type === 'passphrase'`) with the
@@ -725,18 +774,11 @@ export async function backfillPassphraseUnlockMethod({
     return record
   }
 
-  const entry: PassphraseUnlockMethod = {
-    type: 'passphrase',
-    createdAt: existing?.createdAt ?? new Date().toISOString(),
+  const nextRecord = upsertPassphraseUnlockMethod({
+    record,
     unlockSpaceId,
-    ...(manageCapability ? { manageCapability } : {})
-  }
-  const methods = existing
-    ? record.methods.map(method =>
-        method.type === 'passphrase' ? entry : method
-      )
-    : [...record.methods, entry]
-  const nextRecord: UnlockMethodsRecord = { ...record, methods }
+    manageCapability
+  })
   await putUnlockMethods({ session, record: nextRecord, idb })
   return nextRecord
 }

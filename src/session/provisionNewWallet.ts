@@ -47,9 +47,12 @@ export async function provisionNewWallet({
   // Create the Space (remote) and open/init the collections (local always).
   await storage.ensureUserCollections({ user, profile })
 
-  // Now that there is somewhere to write to, start the history.
-  await storage.addHistoryNewAccount({ user })
-  await storage.addHistorySpaceCreated({ user })
+  // Now that there is somewhere to write to, start the history. The two
+  // records are independent, so they are written together.
+  await Promise.all([
+    storage.addHistoryNewAccount({ user }),
+    storage.addHistorySpaceCreated({ user })
+  ])
 
   // Seed the default contacts: the Interop Alliance Team, and a self-contact
   // carrying the did:web/did:webvh DIDs `ensureUserCollections` minted above
@@ -63,15 +66,17 @@ export async function provisionNewWallet({
   // welcome credential (and, on the signup path, without the unlock-methods
   // entry the page writes after this returns).
   try {
-    await storage.addContact({ contact: interopAllianceTeamContact })
-    await storage.addContact({
-      contact: selfContact({
-        dids: [profile.didWeb?.did, profile.didWebvh?.did].filter(
-          (did): did is string => Boolean(did)
-        ),
-        ...(session.isGuest ? {} : { email: user.email })
+    await Promise.all([
+      storage.addContact({ contact: interopAllianceTeamContact }),
+      storage.addContact({
+        contact: selfContact({
+          dids: [profile.didWeb?.did, profile.didWebvh?.did].filter(
+            (did): did is string => Boolean(did)
+          ),
+          ...(session.isGuest ? {} : { email: user.email })
+        })
       })
-    })
+    ])
   } catch (err) {
     console.warn('Could not seed the default contacts:', err)
   }

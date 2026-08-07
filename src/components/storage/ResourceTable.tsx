@@ -21,21 +21,17 @@ import {
   getResourceModifiedIso,
   getResourceTypeLabel
 } from './displayUtils'
-import { PublicAccessIcon } from './PublicAccessIcon'
-
-interface ResourceTableProps {
-  resources: StorageResource[]
-  onResourceOpen: (resource: StorageResource) => void
-  selectedResourceId?: string | null
-  ariaLabel?: string
-}
+import { PublicAccessIcon } from './AccessIcon'
 
 export function ResourceTable({
   resources,
   onResourceOpen,
-  selectedResourceId,
-  ariaLabel
-}: ResourceTableProps) {
+  selectedResourceId
+}: {
+  resources: StorageResource[]
+  onResourceOpen: (resource: StorageResource) => void
+  selectedResourceId?: string | null
+}) {
   const { t, i18n } = useTranslation()
 
   return (
@@ -46,7 +42,7 @@ export function ResourceTable({
     >
       <Table
         size="small"
-        aria-label={ariaLabel ?? t('storage.resourcesTableLabel')}
+        aria-label={t('storage.resourcesTableLabel')}
         sx={storageStyles.resourceTable}
       >
         <TableHead>
@@ -80,14 +76,17 @@ export function ResourceTable({
   )
 }
 
-interface ResourceRowProps {
+function ResourceRow({
+  resource,
+  locale,
+  selected,
+  onOpen
+}: {
   resource: StorageResource
   locale: string
   selected: boolean
   onOpen: () => void
-}
-
-function ResourceRow({ resource, locale, selected, onOpen }: ResourceRowProps) {
+}) {
   const { t } = useTranslation()
   const displayName = getResourceDisplayName(resource)
   const typeLabel = getResourceTypeLabel(resource, t)

@@ -36,8 +36,7 @@ import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
 import { uuidv7 } from 'uuidv7'
 import type { User } from '@/types/auth'
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
-import { cidFrom } from '@interop/was-client/sync'
-import { bufferToBase64Url, digestHash } from '@/lib/cidFrom'
+import { cidFrom, deriveSpaceId } from '@interop/was-client/sync'
 import {
   syncedDocMigrationStrategies,
   syncedDocSchema,
@@ -72,7 +71,6 @@ export class BrowserStore {
   // Surfaced so the pages can warn the user without any one bad row bricking
   // the whole list.
   #undecryptableCredentials = 0
-  #undecryptableHistory = 0
   // Count of rows the most recent list read had to skip because their envelope
   // named a key epoch this instance's cipher does not know
   // (UnknownEpochError). Unlike the undecryptable rows above, these are not
@@ -147,7 +145,7 @@ export class BrowserStore {
     ciphers?: Record<string, DocCipher>
   }) {
     // Local DBs will have a prefix of <hash of user.id>
-    const dbPrefix = bufferToBase64Url(await digestHash(user.id))
+    const dbPrefix = deriveSpaceId(user.id)
 
     const localStore = new BrowserStore({ dbPrefix, storage, ciphers })
     return { localStore }
@@ -374,38 +372,48 @@ export class BrowserStore {
       []
     const undecryptableRowIds: string[] = []
     const unknownEpochRowIds: string[] = []
-    for (const doc of docs) {
-      const { id, data } = doc.toMutableJSON()
-      if (cipher && isEncryptedEnvelope(data)) {
+    // Every row's decrypt is independent, so they run together; the fold below
+    // then walks them in list order, keeping the entry ordering and the
+    // per-row failure buckets exactly as a sequential pass produced them.
+    const rows = await Promise.all(
+      docs.map(async doc => {
+        const { id, data } = doc.toMutableJSON()
+        if (!cipher || !isEncryptedEnvelope(data)) {
+          return { id, plaintext: data as Json, fromEnvelope: false }
+        }
         const cached = decryptCache?.get(id)
         if (cached !== undefined) {
-          entries.push({ rowId: id, data: cached, fromEnvelope: true })
-          continue
+          return { id, plaintext: cached, fromEnvelope: true }
         }
         try {
           const plaintext = await cipher.decrypt({ envelope: data! })
           decryptCache?.set(id, plaintext)
-          entries.push({ rowId: id, data: plaintext, fromEnvelope: true })
+          return { id, plaintext, fromEnvelope: true }
         } catch (err) {
-          if (err instanceof UnknownEpochError) {
-            // Possibly-fresh data behind a stale descriptor: skip it (uncached) so a
-            // descriptor refresh can pick it up, never purge it.
-            console.warn(
-              `Skipping unknown-epoch "${logicalKey}" row "${id}":`,
-              err
-            )
-            unknownEpochRowIds.push(id)
-          } else {
-            console.warn(
-              `Skipping undecryptable "${logicalKey}" row "${id}":`,
-              err
-            )
-            undecryptableRowIds.push(id)
-          }
+          return { id, fromEnvelope: true, err }
         }
-      } else {
-        entries.push({ rowId: id, data: data as Json, fromEnvelope: false })
+      })
+    )
+    for (const { id, plaintext, fromEnvelope, err } of rows) {
+      if (err) {
+        if (err instanceof UnknownEpochError) {
+          // Possibly-fresh data behind a stale descriptor: skip it (uncached) so a
+          // descriptor refresh can pick it up, never purge it.
+          console.warn(
+            `Skipping unknown-epoch "${logicalKey}" row "${id}":`,
+            err
+          )
+          unknownEpochRowIds.push(id)
+        } else {
+          console.warn(
+            `Skipping undecryptable "${logicalKey}" row "${id}":`,
+            err
+          )
+          undecryptableRowIds.push(id)
+        }
+        continue
       }
+      entries.push({ rowId: id, data: plaintext as Json, fromEnvelope })
     }
     return { entries, undecryptableRowIds, unknownEpochRowIds }
   }
@@ -477,16 +485,6 @@ export class BrowserStore {
    */
   get undecryptableCredentials(): number {
     return this.#undecryptableCredentials
-  }
-
-  /**
-   * The count of `wallet-activity` rows the most recent
-   * {@link listHistoryItems} call had to skip for the same reason.
-   *
-   * @returns {number}
-   */
-  get undecryptableHistory(): number {
-    return this.#undecryptableHistory
   }
 
   /**
@@ -876,17 +874,17 @@ export class BrowserStore {
    * carrying the same activity are collapsed to their oldest copy.
    *
    * A row whose envelope will not decrypt under the current KAK is skipped
-   * (logged and counted in {@link undecryptableHistory}) rather than rejecting
-   * the whole read, so one poisoned row cannot hang the history page.
+   * (logged) rather than rejecting the whole read, so one poisoned row cannot hang the history page.
    *
    * @returns {Promise<Array<{ id: string; doc: WalletActivity }>>}
    */
   async listHistoryItems(): Promise<
     Array<{ id: string; doc: WalletActivity }>
   > {
-    const { entries, undecryptableRowIds, unknownEpochRowIds } =
-      await this.#decryptedRows({ logicalKey: 'walletActivity', sort: 'asc' })
-    this.#undecryptableHistory = undecryptableRowIds.length
+    const { entries, unknownEpochRowIds } = await this.#decryptedRows({
+      logicalKey: 'walletActivity',
+      sort: 'asc'
+    })
     this.#unknownEpochHistory = unknownEpochRowIds.length
     const seen = new Set<string>()
     const items: Array<{ id: string; doc: WalletActivity }> = []
@@ -1177,6 +1175,27 @@ export class BrowserStore {
   }
 
   /**
+   * Runs a one-time local migration at most once per user: a persistent
+   * per-`dbPrefix` marker (localStorage, guarded for the non-browser test/SSR
+   * environments) short-circuits the full-collection scan on every later
+   * login, and is stamped only once the pass completes.
+   *
+   * @param markerKey {string}   the localStorage marker key
+   * @param migrate {() => Promise<void>}   the migration pass
+   * @returns {Promise<void>}
+   */
+  async #runOnce(markerKey: string, migrate: () => Promise<void>) {
+    const hasLocalStorage = typeof localStorage !== 'undefined'
+    if (hasLocalStorage && localStorage.getItem(markerKey)) {
+      return
+    }
+    await migrate()
+    if (hasLocalStorage) {
+      localStorage.setItem(markerKey, new Date().toISOString())
+    }
+  }
+
+  /**
    * One-time local migration for the encrypted collections: re-keys plaintext
    * rows written before encrypted sync landed (when
    * `private-credentials` / `wallet-activity` were local-active but not yet
@@ -1202,33 +1221,36 @@ export class BrowserStore {
    * @returns {Promise<void>}
    */
   async migrateLocalPlaintextDocs() {
-    const markerKey = `freewallet:plaintext-migrated:${this.dbPrefix}`
-    const hasLocalStorage = typeof localStorage !== 'undefined'
-    if (hasLocalStorage && localStorage.getItem(markerKey)) {
-      return
-    }
-    for (const [logicalKey, cipher] of Object.entries(this.#ciphers ?? {})) {
-      const collection = this.rxCollection(logicalKey)
-      const docs = await collection.find().exec()
-      for (const doc of docs) {
-        const { updatedAt, version, data } = doc.toMutableJSON()
-        if (version !== 0 || data === undefined || isEncryptedEnvelope(data)) {
-          continue
+    await this.#runOnce(
+      `freewallet:plaintext-migrated:${this.dbPrefix}`,
+      async () => {
+        for (const [logicalKey, cipher] of Object.entries(
+          this.#ciphers ?? {}
+        )) {
+          const collection = this.rxCollection(logicalKey)
+          const docs = await collection.find().exec()
+          for (const doc of docs) {
+            const { updatedAt, version, data } = doc.toMutableJSON()
+            if (
+              version !== 0 ||
+              data === undefined ||
+              isEncryptedEnvelope(data)
+            ) {
+              continue
+            }
+            const { id, envelope, epoch } = await cipher.encrypt({ data })
+            await collection.insertIfNotExists({
+              id,
+              updatedAt,
+              version: 0,
+              ...(epoch !== undefined && { epoch }),
+              data: envelope
+            })
+            await doc.remove()
+          }
         }
-        const { id, envelope, epoch } = await cipher.encrypt({ data })
-        await collection.insertIfNotExists({
-          id,
-          updatedAt,
-          version: 0,
-          ...(epoch !== undefined && { epoch }),
-          data: envelope
-        })
-        await doc.remove()
       }
-    }
-    if (hasLocalStorage) {
-      localStorage.setItem(markerKey, new Date().toISOString())
-    }
+    )
   }
 
   /**
@@ -1255,33 +1277,30 @@ export class BrowserStore {
    * @returns {Promise<void>}
    */
   async migratePublicCredentialCids() {
-    const markerKey = `freewallet:public-cids-migrated:${this.dbPrefix}`
-    const hasLocalStorage = typeof localStorage !== 'undefined'
-    if (hasLocalStorage && localStorage.getItem(markerKey)) {
-      return
-    }
-    const collection = this.rxCollection('publicCredentials')
-    const docs = await collection.find().exec()
-    for (const doc of docs) {
-      const { id, updatedAt, data } = doc.toMutableJSON()
-      if (data === undefined) {
-        continue
+    await this.#runOnce(
+      `freewallet:public-cids-migrated:${this.dbPrefix}`,
+      async () => {
+        const collection = this.rxCollection('publicCredentials')
+        const docs = await collection.find().exec()
+        for (const doc of docs) {
+          const { id, updatedAt, data } = doc.toMutableJSON()
+          if (data === undefined) {
+            continue
+          }
+          const cid = await cidFrom({ doc: data as object })
+          if (cid === id) {
+            continue
+          }
+          await collection.insertIfNotExists({
+            id: cid,
+            updatedAt,
+            version: 0,
+            data
+          })
+          await doc.remove()
+        }
       }
-      const cid = await cidFrom({ doc: data as object })
-      if (cid === id) {
-        continue
-      }
-      await collection.insertIfNotExists({
-        id: cid,
-        updatedAt,
-        version: 0,
-        data
-      })
-      await doc.remove()
-    }
-    if (hasLocalStorage) {
-      localStorage.setItem(markerKey, new Date().toISOString())
-    }
+    )
   }
 
   /**

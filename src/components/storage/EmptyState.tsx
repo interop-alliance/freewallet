@@ -3,12 +3,6 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import { storageStyles } from '@/styles/appStyles'
 
-interface StorageEmptyStateProps {
-  icon: ReactNode
-  title: string
-  description?: string
-}
-
 /**
  * Reusable empty state for storage views (no collections, empty folder, etc.)
  */
@@ -16,7 +10,11 @@ export function StorageEmptyState({
   icon,
   title,
   description
-}: StorageEmptyStateProps) {
+}: {
+  icon: ReactNode
+  title: string
+  description?: string
+}) {
   return (
     <Box sx={storageStyles.emptyState}>
       <Box sx={storageStyles.emptyStateIcon}>{icon}</Box>

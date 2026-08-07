@@ -47,10 +47,14 @@ export function useSearch<T>({
     [items, keys, threshold, minMatchCharLength]
   )
 
-  const normalizedQuery = query.trim()
-  const results = normalizedQuery
-    ? fuse.search(normalizedQuery).map(result => result.item)
-    : items
+  // Memoized so the returned array keeps a stable identity between renders --
+  // consumers key their own memos on it.
+  const results = useMemo(() => {
+    const normalizedQuery = query.trim()
+    return normalizedQuery
+      ? fuse.search(normalizedQuery).map(result => result.item)
+      : items
+  }, [fuse, query, items])
 
   return { query, setQuery, results }
 }

@@ -167,7 +167,6 @@ export function ContactDetailPage() {
   const session = useAuthStore(state => state.session)
   const [contact, setContact] = useState<ContactData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -180,13 +179,9 @@ export function ContactDetailPage() {
         const stored = await session.storage.loadContact({ id: contactId })
         if (!cancelled) {
           setContact(stored?.contact ?? null)
-          setLoadError(false)
         }
       } catch (err) {
         console.error('Could not load contact:', err)
-        if (!cancelled) {
-          setLoadError(true)
-        }
       } finally {
         if (!cancelled) {
           setLoading(false)
@@ -239,7 +234,7 @@ export function ContactDetailPage() {
     )
   }
 
-  if (loadError || !contact) {
+  if (!contact) {
     return <NotFoundPage />
   }
 

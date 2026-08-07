@@ -27,7 +27,7 @@ import DialogContentText from '@mui/material/DialogContentText'
 import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import {
@@ -90,18 +90,8 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
     collectionId: string
     recipientId: string
   } | null>(null)
-  const [removeDialogOpen, setRemoveDialogOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState(false)
-
-  // Fetches every encrypted collection's current reader roster, keyed by WAS
-  // collection id. Pure (no state writes) so callers own their own setState --
-  // the mount effect below guards against a stale write, the remove handler
-  // just refreshes.
-  const fetchShares = useCallback(
-    async () => listSharedCollections({ session }),
-    [session]
-  )
 
   // Load the rosters on mount. Skipped without a remote store (nothing is
   // shared).
@@ -112,7 +102,7 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
     let cancelled = false
     async function load() {
       try {
-        const record = await fetchShares()
+        const record = await listSharedCollections({ session })
         if (!cancelled) {
           setSharesByCollection(record)
           setLoadError(false)
@@ -128,7 +118,7 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
     return () => {
       cancelled = true
     }
-  }, [fetchShares, hasRemoteStorage])
+  }, [session, hasRemoteStorage])
 
   const openRemoveDialog = (target: {
     collectionId: string
@@ -136,7 +126,6 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
   }) => {
     setRemoveError(false)
     setRemoveTarget(target)
-    setRemoveDialogOpen(true)
   }
 
   const handleRemoveAccess = async () => {
@@ -151,11 +140,10 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
         collectionId: removeTarget.collectionId,
         recipientId: removeTarget.recipientId
       })
-      setRemoveDialogOpen(false)
       setRemoveTarget(null)
       showToast({ message: t('settings.sharedRemoved') })
       try {
-        setSharesByCollection(await fetchShares())
+        setSharesByCollection(await listSharedCollections({ session }))
         setLoadError(false)
       } catch (err) {
         console.error('Could not reload the collection shares:', err)
@@ -257,10 +245,10 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
       )}
 
       <Dialog
-        open={removeDialogOpen}
+        open={removeTarget !== null}
         onClose={() => {
           if (!removing) {
-            setRemoveDialogOpen(false)
+            setRemoveTarget(null)
           }
         }}
       >
@@ -276,10 +264,7 @@ export function SharedCollectionsPanel({ session }: { session: Session }) {
           )}
         </DialogContent>
         <DialogActions>
-          <Button
-            onClick={() => setRemoveDialogOpen(false)}
-            disabled={removing}
-          >
+          <Button onClick={() => setRemoveTarget(null)} disabled={removing}>
             {t('common.cancel')}
           </Button>
           <Button

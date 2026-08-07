@@ -309,11 +309,13 @@ describe('revokeAppAccess', () => {
     // writes before its grants are even withdrawn.
     expect(storage.revokeAppCollectionRecipients).toHaveBeenCalledWith({
       origin: 'https://app.example',
-      subjectDid: APP_DID
+      subjectDid: APP_DID,
+      items: []
     })
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
-      subjectDid: APP_DID
+      subjectDid: APP_DID,
+      items: []
     })
     expect(storage.deleteCredential).toHaveBeenCalledWith({ cid: 'c-app' })
     expect(storage.addHistoryAppRevoke).toHaveBeenCalledWith({
@@ -343,7 +345,8 @@ describe('revokeAppAccess', () => {
     expect(storage.revokeAppGrants).not.toHaveBeenCalled()
     expect(storage.revokeAppCollectionRecipients).toHaveBeenCalledWith({
       origin: 'https://app.example',
-      subjectDid: APP_DID
+      subjectDid: APP_DID,
+      items: []
     })
     expect(storage.deleteCredential).toHaveBeenCalledWith({ cid: 'c-app' })
     expect(storage.addHistoryAppRevoke).toHaveBeenCalledWith({

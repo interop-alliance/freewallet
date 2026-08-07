@@ -56,15 +56,23 @@ export function DashboardPage() {
     [navigate]
   )
 
-  const loadCredentials = useCallback(async () => {
-    if (!session?.storage) {
-      throw new Error('Storage not initialized')
-    }
-    const vcs = await session.storage.listCredentials()
-    setCredentials(vcs)
-    setUndecryptableCount(session.storage.undecryptableCredentials)
-    setLoadError(false)
-  }, [session])
+  // `isStale` lets the mount effect drop a read whose effect was cleaned up;
+  // the imperative refreshes never cancel and pass nothing.
+  const loadCredentials = useCallback(
+    async (isStale?: () => boolean) => {
+      if (!session?.storage) {
+        throw new Error('Storage not initialized')
+      }
+      const vcs = await session.storage.listCredentials()
+      if (isStale?.()) {
+        return
+      }
+      setCredentials(vcs)
+      setUndecryptableCount(session.storage.undecryptableCredentials)
+      setLoadError(false)
+    },
+    [session]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -74,12 +82,7 @@ export function DashboardPage() {
         return
       }
       try {
-        const vcs = await session.storage.listCredentials()
-        if (!cancelled) {
-          setCredentials(vcs)
-          setUndecryptableCount(session.storage.undecryptableCredentials)
-          setLoadError(false)
-        }
+        await loadCredentials(() => cancelled)
       } catch (err) {
         // A failed read must not leave the page spinning forever.
         console.error('Could not load credentials:', err)
@@ -98,7 +101,7 @@ export function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [session])
+  }, [session, loadCredentials])
 
   useEffect(() => {
     let cancelled = false

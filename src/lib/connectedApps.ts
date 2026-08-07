@@ -24,7 +24,8 @@
  */
 import type { StorageManager } from '@/stores/storageManager'
 import type { User } from '@/types/auth'
-import { appKeyOrigin, appKeySubjectDid } from '@/lib/appKey'
+import { multibaseOf } from '@interop/wallet-core/webvh'
+import { appKeyOrigin } from '@/lib/appKey'
 import { issuerId, subjectId } from '@/lib/vcShape'
 
 /**
@@ -98,17 +99,30 @@ export interface ConnectedApp {
 const APP_KEY_NAME_SUFFIX = ' app key'
 
 /**
+ * A string-valued member of an unknown object, or undefined when the value is
+ * absent or not a string. The one shape guard the recorded-activity readers
+ * below share.
+ *
+ * @param value {unknown}   the (possibly non-object) container
+ * @param key {string}   the member to read
+ * @returns {string | undefined}
+ */
+function stringField(value: unknown, key: string): string | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined
+  }
+  const member = (value as Record<string, unknown>)[key]
+  return typeof member === 'string' ? member : undefined
+}
+
+/**
  * The origin an App Connect Login activity recorded, when it is one.
  *
  * @param object {unknown}   the activity's `object` member
  * @returns {string | undefined}
  */
 function loginOrigin(object: unknown): string | undefined {
-  if (object && typeof object === 'object' && 'origin' in object) {
-    const { origin } = object as { origin?: unknown }
-    return typeof origin === 'string' ? origin : undefined
-  }
-  return undefined
+  return stringField(object, 'origin')
 }
 
 /**
@@ -119,18 +133,10 @@ function loginOrigin(object: unknown): string | undefined {
  * @returns {string | undefined}
  */
 function loginAppName(object: unknown): string | undefined {
-  if (object && typeof object === 'object' && 'appConnect' in object) {
-    const { appConnect } = object as { appConnect?: unknown }
-    if (
-      appConnect &&
-      typeof appConnect === 'object' &&
-      'name' in appConnect &&
-      typeof (appConnect as { name?: unknown }).name === 'string'
-    ) {
-      return (appConnect as { name: string }).name
-    }
+  if (!object || typeof object !== 'object') {
+    return undefined
   }
-  return undefined
+  return stringField((object as { appConnect?: unknown }).appConnect, 'name')
 }
 
 /**
@@ -180,31 +186,28 @@ function loginGrants(object: unknown): AppGrant[] {
  * @returns {string | undefined}
  */
 function grantSignerKeyId(zcap: unknown): string | undefined {
-  if (!zcap || typeof zcap !== 'object' || !('proof' in zcap)) {
+  if (!zcap || typeof zcap !== 'object') {
     return undefined
   }
   const { proof } = zcap as { proof?: unknown }
-  const first = Array.isArray(proof) ? proof[0] : proof
-  if (first && typeof first === 'object' && 'verificationMethod' in first) {
-    const { verificationMethod } = first as { verificationMethod?: unknown }
-    return typeof verificationMethod === 'string'
-      ? verificationMethod
-      : undefined
-  }
-  return undefined
+  return stringField(
+    Array.isArray(proof) ? proof[0] : proof,
+    'verificationMethod'
+  )
 }
 
 /**
  * The key-multibase fragment of a verification-method id -- the part after
  * `#`, which names the same Ed25519 key whether the id is the did:key form
- * (`did:key:<mb>#<mb>`) or the promoted did:webvh form (`<did>#<mb>`).
+ * (`did:key:<mb>#<mb>`) or the promoted did:webvh form (`<did>#<mb>`). The
+ * fragment guard is this module's: `multibaseOf` returns the whole string for
+ * an id that carries no fragment, which is never a key multibase here.
  *
  * @param keyId {string}
  * @returns {string | undefined}
  */
 function signerKeyMultibase(keyId: string): string | undefined {
-  const fragment = keyId.split('#')[1]
-  return fragment || undefined
+  return keyId.includes('#') ? multibaseOf(keyId) : undefined
 }
 
 /**
@@ -288,6 +291,20 @@ export async function listConnectedApps({
     storage.listHistoryItems()
   ])
 
+  // One pass over the history: the latest App Connect Login per origin, so the
+  // per-credential loop below is a lookup rather than a filter-and-sort each.
+  const latestLoginByOrigin = new Map<string, (typeof history)[number]>()
+  for (const item of history) {
+    const origin = loginOrigin(item.doc.object)
+    if (!origin || !isAppConnectLoginFor({ doc: item.doc, origin })) {
+      continue
+    }
+    const current = latestLoginByOrigin.get(origin)
+    if (!current || (current.doc.created ?? '') < (item.doc.created ?? '')) {
+      latestLoginByOrigin.set(origin, item)
+    }
+  }
+
   const apps: ConnectedApp[] = []
   for (const { cid, vc: credential } of credentials) {
     const issuer = issuerId(credential.issuer)
@@ -295,17 +312,13 @@ export async function listConnectedApps({
     const origin = appKeyOrigin(credential)
     // A connected app's key is self-issued (issuer == subject) and bound to
     // an origin; anything else is an ordinary stored credential.
-    if (!issuer || issuer !== subject || !origin) {
+    if (!issuer || !subject || issuer !== subject || !origin) {
       continue
     }
 
     // The latest App Connect Login for this origin supplies the raw display
     // name, the grants, and the last-connected timestamp.
-    const latestLogin = history
-      .filter(({ doc }) => isAppConnectLoginFor({ doc, origin }))
-      .sort((first, second) =>
-        (second.doc.created ?? '').localeCompare(first.doc.created ?? '')
-      )[0]
+    const latestLogin = latestLoginByOrigin.get(origin)
 
     const vcName = (credential as { name?: unknown }).name
     const strippedName =
@@ -323,7 +336,7 @@ export async function listConnectedApps({
       cid,
       name,
       origin,
-      subjectDid: appKeySubjectDid(credential) ?? subject,
+      subjectDid: subject,
       connectedAt: typeof issuanceDate === 'string' ? issuanceDate : undefined,
       grants: latestLogin ? loginGrants(latestLogin.doc.object) : [],
       lastConnectedAt: latestLogin?.doc.created
@@ -380,19 +393,24 @@ export async function revokeAppAccess({
   app: ConnectedApp
   grantsState?: AppGrantsState
 }): Promise<{ revoked: number; skipped: number }> {
+  // Both stages below look up the app's recorded grants in the activity
+  // history; scan it once here and pass it through.
+  const items = await storage.listHistoryItems()
   // Rotate the epoch off the app for each app-provisioned encrypted collection
   // (and revoke those collections' pull-axis grants) before anything else, so a
   // revoked app cannot decrypt future writes.
   await storage.revokeAppCollectionRecipients({
     origin: app.origin,
-    subjectDid: app.subjectDid
+    subjectDid: app.subjectDid,
+    items
   })
   const outcome =
     grantsState === 'orphaned'
       ? { revoked: 0, skipped: 0 }
       : await storage.revokeAppGrants({
           origin: app.origin,
-          subjectDid: app.subjectDid
+          subjectDid: app.subjectDid,
+          items
         })
   await storage.deleteCredential({ cid: app.cid })
   await storage.addHistoryAppRevoke({

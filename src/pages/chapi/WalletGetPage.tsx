@@ -53,6 +53,7 @@ import {
   LOGIN_CREDENTIAL_TYPE
 } from '@/lib/loginCredential'
 import { chapiStyles } from '@/styles/appStyles'
+import { ChapiInitializing } from '@/pages/chapi/ChapiInitializing'
 import type { Session } from '@/types/auth'
 import type { StoredCredential } from '@/types/credential'
 import {
@@ -493,14 +494,7 @@ export function WalletGetPage() {
   }
 
   if (pageState === 'initializing') {
-    return (
-      <Box
-        className="fw-page"
-        sx={{ ...chapiStyles.page, alignItems: 'center' }}
-      >
-        <CircularProgress />
-      </Box>
-    )
+    return <ChapiInitializing />
   }
 
   const didAuthOnly = isDidAuthOnly(profile)

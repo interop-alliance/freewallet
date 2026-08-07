@@ -370,7 +370,10 @@ describe('registerPasskey PRF resolution', () => {
     expect(get).toHaveBeenCalledOnce()
     const getOptions = get.mock.calls[0][0].publicKey
     expect(getOptions.allowCredentials).toHaveLength(1)
-    expect(getOptions.allowCredentials[0].id).toBe(rawId)
+    // The id is a copy of the created credential's rawId, not the same object.
+    expect(new Uint8Array(getOptions.allowCredentials[0].id)).toEqual(
+      new Uint8Array(rawId)
+    )
     expect(getOptions.allowCredentials[0].transports).toEqual(['internal'])
     expect(getOptions.userVerification).toBe('required')
     expect(registration.prfOutput).toEqual(prfBytes)

@@ -1,6 +1,3 @@
-import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import { getExpirationDate } from '@interop/wallet-core/display'
-
 import { DATE_FMT } from '@/app.config'
 
 /**
@@ -39,16 +36,3 @@ export function formatDateTime(date: Date, locale: string): string {
     return date.toISOString()
   }
 }
-
-// --- VC data model: expiry (`validUntil` preferred, else VC 1.x `expirationDate`) ---
-
-/**
- * The credential's raw ISO expiration string, or `''` when none. Thin
- * empty-string wrapper over the library's `getExpirationDate` (which returns
- * `undefined`).
- */
-export function getExpirationDateIso(vc: IVerifiableCredential): string {
-  return getExpirationDate(vc) ?? ''
-}
-
-export { getExpirationInstant } from '@interop/wallet-core/display'

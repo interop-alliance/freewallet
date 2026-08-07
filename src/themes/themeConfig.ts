@@ -107,13 +107,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   }
 }
 
-export function getThemePalette(
-  themeId: AppThemeId,
-  mode: ThemeMode
-): ThemePaletteValues {
-  return THEME_DEFINITIONS[themeId].palette[mode]
-}
-
 export function buildMuiThemeOptions(
   themeId: AppThemeId,
   mode: ThemeMode

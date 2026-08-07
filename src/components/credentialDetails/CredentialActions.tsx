@@ -18,6 +18,7 @@ import {
   MdLinkOff,
   MdPublic
 } from 'react-icons/md'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { credentialDetailCardStyles as sx } from '@/styles/credentialStyles'
@@ -27,36 +28,42 @@ import type {
 } from '@/types/credentialActions'
 
 /**
- * The public-link toggle button: "Create public link" when the credential is
- * private, "Remove public link" when it is shared. On small screens only the
- * icon is shown; the label appears from `sm` up.
+ * One credential action button: icon-only below `sm` (the label moving into a
+ * tooltip), icon plus label from `sm` up. Both the public-link toggle and the
+ * delete action render through this so their responsive treatment stays
+ * identical.
+ *
+ * @param options {object}
+ * @param options.label {string}   the button's label and accessible name
+ * @param options.icon {ReactNode}   the start icon
+ * @param options.buttonSx {SxProps}   the action's own styling
+ * @param options.onClick {Function}
+ * @param [options.disabled] {boolean}
+ * @returns {JSX.Element}
  */
-function ShareButton({ share }: { share: CredentialShareActions }) {
-  const { t } = useTranslation()
+function ActionButton({
+  label,
+  icon,
+  buttonSx,
+  onClick,
+  disabled
+}: {
+  label: string
+  icon: ReactNode
+  buttonSx: SxProps
+  onClick?: () => void
+  disabled?: boolean
+}) {
   const theme = useTheme()
   const compact = useMediaQuery(theme.breakpoints.down('sm'))
-
-  let icon = <MdAddLink size={18} />
-  if (share.busy) {
-    icon = <CircularProgress size={16} />
-  } else if (share.isShared) {
-    icon = <MdLinkOff size={18} />
-  }
-
-  let label = t('credential.createPublicLink')
-  let buttonSx: SxProps = sx.shareButton
-  if (share.isShared) {
-    label = t('credential.removePublicLink')
-    buttonSx = sx.shareActiveButton
-  }
 
   return (
     <Tooltip title={compact ? label : ''}>
       <Button
         size="small"
         variant="outlined"
-        disabled={share.busy}
-        onClick={share.toggle}
+        disabled={disabled}
+        onClick={onClick}
         startIcon={icon}
         aria-label={label}
         sx={{
@@ -78,6 +85,39 @@ function ShareButton({ share }: { share: CredentialShareActions }) {
 }
 
 /**
+ * The public-link toggle button: "Create public link" when the credential is
+ * private, "Remove public link" when it is shared. On small screens only the
+ * icon is shown; the label appears from `sm` up.
+ */
+function ShareButton({ share }: { share: CredentialShareActions }) {
+  const { t } = useTranslation()
+
+  let icon = <MdAddLink size={18} />
+  if (share.busy) {
+    icon = <CircularProgress size={16} />
+  } else if (share.isShared) {
+    icon = <MdLinkOff size={18} />
+  }
+
+  let label = t('credential.createPublicLink')
+  let buttonSx: SxProps = sx.shareButton
+  if (share.isShared) {
+    label = t('credential.removePublicLink')
+    buttonSx = sx.shareActiveButton
+  }
+
+  return (
+    <ActionButton
+      label={label}
+      icon={icon}
+      buttonSx={buttonSx}
+      onClick={share.toggle}
+      disabled={share.busy}
+    />
+  )
+}
+
+/**
  * Action cluster for a credential: on desktop the shared link sits to the
  * left of the buttons; on mobile the buttons are on top and the link below.
  */
@@ -89,8 +129,6 @@ export function CredentialActions({
   containerSx?: object
 }) {
   const { t } = useTranslation()
-  const theme = useTheme()
-  const compact = useMediaQuery(theme.breakpoints.down('sm'))
   const { onDelete, share } = actions
   const publicLink = share?.publicLink
   const deleteLabel = t('credential.delete')
@@ -105,31 +143,12 @@ export function CredentialActions({
         <Stack direction="row" spacing={1} sx={sx.actionButtonsRow}>
           {share && <ShareButton share={share} />}
           {onDelete && (
-            <Tooltip title={compact ? deleteLabel : ''}>
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={onDelete}
-                startIcon={<MdDeleteOutline size={18} />}
-                aria-label={deleteLabel}
-                sx={{
-                  ...sx.deleteButton,
-                  minWidth: { xs: 36, sm: 'auto' },
-                  px: { xs: 1, sm: 1.5 },
-                  '& .MuiButton-startIcon': {
-                    mr: { xs: 0, sm: 1 },
-                    ml: { xs: 0, sm: -0.5 }
-                  }
-                }}
-              >
-                <Box
-                  component="span"
-                  sx={{ display: { xs: 'none', sm: 'inline' } }}
-                >
-                  {deleteLabel}
-                </Box>
-              </Button>
-            </Tooltip>
+            <ActionButton
+              label={deleteLabel}
+              icon={<MdDeleteOutline size={18} />}
+              buttonSx={sx.deleteButton}
+              onClick={onDelete}
+            />
           )}
         </Stack>
       )}
@@ -148,7 +167,7 @@ function truncateUrl(url: string, maxLength: number): string {
 /**
  * Compact display of a credential's active public link, with a copy button.
  */
-export function PublicLinkDisplay({ url }: { url: string }) {
+function PublicLinkDisplay({ url }: { url: string }) {
   const { t } = useTranslation()
   const theme = useTheme()
   const isSmall = useMediaQuery(theme.breakpoints.down('sm'))

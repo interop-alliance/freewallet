@@ -6,6 +6,20 @@ import {
   isFullyVerified
 } from '@/lib/viewMappers/verificationMessages'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
+import type { TFunction } from 'i18next'
+import en from '@/i18n/locales/en.json'
+
+/**
+ * A stub `TFunction` resolving dotted keys against the English locale file, so
+ * these assertions read the shipped strings rather than a duplicate table.
+ */
+const t = ((key: string) =>
+  key
+    .split('.')
+    .reduce<unknown>(
+      (node, part) => (node as Record<string, unknown>)?.[part],
+      en
+    ) ?? key) as unknown as TFunction
 
 const BASE_VC = {
   '@context': ['https://www.w3.org/ns/credentials/v2'],
@@ -32,7 +46,8 @@ describe('verifyResultToChecklist', () => {
         { id: 'revocation_status', valid: true },
         { id: 'expiration', valid: true }
       ]),
-      BASE_VC
+      BASE_VC,
+      t
     )
 
     expect(result.supportedFormat.valid).toBe(true)
@@ -58,7 +73,8 @@ describe('verifyResultToChecklist', () => {
           }
         }
       ]),
-      BASE_VC
+      BASE_VC,
+      t
     )
 
     expect(result.issuer.valid).toBe(false)
@@ -75,7 +91,8 @@ describe('verifyResultToChecklist', () => {
         { id: 'registered_issuer', valid: true },
         { id: 'expiration', valid: false }
       ]),
-      BASE_VC
+      BASE_VC,
+      t
     )
 
     expect(result.expiration.valid).toBe(false)
@@ -94,7 +111,8 @@ describe('verifyResultToChecklist', () => {
       {
         ...BASE_VC,
         credentialStatus: { id: 'status:1' }
-      } as IVerifiableCredential
+      } as IVerifiableCredential,
+      t
     )
 
     expect(result.revocation.valid).toBe(false)
@@ -105,7 +123,8 @@ describe('verifyResultToChecklist', () => {
   it('reports unsupported credential types as a hard failure', () => {
     const result = verifyResultToChecklist(
       payload([{ id: 'valid_signature', valid: true }]),
-      { ...BASE_VC, type: ['CustomCredential'] } as IVerifiableCredential
+      { ...BASE_VC, type: ['CustomCredential'] } as IVerifiableCredential,
+      t
     )
 
     expect(result.supportedFormat.valid).toBe(false)
@@ -116,7 +135,8 @@ describe('verifyResultToChecklist', () => {
   it('shows no expiration date when the credential has none', () => {
     const result = verifyResultToChecklist(
       payload([{ id: 'valid_signature', valid: true }]),
-      BASE_VC
+      BASE_VC,
+      t
     )
 
     expect(result.expiration.valid).toBe(true)
@@ -126,7 +146,8 @@ describe('verifyResultToChecklist', () => {
   it('defaults revocation to valid when no credentialStatus is present', () => {
     const result = verifyResultToChecklist(
       payload([{ id: 'valid_signature', valid: true }]),
-      BASE_VC
+      BASE_VC,
+      t
     )
 
     expect(result.revocation.valid).toBe(true)

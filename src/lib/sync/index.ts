@@ -8,14 +8,9 @@ export {
   syncedDocSchema,
   syncedDocMigrationStrategies
 } from './syncedDocSchema.js'
-export { createPullHandler, wireDocToRxDoc } from './changesQuery.js'
-export { createPushHandler, formatEtag } from './pushWrites.js'
 export {
-  WasSyncConflictError,
   type Json,
   type SyncCheckpoint,
-  type WireDoc,
   type SyncedDoc,
-  type MasterState,
   type WasSyncPort
 } from './types.js'

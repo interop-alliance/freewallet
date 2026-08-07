@@ -39,8 +39,8 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
 }))
 
 vi.mock('@/lib/sessionKey', () => ({
-  saveUserKeyEpochPin: vi.fn(async () => {
-    state.calls.push('saveUserKeyEpochPin')
+  savePinFromDescriptor: vi.fn(async () => {
+    state.calls.push('savePinFromDescriptor')
   }),
   loadUserKeyEpochPin: vi.fn(async () => {
     state.calls.push('loadUserKeyEpochPin')
@@ -56,7 +56,8 @@ vi.mock('@/session/unlockMethods', () => ({
   })
 }))
 
-vi.mock('@/session/recovery', () => ({
+vi.mock('@/session/recovery', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/recovery')>()),
   remintRecoveryDelegations: vi.fn(async () => {
     state.calls.push('remintRecoveryDelegations')
     return { reminted: 0, skipped: 0 }
@@ -74,7 +75,7 @@ vi.mock('@/session/userKeyCascade', () => ({
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
 import { userKeyVaultKeys } from '@interop/wallet-core/keys'
-import { loadUserKeyEpochPin, saveUserKeyEpochPin } from '@/lib/sessionKey'
+import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
 import {
   getUnlockMethods,
   rewrapUnlockMethodsRecord
@@ -291,7 +292,7 @@ describe('the cascade, rotated path', () => {
     expect(state.calls).toEqual([
       'loadUserKeyEpochPin',
       'revokeAccountClient',
-      'saveUserKeyEpochPin',
+      'savePinFromDescriptor',
       'persistClientKeys',
       'cascadeCollections',
       'remintRecoveryDelegations',
@@ -340,11 +341,11 @@ describe('the cascade, rotated path', () => {
     const session = sessionWith()
     await revokeEnrolledClient({ session, client: REVOKED })
 
-    expect(vi.mocked(saveUserKeyEpochPin)).toHaveBeenCalledWith(
+    expect(vi.mocked(savePinFromDescriptor)).toHaveBeenCalledWith(
       expect.objectContaining({
         spaceId: POINTER.spaceId,
         epochId: FRESH_USER_KEY.id,
-        epochIds: [FRESH_USER_KEY.id]
+        descriptor: ROSTER_DESCRIPTOR
       })
     )
     expect(session.profile.persistClientKeys).toHaveBeenCalledWith({

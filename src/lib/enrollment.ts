@@ -30,8 +30,8 @@ import { deriveUnlockIdentity, KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { bindPassphrase, fetchKeyring } from '@/session/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
-import type { ControllerProfile, Session } from '@/types/auth'
-import type { StorageManager } from '@/stores/storageManager'
+import { requireEnrolledClientContext } from '@/session/enrolledContext'
+import type { Session } from '@/types/auth'
 
 /**
  * ENROLLING CLIENT: approves a connect code the person has compared against
@@ -43,8 +43,7 @@ import type { StorageManager } from '@/stores/storageManager'
  *
  * @param options {object}
  * @param options.request {EnrollmentRequest}   the parsed connect code
- * @param options.profile {ControllerProfile}   the approving session's profile
- * @param options.storage {StorageManager}   the approving session's storage
+ * @param options.session {Session}   the approving session
  * @param [options.label] {string}   a display label for the new client,
  *   chosen here at approval (the document carries key material, never
  *   labels, so it lands in `key-map/client-labels.json`); best-effort -- a
@@ -55,31 +54,16 @@ import type { StorageManager } from '@/stores/storageManager'
  */
 export async function approveEnrollment({
   request,
-  profile,
-  storage,
+  session,
   label
 }: {
   request: EnrollmentRequest
-  profile: ControllerProfile
-  storage: StorageManager
+  session: Session
   label?: string
 }): Promise<{ did: string; clientDid: string; signingKeyMultibase: string }> {
-  const remoteStore = storage.remoteStore
-  if (!remoteStore) {
-    throw new Error('Enrollment requires a configured WAS server.')
-  }
-  if (!profile.clientWebvhKeys) {
-    throw new Error(
-      "Enrollment requires this client's did:webvh update keys; this " +
-        'session does not hold them.'
-    )
-  }
-  if (!profile.clientKeyAgreementKey) {
-    throw new Error(
-      "Enrollment requires this client's key-agreement key; this session " +
-        'does not hold it.'
-    )
-  }
+  const { remoteStore, clientWebvhKeys, clientKeyAgreementKey } =
+    requireEnrolledClientContext({ session, action: 'Enrollment' })
+  const { profile } = session
 
   // The approval publishes the new client's log entries (and a torn approval
   // may have published the commit entry before failing), so this session's
@@ -87,8 +71,8 @@ export async function approveEnrollment({
   // afterwards must show the newly enrolled client.
   const approved = await approveEnrollmentCore({
     request,
-    clientWebvhKeys: profile.clientWebvhKeys,
-    clientKeyAgreementKey: profile.clientKeyAgreementKey,
+    clientWebvhKeys,
+    clientKeyAgreementKey,
     userKeyRosterStore: remoteStore.userKeyRosterStore(),
     idStore: remoteStore.webvhIdStore()
   }).finally(() => invalidateVerifiedLog({ profile }))

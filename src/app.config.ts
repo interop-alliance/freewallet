@@ -153,13 +153,11 @@ export const SYNCED_COLLECTIONS: Array<{ key: string; id: string }> =
   WALLET_STANDARD_COLLECTIONS.map(({ key, id }) => ({ key, id }))
 // The system collections and resource names that carry the account's identity
 // and key material -- the world-readable `id` collection (`did.json`,
-// `did.jsonl`), the private `key-map` collection (`keys.json`, `user-key.json`,
-// `client-labels.json`),
+// `did.jsonl`), the private `key-map` collection (`keys.json`, `user-key.json`),
 // and the unlock Space's `keyring` collection (`keyring.json`). They are
 // shared wallet Space layout, declared once in `@interop/wallet-core/space`
 // and re-exported here so app-side call sites keep one config import.
 export {
-  CLIENT_LABELS_RESOURCE,
   DID_DOCUMENT_RESOURCE,
   DID_KEYS_RESOURCE,
   DID_LOG_RESOURCE,

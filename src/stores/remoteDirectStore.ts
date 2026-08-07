@@ -139,33 +139,18 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }
 
   /**
-   * The `private-credentials` cipher, or a clear error when it is absent (a
+   * One synced collection's cipher, or a clear error when it is absent (a
    * remote-direct session is always a passphrase session with vault keys, so
    * this is a misconfiguration guard rather than an expected path).
    *
+   * @param logicalKey {string}   'privateCredentials' | 'walletActivity'
    * @returns {DocCipher}
    */
-  #privateCredentialsCipher(): DocCipher {
-    const cipher = this.#ciphers.privateCredentials
+  #cipherFor(logicalKey: string): DocCipher {
+    const cipher = this.#ciphers[logicalKey]
     if (!cipher) {
       throw new Error(
-        'Remote-direct credential storage requires the private-credentials ' +
-          'cipher.'
-      )
-    }
-    return cipher
-  }
-
-  /**
-   * The `wallet-activity` cipher, or a clear error when it is absent.
-   *
-   * @returns {DocCipher}
-   */
-  #walletActivityCipher(): DocCipher {
-    const cipher = this.#ciphers.walletActivity
-    if (!cipher) {
-      throw new Error(
-        'Remote-direct history storage requires the wallet-activity cipher.'
+        `Remote-direct storage requires the "${logicalKey}" cipher.`
       )
     }
     return cipher
@@ -210,7 +195,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
    * @returns {Promise<void>}
    */
   async #loadCredentialEntries(): Promise<void> {
-    const cipher = this.#privateCredentialsCipher()
+    const cipher = this.#cipherFor('privateCredentials')
     const resources = await this.#remote.listSyncedResources({
       logicalKey: 'privateCredentials'
     })
@@ -230,45 +215,56 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     const index = new Map<string, Set<string>>()
     const undecryptableRowIds: string[] = []
     let unknownEpoch = 0
+    // The rows decrypt in parallel; the fold below then walks them in list
+    // order, so the entry ordering and the per-row failure buckets match what
+    // a sequential pass produced.
+    const decrypted = await Promise.all(
+      bodies.map(async data => {
+        if (data === undefined || !isEncryptedEnvelope(data)) {
+          return { vc: data as unknown as IVerifiableCredential | undefined }
+        }
+        try {
+          return {
+            vc: (await cipher.decrypt({
+              envelope: data
+            })) as unknown as IVerifiableCredential,
+            fromEnvelope: true
+          }
+        } catch (err) {
+          return { err, fromEnvelope: true }
+        }
+      })
+    )
     for (let position = 0; position < resources.length; position++) {
-      const data = bodies[position]
-      if (data === undefined) {
+      const { id: resourceId } = resources[position]
+      const { vc, fromEnvelope, err } = decrypted[position]
+      if (err) {
+        if (err instanceof UnknownEpochError) {
+          // Possibly-fresh data behind a stale descriptor: skip it so a descriptor
+          // refresh can pick it up, never purge it.
+          console.warn(
+            `Skipping unknown-epoch remote private-credentials resource ` +
+              `"${resourceId}":`,
+            err
+          )
+          unknownEpoch += 1
+        } else {
+          // One undecryptable remote row must not brick the whole popup list.
+          console.warn(
+            `Skipping undecryptable remote private-credentials resource ` +
+              `"${resourceId}":`,
+            err
+          )
+          undecryptableRowIds.push(resourceId)
+        }
         continue
       }
-      const { id: resourceId } = resources[position]
-      if (isEncryptedEnvelope(data)) {
-        try {
-          const vc = (await cipher.decrypt({
-            envelope: data
-          })) as unknown as IVerifiableCredential
-          const cid = await cidFrom({ doc: vc })
-          this.#indexCredential({ index, cid, resourceId })
-          entries.push({ resourceId, cid, vc })
-        } catch (err) {
-          if (err instanceof UnknownEpochError) {
-            // Possibly-fresh data behind a stale descriptor: skip it so a descriptor
-            // refresh can pick it up, never purge it.
-            console.warn(
-              `Skipping unknown-epoch remote private-credentials resource ` +
-                `"${resourceId}":`,
-              err
-            )
-            unknownEpoch += 1
-          } else {
-            // One undecryptable remote row must not brick the whole popup list.
-            console.warn(
-              `Skipping undecryptable remote private-credentials resource ` +
-                `"${resourceId}":`,
-              err
-            )
-            undecryptableRowIds.push(resourceId)
-          }
-        }
-      } else {
-        const vc = data as unknown as IVerifiableCredential
-        this.#indexCredential({ index, cid: resourceId, resourceId })
-        entries.push({ resourceId, cid: resourceId, vc })
+      if (vc === undefined) {
+        continue
       }
+      const cid = fromEnvelope ? await cidFrom({ doc: vc }) : resourceId
+      this.#indexCredential({ index, cid, resourceId })
+      entries.push({ resourceId, cid, vc })
     }
     this.#credentialEntries = entries
     this.#credentialCidIndex = index
@@ -297,7 +293,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     cid: string
     credential: IVerifiableCredential
   }): Promise<boolean> {
-    const cipher = this.#privateCredentialsCipher()
+    const cipher = this.#cipherFor('privateCredentials')
     // Dedupe by content cid against the cached remote contents (scanned once per
     // session), not a full refetch per add.
     await this.#ensureCredentialsLoaded()
@@ -405,7 +401,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     // The caller's `resourceId` lives on only as the activity's own `id` inside
     // the encrypted document (mirroring the local store); the row is keyed by
     // the cipher's content-derived envelope-hash id.
-    const cipher = this.#walletActivityCipher()
+    const cipher = this.#cipherFor('walletActivity')
     const { id, envelope, epoch } = await cipher.encrypt({
       data: activity as Json
     })
@@ -420,7 +416,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   async listHistoryItems(): Promise<
     Array<{ id: string; doc: WalletActivity }>
   > {
-    const cipher = this.#walletActivityCipher()
+    const cipher = this.#cipherFor('walletActivity')
     const resources = await this.#remote.listSyncedResources({
       logicalKey: 'walletActivity'
     })
@@ -435,32 +431,40 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     const seen = new Set<string>()
     const items: Array<{ id: string; doc: WalletActivity }> = []
     let unknownEpoch = 0
-    for (let position = 0; position < resources.length; position++) {
-      const data = bodies[position]
-      if (data === undefined) {
-        continue
-      }
-      const { id: resourceId } = resources[position]
-      let activity: WalletActivity
-      if (isEncryptedEnvelope(data)) {
+    // Same shape as the credential scan: decrypt in parallel, fold in order.
+    const decrypted = await Promise.all(
+      bodies.map(async data => {
+        if (data === undefined || !isEncryptedEnvelope(data)) {
+          return { activity: data as unknown as WalletActivity | undefined }
+        }
         try {
-          activity = (await cipher.decrypt({
-            envelope: data
-          })) as unknown as WalletActivity
-        } catch (err) {
-          if (err instanceof UnknownEpochError) {
-            unknownEpoch += 1
-            continue
+          return {
+            activity: (await cipher.decrypt({
+              envelope: data
+            })) as unknown as WalletActivity
           }
-          console.warn(
-            `Skipping undecryptable remote wallet-activity resource ` +
-              `"${resourceId}":`,
-            err
-          )
+        } catch (err) {
+          return { err }
+        }
+      })
+    )
+    for (let position = 0; position < resources.length; position++) {
+      const { id: resourceId } = resources[position]
+      const { activity, err } = decrypted[position]
+      if (err) {
+        if (err instanceof UnknownEpochError) {
+          unknownEpoch += 1
           continue
         }
-      } else {
-        activity = data as unknown as WalletActivity
+        console.warn(
+          `Skipping undecryptable remote wallet-activity resource ` +
+            `"${resourceId}":`,
+          err
+        )
+        continue
+      }
+      if (activity === undefined) {
+        continue
       }
       const id = activity.id ?? resourceId
       if (seen.has(id)) {

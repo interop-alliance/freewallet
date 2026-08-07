@@ -390,11 +390,6 @@ export const issuerDetailStyles = {
   wrapper: {
     maxWidth: 720
   },
-  sectionHeader: {
-    fontWeight: 700,
-    fontSize: '0.7rem',
-    display: 'block'
-  },
   registryBlock: {
     border: 1,
     borderColor: 'divider',

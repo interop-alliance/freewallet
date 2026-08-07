@@ -24,6 +24,7 @@ import { useAuthStore } from '@/stores/authStore'
 import type { WalletActivity } from '@/stores/storageManager'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { JsonHighlight } from '@/components/JsonHighlight'
 import { MdClose, MdSearch } from 'react-icons/md'
 import { formatRelativeTime } from '@/lib/formatRelativeTime'
 import { historyStyles, infoBoxStyles } from '@/styles/appStyles'
@@ -49,7 +50,6 @@ export function HistoryPage() {
 
   const [tab, setTab] = useState<HistoryTab>('all')
 
-  const [sourceOpen, setSourceOpen] = useState(false)
   const [selectedItem, setSelectedItem] = useState<HistoryItem | null>(null)
 
   const sourceJson = useMemo(() => {
@@ -59,17 +59,15 @@ export function HistoryPage() {
     return JSON.stringify(selectedItem.doc, null, 2)
   }, [selectedItem])
 
-  const selectedSummary = useMemo(() => {
-    return selectedItem?.doc?.summary ?? ''
-  }, [selectedItem])
-
   const {
     query,
     setQuery,
     results: searchedItems
   } = useSearch({ items: historyItems, keys: HISTORY_SEARCH_KEYS })
 
-  const { tabCounts, filteredItems } = useMemo(() => {
+  // The tab counts describe the whole history, so they are keyed on it alone
+  // and do not recompute per keystroke in the search box.
+  const tabCounts = useMemo(() => {
     const counts: Record<HistoryTab, number> = {
       all: historyItems.length,
       credentials: 0,
@@ -82,14 +80,17 @@ export function HistoryPage() {
         counts[category] += 1
       }
     }
+    return counts
+  }, [historyItems])
 
-    const filtered = searchedItems.filter(item => {
-      const category = classifyActivity(item.doc)
-      return tab === 'all' || category === tab
-    })
-
-    return { tabCounts: counts, filteredItems: filtered }
-  }, [historyItems, searchedItems, tab])
+  const filteredItems = useMemo(
+    () =>
+      searchedItems.filter(item => {
+        const category = classifyActivity(item.doc)
+        return tab === 'all' || category === tab
+      }),
+    [searchedItems, tab]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -196,7 +197,6 @@ export function HistoryPage() {
                           sx={historyStyles.viewSourceButton}
                           onClick={() => {
                             setSelectedItem({ id, doc })
-                            setSourceOpen(true)
                           }}
                         >
                           {t('history.viewSource')}
@@ -212,8 +212,8 @@ export function HistoryPage() {
       )}
 
       <Dialog
-        open={sourceOpen}
-        onClose={() => setSourceOpen(false)}
+        open={selectedItem !== null}
+        onClose={() => setSelectedItem(null)}
         maxWidth="md"
         fullWidth
         scroll="paper"
@@ -229,7 +229,7 @@ export function HistoryPage() {
             {t('history.dialogTitle')}
           </Box>
           <IconButton
-            onClick={() => setSourceOpen(false)}
+            onClick={() => setSelectedItem(null)}
             size="small"
             aria-label={t('common.close')}
           >
@@ -239,14 +239,15 @@ export function HistoryPage() {
 
         <DialogContent sx={infoBoxStyles.content}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {selectedSummary && (
+            {selectedItem?.doc?.summary && (
               <Typography variant="caption" color="text.secondary">
-                {selectedSummary as string}
+                {selectedItem.doc.summary}
               </Typography>
             )}
-            <Box component="pre" sx={credentialDetailStyles.codeBlock}>
-              {sourceJson}
-            </Box>
+            <JsonHighlight
+              code={sourceJson}
+              sx={credentialDetailStyles.codeBlock}
+            />
           </Box>
         </DialogContent>
       </Dialog>

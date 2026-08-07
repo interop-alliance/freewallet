@@ -1,16 +1,13 @@
 import AppBar from '@mui/material/AppBar'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import Stack from '@mui/material/Stack'
 import Drawer from '@mui/material/Drawer'
 import List from '@mui/material/List'
 import ListItemButton from '@mui/material/ListItemButton'
 import ListItemText from '@mui/material/ListItemText'
 import Toolbar from '@mui/material/Toolbar'
 import Typography from '@mui/material/Typography'
-import { LanguageSelector } from '@/components/LanguageSelector'
-import { ThemeModeToggle } from '@/components/ThemeModeToggle'
-import { ThemePicker } from '@/components/ThemePicker'
+import { AppBarControls } from '@/components/AppBarControls'
 import { Toast } from '@/components/Toast'
 import { dashboardStyles } from '@/styles/appStyles'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
@@ -18,11 +15,6 @@ import { useAuthStore } from '@/stores/authStore'
 import walletIcon from '@/assets/wallet.svg'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-
-interface DashboardLayoutProps {
-  title: string
-  children?: ReactNode
-}
 
 const primaryNavItems = [
   { labelKey: 'nav.dashboard', to: '/dashboard' },
@@ -35,7 +27,13 @@ const settingsNavItems = [
   { labelKey: 'nav.history', to: '/history' }
 ] as const
 
-export function DashboardLayout({ title, children }: DashboardLayoutProps) {
+export function DashboardLayout({
+  title,
+  children
+}: {
+  title: string
+  children?: ReactNode
+}) {
   const { t } = useTranslation()
   const { pathname } = useLocation()
   const navigate = useNavigate()
@@ -66,20 +64,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
           >
             {t('common.brand')}
           </Typography>
-          <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-            <Stack sx={dashboardStyles.navControlGroup}>
-              <Typography component="span" sx={dashboardStyles.navControlLabel}>
-                {t('common.language')}:
-              </Typography>
-              <LanguageSelector showLabel={false} />
-            </Stack>
-            <Stack sx={dashboardStyles.navControlGroup}>
-              <Typography component="span" sx={dashboardStyles.navControlLabel}>
-                {t('common.theme')}:
-              </Typography>
-              <ThemePicker showLabel={false} />
-            </Stack>
-            <ThemeModeToggle />
+          <AppBarControls>
             {session ? (
               <Button variant="outlined" onClick={handleLogout}>
                 {t('common.logOut')}
@@ -89,7 +74,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
                 {t('common.logIn')}
               </Button>
             )}
-          </Stack>
+          </AppBarControls>
         </Toolbar>
       </AppBar>
 

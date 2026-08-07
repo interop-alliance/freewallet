@@ -7,14 +7,11 @@
  */
 import AppBar from '@mui/material/AppBar'
 import Box from '@mui/material/Box'
-import Stack from '@mui/material/Stack'
 import Toolbar from '@mui/material/Toolbar'
 import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
 import { Link as RouterLink } from 'react-router'
-import { LanguageSelector } from '@/components/LanguageSelector'
-import { ThemeModeToggle } from '@/components/ThemeModeToggle'
-import { ThemePicker } from '@/components/ThemePicker'
+import { AppBarControls } from '@/components/AppBarControls'
 import { dashboardStyles } from '@/styles/appStyles'
 import walletIcon from '@/assets/wallet.svg'
 
@@ -51,21 +48,7 @@ export function AuthPageHeader() {
             {t('common.brand')}
           </Typography>
         </Box>
-        <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-          <Stack sx={dashboardStyles.navControlGroup}>
-            <Typography component="span" sx={dashboardStyles.navControlLabel}>
-              {t('common.language')}:
-            </Typography>
-            <LanguageSelector showLabel={false} />
-          </Stack>
-          <Stack sx={dashboardStyles.navControlGroup}>
-            <Typography component="span" sx={dashboardStyles.navControlLabel}>
-              {t('common.theme')}:
-            </Typography>
-            <ThemePicker showLabel={false} />
-          </Stack>
-          <ThemeModeToggle />
-        </Stack>
+        <AppBarControls />
       </Toolbar>
     </AppBar>
   )

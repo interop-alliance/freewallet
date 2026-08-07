@@ -146,12 +146,6 @@ export const dashboardStyles = {
       borderColor: 'divider'
     }
   },
-  navHeader: {
-    px: 3,
-    py: 3,
-    borderBottom: 1,
-    borderColor: 'divider'
-  },
   navList: {
     px: 1.5,
     py: 1.5,
@@ -297,24 +291,9 @@ export const dashboardStyles = {
     gap: 2,
     mt: 2
   },
-  /**
-   * Sidebar brand row (icon + title)
-   */
-  navHeaderStack: {
-    flexDirection: 'row',
-    gap: 1.5
-  },
   navBrandTitle: {
     fontWeight: 600,
     ml: 1
-  },
-  /**
-   * Main area: page title + actions
-   */
-  mainToolbarStack: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center'
   },
   dashboardCredentialActions: {
     mt: 3,
@@ -639,20 +618,6 @@ export const storageStyles = {
   },
 
   /**
-   * Section header (e.g. "Collections") + secondary description line.
-   */
-  sectionHeader: {
-    mt: 6
-  },
-  sectionHeading: {
-    fontWeight: 600
-  },
-  sectionDescription: {
-    mt: 0.5,
-    color: 'text.secondary'
-  },
-
-  /**
    * Reusable button sizing tokens, kept here to standardize toolbar actions.
    */
   buttonTextLeft: {
@@ -740,45 +705,23 @@ export const storageStyles = {
     backgroundColor: 'background.paper',
     borderRadius: '50%'
   },
-  publicAccessMeta: {
+  accessMeta: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 0.25,
-    color: 'success.main',
     verticalAlign: 'middle'
   },
-  publicAccessMetaIcon: {
+  accessMetaIcon: {
     display: 'flex',
     alignItems: 'center',
     lineHeight: 0
   },
-  publicAccessMetaLabel: {
+  accessMetaLabel: {
     fontSize: '0.8rem',
     fontWeight: 600,
     color: 'inherit'
   },
-  folderMetaPublic: {
-    display: 'inline',
-    whiteSpace: 'nowrap'
-  },
-  encryptedAccessMeta: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 0.25,
-    color: 'info.main',
-    verticalAlign: 'middle'
-  },
-  encryptedAccessMetaIcon: {
-    display: 'flex',
-    alignItems: 'center',
-    lineHeight: 0
-  },
-  encryptedAccessMetaLabel: {
-    fontSize: '0.8rem',
-    fontWeight: 600,
-    color: 'inherit'
-  },
-  folderMetaEncrypted: {
+  folderMetaInline: {
     display: 'inline',
     whiteSpace: 'nowrap'
   },

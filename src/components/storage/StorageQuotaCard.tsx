@@ -21,11 +21,6 @@ import type {
 } from '@/types/storageQuota'
 import { storageStyles as sx } from '@/styles/appStyles'
 
-interface StorageQuotaCardProps {
-  status: StorageQuotaStatus
-  onRetry?: () => void
-}
-
 const STATE_BADGE_COLOR: Record<BackendState, 'success' | 'warning' | 'error'> =
   {
     ok: 'success',
@@ -169,17 +164,21 @@ function QuotaReadyContent({ quota }: { quota: StorageQuotaView }) {
   )
 }
 
-export function StorageQuotaCard({ status, onRetry }: StorageQuotaCardProps) {
+export function StorageQuotaCard({
+  status,
+  onRetry
+}: {
+  status: StorageQuotaStatus
+  onRetry?: () => void
+}) {
   const { t } = useTranslation()
 
   if (status.kind === 'unavailable') {
     return null
   }
 
-  let headerState: BackendState | null = null
-  if (status.kind === 'ready') {
-    headerState = status.quota.state
-  }
+  const headerState: BackendState | null =
+    status.kind === 'ready' ? status.quota.state : null
 
   return (
     <Paper variant="outlined" sx={sx.quotaCard}>
@@ -198,9 +197,7 @@ export function StorageQuotaCard({ status, onRetry }: StorageQuotaCardProps) {
             variant="outlined"
             color={STATE_BADGE_COLOR[headerState]}
             icon={
-              status.kind === 'ready' && status.quota.state === 'ok' ? (
-                <MdCheckCircle size={14} />
-              ) : undefined
+              headerState === 'ok' ? <MdCheckCircle size={14} /> : undefined
             }
             label={t(STATE_BADGE_KEY[headerState])}
           />

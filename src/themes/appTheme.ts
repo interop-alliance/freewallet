@@ -1,5 +1,5 @@
-export const APP_THEME_STORAGE_KEY = 'fw-theme'
-export const APP_THEME_MODE_STORAGE_KEY = 'fw-theme-mode'
+const APP_THEME_STORAGE_KEY = 'fw-theme'
+const APP_THEME_MODE_STORAGE_KEY = 'fw-theme-mode'
 
 export type ThemeMode = 'light' | 'dark'
 
@@ -10,9 +10,7 @@ export const APP_THEME_IDS = ['default', 'west-coast'] as const
 
 export type AppThemeId = (typeof APP_THEME_IDS)[number]
 
-export function isAppThemeId(
-  value: string | null | undefined
-): value is AppThemeId {
+function isAppThemeId(value: string | null | undefined): value is AppThemeId {
   return APP_THEME_IDS.includes(value as AppThemeId)
 }
 

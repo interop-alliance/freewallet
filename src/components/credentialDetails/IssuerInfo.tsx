@@ -14,21 +14,19 @@ import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { issuerInfoStyles as sx } from '@/styles/credentialStyles'
 import { useTranslation } from 'react-i18next'
 
-interface IssuerInfoProps {
-  issuer: IVerifiableCredential['issuer']
-  cid?: string
-  issuerRegistry?: IssuerRegistryInfo | null
-  registryLoading?: boolean
-  urlsDisabled?: boolean
-}
-
 export function IssuerInfo({
   issuer,
   cid,
   issuerRegistry = null,
   registryLoading = false,
   urlsDisabled = false
-}: IssuerInfoProps) {
+}: {
+  issuer: IVerifiableCredential['issuer']
+  cid?: string
+  issuerRegistry?: IssuerRegistryInfo | null
+  registryLoading?: boolean
+  urlsDisabled?: boolean
+}) {
   const { t } = useTranslation()
   const details = getIssuerDetails(issuer)
   const hasName = !!details.name

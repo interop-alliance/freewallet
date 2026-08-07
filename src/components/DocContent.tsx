@@ -8,12 +8,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { SERVER_URL } from '@/app.config'
 import { useTranslation } from 'react-i18next'
 
-interface DocContentProps {
-  fileName: string
-  onError?: () => void
-}
-
-export function DocContent({ fileName, onError }: DocContentProps) {
+export function DocContent({ fileName }: { fileName: string }) {
   const { t } = useTranslation()
   const [content, setContent] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
@@ -31,18 +26,16 @@ export function DocContent({ fileName, onError }: DocContentProps) {
         })
         if (!res.ok) {
           setNotFound(true)
-          onError?.()
           return
         }
         setContent(await res.text())
       } catch (err) {
         console.error(err)
         setNotFound(true)
-        onError?.()
       }
     }
     load()
-  }, [fileName, onError])
+  }, [fileName])
 
   if (notFound) {
     return (

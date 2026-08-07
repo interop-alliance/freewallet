@@ -9,7 +9,7 @@
  * Repeats the Applications section's Revoke action; on success it navigates
  * back to the list (the toast survives the navigation).
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { MdArrowBack } from 'react-icons/md'
@@ -17,24 +17,18 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
-import Dialog from '@mui/material/Dialog'
-import DialogActions from '@mui/material/DialogActions'
-import DialogContent from '@mui/material/DialogContent'
-import DialogContentText from '@mui/material/DialogContentText'
-import DialogTitle from '@mui/material/DialogTitle'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { RevokeAppDialog } from '@/components/RevokeAppDialog'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { dashboardStyles, storageStyles } from '@/styles/appStyles'
-import { currentAccountSigningKeys } from '@/session/clients'
+import { listApplicationsView, revokeApplication } from '@/session/applications'
 import {
   deriveAppGrantsState,
-  listConnectedApps,
-  revokeAppAccess,
   type AppGrant,
   type ConnectedApp
 } from '@/lib/connectedApps'
@@ -75,55 +69,28 @@ export function ApplicationDetailPage() {
   // stable timestamp rather than an impure `Date.now()` call during render.
   const [loadedAt, setLoadedAt] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [notFound, setNotFound] = useState(false)
   const [revokeDialogOpen, setRevokeDialogOpen] = useState(false)
   const [revoking, setRevoking] = useState(false)
   const [revokeError, setRevokeError] = useState(false)
 
-  const fetchApp = useCallback(async () => {
-    if (!session?.storage || !cid) {
-      return undefined
-    }
-    const apps = await listConnectedApps({ storage: session.storage })
-    return apps.find(entry => entry.cid === cid)
-  }, [session, cid])
-
-  // Best-effort: without a promoted account (or with the log unreachable) the
-  // state check degrades to "unknown" rather than failing the page.
-  const fetchSigningKeys = useCallback(async () => {
-    if (!session) {
-      return undefined
-    }
-    try {
-      return await currentAccountSigningKeys({ session })
-    } catch (err) {
-      console.warn(
-        'Could not read the account key set for the app detail:',
-        err
-      )
-      return undefined
-    }
-  }, [session])
-
   useEffect(() => {
     let cancelled = false
     async function load() {
+      if (!session || !cid) {
+        setLoading(false)
+        return
+      }
       try {
-        const [found, keys] = await Promise.all([
-          fetchApp(),
-          fetchSigningKeys()
-        ])
+        const { apps, signingKeys: keys } = await listApplicationsView({
+          session
+        })
         if (!cancelled) {
-          setApp(found ?? null)
+          setApp(apps.find(entry => entry.cid === cid) ?? null)
           setSigningKeys(keys)
-          setNotFound(!found)
           setLoadedAt(Date.now())
         }
       } catch (err) {
         console.error('Could not load the connected application:', err)
-        if (!cancelled) {
-          setNotFound(true)
-        }
       } finally {
         if (!cancelled) {
           setLoading(false)
@@ -134,7 +101,7 @@ export function ApplicationDetailPage() {
     return () => {
       cancelled = true
     }
-  }, [fetchApp, fetchSigningKeys])
+  }, [session, cid])
 
   const grantsState = app
     ? deriveAppGrantsState({ app, currentSigningKeys: signingKeys })
@@ -147,17 +114,16 @@ export function ApplicationDetailPage() {
     setRevoking(true)
     setRevokeError(false)
     try {
-      const outcome = await revokeAppAccess({
-        storage: session.storage,
-        user: session.user,
+      const { revoked } = await revokeApplication({
+        session,
         app,
-        grantsState
+        signingKeys
       })
       showToast({
         message:
           grantsState === 'orphaned'
             ? t('applications.revokeSuccessOrphaned')
-            : outcome.revoked > 0
+            : revoked > 0
               ? t('applications.revokeSuccess')
               : t('applications.revokeSuccessLegacy')
       })
@@ -192,7 +158,7 @@ export function ApplicationDetailPage() {
       </Button>
       {loading ? (
         <LoadingSpinner />
-      ) : notFound || !app ? (
+      ) : !app ? (
         <Stack sx={{ gap: 2, mt: 1 }}>
           <Typography color="text.secondary">
             {t('applications.notFound')}
@@ -287,19 +253,17 @@ export function ApplicationDetailPage() {
                         variant="body2"
                         color={grantExpired(grant) ? 'error' : 'text.secondary'}
                       >
-                        {grantExpired(grant)
-                          ? t('applications.grantExpired', {
-                              date: formatDate({
-                                isoDate: grant.expires,
-                                locale: i18n.language
-                              })
+                        {t(
+                          grantExpired(grant)
+                            ? 'applications.grantExpired'
+                            : 'applications.grantExpires',
+                          {
+                            date: formatDate({
+                              isoDate: grant.expires,
+                              locale: i18n.language
                             })
-                          : t('applications.grantExpires', {
-                              date: formatDate({
-                                isoDate: grant.expires,
-                                locale: i18n.language
-                              })
-                            })}
+                          }
+                        )}
                       </Typography>
                     )}
                   </Card>
@@ -324,46 +288,15 @@ export function ApplicationDetailPage() {
         </Stack>
       )}
 
-      <Dialog
+      <RevokeAppDialog
         open={revokeDialogOpen}
-        onClose={() => {
-          if (!revoking) {
-            setRevokeDialogOpen(false)
-          }
-        }}
-      >
-        <DialogTitle>{t('applications.revokeTitle')}</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            {grantsState === 'orphaned'
-              ? t('applications.revokeConfirmOrphaned', {
-                  name: app?.name ?? ''
-                })
-              : t('applications.revokeConfirm', { name: app?.name ?? '' })}
-          </DialogContentText>
-          {revokeError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {t('applications.revokeFailed')}
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => setRevokeDialogOpen(false)}
-            disabled={revoking}
-          >
-            {t('common.cancel')}
-          </Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={handleRevoke}
-            loading={revoking}
-          >
-            {t('applications.revokeConfirmAction')}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        appName={app?.name ?? ''}
+        orphaned={grantsState === 'orphaned'}
+        revoking={revoking}
+        error={revokeError}
+        onCancel={() => setRevokeDialogOpen(false)}
+        onConfirm={handleRevoke}
+      />
     </DashboardLayout>
   )
 }

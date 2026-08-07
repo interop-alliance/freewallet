@@ -111,20 +111,18 @@ import {
 const CLIENT_KEYS_RECORD_VERSION = 1
 const CLIENT_KEYS_CIPHER_ID = 'client-keys'
 
-/**
- * This client's key set as recovered from the local client-key record: the
- * random 32-byte client seed behind the client's Ed25519 + X25519 pair, the
- * locally cached user key (absent only on records written for accounts minted
- * before the user key existed), this client's did:webvh update-key seeds
- * (absent on records written before the update keys became client-held), and
- * the account controller the record was bound for (absent on records written
- * before multi-client enrollment; those were necessarily written by the
- * first client, whose own did:key IS the controller).
- *
- * The contents are the shared record both wallets encode and validate
- * identically; only the unlock-layer wrap around them is freewallet's.
+/*
+ * This client's key set, as recovered from the local client-key record, is the
+ * shared `ClientKeyRecord`: the random 32-byte client seed behind the client's
+ * Ed25519 + X25519 pair, the locally cached user key (absent only on records
+ * written for accounts minted before the user key existed), this client's
+ * did:webvh update-key seeds (absent on records written before the update keys
+ * became client-held), and the account controller the record was bound for
+ * (absent on records written before multi-client enrollment; those were
+ * necessarily written by the first client, whose own did:key IS the
+ * controller). Both wallets encode and validate those contents identically;
+ * only the unlock-layer wrap around them is freewallet's.
  */
-export type ClientKeySet = ClientKeyRecord
 
 /**
  * The re-wrappable members of a client-key record -- what a live session may
@@ -150,7 +148,7 @@ export interface PersistableClientKeys {
  */
 export interface KeyringFetchResult extends KeyringRecordContents {
   unlockSpaceId: string
-  clientKeys?: ClientKeySet
+  clientKeys?: ClientKeyRecord
   manageCapability?: IZcap
   // Present beside `clientKeys`: re-wraps the client-key record with changed
   // members (see `PersistableClientKeys`) without the unlock secret -- a
@@ -380,7 +378,7 @@ function accountPointerPersister({
  * @param options {object}
  * @param options.unlock {UnlockIdentity}
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<ClientKeySet | undefined>}
+ * @returns {Promise<ClientKeyRecord | undefined>}
  */
 async function loadClientKeys({
   unlock,
@@ -388,7 +386,7 @@ async function loadClientKeys({
 }: {
   unlock: UnlockIdentity
   idb?: IDBFactory
-}): Promise<ClientKeySet | undefined> {
+}): Promise<ClientKeyRecord | undefined> {
   const record = await loadClientKeyRecord({ spaceId: unlock.spaceId, idb })
   if (!record) {
     return undefined
@@ -410,7 +408,7 @@ async function loadClientKeys({
  * @param options {object}
  * @param options.record {unknown}   the stored `{ version, wrapped }` envelope
  * @param options.unlock {UnlockIdentity}
- * @returns {Promise<ClientKeySet>}
+ * @returns {Promise<ClientKeyRecord>}
  */
 async function unwrapClientKeys({
   record,
@@ -418,7 +416,7 @@ async function unwrapClientKeys({
 }: {
   record: unknown
   unlock: UnlockIdentity
-}): Promise<ClientKeySet> {
+}): Promise<ClientKeyRecord> {
   if (record === null || typeof record !== 'object') {
     throw new Error('Malformed client-key record.')
   }
@@ -1083,21 +1081,29 @@ async function verifyUnlockKeyring({
  * @param options.secret {string | Uint8Array}   the unlock secret
  * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
  * @param [options.idb] {IDBFactory}
+ * @param [options.unlock] {UnlockIdentity}   an already-derived identity for
+ *   this secret, so a caller running several unlock-layer steps pays the KDF
+ *   once
  * @returns {Promise<void>}
  */
-export async function verifyUnlockSecret({
+async function verifyUnlockSecret({
   controller,
   secret,
   kdf,
-  idb
+  idb,
+  unlock
 }: {
   controller: string
   secret: string | Uint8Array
   kdf: UnlockKdf
   idb?: IDBFactory
+  unlock?: UnlockIdentity
 }): Promise<void> {
-  const unlock = await deriveUnlockIdentity({ secret, kdf })
-  await verifyUnlockKeyring({ unlock, controller, idb })
+  await verifyUnlockKeyring({
+    unlock: unlock ?? (await deriveUnlockIdentity({ secret, kdf })),
+    controller,
+    idb
+  })
 }
 
 /**
@@ -1109,20 +1115,70 @@ export async function verifyUnlockSecret({
  * @param options.passphrase {string}
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
+ * @param [options.unlock] {UnlockIdentity}   an already-derived identity for
+ *   this passphrase
  * @returns {Promise<void>}
  */
 export async function verifyPassphrase({
   controller,
   passphrase,
   idb,
-  kdf = KEYRING_KDF
+  kdf = KEYRING_KDF,
+  unlock
 }: {
   controller: string
   passphrase: string
   idb?: IDBFactory
   kdf?: UnlockKdf
+  unlock?: UnlockIdentity
 }): Promise<void> {
-  return verifyUnlockSecret({ controller, secret: passphrase, kdf, idb })
+  return verifyUnlockSecret({
+    controller,
+    secret: passphrase,
+    kdf,
+    idb,
+    unlock
+  })
+}
+
+/**
+ * Retires one unlock identity: its unlock Space on the server (best effort)
+ * and every local record filed under it (the keyring cache, the client-key
+ * record, the account-pointer pin). Shared by `deleteUnlockMethod` and the
+ * old-identity half of `changePassphrase`.
+ *
+ * @param options {object}
+ * @param options.unlock {UnlockIdentity}   the identity to retire
+ * @param options.warning {string}   how a failed Space deletion is logged
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<boolean>}   whether the unlock Space was deleted
+ */
+async function retireUnlockIdentity({
+  unlock,
+  warning,
+  idb
+}: {
+  unlock: UnlockIdentity
+  warning: string
+  idb?: IDBFactory
+}): Promise<boolean> {
+  let unlockSpaceDeleted = true
+  if (WAS_SERVER_URL) {
+    try {
+      await deleteUnlockSpace({
+        storageServerUrl: WAS_SERVER_URL,
+        zcapClient: unlock.zcapClient,
+        spaceId: unlock.spaceId
+      })
+    } catch (err) {
+      console.warn(warning, err)
+      unlockSpaceDeleted = false
+    }
+  }
+  await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
+  await deleteClientKeyRecord({ spaceId: unlock.spaceId, idb })
+  await deleteAccountPointerPin({ spaceId: unlock.spaceId, idb })
+  return unlockSpaceDeleted
 }
 
 /**
@@ -1143,35 +1199,26 @@ export async function verifyPassphrase({
  * @param options.secret {string | Uint8Array}   the unlock secret
  * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
  * @param [options.idb] {IDBFactory}
+ * @param [options.unlock] {UnlockIdentity}   an already-derived identity for
+ *   this secret (account deletion verifies then deletes on one derivation)
  * @returns {Promise<{ unlockSpaceDeleted: boolean }>}
  */
 export async function deleteUnlockMethod({
   secret,
   kdf,
-  idb
+  idb,
+  unlock
 }: {
   secret: string | Uint8Array
   kdf: UnlockKdf
   idb?: IDBFactory
+  unlock?: UnlockIdentity
 }): Promise<{ unlockSpaceDeleted: boolean }> {
-  const unlock = await deriveUnlockIdentity({ secret, kdf })
-
-  let unlockSpaceDeleted = true
-  if (WAS_SERVER_URL) {
-    try {
-      await deleteUnlockSpace({
-        storageServerUrl: WAS_SERVER_URL,
-        zcapClient: unlock.zcapClient,
-        spaceId: unlock.spaceId
-      })
-    } catch (err) {
-      console.warn('Could not delete the unlock Space:', err)
-      unlockSpaceDeleted = false
-    }
-  }
-  await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
-  await deleteClientKeyRecord({ spaceId: unlock.spaceId, idb })
-  await deleteAccountPointerPin({ spaceId: unlock.spaceId, idb })
+  const unlockSpaceDeleted = await retireUnlockIdentity({
+    unlock: unlock ?? (await deriveUnlockIdentity({ secret, kdf })),
+    warning: 'Could not delete the unlock Space:',
+    idb
+  })
 
   return { unlockSpaceDeleted }
 }
@@ -1185,18 +1232,22 @@ export async function deleteUnlockMethod({
  * @param options.passphrase {string}
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
+ * @param [options.unlock] {UnlockIdentity}   an already-derived identity for
+ *   this passphrase
  * @returns {Promise<{ unlockSpaceDeleted: boolean }>}
  */
 export async function deleteKeyring({
   passphrase,
   idb,
-  kdf = KEYRING_KDF
+  kdf = KEYRING_KDF,
+  unlock
 }: {
   passphrase: string
   idb?: IDBFactory
   kdf?: UnlockKdf
+  unlock?: UnlockIdentity
 }): Promise<{ unlockSpaceDeleted: boolean }> {
-  return deleteUnlockMethod({ secret: passphrase, kdf, idb })
+  return deleteUnlockMethod({ secret: passphrase, kdf, idb, unlock })
 }
 
 /**
@@ -1314,21 +1365,11 @@ export async function changePassphrase({
   // answers this without a third unlock derivation.
   let oldSpaceDeleted = true
   if (newPassphrase !== oldPassphrase) {
-    if (WAS_SERVER_URL) {
-      try {
-        await deleteUnlockSpace({
-          storageServerUrl: WAS_SERVER_URL,
-          zcapClient: oldUnlock.zcapClient,
-          spaceId: oldUnlock.spaceId
-        })
-      } catch (err) {
-        console.warn('Could not delete the old unlock Space:', err)
-        oldSpaceDeleted = false
-      }
-    }
-    await deleteKeyringCache({ spaceId: oldUnlock.spaceId, idb })
-    await deleteClientKeyRecord({ spaceId: oldUnlock.spaceId, idb })
-    await deleteAccountPointerPin({ spaceId: oldUnlock.spaceId, idb })
+    oldSpaceDeleted = await retireUnlockIdentity({
+      unlock: oldUnlock,
+      warning: 'Could not delete the old unlock Space:',
+      idb
+    })
   }
 
   // The old unlock Space is gone (deleted, or old == new so nothing to delete);

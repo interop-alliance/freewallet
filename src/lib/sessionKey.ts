@@ -65,42 +65,15 @@ async function withSessionStore(
   operation: (store: IDBObjectStore) => IDBRequest,
   idb?: IDBFactory
 ): Promise<unknown> {
-  const [result] = await withSessionStoreBatch(mode, [operation], idb)
-  return result
-}
-
-/**
- * Runs several independent get/put/delete operations against the session
- * object store within a single transaction on one open connection, resolving
- * to their results in order. Batching this way avoids repeating the
- * openSessionDb() handshake (and the version check it carries) once per
- * operation. `withSessionStore` (the single-operation helper) is a thin
- * wrapper over this.
- *
- * @param mode {IDBTransactionMode}
- * @param operations {Array<(store: IDBObjectStore) => IDBRequest>}
- * @param [idb] {IDBFactory}
- * @returns {Promise<unknown[]>}
- */
-async function withSessionStoreBatch(
-  mode: IDBTransactionMode,
-  operations: Array<(store: IDBObjectStore) => IDBRequest>,
-  idb?: IDBFactory
-): Promise<unknown[]> {
   const db = await openSessionDb({ idb })
   try {
     const transaction = db.transaction(SESSION_STORE, mode)
     const store = transaction.objectStore(SESSION_STORE)
-    return await Promise.all(
-      operations.map(
-        operation =>
-          new Promise((resolve, reject) => {
-            const request = operation(store)
-            request.onsuccess = () => resolve(request.result)
-            request.onerror = () => reject(request.error)
-          })
-      )
-    )
+    return await new Promise((resolve, reject) => {
+      const request = operation(store)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
   } finally {
     db.close()
   }
@@ -407,6 +380,21 @@ function userKeyEpochPinKey(spaceId: string): string {
 }
 
 /**
+ * The pinned epoch id in a stored pin record, or `null` when the record is
+ * absent or malformed.
+ *
+ * @param stored {unknown}   the raw object-store value
+ * @returns {string | null}
+ */
+function epochPinFrom(stored: unknown): string | null {
+  if (stored === null || stored === undefined) {
+    return null
+  }
+  const { epochId } = stored as { epochId?: unknown }
+  return typeof epochId === 'string' && epochId ? epochId : null
+}
+
+/**
  * Pins the latest-seen user key roster epoch for an account -- the continuity
  * prior beside the account-pointer pin. The roster lives as an opaque
  * resource the server enforces no descriptor invariants on, so a served roster
@@ -441,28 +429,82 @@ export async function saveUserKeyEpochPin({
   epochIds?: string[]
   idb?: IDBFactory
 }): Promise<void> {
-  const stored = await loadUserKeyEpochPin({ spaceId, idb })
-  if (stored === epochId) {
-    return
+  const db = await openSessionDb({ idb })
+  try {
+    // Read and conditional write in ONE readwrite transaction, so the
+    // compare-and-set cannot interleave with another tab's pin advance. The
+    // put is issued synchronously from the read's success handler, which is
+    // what keeps the transaction alive across the decision.
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(SESSION_STORE, 'readwrite')
+      const store = transaction.objectStore(SESSION_STORE)
+      const key = userKeyEpochPinKey(spaceId)
+      const read = store.get(key)
+      read.onerror = () => reject(read.error)
+      read.onsuccess = () => {
+        const stored = epochPinFrom(read.result)
+        if (stored === epochId) {
+          resolve()
+          return
+        }
+        if (stored) {
+          const storedIndex = epochIds ? epochIds.indexOf(stored) : -1
+          const nextIndex = epochIds ? epochIds.indexOf(epochId) : -1
+          if (
+            storedIndex === -1 ||
+            nextIndex === -1 ||
+            nextIndex < storedIndex
+          ) {
+            console.warn(
+              'Refusing to move the user key epoch pin backward (or off the ' +
+                'served epoch order); keeping the stored pin.',
+              { storedEpochId: stored, epochId }
+            )
+            resolve()
+            return
+          }
+        }
+        const write = store.put({ epochId, pinnedAt: Date.now() }, key)
+        write.onerror = () => reject(write.error)
+        write.onsuccess = () => resolve()
+      }
+    })
+  } finally {
+    db.close()
   }
-  if (stored) {
-    const storedIndex = epochIds ? epochIds.indexOf(stored) : -1
-    const nextIndex = epochIds ? epochIds.indexOf(epochId) : -1
-    if (storedIndex === -1 || nextIndex === -1 || nextIndex < storedIndex) {
-      console.warn(
-        'Refusing to move the user key epoch pin backward (or off the served ' +
-          'epoch order); keeping the stored pin.',
-        { storedEpochId: stored, epochId }
-      )
-      return
-    }
-  }
-  await withSessionStore(
-    'readwrite',
-    store =>
-      store.put({ epochId, pinnedAt: Date.now() }, userKeyEpochPinKey(spaceId)),
+}
+
+/**
+ * Advances the user key roster-epoch pin from a roster read: the served
+ * descriptor carries both the epoch just authenticated and the append-only
+ * epoch order the pin is checked against, so every caller that has a
+ * descriptor in hand pins through here rather than restating the mapping.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param options.epochId {string}   the roster's current epoch id (a did:key)
+ * @param options.descriptor {{ epochs?: Array<{ id: string }> }}   the served
+ *   roster descriptor
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function savePinFromDescriptor({
+  spaceId,
+  epochId,
+  descriptor,
+  idb
+}: {
+  spaceId: string
+  epochId: string
+  descriptor: { epochs?: Array<{ id: string }> }
+  idb?: IDBFactory
+}): Promise<void> {
+  await saveUserKeyEpochPin({
+    spaceId,
+    epochId,
+    epochIds: (descriptor.epochs ?? []).map(epoch => epoch.id),
     idb
-  )
+  })
 }
 
 /**
@@ -481,16 +523,13 @@ export async function loadUserKeyEpochPin({
   spaceId: string
   idb?: IDBFactory
 }): Promise<string | null> {
-  const stored = await withSessionStore(
-    'readonly',
-    store => store.get(userKeyEpochPinKey(spaceId)),
-    idb
+  return epochPinFrom(
+    await withSessionStore(
+      'readonly',
+      store => store.get(userKeyEpochPinKey(spaceId)),
+      idb
+    )
   )
-  if (stored === null || stored === undefined) {
-    return null
-  }
-  const { epochId } = stored as { epochId?: unknown }
-  return typeof epochId === 'string' && epochId ? epochId : null
 }
 
 /**

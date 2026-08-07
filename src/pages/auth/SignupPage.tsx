@@ -1,15 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   Box,
   Button,
   Card,
   CardContent,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
-  DialogTitle,
   Link,
   Stack,
   Step,
@@ -20,7 +15,7 @@ import {
   useMediaQuery,
   useTheme
 } from '@mui/material'
-import { FiCheck, FiCheckCircle, FiKey, FiX } from 'react-icons/fi'
+import { FiCheckCircle, FiKey } from 'react-icons/fi'
 import { SiGoogledrive } from 'react-icons/si'
 import {
   Link as RouterLink,
@@ -40,7 +35,8 @@ import {
   passkeySupported
 } from '@/lib/passkey'
 import { useAuthStore } from '@/stores/authStore'
-import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter'
+import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
+import { usePrfRetryPrompt } from '@/hooks/usePrfRetryPrompt'
 import { DATE_FMT, PASSWORD_RULES } from '@/app.config'
 import { registerWallet } from '@/lib/registerWallet'
 import type { AuthLocationState } from '@/types/auth'
@@ -85,25 +81,9 @@ export function SignupPage() {
   const [score, setScore] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorKey, setErrorKey] = useState<string | null>(null)
-  // PRF-retry consent dialog (passkey signup): some authenticators evaluate the
-  // WebAuthn PRF only during a second (assertion) ceremony. `registerPasskey`
-  // calls `promptForPrfRetry` when that is needed; the promise resolves on the
-  // user's choice in the dialog below.
-  const [prfRetryOpen, setPrfRetryOpen] = useState(false)
-  const prfRetryResolve = useRef<((consented: boolean) => void) | null>(null)
-
-  const promptForPrfRetry = (): Promise<boolean> => {
-    setPrfRetryOpen(true)
-    return new Promise<boolean>(resolve => {
-      prfRetryResolve.current = resolve
-    })
-  }
-
-  const resolvePrfRetry = (consented: boolean) => {
-    setPrfRetryOpen(false)
-    prfRetryResolve.current?.(consented)
-    prfRetryResolve.current = null
-  }
+  // PRF-retry consent dialog (passkey signup): `registerPasskey` calls
+  // `promptForPrfRetry` when a second ceremony is needed.
+  const { promptForPrfRetry, dialog: prfRetryDialog } = usePrfRetryPrompt()
 
   const stepParam = searchParams.get('step')
   const activeStep = stepParam === 'storage' ? 2 : stepParam === 'email' ? 1 : 0
@@ -307,30 +287,10 @@ export function SignupPage() {
                     autoComplete="new-password"
                     sx={authStyles.input}
                   />
-                  <Box sx={authStyles.input}>
-                    <PasswordStrengthMeter
+                  <Stack spacing={0.5} sx={authStyles.input}>
+                    <PassphraseStrengthField
                       password={passphrase}
                       onChangeScore={setScore}
-                      scoreWords={
-                        (t('auth.signup.passwordScores', {
-                          returnObjects: true
-                        }) as string[]) ?? [
-                          'Weak',
-                          'Weak',
-                          'Fair',
-                          'Strong',
-                          'Very strong'
-                        ]
-                      }
-                      shortScoreWord={t('auth.signup.passwordTooShort')}
-                    />
-                  </Box>
-                  <Stack spacing={0.5} sx={authStyles.input}>
-                    <RuleIndicator
-                      passed={lengthPassed}
-                      label={t('auth.signup.minChars', {
-                        count: PASSWORD_RULES.minlength
-                      })}
                     />
                   </Stack>
                 </CardContent>
@@ -518,35 +478,8 @@ export function SignupPage() {
           </>
         )}
 
-        <Dialog open={prfRetryOpen} onClose={() => resolvePrfRetry(false)}>
-          <DialogTitle>{t('settings.passkeyRetryTitle')}</DialogTitle>
-          <DialogContent>
-            <DialogContentText>
-              {t('settings.passkeyRetryMessage')}
-            </DialogContentText>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => resolvePrfRetry(false)}>
-              {t('settings.passkeyRetryCancel')}
-            </Button>
-            <Button variant="contained" onClick={() => resolvePrfRetry(true)}>
-              {t('settings.passkeyRetryConfirm')}
-            </Button>
-          </DialogActions>
-        </Dialog>
+        {prfRetryDialog}
       </Box>
     </Box>
-  )
-}
-
-function RuleIndicator({ passed, label }: { passed: boolean; label: string }) {
-  return (
-    <Typography
-      variant="body2"
-      color={passed ? 'success.main' : 'text.secondary'}
-      sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}
-    >
-      {passed ? <FiCheck aria-hidden /> : <FiX aria-hidden />} {label}
-    </Typography>
   )
 }

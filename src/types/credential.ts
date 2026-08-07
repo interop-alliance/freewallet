@@ -2,24 +2,7 @@
  * VC-related types for the wallet UI: display projection, verification
  * results, and the StoredCredential wrapper returned by the storage layer.
  */
-import type {
-  IVerifiableCredential,
-  IAlignment
-} from '@interop/data-integrity-core'
-
-/**
- * Projected display fields extracted from a raw VC for the credential card and detail view.
- */
-export interface CredentialDisplayFields {
-  credentialName: string
-  issuedTo: string
-  expirationDate: string
-  credentialDescription: string
-  criteria: string
-  achievementImage: string
-  achievementType: string
-  alignments: IAlignment[]
-}
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 
 /**
  * Legacy verify payload synthesized by `@/lib/verify` for the UI layer.
@@ -38,6 +21,16 @@ export interface VerifyCredentialPayload {
     verified?: boolean
     log?: Array<{ id: string; valid?: boolean }>
     credential?: object
+    /**
+     * Present only on a fatal verification failure (nothing about the
+     * credential could be checked); the UI renders its `message`.
+     */
+    error?: {
+      details: { cause: { message: string; name: string } }
+      message: string
+      name: string
+      isFatal: boolean
+    }
   }>
   hasStatusError?: boolean
 }
@@ -46,7 +39,7 @@ export interface VerifyCredentialPayload {
  * DCW five-step checklist; `expiry` / `status` alias ResumeCredentialCard
  * fields.
  */
-export interface VerificationChecklist {
+export interface VerificationResult {
   supportedFormat: VerificationStep
   signature: VerificationStep
   issuer: VerificationStep
@@ -62,8 +55,6 @@ export interface VerificationChecklist {
   status: VerificationStep
 }
 
-export type VerificationResult = VerificationChecklist
-
 export type VerificationStepStatus = 'positive' | 'warning' | 'negative'
 
 export interface VerificationStep {
@@ -73,12 +64,10 @@ export interface VerificationStep {
   error?: string
 }
 
-export type VerificationAggregateStatus =
-  'verified' | 'warning' | 'not_verified'
-
 /**
  * A VC as returned by the storage layer. The `cid` is the credential's
- * content cid (a hash of the canonicalized VC, see `src/lib/cidFrom.ts`),
+ * content cid (a hash of the canonicalized VC, see `cidFrom` in
+ * `@interop/was-client/sync`),
  * which keys the content-addressed local `private-credentials` collection.
  */
 export interface StoredCredential {

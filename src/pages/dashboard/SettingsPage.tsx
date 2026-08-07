@@ -21,6 +21,7 @@ import type { IZcap } from '@interop/data-integrity-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { useInfoBox } from '@/hooks/useInfoBox'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { usePrfRetryPrompt } from '@/hooks/usePrfRetryPrompt'
 import { getFileUrl } from '@interop/did-method-webvh'
 import { isWebvhDid } from '@interop/wallet-core/webvh'
 import { WrongPassphraseError } from '@/session/keyring'
@@ -54,7 +55,7 @@ import { RecoveryCodesSection } from '@/components/RecoveryCodesSection'
 import { EnrolledClientsSection } from '@/components/EnrolledClientsSection'
 import { SharedCollectionsPanel } from '@/components/SharedCollectionsPanel'
 import { dashboardStyles } from '@/styles/appStyles'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import {
@@ -318,25 +319,9 @@ export function SettingsPage() {
       setRegistryLoadError(true)
     }
   }
-  // PRF-retry consent dialog: some authenticators evaluate the WebAuthn PRF
-  // only during a second (assertion) ceremony. `registerPasskey` calls
-  // `promptForPrfRetry` when that is needed; the promise resolves on the user's
-  // choice in the dialog below.
-  const [prfRetryOpen, setPrfRetryOpen] = useState(false)
-  const prfRetryResolve = useRef<((consented: boolean) => void) | null>(null)
-
-  const promptForPrfRetry = (): Promise<boolean> => {
-    setPrfRetryOpen(true)
-    return new Promise<boolean>(resolve => {
-      prfRetryResolve.current = resolve
-    })
-  }
-
-  const resolvePrfRetry = (consented: boolean) => {
-    setPrfRetryOpen(false)
-    prfRetryResolve.current?.(consented)
-    prfRetryResolve.current = null
-  }
+  // PRF-retry consent dialog: `registerPasskey` calls `promptForPrfRetry` when
+  // a second ceremony is needed.
+  const { promptForPrfRetry, dialog: prfRetryDialog } = usePrfRetryPrompt()
 
   const handleAddPasskey = async () => {
     const profile = session?.profile
@@ -1287,22 +1272,7 @@ export function SettingsPage() {
           </DialogActions>
         </Dialog>
 
-        <Dialog open={prfRetryOpen} onClose={() => resolvePrfRetry(false)}>
-          <DialogTitle>{t('settings.passkeyRetryTitle')}</DialogTitle>
-          <DialogContent>
-            <DialogContentText>
-              {t('settings.passkeyRetryMessage')}
-            </DialogContentText>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => resolvePrfRetry(false)}>
-              {t('settings.passkeyRetryCancel')}
-            </Button>
-            <Button variant="contained" onClick={() => resolvePrfRetry(true)}>
-              {t('settings.passkeyRetryConfirm')}
-            </Button>
-          </DialogActions>
-        </Dialog>
+        {prfRetryDialog}
 
         <Dialog
           open={rotateDialogOpen}

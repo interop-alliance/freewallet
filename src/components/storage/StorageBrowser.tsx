@@ -18,19 +18,16 @@ import type { StorageCollection } from '@/lib/storage'
 import { formatBytes } from '@/lib/formatBytes'
 import { storageStyles } from '@/styles/appStyles'
 import { getCollectionDisplayName, groupCollections } from './displayUtils'
-import { PublicAccessIcon } from './PublicAccessIcon'
-import { EncryptedAccessIcon } from './EncryptedAccessIcon'
+import { EncryptedAccessIcon, PublicAccessIcon } from './AccessIcon'
 import { StorageEmptyState } from './EmptyState'
-
-interface CollectionsOverviewProps {
-  collections: StorageCollection[]
-  usageByCollection?: Map<string, number>
-}
 
 export function CollectionsOverview({
   collections,
   usageByCollection
-}: CollectionsOverviewProps) {
+}: {
+  collections: StorageCollection[]
+  usageByCollection?: Map<string, number>
+}) {
   const { t } = useTranslation()
 
   if (collections.length === 0) {
@@ -122,17 +119,15 @@ function CollectionGroup({
   )
 }
 
-interface CollectionFolderCardProps {
-  collection: StorageCollection
-  usageBytes?: number
-  muted?: boolean
-}
-
 function CollectionFolderCard({
   collection,
   usageBytes,
   muted = false
-}: CollectionFolderCardProps) {
+}: {
+  collection: StorageCollection
+  usageBytes?: number
+  muted?: boolean
+}) {
   const { t } = useTranslation()
   const displayName = getCollectionDisplayName(collection, t)
   const total = collection.totalItems ?? 0
@@ -182,12 +177,12 @@ function CollectionFolderCard({
                 component="div"
               >
                 {collection.isPublic && (
-                  <Box component="span" sx={storageStyles.folderMetaPublic}>
+                  <Box component="span" sx={storageStyles.folderMetaInline}>
                     <PublicAccessIcon />
                   </Box>
                 )}
                 {collection.isEncrypted && (
-                  <Box component="span" sx={storageStyles.folderMetaEncrypted}>
+                  <Box component="span" sx={storageStyles.folderMetaInline}>
                     {collection.isPublic && ' · '}
                     <EncryptedAccessIcon />
                   </Box>

@@ -7,7 +7,11 @@
  * keeps the wizard state and the error copy; the orderings live here.
  */
 import { base64urlnopad } from '@scure/base'
-import type { AccountPointer } from '@interop/wallet-core/keyring'
+import {
+  deriveUnlockIdentity,
+  KEYRING_KDF,
+  type AccountPointer
+} from '@interop/wallet-core/keyring'
 import { mintClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
 import { mintUserKey } from '@interop/wallet-core/keys'
 import { PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
@@ -54,6 +58,55 @@ async function mintAccountKeySet() {
 }
 
 /**
+ * The tail both signup sequences share: provisioning has published the
+ * did:webvh id, so it is backfilled into the account pointer (the keyring
+ * record and the local pin) by re-binding under the unlock secret still in
+ * hand, and THEN the Space controller is promoted onto it. The order is
+ * load-bearing: the pointer must durably name the did before the promotion
+ * PUT, since the pointer is what tells the next login to sign under the
+ * promoted keyId (a tear between the two is healed at the next login).
+ * Best-effort -- the pointer's spaceId + host already locate the account.
+ *
+ * Only the re-bind differs between the two (a passphrase bind, or a passkey
+ * PRF bind that also re-delegates its management zcap), so the caller passes
+ * it in.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param [options.pointer] {AccountPointer}   the pre-backfill pointer
+ * @param options.rebind {function}   re-binds the unlock record to the
+ *   did-carrying pointer
+ * @returns {Promise<void>}
+ */
+async function backfillPointerAndPromote({
+  session,
+  pointer,
+  rebind
+}: {
+  session: Session
+  pointer?: AccountPointer
+  rebind: (fullPointer: AccountPointer & { did: string }) => Promise<void>
+}): Promise<void> {
+  session.profile.accountPointer = pointer
+  if (!pointer || !session.profile.didWebvh) {
+    return
+  }
+  const fullPointer = { ...pointer, did: session.profile.didWebvh.did }
+  try {
+    await rebind(fullPointer)
+    session.profile.accountPointer = fullPointer
+    await session.storage.ensurePromotedController({
+      profile: session.profile
+    })
+  } catch (err) {
+    console.warn(
+      'Could not backfill the did:webvh and promote the controller:',
+      err
+    )
+  }
+}
+
+/**
  * Creates a new wallet under a passphrase, or reports that this passphrase
  * already has one.
  *
@@ -84,10 +137,17 @@ export async function signUpWithPassphrase({
   // what prevents a re-signup with an existing passphrase from overwriting
   // that account's keyring and orphaning the wallet. The probe session is
   // discarded after reading `userExists`, so it must not provision.
+  // One 600k-iteration derivation for the whole signup: the probe login, the
+  // bind, and the pointer-backfill re-bind all run on this identity.
+  const unlock = await deriveUnlockIdentity({
+    secret: passphrase,
+    kdf: KEYRING_KDF
+  })
   const probe = await loginWithPassphrase({
     passphrase,
     email,
-    provisionStorage: false
+    provisionStorage: false,
+    unlock
   })
   if (probe.userExists) {
     return { userExists: true }
@@ -114,7 +174,8 @@ export async function signUpWithPassphrase({
     email,
     userKey,
     webvhUpdateKeys,
-    pointer
+    pointer,
+    unlock
   })
   session.profile.persistClientKeys = persistClientKeys
 
@@ -122,17 +183,10 @@ export async function signUpWithPassphrase({
   // welcome credential.
   await provisionNewWallet({ session })
 
-  // Provisioning published the did:webvh id; backfill it into the account
-  // pointer (the record and the local pin) with a re-bind, and THEN
-  // promote the Space controller to the did:webvh: the pointer must
-  // durably name the did before the promotion PUT, since the pointer is
-  // what tells the next login to sign under the promoted keyId (a tear
-  // between the two is healed at the next login). Best-effort: the
-  // pointer's spaceId + host already locate the account.
-  session.profile.accountPointer = pointer
-  if (pointer && session.profile.didWebvh) {
-    const fullPointer = { ...pointer, did: session.profile.didWebvh.did }
-    try {
+  await backfillPointerAndPromote({
+    session,
+    pointer,
+    rebind: async fullPointer => {
       await bindPassphrase({
         clientSeed: seed,
         controller: session.user.id,
@@ -140,19 +194,11 @@ export async function signUpWithPassphrase({
         email,
         userKey,
         webvhUpdateKeys,
-        pointer: fullPointer
+        pointer: fullPointer,
+        unlock
       })
-      session.profile.accountPointer = fullPointer
-      await session.storage.ensurePromotedController({
-        profile: session.profile
-      })
-    } catch (err) {
-      console.warn(
-        'Could not backfill the did:webvh and promote the controller:',
-        err
-      )
     }
-  }
+  })
   return { session, userExists: false }
 }
 
@@ -229,22 +275,15 @@ export async function signUpWithPasskey({
   // welcome credential.
   await provisionNewWallet({ session })
 
-  // Provisioning published the did:webvh id; backfill it into the
-  // account pointer (the record and the local pin) by re-binding with
-  // the PRF output still in hand -- no second ceremony, and THEN
-  // promote the Space controller to the did:webvh: the pointer must
-  // durably name the did before the promotion PUT, since the pointer
-  // is what tells the next login to sign under the promoted keyId (a
-  // tear between the two is healed at the next login). Best-effort:
-  // the pointer's spaceId + host already locate the account.
-  session.profile.accountPointer = pointer
-  if (pointer && session.profile.didWebvh) {
-    const fullPointer = { ...pointer, did: session.profile.didWebvh.did }
-    try {
-      // The re-bind also re-delegates the management zcap to the
-      // just-published did:webvh, so the passkey entry recorded below
-      // is revocable from ANY enrolled client (the pre-promotion
-      // delegation named this first client's did:key alone).
+  // The re-bind runs with the PRF output still in hand -- no second
+  // ceremony -- and also re-delegates the management zcap to the
+  // just-published did:webvh, so the passkey entry recorded below is
+  // revocable from ANY enrolled client (the pre-promotion delegation named
+  // this first client's did:key alone).
+  await backfillPointerAndPromote({
+    session,
+    pointer,
+    rebind: async fullPointer => {
       const { manageCapability } = await bindUnlockSecret({
         clientSeed: seed,
         controller: session.user.id,
@@ -262,17 +301,8 @@ export async function signUpWithPasskey({
       if (manageCapability) {
         entry.manageCapability = manageCapability
       }
-      session.profile.accountPointer = fullPointer
-      await session.storage.ensurePromotedController({
-        profile: session.profile
-      })
-    } catch (err) {
-      console.warn(
-        'Could not backfill the did:webvh and promote the controller:',
-        err
-      )
     }
-  }
+  })
 
   // Write the initial unlock-methods registry only now: it lives in the
   // data Space, which `provisionNewWallet` just created, so this must run

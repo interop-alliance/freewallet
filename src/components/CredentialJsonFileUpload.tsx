@@ -17,15 +17,13 @@ function jsonFilesFrom(fileList: FileList | null): File[] {
   return [...fileList].filter(isJsonCredentialFile)
 }
 
-type CredentialJsonUploadPanelProps = {
-  onFiles: (files: File[]) => void
-  disabled?: boolean
-}
-
 export function CredentialJsonUploadPanel({
   onFiles,
   disabled = false
-}: CredentialJsonUploadPanelProps) {
+}: {
+  onFiles: (files: File[]) => void
+  disabled?: boolean
+}) {
   const { t } = useTranslation()
   const inputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)

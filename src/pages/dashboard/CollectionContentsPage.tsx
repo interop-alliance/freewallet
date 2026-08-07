@@ -11,8 +11,6 @@ import IconButton from '@mui/material/IconButton'
 import Paper from '@mui/material/Paper'
 import Skeleton from '@mui/material/Skeleton'
 import Stack from '@mui/material/Stack'
-import ToggleButton from '@mui/material/ToggleButton'
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -42,11 +40,17 @@ import {
 } from '@/lib/storageResource'
 import { extensionFromMime } from '@/lib/extensionFromMime'
 import { downloadBlob } from '@/lib/downloadBlob'
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { ResourceTable } from '@/components/storage/ResourceTable'
-import { PublicAccessIcon } from '@/components/storage/PublicAccessIcon'
-import { EncryptedAccessIcon } from '@/components/storage/EncryptedAccessIcon'
+import {
+  EncryptedAccessIcon,
+  PublicAccessIcon
+} from '@/components/storage/AccessIcon'
 import { StorageEmptyState } from '@/components/storage/EmptyState'
+import { SourceViewToggle } from '@/components/storage/SourceViewToggle'
+import {
+  decryptResourceBody,
+  useResourceSourceCopy
+} from '@/components/storage/useResourceSource'
 import {
   getCollectionDisplayName,
   getResourceDisplayName
@@ -91,13 +95,7 @@ export function CollectionContentsPage() {
     copied: snippetCopied,
     copy: copySnippet,
     reset: resetSnippetCopied
-  } = useCopyToClipboard({
-    resetDelay: 2000,
-    fallbackToExecCommand: true,
-    onError: (err: unknown) => {
-      console.warn('Copy to clipboard failed:', err)
-    }
-  })
+  } = useResourceSourceCopy()
 
   const clearResourcePreview = useCallback(() => {
     setSelectedResource(null)
@@ -111,12 +109,7 @@ export function CollectionContentsPage() {
   const [previousCollectionId, setPreviousCollectionId] = useState(collectionId)
   if (previousCollectionId !== collectionId) {
     setPreviousCollectionId(collectionId)
-    setSelectedResource(null)
-    setResourcePayload(null)
-    setDecryptedData(null)
-    setResourceError(null)
-    setResourceLoading(false)
-    resetSnippetCopied()
+    clearResourcePreview()
   }
 
   useEffect(() => {
@@ -176,24 +169,16 @@ export function CollectionContentsPage() {
       if (!storage?.hasRemoteStorage) {
         return
       }
+      clearResourcePreview()
       setSelectedResource(resource)
-      setResourcePayload(null)
-      setDecryptedData(null)
-      setResourceError(null)
       setResourceLoading(true)
-      resetSnippetCopied()
       try {
         const body = await storage.fetchCollectionResource(resource)
-        // An encrypted-collection resource arrives as an EDV envelope; with
-        // an unlocked vault, recover the document behind it so the preview
-        // can offer both views.
-        const decrypted =
-          body.kind === 'json' && collectionId
-            ? await storage.decryptCollectionResource({
-                collectionId,
-                data: body.data as Json
-              })
-            : undefined
+        const decrypted = await decryptResourceBody({
+          storage,
+          collectionId,
+          body
+        })
         if (
           body.kind === 'json' &&
           isVerifiableCredentialData(decrypted ?? body.data) &&
@@ -215,7 +200,7 @@ export function CollectionContentsPage() {
         setResourceLoading(false)
       }
     },
-    [collectionId, navigate, resetSnippetCopied, storage, t]
+    [clearResourcePreview, collectionId, navigate, storage, t]
   )
 
   const snippetText = useMemo(() => {
@@ -343,13 +328,13 @@ export function CollectionContentsPage() {
               >
                 {subtitle}
                 {collection?.isPublic && (
-                  <Box component="span" sx={storageStyles.folderMetaPublic}>
+                  <Box component="span" sx={storageStyles.folderMetaInline}>
                     {' · '}
                     <PublicAccessIcon />
                   </Box>
                 )}
                 {collection?.isEncrypted && (
-                  <Box component="span" sx={storageStyles.folderMetaEncrypted}>
+                  <Box component="span" sx={storageStyles.folderMetaInline}>
                     {' · '}
                     <EncryptedAccessIcon />
                   </Box>
@@ -486,24 +471,11 @@ export function CollectionContentsPage() {
               {resourcePreviewTitle || t('storage.resourceTitle')}
             </Typography>
             {decryptedData !== null && (
-              <ToggleButtonGroup
-                size="small"
-                exclusive
+              <SourceViewToggle
                 value={resourceView}
-                onChange={(_event, view: 'decrypted' | 'envelope' | null) => {
-                  if (view) {
-                    setResourceView(view)
-                  }
-                }}
+                onChange={setResourceView}
                 sx={{ flexShrink: 0 }}
-              >
-                <ToggleButton value="decrypted">
-                  {t('storage.viewDecrypted')}
-                </ToggleButton>
-                <ToggleButton value="envelope">
-                  {t('storage.viewEnvelope')}
-                </ToggleButton>
-              </ToggleButtonGroup>
+              />
             )}
             {resourcePayload?.kind === 'json' && (
               <Button

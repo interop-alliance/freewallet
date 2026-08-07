@@ -123,6 +123,43 @@ export function useVerification(
     setLastCheckedAt(null)
   }
 
+  // Runs one verification pass and applies its outcome. `isStale` lets the
+  // mount effect drop a result whose run was superseded (a cancelled effect);
+  // the imperative `verify` never cancels and passes nothing.
+  const runVerification = useCallback(
+    async (
+      subject: IVerifiableCredential,
+      language: string,
+      isStale?: () => boolean
+    ) => {
+      setLoading(true)
+      setError(null)
+      try {
+        const entry = await verifyAndStore(subject, t, language)
+        if (isStale?.()) {
+          return
+        }
+        setResult(entry.result)
+        setIssuerRegistry(entry.issuerRegistry)
+        setLastCheckedAt(new Date(entry.checkedAt))
+      } catch (err) {
+        if (isStale?.()) {
+          return
+        }
+        const error = err instanceof Error ? err : new Error(String(err))
+        setError(error)
+        setResult(null)
+        setIssuerRegistry(null)
+        setLastCheckedAt(new Date())
+      } finally {
+        if (!isStale?.()) {
+          setLoading(false)
+        }
+      }
+    },
+    [t]
+  )
+
   const verify = useCallback(async () => {
     if (!credential) {
       setResult(null)
@@ -130,24 +167,9 @@ export function useVerification(
       setIssuerRegistry(null)
       return
     }
-    setLoading(true)
-    setError(null)
-    try {
-      // The imperative re-check always bypasses the cache and refreshes it.
-      const entry = await verifyAndStore(credential, t, i18n.language)
-      setResult(entry.result)
-      setIssuerRegistry(entry.issuerRegistry)
-      setLastCheckedAt(new Date(entry.checkedAt))
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err))
-      setError(error)
-      setResult(null)
-      setIssuerRegistry(null)
-      setLastCheckedAt(new Date())
-    } finally {
-      setLoading(false)
-    }
-  }, [credential, i18n.language, t])
+    // The imperative re-check always bypasses the cache and refreshes it.
+    await runVerification(credential, i18n.language)
+  }, [credential, i18n.language, runVerification])
 
   useEffect(() => {
     if (!runOnMount || !credential) {
@@ -168,36 +190,13 @@ export function useVerification(
         setLoading(false)
         return
       }
-      setLoading(true)
-      setError(null)
-      try {
-        const entry = await verifyAndStore(credential!, t, language)
-        if (cancelled) {
-          return
-        }
-        setResult(entry.result)
-        setIssuerRegistry(entry.issuerRegistry)
-        setLastCheckedAt(new Date(entry.checkedAt))
-      } catch (err) {
-        if (cancelled) {
-          return
-        }
-        const error = err instanceof Error ? err : new Error(String(err))
-        setError(error)
-        setResult(null)
-        setIssuerRegistry(null)
-        setLastCheckedAt(new Date())
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
-      }
+      await runVerification(credential!, language, () => cancelled)
     }
     void run()
     return () => {
       cancelled = true
     }
-  }, [runOnMount, credential, i18n.language, t])
+  }, [runOnMount, credential, i18n.language, runVerification])
 
   return { result, loading, error, verify, lastCheckedAt, issuerRegistry }
 }

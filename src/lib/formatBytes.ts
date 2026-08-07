@@ -1,11 +1,19 @@
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const
 
 /**
- * Formats a byte count for display (base-1024, e.g. "2.4 MB").
+ * Splits a byte count into its numeric amount and unit (base-1024, e.g.
+ * `{ amount: '2.4', unit: 'MB' }`). The primitive both display paths share --
+ * {@link formatBytes} is the joined form.
+ *
+ * @param bytes {number}   the byte count to format
+ * @returns {{ amount: string, unit: string }}
  */
-export function formatBytes(bytes: number): string {
+export function formatBytesParts(bytes: number): {
+  amount: string
+  unit: string
+} {
   if (!Number.isFinite(bytes) || bytes <= 0) {
-    return '0 B'
+    return { amount: '0', unit: 'B' }
   }
 
   const unitIndex = Math.min(
@@ -14,31 +22,19 @@ export function formatBytes(bytes: number): string {
   )
   const value = bytes / 1024 ** unitIndex
 
-  if (unitIndex === 0) {
-    return `${Math.round(value)} B`
+  return {
+    amount: unitIndex === 0 ? `${Math.round(value)}` : value.toFixed(1),
+    unit: UNITS[unitIndex]
   }
-
-  return `${value.toFixed(1)} ${UNITS[unitIndex]}`
 }
 
 /**
- * Splits a byte count into its numeric amount and unit.
- * @param bytes {number} - The byte count to format.
- * @returns {Object} - An object containing the numeric amount and unit.
- * @property {string} amount - The numeric amount.
- * @property {string} unit - The unit.
+ * Formats a byte count for display (base-1024, e.g. "2.4 MB").
+ *
+ * @param bytes {number}   the byte count to format
+ * @returns {string}
  */
-export function formatBytesParts(bytes: number): {
-  amount: string
-  unit: string
-} {
-  const formatted = formatBytes(bytes)
-  const separator = formatted.lastIndexOf(' ')
-  if (separator === -1) {
-    return { amount: formatted, unit: '' }
-  }
-  return {
-    amount: formatted.slice(0, separator),
-    unit: formatted.slice(separator + 1)
-  }
+export function formatBytes(bytes: number): string {
+  const { amount, unit } = formatBytesParts(bytes)
+  return `${amount} ${unit}`
 }

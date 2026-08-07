@@ -20,24 +20,18 @@ import {
   scanCredentialQrVideoStyle
 } from '@/styles/scanCredentialQrStyles'
 
-type QrDecodedPayload = {
-  data: string
-}
-
-type ScanCredentialQrDialogProps = {
+export function ScanCredentialQrDialog({
+  open,
+  onClose,
+  onCredentialsReady
+}: {
   open: boolean
   onClose: () => void
   /**
    * Same acceptance flow as Add Credential (review screen before storing).
    */
   onCredentialsReady: (credentials: IVerifiableCredential[]) => void
-}
-
-export function ScanCredentialQrDialog({
-  open,
-  onClose,
-  onCredentialsReady
-}: ScanCredentialQrDialogProps) {
+}) {
   const { t } = useTranslation()
   const scannerRef = useRef<QrScanner | null>(null)
   const [decodeError, setDecodeError] = useState<string | null>(null)
@@ -61,7 +55,7 @@ export function ScanCredentialQrDialog({
   )
 
   const onScanSuccess = useCallback(
-    async (result: string | QrDecodedPayload) => {
+    async (result: string | { data: string }) => {
       const sc = scannerRef.current
       if (!sc) {
         return

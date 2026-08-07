@@ -153,8 +153,6 @@ export const StoragePage = () => {
     }
   }, [hasRemoteStorage, session, t, collectionsRefreshKey, loadQuota])
 
-  const visibleCollections = hasRemoteStorage ? collections : []
-
   const handleExportSpace = async () => {
     if (!session?.storage) {
       return
@@ -332,7 +330,7 @@ export const StoragePage = () => {
         {collectionsError && <Alert severity="error">{collectionsError}</Alert>}
         {hasRemoteStorage && !isLoadingCollections && !collectionsError && (
           <CollectionsOverview
-            collections={visibleCollections}
+            collections={collections}
             usageByCollection={
               quotaStatus.kind === 'ready'
                 ? quotaStatus.quota.usageByCollection
