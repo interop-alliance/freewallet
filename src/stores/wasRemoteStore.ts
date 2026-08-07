@@ -285,7 +285,8 @@ export class WASRemoteStore {
   async ensureUserCollections({ user: _user }: { user: User }) {
     // Each collection is provisioned through the library's generic
     // `ensureSpaceAndCollection`, which idempotently upserts the Space (with
-    // this wallet's `Freewallet Space` name and controller) and then configures
+    // the app-neutral `Wallet Space` name shared with dcw, since both wallets
+    // can re-configure one Space, and controller) and then configures
     // the collection: an `'edv'` collection declares the set-once encryption
     // descriptor (a late declaration on a pre-descriptor collection is allowed, so a
     // re-run upgrades it in place), a `'plaintext'` collection is a descriptor-less
@@ -331,7 +332,7 @@ export class WASRemoteStore {
             collectionName: name,
             encryption: encryption ? 'edv' : 'plaintext',
             ...(isPublic !== undefined && { isPublic }),
-            spaceName: 'Freewallet Space'
+            spaceName: 'Wallet Space'
           })
         } catch (err) {
           // An encrypted collection whose descriptor already carries key epochs
@@ -400,7 +401,7 @@ export class WASRemoteStore {
   }): Promise<void> {
     await this.was
       .space(this.spaceId)
-      .configure({ name: 'Freewallet Space', controller })
+      .configure({ name: 'Wallet Space', controller })
     this.controller = controller
   }
 

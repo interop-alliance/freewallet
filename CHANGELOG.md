@@ -1,5 +1,13 @@
 # History
 
+## 0.28.0 - TBD
+
+### Changed
+
+- A Space provisioned by this wallet is now named "Wallet Space" instead of
+  "Freewallet Space". Both wallets now use the same app-neutral name, so a
+  shared Space keeps one name no matter which wallet provisions it.
+
 ## 0.27.0 - 2026-08-06
 
 ### Changed
