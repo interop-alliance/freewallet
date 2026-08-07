@@ -1,9 +1,15 @@
 # History
 
-## 0.26.2 - TBD
+## 0.27.0 - TBD
 
 ### Changed
 
+- The local writer-attribution id is now spelled `writerId` end to end,
+  matching the `@interop/social-core` 0.8.0 wire rename: `src/lib/deviceId.ts`
+  is `src/lib/writerId.ts` (`getOrCreateWriterId`, `localStorage` key
+  `freewallet:writerId`), and the store/manager parameters follow. Greenfield
+  rename: the old `freewallet:deviceId` key is not carried over, so a fresh id
+  is minted on first write.
 - The "PUK" abbreviation is retired: the concept is unchanged (the
   account-wide key that is recipient zero of every encrypted collection,
   delivered through the wrap-set roster), but identifiers are now `userKey` /

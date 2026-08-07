@@ -83,12 +83,12 @@ export interface SyncedCollectionStore {
   loadContact(options: { id: string }): Promise<StoredContact | undefined>
   addContact(options: {
     contact: ContactData
-    deviceId: string
+    writerId: string
   }): Promise<StoredContact>
   updateContact(options: {
     id: string
     contact: ContactData
-    deviceId: string
+    writerId: string
   }): Promise<StoredContact>
   deleteContact(options: { id: string }): Promise<void>
   addContactRevision(options: {

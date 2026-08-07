@@ -512,12 +512,12 @@ describeConformance('cross-replica round-trip conformance', () => {
   /** `browserStore.addContact`: cipher-minted random EDV row id, version 0. */
   async function fwAddContact(
     contact: ContactHeadPayload['contact'],
-    deviceId: string
+    writerId: string
   ): Promise<{ id: string; head: ContactHeadPayload }> {
     const head: ContactHeadPayload = {
       contactId: uuidv7(),
       updatedAt: new Date().toISOString(),
-      writerId: deviceId,
+      writerId,
       contact
     }
     const { id, envelope } = await fwCiphers[CONTACTS_COLLECTION].encrypt({
@@ -539,13 +539,13 @@ describeConformance('cross-replica round-trip conformance', () => {
    */
   async function fwAddLegacyContact(
     contact: ContactHeadPayload['contact'],
-    deviceId: string
+    writerId: string
   ): Promise<{ id: string; head: ContactHeadPayload }> {
     const id = uuidv7()
     const head: ContactHeadPayload = {
       contactId: uuidv7(),
       updatedAt: new Date().toISOString(),
-      writerId: deviceId,
+      writerId,
       contact
     }
     const { envelope } = await fwLegacyContactsCipher.encrypt({
@@ -569,7 +569,7 @@ describeConformance('cross-replica round-trip conformance', () => {
   async function fwUpdateContact(
     id: string,
     contact: ContactHeadPayload['contact'],
-    deviceId: string,
+    writerId: string,
     updatedAt = new Date().toISOString()
   ): Promise<ContactHeadPayload> {
     const doc = await fwCollections[CONTACTS_COLLECTION].findOne(id).exec()
@@ -583,7 +583,7 @@ describeConformance('cross-replica round-trip conformance', () => {
     const head: ContactHeadPayload = {
       contactId: existing.contactId ?? id,
       updatedAt,
-      writerId: deviceId,
+      writerId,
       contact
     }
     const { envelope } = await fwCiphers[CONTACTS_COLLECTION].encryptUpdate!({
@@ -643,13 +643,13 @@ describeConformance('cross-replica round-trip conformance', () => {
 
   async function dcwAddContact(
     contact: ContactHeadPayload['contact'],
-    deviceId: string,
+    writerId: string,
     updatedAt = new Date().toISOString()
   ): Promise<{ id: string; head: ContactHeadPayload }> {
     const head: ContactHeadPayload = {
       contactId: uuidv7(),
       updatedAt,
-      writerId: deviceId,
+      writerId,
       contact
     }
     const { id, envelope } = await dcwCiphers[CONTACTS_COLLECTION].encrypt({
@@ -667,7 +667,7 @@ describeConformance('cross-replica round-trip conformance', () => {
   async function dcwUpdateContact(
     id: string,
     contact: ContactHeadPayload['contact'],
-    deviceId: string,
+    writerId: string,
     updatedAt = new Date().toISOString()
   ): Promise<ContactHeadPayload> {
     const store = dcwStores[CONTACTS_COLLECTION]
@@ -682,7 +682,7 @@ describeConformance('cross-replica round-trip conformance', () => {
     const head: ContactHeadPayload = {
       contactId: existing.contactId ?? id,
       updatedAt,
-      writerId: deviceId,
+      writerId,
       contact
     }
     if (!cipher.encryptUpdate) {

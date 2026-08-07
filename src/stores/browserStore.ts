@@ -989,22 +989,22 @@ export class BrowserStore {
    *
    * @param options {object}
    * @param options.contact {ContactData}
-   * @param options.deviceId {string}
+   * @param options.writerId {string}
    * @returns {Promise<StoredContact>}
    */
   async addContact({
     contact,
-    deviceId
+    writerId
   }: {
     contact: ContactHeadPayload['contact']
-    deviceId: string
+    writerId: string
   }): Promise<StoredContact> {
     const contactId = uuidv7()
     const updatedAt = new Date().toISOString()
     const head: ContactHeadPayload = {
       contactId,
       updatedAt,
-      writerId: deviceId,
+      writerId,
       contact
     }
     // `contacts` is stable-id (mutable, updated in place): an encrypted write
@@ -1035,17 +1035,17 @@ export class BrowserStore {
    * @param options {object}
    * @param options.id {string}
    * @param options.contact {ContactData}
-   * @param options.deviceId {string}
+   * @param options.writerId {string}
    * @returns {Promise<StoredContact>}
    */
   async updateContact({
     id,
     contact,
-    deviceId
+    writerId
   }: {
     id: string
     contact: ContactHeadPayload['contact']
-    deviceId: string
+    writerId: string
   }): Promise<StoredContact> {
     const doc = await this.rxCollection('contacts').findOne(id).exec()
     if (!doc) {
@@ -1071,7 +1071,7 @@ export class BrowserStore {
     const head: ContactHeadPayload = {
       contactId,
       updatedAt,
-      writerId: deviceId,
+      writerId,
       contact
     }
     // Re-encrypt in place through the cipher's update path: it keeps the row's

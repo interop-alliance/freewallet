@@ -630,6 +630,13 @@ classification time (`classify.ts`), and wallets that predate it fail closed
 (the app surfaces an "update Freewallet" error) rather than degrading into a
 partial generic flow.
 
+The exchange's wire contract -- the `AppConnectQuery`, the app-key
+credential, the descriptor vocabulary and action ceilings, and the response
+presentation -- is specified normatively in the **App Connect companion
+spec** (<https://github.com/interop-alliance/app-connect-spec>; local
+checkout `../app-connect-spec` -- read `spec.md` there instead of fetching
+the rendered version).
+
 The key design move: **the wallet mints the app-key seed**
 (`src/lib/appKey.ts`). The seed is a client secret that must never transit
 a server,
@@ -943,14 +950,12 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
 - **`writerId`** — an unkeyed, clearable, unrecoverable attribution label
   saying which writing agent produced a revision. Its only jobs are history
   attribution and breaking last-write-wins ties; it is minted locally
-  (`src/lib/deviceId.ts`, a `localStorage` key), dies with a wallet reset, and
+  (`src/lib/writerId.ts`, a `localStorage` key), dies with a wallet reset, and
   is deliberately not derived from any secret — so it is never an identity and
   must not be treated as one. Distinct from a `clientId` in lifetime and in
   trust: it can vanish and be re-minted with nothing carried over. Also not a
   `replicaId`: it is minted per browser profile while the local database is
-  per user, so it is not 1:1 with a replica. Still spelled `deviceId` in code
-  and in the `@interop/social-core` contact payloads pending the cross-repo
-  rename.
+  per user, so it is not 1:1 with a replica.
 - **Share** — granting a third party read AND decrypt access to one of the
   wallet's own encrypted collections, asked for with a
   `https://w3id.org/byoe#shared-collection` invocation-target descriptor. One

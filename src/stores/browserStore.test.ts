@@ -730,7 +730,7 @@ describe('BrowserStore (contacts encryption)', () => {
 
     const stored = await localStore.addContact({
       contact: { givenName: 'Bob' } as never,
-      deviceId: 'device-1'
+      writerId: 'writer-1'
     })
     const contactRow = (await localStore
       .rxCollection('contacts')
@@ -744,7 +744,7 @@ describe('BrowserStore (contacts encryption)', () => {
     await localStore.updateContact({
       id: stored.id,
       contact: { givenName: 'Bobby' } as never,
-      deviceId: 'device-1'
+      writerId: 'writer-1'
     })
     const updatedRow = (await localStore
       .rxCollection('contacts')

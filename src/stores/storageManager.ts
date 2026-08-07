@@ -54,7 +54,7 @@ import {
   WAS_SERVER_URL
 } from '@/app.config'
 import { assertStorableAppKey } from '@/lib/appKey'
-import { getOrCreateDeviceId } from '@/lib/deviceId'
+import { getOrCreateWriterId } from '@/lib/writerId'
 import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
 import {
   clientSigningKeyMultibase,
@@ -2505,13 +2505,13 @@ export class StorageManager {
   }: {
     contact: ContactData
   }): Promise<StoredContact> {
-    const deviceId = getOrCreateDeviceId()
-    const stored = await this.#store.addContact({ contact, deviceId })
+    const writerId = getOrCreateWriterId()
+    const stored = await this.#store.addContact({ contact, writerId })
     await this.#recordContactRevision({
       contactId: stored.contactId,
       action: 'create',
       snapshot: contact,
-      deviceId
+      writerId
     })
     return stored
   }
@@ -2531,17 +2531,17 @@ export class StorageManager {
     id: string
     contact: ContactData
   }): Promise<StoredContact> {
-    const deviceId = getOrCreateDeviceId()
+    const writerId = getOrCreateWriterId()
     const stored = await this.#store.updateContact({
       id,
       contact,
-      deviceId
+      writerId
     })
     await this.#recordContactRevision({
       contactId: stored.contactId,
       action: 'update',
       snapshot: contact,
-      deviceId
+      writerId
     })
     return stored
   }
@@ -2562,7 +2562,7 @@ export class StorageManager {
         contactId: existing.contactId,
         action: 'delete',
         snapshot: existing.contact,
-        deviceId: getOrCreateDeviceId()
+        writerId: getOrCreateWriterId()
       })
     }
   }
@@ -2578,19 +2578,19 @@ export class StorageManager {
    * @param options.contactId {string}
    * @param options.action {ContactRevisionPayload['action']}
    * @param options.snapshot {ContactData}
-   * @param options.deviceId {string}
+   * @param options.writerId {string}
    * @returns {Promise<void>}
    */
   async #recordContactRevision({
     contactId,
     action,
     snapshot,
-    deviceId
+    writerId
   }: {
     contactId: string
     action: ContactRevisionPayload['action']
     snapshot: ContactData
-    deviceId: string
+    writerId: string
   }): Promise<void> {
     try {
       await this.#store.addContactRevision({
@@ -2598,7 +2598,7 @@ export class StorageManager {
           contactId,
           action,
           timestamp: new Date().toISOString(),
-          writerId: deviceId,
+          writerId,
           snapshot
         }
       })
