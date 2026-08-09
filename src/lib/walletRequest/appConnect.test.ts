@@ -5,7 +5,7 @@ import type { Session } from '@/types/auth'
 import type { StoredCredential } from '@/types/credential'
 import { mintAppKeyCredential } from '@/lib/appKey'
 import { appConnectZcapRequests, processAppConnect } from './appConnect'
-import type { IAppConnectCapabilityQuery, IZcap } from './types'
+import type { IZcap } from './types'
 
 vi.mock('./processZcaps', () => ({
   processZcaps: vi.fn()
@@ -72,23 +72,6 @@ describe('appConnectZcapRequests', () => {
     expect(requests).toEqual([
       { ...CAPABILITY_QUERY, controller: 'did:key:z6MkTest' }
     ])
-  })
-
-  it('strips a wire-level reason the type-level Omit cannot block', () => {
-    // The type omits `reason`, but an actual request body can carry it
-    // anyway; it must never reach the App Connect consent screen.
-    const smuggled = {
-      ...CAPABILITY_QUERY,
-      reason: 'Totally legitimate reason from the requesting site'
-    } as IAppConnectCapabilityQuery
-    const requests = appConnectZcapRequests({
-      capabilityQueries: [smuggled],
-      controller: 'did:key:z6MkTest'
-    })
-    expect(requests).toEqual([
-      { ...CAPABILITY_QUERY, controller: 'did:key:z6MkTest' }
-    ])
-    expect(requests[0]).not.toHaveProperty('reason')
   })
 })
 
@@ -170,6 +153,48 @@ describe('processAppConnect', () => {
     // other origin's key.
     expect(response.appConnect?.firstRun).toBe(true)
     expect(added).toHaveLength(1)
+  })
+
+  it('delegates to the previewed DID when the match is unchanged', async () => {
+    const { credential, subjectDid } = await mintAppKeyCredential({
+      app: APP,
+      origin: ORIGIN
+    })
+    const stored = [{ cid: 'cid-1', vc: credential }] as StoredCredential[]
+    const { session } = await fakeSession({ stored })
+
+    const response = await processAppConnect({
+      appConnect: { app: APP, capabilityQueries: [] },
+      session,
+      origin: ORIGIN,
+      didAuthRequested: false,
+      expectedSubjectDid: subjectDid
+    })
+    expect(response.appConnect).toEqual({ firstRun: false, subjectDid })
+  })
+
+  it('fails closed when the matched DID diverges from the previewed one', async () => {
+    // The credential the consent screen previewed was deleted (or superseded)
+    // between preview and approval: the approve-time re-match resolves a
+    // different subject DID, and the delegation must not silently go to a
+    // recipient the user never saw.
+    const { credential } = await mintAppKeyCredential({
+      app: APP,
+      origin: ORIGIN
+    })
+    const stored = [{ cid: 'cid-1', vc: credential }] as StoredCredential[]
+    const { session } = await fakeSession({ stored })
+
+    await expect(
+      processAppConnect({
+        appConnect: { app: APP, capabilityQueries: [CAPABILITY_QUERY] },
+        session,
+        origin: ORIGIN,
+        didAuthRequested: false,
+        expectedSubjectDid: 'did:key:z6MkPreviewedElsewhere'
+      })
+    ).rejects.toThrow(/changed between consent and approval/)
+    expect(processZcaps).not.toHaveBeenCalled()
   })
 
   it('skips delegation when no capabilities were requested', async () => {

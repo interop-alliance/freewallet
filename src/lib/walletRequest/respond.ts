@@ -132,6 +132,9 @@ async function recordLoginActivity({
  * @param options.selectedVCs {IVerifiableCredential[]}
  * @param [options.exchangeUrl] {string}   set when the verifier deferred the
  *   request to a VC API exchange
+ * @param [options.expectedAppKeyDid] {string}   App Connect: the app-key
+ *   subject DID the consent screen displayed, pinning the delegation to the
+ *   identity the user actually saw
  * @returns {Promise<WalletResponse>}   the composed response (`{}` when there
  *   was nothing to send)
  * @throws {WalletResponseFailure}   nothing was delivered
@@ -142,7 +145,8 @@ export async function composeAndDeliverResponse({
   profile,
   requestOrigin,
   selectedVCs,
-  exchangeUrl
+  exchangeUrl,
+  expectedAppKeyDid
 }: {
   request: IVPRDetails
   session: Session
@@ -150,6 +154,7 @@ export async function composeAndDeliverResponse({
   requestOrigin: string
   selectedVCs: IVerifiableCredential[]
   exchangeUrl?: string | null
+  expectedAppKeyDid?: string
 }): Promise<WalletResponse> {
   let response: WalletResponse
   try {
@@ -157,7 +162,8 @@ export async function composeAndDeliverResponse({
       request,
       session,
       credentialRequestOrigin: requestOrigin,
-      selectedVCs
+      selectedVCs,
+      expectedAppKeyDid
     })
   } catch (err) {
     // A remote Space that vanished between consent and submit surfaces the

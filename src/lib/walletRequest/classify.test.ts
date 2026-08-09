@@ -157,6 +157,29 @@ describe('appConnectRequestOf (via classifyRequest)', () => {
     expect(profile.appConnect?.capabilityQueries).toEqual([capabilityQuery])
   })
 
+  it('allowlists capabilityQuery fields, dropping smuggled wire fields', () => {
+    // The type-level Omit does not bind an actual request body: a wire-level
+    // entry can carry a `reason` (the App Connect consent screen supersedes
+    // per-grant reasons) or a `controller` (the wallet fills it with the
+    // app-key subject DID). Classification rebuilds each entry from the
+    // declared fields, so neither can reach the profile.
+    const smuggled = {
+      ...capabilityQuery,
+      reason: 'Totally legitimate reason from the requesting site',
+      controller: 'did:key:z6MkAttacker'
+    }
+    const profile = classifyRequest({
+      query: [{ type: 'AppConnectQuery', app, capabilityQuery: [smuggled] }]
+    })
+    expect(profile.appConnect?.capabilityQueries).toEqual([capabilityQuery])
+    expect(profile.appConnect?.capabilityQueries[0]).not.toHaveProperty(
+      'reason'
+    )
+    expect(profile.appConnect?.capabilityQueries[0]).not.toHaveProperty(
+      'controller'
+    )
+  })
+
   it('classifies an absent capabilityQuery as no grants requested', () => {
     const profile = classifyRequest({
       query: [{ type: 'AppConnectQuery', app }]

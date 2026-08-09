@@ -31,10 +31,10 @@ import type {
  * app-key subject DID, yielding the standard capability-query details that
  * `resolveGrants` / `processZcaps` operate on. Used with the real subject DID
  * at delegation time, and with a placeholder at consent-preview time (the
- * resolution itself never reads the controller). Also strips any `reason` the
- * wire-level request carries: the type-level Omit does not bind an actual
- * request body, and the App Connect consent screen supersedes per-grant
- * reason lines, so requester-supplied reason text must never reach it.
+ * resolution itself never reads the controller). The entries arrive already
+ * rebuilt from the classification-time allowlist (`appConnectRequestOf`), so
+ * no undeclared wire-level field (a smuggled `reason`, an attacker-chosen
+ * `controller`) can ride through here.
  *
  * @param options {object}
  * @param options.capabilityQueries {IAppConnectCapabilityQuery[]}
@@ -48,10 +48,7 @@ export function appConnectZcapRequests({
   capabilityQueries: IAppConnectCapabilityQuery[]
   controller: string
 }): ICapabilityQueryDetail[] {
-  return capabilityQueries.map(detail => {
-    const { reason: _reason, ...rest } = detail as ICapabilityQueryDetail
-    return { ...rest, controller }
-  })
+  return capabilityQueries.map(detail => ({ ...detail, controller }))
 }
 
 /**
@@ -75,6 +72,9 @@ export function appConnectZcapRequests({
  * @param [options.domain] {string}
  * @param options.didAuthRequested {boolean}
  * @param [options.cryptosuite] {string}
+ * @param [options.expectedSubjectDid] {string}   the app-key subject DID the
+ *   consent screen displayed; approval fails closed when the authoritative
+ *   re-match resolves a different DID
  * @returns {Promise<WalletResponse>}
  */
 export async function processAppConnect({
@@ -84,7 +84,8 @@ export async function processAppConnect({
   challenge,
   domain,
   didAuthRequested,
-  cryptosuite
+  cryptosuite,
+  expectedSubjectDid
 }: {
   appConnect: IAppConnectRequest
   session: Session
@@ -93,6 +94,7 @@ export async function processAppConnect({
   domain?: string
   didAuthRequested: boolean
   cryptosuite?: string
+  expectedSubjectDid?: string
 }): Promise<WalletResponse> {
   const { app, capabilityQueries } = appConnect
   const stored = await session.storage.listCredentials()
@@ -121,6 +123,17 @@ export async function processAppConnect({
     // the credential's content id). Through the mint path's own door --
     // `addCredential` refuses every marker credential, wallet-minted or not.
     await session.storage.addMintedAppKey({ credential, user: session.user })
+  }
+
+  // The consent screen displayed a recipient DID, so the delegation must go
+  // to exactly that identity. A divergence -- the matched credential deleted
+  // or superseded by a later-dated candidate between preview and approval --
+  // fails closed rather than silently delegating to a DID the user never saw.
+  if (expectedSubjectDid && subjectDid !== expectedSubjectDid) {
+    throw new Error(
+      'The app-key identity changed between consent and approval; ' +
+        'please retry connecting.'
+    )
   }
 
   const zcapRequests = appConnectZcapRequests({

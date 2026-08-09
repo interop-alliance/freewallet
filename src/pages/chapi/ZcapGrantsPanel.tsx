@@ -9,15 +9,19 @@
  * anyone on the web can read the collection (and, being plaintext, never a
  * ciphertext note); unsatisfiable grants render greyed with a "cannot
  * fulfill" note. Because the RP-supplied `reason` is attacker-controlled free
- * text, it renders under an explicit "the site says" attribution label,
- * line-clamped so it can neither read as wallet copy nor push the trusted
- * rows below the fold -- and the recipient DID is rendered separately with
- * its own label and a monospace style so it cannot be spoofed by the reason.
- * The recipient row renders on every path; App Connect marks it wallet-minted
- * (`walletMintedRecipient`), stating that the identity is created in this
- * user's wallet and unique to them -- on first run before the DID exists, the
- * marking stands alone. Display-only -- approval is the single Continue
- * button on the parent page.
+ * text, it renders through `SiteProvidedText` -- type-guarded, under an
+ * explicit "the site says" attribution label, and truncated textually as well
+ * as clamped, so it can neither read as wallet copy nor push the trusted rows
+ * below the fold (for a screen reader too) -- and the recipient DID is
+ * rendered separately with its own label and a monospace style so it cannot
+ * be spoofed by the reason. The recipient row renders whenever there is a
+ * recipient to show: a `controller` DID, or App Connect's wallet marking
+ * (`walletMintedRecipient`) -- on a returning visit the copy states custody
+ * ("stored in your wallet"), not provenance, since the app-key match
+ * authenticates internal consistency only; on first run, before the DID
+ * exists, the mint really is about to happen in this wallet and the copy says
+ * so. Display-only -- approval is the single Continue button on the parent
+ * page.
  *
  * A share grant (`https://w3id.org/byoe#shared-collection`) is the strongest thing this
  * panel can show and is rendered unmistakably differently: a heavier border
@@ -33,6 +37,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
 import type { ResolvedGrant } from '@/lib/walletRequest'
+import { SiteProvidedText } from './SiteProvidedText'
 
 /**
  * A human-readable label for a resolved grant's target. A collection target
@@ -82,8 +87,10 @@ export function ZcapGrantsPanel({
   ttlDays: number
   writeTtlDays: number
   shareTtlDays: number
-  // App Connect consent: the recipient identity is minted by the wallet for
-  // this user (or about to be, on first run), and the row says so.
+  // App Connect consent: the recipient identity lives in this user's wallet
+  // (matched from the credential store, or about to be minted on first run),
+  // and the row says so. The matched copy claims custody, not provenance --
+  // the match cannot prove who created the credential.
   walletMintedRecipient?: boolean
   // Overrides the default "Storage access" section heading (App Connect uses
   // app-centric phrasing).
@@ -115,41 +122,20 @@ export function ZcapGrantsPanel({
               opacity: satisfiable ? 1 : 0.6
             }}
           >
-            {descriptor.reason && (
-              <>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ display: 'block' }}
-                >
-                  {t('chapi.get.zcapReasonLabel')}
-                </Typography>
-                {/* Clamped: a maximally long reason must not push the
-                    trusted rows below it out of view. */}
-                <Typography
-                  variant="body2"
-                  sx={{
-                    mb: 0.5,
-                    fontStyle: 'italic',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 3,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden',
-                    overflowWrap: 'anywhere'
-                  }}
-                >
-                  {descriptor.reason}
-                </Typography>
-              </>
-            )}
+            <SiteProvidedText
+              text={descriptor.reason}
+              label={t('chapi.get.zcapReasonLabel')}
+            />
 
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ display: 'block', mb: 0.5 }}
-            >
-              {t('chapi.get.zcapRecipient')}
-            </Typography>
+            {(descriptor.controller || walletMintedRecipient) && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: 'block', mb: 0.5 }}
+              >
+                {t('chapi.get.zcapRecipient')}
+              </Typography>
+            )}
             {descriptor.controller && (
               <Typography
                 variant="caption"
@@ -171,7 +157,7 @@ export function ZcapGrantsPanel({
               >
                 {t(
                   descriptor.controller
-                    ? 'chapi.get.zcapRecipientWalletMinted'
+                    ? 'chapi.get.zcapRecipientWalletStored'
                     : 'chapi.get.zcapRecipientWalletMintedPending'
                 )}
               </Typography>

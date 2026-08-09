@@ -26,15 +26,28 @@
   hold within a single request: delegation tracks the collections the request
   itself provisions, so duplicate names in one consent approval cannot
   convert or escalate.
-- The App Connect consent screen strips request-supplied per-grant `reason`
-  text at runtime (the type-level omission alone did not bind actual request
-  bodies) and no longer hides the recipient-identity row: the row renders
-  marked as wallet-minted and unique to this user -- on first run, before the
-  app key exists, the marking stands alone.
-- Requester-supplied `reason` text on the consent screen now renders under an
-  explicit "The site says:" attribution label, italicized and line-clamped,
-  so it can neither read as wallet copy nor push the recipient row and the
-  grant warnings out of view.
+- App Connect capability queries are rebuilt from an allowlist of the
+  declared fields at classification time, so undeclared wire-level fields (a
+  smuggled per-grant `reason`, an attacker-chosen `controller`) never reach
+  the consent screen or the delegation path (the type-level omission alone
+  did not bind actual request bodies). The consent screen also no longer
+  hides the recipient-identity row: on first run the mint marking stands
+  alone, and the returning-visit copy states custody ("stored in your
+  wallet"), not provenance, which the app-key match cannot prove.
+- Requester-supplied free text on the consent screen -- per-grant `reason`
+  lines, the generic request's top-level reason, and the app-manifest
+  description -- now renders under an explicit "The site says:" attribution
+  label, italicized, line-clamped, and textually truncated (a CSS-only clamp
+  would leave the full text for a screen reader to read out ahead of the
+  trusted rows). A non-string wire `reason` renders nothing instead of
+  crashing the consent popup, and the requester-supplied app name is bounded
+  before it is interpolated into the consent copy.
+- An App Connect approval delegates to exactly the app-key DID the consent
+  screen displayed: the approve-time re-match fails closed when the matched
+  credential changed between preview and approval.
+- A capability request that names no `controller` resolves unsatisfiable
+  ("cannot fulfill") instead of rendering a recipient-less consent row and
+  delegating to nobody.
 
 ### Changed
 

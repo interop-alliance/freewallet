@@ -655,7 +655,7 @@
       "zcapPublicWarning": "This collection will be public: anyone on the web will be able to read it, without logging in.",
       "zcapRecipient": "Access granted to:",
       "zcapReasonLabel": "The site says:",
-      "zcapRecipientWalletMinted": "This identity was created by your wallet for this app; it is unique to you.",
+      "zcapRecipientWalletStored": "This identity is stored in your wallet for this app.",
       "zcapRecipientWalletMintedPending": "A new identity, unique to you, will be created in your wallet for this app.",
       "zcapWriteWarning": "This site will be able to add, change, or delete data in this collection.",
       "zcapReadOnlyNote": "Read-only",
