@@ -2,9 +2,11 @@
  * Unit tests for the store-time app-key refusal: `StorageManager.addCredential`
  * is the single door every credential coming from outside the wallet goes
  * through (the CHAPI store popup, the URL / QR / manual-paste import, the
- * credentials half of a space import), so a credential presenting as an app key
- * whose subject DID does not derive from its own seed must never land in the
- * store.
+ * credentials half of a space import), and it refuses every credential
+ * presenting as an app key -- whether or not it binds to its own seed, since a
+ * fully attacker-generated credential binds perfectly. Only the wallet's own
+ * mint path stores one, through its own door (`addMintedAppKey`), which in
+ * turn refuses anything that does not carry the mint invariants.
  *
  * The manager runs over a real BrowserStore on memory RxDB with real EDV
  * ciphers and no remote store, so a stored credential really round-trips
@@ -23,7 +25,11 @@ import { CapabilityAgent } from '@interop/webkms-client'
 import { createEdvDocCipher, type DocCipher } from '@interop/was-client/edv'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { User } from '@/types/auth'
-import { AppKeyRefusedError, mintAppKeyCredential } from '@/lib/appKey'
+import {
+  AppKeyMintInvariantError,
+  AppKeyRefusedError,
+  mintAppKeyCredential
+} from '@/lib/appKey'
 import { BrowserStore } from './browserStore'
 import { StorageManager } from './storageManager'
 
@@ -115,13 +121,33 @@ describe('StorageManager.addCredential app-key screening', () => {
     expect(await storage.listCredentials()).toEqual([])
   })
 
-  it('stores a genuine app key (the wallet mint path is unaffected)', async () => {
+  it('refuses an externally arriving app key even when it binds', async () => {
+    // The core attack shape: an attacker-generated credential with its OWN
+    // fresh seed binds perfectly, so binding cannot admit it -- the marker
+    // alone refuses, and only the mint path's door stores one.
     const { storage, user } = await makeStorage()
     const { credential } = await mintAppKeyCredential({ app, origin })
-    await storage.addCredential({ credential, user })
+    await expect(storage.addCredential({ credential, user })).rejects.toThrow(
+      AppKeyRefusedError
+    )
+    expect(await storage.listCredentials()).toEqual([])
+  })
+
+  it('stores a wallet-minted app key through addMintedAppKey', async () => {
+    const { storage, user } = await makeStorage()
+    const { credential } = await mintAppKeyCredential({ app, origin })
+    await storage.addMintedAppKey({ credential, user })
     const listed = await storage.listCredentials()
     expect(listed).toHaveLength(1)
     expect(listed[0].vc).toEqual(credential)
+  })
+
+  it('addMintedAppKey refuses a credential that does not bind', async () => {
+    const { storage, user } = await makeStorage()
+    await expect(
+      storage.addMintedAppKey({ credential: await plantedAppKey(), user })
+    ).rejects.toThrow(AppKeyMintInvariantError)
+    expect(await storage.listCredentials()).toEqual([])
   })
 
   it('stores an ordinary credential that merely carries seed / origin claims', async () => {

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
 import * as vc from '@interop/vc'
 import { securityLoader } from '@interop/security-document-loader'
@@ -7,6 +7,7 @@ import type { Session } from '@/types/auth'
 import type { ICapabilityQueryDetail, IZcap } from '@/lib/walletRequest'
 import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
 import {
+  existingCollectionsFrom,
   resolveInvocationTarget,
   resolveGrant,
   resolveGrants,
@@ -20,6 +21,13 @@ const documentLoader = securityLoader({ fetchRemoteContexts: true }).build()
 const SPACE_URL = 'https://was.example.com/space/L8qcqABC'
 const RP_DID = 'did:key:z6MkrRPexampleRelyingParty'
 const CHALLENGE = '99612b24-63d9-11ea-b99f-4f66f3e4f81a'
+
+// The existing-collections snapshot resolution consults; the empty default is
+// a Space where every named collection is new. `collectionListing` backs the
+// session stub's `listCollectionPublicStates`, so processZcaps tests can stage
+// existing collections per test.
+const NO_COLLECTIONS = existingCollectionsFrom([])
+let collectionListing: Array<{ id: string; isPublic?: boolean }> = []
 
 const collectionDetail: ICapabilityQueryDetail = {
   referenceId: 'example-app-data',
@@ -198,6 +206,9 @@ beforeAll(async () => {
   const storage = {
     hasRemoteStorage: true,
     spaceUrl: SPACE_URL,
+    async listCollectionPublicStates() {
+      return collectionListing
+    },
     async ensureCollection({
       id,
       isPublic
@@ -256,11 +267,18 @@ beforeAll(async () => {
   } as unknown as Session
 })
 
+beforeEach(() => {
+  // Default: a Space with no listed collections; tests that need existing
+  // collections stage their own listing.
+  collectionListing = []
+})
+
 describe('resolveInvocationTarget', () => {
   it('accepts a plain URL under the Space, verbatim', () => {
     const target = resolveInvocationTarget({
       descriptor: `${SPACE_URL}/example-app-data/doc1`,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(target).toMatchObject({
       satisfiable: true,
@@ -274,7 +292,8 @@ describe('resolveInvocationTarget', () => {
   it('treats an exact Space URL string as a whole-Space grant', () => {
     const target = resolveInvocationTarget({
       descriptor: SPACE_URL,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(target).toMatchObject({
       satisfiable: true,
@@ -287,7 +306,8 @@ describe('resolveInvocationTarget', () => {
   it('treats the Space URL with a trailing slash as a whole-Space grant', () => {
     const target = resolveInvocationTarget({
       descriptor: `${SPACE_URL}/`,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     // The trailing slash is normalized off the delegated target.
     expect(target).toMatchObject({
@@ -302,7 +322,8 @@ describe('resolveInvocationTarget', () => {
   it('refuses a foreign URL', () => {
     const target = resolveInvocationTarget({
       descriptor: 'https://someone-else.example/space/OTHER',
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(target.satisfiable).toBe(false)
     expect(target.targetClass).toBeUndefined()
@@ -322,7 +343,8 @@ describe('resolveInvocationTarget', () => {
     ]) {
       const target = resolveInvocationTarget({
         descriptor,
-        spaceUrl: SPACE_URL
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
       })
       expect(target.satisfiable).toBe(false)
       expect(target.targetClass).toBeUndefined()
@@ -337,7 +359,8 @@ describe('resolveInvocationTarget', () => {
     ]) {
       const target = resolveInvocationTarget({
         descriptor,
-        spaceUrl: SPACE_URL
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
       })
       expect(target.satisfiable).toBe(false)
       expect(target.targetClass).toBeUndefined()
@@ -353,7 +376,8 @@ describe('resolveInvocationTarget', () => {
     ]) {
       const target = resolveInvocationTarget({
         descriptor: `${SPACE_URL}/${segment}/doc1`,
-        spaceUrl: SPACE_URL
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
       })
       expect(target.satisfiable).toBe(false)
       expect(target.targetClass).toBeUndefined()
@@ -369,7 +393,8 @@ describe('resolveInvocationTarget', () => {
     ]) {
       const target = resolveInvocationTarget({
         descriptor: `${origin}${space.pathname}/example-app-data`,
-        spaceUrl: SPACE_URL
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
       })
       expect(target.satisfiable).toBe(false)
       expect(target.targetClass).toBeUndefined()
@@ -379,11 +404,13 @@ describe('resolveInvocationTarget', () => {
   it('normalizes a trailing slash off a collection URL', () => {
     const withSlash = resolveInvocationTarget({
       descriptor: `${SPACE_URL}/example-app-data/`,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     const without = resolveInvocationTarget({
       descriptor: `${SPACE_URL}/example-app-data`,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(withSlash).toMatchObject({
       satisfiable: true,
@@ -397,7 +424,11 @@ describe('resolveInvocationTarget', () => {
   it('classifies a deep resource URL under a protected collection', () => {
     const url = `${SPACE_URL}/private-credentials/sub/path/resource-1`
     expect(
-      resolveInvocationTarget({ descriptor: url, spaceUrl: SPACE_URL })
+      resolveInvocationTarget({
+        descriptor: url,
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
+      })
     ).toMatchObject({
       satisfiable: true,
       invocationTarget: url,
@@ -414,7 +445,8 @@ describe('resolveInvocationTarget', () => {
         type: 'https://w3id.org/byoe#collection',
         name: 'example-app-data'
       },
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(target).toMatchObject({
       satisfiable: true,
@@ -432,7 +464,8 @@ describe('resolveInvocationTarget', () => {
         type: 'https://w3id.org/byoe#collection',
         name: 'public-credentials'
       },
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(target).toMatchObject({
       needsProvisioning: false,
@@ -447,7 +480,8 @@ describe('resolveInvocationTarget', () => {
         type: 'https://w3id.org/byoe#collection',
         name: 'private-credentials'
       },
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(target).toMatchObject({
       needsProvisioning: false,
@@ -461,7 +495,8 @@ describe('resolveInvocationTarget', () => {
       expect(
         resolveInvocationTarget({
           descriptor: { type: 'https://w3id.org/byoe#collection', name },
-          spaceUrl: SPACE_URL
+          spaceUrl: SPACE_URL,
+          collections: NO_COLLECTIONS
         })
       ).toMatchObject({
         satisfiable: true,
@@ -479,7 +514,8 @@ describe('resolveInvocationTarget', () => {
           type: 'https://w3id.org/byoe#collection',
           name: 'Bad_Name!'
         },
-        spaceUrl: SPACE_URL
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
       }).satisfiable
     ).toBe(false)
   })
@@ -488,7 +524,8 @@ describe('resolveInvocationTarget', () => {
     expect(
       resolveInvocationTarget({
         descriptor: { type: 'https://w3id.org/byoe#space' },
-        spaceUrl: SPACE_URL
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
       })
     ).toMatchObject({
       satisfiable: true,
@@ -501,7 +538,8 @@ describe('resolveInvocationTarget', () => {
   it('refuses an unknown descriptor type', () => {
     const target = resolveInvocationTarget({
       descriptor: { type: 'https://w3id.org/byoe#unknown' },
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(target.satisfiable).toBe(false)
     expect(target.targetClass).toBeUndefined()
@@ -513,7 +551,8 @@ describe('resolveInvocationTarget', () => {
         type: 'https://w3id.org/byoe#public-collection',
         name: 'example-app-public'
       },
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(target).toMatchObject({
       satisfiable: true,
@@ -532,13 +571,18 @@ describe('resolveInvocationTarget', () => {
       { type: 'https://w3id.org/byoe#space' }
     ]) {
       expect(
-        resolveInvocationTarget({ descriptor, spaceUrl: SPACE_URL }).isPublic
+        resolveInvocationTarget({
+          descriptor,
+          spaceUrl: SPACE_URL,
+          collections: NO_COLLECTIONS
+        }).isPublic
       ).toBe(false)
     }
     expect(
       resolveInvocationTarget({
         descriptor: `${SPACE_URL}/example-app-data`,
-        spaceUrl: SPACE_URL
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
       }).isPublic
     ).toBe(false)
   })
@@ -554,7 +598,8 @@ describe('resolveInvocationTarget', () => {
       expect(
         resolveInvocationTarget({
           descriptor: { type: 'https://w3id.org/byoe#public-collection', name },
-          spaceUrl: SPACE_URL
+          spaceUrl: SPACE_URL,
+          collections: NO_COLLECTIONS
         }).satisfiable
       ).toBe(false)
     }
@@ -566,7 +611,8 @@ describe('resolveInvocationTarget', () => {
         type: 'https://w3id.org/byoe#shared-collection',
         name: 'private-credentials'
       },
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(target).toMatchObject({
       satisfiable: true,
@@ -587,7 +633,8 @@ describe('resolveInvocationTarget', () => {
       expect(
         resolveInvocationTarget({
           descriptor: { type: 'https://w3id.org/byoe#shared-collection', name },
-          spaceUrl: SPACE_URL
+          spaceUrl: SPACE_URL,
+          collections: NO_COLLECTIONS
         })
       ).toMatchObject({ satisfiable: true, isShare: true, encrypted: true })
     }
@@ -607,7 +654,8 @@ describe('resolveInvocationTarget', () => {
       expect(
         resolveInvocationTarget({
           descriptor: { type: 'https://w3id.org/byoe#shared-collection', name },
-          spaceUrl: SPACE_URL
+          spaceUrl: SPACE_URL,
+          collections: NO_COLLECTIONS
         }).satisfiable
       ).toBe(false)
     }
@@ -623,13 +671,18 @@ describe('resolveInvocationTarget', () => {
       { type: 'https://w3id.org/byoe#space' }
     ]) {
       expect(
-        resolveInvocationTarget({ descriptor, spaceUrl: SPACE_URL }).isShare
+        resolveInvocationTarget({
+          descriptor,
+          spaceUrl: SPACE_URL,
+          collections: NO_COLLECTIONS
+        }).isShare
       ).toBe(false)
     }
     expect(
       resolveInvocationTarget({
         descriptor: `${SPACE_URL}/private-credentials`,
-        spaceUrl: SPACE_URL
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
       }).isShare
     ).toBe(false)
   })
@@ -641,15 +694,128 @@ describe('resolveInvocationTarget', () => {
           type: 'https://w3id.org/byoe#public-collection',
           name: 'Bad_Name!'
         },
-        spaceUrl: SPACE_URL
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
       }).satisfiable
     ).toBe(false)
     expect(
       resolveInvocationTarget({
         descriptor: { type: 'https://w3id.org/byoe#public-collection' },
-        spaceUrl: SPACE_URL
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
       }).satisfiable
     ).toBe(false)
+  })
+})
+
+describe('existing-collection state (create-only public collections)', () => {
+  // A Space that already holds one private RP collection (which stands in for
+  // any existing non-public collection, an encrypted App Connect one
+  // included -- only the public state matters) and one public collection.
+  const EXISTING = existingCollectionsFrom([
+    { id: 'example-app-data', isPublic: false },
+    { id: 'example-app-public', isPublic: true }
+  ])
+
+  it('refuses a public grant that would convert an existing collection', () => {
+    // A second app naming another app's existing (possibly encrypted)
+    // collection in a public-collection entry must not be able to flip it
+    // world-readable after one consent approval.
+    const target = resolveInvocationTarget({
+      descriptor: {
+        type: 'https://w3id.org/byoe#public-collection',
+        name: 'example-app-data'
+      },
+      spaceUrl: SPACE_URL,
+      collections: EXISTING
+    })
+    expect(target.satisfiable).toBe(false)
+    expect(target.targetClass).toBeUndefined()
+  })
+
+  it('keeps the re-grant on an already-public collection satisfiable', () => {
+    const target = resolveInvocationTarget({
+      descriptor: {
+        type: 'https://w3id.org/byoe#public-collection',
+        name: 'example-app-public'
+      },
+      spaceUrl: SPACE_URL,
+      collections: EXISTING
+    })
+    // Satisfiable, but with nothing to provision: the policy is never
+    // re-applied to an existing collection.
+    expect(target).toMatchObject({
+      satisfiable: true,
+      needsProvisioning: false,
+      collectionId: 'example-app-public',
+      isPublic: true,
+      targetClass: 'public-collection'
+    })
+  })
+
+  it('caps a string target naming a public collection add-only', () => {
+    for (const invocationTarget of [
+      `${SPACE_URL}/example-app-public`,
+      `${SPACE_URL}/example-app-public/some-resource`
+    ]) {
+      const grant = resolveGrant({
+        descriptor: {
+          controller: RP_DID,
+          allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+          invocationTarget
+        },
+        spaceUrl: SPACE_URL,
+        collections: EXISTING
+      })
+      expect(grant.target.targetClass).toBe('public-collection')
+      expect(grant.target.isPublic).toBe(true)
+      expect(grant.allowedActions).toEqual(['GET', 'HEAD', 'POST'])
+    }
+  })
+
+  it('caps a plain collection descriptor naming a public collection too', () => {
+    // Ceiling parity holds for every spelling of the target, so asking via
+    // `#collection` cannot recover the full RP-collection vocabulary either.
+    const grant = resolveGrant({
+      descriptor: {
+        controller: RP_DID,
+        allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+        invocationTarget: {
+          type: 'https://w3id.org/byoe#collection',
+          name: 'example-app-public'
+        }
+      },
+      spaceUrl: SPACE_URL,
+      collections: EXISTING
+    })
+    expect(grant.target.targetClass).toBe('public-collection')
+    expect(grant.target.isPublic).toBe(true)
+    // Nothing to provision either: the `#collection` spelling of an existing
+    // public collection is the idempotent public re-grant, so the public
+    // policy is never re-applied and no recipient roster is ever set up on a
+    // world-readable collection.
+    expect(grant.target.needsProvisioning).toBe(false)
+    expect(grant.allowedActions).toEqual(['GET', 'HEAD', 'POST'])
+  })
+
+  it('keeps the full ceiling on an existing private RP collection', () => {
+    const grant = resolveGrant({
+      descriptor: {
+        controller: RP_DID,
+        allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+        invocationTarget: `${SPACE_URL}/example-app-data`
+      },
+      spaceUrl: SPACE_URL,
+      collections: EXISTING
+    })
+    expect(grant.target.targetClass).toBe('collection')
+    expect(grant.allowedActions).toEqual([
+      'GET',
+      'HEAD',
+      'POST',
+      'PUT',
+      'DELETE'
+    ])
   })
 })
 
@@ -663,20 +829,26 @@ describe('resolveGrant action handling', () => {
           name: 'app-data'
         }
       },
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
   })
 
   it('strips whole-Space grants to read-only', () => {
-    const grant = resolveGrant({ descriptor: spaceDetail, spaceUrl: SPACE_URL })
+    const grant = resolveGrant({
+      descriptor: spaceDetail,
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
+    })
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
   })
 
   it('passes through explicit RP-collection actions and flags write', () => {
     const grant = resolveGrant({
       descriptor: collectionDetail,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     // Emitted in ceiling order, not in the order the request asked in.
     expect(grant.allowedActions).toEqual([
@@ -692,7 +864,8 @@ describe('resolveGrant action handling', () => {
   it('caps a standard-collection write to read-only (descriptor form)', () => {
     const grant = resolveGrant({
       descriptor: standardCollectionDetail,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
     expect(grant.write).toBe(false)
@@ -701,7 +874,8 @@ describe('resolveGrant action handling', () => {
   it('caps a standard-collection write to read-only (string URL form)', () => {
     const grant = resolveGrant({
       descriptor: standardCollectionUrlDetail,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.target.collectionId).toBe('private-credentials')
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
@@ -711,7 +885,8 @@ describe('resolveGrant action handling', () => {
   it('caps a write to a resource inside a standard collection (string URL)', () => {
     const grant = resolveGrant({
       descriptor: standardResourceUrlDetail,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.target.collectionId).toBe('private-credentials')
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
@@ -721,7 +896,8 @@ describe('resolveGrant action handling', () => {
   it('caps an id-collection write to read-only (descriptor form)', () => {
     const grant = resolveGrant({
       descriptor: idCollectionDetail,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.target.collectionId).toBe('id')
     // Provisioned at login, like the standard collections.
@@ -733,7 +909,8 @@ describe('resolveGrant action handling', () => {
   it('caps a key-map-collection write to read-only (descriptor form)', () => {
     const grant = resolveGrant({
       descriptor: keyMapCollectionDetail,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.target.collectionId).toBe('key-map')
     // Provisioned at login, like the standard and `id` collections.
@@ -749,7 +926,8 @@ describe('resolveGrant action handling', () => {
     // an empty `allowedAction` array means "every action" in the zcap model.
     const grant = resolveGrant({
       descriptor: didDocumentUrlDetail,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.target.satisfiable).toBe(false)
     expect(grant.allowedActions).toEqual([])
@@ -757,7 +935,11 @@ describe('resolveGrant action handling', () => {
   })
 
   it('marks a read-only grant as not a write', () => {
-    const grant = resolveGrant({ descriptor: spaceDetail, spaceUrl: SPACE_URL })
+    const grant = resolveGrant({
+      descriptor: spaceDetail,
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
+    })
     expect(grant.write).toBe(false)
   })
 
@@ -767,7 +949,8 @@ describe('resolveGrant action handling', () => {
     // RP may add to what it published, never rewrite or retract it.
     const grant = resolveGrant({
       descriptor: publicCollectionDetail,
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.target.isPublic).toBe(true)
     expect(grant.allowedActions).toEqual(['GET', 'HEAD', 'POST'])
@@ -799,7 +982,8 @@ describe('resolveGrant action vocabulary', () => {
   it('accepts a single (non-array) action string', () => {
     const grant = resolveGrant({
       descriptor: rpQuery('PUT'),
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.allowedActions).toEqual(['PUT'])
     expect(grant.write).toBe(true)
@@ -819,7 +1003,8 @@ describe('resolveGrant action vocabulary', () => {
         { action: 'DELETE' },
         ['POST'] as unknown as string
       ]),
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.allowedActions).toEqual(['GET', 'PUT'])
     expect(grant.write).toBe(true)
@@ -830,7 +1015,8 @@ describe('resolveGrant action vocabulary', () => {
     // a request that asks only for tokens outside the vocabulary is refused.
     const grant = resolveGrant({
       descriptor: rpQuery(['FROBNICATE', 'PATCH']),
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.target.satisfiable).toBe(false)
     expect(grant.target.invocationTarget).toBeUndefined()
@@ -845,14 +1031,19 @@ describe('resolveGrant action vocabulary', () => {
         allowedAction: ['PUT', 'DELETE'],
         invocationTarget: { type: 'https://w3id.org/byoe#space' }
       },
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.target.satisfiable).toBe(false)
     expect(grant.allowedActions).toEqual([])
   })
 
   it('makes an empty action array unsatisfiable rather than grant-all', () => {
-    const grant = resolveGrant({ descriptor: rpQuery([]), spaceUrl: SPACE_URL })
+    const grant = resolveGrant({
+      descriptor: rpQuery([]),
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
+    })
     expect(grant.target.satisfiable).toBe(false)
     expect(grant.allowedActions).toEqual([])
   })
@@ -869,7 +1060,8 @@ describe('resolveGrant action vocabulary', () => {
         rpQuery(['PATCH']),
         rpQuery([])
       ],
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     for (const grant of grants) {
       if (grant.target.satisfiable) {
@@ -1080,6 +1272,163 @@ describe('processZcaps', () => {
     expect(ensureCalls).toEqual([])
   })
 
+  it('skips a public grant that would convert an existing collection', async () => {
+    // The listed collection stands in for another app's existing encrypted
+    // collection: only its non-public state matters. Nothing is delegated and
+    // nothing is provisioned, so the PublicCanRead policy is never applied.
+    collectionListing = [{ id: 'example-app-data', isPublic: false }]
+    delegated.length = 0
+    ensureCalls.length = 0
+    provisionCalls.length = 0
+    const zcaps = await processZcaps({
+      zcapRequests: [
+        {
+          referenceId: 'convert-attempt',
+          allowedAction: ['GET', 'HEAD', 'POST'],
+          controller: RP_DID,
+          invocationTarget: {
+            type: 'https://w3id.org/byoe#public-collection',
+            name: 'example-app-data'
+          }
+        }
+      ],
+      session,
+      appProvisioning: true
+    })
+    expect(zcaps).toHaveLength(0)
+    expect(ensureCalls).toEqual([])
+    expect(provisionCalls).toEqual([])
+  })
+
+  it('re-grants an already-public collection without re-provisioning', async () => {
+    collectionListing = [{ id: 'example-app-public', isPublic: true }]
+    delegated.length = 0
+    ensureCalls.length = 0
+    const zcaps = await processZcaps({
+      zcapRequests: [publicCollectionDetail],
+      session
+    })
+    // The delegation lands (idempotent re-grant), but the existing collection
+    // is neither reconfigured nor has its policy re-set.
+    expect(zcaps).toHaveLength(1)
+    expect(ensureCalls).toEqual([])
+    expect(
+      (zcaps[0] as unknown as { allowedAction: string[] }).allowedAction
+    ).toEqual(['GET', 'HEAD', 'POST'])
+  })
+
+  it('caps a string-target grant on an existing public collection add-only', async () => {
+    collectionListing = [{ id: 'example-app-public', isPublic: true }]
+    delegated.length = 0
+    ensureCalls.length = 0
+    const zcaps = await processZcaps({
+      zcapRequests: [
+        {
+          referenceId: 'public-by-url',
+          allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+          controller: RP_DID,
+          invocationTarget: `${SPACE_URL}/example-app-public`
+        }
+      ],
+      session
+    })
+    expect(zcaps).toHaveLength(1)
+    expect(
+      (zcaps[0] as unknown as { allowedAction: string[] }).allowedAction
+    ).toEqual(['GET', 'HEAD', 'POST'])
+  })
+
+  it('never re-provisions a #collection grant naming an existing public collection', async () => {
+    collectionListing = [{ id: 'example-app-public', isPublic: true }]
+    delegated.length = 0
+    ensureCalls.length = 0
+    provisionCalls.length = 0
+    const zcaps = await processZcaps({
+      zcapRequests: [
+        {
+          referenceId: 'collection-spelling',
+          allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+          controller: granteeDid,
+          invocationTarget: {
+            type: 'https://w3id.org/byoe#collection',
+            name: 'example-app-public'
+          }
+        }
+      ],
+      session,
+      appProvisioning: true
+    })
+    // The `#collection` spelling of an existing public collection is the
+    // idempotent public re-grant: add-only, nothing provisioned -- so the
+    // public policy is not re-applied, and on App Connect no recipient
+    // roster is set up on a world-readable plaintext collection.
+    expect(zcaps).toHaveLength(1)
+    expect(ensureCalls).toEqual([])
+    expect(provisionCalls).toEqual([])
+    expect(
+      (zcaps[0] as unknown as { allowedAction: string[] }).allowedAction
+    ).toEqual(['GET', 'HEAD', 'POST'])
+  })
+
+  it('refuses a same-request public grant on a just-provisioned private collection', async () => {
+    // One request, two descriptors naming the same collection: the first
+    // provisions it private (on App Connect: encrypted, multi-recipient), the
+    // second asks for it public. The snapshot records the in-request
+    // provisioning, so the create-only rule sees an existing non-public
+    // collection and refuses -- one consent approval must not flip the
+    // just-created encrypted collection world-readable.
+    delegated.length = 0
+    ensureCalls.length = 0
+    provisionCalls.length = 0
+    const zcaps = await processZcaps({
+      zcapRequests: [
+        { ...collectionDetail, controller: granteeDid },
+        {
+          referenceId: 'convert-within-request',
+          allowedAction: ['GET', 'HEAD', 'POST'],
+          controller: granteeDid,
+          invocationTarget: {
+            type: 'https://w3id.org/byoe#public-collection',
+            name: 'example-app-data'
+          }
+        }
+      ],
+      session,
+      appProvisioning: true
+    })
+    expect(zcaps).toHaveLength(1)
+    expect(provisionCalls).toHaveLength(1)
+    expect(provisionCalls[0].collectionId).toBe('example-app-data')
+    // The public grant was skipped outright: setPublic never runs.
+    expect(ensureCalls).toEqual([])
+  })
+
+  it('caps a same-request string target on a just-provisioned public collection', async () => {
+    // The mirror order: the first descriptor provisions a public collection,
+    // the second reaches the same collection as a plain URL asking for the
+    // full vocabulary. The live snapshot classes it public-collection, so
+    // PUT/DELETE are dropped rather than granted on a world-readable target.
+    delegated.length = 0
+    ensureCalls.length = 0
+    const zcaps = await processZcaps({
+      zcapRequests: [
+        publicCollectionDetail,
+        {
+          referenceId: 'public-by-url-within-request',
+          allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+          controller: RP_DID,
+          invocationTarget: `${SPACE_URL}/example-app-public`
+        }
+      ],
+      session
+    })
+    expect(zcaps).toHaveLength(2)
+    expect(ensureCalls).toEqual([{ id: 'example-app-public', isPublic: true }])
+    expect(
+      (zcaps[1] as unknown as { allowedAction: string[] }).allowedAction
+    ).toEqual(['GET', 'HEAD', 'POST'])
+  })
+
   it('routes a share grant to shareCollection, not the delegation loop', async () => {
     delegated.length = 0
     shareCalls.length = 0
@@ -1127,9 +1476,13 @@ describe('processZcaps', () => {
     const descriptor = { ...shareDetail, controller: 'did:web:app.example' }
     // Unsatisfiable at resolution time, so consent shows "cannot fulfill" and
     // delegation skips it rather than deriving a key from a DID it cannot.
-    expect(resolveGrant({ descriptor, spaceUrl: SPACE_URL }).target).toEqual(
-      expect.objectContaining({ satisfiable: false })
-    )
+    expect(
+      resolveGrant({
+        descriptor,
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
+      }).target
+    ).toEqual(expect.objectContaining({ satisfiable: false }))
     const zcaps = await processZcaps({ zcapRequests: [descriptor], session })
     expect(zcaps).toHaveLength(0)
     expect(shareCalls).toHaveLength(0)
@@ -1140,9 +1493,13 @@ describe('processZcaps', () => {
     // Right prefix, undecodable body: caught at resolution (so consent shows
     // "cannot fulfill") rather than throwing part-way through the response.
     const descriptor = { ...shareDetail, controller: 'did:key:z6MkZZZZ' }
-    expect(resolveGrant({ descriptor, spaceUrl: SPACE_URL }).target).toEqual(
-      expect.objectContaining({ satisfiable: false })
-    )
+    expect(
+      resolveGrant({
+        descriptor,
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
+      }).target
+    ).toEqual(expect.objectContaining({ satisfiable: false }))
     const zcaps = await processZcaps({ zcapRequests: [descriptor], session })
     expect(zcaps).toHaveLength(0)
     expect(shareCalls).toHaveLength(0)
@@ -1155,7 +1512,8 @@ describe('processZcaps', () => {
         ...shareDetail,
         allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE']
       },
-      spaceUrl: SPACE_URL
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
     })
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
     expect(grant.write).toBe(false)

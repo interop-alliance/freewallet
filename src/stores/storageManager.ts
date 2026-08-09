@@ -53,7 +53,7 @@ import {
   WALLET_STANDARD_COLLECTIONS,
   WAS_SERVER_URL
 } from '@/app.config'
-import { assertStorableAppKey } from '@/lib/appKey'
+import { assertMintedAppKey, assertStorableAppKey } from '@/lib/appKey'
 import { getOrCreateWriterId } from '@/lib/writerId'
 import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
 import {
@@ -722,10 +722,17 @@ export class StorageManager {
    * This is the single door every credential coming from outside the wallet
    * goes through (the CHAPI store popup, the URL / QR / manual-paste import,
    * and the credentials half of a space import), so it is where a credential
-   * presenting as an app key is screened: one that does not bind its subject
-   * DID to the seed it carries is refused rather than stored and later
-   * ignored. The wallet's own mint path stores through here too and passes,
-   * since a freshly minted app key binds by construction.
+   * presenting as an app key is refused outright, whether or not it binds to
+   * its own seed: app keys are wallet-minted, never imported, and the mint
+   * path has its own door ({@link addMintedAppKey}). The background sync pull
+   * (`src/lib/sync/`) writes pulled rows into the local replica without
+   * passing through here, deliberately: it replicates the account's own
+   * remote collections, which only the account's enrolled wallet clients can
+   * write (`private-credentials` is a protected collection -- RP and share
+   * grants on it are read-only), and each of those clients enforces this same
+   * refusal at its own door; the pulled bodies are also EDV envelopes the
+   * sync layer could not inspect. The match-time seed binding and skew cutoff
+   * in `appKey.ts` remain the backstop for anything that slips past.
    *
    * @param options {object}
    * @param options.credential {IVerifiableCredential}
@@ -739,7 +746,53 @@ export class StorageManager {
     credential: IVerifiableCredential
     user: User
   }) {
-    await assertStorableAppKey(credential)
+    assertStorableAppKey(credential)
+    await this.#putCredential({ credential, user })
+  }
+
+  /**
+   * The mint path's own store door: saves an app-key credential the wallet
+   * itself just minted (`processAppConnect`), which {@link addCredential}
+   * would refuse -- external ingest never stores a marker credential, so the
+   * one legitimate producer gets its own entry point instead of a bypass flag
+   * on the shared one. Still asserts the mint invariants (`assertMintedAppKey`
+   * in `src/lib/appKey.ts`: marker present, subject DID derived from the
+   * carried seed) so this door cannot be misused to store a foreign app key
+   * either.
+   *
+   * @param options {object}
+   * @param options.credential {IVerifiableCredential}
+   * @param options.user {User}   recorded as the history entry's actor
+   * @returns {Promise<void>}
+   */
+  async addMintedAppKey({
+    credential,
+    user
+  }: {
+    credential: IVerifiableCredential
+    user: User
+  }) {
+    await assertMintedAppKey(credential)
+    await this.#putCredential({ credential, user })
+  }
+
+  /**
+   * The shared store step behind {@link addCredential} and
+   * {@link addMintedAppKey}: content-cid derivation, the idempotent insert,
+   * and the best-effort Create history entry.
+   *
+   * @param options {object}
+   * @param options.credential {IVerifiableCredential}
+   * @param options.user {User}
+   * @returns {Promise<void>}
+   */
+  async #putCredential({
+    credential,
+    user
+  }: {
+    credential: IVerifiableCredential
+    user: User
+  }) {
     // The credential's content cid is its page-facing identity (idempotence,
     // routes, history); the backend encrypts the VC into an EDV envelope keyed
     // by a content-derived envelope-hash id.
@@ -904,6 +957,22 @@ export class StorageManager {
       return []
     }
     return await this.#remoteStore.listCollections()
+  }
+
+  /**
+   * Lean collection listing for grant resolution (the ids and their public
+   * state, no per-collection description reads). Empty without a remote
+   * store, like {@link listCollections}.
+   *
+   * @returns {Promise<Array<{ id: string, isPublic: boolean }>>}
+   */
+  async listCollectionPublicStates(): Promise<
+    Array<{ id: string; isPublic: boolean }>
+  > {
+    if (!this.#remoteStore) {
+      return []
+    }
+    return await this.#remoteStore.listCollectionPublicStates()
   }
 
   async listCollectionResources({

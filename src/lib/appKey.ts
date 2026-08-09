@@ -71,8 +71,12 @@ const VC_1_CONTEXT_URL = 'https://www.w3.org/2018/credentials/v1'
  *
  * It is a self-declaration, not evidence: the `type` array of a planted
  * credential is attacker-controlled like the rest of it. The marker makes the
- * rule precise; the seed-to-subject binding ({@link appKeySeedBindsSubject})
- * remains the only thing that authenticates.
+ * rule precise -- and the seed-to-subject binding
+ * ({@link appKeySeedBindsSubject}) authenticates only a credential's internal
+ * consistency, never its provenance (a fully attacker-generated credential
+ * binds perfectly). That is exactly why external ingest refuses on the marker
+ * alone, binding or not ({@link assertStorableAppKey}): app keys are
+ * wallet-minted, never imported.
  */
 export const APP_KEY_CREDENTIAL_TYPE = 'AppKeyCredential'
 
@@ -134,41 +138,43 @@ export function presentsAsAppKey(credential: IVerifiableCredential): boolean {
 
 /**
  * The refusal a store path raises for a credential that presents as an app key
- * without binding to its own seed. A distinct class so the UI can show its own
- * translated wording rather than this message.
+ * but arrived from outside the wallet's own mint path. A distinct class so the
+ * UI can show its own translated wording rather than this message.
  */
 export class AppKeyRefusedError extends Error {
   constructor() {
     super(
-      'This credential claims to be an app key, but its key does not match ' +
-        'its identifier. It was not stored.'
+      'This credential claims to be an app key. App keys are created by the ' +
+        'wallet itself and cannot be added from outside, so it was not stored.'
     )
     this.name = 'AppKeyRefusedError'
   }
 }
 
 /**
- * Refuses a credential that presents as an app key but whose subject DID does
- * not derive from the seed it itself carries. Called on every path that puts a
+ * Refuses any credential that presents as an app key, unconditionally --
+ * whether or not it binds to its own seed. Called on every path that puts a
  * credential in the store from outside the wallet (the CHAPI store popup, the
- * URL / QR / manual-paste import), so a planted app key never reaches the
- * store, the dashboard, or the user's Space -- rather than being stored and
- * then quietly ignored at match time.
+ * URL / QR / manual-paste import), so an externally arriving app key never
+ * reaches the store, the dashboard, or the user's Space.
+ *
+ * The seed-to-subject binding ({@link appKeySeedBindsSubject}) authenticates
+ * only the credential's internal consistency, not its provenance: a fully
+ * attacker-generated credential binds perfectly (a fresh seed, the victim
+ * app's `origin` and `credentialType`, self-issued), and storing it would make
+ * its DID the controller the wallet delegates the user's storage to. So there
+ * is no "binds, so it stores" carve-out here: app-key credentials are
+ * wallet-minted, never imported, and only the wallet's own mint path
+ * (`StorageManager.addMintedAppKey`) may store one.
  *
  * A credential with no marker is left alone, so an ordinary credential that
- * merely happens to carry a `seed` or `origin` claim is never caught; a
- * genuine app key handed over legitimately still stores, because it binds.
+ * merely happens to carry a `seed` or `origin` claim is never caught.
  *
  * @param credential {IVerifiableCredential}
- * @returns {Promise<void>}   rejects with the refusal reason
+ * @returns {void}   throws the refusal reason
  */
-export async function assertStorableAppKey(
-  credential: IVerifiableCredential
-): Promise<void> {
-  if (!presentsAsAppKey(credential)) {
-    return
-  }
-  if (!(await appKeySeedBindsSubject(credential))) {
+export function assertStorableAppKey(credential: IVerifiableCredential): void {
+  if (presentsAsAppKey(credential)) {
     throw new AppKeyRefusedError()
   }
 }
@@ -202,6 +208,47 @@ export async function appKeySeedBindsSubject(
     return agent.id === subjectDid
   } catch {
     return false
+  }
+}
+
+/**
+ * Raised by {@link assertMintedAppKey} when a credential offered to the mint
+ * path's store door (`StorageManager.addMintedAppKey`) does not carry the
+ * mint invariants. Reaching it means a caller tried to route a foreign
+ * credential through the wallet's own mint door -- a programming error, not a
+ * user-facing refusal, so it is not translated like
+ * {@link AppKeyRefusedError}.
+ */
+export class AppKeyMintInvariantError extends Error {
+  constructor() {
+    super(
+      'Only a wallet-minted app-key credential (marker type present, subject ' +
+        'DID derived from its own seed) can be stored through the mint path.'
+    )
+    this.name = 'AppKeyMintInvariantError'
+  }
+}
+
+/**
+ * Asserts the mint invariants on a credential the wallet claims to have just
+ * minted: it presents as an app key (the marker type) and its subject DID
+ * re-derives from the seed it carries. The mirror image of
+ * {@link assertStorableAppKey} -- external ingest refuses every marker
+ * credential, the mint door stores only credentials that carry the full mint
+ * shape -- kept beside it so the two halves of the app-key store policy live
+ * in one module.
+ *
+ * @param credential {IVerifiableCredential}
+ * @returns {Promise<void>}   throws {@link AppKeyMintInvariantError}
+ */
+export async function assertMintedAppKey(
+  credential: IVerifiableCredential
+): Promise<void> {
+  if (
+    !presentsAsAppKey(credential) ||
+    !(await appKeySeedBindsSubject(credential))
+  ) {
+    throw new AppKeyMintInvariantError()
   }
 }
 
@@ -245,9 +292,56 @@ export async function appKeyCredentialsIn({
 }
 
 /**
+ * How far past "now" a candidate's `issuanceDate` may sit before it is
+ * excluded from matching. Generous on purpose: the wallet stamps mint time,
+ * so the only legitimate way a stored app key is future-dated is clock skew
+ * between two of the user's own clients, and excluding a genuine key would
+ * mint a duplicate whose seed cannot open the app's existing data. A whole
+ * day covers any clock a working TLS stack tolerates, while still cutting
+ * off the far-future `issuanceDate` a planted credential uses to win the
+ * latest-first ranking durably.
+ */
+const ISSUANCE_SKEW_GRACE_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Whether a credential states an `issuanceDate` the latest-first ranking can
+ * trust: a string that parses to a real timestamp no further in the future
+ * than the clock-skew grace. Candidates are ranked on a date the credential
+ * itself states, so without this cutoff a planted credential dated 2099 would
+ * outrank every key the wallet ever mints. Store-time refusal
+ * ({@link assertStorableAppKey}) is the primary door; this is the match-time
+ * backstop for a credential that reached the store some other way (stored
+ * before the refusal existed, or injected into the Space directly).
+ *
+ * Fails CLOSED on an absent, non-string, or unparseable date: the ranking
+ * compares raw strings, so a value `Date.parse` cannot make sense of
+ * ('9999-99-99...', 'z2099') would still sort ahead of every real ISO date --
+ * exactly the durable-win slot a planted credential wants -- and a non-string
+ * would throw inside the sort. The wallet's own mint path always stamps a
+ * parseable ISO date (`vc.issue` auto-fills it), so nothing legitimate is
+ * dropped.
+ *
+ * @param credential {IVerifiableCredential}
+ * @returns {boolean}
+ */
+function issuedWithinSkewGrace(credential: IVerifiableCredential): boolean {
+  const raw = (credential as { issuanceDate?: unknown }).issuanceDate
+  if (typeof raw !== 'string') {
+    return false
+  }
+  const issued = Date.parse(raw)
+  return (
+    Number.isFinite(issued) && issued <= Date.now() + ISSUANCE_SKEW_GRACE_MS
+  )
+}
+
+/**
  * The app-key candidates for an app + origin, latest-first: everything the
  * cheap, synchronous predicates accept, so only plausible candidates pay for a
- * key derivation. Sorting here (rather than after the binding check) lets
+ * key derivation. A candidate whose `issuanceDate` is missing, unparseable,
+ * or beyond the clock-skew grace is dropped here
+ * ({@link issuedWithinSkewGrace}), so a far-future or garbage date can never
+ * win the ranking. Sorting here (rather than after the binding check) lets
  * {@link findAppKeyCredential} stop at the newest credential that binds.
  *
  * @param options {object}
@@ -271,7 +365,8 @@ function appKeyCandidates({
         presentsAsAppKey(credential) &&
         typeArray(credential.type).includes(credentialType) &&
         isSelfIssued(credential) &&
-        appKeyOrigin(credential) === origin
+        appKeyOrigin(credential) === origin &&
+        issuedWithinSkewGrace(credential)
     )
     .sort(byIssuanceDateDesc)
 }

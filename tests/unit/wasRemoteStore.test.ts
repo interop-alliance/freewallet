@@ -106,6 +106,62 @@ describe('WASRemoteStore.listCollections', () => {
   })
 })
 
+describe('WASRemoteStore.listCollectionPublicStates', () => {
+  it('answers from the inline public flag with no describe() reads', async () => {
+    const items = [
+      {
+        id: 'private-credentials',
+        url: '/space/space-id/private-credentials',
+        public: false
+      },
+      {
+        id: 'example-app-public',
+        url: '/space/space-id/example-app-public',
+        public: true
+      }
+    ]
+    const collections = vi.fn().mockResolvedValue({ totalItems: 2, items })
+    const isPublic = vi.fn().mockResolvedValue(false)
+    const describeCollection = vi.fn().mockResolvedValue({})
+    const collection = vi
+      .fn()
+      .mockReturnValue({ isPublic, describe: describeCollection })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collections, collection })
+    })
+
+    await expect(store.listCollectionPublicStates()).resolves.toEqual([
+      { id: 'private-credentials', isPublic: false },
+      { id: 'example-app-public', isPublic: true }
+    ])
+    // The lean listing is one GET on a current server: no policy probes and,
+    // unlike listCollections, no per-collection description reads.
+    expect(isPublic).not.toHaveBeenCalled()
+    expect(describeCollection).not.toHaveBeenCalled()
+  })
+
+  it('probes isPublic() only when the listing omits the flag', async () => {
+    const items = [
+      { id: 'legacy-collection', url: '/space/space-id/legacy-collection' }
+    ]
+    const collections = vi.fn().mockResolvedValue({ totalItems: 1, items })
+    const isPublic = vi.fn().mockResolvedValue(true)
+    const describeCollection = vi.fn().mockResolvedValue({})
+    const collection = vi
+      .fn()
+      .mockReturnValue({ isPublic, describe: describeCollection })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collections, collection })
+    })
+
+    await expect(store.listCollectionPublicStates()).resolves.toEqual([
+      { id: 'legacy-collection', isPublic: true }
+    ])
+    expect(isPublic).toHaveBeenCalledOnce()
+    expect(describeCollection).not.toHaveBeenCalled()
+  })
+})
+
 describe('WASRemoteStore.listCollectionResources', () => {
   it('returns listed resources without isPublic for private collections', async () => {
     const items = [

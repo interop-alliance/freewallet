@@ -31,7 +31,9 @@ export function isSelfIssued(credential: IVerifiableCredential): boolean {
 
 /**
  * Sort comparator ordering stored credentials latest-first by the
- * `issuanceDate` they state (missing dates sort last).
+ * `issuanceDate` they state (missing or non-string dates sort last -- the
+ * field is credential-supplied, so a number or an array must not throw out of
+ * the sort).
  *
  * @param first {StoredCredential}
  * @param second {StoredCredential}
@@ -41,7 +43,16 @@ export function byIssuanceDateDesc(
   first: StoredCredential,
   second: StoredCredential
 ): number {
-  const firstDate = (first.vc.issuanceDate as string) ?? ''
-  const secondDate = (second.vc.issuanceDate as string) ?? ''
-  return secondDate.localeCompare(firstDate)
+  return issuanceDateOf(second).localeCompare(issuanceDateOf(first))
+}
+
+/**
+ * The `issuanceDate` string a stored credential states, or '' when it is
+ * absent or not a string.
+ *
+ * @param credential {StoredCredential}
+ * @returns {string}
+ */
+function issuanceDateOf({ vc }: StoredCredential): string {
+  return typeof vc.issuanceDate === 'string' ? vc.issuanceDate : ''
 }

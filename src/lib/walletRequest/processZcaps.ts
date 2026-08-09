@@ -33,7 +33,11 @@
  * The class is resolved from the target itself, so it applies whether the
  * target arrives as a descriptor object or as a plain URL string under the
  * Space (the collection id is derived from the first path segment after the
- * Space URL either way) -- a string target cannot bypass it. A request whose
+ * Space URL either way) -- a string target cannot bypass it. Resolution also
+ * consults the existing collections' state (`collections`, a snapshot the
+ * caller fetches from the user's Space), so a target naming a collection that
+ * is ALREADY world-readable gets the public-collection ceiling whichever form
+ * it arrives in. A request whose
  * actions are all dropped or all above its class's ceiling renders the grant
  * unsatisfiable rather than empty: an empty `allowedAction` array means "every
  * action" in the zcap model.
@@ -43,7 +47,15 @@
  * provisioning time. Public covers only unauthenticated reads; writes stay
  * capability-only, so the grant still delegates the usual collection-scoped
  * zcap (with the ordinary write TTL). A public grant on a protected wallet
- * collection is unsatisfiable, unconditionally.
+ * collection is unsatisfiable, unconditionally. A public collection is only
+ * ever CREATED public, never converted: a `https://w3id.org/byoe#public-collection` grant
+ * naming an existing collection that is not already public is unsatisfiable
+ * (otherwise one consent approval could flip another app's private -- possibly
+ * encrypted -- collection world-readable), while the idempotent re-grant on an
+ * already-public collection stays satisfiable and provisions nothing. The rule
+ * holds within a single request too: the delegation loop records each
+ * collection it provisions, so a duplicate name later in the same request
+ * resolves against it as an existing collection.
  *
  * A `https://w3id.org/byoe#shared-collection` grant is the share flow: it asks not just to
  * fetch one of the wallet's own encrypted collections but to DECRYPT it. It
@@ -182,6 +194,62 @@ function isProtectedCollection(collectionId: string | undefined): boolean {
  * starting with a hyphen, up to 64 characters.
  */
 const COLLECTION_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
+
+/**
+ * The existing collections in the user's Space, keyed by collection id,
+ * carrying the state grant resolution consults: whether each is already
+ * world-readable. An absent key means the collection does not exist yet.
+ * Resolution takes this as a required input rather than looking it up itself
+ * (it stays pure and synchronous); callers build the snapshot with
+ * {@link existingCollectionsFrom} over
+ * `StorageManager.listCollectionPublicStates()`.
+ */
+export type ExistingCollections = ReadonlyMap<string, { isPublic: boolean }>
+
+/**
+ * Builds the {@link ExistingCollections} snapshot from a collection listing
+ * (`StorageManager.listCollectionPublicStates()` or anything shaped like it).
+ *
+ * @param collections {Array<{ id: string, isPublic?: boolean }>}
+ * @returns {ExistingCollections}
+ */
+export function existingCollectionsFrom(
+  collections: Array<{ id: string; isPublic?: boolean }>
+): ExistingCollections {
+  return new Map(
+    collections.map(({ id, isPublic }) => [id, { isPublic: !!isPublic }])
+  )
+}
+
+/**
+ * The target class and public flag for a target resolving onto a named
+ * collection -- shared by the string-URL and `https://w3id.org/byoe#collection` forms so the
+ * ceiling parity holds whichever way the target arrives: protected wallet
+ * collections first (their read-only ceiling is the strictest), then a
+ * collection the Space already serves world-readable (the add-only
+ * public-collection ceiling -- a write there is publication, however the
+ * request spelled the target), and only then the full RP-collection class.
+ *
+ * @param options {object}
+ * @param options.collectionId {string}
+ * @param options.collections {ExistingCollections}
+ * @returns {{ targetClass: TargetClass, isPublic: boolean }}
+ */
+function collectionClassFor({
+  collectionId,
+  collections
+}: {
+  collectionId: string
+  collections: ExistingCollections
+}): { targetClass: TargetClass; isPublic: boolean } {
+  if (isProtectedCollection(collectionId)) {
+    return { targetClass: 'protected-collection', isPublic: false }
+  }
+  if (collections.get(collectionId)?.isPublic) {
+    return { targetClass: 'public-collection', isPublic: true }
+  }
+  return { targetClass: 'collection', isPublic: false }
+}
 
 /**
  * A requested capability's `invocationTarget` resolved against the user's own
@@ -357,18 +425,27 @@ function parseSpaceUrl({
  *   `spaceUrl` (`parseSpaceUrl`), with the collection id taken from the first
  *   path segment after the Space URL, so a URL under a standard collection (or
  *   at a resource inside one) is flagged `collectionId` / `encrypted` and gets
- *   the same cap as its descriptor form. The Space URL itself, with or without
+ *   the same cap as its descriptor form -- including the add-only
+ *   public-collection cap when the named collection is already
+ *   world-readable. The Space URL itself, with or without
  *   a trailing slash, is a whole-Space grant. Any other string -- a foreign
  *   origin, a path that escapes the Space, a target carrying a query or
  *   fragment, a first segment that is not a valid collection id --
  *   unsatisfiable;
  * - `{ type: 'https://w3id.org/byoe#collection', name }` -- `${spaceUrl}/${name}` after
  *   validating `name`, flagged `needsProvisioning` unless it is a standard
- *   collection (and `encrypted` for the two EDV collections);
+ *   collection (and `encrypted` for the two EDV collections). Like the string
+ *   form, classed public-collection when the collection already is -- with
+ *   nothing to provision, exactly as if it had been asked for as a
+ *   `https://w3id.org/byoe#public-collection` re-grant;
  * - `{ type: 'https://w3id.org/byoe#public-collection', name }` -- like `https://w3id.org/byoe#collection`
  *   but flagged `isPublic`: provisioned plaintext with a world-readable
  *   (PublicCanRead) policy. Unsatisfiable on a protected wallet collection --
- *   an RP must never be able to flip the user's own collections public;
+ *   an RP must never be able to flip the user's own collections public -- and
+ *   unsatisfiable on any existing collection that is not already public: a
+ *   public collection is only ever created public, never converted. The
+ *   idempotent re-grant on an already-public collection stays satisfiable,
+ *   with nothing to provision;
  * - `{ type: 'https://w3id.org/byoe#shared-collection', name }` -- like `https://w3id.org/byoe#collection`
  *   but flagged `isShare`: the grantee also joins the collection's key-epoch
  *   roster, so it can decrypt what it fetches. `name` must be one of the
@@ -381,14 +458,18 @@ function parseSpaceUrl({
  * @param options {object}
  * @param options.descriptor {string | { type: string; name?: string }}
  * @param options.spaceUrl {string}
+ * @param options.collections {ExistingCollections}   the Space's existing
+ *   collections and their public state
  * @returns {ResolvedTarget}
  */
 export function resolveInvocationTarget({
   descriptor,
-  spaceUrl
+  spaceUrl,
+  collections
 }: {
   descriptor: string | { type?: string; name?: string }
   spaceUrl: string
+  collections: ExistingCollections
 }): ResolvedTarget {
   if (typeof descriptor === 'string') {
     const parsed = parseSpaceUrl({ target: descriptor, spaceUrl })
@@ -419,9 +500,7 @@ export function resolveInvocationTarget({
       invocationTarget: url,
       collectionId: segment,
       encrypted: !!standardCollection(segment)?.encryption,
-      targetClass: isProtectedCollection(segment)
-        ? 'protected-collection'
-        : 'collection'
+      ...collectionClassFor({ collectionId: segment, collections })
     }
   }
 
@@ -440,20 +519,30 @@ export function resolveInvocationTarget({
       return UNSATISFIABLE
     }
     const standard = standardCollection(name)
+    const collectionClass = collectionClassFor({
+      collectionId: name,
+      collections
+    })
     return {
       ...SATISFIABLE_DEFAULTS,
       invocationTarget: `${spaceUrl}/${name}`,
       // The `id` and `key-map` collections are provisioned at login, like the
-      // standard ones.
+      // standard ones. An existing private RP collection still flags
+      // provisioning: the provisioning step is idempotent and, on the App
+      // Connect path, is what re-admits a reconnecting app to an existing
+      // collection's recipient roster. An existing PUBLIC collection never
+      // does: it is classed public-collection (add-only) whichever way the
+      // target is spelled, and re-provisioning it here would re-run the
+      // public-policy setup on a live collection -- or, on App Connect, set
+      // up a recipient roster on a world-readable plaintext collection.
       needsProvisioning:
         !standard &&
         name !== ID_COLLECTION.id &&
-        name !== KEY_MAP_COLLECTION.id,
+        name !== KEY_MAP_COLLECTION.id &&
+        !collectionClass.isPublic,
       collectionId: name,
       encrypted: !!standard?.encryption,
-      targetClass: isProtectedCollection(name)
-        ? 'protected-collection'
-        : 'collection'
+      ...collectionClass
     }
   }
 
@@ -468,12 +557,22 @@ export function resolveInvocationTarget({
     if (isProtectedCollection(name)) {
       return UNSATISFIABLE
     }
+    // A public collection is only ever created public, never converted: a
+    // grant naming an existing collection that is not already world-readable
+    // is refused, or one consent approval could flip another app's private
+    // (possibly encrypted) collection public.
+    const existing = collections.get(name)
+    if (existing && !existing.isPublic) {
+      return UNSATISFIABLE
+    }
     // Public implies plaintext: the collection is provisioned without an
-    // encryption descriptor, so a ciphertext note never applies.
+    // encryption descriptor, so a ciphertext note never applies. An
+    // already-public collection has nothing to provision -- the idempotent
+    // re-grant only delegates.
     return {
       ...SATISFIABLE_DEFAULTS,
       invocationTarget: `${spaceUrl}/${name}`,
-      needsProvisioning: true,
+      needsProvisioning: !existing,
       collectionId: name,
       isPublic: true,
       targetClass: 'public-collection'
@@ -574,18 +673,22 @@ function capActions({
  * @param options {object}
  * @param options.descriptor {ICapabilityQueryDetail}
  * @param options.spaceUrl {string}
+ * @param options.collections {ExistingCollections}
  * @returns {ResolvedGrant}
  */
 export function resolveGrant({
   descriptor,
-  spaceUrl
+  spaceUrl,
+  collections
 }: {
   descriptor: ICapabilityQueryDetail
   spaceUrl: string
+  collections: ExistingCollections
 }): ResolvedGrant {
   let target = resolveInvocationTarget({
     descriptor: descriptor.invocationTarget,
-    spaceUrl
+    spaceUrl,
+    collections
   })
   // A share's recipient key is DERIVED from the grantee's controller DID, so a
   // controller the derivation cannot handle cannot be a share recipient. Run
@@ -624,21 +727,27 @@ export function resolveGrant({
 
 /**
  * Resolves every requested capability against the user's Space, for the consent
- * preview. Pure -- no provisioning or delegation.
+ * preview. Pure -- no provisioning or delegation; the caller supplies the
+ * existing-collections snapshot ({@link existingCollectionsFrom}).
  *
  * @param options {object}
  * @param options.zcapRequests {ICapabilityQueryDetail[]}
  * @param options.spaceUrl {string}
+ * @param options.collections {ExistingCollections}
  * @returns {ResolvedGrant[]}
  */
 export function resolveGrants({
   zcapRequests,
-  spaceUrl
+  spaceUrl,
+  collections
 }: {
   zcapRequests: ICapabilityQueryDetail[]
   spaceUrl: string
+  collections: ExistingCollections
 }): ResolvedGrant[] {
-  return zcapRequests.map(descriptor => resolveGrant({ descriptor, spaceUrl }))
+  return zcapRequests.map(descriptor =>
+    resolveGrant({ descriptor, spaceUrl, collections })
+  )
 }
 
 /**
@@ -686,12 +795,29 @@ export async function processZcaps({
   appProvisioning?: boolean
   app?: { name: string; origin: string }
 }): Promise<IZcap[]> {
+  if (zcapRequests.length === 0) {
+    return []
+  }
   if (!hasZcapStorage(session)) {
     throw new ZcapUnavailableError()
   }
 
   // `hasZcapStorage` above guarantees a resolved `spaceUrl`.
   const spaceUrl = session.storage.spaceUrl!
+  // The existing collections' public state, fetched fresh at delegation time
+  // (the consent preview resolves against its own snapshot): resolution
+  // refuses a public grant that would convert an existing collection, and
+  // caps any target naming an already-public collection add-only. A failed
+  // listing fails the request rather than resolving against assumed-absent
+  // collections. The snapshot is mutable on purpose: the loop below records
+  // each collection it provisions, so a later descriptor in the SAME request
+  // resolves against what the request has already created -- a duplicate name
+  // cannot flip a just-provisioned private collection public (the
+  // create-only rule sees it as existing), and a target naming a
+  // just-provisioned public collection gets the add-only public ceiling.
+  const collections = new Map(
+    existingCollectionsFrom(await session.storage.listCollectionPublicStates())
+  )
   const spaceRootCapability = await generateZcapUri({ url: spaceUrl })
   const now = Date.now()
   const { zcapClient } = session.profile
@@ -766,7 +892,8 @@ export async function processZcaps({
   for (const descriptor of zcapRequests) {
     const { target, allowedActions, write } = resolveGrant({
       descriptor,
-      spaceUrl
+      spaceUrl,
+      collections
     })
     if (!target.satisfiable || !target.invocationTarget) {
       continue
@@ -797,6 +924,9 @@ export async function processZcaps({
         isPublic: target.isPublic,
         controller: descriptor.controller
       })
+      // Record the provisioned collection so the rest of this request's
+      // descriptors resolve against it as an existing collection.
+      collections.set(target.collectionId, { isPublic: target.isPublic })
     }
     // Write grants live for the shorter write TTL; read-only grants for the
     // longer read TTL.

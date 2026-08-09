@@ -10,7 +10,7 @@ import { BsAward } from 'react-icons/bs'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import { AppKeyRefusedError } from '@/lib/appKey'
+import { AppKeyRefusedError, presentsAsAppKey } from '@/lib/appKey'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { cidFrom } from '@interop/was-client/sync'
@@ -67,7 +67,17 @@ export function AcceptCredentialsPage() {
         seenCids.add(cid)
         uniqueCredentials.push(credential)
       }
-      for (const credential of uniqueCredentials) {
+      // App keys are wallet-minted, never imported (`addCredential` refuses
+      // them unconditionally), so screen them out of the batch up front
+      // rather than letting the first one abort the loop half-stored -- the
+      // user's own exported archive legitimately contains their app keys,
+      // and the rest of the batch must still land. The skipped count is
+      // reported alongside the stored count below.
+      const storable = uniqueCredentials.filter(
+        credential => !presentsAsAppKey(credential)
+      )
+      const appKeysSkipped = uniqueCredentials.length - storable.length
+      for (const credential of storable) {
         console.log('Storing credential:', credentialTitle(credential))
         // addCredential records the credential-created history entry itself,
         // gated on an actual insert.
@@ -76,24 +86,23 @@ export function AcceptCredentialsPage() {
           user: session.user
         })
       }
-      if (importSummary) {
-        showToast({
-          message: t('storage.importSuccess', {
+      const storedMessage = importSummary
+        ? t('storage.importSuccess', {
             ...importSummary,
             credentialsNote: t('storage.importCredentialsNote', {
-              count: credentials.length
+              count: storable.length
             })
-          }),
-          severity: 'success'
-        })
-      } else {
-        showToast({
-          message: t('acceptCredentials.stored', {
-            count: uniqueCredentials.length
-          }),
-          severity: 'success'
-        })
-      }
+          })
+        : t('acceptCredentials.stored', { count: storable.length })
+      showToast({
+        message:
+          appKeysSkipped > 0
+            ? `${storedMessage} ${t('acceptCredentials.appKeysSkipped', {
+                count: appKeysSkipped
+              })}`
+            : storedMessage,
+        severity: appKeysSkipped > 0 ? 'warning' : 'success'
+      })
       navigate('/dashboard')
     } catch (err) {
       console.error('Error storing credentials:', err)

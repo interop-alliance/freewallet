@@ -288,7 +288,7 @@ describe('the AppKeyCredential marker', () => {
     ).toBeUndefined()
   })
 
-  it('is not claimed by an ordinary credential', async () => {
+  it('is not claimed by an ordinary credential', () => {
     const ordinary = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential', 'SomeOtherCredential'],
@@ -296,31 +296,22 @@ describe('the AppKeyCredential marker', () => {
       credentialSubject: { id: 'did:key:zSubject', seed: 'abc', origin }
     } as unknown as IVerifiableCredential
     expect(presentsAsAppKey(ordinary)).toBe(false)
-    await expect(assertStorableAppKey(ordinary)).resolves.toBeUndefined()
+    expect(() => assertStorableAppKey(ordinary)).not.toThrow()
   })
 })
 
 describe('assertStorableAppKey', () => {
-  it('stores a wallet-minted app key', async () => {
+  it('refuses every marker credential, even one that binds perfectly', async () => {
+    // A fully attacker-generated credential binds (its subject DID derives
+    // from its own fresh seed), so binding proves nothing about provenance:
+    // external ingest refuses on the marker alone.
     const { credential } = await mintAppKeyCredential({ app, origin })
-    await expect(assertStorableAppKey(credential)).resolves.toBeUndefined()
+    expect(() => assertStorableAppKey(credential)).toThrow(AppKeyRefusedError)
   })
 
   it('refuses a planted app key', async () => {
-    await expect(
-      assertStorableAppKey(await plantedCredential())
-    ).rejects.toThrow(AppKeyRefusedError)
-  })
-
-  it('refuses one whose seed was swapped for another key', async () => {
-    const { credential } = await mintAppKeyCredential({ app, origin })
-    const other = await mintAppKeyCredential({ app, origin })
-    ;(credential.credentialSubject as { seed: string }).seed = (
-      other.credential.credentialSubject as { seed: string }
-    ).seed
-    await expect(assertStorableAppKey(credential)).rejects.toThrow(
-      AppKeyRefusedError
-    )
+    const planted = await plantedCredential()
+    expect(() => assertStorableAppKey(planted)).toThrow(AppKeyRefusedError)
   })
 
   it('refuses one with an absent, malformed, or wrong-length seed', async () => {
@@ -337,9 +328,135 @@ describe('assertStorableAppKey', () => {
       } else {
         subject.seed = seed
       }
-      await expect(assertStorableAppKey(credential)).rejects.toThrow(
-        AppKeyRefusedError
-      )
+      expect(() => assertStorableAppKey(credential)).toThrow(AppKeyRefusedError)
     }
+  })
+})
+
+describe('the far-future issuanceDate cutoff', () => {
+  /**
+   * The fully attacker-generated planted credential: the attacker's OWN
+   * fresh seed (so it binds perfectly), the victim app's origin and
+   * credentialType, self-issued, and a far-future `issuanceDate` picked to
+   * win the latest-first ranking durably.
+   */
+  async function boundPlantedCredential(): Promise<IVerifiableCredential> {
+    const { credential } = await mintAppKeyCredential({ app, origin })
+    ;(credential as { issuanceDate: string }).issuanceDate =
+      '2099-01-01T00:00:00Z'
+    return credential
+  }
+
+  it('a far-future planted credential never outranks a wallet-minted key', async () => {
+    const mine = await mintAppKeyCredential({ app, origin })
+    ;(mine.credential as { issuanceDate: string }).issuanceDate =
+      '2024-01-01T00:00:00Z'
+    const credentials = [
+      stored(await boundPlantedCredential(), 'planted'),
+      stored(mine.credential, 'mine')
+    ]
+    expect(
+      (
+        await findAppKeyCredential({
+          credentials,
+          credentialType: app.credentialType,
+          origin
+        })
+      )?.cid
+    ).toBe('mine')
+    const matched = await appKeyCredentialsIn({
+      credentials,
+      credentialType: app.credentialType,
+      origin
+    })
+    expect(matched.map(({ cid }) => cid)).toEqual(['mine'])
+  })
+
+  it('a far-future planted credential alone matches nothing', async () => {
+    expect(
+      await findAppKeyCredential({
+        credentials: [stored(await boundPlantedCredential(), 'planted')],
+        credentialType: app.credentialType,
+        origin
+      })
+    ).toBeUndefined()
+  })
+
+  it('drops a candidate whose issuanceDate does not parse', async () => {
+    // `Date.parse` fails on these, but the ranking compares raw strings,
+    // where '9999-99-99...' and 'z2099' sort ahead of every real ISO date --
+    // so the cutoff must fail closed, not keep what it cannot parse.
+    for (const issuanceDate of ['9999-99-99T00:00:00Z', 'z2099']) {
+      const mine = await mintAppKeyCredential({ app, origin })
+      ;(mine.credential as { issuanceDate: string }).issuanceDate =
+        '2024-01-01T00:00:00Z'
+      const planted = await mintAppKeyCredential({ app, origin })
+      ;(planted.credential as { issuanceDate: string }).issuanceDate =
+        issuanceDate
+      const credentials = [
+        stored(planted.credential, 'planted'),
+        stored(mine.credential, 'mine')
+      ]
+      expect(
+        (
+          await findAppKeyCredential({
+            credentials,
+            credentialType: app.credentialType,
+            origin
+          })
+        )?.cid
+      ).toBe('mine')
+      expect(
+        await findAppKeyCredential({
+          credentials: [stored(planted.credential, 'planted')],
+          credentialType: app.credentialType,
+          origin
+        })
+      ).toBeUndefined()
+    }
+  })
+
+  it('drops a non-string issuanceDate without breaking the match', async () => {
+    // A number or an array would throw inside the raw-string sort
+    // (`localeCompare` on a non-string); the cutoff drops the candidate
+    // instead, so the genuine key still matches.
+    for (const issuanceDate of [1893456000, ['2024-01-01T00:00:00Z'], null]) {
+      const mine = await mintAppKeyCredential({ app, origin })
+      const planted = await mintAppKeyCredential({ app, origin })
+      ;(planted.credential as { issuanceDate?: unknown }).issuanceDate =
+        issuanceDate
+      const credentials = [
+        stored(planted.credential, 'planted'),
+        stored(mine.credential, 'mine')
+      ]
+      expect(
+        (
+          await findAppKeyCredential({
+            credentials,
+            credentialType: app.credentialType,
+            origin
+          })
+        )?.cid
+      ).toBe('mine')
+    }
+  })
+
+  it("tolerates ordinary clock skew between the account's own clients", async () => {
+    // A key minted on a client whose clock runs a few minutes ahead must not
+    // be dropped -- excluding it would mint a duplicate key whose seed cannot
+    // open the app's existing data.
+    const { credential } = await mintAppKeyCredential({ app, origin })
+    ;(credential as { issuanceDate: string }).issuanceDate = new Date(
+      Date.now() + 5 * 60 * 1000
+    ).toISOString()
+    expect(
+      (
+        await findAppKeyCredential({
+          credentials: [stored(credential, 'skewed')],
+          credentialType: app.credentialType,
+          origin
+        })
+      )?.cid
+    ).toBe('skewed')
   })
 })

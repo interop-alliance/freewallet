@@ -63,6 +63,7 @@ import {
   credentialQueriesOf,
   didAuthMethodSupported,
   domainMatchesOrigin,
+  existingCollectionsFrom,
   hasTypedExample,
   hasZcapStorage,
   isDidAuthOnly,
@@ -349,6 +350,17 @@ export function WalletGetPage() {
         return
       }
 
+      // The existing collections' public state, consulted by grant
+      // resolution: a public grant that would convert an existing collection
+      // resolves unsatisfiable, and a target naming an already-public
+      // collection is capped add-only. Fetched once for the preview; the
+      // approve-time delegation re-fetches its own authoritative snapshot.
+      const existingCollections = wantsGrants
+        ? existingCollectionsFrom(
+            await loggedIn.storage.listCollectionPublicStates()
+          )
+        : existingCollectionsFrom([])
+
       // App Connect: look up the stored app key for this app + origin, for
       // the first-run vs returning consent copy and the grants preview. The
       // approve-time processing repeats the lookup authoritatively.
@@ -376,7 +388,8 @@ export function WalletGetPage() {
                   ? (appKeySubjectDid(existing.vc) ?? '')
                   : ''
               }),
-              spaceUrl: loggedIn.storage.spaceUrl
+              spaceUrl: loggedIn.storage.spaceUrl,
+              collections: existingCollections
             })
           )
         }
@@ -406,7 +419,8 @@ export function WalletGetPage() {
         setResolvedGrants(
           resolveGrants({
             zcapRequests: profile.zcapRequests,
-            spaceUrl: loggedIn.storage.spaceUrl
+            spaceUrl: loggedIn.storage.spaceUrl,
+            collections: existingCollections
           })
         )
       }

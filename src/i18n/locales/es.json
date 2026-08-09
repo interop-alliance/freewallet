@@ -1,6 +1,6 @@
 {
   "common": {
-    "appKeyRefused": "Esta credencial dice ser una clave de aplicación, pero su clave no coincide con su identificador. No se guardó.",
+    "appKeyRefused": "Esta credencial dice ser una clave de aplicación. Las claves de aplicación las crea la propia billetera y no se pueden añadir desde fuera. No se guardó.",
     "language": "Idioma",
     "theme": "Tema",
     "switchToDarkMode": "Cambiar a modo oscuro",
@@ -601,7 +601,9 @@
     "acceptAll": "Aceptar todas",
     "storeError": "No se pudieron guardar las credenciales. Inténtelo de nuevo.",
     "stored_one": "Credencial guardada.",
-    "stored_other": "Se guardaron {{count}} credenciales."
+    "stored_other": "Se guardaron {{count}} credenciales.",
+    "appKeysSkipped_one": "Se omitió 1 clave de aplicación: las claves de aplicación las crea la propia billetera y no se pueden importar.",
+    "appKeysSkipped_other": "Se omitieron {{count}} claves de aplicación: las claves de aplicación las crea la propia billetera y no se pueden importar."
   },
   "notFound": {
     "title": "Página no encontrada",

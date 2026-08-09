@@ -1,6 +1,6 @@
 {
   "common": {
-    "appKeyRefused": "This credential claims to be an app key, but its key does not match its identifier. It was not saved.",
+    "appKeyRefused": "This credential claims to be an app key. App keys are created by the wallet itself and can't be added from outside. It was not saved.",
     "language": "Language",
     "theme": "Theme",
     "switchToDarkMode": "Switch to dark mode",
@@ -601,7 +601,9 @@
     "acceptAll": "Accept all",
     "storeError": "Could not save the credentials. Please try again.",
     "stored_one": "Credential saved.",
-    "stored_other": "{{count}} credentials saved."
+    "stored_other": "{{count}} credentials saved.",
+    "appKeysSkipped_one": "1 app key was skipped: app keys are created by the wallet itself and can't be imported.",
+    "appKeysSkipped_other": "{{count}} app keys were skipped: app keys are created by the wallet itself and can't be imported."
   },
   "notFound": {
     "title": "Page not found",

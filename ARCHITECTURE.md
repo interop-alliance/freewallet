@@ -656,36 +656,56 @@ A match additionally requires that the credential's subject DID **re-derive
 from the seed the credential itself carries** (`appKeySeedBindsSubject`).
 Self-issuance is a weak signal -- anyone can self-issue, and candidates are
 ranked on an `issuanceDate` the credential itself states -- so without this a
-credential planted through the store popup or a manual import would win the
+credential planted through an import (before the store door below existed, or
+injected into the Space directly) would win the
 match and its DID would become the `controller` the wallet delegates to. The
 check is local and deterministic (the seed is right there; re-derive with the
 same `CapabilityAgent.fromSeed` call that minted it) and fails closed on an
-absent, non-base64url, or wrong-length seed.
+absent, non-base64url, or wrong-length seed. Binding authenticates internal
+consistency only, not provenance -- a fully attacker-generated credential (its
+own fresh seed, the victim app's `origin` and `credentialType`) binds
+perfectly -- so the match also drops any candidate whose `issuanceDate` is
+missing, does not parse, or sits more than a day in the future (fail-closed:
+the ranking compares raw strings, where an unparseable '9999-...' still sorts
+first): the far-future date is what would let such a plant win the
+latest-first ranking durably, while the day of grace keeps a genuine key
+minted on a clock-skewed sibling client matchable (excluding it would mint a
+duplicate key that cannot open the app's existing data). The wallet's own
+mint path always stamps a parseable ISO date, so nothing legitimate is
+dropped.
 
-**The same binding is enforced at store time, so a foreign app key never
-lands.** Every minted app key carries the marker type `AppKeyCredential`
+**Externally arriving app keys are refused at store time, unconditionally.**
+Every minted app key carries the marker type `AppKeyCredential`
 (`https://w3id.org/byoe#AppKeyCredential` -- one stable IRI for every app,
 defined in the inline `@context`, never interpolated from `vocabBase`), which
 turns "presents
 as an app key" into a term check rather than a shape heuristic. Be clear about
 what the marker is: the `type` array of a planted credential is
 attacker-controlled like everything else in it, so the marker is a
-**self-declaration, not evidence** -- it makes the refusal rule precise, and
-the seed-to-subject binding remains the only thing that authenticates.
+**self-declaration, not evidence** -- which is exactly why the store-time rule
+cannot be "binds, so it stores" (a planted credential can bind, see above) and
+is instead: app keys are wallet-minted, never imported.
 `StorageManager.addCredential` -- the one door every externally supplied
 credential goes through (the CHAPI store popup, the URL / QR / manual-paste
-import, the credentials half of a space import) -- refuses a marked credential
-that does not bind (`assertStorableAppKey`, `AppKeyRefusedError`). Refusing
+import, the credentials half of a space import) -- refuses every marked
+credential, binding or not (`assertStorableAppKey`, `AppKeyRefusedError`).
+Refusing
 beats storing-and-ignoring on two counts: future consumers of an app-key match
-do not each have to remember to re-check the binding, and the wallet does not
+do not each have to remember to re-check provenance, and the wallet does not
 present the user with a credential it will never act on. The marker is
 _required_ at match time rather than merely tolerated, so a credential can
 only reach the delegation path by carrying it -- which is exactly what the
-store-time refusal screens. The wallet's own mint path stores through the same
-door and passes, since a freshly minted key binds by construction. The space
-half of an import is not screened: it writes opaque resources into the user's
-own Space server-side, and the credentials it carries surface through
-`addCredential` like any other import.
+store-time refusal screens. The wallet's own mint path stores through its own
+door (`StorageManager.addMintedAppKey`, called only by `processAppConnect`),
+which itself asserts the mint invariants so it cannot be misused to store a
+foreign key. Two ingest paths sit outside the door, deliberately: the
+background sync pull writes pulled rows into the local replica directly, but
+it replicates the account's own remote collections, which only the account's
+enrolled wallet clients can write (`private-credentials` is a protected
+collection -- RP and share grants on it are read-only) and each of those
+clients enforces the same refusal at its own door; and the space half of an
+import writes opaque resources into the user's own Space server-side. For
+both, the match-time binding and future-date checks remain the backstop.
 
 The claim terms are shared, not per-app: `seed` and `origin` map to
 `https://w3id.org/byoe#seed` / `https://w3id.org/byoe#origin`, since they
@@ -723,7 +743,11 @@ Provisioning is idempotent: no epochs yet ->
 already present -> no-op. The wallet ensures the collection exists without
 clobbering an existing `encryption` descriptor, so an established epoch roster is
 never dropped. Public (`https://w3id.org/byoe#public-collection`) grants
-stay plaintext and world-readable as before; only private app collections are encrypted. The
+stay plaintext and world-readable as before; only private app collections are
+encrypted, and a public grant can only ever CREATE its collection -- one
+naming an existing non-public collection is unsatisfiable, so no consent
+approval can flip an established (encrypted or not) collection
+world-readable. The
 policy is that **the user is always a recipient of an encrypted collection in
 their own Space** -- any future exception (an app collection the user is
 deliberately not a recipient of) must be an explicit, separate consent surface,
@@ -808,7 +832,19 @@ Security notes:
   protected collection, and share read-only; public collection add-only; an
   app-provisioned private collection the full vocabulary), and the consent
   screen shows exactly what `resolveGrants` resolved. A grant left with no
-  permitted action is unsatisfiable, never delegated empty.
+  permitted action is unsatisfiable, never delegated empty. Resolution also
+  consults the existing collections' state (a snapshot fetched from the
+  Space, once for the consent preview and fresh again at delegation time,
+  then kept current as the delegation loop provisions -- so duplicate names
+  within one request resolve against what the request itself created): a
+  public collection is only ever created public, never converted -- a
+  `#public-collection` grant naming an existing non-public collection
+  (another app's, possibly encrypted) is unsatisfiable, and the idempotent
+  re-grant on an already-public collection delegates without re-provisioning
+  -- and any target naming an already-public collection gets the add-only
+  public ceiling and skips provisioning whether it arrives as a
+  `#public-collection` descriptor, a `#collection` descriptor, or a plain
+  URL string.
 - **Challenge/domain**: unchanged DIDAuth verification app-side in
   was-react.
 - **Per-user app identity**: an app key is minted from 32 fresh random bytes
@@ -932,9 +968,9 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   did:key (`CapabilityAgent.fromSeed`, `keyName: 'app-key'`). It is how a
   BYOE app keeps its identity/encryption root in the user's wallet
   (`src/lib/appKey.ts`). Every app key carries the marker type
-  `AppKeyCredential` (`https://w3id.org/byoe#AppKeyCredential`); one
-  carrying the marker without binding its subject DID to its own seed is
-  refused at store time.
+  `AppKeyCredential` (`https://w3id.org/byoe#AppKeyCredential`); any
+  externally arriving credential carrying the marker is refused at store
+  time, binding or not -- app keys are wallet-minted, never imported.
 - **Client / `clientId`** — the keyed, custodied, revocable identity of an
   (app, user) pair: a keypair that can be a zcap grantee, a delegation
   `controller`, or an entry in a collection's key-epoch roster. For a BYOE app
