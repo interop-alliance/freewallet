@@ -5,14 +5,13 @@
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
 import {
   CONTACTS_COLLECTION,
-  CONTACTS_COLLECTION_SPEC,
-  CONTACTS_HISTORY_COLLECTION,
-  CONTACTS_HISTORY_COLLECTION_SPEC
+  CONTACTS_HISTORY_COLLECTION
 } from '@interop/social-core'
 import {
-  PRIVATE_CREDENTIALS_COLLECTION_SPEC,
-  PUBLIC_CREDENTIALS_COLLECTION_SPEC,
-  WALLET_ACTIVITY_COLLECTION_SPEC
+  PRIVATE_CREDENTIALS_COLLECTION,
+  PUBLIC_CREDENTIALS_COLLECTION,
+  WALLET_ACTIVITY_COLLECTION,
+  WALLET_SPACE_SYNCED_SPECS
 } from '@interop/wallet-core/space'
 
 const env = import.meta.env
@@ -68,6 +67,20 @@ export const WAS_SYNC_BATCH_SIZE = env.VITE_WAS_SYNC_BATCH_SIZE
   ? Number(env.VITE_WAS_SYNC_BATCH_SIZE)
   : undefined
 
+// The RxDB collection key per synced wallet-Space collection id -- the only
+// app-local binding left in the roster; everything byte-significant (the
+// collection ids, friendly display names, `encryption`, `isPublic`,
+// `idDerivation`) comes from `WALLET_SPACE_SYNCED_SPECS` in
+// `@interop/wallet-core/space`, the single roster both wallets provision from
+// (the contacts identity contract inside it comes from `@interop/social-core`).
+const RXDB_KEY_BY_COLLECTION_ID: Record<string, string> = {
+  [PRIVATE_CREDENTIALS_COLLECTION]: 'privateCredentials',
+  [PUBLIC_CREDENTIALS_COLLECTION]: 'publicCredentials',
+  [WALLET_ACTIVITY_COLLECTION]: 'walletActivity',
+  [CONTACTS_COLLECTION]: 'contacts',
+  [CONTACTS_HISTORY_COLLECTION]: 'contactsHistory'
+}
+
 export const WALLET_STANDARD_COLLECTIONS: Array<{
   key: string
   id: string
@@ -76,6 +89,7 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
   // Declares the collection's client-side encryption descriptor on the server,
   // making it self-describing (a future client/delegate can discover that it is
   // encrypted and supply its own keys). Set-once / immutable on the server.
+  // Derived from the spec's `'edv'` / `'plaintext'` encryption string.
   encryption?: { scheme: 'edv' }
   // How the collection's cipher mints a document id, from the collection spec:
   // 'content' (content-addressed, immutable) or 'random' (the mutable
@@ -83,57 +97,26 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
   // collection; the ciphers are built with it so the minted ids follow the
   // spec (a `'random'` mint becomes the row id, see `browserStore.addContact`).
   idDerivation?: 'content' | 'random'
-}> = [
-  // Collection ids and their public/encryption config come from
-  // `@interop/wallet-core/space` so this list matches Freewallet mobile's Space
-  // layout byte-for-byte. The RxDB `key` and the friendly display `name` are
-  // local (the library spec does not carry them); the local `encryption`
-  // descriptor's `{ scheme: 'edv' }` object is derived from the spec's `'edv'` /
-  // `'plaintext'` encryption string.
-  {
-    key: 'privateCredentials',
-    id: PRIVATE_CREDENTIALS_COLLECTION_SPEC.collectionId,
-    name: 'Verifiable Credentials',
-    encryption:
-      PRIVATE_CREDENTIALS_COLLECTION_SPEC.encryption === 'edv'
-        ? { scheme: 'edv' }
-        : undefined,
-    idDerivation: PRIVATE_CREDENTIALS_COLLECTION_SPEC.idDerivation
-  },
-  {
-    key: 'publicCredentials',
-    id: PUBLIC_CREDENTIALS_COLLECTION_SPEC.collectionId,
-    name: 'Verifiable Credentials (Publicly Shared)',
-    isPublic: PUBLIC_CREDENTIALS_COLLECTION_SPEC.isPublic
-  },
-  {
-    key: 'walletActivity',
-    id: WALLET_ACTIVITY_COLLECTION_SPEC.collectionId,
-    name: 'Wallet Activity Log',
-    encryption:
-      WALLET_ACTIVITY_COLLECTION_SPEC.encryption === 'edv'
-        ? { scheme: 'edv' }
-        : undefined,
-    idDerivation: WALLET_ACTIVITY_COLLECTION_SPEC.idDerivation
-  },
-  // Ids come from `@interop/social-core` (not hardcoded) so this collection
-  // matches Freewallet mobile's byte-for-byte -- a disagreement here would
-  // split writes into separate collections that never converge.
-  {
-    key: 'contacts',
-    id: CONTACTS_COLLECTION,
-    name: 'Contacts',
-    encryption: { scheme: 'edv' },
-    idDerivation: CONTACTS_COLLECTION_SPEC.idDerivation
-  },
-  {
-    key: 'contactsHistory',
-    id: CONTACTS_HISTORY_COLLECTION,
-    name: 'Contacts History',
-    encryption: { scheme: 'edv' },
-    idDerivation: CONTACTS_HISTORY_COLLECTION_SPEC.idDerivation
+}> = WALLET_SPACE_SYNCED_SPECS.map(spec => {
+  const key = RXDB_KEY_BY_COLLECTION_ID[spec.collectionId]
+  if (!key) {
+    // A roster addition upstream without a local RxDB binding fails loudly at
+    // module load, never as a silently unsynced collection.
+    throw new Error(
+      `No RxDB collection key bound for synced collection "${spec.collectionId}".`
+    )
   }
-]
+  return {
+    key,
+    id: spec.collectionId,
+    name: spec.name,
+    ...(spec.isPublic && { isPublic: true }),
+    ...(spec.encryption === 'edv' && {
+      encryption: { scheme: 'edv' as const }
+    }),
+    idDerivation: spec.idDerivation
+  }
+})
 
 // The WAS collections replicated by the sync controller: every standard
 // collection, projected down to the (key, id) pair the collection-agnostic

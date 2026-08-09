@@ -2,6 +2,17 @@
 
 ## 0.28.0 - TBD
 
+### Changed
+
+- Wallet Space provisioning now runs through the shared one-shot
+  `provisionWalletSpace` from `@interop/wallet-core/space`, and
+  `WALLET_STANDARD_COLLECTIONS` is derived from the shared
+  `WALLET_SPACE_SYNCED_SPECS` roster (collection ids, display names,
+  encryption, public flags, id derivation) -- the RxDB collection key is the
+  only app-local binding left. The `id` / `key-map` system-collection config
+  and the epoch-refusal name-only retry moved into the shared provisioner, so
+  a Space provisioned by either wallet app has an identical layout.
+
 ### Security
 
 - Externally arriving app-key credentials are refused at store time

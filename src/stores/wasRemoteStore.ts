@@ -64,10 +64,10 @@ import {
 import type { ImportSpaceSummary } from '@/stores/storageManager'
 import {
   deriveSpaceId,
-  ensureSpaceAndCollection,
   errorStatus,
   WAS_KEY_EPOCH_HEADER
 } from '@interop/was-client/sync'
+import { provisionWalletSpace } from '@interop/wallet-core/space'
 
 /**
  * Map from logical collection name to its WAS base URL.
@@ -283,99 +283,26 @@ export class WASRemoteStore {
   }
 
   async ensureUserCollections({ user: _user }: { user: User }) {
-    // Each collection is provisioned through the library's generic
-    // `ensureSpaceAndCollection`, which idempotently upserts the Space (with
-    // the app-neutral `Wallet Space` name shared with dcw, since both wallets
-    // can re-configure one Space, and controller) and then configures
-    // the collection: an `'edv'` collection declares the set-once encryption
-    // descriptor (a late declaration on a pre-descriptor collection is allowed, so a
-    // re-run upgrades it in place), a `'plaintext'` collection is a descriptor-less
-    // `force` upsert (running with the root capability, a 404 from the pre-merge
-    // describe really means absent), and a public collection additionally gets a
-    // collection-level world-read grant. The app-specific roster and its
-    // per-collection config (id, display name, encryption opt-in, public flag)
-    // stay here in WALLET_STANDARD_COLLECTIONS; the helper owns only the
-    // generic sequence.
-    //
-    // The `id` and `key-map` collections are standard-on-the-server but not
-    // wallet-synced, so they live outside WALLET_STANDARD_COLLECTIONS (no RxDB
-    // `key`, no local replica, no collection map entry) and join the roster
-    // here: `id` holds only world-readable DID artifacts (`did.json`,
-    // `did.jsonl`) and gets a collection-level PublicCanRead policy; `key-map`
-    // holds the private key-id map and stays capability-only.
-    //
-    // All collections are independent -- each depends only on the Space
-    // existing -- and provision concurrently under a single Promise.all. A
-    // rejected chain surfaces as Promise.all's first rejection; chains that
-    // already completed leave their provisioning in place (partial provisioning
-    // was possible before too).
-    const roster: Array<{
-      key?: string
-      id: string
-      name: string
-      isPublic?: boolean
-      encryption?: { scheme: 'edv' }
-    }> = [
-      ...WALLET_STANDARD_COLLECTIONS,
-      { ...ID_COLLECTION, isPublic: true },
-      KEY_MAP_COLLECTION
-    ]
-    const collections: ICollectionsSet = new Map()
-    await Promise.all(
-      roster.map(async ({ key, id, name, isPublic, encryption }) => {
-        try {
-          await ensureSpaceAndCollection({
-            was: this.was,
-            spaceId: this.spaceId,
-            controllerDid: this.controller,
-            collectionId: id,
-            collectionName: name,
-            encryption: encryption ? 'edv' : 'plaintext',
-            ...(isPublic !== undefined && { isPublic }),
-            spaceName: 'Wallet Space'
-          })
-        } catch (err) {
-          // An encrypted collection whose descriptor already carries key epochs
-          // (a share, or a recovery escrow) refuses the bare `edv`
-          // re-declaration: the PUT would drop the append-only epochs and
-          // the server rejects it. A name-only configure merges the current
-          // description forward, re-stating the standing descriptor (epochs
-          // included) verbatim -- the idempotent form of "ensure it exists".
-          // The original error is still logged on a successful retry: the
-          // retry also masks failures that were never the epoch refusal
-          // (including a failed Space-description PUT, which
-          // `ensureSpaceAndCollection` performs FIRST), and those should
-          // stay visible even when the narrower configure happens to land.
-          if (encryption) {
-            try {
-              await this.was.space(this.spaceId).collection(id).configure({
-                name
-              })
-              console.warn(
-                `Collection "${id}" was ensured via the name-only retry; ` +
-                  'the full ensure had failed with:',
-                err
-              )
-            } catch {
-              throw new Error(
-                `Error creating collection "${id}" in space ` +
-                  `"${this.spaceId}".`,
-                { cause: err }
-              )
-            }
-          } else {
-            throw new Error(
-              `Error creating collection "${id}" in space "${this.spaceId}".`,
-              { cause: err }
-            )
-          }
-        }
-        if (key) {
-          collections.set(key, this.#collectionBaseUrl(id))
-        }
-      })
-    )
+    // The full wallet-Space layout -- the synced feeds plus the non-synced
+    // `id` / `key-map` system collections -- is provisioned by the shared
+    // one-shot `provisionWalletSpace`: the roster, the per-collection config
+    // (display name, encryption declaration, public-read grant), the
+    // app-neutral Space name, and the name-only retry for an encrypted
+    // collection whose descriptor already carries key epochs all live in
+    // `@interop/wallet-core/space`, so a Space provisioned here is identical
+    // to one provisioned by the mobile wallet. Only the synced feeds get an
+    // entry in the local collection map (`id` / `key-map` have no RxDB `key`,
+    // no local replica).
+    await provisionWalletSpace({
+      was: this.was,
+      spaceId: this.spaceId,
+      controllerDid: this.controller
+    })
 
+    const collections: ICollectionsSet = new Map()
+    for (const { key, id } of WALLET_STANDARD_COLLECTIONS) {
+      collections.set(key, this.#collectionBaseUrl(id))
+    }
     this.collections = collections
   }
 
