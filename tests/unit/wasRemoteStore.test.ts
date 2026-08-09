@@ -6,17 +6,6 @@ import { mintSpaceId, WASRemoteStore } from '../../src/stores/wasRemoteStore'
 import { deriveSpaceId } from '@interop/was-client/sync'
 import type { ControllerProfile, User } from '../../src/types/auth'
 
-// Stub only `ensureSpaceAndCollection` (the library's Space + Collection
-// upsert), keeping `deriveSpaceId` / `errorStatus` / the key-epoch header real
-// for the other tests in this file. This isolates `ensureUserCollections`'s own
-// per-collection config from real network/ezcap provisioning.
-vi.mock('@interop/was-client/sync', async importOriginal => {
-  const actual =
-    await importOriginal<typeof import('@interop/was-client/sync')>()
-  return { ...actual, ensureSpaceAndCollection: vi.fn() }
-})
-import { ensureSpaceAndCollection } from '@interop/was-client/sync'
-
 /**
  * Builds a WASRemoteStore whose `was` client has been replaced with a stub, so
  * tests exercise the store's handle navigation without real network/ezcap I/O.
@@ -497,41 +486,79 @@ describe('WASRemoteStore.ensureCollection', () => {
 })
 
 describe('WASRemoteStore.ensureUserCollections', () => {
-  const ensureMock = vi.mocked(ensureSpaceAndCollection)
   const USER = { id: 'user-id', email: 'user@example.test' } as unknown as User
 
+  // Provisioning now runs through the shared `provisionWalletSpace`
+  // (`@interop/wallet-core/space`), so these tests drive the real roster and
+  // provisioner against a recording stub of the was-client handle surface it
+  // touches, rather than stubbing the library's `ensureSpaceAndCollection`.
+  function recordingWas({
+    fail = () => false
+  }: {
+    fail?: (id: string) => boolean
+  } = {}) {
+    const configures: Array<{
+      id: string
+      name?: string
+      encryption?: { scheme: string }
+      force?: boolean
+    }> = []
+    const setPublics: string[] = []
+    const was = {
+      space: () => ({
+        configure: async () => undefined,
+        collection: (id: string) => ({
+          configure: async (opts: {
+            name?: string
+            encryption?: { scheme: string }
+            force?: boolean
+          }) => {
+            if (fail(id)) {
+              throw new Error('boom')
+            }
+            configures.push({ id, ...opts })
+          },
+          setPublic: async () => {
+            setPublics.push(id)
+          }
+        })
+      })
+    }
+    return { was, configures, setPublics }
+  }
+
   it('throws if provisioning fails', async () => {
-    // Provisioning runs through the library's `ensureSpaceAndCollection`; a
-    // rejection surfaces as a per-collection provisioning error (the catch
-    // wrapping the library's own error).
-    ensureMock.mockReset()
-    ensureMock.mockRejectedValue(new Error('boom'))
-    const store = storeWithStubbedClient({})
+    // A plaintext collection gets no name-only retry, so its failure surfaces
+    // as the shared provisioner's per-collection error.
+    const { was } = recordingWas({ fail: id => id === 'key-map' })
+    const store = storeWithStubbedClient(was)
 
     await expect(store.ensureUserCollections({ user: USER })).rejects.toThrow(
-      /Error creating collection/
+      /Error provisioning collection "key-map"/
     )
   })
 
   it('provisions id as collection-level public and key-map capability-only', async () => {
-    ensureMock.mockReset()
-    ensureMock.mockResolvedValue(undefined)
-    const store = storeWithStubbedClient({})
+    const { was, configures, setPublics } = recordingWas()
+    const store = storeWithStubbedClient(was)
 
     await store.ensureUserCollections({ user: USER })
 
-    const calls = ensureMock.mock.calls.map(([options]) => options)
-    const idCall = calls.find(({ collectionId }) => collectionId === 'id')
-    expect(idCall?.isPublic).toBe(true)
-    expect(idCall?.encryption).toBe('plaintext')
-    const keyMapCall = calls.find(
-      ({ collectionId }) => collectionId === 'key-map'
-    )
-    expect(keyMapCall?.isPublic).toBeUndefined()
-    expect(keyMapCall?.encryption).toBe('plaintext')
+    // Both system collections are plaintext (a descriptor-less `force`
+    // upsert), under their shared display names; only `id` goes public.
+    expect(configures.find(({ id }) => id === 'id')).toEqual({
+      id: 'id',
+      name: 'Identity',
+      force: true
+    })
+    expect(setPublics).toContain('id')
+    expect(configures.find(({ id }) => id === 'key-map')).toEqual({
+      id: 'key-map',
+      name: 'Key Map',
+      force: true
+    })
+    expect(setPublics).not.toContain('key-map')
     // The synced standard collections are provisioned alongside them.
-    expect(calls.map(({ collectionId }) => collectionId)).toContain(
-      'private-credentials'
-    )
+    expect(configures.map(({ id }) => id)).toContain('private-credentials')
   })
 })
