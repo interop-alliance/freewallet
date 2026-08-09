@@ -171,6 +171,20 @@ async function connectViaPopup(
   // The requested collection is previewed in the storage-access panel (the
   // collection id renders as its own monospace badge).
   await expect(page.getByText('test-app-data', { exact: true })).toBeVisible()
+  // The recipient row renders with the wallet-minted marking: on first run
+  // the app-key DID does not exist yet, so the marking stands alone; on a
+  // returning visit the stored key's DID shows beside it.
+  await expect(page.getByText('Access granted to:').first()).toBeVisible()
+  if (firstRun) {
+    await expect(
+      page.getByText(/A new identity, unique to you, will be created/).first()
+    ).toBeVisible()
+  } else {
+    await expect(
+      page.getByText(/created by your wallet for this app/).first()
+    ).toBeVisible()
+    await expect(page.getByText(/^did:key:z6Mk/).first()).toBeVisible()
+  }
 
   await page.getByRole('button', { name: 'Connect' }).click()
 

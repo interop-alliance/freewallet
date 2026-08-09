@@ -635,7 +635,7 @@ export function WalletGetPage() {
                 ttlDays={RP_ZCAP_TTL_DAYS}
                 writeTtlDays={RP_ZCAP_WRITE_TTL_DAYS}
                 shareTtlDays={SHARE_ZCAP_TTL_DAYS}
-                hideRecipient
+                walletMintedRecipient
                 heading={t('chapi.get.appConnect.zcapHeading')}
               />
             )}

@@ -5,7 +5,7 @@ import type { Session } from '@/types/auth'
 import type { StoredCredential } from '@/types/credential'
 import { mintAppKeyCredential } from '@/lib/appKey'
 import { appConnectZcapRequests, processAppConnect } from './appConnect'
-import type { IZcap } from './types'
+import type { IAppConnectCapabilityQuery, IZcap } from './types'
 
 vi.mock('./processZcaps', () => ({
   processZcaps: vi.fn()
@@ -72,6 +72,23 @@ describe('appConnectZcapRequests', () => {
     expect(requests).toEqual([
       { ...CAPABILITY_QUERY, controller: 'did:key:z6MkTest' }
     ])
+  })
+
+  it('strips a wire-level reason the type-level Omit cannot block', () => {
+    // The type omits `reason`, but an actual request body can carry it
+    // anyway; it must never reach the App Connect consent screen.
+    const smuggled = {
+      ...CAPABILITY_QUERY,
+      reason: 'Totally legitimate reason from the requesting site'
+    } as IAppConnectCapabilityQuery
+    const requests = appConnectZcapRequests({
+      capabilityQueries: [smuggled],
+      controller: 'did:key:z6MkTest'
+    })
+    expect(requests).toEqual([
+      { ...CAPABILITY_QUERY, controller: 'did:key:z6MkTest' }
+    ])
+    expect(requests[0]).not.toHaveProperty('reason')
   })
 })
 
