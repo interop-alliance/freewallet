@@ -31,7 +31,10 @@ import type {
  * app-key subject DID, yielding the standard capability-query details that
  * `resolveGrants` / `processZcaps` operate on. Used with the real subject DID
  * at delegation time, and with a placeholder at consent-preview time (the
- * resolution itself never reads the controller).
+ * resolution itself never reads the controller). Also strips any `reason` the
+ * wire-level request carries: the type-level Omit does not bind an actual
+ * request body, and the App Connect consent screen supersedes per-grant
+ * reason lines, so requester-supplied reason text must never reach it.
  *
  * @param options {object}
  * @param options.capabilityQueries {IAppConnectCapabilityQuery[]}
@@ -45,7 +48,10 @@ export function appConnectZcapRequests({
   capabilityQueries: IAppConnectCapabilityQuery[]
   controller: string
 }): ICapabilityQueryDetail[] {
-  return capabilityQueries.map(detail => ({ ...detail, controller }))
+  return capabilityQueries.map(detail => {
+    const { reason: _reason, ...rest } = detail as ICapabilityQueryDetail
+    return { ...rest, controller }
+  })
 }
 
 /**

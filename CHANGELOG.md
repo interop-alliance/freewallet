@@ -26,6 +26,15 @@
   hold within a single request: delegation tracks the collections the request
   itself provisions, so duplicate names in one consent approval cannot
   convert or escalate.
+- The App Connect consent screen strips request-supplied per-grant `reason`
+  text at runtime (the type-level omission alone did not bind actual request
+  bodies) and no longer hides the recipient-identity row: the row renders
+  marked as wallet-minted and unique to this user -- on first run, before the
+  app key exists, the marking stands alone.
+- Requester-supplied `reason` text on the consent screen now renders under an
+  explicit "The site says:" attribution label, italicized and line-clamped,
+  so it can neither read as wallet copy nor push the recipient row and the
+  grant warnings out of view.
 
 ### Changed
 

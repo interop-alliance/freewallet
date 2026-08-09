@@ -9,9 +9,15 @@
  * anyone on the web can read the collection (and, being plaintext, never a
  * ciphertext note); unsatisfiable grants render greyed with a "cannot
  * fulfill" note. Because the RP-supplied `reason` is attacker-controlled free
- * text, the recipient DID is rendered separately with its own label and a
- * monospace style so it cannot be spoofed by the reason. Display-only --
- * approval is the single Continue button on the parent page.
+ * text, it renders under an explicit "the site says" attribution label,
+ * line-clamped so it can neither read as wallet copy nor push the trusted
+ * rows below the fold -- and the recipient DID is rendered separately with
+ * its own label and a monospace style so it cannot be spoofed by the reason.
+ * The recipient row renders on every path; App Connect marks it wallet-minted
+ * (`walletMintedRecipient`), stating that the identity is created in this
+ * user's wallet and unique to them -- on first run before the DID exists, the
+ * marking stands alone. Display-only -- approval is the single Continue
+ * button on the parent page.
  *
  * A share grant (`https://w3id.org/byoe#shared-collection`) is the strongest thing this
  * panel can show and is rendered unmistakably differently: a heavier border
@@ -69,16 +75,16 @@ export function ZcapGrantsPanel({
   ttlDays,
   writeTtlDays,
   shareTtlDays,
-  hideRecipient = false,
+  walletMintedRecipient = false,
   heading
 }: {
   grants: ResolvedGrant[]
   ttlDays: number
   writeTtlDays: number
   shareTtlDays: number
-  // App Connect consent hides the recipient DID rows: the recipient is the
-  // app's own (possibly not-yet-minted) key, not a DID the user could vet.
-  hideRecipient?: boolean
+  // App Connect consent: the recipient identity is minted by the wallet for
+  // this user (or about to be, on first run), and the row says so.
+  walletMintedRecipient?: boolean
   // Overrides the default "Storage access" section heading (App Connect uses
   // app-centric phrasing).
   heading?: string
@@ -110,32 +116,65 @@ export function ZcapGrantsPanel({
             }}
           >
             {descriptor.reason && (
-              <Typography variant="body2" sx={{ mb: 0.5 }}>
-                {descriptor.reason}
-              </Typography>
-            )}
-
-            {!hideRecipient && (
               <>
                 <Typography
                   variant="caption"
                   color="text.secondary"
-                  sx={{ display: 'block', mb: 0.5 }}
+                  sx={{ display: 'block' }}
                 >
-                  {t('chapi.get.zcapRecipient')}
+                  {t('chapi.get.zcapReasonLabel')}
                 </Typography>
+                {/* Clamped: a maximally long reason must not push the
+                    trusted rows below it out of view. */}
                 <Typography
-                  variant="caption"
-                  component="div"
+                  variant="body2"
                   sx={{
-                    fontFamily: 'monospace',
-                    wordBreak: 'break-all',
-                    mb: 0.5
+                    mb: 0.5,
+                    fontStyle: 'italic',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 3,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    overflowWrap: 'anywhere'
                   }}
                 >
-                  {descriptor.controller}
+                  {descriptor.reason}
                 </Typography>
               </>
+            )}
+
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', mb: 0.5 }}
+            >
+              {t('chapi.get.zcapRecipient')}
+            </Typography>
+            {descriptor.controller && (
+              <Typography
+                variant="caption"
+                component="div"
+                sx={{
+                  fontFamily: 'monospace',
+                  wordBreak: 'break-all',
+                  mb: 0.5
+                }}
+              >
+                {descriptor.controller}
+              </Typography>
+            )}
+            {walletMintedRecipient && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: 'block', mb: 0.5 }}
+              >
+                {t(
+                  descriptor.controller
+                    ? 'chapi.get.zcapRecipientWalletMinted'
+                    : 'chapi.get.zcapRecipientWalletMintedPending'
+                )}
+              </Typography>
             )}
 
             {satisfiable ? (
