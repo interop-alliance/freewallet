@@ -762,16 +762,7 @@ export class WASRemoteStore {
   }
 
   async listCollections(): Promise<Array<StorageCollection>> {
-    let listing
-    try {
-      listing = await this.was.space(this.spaceId).collections()
-    } catch (err) {
-      console.error('Error listing collections:', err)
-      throw new Error('Failed to list remote storage collections.', {
-        cause: err
-      })
-    }
-    const items = (listing?.items ?? []) as Array<StorageCollection>
+    const items = await this.#collectionSummaries()
     // The listing's `CollectionSummary` surfaces the `PublicCanRead` status
     // inline (`public`, present on every item when the server computes it), so
     // no per-collection policy probe is needed. A server that predates the
@@ -792,6 +783,51 @@ export class WASRemoteStore {
         }
       })
     )
+  }
+
+  /**
+   * Lean listing for grant resolution: the collection ids and their public
+   * state only. One listing GET on a current server (the summary's inline
+   * `public` flag answers the question); only a legacy server that omits the
+   * flag pays a per-collection policy probe. No `describe()` reads at all --
+   * the full {@link listCollections} pays one signed round trip per
+   * collection for an `isEncrypted` flag grant resolution never consults.
+   *
+   * @returns {Promise<Array<{ id: string, isPublic: boolean }>>}
+   */
+  async listCollectionPublicStates(): Promise<
+    Array<{ id: string; isPublic: boolean }>
+  > {
+    const items = await this.#collectionSummaries()
+    return await Promise.all(
+      items.map(async item => ({
+        id: item.id,
+        isPublic:
+          item.public !== undefined
+            ? item.public
+            : await this.#collectionFromUrl(item.url).isPublic()
+      }))
+    )
+  }
+
+  /**
+   * The raw `CollectionSummary` items of this Space's collection listing --
+   * the shared fetch behind {@link listCollections} and
+   * {@link listCollectionPublicStates}.
+   *
+   * @returns {Promise<Array<StorageCollection>>}
+   */
+  async #collectionSummaries(): Promise<Array<StorageCollection>> {
+    let listing
+    try {
+      listing = await this.was.space(this.spaceId).collections()
+    } catch (err) {
+      console.error('Error listing collections:', err)
+      throw new Error('Failed to list remote storage collections.', {
+        cause: err
+      })
+    }
+    return (listing?.items ?? []) as Array<StorageCollection>
   }
 
   /**

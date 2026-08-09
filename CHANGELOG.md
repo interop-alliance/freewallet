@@ -2,6 +2,31 @@
 
 ## 0.28.0 - TBD
 
+### Security
+
+- Externally arriving app-key credentials are refused at store time
+  unconditionally: any credential carrying the `AppKeyCredential` marker is
+  refused at every ingest door (CHAPI store popup, URL / QR / manual-paste
+  import), whether or not its subject DID binds to its own seed -- a fully
+  attacker-generated credential binds, so binding proves nothing about
+  provenance. Only the wallet's own App Connect mint path stores one, through
+  its own `StorageManager.addMintedAppKey` door. App-key matching also drops
+  candidates whose `issuanceDate` is missing, unparseable, or more than a day
+  in the future (fail-closed), so a planted credential cannot durably win the
+  latest-first ranking. Batch imports that contain app keys (e.g. a wallet
+  archive) skip them and store the rest, reporting the skipped count.
+- A `https://w3id.org/byoe#public-collection` grant can no longer convert an
+  existing collection to world-readable: grant resolution now consults the
+  Space's existing collections, refuses a public grant naming an existing
+  non-public collection as unsatisfiable, and no longer re-applies the
+  `PublicCanRead` policy when re-granting an already-public collection. Any
+  target naming an already-public collection is capped to the add-only
+  public-collection ceiling (`GET`/`HEAD`/`POST`) whether it arrives as a
+  descriptor or a plain URL string, and is never re-provisioned. Both rules
+  hold within a single request: delegation tracks the collections the request
+  itself provisions, so duplicate names in one consent approval cannot
+  convert or escalate.
+
 ### Changed
 
 - A Space provisioned by this wallet is now named "Wallet Space" instead of

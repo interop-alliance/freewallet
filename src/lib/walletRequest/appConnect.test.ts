@@ -46,7 +46,9 @@ async function fakeSession({
     profile: { keyAgent },
     storage: {
       listCredentials: async () => stored,
-      addCredential: async (entry: unknown) => {
+      // The mint path stores through its own door, never `addCredential`
+      // (which refuses every marker credential).
+      addMintedAppKey: async (entry: unknown) => {
         added.push(entry)
       }
     }

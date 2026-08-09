@@ -112,8 +112,9 @@ export async function processAppConnect({
     subjectDid = minted.subjectDid
     // Store before delegating: if delegation fails, the saved key is simply
     // found as "returning" on the next attempt (the store is idempotent on
-    // the credential's content id).
-    await session.storage.addCredential({ credential, user: session.user })
+    // the credential's content id). Through the mint path's own door --
+    // `addCredential` refuses every marker credential, wallet-minted or not.
+    await session.storage.addMintedAppKey({ credential, user: session.user })
   }
 
   const zcapRequests = appConnectZcapRequests({
