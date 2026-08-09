@@ -48,6 +48,28 @@ The authoritative table of environment variables (all optional; the app runs
 without any set) lives in [README.md](README.md#environment-variables). Keep
 that table up to date when adding or changing a variable.
 
+## Roadmap & Task Conventions
+
+Roadmap tracking lives in `_spec/ROADMAP.md` (a local, gitignored planning
+dir): narrative context plus structured `### FW-N` work items, following the
+item structure shared with the isomorphic-lib-template and dcw roadmaps.
+Never create a parallel task list elsewhere. The full item schema lives in
+that file's header; the rules that apply when working an item:
+
+- Item ids are permanent and never reused; a new item takes the next unused
+  number regardless of section.
+- Statuses are edited in place; acceptance checkboxes are ticked as they are
+  met.
+- **Completing an item includes archiving it**: in the same pass that marks
+  it `done`, move it verbatim (number, title, field block, prose, with its
+  `done` date) from `_spec/ROADMAP.md` to
+  `_spec/historical/archived-roadmap.md`, append-only at the bottom. A `done`
+  item left in ROADMAP.md is an unfinished task. CHANGELOG.md remains the
+  record of what landed; do not rewrite or summarize items on the way into
+  the archive.
+- Work discovered mid-implementation gets its own FW-N item immediately,
+  noting `discovered-from: FW-N` in its prose.
+
 ## Conventions
 
 Code style, refactoring, JSDoc, comment, and error-handling conventions live in

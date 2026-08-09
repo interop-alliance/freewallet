@@ -32,6 +32,9 @@ export { domainMatchesOrigin } from '@interop/wallet-core/request'
  *   the domain-binding check.
  * @param [options.selectedVCs] {IVerifiableCredential[]} - VCs the user chose to
  *   share (empty for a DID-Auth-only response).
+ * @param [options.expectedAppKeyDid] {string} - App Connect: the app-key
+ *   subject DID the consent screen displayed; approval fails closed when the
+ *   authoritative re-match resolves a different DID.
  * @returns {Promise<WalletResponse>} The response VP, or `{}` when there is
  *   nothing to send.
  */
@@ -39,12 +42,14 @@ export async function processRequest({
   request,
   session,
   credentialRequestOrigin,
-  selectedVCs = []
+  selectedVCs = [],
+  expectedAppKeyDid
 }: {
   request: IVPRDetails
   session: Session
   credentialRequestOrigin?: string
   selectedVCs?: IVerifiableCredential[]
+  expectedAppKeyDid?: string
 }): Promise<WalletResponse> {
   const { didAuth, appConnect } = classifyRequest(request)
 
@@ -90,7 +95,8 @@ export async function processRequest({
           challenge,
           domain,
           didAuthRequested,
-          cryptosuite
+          cryptosuite,
+          expectedSubjectDid: expectedAppKeyDid
         })
     }
   })

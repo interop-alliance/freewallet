@@ -58,7 +58,13 @@ export function queriesOf(request: IVPRDetails): ISpecVPRQuery[] {
  * or mint the app-key credential. Violations throw; classification-time
  * callers surface the throw as a malformed-request state. The capability
  * queries are normalized to an array (absent means "no grants requested" --
- * a connect that only recovers the app key is legal).
+ * a connect that only recovers the app key is legal), and each entry is
+ * rebuilt from an allowlist of the declared fields (`referenceId`,
+ * `allowedAction`, `invocationTarget`): the type-level Omit does not bind an
+ * actual request body, so any other wire-level field -- a smuggled `reason`,
+ * an attacker-chosen `controller`, a future display-bearing addition -- is
+ * made unrepresentable here, before the entries reach the profile the
+ * consent screen and the delegation path read.
  *
  * @param queries {IVPRQuery[]}
  * @returns {IAppConnectRequest | null}
@@ -99,19 +105,27 @@ export function appConnectRequestOf(
         'vocabBase.'
     )
   }
-  const capabilityQueries: IAppConnectCapabilityQuery[] =
+  const rawQueries =
     capabilityQuery === undefined
       ? []
       : Array.isArray(capabilityQuery)
         ? capabilityQuery
         : [capabilityQuery]
-  for (const detail of capabilityQueries) {
-    if (!detail || typeof detail !== 'object') {
-      throw new Error(
-        'An AppConnectQuery carries a malformed capabilityQuery entry.'
-      )
+  const capabilityQueries: IAppConnectCapabilityQuery[] = rawQueries.map(
+    detail => {
+      if (!detail || typeof detail !== 'object') {
+        throw new Error(
+          'An AppConnectQuery carries a malformed capabilityQuery entry.'
+        )
+      }
+      const { referenceId, allowedAction, invocationTarget } = detail
+      return {
+        ...(referenceId !== undefined && { referenceId }),
+        ...(allowedAction !== undefined && { allowedAction }),
+        invocationTarget
+      }
     }
-  }
+  )
   return { app, capabilityQueries }
 }
 

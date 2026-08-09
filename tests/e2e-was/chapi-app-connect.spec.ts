@@ -181,7 +181,7 @@ async function connectViaPopup(
     ).toBeVisible()
   } else {
     await expect(
-      page.getByText(/created by your wallet for this app/).first()
+      page.getByText(/stored in your wallet for this app/).first()
     ).toBeVisible()
     await expect(page.getByText(/^did:key:z6Mk/).first()).toBeVisible()
   }

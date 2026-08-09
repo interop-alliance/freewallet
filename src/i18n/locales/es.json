@@ -655,7 +655,7 @@
       "zcapPublicWarning": "Esta colección será pública: cualquier persona en la web podrá leerla, sin iniciar sesión.",
       "zcapRecipient": "Acceso otorgado a:",
       "zcapReasonLabel": "El sitio dice:",
-      "zcapRecipientWalletMinted": "Esta identidad fue creada por su billetera para esta aplicación; es única para usted.",
+      "zcapRecipientWalletStored": "Esta identidad está guardada en su billetera para esta aplicación.",
       "zcapRecipientWalletMintedPending": "Se creará en su billetera una identidad nueva, única para usted, para esta aplicación.",
       "zcapWriteWarning": "Este sitio podrá agregar, cambiar o eliminar datos en esta colección.",
       "zcapReadOnlyNote": "Solo lectura",

@@ -84,6 +84,7 @@ import {
 import { appKeySubjectDid, findAppKeyCredential } from '@/lib/appKey'
 import { fetchAppManifest, type AppManifestInfo } from '@/lib/appManifest'
 import { ZcapGrantsPanel } from './ZcapGrantsPanel'
+import { SiteProvidedText } from './SiteProvidedText'
 import { RequestSourcePanel } from './RequestSourcePanel'
 import { CHAPILoginForm } from './CHAPILoginForm'
 import { useTranslation } from 'react-i18next'
@@ -148,19 +149,33 @@ function injectedCHAPIGetEvent(): CHAPIGetEvent | undefined {
 
 /**
  * Pulls the first `QueryByExample` reason string (if any) out of a VPR's query
- * set, for display on the share screen.
+ * set, for display on the share screen. The wire value is untrusted: only an
+ * actual string is accepted (a non-string would later crash the render).
  */
 function reasonFrom(queries: IVPRQuery[]): string {
   for (const query of queries) {
     if (query.type === 'QueryByExample') {
       for (const { reason } of credentialQueriesOf(query)) {
-        if (reason) {
+        if (typeof reason === 'string' && reason) {
           return reason
         }
       }
     }
   }
   return ''
+}
+
+/**
+ * Bounds the requester-supplied app display name: it is interpolated into the
+ * consent title, the name row, and the first-run / returning copy, so an
+ * unbounded name could dominate the layout and push the trusted consent rows
+ * out of view.
+ */
+const MAX_APP_NAME_CHARS = 64
+function clampAppName(name: string): string {
+  return name.length > MAX_APP_NAME_CHARS
+    ? name.slice(0, MAX_APP_NAME_CHARS) + '...'
+    : name
 }
 
 /**
@@ -196,6 +211,13 @@ export function WalletGetPage() {
   // App Connect: whether no stored app key matched at login time (the consent
   // copy differs); the authoritative match-or-mint happens at approve time.
   const [appKeyFirstRun, setAppKeyFirstRun] = useState(false)
+  // App Connect: the matched app key's subject DID the consent screen
+  // displays (null on first run). Approval pins the delegation to exactly
+  // this DID -- the approve-time re-match failing closed on a divergence --
+  // so the recipient the user vets is the recipient that is delegated to.
+  const [previewedAppKeyDid, setPreviewedAppKeyDid] = useState<string | null>(
+    null
+  )
   // App Connect: the requesting origin's Web App Manifest (logo, description),
   // fetched in the background for the consent screen; display-only garnish.
   const [appManifest, setAppManifest] = useState<AppManifestInfo | null>(null)
@@ -370,7 +392,11 @@ export function WalletGetPage() {
           credentialType: profile.appConnect.app.credentialType,
           origin: requestOrigin
         })
+        const existingDid = existing
+          ? (appKeySubjectDid(existing.vc) ?? '')
+          : ''
         setAppKeyFirstRun(!existing)
+        setPreviewedAppKeyDid(existingDid || null)
         if (
           profile.appConnect.capabilityQueries.length > 0 &&
           loggedIn.storage.spaceUrl
@@ -381,15 +407,14 @@ export function WalletGetPage() {
                 capabilityQueries: profile.appConnect.capabilityQueries,
                 // On first run the app-key DID does not exist yet, so the
                 // controller is empty here. Resolution reads it only to
-                // validate a share's recipient derivation, and treats an
-                // absent controller as "not yet a failure" for exactly this
+                // validate a share's recipient derivation, and the opt-out
+                // below suspends the no-recipient refusal for exactly this
                 // case; the approved path re-derives with the real subject DID.
-                controller: existing
-                  ? (appKeySubjectDid(existing.vc) ?? '')
-                  : ''
+                controller: existingDid
               }),
               spaceUrl: loggedIn.storage.spaceUrl,
-              collections: existingCollections
+              collections: existingCollections,
+              allowMissingController: true
             })
           )
         }
@@ -469,7 +494,8 @@ export function WalletGetPage() {
         profile,
         requestOrigin,
         selectedVCs,
-        exchangeUrl
+        exchangeUrl,
+        expectedAppKeyDid: previewedAppKeyDid ?? undefined
       })
       verifiablePresentation = response.verifiablePresentation
     } catch (err) {
@@ -513,6 +539,9 @@ export function WalletGetPage() {
 
   const didAuthOnly = isDidAuthOnly(profile)
   const appConnect = profile.appConnect
+  // The requester-supplied display name, bounded once for every place that
+  // renders or interpolates it.
+  const appName = appConnect ? clampAppName(appConnect.app.name) : ''
   // With no DID Auth to sign, no credentials picked, and no satisfiable grant,
   // Continue would compose nothing (processRequest returns `{}`) -- keep it
   // disabled so the only way out of an empty consent screen is Cancel, which
@@ -524,7 +553,7 @@ export function WalletGetPage() {
     selectedCids.size === 0 &&
     !resolvedGrants.some(({ target }) => target.satisfiable)
   const title = appConnect
-    ? t('chapi.get.appConnect.title', { appName: appConnect.app.name })
+    ? t('chapi.get.appConnect.title', { appName })
     : profile.zcapRequests.length > 0
       ? t('chapi.get.loginTitle')
       : didAuthOnly
@@ -534,7 +563,10 @@ export function WalletGetPage() {
   return (
     <Box className="fw-page" sx={chapiStyles.page}>
       <Box sx={chapiStyles.card}>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
+        <Typography
+          variant="h5"
+          sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}
+        >
           {title}
         </Typography>
 
@@ -559,8 +591,11 @@ export function WalletGetPage() {
               <Typography variant="body2" color="text.secondary">
                 {t('chapi.get.appConnect.nameLabel')}
               </Typography>
-              <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                {appConnect.app.name}
+              <Typography
+                variant="body1"
+                sx={{ fontWeight: 500, overflowWrap: 'anywhere' }}
+              >
+                {appName}
               </Typography>
             </Stack>
           )}
@@ -586,19 +621,27 @@ export function WalletGetPage() {
               sx={chapiStyles.originChip}
             />
           )}
+          {/* The manifest description is fetched from the requesting
+              origin's own web-app manifest -- site-authored free text, so it
+              gets the same attributed, clamped treatment as a request
+              `reason` rather than rendering as wallet copy. */}
           {appConnect && appManifest?.description && (
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ display: 'block', mt: 0.5 }}
-            >
-              {appManifest.description}
-            </Typography>
+            <Box sx={{ mt: 0.5 }}>
+              <SiteProvidedText
+                text={appManifest.description}
+                label={t('chapi.get.zcapReasonLabel')}
+              />
+            </Box>
           )}
         </Box>
 
         {requestReason && (
-          <Typography variant="body2">{requestReason}</Typography>
+          <Box>
+            <SiteProvidedText
+              text={requestReason}
+              label={t('chapi.get.zcapReasonLabel')}
+            />
+          </Box>
         )}
 
         {pageState === 'blocked' && blockReason && (
@@ -625,7 +668,7 @@ export function WalletGetPage() {
                 appKeyFirstRun
                   ? 'chapi.get.appConnect.firstRun'
                   : 'chapi.get.appConnect.returning',
-                { appName: appConnect.app.name }
+                { appName }
               )}
             </Typography>
 

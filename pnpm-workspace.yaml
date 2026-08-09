@@ -4,6 +4,7 @@ allowBuilds:
 allowedDeprecatedVersions:
   get-graphql-from-jsonschema: '8.1.0'
   defekt: '9.3.0'
+  crypto-js: '4.2.0'
 minimumReleaseAgeExclude:
   - '@interop/*'
   - 'byoe-context*'

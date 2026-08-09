@@ -674,31 +674,45 @@ function capActions({
  * @param options.descriptor {ICapabilityQueryDetail}
  * @param options.spaceUrl {string}
  * @param options.collections {ExistingCollections}
+ * @param [options.allowMissingController] {boolean}   App Connect
+ *   consent-preview only: the app-key DID may not exist yet, so an absent
+ *   controller is not yet a failure there
  * @returns {ResolvedGrant}
  */
 export function resolveGrant({
   descriptor,
   spaceUrl,
-  collections
+  collections,
+  allowMissingController = false
 }: {
   descriptor: ICapabilityQueryDetail
   spaceUrl: string
   collections: ExistingCollections
+  allowMissingController?: boolean
 }): ResolvedGrant {
   let target = resolveInvocationTarget({
     descriptor: descriptor.invocationTarget,
     spaceUrl,
     collections
   })
+  // A grant with no recipient cannot be delegated: the wire type requires a
+  // `controller` but an actual request body can omit it, which would render a
+  // consent row with no recipient and delegate to nobody. Refuse it visibly
+  // (unsatisfiable) instead. The App Connect consent preview resolves with an
+  // empty controller on first run (the app-key DID does not exist yet) and
+  // opts out; the approved path fills the real subject DID before resolving
+  // again, without the opt-out.
+  if (!descriptor.controller && !allowMissingController) {
+    target = UNSATISFIABLE
+  }
   // A share's recipient key is DERIVED from the grantee's controller DID, so a
   // controller the derivation cannot handle cannot be a share recipient. Run
   // the real derivation rather than a shape check: a well-formed-looking but
   // malformed did:key (a truncated identifier, a non-curve point) would
   // otherwise preview as satisfiable and then throw mid-response, after earlier
-  // grants in the same request had already been delegated. App Connect resolves
-  // with an empty controller at preview time (the app-key DID may not exist
-  // yet) and fills the real one before delegating, so an absent controller is
-  // not yet a failure.
+  // grants in the same request had already been delegated. An absent
+  // controller was already handled above (unsatisfiable, or the App Connect
+  // preview's opt-out).
   if (target.isShare && descriptor.controller) {
     try {
       x25519RecipientFromDidKey({ did: descriptor.controller })
@@ -734,19 +748,23 @@ export function resolveGrant({
  * @param options.zcapRequests {ICapabilityQueryDetail[]}
  * @param options.spaceUrl {string}
  * @param options.collections {ExistingCollections}
+ * @param [options.allowMissingController] {boolean}   App Connect
+ *   consent-preview only (see {@link resolveGrant})
  * @returns {ResolvedGrant[]}
  */
 export function resolveGrants({
   zcapRequests,
   spaceUrl,
-  collections
+  collections,
+  allowMissingController
 }: {
   zcapRequests: ICapabilityQueryDetail[]
   spaceUrl: string
   collections: ExistingCollections
+  allowMissingController?: boolean
 }): ResolvedGrant[] {
   return zcapRequests.map(descriptor =>
-    resolveGrant({ descriptor, spaceUrl, collections })
+    resolveGrant({ descriptor, spaceUrl, collections, allowMissingController })
   )
 }
 
