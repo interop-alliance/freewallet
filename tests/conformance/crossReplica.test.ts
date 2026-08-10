@@ -68,10 +68,12 @@ import type {
 } from '../../src/lib/sync/types'
 import { createContactsConflictHandler } from '../../src/stores/contactsConflictHandler'
 
-import { WasClient } from '@interop/was-client'
+import { WasClient, type CollectionEncryption } from '@interop/was-client'
 import {
   createEdvDocCipher,
   createEdvEncryption,
+  ensureFirstEpoch,
+  ownerRecipient,
   type DocCipher
 } from '@interop/was-client/edv'
 import {
@@ -346,7 +348,9 @@ class InMemoryStore implements SyncStore {
         id,
         version: latest.version,
         updatedAt: latest.updatedAt,
-        deleted: latest.deleted,
+        // A non-null MasterState is never a tombstone (the port folds those
+        // into `get` resolving null).
+        deleted: false,
         data: latest.data ?? row?.data ?? null,
         dirty: false
       })
@@ -373,7 +377,7 @@ function makeDcwContactResolve({
 }): ResolveConflict {
   return async ({ id, data }) => {
     const master = await port.get({ id })
-    if (master === null || master.deleted) {
+    if (master === null) {
       await store.adoptLatest({
         id,
         latest: null,
@@ -752,6 +756,11 @@ describeConformance('cross-replica round-trip conformance', () => {
     })
 
     // Freewallet created the account; DCW attaches without re-provisioning.
+    // The provisioning two-step: declare each collection encrypted, then
+    // install its key epoch[0] (create-if-absent) wrapped to the account KAK
+    // -- every encrypted collection carries its epochs from birth, and the
+    // ciphers below refuse to build without a descriptor.
+    const descriptors: Record<string, CollectionEncryption> = {}
     for (const collectionId of COLLECTIONS) {
       await ensureSpaceAndCollection({
         was: fwWas,
@@ -760,11 +769,19 @@ describeConformance('cross-replica round-trip conformance', () => {
         collectionId,
         encryption: 'edv'
       })
+      const { descriptor } = await ensureFirstEpoch({
+        collection: fwWas.space(spaceId).collection(collectionId),
+        recipients: [
+          ownerRecipient({ keyAgreementKey: fwAgents.keyAgreementKey })
+        ]
+      })
+      descriptors[collectionId] = descriptor
     }
 
     // Ciphers: each app's REAL construction -- both now pass the collection
     // spec's idDerivation ('random' for the mutable contacts head, 'content'
-    // for the content-addressed collections); freewallet wires it through
+    // for the content-addressed collections) plus the collection's
+    // epoch-bearing descriptor; freewallet wires both through
     // `storageManager.#buildCiphers` from `WALLET_STANDARD_COLLECTIONS`.
     for (const collectionId of COLLECTIONS) {
       dcwCiphers[collectionId] = await createEdvDocCipher({
@@ -772,14 +789,16 @@ describeConformance('cross-replica round-trip conformance', () => {
         keyResolver: dcwAgents.keyResolver,
         collectionId,
         idDerivation:
-          collectionId === CONTACTS_COLLECTION ? 'random' : 'content'
+          collectionId === CONTACTS_COLLECTION ? 'random' : 'content',
+        encryption: descriptors[collectionId]
       })
       fwCiphers[collectionId] = await createEdvDocCipher({
         keyAgreementKey: fwAgents.keyAgreementKey,
         keyResolver: fwAgents.keyResolver,
         collectionId,
         idDerivation:
-          collectionId === CONTACTS_COLLECTION ? 'random' : 'content'
+          collectionId === CONTACTS_COLLECTION ? 'random' : 'content',
+        encryption: descriptors[collectionId]
       })
       dcwPorts[collectionId] = createWasSyncPort({
         was: dcwWas,
@@ -795,7 +814,8 @@ describeConformance('cross-replica round-trip conformance', () => {
     fwLegacyContactsCipher = await createEdvDocCipher({
       keyAgreementKey: fwAgents.keyAgreementKey,
       keyResolver: fwAgents.keyResolver,
-      collectionId: CONTACTS_COLLECTION
+      collectionId: CONTACTS_COLLECTION,
+      encryption: descriptors[CONTACTS_COLLECTION]
     })
 
     // Freewallet replica: memory RxDB with the real schema + conflict handler.

@@ -12,7 +12,9 @@ IndexedDB (the active replica); optionally, a remote **Wallet Attached Storage
 the background.
 
 The companion WAS server lives at
-`/home/dmitri/code/Interop/was-teaching-server`. Its AGENTS.md has the
+<https://github.com/interop-alliance/was-teaching-server>. Its
+[AGENTS.md](https://github.com/interop-alliance/was-teaching-server/blob/main/AGENTS.md)
+has the
 authoritative description of the WAS protocol, Space/Collection/Resource data
 model, and ZCap authorization model.
 
@@ -74,3 +76,38 @@ that file's header; the rules that apply when working an item:
 
 Code style, refactoring, JSDoc, comment, and error-handling conventions live in
 @CONTRIBUTING.md -- follow them.
+
+## Reference material (read-only, outside this repo)
+
+These are separate repositories. Use them to ground changes against the specs
+and the shared libraries' actual source -- check with the user before editing
+anything in them. (If a repo happens to be checked out beside this one, read
+it locally instead of fetching.)
+
+- [wallet-attached-storage-spec](https://github.com/w3c-ccg/wallet-attached-storage-spec)
+  -- the WAS spec: the Space / Collection / Resource model, the HTTP API, and
+  the zCap authorization profile.
+- [app-connect-spec](https://github.com/interop-alliance/app-connect-spec)
+  -- the App Connect companion spec: the `AppConnectQuery`, the app-key
+  credential, descriptor vocabulary and action ceilings, and the response
+  presentation. The normative wire contract for `src/lib/walletRequest/`.
+- [encrypted-collections-spec](https://github.com/interop-alliance/encrypted-collections-spec)
+  -- the WAS Encrypted Collections profile: envelope cryptography, key
+  epochs, and recipient-key derivation.
+- [wallet-core](https://github.com/interop-alliance/wallet-core) --
+  `@interop/wallet-core`, the shared wallet layer (see "What lives elsewhere"
+  in ARCHITECTURE.md); its own `ARCHITECTURE.md` maps the module layers, key
+  hierarchy, and ceremonies.
+- [was-client](https://github.com/interop-alliance/was-client) /
+  [was-teaching-server](https://github.com/interop-alliance/was-teaching-server)
+  -- the WAS HTTP client (plus the EDV cipher and sync wire contract) and the
+  companion server; the server's AGENTS.md is the authoritative protocol
+  description.
+- [was-react](https://github.com/interop-alliance/was-react) -- the
+  app-side half of App Connect and shared-collection reading; what a BYOE app
+  runs against the capabilities this wallet grants.
+- dcw (private repo) -- the sibling mobile wallet built on the same
+  `@interop/wallet-core` ceremonies; the cross-wallet interop check.
+- [zcap-developer-guide](https://github.com/interop-alliance/zcap-developer-guide)
+  -- how zCaps (delegation, invocation, verification, root-of-trust) actually
+  work. Consult before changing anything about authorization.

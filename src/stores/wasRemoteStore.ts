@@ -68,6 +68,10 @@ import {
   WAS_KEY_EPOCH_HEADER
 } from '@interop/was-client/sync'
 import { provisionWalletSpace } from '@interop/wallet-core/space'
+import {
+  ensureWalletSpaceEpochs,
+  type UserKey
+} from '@interop/wallet-core/keys'
 
 /**
  * Map from logical collection name to its WAS base URL.
@@ -304,6 +308,30 @@ export class WASRemoteStore {
       collections.set(key, this.#collectionBaseUrl(id))
     }
     this.collections = collections
+  }
+
+  /**
+   * The EDV-bearing second step of the shared provisioning two-step: installs
+   * key epoch[0] on every encrypted collection of the wallet-Space roster
+   * (contacts included), wrapped to the account's user key. Create-if-absent
+   * through the descriptor-store seam, adopting (never overwriting) a roster
+   * another provisioner already landed -- so re-running after a tear
+   * converges, and exactly one epoch[0] ever exists per collection. Run right
+   * after `ensureUserCollections`, before any encrypted collection's first
+   * content push: every encrypted collection carries its key epochs from
+   * birth, and ciphers refuse fail-closed without them.
+   *
+   * @param options {object}
+   * @param options.userKey {UserKey}   the account's user key, epoch[0]'s one
+   *   initial recipient
+   * @returns {Promise<void>}
+   */
+  async ensureSpaceEpochs({ userKey }: { userKey: UserKey }): Promise<void> {
+    await ensureWalletSpaceEpochs({
+      was: this.was,
+      spaceId: this.spaceId,
+      userKey
+    })
   }
 
   /**

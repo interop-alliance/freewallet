@@ -60,11 +60,11 @@ importers:
         specifier: ^3.5.3
         version: 3.5.3
       '@interop/wallet-core':
-        specifier: ^0.21.0
-        version: 0.21.0(@interop/jsonld-signatures@11.8.4)
+        specifier: ^0.23.1
+        version: 0.23.1(@interop/jsonld-signatures@11.8.4)
       '@interop/was-client':
-        specifier: ^0.27.0
-        version: 0.27.0(@interop/jsonld-signatures@11.8.4)
+        specifier: ^0.30.0
+        version: 0.30.0(@interop/jsonld-signatures@11.8.4)
       '@interop/webkms-client':
         specifier: ^14.7.1
         version: 14.7.1
@@ -82,7 +82,7 @@ importers:
         version: 1.62.1
       '@scure/base':
         specifier: ^2.2.0
-        version: 2.2.0
+        version: 2.3.0
       '@zxcvbn-ts/core':
         specifier: ^4.1.2
         version: 4.1.2
@@ -200,7 +200,7 @@ importers:
         version: 17.9.0
       jsdom:
         specifier: ^30.0.1
-        version: 30.0.1(@noble/hashes@2.2.0)
+        version: 30.0.1(@noble/hashes@2.3.0)
       prettier:
         specifier: ^3.9.6
         version: 3.9.6
@@ -218,7 +218,7 @@ importers:
         version: 8.2.1(@types/node@26.1.2)
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@types/node@26.1.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(vite@8.2.1(@types/node@26.1.2))
+        version: 4.1.10(@types/node@26.1.2)(jsdom@30.0.1(@noble/hashes@2.3.0))(vite@8.2.1(@types/node@26.1.2))
 
 packages:
 
@@ -661,12 +661,12 @@ packages:
     resolution: {integrity: sha512-3cFFlZZz8mKwLiT8GFLeL3Nr49UOO7fP77Cwj7mEXWh15S/OKEpqpAHEePQ9p1T7fusbUVVmk7W+/AVHU1r1Fw==}
     engines: {node: '>=24.0'}
 
-  '@interop/wallet-core@0.21.0':
-    resolution: {integrity: sha512-hSWJ9xruEA/EGsdzVNGuy9Rhu809lfEEKAg22N3bRuBow78ZpvvwOLrA+5j5Rpc5BvwIx6wls0meUQS9eG/oAg==}
+  '@interop/wallet-core@0.23.1':
+    resolution: {integrity: sha512-IQDrZCLyvXUN5+vE1QqWh2/Bp70ZKuL0uQ6W9fJFQAumO27OAVF8fdBiPYqvP3JtvOifJx5S4+nKxiqCbZGvXw==}
     engines: {node: '>=24.0'}
 
-  '@interop/was-client@0.27.0':
-    resolution: {integrity: sha512-tP3DSQsML/5gjeEV72bsxt2/4YdJVQIpCP8mLJfCkU7Ol26GQTUha96W38WJZtz2ey16ZuAIgpGHkRQxWXPMmg==}
+  '@interop/was-client@0.30.0':
+    resolution: {integrity: sha512-SxJLDnNNgB9sG9W1wLxaEw8C6bHBJ+2MWgb1HfaKVHxywAozf1DTpgU0A9wo1nr2E3bBgHfyYVYpwRU8qTZRgA==}
     engines: {node: '>=24.0'}
 
   '@interop/webkms-client@14.7.1':
@@ -835,6 +835,10 @@ packages:
     resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
     engines: {node: '>= 20.19.0'}
 
+  '@noble/hashes@2.3.0':
+    resolution: {integrity: sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ==}
+    engines: {node: '>= 20.19.0'}
+
   '@oxc-project/types@0.142.0':
     resolution: {integrity: sha512-7W+2q5AKQVU36fkaryontrHn3YDt1RyUYXatw9i5H8ocYe2sPKSFB6eS8WNPeRKiN1qAWWZUPm7gwFzJGrccqQ==}
 
@@ -943,11 +947,8 @@ packages:
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
 
-  '@scure/base@1.2.6':
-    resolution: {integrity: sha512-g/nm5FgUa//MCj1gV09zTJTaM6KBAHqLN907YVQqf7zC49+DcO4B1so4ZX07Ef10Twr6nuqYEH9GEggFXA4Fmg==}
-
-  '@scure/base@2.2.0':
-    resolution: {integrity: sha512-b8XEupJibegiXV+tDUseI8oLQc8ei3d/4Jkb2RpbHh3MfE054ov3uIz2dhFkB3FI8iwYkEh0gGCApkrYggkPNg==}
+  '@scure/base@2.3.0':
+    resolution: {integrity: sha512-NsG6Y03tY6R5BUis4FdVtHVkur0U6FOzskgs9ZXNl78CUc9fkZ78HmENUle1nSOkCasDmbubmWD9qwB7mm4PZA==}
 
   '@stablelib/aead@2.0.0':
     resolution: {integrity: sha512-U/RMANRxbT/ahIpYsPSiFwDFNjADHdnCFfmo09MO1ai2XmerPAOPtMl0qmX7XVvygnACC6ijKDyHBoT2rGyElg==}
@@ -1014,9 +1015,6 @@ packages:
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
-
-  '@types/node@25.9.5':
-    resolution: {integrity: sha512-OScDchr2fwuUmWdf4kZ9h7PcJiYDVInhJizG/biAq3cAvqwYktuy/TYGGdZNMtNTFUP7rnb0NU4TUdm82kt4Rg==}
 
   '@types/node@26.1.2':
     resolution: {integrity: sha512-Vu4a5UFA9rIIFJ7rB/Vaafh9lrCQszopTCx6KjFboXTGQbPNasehVR5TEiithSDGyd1DEiUByggTZsg8jukeIg==}
@@ -3217,9 +3215,6 @@ packages:
     resolution: {integrity: sha512-nWJ91DjeOkej/TA8pXQ3myruKpKEYgqvpw9lz4OPHj/NWFNluYrjbz9j01CJ8yKQd2g4jFoOkINCTW2I5LEEyw==}
     engines: {node: '>= 0.4'}
 
-  undici-types@7.24.6:
-    resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
-
   undici-types@8.3.0:
     resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
 
@@ -3833,9 +3828,9 @@ snapshots:
       '@eslint/core': 1.2.1
       levn: 0.4.1
 
-  '@exodus/bytes@1.15.1(@noble/hashes@2.2.0)':
+  '@exodus/bytes@1.15.1(@noble/hashes@2.3.0)':
     optionalDependencies:
-      '@noble/hashes': 2.2.0
+      '@noble/hashes': 2.3.0
 
   '@fontsource-variable/inter@5.3.0': {}
 
@@ -3857,7 +3852,7 @@ snapshots:
 
   '@interop/bnid@6.0.2':
     dependencies:
-      '@scure/base': 2.2.0
+      '@scure/base': 2.3.0
 
   '@interop/data-integrity-core@8.4.0': {}
 
@@ -3865,8 +3860,8 @@ snapshots:
     dependencies:
       '@interop/data-integrity-core': 8.4.0
       '@interop/jsonld-signatures': 11.8.4
-      '@noble/hashes': 2.2.0
-      '@scure/base': 2.2.0
+      '@noble/hashes': 2.3.0
+      '@scure/base': 2.3.0
 
   '@interop/did-io@4.1.0':
     dependencies:
@@ -3886,8 +3881,8 @@ snapshots:
     dependencies:
       '@interop/data-integrity-core': 8.4.0
       '@noble/curves': 2.2.0
-      '@noble/hashes': 2.2.0
-      '@scure/base': 2.2.0
+      '@noble/hashes': 2.3.0
+      '@scure/base': 2.3.0
       json-canonicalize: 2.0.0
 
   '@interop/did-web-resolver@6.3.0':
@@ -3903,7 +3898,7 @@ snapshots:
   '@interop/ecdsa-multikey@2.3.3':
     dependencies:
       '@interop/data-integrity-core': 8.4.0
-      '@scure/base': 2.2.0
+      '@scure/base': 2.3.0
 
   '@interop/ecdsa-signature@2.0.5(@interop/jsonld-signatures@11.8.4)':
     dependencies:
@@ -3932,8 +3927,8 @@ snapshots:
     dependencies:
       '@interop/data-integrity-core': 8.4.0
       '@noble/ed25519': 3.1.0
-      '@noble/hashes': 2.2.0
-      '@scure/base': 2.2.0
+      '@noble/hashes': 2.3.0
+      '@scure/base': 2.3.0
 
   '@interop/edv-client@17.8.0':
     dependencies:
@@ -3942,8 +3937,8 @@ snapshots:
       '@interop/http-signature-zcap-invoke': 6.2.4
       '@interop/lru-memoize': 4.0.3
       '@interop/minimal-cipher': 7.8.1
-      '@noble/hashes': 2.2.0
-      '@scure/base': 2.2.0
+      '@noble/hashes': 2.3.0
+      '@scure/base': 2.3.0
       canonicalize: 3.0.0
       split-string: 6.1.0
     transitivePeerDependencies:
@@ -4005,7 +4000,7 @@ snapshots:
       '@interop/ecdsa-multikey': 2.3.3
       '@noble/ciphers': 2.2.0
       '@noble/curves': 2.2.0
-      '@scure/base': 2.2.0
+      '@scure/base': 2.3.0
       '@stablelib/chacha': 2.0.1
       '@stablelib/chacha20poly1305': 2.0.1
 
@@ -4079,7 +4074,7 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/wallet-core@0.21.0(@interop/jsonld-signatures@11.8.4)':
+  '@interop/wallet-core@0.23.1(@interop/jsonld-signatures@11.8.4)':
     dependencies:
       '@interop/data-integrity-core': 8.4.0
       '@interop/data-integrity-proof': 3.4.3
@@ -4090,18 +4085,18 @@ snapshots:
       '@interop/security-document-loader': 9.5.1
       '@interop/social-core': 0.8.0
       '@interop/vc': 11.0.6
-      '@interop/was-client': 0.27.0(@interop/jsonld-signatures@11.8.4)
+      '@interop/was-client': 0.30.0(@interop/jsonld-signatures@11.8.4)
       '@interop/webkms-client': 14.7.1
       '@interop/x25519-key-agreement-key': 5.2.1
-      '@noble/hashes': 2.2.0
-      '@scure/base': 1.2.6
+      '@noble/hashes': 2.3.0
+      '@scure/base': 2.3.0
       jsonpath-plus: 10.4.0
     transitivePeerDependencies:
       - '@interop/jsonld-signatures'
       - expo-crypto
       - react-native-get-random-values
 
-  '@interop/was-client@0.27.0(@interop/jsonld-signatures@11.8.4)':
+  '@interop/was-client@0.30.0(@interop/jsonld-signatures@11.8.4)':
     dependencies:
       '@interop/data-integrity-core': 8.4.0
       '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.4)
@@ -4111,8 +4106,8 @@ snapshots:
       '@interop/minimal-cipher': 7.8.1
       '@interop/storage-core': 0.3.13
       '@interop/x25519-key-agreement-key': 5.2.1
-      '@noble/hashes': 2.2.0
-      '@scure/base': 2.2.0
+      '@noble/hashes': 2.3.0
+      '@scure/base': 2.3.0
       json-canonicalize: 2.0.0
     transitivePeerDependencies:
       - '@interop/jsonld-signatures'
@@ -4126,7 +4121,7 @@ snapshots:
       '@interop/http-client': 1.0.5
       '@interop/http-signature-zcap-invoke': 6.2.4
       '@interop/lru-memoize': 4.0.3
-      '@scure/base': 2.2.0
+      '@scure/base': 2.3.0
     transitivePeerDependencies:
       - expo-crypto
       - react-native-get-random-values
@@ -4135,7 +4130,7 @@ snapshots:
     dependencies:
       '@interop/data-integrity-core': 8.4.0
       '@noble/curves': 2.2.0
-      '@scure/base': 2.2.0
+      '@scure/base': 2.3.0
 
   '@interop/zcap@11.0.5':
     dependencies:
@@ -4284,6 +4279,8 @@ snapshots:
 
   '@noble/hashes@2.2.0': {}
 
+  '@noble/hashes@2.3.0': {}
+
   '@oxc-project/types@0.142.0': {}
 
   '@playwright/test@1.62.1':
@@ -4343,9 +4340,7 @@ snapshots:
 
   '@rolldown/pluginutils@1.0.1': {}
 
-  '@scure/base@1.2.6': {}
-
-  '@scure/base@2.2.0': {}
+  '@scure/base@2.3.0': {}
 
   '@stablelib/aead@2.0.0': {}
 
@@ -4420,10 +4415,6 @@ snapshots:
 
   '@types/ms@2.1.0': {}
 
-  '@types/node@25.9.5':
-    dependencies:
-      undici-types: 7.24.6
-
   '@types/node@26.1.2':
     dependencies:
       undici-types: 8.3.0
@@ -4450,7 +4441,7 @@ snapshots:
 
   '@types/simple-peer@9.11.9':
     dependencies:
-      '@types/node': 25.9.5
+      '@types/node': 26.1.2
 
   '@types/unist@2.0.11': {}
 
@@ -4458,7 +4449,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 25.9.5
+      '@types/node': 26.1.2
 
   '@typescript-eslint/eslint-plugin@8.66.0(@typescript-eslint/parser@8.66.0(eslint@10.8.0(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3))(eslint@10.8.0(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)':
     dependencies:
@@ -4959,10 +4950,10 @@ snapshots:
 
   damerau-levenshtein@1.0.8: {}
 
-  data-urls@7.0.0(@noble/hashes@2.2.0):
+  data-urls@7.0.0(@noble/hashes@2.3.0):
     dependencies:
       whatwg-mimetype: 5.0.0
-      whatwg-url: 16.0.1(@noble/hashes@2.2.0)
+      whatwg-url: 16.0.1(@noble/hashes@2.3.0)
     transitivePeerDependencies:
       - '@noble/hashes'
 
@@ -5525,9 +5516,9 @@ snapshots:
     dependencies:
       react-is: 16.13.1
 
-  html-encoding-sniffer@6.0.0(@noble/hashes@2.2.0):
+  html-encoding-sniffer@6.0.0(@noble/hashes@2.3.0):
     dependencies:
-      '@exodus/bytes': 1.15.1(@noble/hashes@2.2.0)
+      '@exodus/bytes': 1.15.1(@noble/hashes@2.3.0)
     transitivePeerDependencies:
       - '@noble/hashes'
 
@@ -5736,17 +5727,17 @@ snapshots:
 
   js-tokens@4.0.0: {}
 
-  jsdom@30.0.1(@noble/hashes@2.2.0):
+  jsdom@30.0.1(@noble/hashes@2.3.0):
     dependencies:
       '@asamuzakjp/css-color': 6.0.5
       '@asamuzakjp/dom-selector': 8.3.2
       '@bramus/specificity': 2.4.2
       '@csstools/css-syntax-patches-for-csstree': 1.1.7(css-tree@3.2.1)
-      '@exodus/bytes': 1.15.1(@noble/hashes@2.2.0)
+      '@exodus/bytes': 1.15.1(@noble/hashes@2.3.0)
       css-tree: 3.2.1
-      data-urls: 7.0.0(@noble/hashes@2.2.0)
+      data-urls: 7.0.0(@noble/hashes@2.3.0)
       decimal.js: 10.6.0
-      html-encoding-sniffer: 6.0.0(@noble/hashes@2.2.0)
+      html-encoding-sniffer: 6.0.0(@noble/hashes@2.3.0)
       is-potential-custom-element-name: 1.0.1
       lru-cache: 11.5.2
       parse5: 8.0.1
@@ -5757,7 +5748,7 @@ snapshots:
       w3c-xmlserializer: 5.0.0
       webidl-conversions: 8.0.1
       whatwg-mimetype: 5.0.0
-      whatwg-url: 17.1.0(@noble/hashes@2.2.0)
+      whatwg-url: 17.1.0(@noble/hashes@2.3.0)
       xml-name-validator: 5.0.0
     transitivePeerDependencies:
       - '@noble/hashes'
@@ -7057,8 +7048,6 @@ snapshots:
       has-symbols: 1.1.0
       which-boxed-primitive: 1.1.1
 
-  undici-types@7.24.6: {}
-
   undici-types@8.3.0: {}
 
   undici@7.29.0: {}
@@ -7148,7 +7137,7 @@ snapshots:
       '@types/node': 26.1.2
       fsevents: 2.3.3
 
-  vitest@4.1.10(@types/node@26.1.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(vite@8.2.1(@types/node@26.1.2)):
+  vitest@4.1.10(@types/node@26.1.2)(jsdom@30.0.1(@noble/hashes@2.3.0))(vite@8.2.1(@types/node@26.1.2)):
     dependencies:
       '@vitest/expect': 4.1.10
       '@vitest/mocker': 4.1.10(vite@8.2.1(@types/node@26.1.2))
@@ -7172,7 +7161,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 26.1.2
-      jsdom: 30.0.1(@noble/hashes@2.2.0)
+      jsdom: 30.0.1(@noble/hashes@2.3.0)
     transitivePeerDependencies:
       - msw
 
@@ -7191,17 +7180,17 @@ snapshots:
 
   whatwg-mimetype@5.0.0: {}
 
-  whatwg-url@16.0.1(@noble/hashes@2.2.0):
+  whatwg-url@16.0.1(@noble/hashes@2.3.0):
     dependencies:
-      '@exodus/bytes': 1.15.1(@noble/hashes@2.2.0)
+      '@exodus/bytes': 1.15.1(@noble/hashes@2.3.0)
       tr46: 6.0.0
       webidl-conversions: 8.0.1
     transitivePeerDependencies:
       - '@noble/hashes'
 
-  whatwg-url@17.1.0(@noble/hashes@2.2.0):
+  whatwg-url@17.1.0(@noble/hashes@2.3.0):
     dependencies:
-      '@exodus/bytes': 1.15.1(@noble/hashes@2.2.0)
+      '@exodus/bytes': 1.15.1(@noble/hashes@2.3.0)
       tr46: 6.0.0
       webidl-conversions: 8.0.1
     transitivePeerDependencies:

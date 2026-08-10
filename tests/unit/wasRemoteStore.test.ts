@@ -504,10 +504,15 @@ describe('WASRemoteStore.ensureUserCollections', () => {
       force?: boolean
     }> = []
     const setPublics: string[] = []
+    // The 0.29.x ensure is non-clobbering: it describes first (a `null` here
+    // means "absent", so every collection takes its creation path) and checks
+    // the public policy before granting it.
     const was = {
       space: () => ({
+        describe: async () => null,
         configure: async () => undefined,
         collection: (id: string) => ({
+          describe: async () => null,
           configure: async (opts: {
             name?: string
             encryption?: { scheme: string }
@@ -518,6 +523,7 @@ describe('WASRemoteStore.ensureUserCollections', () => {
             }
             configures.push({ id, ...opts })
           },
+          isPublic: async () => false,
           setPublic: async () => {
             setPublics.push(id)
           }

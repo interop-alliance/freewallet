@@ -29,7 +29,12 @@ import {
   type IZcap,
   type Space
 } from '@interop/was-client'
-import { initRecipients, removeRecipient } from '@interop/was-client/edv'
+import {
+  ensureFirstEpoch,
+  initRecipients,
+  removeRecipient
+} from '@interop/was-client/edv'
+import { mintRecordEncryption } from '@/session/recordEnvelope'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
@@ -235,7 +240,10 @@ function makeFakeRemote(): {
 /**
  * Builds the encrypted-collection ciphers over the owner's keys and the given
  * per-collection descriptors (keyed by WAS collection id), mirroring what
- * StorageManager builds internally.
+ * StorageManager builds internally. Every encrypted collection carries a
+ * key-epoch roster from birth, so a collection the test supplies no
+ * descriptor for gets a local one-epoch descriptor wrapped to the owner --
+ * standing in for what provisioning would have installed.
  */
 async function buildCiphers(
   owner: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver },
@@ -252,11 +260,39 @@ async function buildCiphers(
         keyAgreementKey: owner.keyAgreementKey,
         keyResolver: owner.keyResolver,
         collectionId: id,
-        encryption: descriptors[id]
+        encryption:
+          descriptors[id] ??
+          (await mintRecordEncryption({
+            keyAgreementKey: owner.keyAgreementKey
+          }))
       })
     ])
   )
   return Object.fromEntries(entries)
+}
+
+/**
+ * Installs epoch[0] (the owner as recipient zero) on the fake remote's
+ * standard encrypted collections, as the shared provisioning two-step would
+ * have -- `shareCollection` now assumes every encrypted collection already
+ * carries its epochs and always `addRecipient`s. Returns the descriptors
+ * (keyed by WAS collection id) to build the ciphers and seed the
+ * StorageManager with, so a mid-test cipher rebuild keeps every collection
+ * readable.
+ */
+async function provisionFakeRemote(
+  owner: { keyAgreementKey: IKeyAgreementKey },
+  remoteStore: WASRemoteStore
+): Promise<Record<string, CollectionEncryption>> {
+  const descriptors: Record<string, CollectionEncryption> = {}
+  for (const id of ['private-credentials', 'wallet-activity']) {
+    const { descriptor } = await ensureFirstEpoch({
+      collection: remoteStore.collectionHandle({ collectionId: id }),
+      recipients: [ownerRecipient({ keyAgreementKey: owner.keyAgreementKey })]
+    })
+    descriptors[id] = descriptor
+  }
+  return descriptors
 }
 
 /**
@@ -332,19 +368,20 @@ afterEach(async () => {
 })
 
 describe('StorageManager.shareCollection', () => {
-  it('first share mints an epoch with the owner as recipient and delegates a GET/HEAD zcap', async () => {
+  it('first share escrows the reader into the provisioned epoch and delegates a GET/HEAD zcap', async () => {
     const owner = await generateKey()
     const reader = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore, user } = await initLocalStore(ciphers)
     const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient, calls } = makeFakeZcapClient()
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
 
     const { descriptor } = await storage.shareCollection({
@@ -355,8 +392,8 @@ describe('StorageManager.shareCollection', () => {
       controller: 'did:key:z6MkReader'
     })
 
-    // Read axis: the first epoch exists, and both the owner (recipient zero)
-    // and the new reader are on its roster.
+    // Read axis: still the one provisioned epoch, and both the owner
+    // (recipient zero) and the new reader are on its roster.
     expect(descriptor.epochs).toHaveLength(1)
     expect(descriptor.currentEpoch).toBeDefined()
     expect(currentEpochKids(descriptor)).toEqual(
@@ -389,16 +426,17 @@ describe('StorageManager.shareCollection', () => {
     const owner = await generateKey()
     const readerA = await generateKey()
     const readerB = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore, user } = await initLocalStore(ciphers)
     const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
     const profile = makeProfile(owner, zcapClient)
 
@@ -434,16 +472,17 @@ describe('StorageManager.unshareCollection', () => {
   it('rotates the epoch and revokes the recorded zcap(s)', async () => {
     const owner = await generateKey()
     const reader = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore, user } = await initLocalStore(ciphers)
     const { remoteStore, revoked } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
     const profile = makeProfile(owner, zcapClient)
 
@@ -480,16 +519,17 @@ describe('StorageManager.unshareCollection', () => {
   it('lists current shares from the descriptor roster minus the owner', async () => {
     const owner = await generateKey()
     const reader = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore, user } = await initLocalStore(ciphers)
     const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
 
     await storage.shareCollection({
@@ -511,16 +551,17 @@ describe('StorageManager.unshareCollection', () => {
   it('carries a connected app name and origin through to the listing', async () => {
     const owner = await generateKey()
     const reader = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore, user } = await initLocalStore(ciphers)
     const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
 
     const { zcap } = await storage.shareCollection({
@@ -623,18 +664,19 @@ describe('StorageManager.revokeAppGrants', () => {
 
   it('revokes the active grant and skips expired and legacy entries', async () => {
     const owner = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore, user } = await initLocalStore(ciphers)
     const revoked: unknown[] = []
     const remoteStore = makeRevokeRemote(async zcap => {
       revoked.push(zcap)
     })
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
     const past = new Date(Date.now() - 1_000_000).toISOString()
@@ -674,18 +716,19 @@ describe('StorageManager.revokeAppGrants', () => {
 
   it('skips grants delegated to a different controller', async () => {
     const owner = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore, user } = await initLocalStore(ciphers)
     const revoked: unknown[] = []
     const remoteStore = makeRevokeRemote(async zcap => {
       revoked.push(zcap)
     })
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
@@ -714,17 +757,18 @@ describe('StorageManager.revokeAppGrants', () => {
 
   it('swallows ValidationError from an already-revoked grant', async () => {
     const owner = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore, user } = await initLocalStore(ciphers)
     const remoteStore = makeRevokeRemote(async () => {
       throw new ValidationError('already revoked')
     })
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
@@ -748,17 +792,18 @@ describe('StorageManager.revokeAppGrants', () => {
 
   it('propagates a non-ValidationError revoke failure', async () => {
     const owner = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore, user } = await initLocalStore(ciphers)
     const remoteStore = makeRevokeRemote(async () => {
       throw new Error('server unreachable')
     })
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
@@ -801,15 +846,16 @@ describe('StorageManager.provisionAppCollection', () => {
   it('first provision mints an epoch with the owner and the app recipient', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore } = await initLocalStore(ciphers)
     const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
 
     const descriptor = await storage.provisionAppCollection({
@@ -826,15 +872,16 @@ describe('StorageManager.provisionAppCollection', () => {
   it('a reconnect after revoke re-adds the app without a second epoch', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore } = await initLocalStore(ciphers)
     const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
     const appRecipient = ownerRecipient({
       keyAgreementKey: app.keyAgreementKey
@@ -867,15 +914,16 @@ describe('StorageManager.provisionAppCollection', () => {
   it('is a no-op when the app is already a recipient of the current epoch', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore } = await initLocalStore(ciphers)
     const { remoteStore, collection } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
     const appRecipient = ownerRecipient({
       keyAgreementKey: app.keyAgreementKey
@@ -924,15 +972,16 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
   it('rotates the app off each app-provisioned collection and revokes its grant', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore, user } = await initLocalStore(ciphers)
     const { remoteStore, revoked } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
 
     await storage.provisionAppCollection({
@@ -976,15 +1025,16 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
   it('ignores grants on standard/protected collections', async () => {
     const owner = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore, user } = await initLocalStore(ciphers)
     const { remoteStore, revoked } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
 
     const future = new Date(Date.now() + 1_000_000).toISOString()
@@ -1018,15 +1068,16 @@ describe('StorageManager.decryptCollectionResource (app collection)', () => {
   it('decrypts an app-collection envelope with the vault KAK', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore } = await initLocalStore(ciphers)
     const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
 
     const descriptor = await storage.provisionAppCollection({
@@ -1056,15 +1107,16 @@ describe('StorageManager.decryptCollectionResource (app collection)', () => {
 
   it('returns undefined for an app collection with no epoch roster', async () => {
     const owner = await generateKey()
-    const ciphers = await buildCiphers(owner, {})
-    const { localStore } = await initLocalStore(ciphers)
     const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       localStore,
       remoteStore,
       ciphers,
       vaultKeys: owner,
-      descriptors: {}
+      descriptors
     })
 
     // A well-formed EDV envelope shape, but the collection was never provisioned

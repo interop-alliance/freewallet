@@ -21,9 +21,8 @@ import { getKmsSignFunction } from '@/lib/kms'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
 /**
- * The suite type of the two Ed25519 verification keys (authentication,
- * assertionMethod) -- what the WebKMS local module generates for the
- * `asymmetric` category.
+ * The suite type of the Ed25519 verification keys -- what the WebKMS local
+ * module generates for the `asymmetric` category.
  */
 const ED25519_VM_TYPE = 'Ed25519VerificationKey2020'
 /**
@@ -66,23 +65,27 @@ export function didWebFromSpace({
 }
 
 /**
- * Whether a parsed `keys.json` body is a well-formed key map (all three
- * relationships present with a `vmId` and `kmsKeyId`).
+ * Whether a parsed `keys.json` body is a well-formed key map: `authentication`
+ * and `keyAgreement` present with a `vmId` and `kmsKeyId`. `assertionMethod`
+ * is optional (no KMS-held assertion key is minted anymore -- the account
+ * document's `assertionMethod` relation lists client keys only) but must be
+ * well-formed where a legacy `keys.json` still carries one.
  */
 function isKeyMap(value: unknown): value is DidWebKeyMap {
   if (!value || typeof value !== 'object') {
     return false
   }
   const map = value as Record<string, unknown>
-  return (['authentication', 'assertionMethod', 'keyAgreement'] as const).every(
-    relationship => {
-      const entry = map[relationship] as Record<string, unknown> | undefined
-      return (
-        !!entry &&
-        typeof entry.vmId === 'string' &&
-        typeof entry.kmsKeyId === 'string'
-      )
-    }
+  const wellFormed = (entry: unknown): boolean => {
+    const key = entry as Record<string, unknown> | undefined
+    return (
+      !!key && typeof key.vmId === 'string' && typeof key.kmsKeyId === 'string'
+    )
+  }
+  return (
+    wellFormed(map.authentication) &&
+    wellFormed(map.keyAgreement) &&
+    (map.assertionMethod === undefined || wellFormed(map.assertionMethod))
   )
 }
 
@@ -110,16 +113,19 @@ export function assembleDidDocument({
     controller: did,
     publicKeyMultibase: multibaseOf(key.vmId)
   })
+  // No KMS-held assertion key is minted anymore; a legacy key map that still
+  // carries one keeps publishing it.
+  const { assertionMethod } = keys
   return {
     '@context': [DID_V1_CONTEXT, ED25519_2020_CONTEXT, X25519_2020_CONTEXT],
     id: did,
     verificationMethod: [
       method(keys.authentication, ED25519_VM_TYPE),
-      method(keys.assertionMethod, ED25519_VM_TYPE),
+      ...(assertionMethod ? [method(assertionMethod, ED25519_VM_TYPE)] : []),
       method(keys.keyAgreement, X25519_KAK_TYPE)
     ],
     authentication: [keys.authentication.vmId],
-    assertionMethod: [keys.assertionMethod.vmId],
+    ...(assertionMethod && { assertionMethod: [assertionMethod.vmId] }),
     keyAgreement: [keys.keyAgreement.vmId]
   }
 }
@@ -173,7 +179,7 @@ async function generateDidKey({
 
 /**
  * Idempotently provisions and publishes the user's did:web DID. The
- * steady-state path is a single read; a fresh Space generates three KMS keys,
+ * steady-state path is a single read; a fresh Space generates two KMS keys,
  * writes `keys.json` (the recovery anchor) first, then publishes `did.json`.
  * A crash between steps resumes from `keys.json` on the next full login.
  *
@@ -210,16 +216,16 @@ export async function ensureDidWeb({
     return existing
   }
 
-  // Fresh provisioning: mint the three keys with their aliases, then write
-  // keys.json before did.json so the flow is crash-resumable.
-  const [authentication, assertionMethod, keyAgreement] = await Promise.all([
-    generateDidKey({ keystoreAgent, did, category: 'asymmetric' }),
+  // Fresh provisioning: mint the two keys with their aliases (no KMS-held
+  // assertion key -- the account document's `assertionMethod` relation lists
+  // client keys only), then write keys.json before did.json so the flow is
+  // crash-resumable.
+  const [authentication, keyAgreement] = await Promise.all([
     generateDidKey({ keystoreAgent, did, category: 'asymmetric' }),
     generateDidKey({ keystoreAgent, did, category: 'keyAgreement' })
   ])
   const keys: DidWebKeyMap = {
     authentication,
-    assertionMethod,
     keyAgreement
   }
   await remoteStore.webvhIdStore().putKeyMap({ content: keys })

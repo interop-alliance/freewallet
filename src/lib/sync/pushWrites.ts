@@ -90,11 +90,13 @@ async function assembleConflict({
       _deleted: true
     }
   }
+  // A non-null MasterState is never a tombstone: the port folds an absent or
+  // tombstoned resource into `get` resolving null (the branch above).
   const conflict: WithDeleted<SyncedDoc> = {
     id,
     updatedAt: master.updatedAt,
     version: master.version,
-    _deleted: master.deleted
+    _deleted: false
   }
   if (master.data !== undefined) {
     conflict.data = master.data
@@ -162,7 +164,6 @@ async function deleteContent({
     const master = await port.get({ id })
     if (
       master === null ||
-      master.deleted ||
       !bodiesEqual(master.data, assumedMasterState?.data)
     ) {
       throw err

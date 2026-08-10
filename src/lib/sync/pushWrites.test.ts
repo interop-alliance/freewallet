@@ -311,7 +311,6 @@ describe('createPushHandler routing', () => {
         return {
           version: 1,
           updatedAt: '2026-02-02T00:00:00Z',
-          deleted: false,
           data: { a: 1 }
         }
       }
@@ -334,7 +333,6 @@ describe('createPushHandler routing', () => {
     const master: MasterState = {
       version: 1,
       updatedAt: '2026-02-02T00:00:00Z',
-      deleted: false,
       data: { a: 99 }
     }
     const port = fakePushPort({
@@ -371,7 +369,6 @@ describe('createPushHandler conflicts', () => {
     const master: MasterState = {
       version: 9,
       updatedAt: '2026-02-02T00:00:00Z',
-      deleted: false,
       data: { a: 99 }
     }
     const port = fakePushPort({
@@ -425,7 +422,6 @@ describe('createPushHandler conflicts', () => {
       version: 3,
       metaVersion: 6,
       updatedAt: '2026-03-03T00:00:00Z',
-      deleted: false,
       data: { a: 1 },
       custom: { jwe: 'srv' }
     }
@@ -465,7 +461,6 @@ describe('createPushHandler conflicts', () => {
     const master: MasterState = {
       version: 9,
       updatedAt: '2026-02-02T00:00:00Z',
-      deleted: false,
       createdBy: 'did:key:z6MkCreator',
       data: { a: 99 }
     }
@@ -491,7 +486,6 @@ describe('createPushHandler conflicts', () => {
     const master: MasterState = {
       version: 9,
       updatedAt: '2026-02-02T00:00:00Z',
-      deleted: false,
       epoch: 'epoch-srv',
       data: { a: 99 }
     }
@@ -546,7 +540,6 @@ describe('createPushHandler conflicts', () => {
       master: {
         version: 1,
         updatedAt: '2026-01-05T00:00:00Z',
-        deleted: false,
         data: { server: true }
       }
     })

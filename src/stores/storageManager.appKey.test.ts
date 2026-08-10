@@ -23,6 +23,7 @@ import type {
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import { CapabilityAgent } from '@interop/webkms-client'
 import { createEdvDocCipher, type DocCipher } from '@interop/was-client/edv'
+import { mintRecordEncryption } from '@/session/recordEnvelope'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { User } from '@/types/auth'
 import {
@@ -68,11 +69,13 @@ async function makeStorage(): Promise<{ storage: StorageManager; user: User }> {
     ['privateCredentials', 'private-credentials'],
     ['walletActivity', 'wallet-activity']
   ]) {
+    // Every encrypted collection carries a key-epoch roster from birth, so
+    // each cipher gets a local one-epoch descriptor wrapped to the test KAK.
     ciphers[logicalKey] = await createEdvDocCipher({
       keyAgreementKey: key,
       keyResolver,
       collectionId,
-      encryption: { scheme: 'edv' }
+      encryption: await mintRecordEncryption({ keyAgreementKey: key })
     })
   }
   userCounter += 1

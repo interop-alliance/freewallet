@@ -39,7 +39,7 @@ import {
 } from '@interop/was-client'
 import {
   addRecipient,
-  initRecipients,
+  ensureFirstEpoch,
   removeRecipient,
   type RecipientPublicKey
 } from '@interop/was-client/edv'
@@ -70,6 +70,7 @@ import {
   ensureUserKeyRoster,
   userKeyRosterEpochsSigner
 } from '@interop/wallet-core/keys'
+import { mintRecordEncryption } from '@interop/wallet-core/keyring'
 import {
   acquireDescriptor,
   acquireDescriptors,
@@ -234,6 +235,51 @@ function localStorageDescriptorCache({
       localStorage.setItem(cacheKey(collectionId), JSON.stringify(descriptor))
     }
   }
+}
+
+/**
+ * Descriptors for a session with no remote store (a guest, or no WAS server
+ * configured). Every encrypted collection still carries a key-epoch roster
+ * from birth, so each collection gets a local one-epoch descriptor wrapped to
+ * the session's vault KAK alone -- minted on first use and persisted in the
+ * same localStorage cache a remote Space's descriptors use, scoped by the
+ * user's DID in place of a Space id, so a returning local login rebuilds the
+ * same epoch and keeps decrypting its own rows. A guest's identity is random
+ * per session and its data dies with it, so a guest's descriptors are minted
+ * fresh and never persisted.
+ *
+ * @param options {object}
+ * @param options.userId {string}   the session user's DID (the cache scope)
+ * @param options.keyAgreementKey {IKeyAgreementKey}   the vault KAK epoch[0]
+ *   wraps to
+ * @param options.persist {boolean}   false for a guest (mint-only)
+ * @returns {Promise<Record<string, CollectionEncryption>>}   keyed by
+ *   collection id
+ */
+async function localOnlyDescriptors({
+  userId,
+  keyAgreementKey,
+  persist
+}: {
+  userId: string
+  keyAgreementKey: IKeyAgreementKey
+  persist: boolean
+}): Promise<Record<string, CollectionEncryption>> {
+  const cache = persist
+    ? localStorageDescriptorCache({ spaceId: `local:${userId}` })
+    : undefined
+  const entries = await Promise.all(
+    ENCRYPTED_COLLECTION_IDS.map(async collectionId => {
+      const cached = await cache?.readDescriptor({ collectionId })
+      if (cached?.epochs?.length) {
+        return [collectionId, cached] as const
+      }
+      const minted = await mintRecordEncryption({ keyAgreementKey })
+      await cache?.writeDescriptor({ collectionId, descriptor: minted })
+      return [collectionId, minted] as const
+    })
+  )
+  return Object.fromEntries(entries)
 }
 
 /**
@@ -493,21 +539,61 @@ export class StorageManager {
     descriptors?: Record<string, CollectionEncryption>
   }) {
     const cipherEntries = await Promise.all(
-      ENCRYPTED_STANDARD_COLLECTIONS.map(async ({ key, id, idDerivation }) => [
-        key,
-        await createEdvDocCipher({
-          keyAgreementKey,
-          keyResolver,
-          collectionId: id,
-          // The collection spec's id mint ('random' for the mutable contacts
-          // head, 'content' for the content-addressed collections), so a
-          // minted id follows the spec and can key the row.
-          idDerivation,
-          encryption: descriptors?.[id]
-        })
-      ])
+      ENCRYPTED_STANDARD_COLLECTIONS.map(async ({ key, id, idDerivation }) => {
+        const encryption = descriptors?.[id]
+        // Every encrypted collection carries its key epochs from
+        // provisioning, so a missing (or epoch-less) descriptor -- an
+        // unprovisioned or torn collection, or an offline session with
+        // nothing cached -- gets a fail-closed cipher rather than none: an
+        // absent cipher would fall through to the store's cipher-less
+        // plaintext path, silently storing (and pushing) plaintext into an
+        // encrypted collection, and an epoch-less descriptor would make the
+        // whole rebuild throw, taking the healthy collections down with it.
+        const cipher = encryption?.epochs?.length
+          ? await createEdvDocCipher({
+              keyAgreementKey,
+              keyResolver,
+              collectionId: id,
+              // The collection spec's id mint ('random' for the mutable
+              // contacts head, 'content' for the content-addressed
+              // collections), so a minted id follows the spec and can key
+              // the row.
+              idDerivation,
+              encryption
+            })
+          : StorageManager.#refusingCipher({ collectionId: id })
+        return [key, cipher]
+      })
     )
     return Object.fromEntries(cipherEntries)
+  }
+
+  /**
+   * A {@link DocCipher} that refuses every operation: the stand-in for an
+   * encrypted collection whose descriptor could not be acquired. The refusal
+   * clears when a descriptor refresh rebuilds the ciphers.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}
+   * @returns {DocCipher}
+   */
+  static #refusingCipher({
+    collectionId
+  }: {
+    collectionId: string
+  }): DocCipher {
+    const refuse = (): never => {
+      throw new Error(
+        `Collection "${collectionId}" has no encryption descriptor available ` +
+          '(fetched or cached). Every encrypted collection carries its key ' +
+          'epochs from provisioning; refusing to read or write without them.'
+      )
+    }
+    return {
+      encrypt: async () => refuse(),
+      encryptUpdate: async () => refuse(),
+      decrypt: async () => refuse()
+    }
   }
 
   /**
@@ -670,9 +756,10 @@ export class StorageManager {
     // Fetch the current encryption descriptor for each encrypted standard
     // collection best-effort (concurrently -- login is not gated on a serial
     // chain of describes), caching each success and falling back to the cached
-    // copy on a fetch failure. A collection with no descriptor stays absent -- the
-    // single-key path; with no remote store there are no descriptors at all
-    // (guest / no-WAS: single-key).
+    // copy on a fetch failure. A collection whose descriptor cannot be
+    // acquired gets a fail-closed refusing cipher below. With no remote store
+    // (guest / no-WAS) the descriptors are minted locally instead -- every
+    // encrypted collection carries its key epochs from birth, server or not.
     const descriptors = remoteStore
       ? await acquireDescriptors({
           source: remoteStore,
@@ -680,7 +767,11 @@ export class StorageManager {
           collectionIds: ENCRYPTED_COLLECTION_IDS,
           onFetchError: warnDescriptorFetchError
         })
-      : {}
+      : await localOnlyDescriptors({
+          userId: user.id,
+          keyAgreementKey,
+          persist: !isGuest
+        })
 
     // One document cipher per encrypted collection, built from the session's
     // passphrase-derived key material (guests included -- their random secret
@@ -1173,12 +1264,13 @@ export class StorageManager {
    * zero (policy -- the user is a recipient of every encrypted collection in
    * their own Space) alongside the app's identity key-agreement key. The
    * collection is ensured to exist and declared `'edv'` without clobbering an
-   * existing descriptor, then the epoch roster is brought to the desired state:
-   *
-   * - no epochs yet -> `initRecipients` with `[owner, appRecipient]`;
-   * - epochs exist but the app is absent (reconnect after revoke) ->
-   *   `addRecipient` escrows the app into every epoch;
-   * - epochs exist and the app is present -> no-op.
+   * existing descriptor, then `ensureFirstEpoch` installs epoch[0] wrapped to
+   * the owner alone -- create-if-absent, adopting a roster an earlier
+   * provision landed, so every app collection carries its key epochs from
+   * birth (the first-epoch mint runs only here, at provisioning). The app is
+   * then always escrowed in by `addRecipient` (into every epoch -- adds are
+   * cheap) unless the current epoch already wraps to it (reconnect with no
+   * intervening revoke: a no-op).
    *
    * The app never needs the vault KAK and the wallet never needs the app seed
    * at all (the recipient is derived from the app's controller DID, and the
@@ -1208,35 +1300,31 @@ export class StorageManager {
     }
     const { keyAgreementKey } = this.#vaultKeys
     const collection = remote.collectionHandle({ collectionId })
-    // Ensure the collection exists and is declared encrypted without dropping an
-    // existing epoch roster; the returned descriptor (with any epochs) drives the
-    // init-vs-add decision below.
-    const current = await remote.ensureEncryptedCollection({ id: collectionId })
+    // Ensure the collection exists and is declared encrypted without dropping
+    // an existing epoch roster, then install epoch[0] (owner as recipient
+    // zero) create-if-absent -- an existing roster is adopted, never
+    // overwritten.
+    await remote.ensureEncryptedCollection({ id: collectionId })
+    const { descriptor: current } = await ensureFirstEpoch({
+      collection,
+      recipients: [ownerRecipient({ keyAgreementKey })]
+    })
 
-    let descriptor: CollectionEncryption
-    if (!current?.epochs || current.epochs.length === 0) {
-      // Lazy first provision: mint the first epoch with the owner as recipient
-      // zero plus the app's identity key.
-      descriptor = await initRecipients({
-        collection,
-        recipients: [ownerRecipient({ keyAgreementKey }), appRecipient]
-      })
-    } else {
-      const present = currentEpochRecipientKids({
-        descriptor: current
-      }).includes(appRecipient.id)
-      if (present) {
-        // The app already reads the current epoch: nothing to do.
-        return current
-      }
-      // Reconnect after a revoke rotated the epoch off the app: escrow the app
-      // back into every epoch (adds are cheap -- no rotation).
-      descriptor = await addRecipient({
-        collection,
-        recipient: appRecipient,
-        owner: { keyAgreementKey }
-      })
+    if (
+      currentEpochRecipientKids({ descriptor: current }).includes(
+        appRecipient.id
+      )
+    ) {
+      // The app already reads the current epoch: nothing to do.
+      return current
     }
+    // First connect, or reconnect after a revoke rotated the epoch off the
+    // app: escrow the app into every epoch (adds are cheap -- no rotation).
+    const descriptor = await addRecipient({
+      collection,
+      recipient: appRecipient,
+      owner: { keyAgreementKey }
+    })
 
     // Update the descriptor cache and the in-memory app-collection state, then drop
     // any stale app cipher so the wallet's own next read rebuilds under the new
@@ -1453,6 +1541,24 @@ export class StorageManager {
         }
       }
       await this.#remoteStore.ensureUserCollections({ user })
+      // The provisioning two-step's EDV-bearing second half: install key
+      // epoch[0] on every encrypted roster collection, wrapped to the
+      // account's user key -- create-if-absent, adopting whatever an earlier
+      // provisioner landed. Runs before login completes (and so before
+      // replication starts), keeping the descriptor-before-first-content-push
+      // invariant. Warn-and-continue like the neighbouring steps: without
+      // epochs the affected collections' ciphers refuse fail-closed (nothing
+      // leaks plaintext), and the idempotent ensure resumes on the next
+      // login.
+      if (profile?.userKey) {
+        try {
+          await this.#remoteStore.ensureSpaceEpochs({
+            userKey: profile.userKey
+          })
+        } catch (err) {
+          console.warn('Collection key-epoch provisioning failed:', err)
+        }
+      }
       // Ensure the user key wrap-set roster (`key-map/user-key.json`) exists,
       // create-if-absent through the descriptor-store seam: an absent roster is
       // initialized with the account's user key as its first epoch, wrapped to
@@ -2185,11 +2291,13 @@ export class StorageManager {
    * recipient operations rewrite the Collection Description) with an unlocked
    * vault and a remote store.
    *
-   * On a collection with no epochs yet this is the lazy first-share migration:
-   * `initRecipients` mints the first epoch with the owner as recipient zero
-   * plus the new reader. On an already-shared collection `addRecipient` escrows
-   * the reader into every epoch (no rotation -- adds are cheap). The delegated
-   * zcap (the full document, needed later for revocation) is recorded in a
+   * The read axis is always `addRecipient`: every encrypted collection
+   * carries its key epochs from provisioning (epoch[0] wrapped to the user
+   * key; the first-epoch mint runs only there), so a share escrows the reader
+   * into every existing epoch (no rotation -- adds are cheap) and an
+   * epoch-less descriptor is refused fail-closed rather than seeded here (it
+   * can only mean an unprovisioned or torn collection). The delegated zcap
+   * (the full document, needed later for revocation) is recorded in a
    * `CollectionShare` history activity, and the refreshed descriptor is cached and
    * swapped into the local ciphers.
    *
@@ -2236,23 +2344,14 @@ export class StorageManager {
       throw new Error('Sharing a collection requires a passphrase session.')
     }
 
-    // Read axis: mint the first epoch (lazy first-share) or escrow the reader
-    // into the existing epochs. The owner must always be recipient zero.
+    // Read axis: escrow the reader into the existing epochs (epoch[0] exists
+    // from provisioning, wrapped to the owner -- recipient zero).
     const collection = remote.collectionHandle({ collectionId })
-    const current = await remote.collectionEncryption({ collectionId })
-    let descriptor: CollectionEncryption
-    if (!current?.epochs || current.epochs.length === 0) {
-      descriptor = await initRecipients({
-        collection,
-        recipients: [ownerRecipient({ keyAgreementKey }), recipient]
-      })
-    } else {
-      descriptor = await addRecipient({
-        collection,
-        recipient,
-        owner: { keyAgreementKey }
-      })
-    }
+    const descriptor = await addRecipient({
+      collection,
+      recipient,
+      owner: { keyAgreementKey }
+    })
 
     // Pull axis: delegate a read-only (GET/HEAD) zcap on the collection URL to
     // the grantee, rooted at the Space root capability (targets outside the

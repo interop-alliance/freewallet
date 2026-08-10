@@ -24,7 +24,7 @@ import type {
   IDelegatedZcap,
   IKeyAgreementKey
 } from '@interop/data-integrity-core'
-import { WasError } from '@interop/was-client'
+import { WasError, type CollectionEncryption } from '@interop/was-client'
 import { deriveSpaceId } from '@interop/was-client/sync'
 import { createEdvDocCipher } from '@interop/was-client/edv'
 import { loadClientKeyRecord, loadKeyringCache } from '@/lib/sessionKey'
@@ -89,6 +89,7 @@ import {
   ensureUnlockSpace,
   getUnlockKeyring,
   KEYRING_KDF,
+  mintRecordEncryption,
   type AccountPointer
 } from '@interop/wallet-core/keyring'
 import { mintUserKey } from '@interop/wallet-core/keys'
@@ -252,34 +253,40 @@ async function unlockFor(passphrase: string) {
 }
 
 /**
- * Builds a keyring record ({version, wrapped}) whose ciphertext decrypts (under
- * the given passphrase's unlock KAK) to an arbitrary plaintext, so the negative
- * validation and pointer-substitution paths can be exercised.
+ * Builds a keyring record ({version, encryption, wrapped}) whose ciphertext
+ * decrypts (under the given passphrase's unlock KAK) to an arbitrary
+ * plaintext, so the negative validation and pointer-substitution paths can be
+ * exercised.
  */
 async function craftRecord({
   passphrase,
   plaintext,
-  version = 2
+  version = 1
 }: {
   passphrase: string
   plaintext: Record<string, unknown>
   version?: number
 }) {
   const { keyAgreementKey, keyResolver, spaceId } = await unlockFor(passphrase)
+  const encryption = await mintRecordEncryption({
+    keyAgreementKey: keyAgreementKey as unknown as IKeyAgreementKey
+  })
   const cipher = await createEdvDocCipher({
     keyAgreementKey: keyAgreementKey as unknown as IKeyAgreementKey,
     keyResolver,
-    collectionId: 'keyring'
+    collectionId: 'keyring',
+    encryption
   })
   const { envelope } = await cipher.encrypt({
     data: plaintext as Parameters<typeof cipher.encrypt>[0]['data']
   })
-  return { record: { version, wrapped: envelope }, spaceId }
+  return { record: { version, encryption, wrapped: envelope }, spaceId }
 }
 
 /**
  * Decrypts a stored keyring record's plaintext under the given passphrase's
- * unlock KAK, so a test can assert what the record does (and does not) carry.
+ * unlock KAK and the record's own carried descriptor, so a test can assert
+ * what the record does (and does not) carry.
  */
 async function decryptRecord({
   passphrase,
@@ -289,12 +296,16 @@ async function decryptRecord({
   record: unknown
 }): Promise<Record<string, unknown>> {
   const { keyAgreementKey, keyResolver } = await unlockFor(passphrase)
+  const { encryption, wrapped } = record as {
+    encryption: CollectionEncryption
+    wrapped: unknown
+  }
   const cipher = await createEdvDocCipher({
     keyAgreementKey: keyAgreementKey as unknown as IKeyAgreementKey,
     keyResolver,
-    collectionId: 'keyring'
+    collectionId: 'keyring',
+    encryption
   })
-  const { wrapped } = record as { wrapped: unknown }
   return (await cipher.decrypt({
     envelope: wrapped as never
   })) as Record<string, unknown>
@@ -407,11 +418,11 @@ describe('wrap / unwrap', () => {
     ])
   })
 
-  it('rejects a legacy version-1 record (the retired wrapped-seed shape)', async () => {
+  it('rejects a legacy version-2 record (the retired direct-to-KAK shape)', async () => {
     const idb = createFakeIdb()
     const { record, spaceId } = await craftRecord({
-      passphrase: 'legacy v1 passphrase',
-      version: 1,
+      passphrase: 'legacy v2 passphrase',
+      version: 2,
       plaintext: {
         seed: seedToBase64Url(randomSeed()),
         controller: DATA_CONTROLLER,
@@ -421,7 +432,25 @@ describe('wrap / unwrap', () => {
     wasState.spaces.set(spaceId, record)
 
     await expect(
-      fetchKeyring({ passphrase: 'legacy v1 passphrase', idb, kdf: KDF })
+      fetchKeyring({ passphrase: 'legacy v2 passphrase', idb, kdf: KDF })
+    ).rejects.toThrow(KeyringRecordUnusableError)
+  })
+
+  it('rejects a record with no encryption descriptor (the retired pre-epoch frame)', async () => {
+    const idb = createFakeIdb()
+    const { record, spaceId } = await craftRecord({
+      passphrase: 'no descriptor passphrase',
+      plaintext: {
+        controller: DATA_CONTROLLER,
+        createdAt: new Date().toISOString()
+      }
+    })
+    const { encryption: _encryption, ...frameWithoutDescriptor } =
+      record as unknown as Record<string, unknown>
+    wasState.spaces.set(spaceId, frameWithoutDescriptor)
+
+    await expect(
+      fetchKeyring({ passphrase: 'no descriptor passphrase', idb, kdf: KDF })
     ).rejects.toThrow(KeyringRecordUnusableError)
   })
 
@@ -468,10 +497,13 @@ describe('wrap / unwrap', () => {
 
   it('maps a corrupt remote record to KeyringRecordUnusableError and never caches it', async () => {
     const idb = createFakeIdb()
-    const { spaceId } = await unlockFor('corrupt record passphrase')
-    // A record with the right shape but an undecryptable payload -- the
+    // A record with the right frame but an undecryptable payload -- the
     // "genuinely corrupt record under the correct unlock Space" case.
-    wasState.spaces.set(spaceId, { version: 2, wrapped: { garbage: true } })
+    const { record, spaceId } = await craftRecord({
+      passphrase: 'corrupt record passphrase',
+      plaintext: { controller: DATA_CONTROLLER }
+    })
+    wasState.spaces.set(spaceId, { ...record, wrapped: { garbage: true } })
 
     await expect(
       fetchKeyring({
