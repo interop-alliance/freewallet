@@ -65,10 +65,6 @@ export function HistoryPage() {
     return JSON.stringify(selectedItem.doc, null, 2)
   }, [selectedItem])
 
-  const selectedSummary = useMemo(() => {
-    return selectedItem?.doc?.summary ?? ''
-  }, [selectedItem])
-
   // Single-credential activities (create/share/unshare) get a title link to
   // the credential; a deleted credential has nothing left to link to, so its
   // title renders as plain text. Every other activity (login, app revoke,
