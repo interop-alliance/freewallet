@@ -1794,49 +1794,12 @@ export class StorageManager {
       id: string
     }) => WalletActivity
   }) {
-    const resourceId = uuidv7()
-    const activity = buildActivity({ cid, user, id: resourceId })
-    activity.summary = `Credential ${verb}: ${title}`
-    activity.object = { cid, title }
-    await this.#addHistoryItem({ resourceId, activity })
-  }
-
-  /**
-   * Records (in the `wallet-activity` collection) a credential activity,
-   * stamping the shared-package summary/object with the credential's
-   * display title so the History page can render a title link without
-   * re-deriving it from the (possibly already-deleted) credential.
-   *
-   * @param options {object}
-   * @param options.cid {string} - CID of the credential (used as history object id).
-   * @param options.title {string} - Display title of the credential at the time of the event.
-   * @param options.user {User} - Session user object (used to record history object actor).
-   * @param options.verb {string} - Past-tense verb for the summary line (e.g. "created").
-   * @param options.buildActivity {function} - The `@interop/wallet-core` builder for this event.
-   * @returns {Promise<void>}
-   */
-  async #recordCredentialActivity({
-    cid,
-    title,
-    user,
-    verb,
-    buildActivity
-  }: {
-    cid: string
-    title: string
-    user: User
-    verb: string
-    buildActivity: (options: {
-      cid: string
-      user: User
-      id: string
-    }) => WalletActivity
-  }) {
-    const resourceId = uuidv7()
-    const activity = buildActivity({ cid, user, id: resourceId })
-    activity.summary = `Credential ${verb}: ${title}`
-    activity.object = { cid, title }
-    await this.#addHistoryItem({ resourceId, activity })
+    await this.#recordActivity(id => {
+      const activity = buildActivity({ cid, user, id })
+      activity.summary = `Credential ${verb}: ${title}`
+      activity.object = { cid, title }
+      return activity
+    })
   }
 
   /**
