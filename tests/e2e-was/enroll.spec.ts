@@ -167,8 +167,8 @@ test.describe('Client enrollment ceremony', () => {
     // Quorum-of-one left both clients authorized: two client update keys.
     expect(resolved.meta.updateKeys).toHaveLength(2)
     // The document roster now carries the second client's keys: two more
-    // verification methods than the four a single-client account publishes.
-    expect(resolved.doc?.verificationMethod).toHaveLength(6)
+    // verification methods than the three a single-client account publishes.
+    expect(resolved.doc?.verificationMethod).toHaveLength(5)
     expect(resolved.doc?.keyAgreement).toHaveLength(2)
   })
 })

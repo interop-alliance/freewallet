@@ -10,6 +10,11 @@ const WAS_SERVER_DIR = process.env.WAS_SERVER_DIR ?? '../was-teaching-server'
 export default defineConfig({
   testDir: './tests/e2e-was',
   fullyParallel: false,
+  // One shared teaching server (dev mode, single process) serves every test,
+  // and it fully re-verifies the did:webvh log per zcap request -- parallel
+  // workers contend on its CPU and push the ceremony-heavy signups past
+  // their timeouts. One worker keeps the suite deterministic.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: 'html',

@@ -137,11 +137,14 @@ Its document is the enrolled-client roster: each enrolled wallet client
 contributes its Ed25519 verification method (published under
 `authentication`, `assertionMethod`, `capabilityInvocation`, AND
 `capabilityDelegation`) and its X25519 twin under `keyAgreement` -- ids are
-`<did:webvh>#<multibase>` with `controller: <did:webvh>`. Two KMS-held VMs
-(`authentication` / `assertionMethod`) remain as server-side conveniences;
-the KMS-held `keyAgreement` VM is deliberately NOT in the document -- the
-`keyAgreement` relation is the source of record for user-key wrap
-recipients, and no server-held key may ever be a wrap target.
+`<did:webvh>#<multibase>` with `controller: <did:webvh>`. One KMS-held VM
+(`authentication`) remains as a server-side convenience; the KMS-held
+`keyAgreement` VM is deliberately NOT in the document -- the `keyAgreement`
+relation is the source of record for user-key wrap recipients, and no
+server-held key may ever be a wrap target -- and no KMS assertion key is
+minted: the App Connect Resource Log Profile authorizes log appends by
+`assertionMethod` membership, so that relation lists client signing keys
+only.
 
 **Update keys are client-held.** `updateKeys` carries one update key per
 enrolled client (apps never), derived from 32-byte seeds that live in the
@@ -454,9 +457,9 @@ locally verified did:webvh log -- the same `verifyAccountLog` step every
 ceremony runs -- then `listEnrolledWebvhClients`, keyed on
 `capabilityInvocation`. That keying is
 the exclusion story: a recovery code's key is published under `keyAgreement`
-only (deliberately unmarked), and the KMS-held conveniences under
-`authentication` / `assertionMethod`, so neither can appear, structurally
-rather than by filter. Two members are not readable off the current document
+only (deliberately unmarked), and the KMS-held convenience under
+`authentication`, so neither can appear, structurally rather than by
+filter. Two members are not readable off the current document
 and are recovered by log attribution: each client's ACTIVE update key (the
 flat `updateKeys` set has no per-client grouping; the entry that published
 the client's verification methods revealed its initial key, and each entry

@@ -1555,6 +1555,20 @@ export class StorageManager {
           await this.#remoteStore.ensureSpaceEpochs({
             userKey: profile.userKey
           })
+          // A fresh signup built this session's ciphers before the Space
+          // existed, so every encrypted collection's descriptor was
+          // unavailable and its cipher refuses. Now that epoch[0] is
+          // installed, refresh the descriptors and rebuild the ciphers --
+          // only when a descriptor is still missing its epochs, so an
+          // ordinary login (descriptors fetched at session init) adds no
+          // requests.
+          if (
+            ENCRYPTED_COLLECTION_IDS.some(
+              collectionId => !this.#descriptors[collectionId]?.epochs?.length
+            )
+          ) {
+            await this.refreshEncryptedDescriptors()
+          }
         } catch (err) {
           console.warn('Collection key-epoch provisioning failed:', err)
         }
