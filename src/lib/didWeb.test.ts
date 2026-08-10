@@ -96,6 +96,20 @@ describe('assembleDidDocument', () => {
     expect(doc.assertionMethod).toEqual([`${DID}#z6MkAssert`])
     expect(doc.keyAgreement).toEqual([`${DID}#z6LSAgree`])
   })
+
+  it('omits assertionMethod for a key map without an assertion key', () => {
+    const { assertionMethod, ...modern } = keyMap()
+    void assertionMethod
+    const modernDoc = assembleDidDocument({ did: DID, keys: modern }) as {
+      verificationMethod: Array<{ id: string }>
+      assertionMethod?: string[]
+    }
+    expect(modernDoc.assertionMethod).toBeUndefined()
+    expect(modernDoc.verificationMethod.map(vm => vm.id)).toEqual([
+      `${DID}#z6MkAuth`,
+      `${DID}#z6LSAgree`
+    ])
+  })
 })
 
 /**
@@ -202,12 +216,12 @@ describe('ensureDidWeb', () => {
     ])
   })
 
-  it('fresh: generates three keys and writes keys.json before did.json', async () => {
+  it('fresh: generates two keys (no assertion key) and writes keys.json before did.json', async () => {
     const { remoteStore, keystoreAgent, puts, generatedCount } = fakes()
     const result = await ensureDidWeb({ keystoreAgent, remoteStore, did: DID })
-    expect(generatedCount()).toBe(3)
+    expect(generatedCount()).toBe(2)
     expect(result.authentication.vmId).toBe(`${DID}#z6MkGen1`)
-    expect(result.assertionMethod.vmId).toBe(`${DID}#z6MkGen2`)
+    expect(result.assertionMethod).toBeUndefined()
     expect(result.keyAgreement.vmId).toBe(`${DID}#z6LSGen1`)
     // keys.json (the recovery anchor, in the key-map collection) is written
     // first, then did.json.

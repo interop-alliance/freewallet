@@ -89,7 +89,10 @@ import {
   type UnlockIdentity,
   type UnlockKdf
 } from '@interop/wallet-core/keyring'
-import { createEdvDocCipher } from '@interop/was-client/edv'
+import {
+  unwrapRecordEnvelope,
+  wrapRecordEnvelope
+} from '@/session/recordEnvelope'
 import {
   deleteAccountPointerPin,
   deleteClientKeyRecord,
@@ -103,10 +106,11 @@ import {
 } from '@/lib/sessionKey'
 
 /**
- * The version stamped on the stored `{ version, wrapped }` client-key
- * envelope, and the cipher context id its JWE is bound to (distinct from the
- * keyring record's, so the two envelopes can never be swapped for each
- * other).
+ * The version stamped on the stored `{ version, encryption, wrapped }`
+ * client-key envelope (the record seals under its own one-epoch descriptor,
+ * see `recordEnvelope.ts`), and the cipher context id its JWE is bound to
+ * (distinct from the keyring record's, so the two envelopes can never be
+ * swapped for each other).
  */
 const CLIENT_KEYS_RECORD_VERSION = 1
 const CLIENT_KEYS_CIPHER_ID = 'client-keys'
@@ -265,23 +269,20 @@ async function saveClientKeys({
   controller?: string
   idb?: IDBFactory
 }): Promise<void> {
-  const cipher = await createEdvDocCipher({
-    keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-    keyResolver: unlock.keyResolver,
-    collectionId: CLIENT_KEYS_CIPHER_ID
-  })
   const contents = encodeClientKeyRecord({
     clientSeed,
     ...(userKey ? { userKey } : {}),
     ...(webvhUpdateKeys ? { webvhUpdateKeys } : {}),
     ...(controller ? { controller } : {})
   })
-  const { envelope } = await cipher.encrypt({ data: { ...contents } })
-  await saveClientKeyRecord({
-    spaceId: unlock.spaceId,
-    record: { version: CLIENT_KEYS_RECORD_VERSION, wrapped: envelope },
-    idb
+  const record = await wrapRecordEnvelope({
+    data: { ...contents },
+    version: CLIENT_KEYS_RECORD_VERSION,
+    collectionId: CLIENT_KEYS_CIPHER_ID,
+    keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+    keyResolver: unlock.keyResolver
   })
+  await saveClientKeyRecord({ spaceId: unlock.spaceId, record, idb })
 }
 
 /**
@@ -401,12 +402,15 @@ async function loadClientKeys({
 }
 
 /**
- * Unwraps and validates a stored client-key record: rejects an unknown outer
- * `version`, decrypts the payload, and hands the contents to the shared
- * record codec, which throws on any malformed member.
+ * Unwraps and validates a stored client-key record: validates the
+ * `{ version, encryption, wrapped }` frame (a record with no `encryption`
+ * descriptor -- the retired direct-to-KAK form -- is refused as unusable),
+ * decrypts the payload, and hands the contents to the shared record codec,
+ * which throws on any malformed member.
  *
  * @param options {object}
- * @param options.record {unknown}   the stored `{ version, wrapped }` envelope
+ * @param options.record {unknown}   the stored `{ version, encryption,
+ *   wrapped }` envelope
  * @param options.unlock {UnlockIdentity}
  * @returns {Promise<ClientKeyRecord>}
  */
@@ -417,24 +421,14 @@ async function unwrapClientKeys({
   record: unknown
   unlock: UnlockIdentity
 }): Promise<ClientKeyRecord> {
-  if (record === null || typeof record !== 'object') {
-    throw new Error('Malformed client-key record.')
-  }
-  const { version, wrapped } = record as {
-    version?: unknown
-    wrapped?: unknown
-  }
-  if (version !== CLIENT_KEYS_RECORD_VERSION) {
-    throw new Error(
-      `Unsupported client-key record version "${String(version)}".`
-    )
-  }
-  const cipher = await createEdvDocCipher({
+  const contents = await unwrapRecordEnvelope({
+    record,
+    version: CLIENT_KEYS_RECORD_VERSION,
+    collectionId: CLIENT_KEYS_CIPHER_ID,
     keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
     keyResolver: unlock.keyResolver,
-    collectionId: CLIENT_KEYS_CIPHER_ID
+    label: 'client-key'
   })
-  const contents = await cipher.decrypt({ envelope: wrapped as never })
   return decodeClientKeyRecord({ contents })
 }
 

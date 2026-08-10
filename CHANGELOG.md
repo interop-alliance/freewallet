@@ -12,6 +12,52 @@
   only app-local binding left. The `id` / `key-map` system-collection config
   and the epoch-refusal name-only retry moved into the shared provisioner, so
   a Space provisioned by either wallet app has an identical layout.
+- Provisioning is now the shared two-step (`@interop/wallet-core` 0.22.0,
+  `@interop/was-client` 0.29.1): after the container ensure, key epoch[0] is
+  installed on every encrypted roster collection (`ensureWalletSpaceEpochs`),
+  wrapped to the account's user key -- create-if-absent, adopting whatever an
+  earlier provisioner landed, and run before login completes so no encrypted
+  collection's first content push precedes its descriptor. Every encrypted
+  collection carries its key epochs from birth.
+- The init-vs-add forks in `shareCollection` and `provisionAppCollection`
+  collapse to always-`addRecipient`: first-epoch minting runs only at
+  provisioning (`ensureFirstEpoch` for an app-provisioned collection, the
+  wallet-Space epoch install for the standard set), a share escrows the
+  reader into the existing epochs, and an epoch-less descriptor is refused
+  fail-closed rather than seeded lazily.
+- Encrypted-collection ciphers are fail-closed: a collection whose descriptor
+  is missing or epoch-less gets a refusing cipher rather than none, so a read
+  or write errors instead of falling through to the cipher-less plaintext
+  path -- nothing can silently store or push plaintext into an encrypted
+  collection.
+- The locally stored records that sealed directly to a key-agreement key --
+  the client-key record and the unlock-methods registry -- now seal under a
+  record-own key epoch, stored as `{ version, encryption, wrapped }`: the
+  same self-contained frame the keyring record uses, built from the same
+  construction (`mintRecordEncryption` / `recordCipher` / `parseRecordFrame`,
+  exported by `@interop/wallet-core/keyring` 0.22.1;
+  `session/recordEnvelope.ts` adds only the frame stamp and the cipher
+  rebuild, with the frame validation imported rather than re-derived).
+  Records in the retired
+  direct-to-KAK form are refused as unusable (greenfield: re-provision /
+  re-enroll), matching wallet-core's keyring-record reset.
+- A session with no remote store (a guest, or no WAS server configured) mints
+  its encrypted collections' descriptors locally: a one-epoch descriptor per
+  collection wrapped to the session's vault KAK alone, persisted in the
+  localStorage descriptor cache scoped by the user's DID (guests are minted
+  fresh, never persisted) -- so the epoch-from-birth model holds without a
+  server instead of every local read/write hitting the refusing cipher.
+- The did:web provisioning no longer mints a KMS-held assertion key
+  (`@interop/wallet-core` 0.23.0: the account document's `assertionMethod`
+  relation lists client keys only, since membership there authorizes appends
+  to co-managed resource logs). `keys.json`'s `assertionMethod` member is
+  optional; a legacy key map that still carries one keeps publishing it.
+- Adopted the `@interop/was-client` 0.29.x sync-port contract: an absent or
+  tombstoned resource surfaces as `get` resolving `null`, simplifying the
+  push-conflict assembly and the
+  delete-retry path. The rotation-only user-key cascade means the login
+  sweep refreshes ciphers only on a `rotated` outcome (the `installed`
+  outcome is gone -- provisioning, not the cascade, installs epochs).
 
 ### Security
 

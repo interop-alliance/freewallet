@@ -328,13 +328,14 @@ export async function initSessionFromSeed({
             userKey: sweepUserKey
           })
           // The session's ciphers were built before the sweep ran: when the
-          // sweep moved any collection's current epoch (`installed` or
-          // `rotated` -- an escrow leaves the current epoch in place), refresh
-          // the descriptors and ciphers so the rest of the session seals
-          // writes under the fresh epoch instead of the retired one.
+          // sweep moved any collection's current epoch (`rotated`; the
+          // rotation-only cascade never installs epochs -- provisioning does
+          // -- and an escrow leaves the current epoch in place), refresh the
+          // descriptors and ciphers so the rest of the session seals writes
+          // under the fresh epoch instead of the retired one.
           if (
             Object.values(result.outcomes).some(
-              outcome => outcome === 'installed' || outcome === 'rotated'
+              outcome => outcome === 'rotated'
             )
           ) {
             await storage.refreshEncryptedDescriptors()

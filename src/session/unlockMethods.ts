@@ -10,8 +10,10 @@
  * passkey registration and reused for every later passkey, so authenticator
  * pickers show one account rather than N) and one entry per method. Its stored
  * body is a JWE wrapped to the session's vault KAK (it names credential ids the
- * server must not read), stored as `{ version, wrapped }` -- the same envelope
- * shape the keyring record uses. The remote copy in the data Space is the
+ * server must not read), stored as `{ version, encryption, wrapped }` -- the
+ * same self-contained envelope shape the keyring record uses (the record seals
+ * under its own one-epoch descriptor; see `recordEnvelope.ts`). The remote
+ * copy in the data Space is the
  * source of truth and is consulted first; a local cache in the
  * `freewallet-session` IndexedDB (keyed by the data controller did:key) serves
  * no-WAS deployments and refreshes on every remote hit.
@@ -52,7 +54,10 @@ import {
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
 import type { UserKey } from '@interop/wallet-core/keys'
-import { createEdvDocCipher } from '@interop/was-client/edv'
+import {
+  unwrapRecordEnvelope,
+  wrapRecordEnvelope
+} from '@/session/recordEnvelope'
 import {
   deleteAccountPointerPin,
   deleteClientKeyRecord,
@@ -156,8 +161,9 @@ export interface UnlockMethodsRecord {
 }
 
 /**
- * The version stamped on the stored `{ version, wrapped }` envelope -- the
- * outer wrapper around the JWE, distinct from the registry's own `version`.
+ * The version stamped on the stored `{ version, encryption, wrapped }`
+ * envelope -- the outer frame around the JWE, distinct from the registry's own
+ * `version`.
  */
 const STORED_RECORD_VERSION = 1
 
@@ -184,14 +190,14 @@ function requireVaultKeys(session: Session): {
 
 /**
  * Wraps an unlock-methods record into its stored envelope: the record encrypted
- * (JWE, ECDH-ES to the vault KAK) via the same EDV cipher the wallet ships,
- * under the `{ version, wrapped }` shape.
+ * (JWE, sealed under a fresh record-own epoch whose key wraps to the vault
+ * KAK) under the `{ version, encryption, wrapped }` shape.
  *
  * @param options {object}
  * @param options.record {UnlockMethodsRecord}
  * @param options.keyAgreementKey {IKeyAgreementKey}   the vault KAK
  * @param options.keyResolver {IKeyResolver}
- * @returns {Promise<{ version: number, wrapped: unknown }>}
+ * @returns {Promise<{ version: number, encryption: unknown, wrapped: unknown }>}
  */
 async function wrapRecord({
   record,
@@ -201,26 +207,26 @@ async function wrapRecord({
   record: UnlockMethodsRecord
   keyAgreementKey: IKeyAgreementKey
   keyResolver: IKeyResolver
-}): Promise<{ version: number; wrapped: unknown }> {
-  const cipher = await createEdvDocCipher({
+}): Promise<{ version: number; encryption: unknown; wrapped: unknown }> {
+  return wrapRecordEnvelope({
+    data: record as unknown as Parameters<typeof wrapRecordEnvelope>[0]['data'],
+    version: STORED_RECORD_VERSION,
+    collectionId: UNLOCK_METHODS_COLLECTION.id,
     keyAgreementKey,
-    keyResolver,
-    collectionId: UNLOCK_METHODS_COLLECTION.id
+    keyResolver
   })
-  const { envelope } = await cipher.encrypt({
-    data: record as unknown as Parameters<typeof cipher.encrypt>[0]['data']
-  })
-  return { version: STORED_RECORD_VERSION, wrapped: envelope }
 }
 
 /**
- * Unwraps and validates a stored unlock-methods envelope: rejects an outer
- * `version` other than 1, decrypts the payload, then sanity-checks the
- * registry shape (its own `version`, a string `userHandle`, an array of
- * methods).
+ * Unwraps and validates a stored unlock-methods envelope: validates the
+ * `{ version, encryption, wrapped }` frame (a record with no `encryption`
+ * descriptor -- the retired direct-to-KAK form -- is refused), decrypts the
+ * payload, then sanity-checks the registry shape (its own `version`, a string
+ * `userHandle`, an array of methods).
  *
  * @param options {object}
- * @param options.record {unknown}   the stored `{ version, wrapped }` envelope
+ * @param options.record {unknown}   the stored `{ version, encryption,
+ *   wrapped }` envelope
  * @param options.keyAgreementKey {IKeyAgreementKey}   the vault KAK
  * @param options.keyResolver {IKeyResolver}
  * @returns {Promise<UnlockMethodsRecord>}
@@ -234,25 +240,13 @@ async function unwrapRecord({
   keyAgreementKey: IKeyAgreementKey
   keyResolver: IKeyResolver
 }): Promise<UnlockMethodsRecord> {
-  if (record === null || typeof record !== 'object') {
-    throw new Error('Malformed unlock-methods record.')
-  }
-  const { version, wrapped } = record as {
-    version?: unknown
-    wrapped?: unknown
-  }
-  if (version !== STORED_RECORD_VERSION) {
-    throw new Error(
-      `Unsupported unlock-methods record version "${String(version)}".`
-    )
-  }
-  const cipher = await createEdvDocCipher({
+  const plaintext = (await unwrapRecordEnvelope({
+    record,
+    version: STORED_RECORD_VERSION,
+    collectionId: UNLOCK_METHODS_COLLECTION.id,
     keyAgreementKey,
     keyResolver,
-    collectionId: UNLOCK_METHODS_COLLECTION.id
-  })
-  const plaintext = (await cipher.decrypt({
-    envelope: wrapped as never
+    label: 'unlock-methods'
   })) as {
     version?: unknown
     userHandle?: unknown
