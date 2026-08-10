@@ -142,14 +142,16 @@ test('signup publishes a did:web document and a DIDAuth VP is signed by the KMS 
     keyAgreement: string[]
   }
   expect(doc.id).toMatch(/^did:web:.+:space:.+:id$/)
-  // The webvh projection: two KMS-held VMs (authentication / assertionMethod)
-  // plus this client's signing key and key-agreement twin; `authentication`
-  // and `assertionMethod` each list the KMS key and the client key, while
+  // The webvh projection: one KMS-held VM (authentication, a server-side
+  // convenience) plus this client's signing key and key-agreement twin;
+  // `authentication` lists the KMS key and the client key, while
+  // `assertionMethod` lists the client key only (membership there confers
+  // resource-log-append authority, so no KMS key is minted for it) and
   // `keyAgreement` is the client's KAK alone (no server-held key is ever a
   // wrap target).
-  expect(doc.verificationMethod).toHaveLength(4)
+  expect(doc.verificationMethod).toHaveLength(3)
   expect(doc.authentication).toHaveLength(2)
-  expect(doc.assertionMethod).toHaveLength(2)
+  expect(doc.assertionMethod).toHaveLength(1)
   expect(doc.keyAgreement).toHaveLength(1)
   // Each relationship references one of the document's verification methods.
   const vmIds = doc.verificationMethod.map(vm => vm.id)

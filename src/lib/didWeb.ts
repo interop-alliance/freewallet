@@ -66,10 +66,10 @@ export function didWebFromSpace({
 
 /**
  * Whether a parsed `keys.json` body is a well-formed key map: `authentication`
- * and `keyAgreement` present with a `vmId` and `kmsKeyId`. `assertionMethod`
- * is optional (no KMS-held assertion key is minted anymore -- the account
- * document's `assertionMethod` relation lists client keys only) but must be
- * well-formed where a legacy `keys.json` still carries one.
+ * and `keyAgreement` present with a `vmId` and `kmsKeyId`. No KMS-held
+ * assertion key exists (the account document's `assertionMethod` relation
+ * lists client keys only), so any `assertionMethod` member a served map
+ * carries is ignored and never republished.
  */
 function isKeyMap(value: unknown): value is DidWebKeyMap {
   if (!value || typeof value !== 'object') {
@@ -82,11 +82,7 @@ function isKeyMap(value: unknown): value is DidWebKeyMap {
       !!key && typeof key.vmId === 'string' && typeof key.kmsKeyId === 'string'
     )
   }
-  return (
-    wellFormed(map.authentication) &&
-    wellFormed(map.keyAgreement) &&
-    (map.assertionMethod === undefined || wellFormed(map.assertionMethod))
-  )
+  return wellFormed(map.authentication) && wellFormed(map.keyAgreement)
 }
 
 /**
@@ -113,19 +109,14 @@ export function assembleDidDocument({
     controller: did,
     publicKeyMultibase: multibaseOf(key.vmId)
   })
-  // No KMS-held assertion key is minted anymore; a legacy key map that still
-  // carries one keeps publishing it.
-  const { assertionMethod } = keys
   return {
     '@context': [DID_V1_CONTEXT, ED25519_2020_CONTEXT, X25519_2020_CONTEXT],
     id: did,
     verificationMethod: [
       method(keys.authentication, ED25519_VM_TYPE),
-      ...(assertionMethod ? [method(assertionMethod, ED25519_VM_TYPE)] : []),
       method(keys.keyAgreement, X25519_KAK_TYPE)
     ],
     authentication: [keys.authentication.vmId],
-    ...(assertionMethod && { assertionMethod: [assertionMethod.vmId] }),
     keyAgreement: [keys.keyAgreement.vmId]
   }
 }

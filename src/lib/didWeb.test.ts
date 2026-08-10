@@ -45,7 +45,6 @@ const DID = 'did:web:localhost%3A8080:space:space-abc:id'
 function keyMap(): DidWebKeyMap {
   return {
     authentication: { vmId: `${DID}#z6MkAuth`, kmsKeyId: 'kms/keys/auth' },
-    assertionMethod: { vmId: `${DID}#z6MkAssert`, kmsKeyId: 'kms/keys/assert' },
     keyAgreement: { vmId: `${DID}#z6LSAgree`, kmsKeyId: 'kms/keys/agree' }
   }
 }
@@ -61,7 +60,6 @@ describe('assembleDidDocument', () => {
       publicKeyMultibase: string
     }>
     authentication: string[]
-    assertionMethod: string[]
     keyAgreement: string[]
   }
 
@@ -75,14 +73,13 @@ describe('assembleDidDocument', () => {
   })
 
   it('recovers publicKeyMultibase from each vm id fragment', () => {
-    const [auth, assert, agree] = doc.verificationMethod
+    const [auth, agree] = doc.verificationMethod
     expect(auth).toEqual({
       id: `${DID}#z6MkAuth`,
       type: 'Ed25519VerificationKey2020',
       controller: DID,
       publicKeyMultibase: 'z6MkAuth'
     })
-    expect(assert.type).toBe('Ed25519VerificationKey2020')
     expect(agree).toEqual({
       id: `${DID}#z6LSAgree`,
       type: 'X25519KeyAgreementKey2020',
@@ -93,22 +90,10 @@ describe('assembleDidDocument', () => {
 
   it('wires each relationship to its verification-method id', () => {
     expect(doc.authentication).toEqual([`${DID}#z6MkAuth`])
-    expect(doc.assertionMethod).toEqual([`${DID}#z6MkAssert`])
     expect(doc.keyAgreement).toEqual([`${DID}#z6LSAgree`])
-  })
-
-  it('omits assertionMethod for a key map without an assertion key', () => {
-    const { assertionMethod, ...modern } = keyMap()
-    void assertionMethod
-    const modernDoc = assembleDidDocument({ did: DID, keys: modern }) as {
-      verificationMethod: Array<{ id: string }>
-      assertionMethod?: string[]
-    }
-    expect(modernDoc.assertionMethod).toBeUndefined()
-    expect(modernDoc.verificationMethod.map(vm => vm.id)).toEqual([
-      `${DID}#z6MkAuth`,
-      `${DID}#z6LSAgree`
-    ])
+    // No assertionMethod relation at all: the relation lists client keys
+    // only, and no KMS-held assertion key exists.
+    expect('assertionMethod' in doc).toBe(false)
   })
 })
 
@@ -221,7 +206,7 @@ describe('ensureDidWeb', () => {
     const result = await ensureDidWeb({ keystoreAgent, remoteStore, did: DID })
     expect(generatedCount()).toBe(2)
     expect(result.authentication.vmId).toBe(`${DID}#z6MkGen1`)
-    expect(result.assertionMethod).toBeUndefined()
+    expect('assertionMethod' in result).toBe(false)
     expect(result.keyAgreement.vmId).toBe(`${DID}#z6LSGen1`)
     // keys.json (the recovery anchor, in the key-map collection) is written
     // first, then did.json.

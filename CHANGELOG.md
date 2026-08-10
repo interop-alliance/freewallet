@@ -50,14 +50,25 @@
 - The did:web provisioning no longer mints a KMS-held assertion key
   (`@interop/wallet-core` 0.23.0: the account document's `assertionMethod`
   relation lists client keys only, since membership there authorizes appends
-  to co-managed resource logs). `keys.json`'s `assertionMethod` member is
-  optional; a legacy key map that still carries one keeps publishing it.
+  to co-managed resource logs). `keys.json` carries no `assertionMethod`
+  member at all (greenfield: accounts are re-provisioned), and a served map
+  that does carry one is ignored rather than republished -- a tampered
+  `keys.json` can no longer reintroduce a server-held key into the
+  document's `assertionMethod` relation.
 - Adopted the `@interop/was-client` 0.29.x sync-port contract: an absent or
   tombstoned resource surfaces as `get` resolving `null`, simplifying the
   push-conflict assembly and the
   delete-retry path. The rotation-only user-key cascade means the login
   sweep refreshes ciphers only on a `rotated` outcome (the `installed`
   outcome is gone -- provisioning, not the cascade, installs epochs).
+
+### Fixed
+
+- A fresh signup now refreshes its encrypted-collection descriptors and
+  rebuilds the session ciphers once epoch[0] is installed: the ciphers were
+  built before the Space existed, so under the fail-closed rule every
+  encrypted read/write refused until the next login. An ordinary login (whose
+  descriptors were fetched at session init) adds no requests.
 
 ### Security
 
