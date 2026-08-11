@@ -16,11 +16,11 @@
  * - whole Space -- read-only (a Space-wide write would permit rewriting the
  *   Space Description, i.e. controller takeover);
  * - a protected wallet collection -- the standard collections
- *   (`private-credentials`, `public-credentials`, `wallet-activity`), the `id`
- *   collection holding the user's published DID artifacts, and the `key-map`
- *   collection holding the private key-id map -- read-only: an RP may read but
- *   never rewrite or delete the user's own credentials, published identity, or
- *   key map;
+ *   (`private-credentials`, `public-credentials`, `wallet-activity`) plus the
+ *   account's system collections (`SYSTEM_COLLECTIONS`: `id`, `key-map`,
+ *   `unlock-methods`) -- read-only: an RP may read but never rewrite or delete
+ *   the user's own credentials, published identity, key material, or
+ *   unlock-method registry;
  * - a share -- read-only (see below);
  * - a public collection -- add-only: reads plus `POST`, never `PUT` or
  *   `DELETE`. A write to a plaintext world-readable target is not data
@@ -76,11 +76,10 @@
 import { generateZcapUri } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
 import {
-  ID_COLLECTION,
-  KEY_MAP_COLLECTION,
   RP_ZCAP_TTL_MS,
   RP_ZCAP_WRITE_TTL_MS,
   SHARE_ZCAP_TTL_MS,
+  SYSTEM_COLLECTIONS,
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
 import {
@@ -173,9 +172,10 @@ function includesWrite(allowedActions: string[]): boolean {
 /**
  * Whether a resolved collection id names a protected wallet collection --
  * a standard collection (`private-credentials`, `public-credentials`,
- * `wallet-activity`), the `id` collection holding the user's published DID
- * artifacts, or the `key-map` collection holding the private key-id map --
- * which an RP may read but never write.
+ * `wallet-activity`, the contacts collections) or one of the account's system
+ * collections (`SYSTEM_COLLECTIONS`: the `id` collection holding the published
+ * DID artifacts, the `key-map` collection holding the private key material,
+ * and the `unlock-methods` registry) -- which an RP may read but never write.
  *
  * @param collectionId {string | undefined}
  * @returns {boolean}
@@ -183,8 +183,7 @@ function includesWrite(allowedActions: string[]): boolean {
 function isProtectedCollection(collectionId: string | undefined): boolean {
   return (
     !!collectionId &&
-    (collectionId === ID_COLLECTION.id ||
-      collectionId === KEY_MAP_COLLECTION.id ||
+    (SYSTEM_COLLECTIONS.some(entry => entry.id === collectionId) ||
       WALLET_STANDARD_COLLECTIONS.some(entry => entry.id === collectionId))
   )
 }
@@ -526,9 +525,10 @@ export function resolveInvocationTarget({
     return {
       ...SATISFIABLE_DEFAULTS,
       invocationTarget: `${spaceUrl}/${name}`,
-      // The `id` and `key-map` collections are provisioned at login, like the
-      // standard ones. An existing private RP collection still flags
-      // provisioning: the provisioning step is idempotent and, on the App
+      // A protected collection -- a standard one or a system one (`id`,
+      // `key-map`, `unlock-methods`) -- is provisioned and maintained by the
+      // wallet itself, never here. An existing private RP collection still
+      // flags provisioning: the provisioning step is idempotent and, on the App
       // Connect path, is what re-admits a reconnecting app to an existing
       // collection's recipient roster. An existing PUBLIC collection never
       // does: it is classed public-collection (add-only) whichever way the
@@ -536,10 +536,7 @@ export function resolveInvocationTarget({
       // public-policy setup on a live collection -- or, on App Connect, set
       // up a recipient roster on a world-readable plaintext collection.
       needsProvisioning:
-        !standard &&
-        name !== ID_COLLECTION.id &&
-        name !== KEY_MAP_COLLECTION.id &&
-        !collectionClass.isPublic,
+        !isProtectedCollection(name) && !collectionClass.isPublic,
       collectionId: name,
       encrypted: !!standard?.encryption,
       ...collectionClass

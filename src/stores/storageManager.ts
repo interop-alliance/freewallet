@@ -47,9 +47,8 @@ import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
 import {
   ENABLE_DID_WEBVH,
-  ID_COLLECTION,
-  KEY_MAP_COLLECTION,
   RP_ZCAP_TTL_MS,
+  SYSTEM_COLLECTIONS,
   WALLET_STANDARD_COLLECTIONS,
   WAS_SERVER_URL
 } from '@/app.config'
@@ -2042,17 +2041,18 @@ export class StorageManager {
   }
 
   /**
-   * Whether a collection id names a protected wallet collection (a standard
-   * collection, `id`, or `key-map`) -- never an app-provisioned one, so it is
-   * excluded from recipient-removal on revocation.
+   * Whether a collection id names a protected wallet collection -- a standard
+   * collection, or one of the account's system collections
+   * (`SYSTEM_COLLECTIONS`: `id`, `key-map`, `unlock-methods`). Never an
+   * app-provisioned one, so it is excluded from recipient-removal on
+   * revocation.
    *
    * @param collectionId {string}
    * @returns {boolean}
    */
   static #isProtectedCollection(collectionId: string): boolean {
     return (
-      collectionId === ID_COLLECTION.id ||
-      collectionId === KEY_MAP_COLLECTION.id ||
+      SYSTEM_COLLECTIONS.some(entry => entry.id === collectionId) ||
       WALLET_STANDARD_COLLECTIONS.some(entry => entry.id === collectionId)
     )
   }

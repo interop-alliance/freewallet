@@ -2,11 +2,9 @@ import type { TFunction } from 'i18next'
 import { CONTACTS_COLLECTION } from '@interop/social-core'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import {
-  ID_COLLECTION,
-  KEY_MAP_COLLECTION,
   KNOWN_EXTENSIONS,
   COMMON_CONTENT_TYPES,
-  UNLOCK_METHODS_COLLECTION,
+  SYSTEM_COLLECTIONS,
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
 
@@ -23,9 +21,7 @@ const SYSTEM_COLLECTION_IDS = [
   ...WALLET_STANDARD_COLLECTIONS.map(({ id }) => id).filter(
     id => !CONTENTS_COLLECTION_IDS.includes(id)
   ),
-  ID_COLLECTION.id,
-  KEY_MAP_COLLECTION.id,
-  UNLOCK_METHODS_COLLECTION.id
+  ...SYSTEM_COLLECTIONS.map(({ id }) => id)
 ]
 
 // The wallet's canonical (untranslated) names for the collections it
@@ -37,9 +33,7 @@ const CANONICAL_COLLECTION_NAMES = new Map<string, string>([
   ...WALLET_STANDARD_COLLECTIONS.map(
     ({ id, name }) => [id, name] as [string, string]
   ),
-  [ID_COLLECTION.id, ID_COLLECTION.name],
-  [KEY_MAP_COLLECTION.id, KEY_MAP_COLLECTION.name],
-  [UNLOCK_METHODS_COLLECTION.id, UNLOCK_METHODS_COLLECTION.name]
+  ...SYSTEM_COLLECTIONS.map(({ id, name }) => [id, name] as [string, string])
 ])
 
 /**

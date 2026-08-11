@@ -96,6 +96,26 @@ const keyMapCollectionDetail: ICapabilityQueryDetail = {
   }
 }
 
+// A write request on the `unlock-methods` collection (the account's registry
+// of unlock methods).
+const unlockMethodsCollectionDetail: ICapabilityQueryDetail = {
+  referenceId: 'unlock-methods-write',
+  allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE'],
+  controller: RP_DID,
+  invocationTarget: {
+    type: 'https://w3id.org/byoe#private-collection',
+    name: 'unlock-methods'
+  }
+}
+
+// The same write request, spelled as a plain URL under the Space.
+const unlockMethodsCollectionUrlDetail: ICapabilityQueryDetail = {
+  referenceId: 'unlock-methods-write-url',
+  allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE'],
+  controller: RP_DID,
+  invocationTarget: `${SPACE_URL}/unlock-methods`
+}
+
 // A write request on the DID document resource itself (plain URL).
 const didDocumentUrlDetail: ICapabilityQueryDetail = {
   referenceId: 'did-doc-write-url',
@@ -493,8 +513,8 @@ describe('resolveInvocationTarget', () => {
     })
   })
 
-  it('treats the `id` and `key-map` collections as protected and present', () => {
-    for (const name of ['id', 'key-map']) {
+  it('treats the system collections as protected and present', () => {
+    for (const name of ['id', 'key-map', 'unlock-methods']) {
       expect(
         resolveInvocationTarget({
           descriptor: {
@@ -602,7 +622,8 @@ describe('resolveInvocationTarget', () => {
       'public-credentials',
       'wallet-activity',
       'id',
-      'key-map'
+      'key-map',
+      'unlock-methods'
     ]) {
       expect(
         resolveInvocationTarget({
@@ -659,6 +680,7 @@ describe('resolveInvocationTarget', () => {
       'public-credentials',
       'id',
       'key-map',
+      'unlock-methods',
       'example-app-data',
       'not-a-collection',
       undefined
@@ -932,6 +954,31 @@ describe('resolveGrant action handling', () => {
     })
     expect(grant.target.collectionId).toBe('key-map')
     // Provisioned at login, like the standard and `id` collections.
+    expect(grant.target.needsProvisioning).toBe(false)
+    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+    expect(grant.write).toBe(false)
+  })
+
+  it('caps an unlock-methods-collection write to read-only (descriptor form)', () => {
+    const grant = resolveGrant({
+      descriptor: unlockMethodsCollectionDetail,
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
+    })
+    expect(grant.target.collectionId).toBe('unlock-methods')
+    // A system collection, provisioned by the wallet itself.
+    expect(grant.target.needsProvisioning).toBe(false)
+    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+    expect(grant.write).toBe(false)
+  })
+
+  it('caps an unlock-methods-collection write to read-only (string URL)', () => {
+    const grant = resolveGrant({
+      descriptor: unlockMethodsCollectionUrlDetail,
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
+    })
+    expect(grant.target.collectionId).toBe('unlock-methods')
     expect(grant.target.needsProvisioning).toBe(false)
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
     expect(grant.write).toBe(false)
