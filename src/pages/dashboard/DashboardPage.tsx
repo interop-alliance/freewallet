@@ -3,27 +3,45 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
+import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import Button from '@mui/material/Button'
 import {
   MdAddCircleOutline,
   MdClose,
   MdQrCodeScanner,
+  MdSearch,
   MdSync
 } from 'react-icons/md'
 import { Link as RouterLink, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import type { FuseOptionKey } from 'fuse.js'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { loadPasskeySafetyNotice } from '@/lib/sessionKey'
 import { syncController } from '@/stores/syncController'
-import { dashboardStyles } from '@/styles/appStyles'
+import { flattenSearchValues } from '@/lib/searchValues'
+import { useSearch } from '@/hooks/useSearch'
+import { dashboardStyles, historyStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialCard } from '@/components/CredentialCard'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { ScanCredentialQrDialog } from '@/components/ScanCredentialQrDialog'
 import type { StoredCredential } from '@/types/credential'
+
+// Declared outside the component so this array is the same object on every
+// render; useSearch's index is memoized on it, so a fresh array each render
+// would rebuild the index on every keystroke. The one `getFn` key pulls out
+// every value in the credential instead of naming fields one by one, so
+// search covers the whole credential; `proof` is skipped since it's a
+// cryptographic signature, not something a user would search for.
+const CREDENTIAL_SEARCH_KEYS: FuseOptionKey<StoredCredential>[] = [
+  {
+    name: 'vcFields',
+    getFn: item => flattenSearchValues(item.vc, ['proof'])
+  }
+]
 
 export function DashboardPage() {
   const { t } = useTranslation()
@@ -47,6 +65,12 @@ export function DashboardPage() {
     backupState: boolean
     createdAt: string
   } | null>(null)
+
+  const {
+    query,
+    setQuery,
+    results: searchedCredentials
+  } = useSearch({ items: credentials, keys: CREDENTIAL_SEARCH_KEYS })
 
   const handleQrCredentialsReady = useCallback(
     (resolved: IVerifiableCredential[]) => {
@@ -269,11 +293,36 @@ export function DashboardPage() {
             {t('common.sync')}
           </Button>
         </Stack>
+        {!loading && credentials.length > 0 && (
+          <TextField
+            size="small"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder={t('dashboard.searchPlaceholder')}
+            sx={{ ...historyStyles.searchField, mt: 2 }}
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <Box
+                    component="span"
+                    sx={{ display: 'flex', color: 'text.secondary', mr: 1 }}
+                  >
+                    <MdSearch />
+                  </Box>
+                )
+              }
+            }}
+          />
+        )}
         {loading ? (
           <LoadingSpinner />
+        ) : searchedCredentials.length === 0 && credentials.length > 0 ? (
+          <Typography color="text.secondary" sx={{ mt: 3 }}>
+            {t('dashboard.noResults')}
+          </Typography>
         ) : (
           <Box sx={dashboardStyles.credentialsGrid}>
-            {credentials.map(({ cid, vc }) => (
+            {searchedCredentials.map(({ cid, vc }) => (
               <CredentialCard key={cid} cid={cid} credential={vc} />
             ))}
           </Box>
