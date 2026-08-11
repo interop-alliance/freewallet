@@ -18,8 +18,7 @@ import { fillSettled, signupViaWizard } from './helpers'
 
 const APP = {
   name: 'Test App',
-  credentialType: 'TestAppKey',
-  vocabBase: 'urn:test-app:vocab#'
+  appUrl: 'https://app.example/editor'
 }
 const APP_ORIGIN = 'https://app.example'
 const APP_DOMAIN = 'app.example'
@@ -124,7 +123,7 @@ function appKeyCredential(response: AppConnectResponse) {
   const credential = (Array.isArray(carried) ? carried[0] : carried) as {
     type: string | string[]
     issuer: string | { id: string }
-    credentialSubject: { id: string; origin: string }
+    credentialSubject: { id: string; origin: string; appUrl: string }
   }
   return credential
 }
@@ -215,13 +214,13 @@ test('first-run App Connect mints an app key and grants over its collection', as
   expect(response.data.proof.challenge).toBe(challenge)
   expect(response.data.proof.domain).toBe(APP_DOMAIN)
 
-  // The app-key credential: type TestAppKey, self-issued (issuer == subject),
-  // bound to the requesting origin.
+  // The app-key credential: the fixed two-entry type array, self-issued
+  // (issuer == subject), bound to the requesting origin and the app's URL.
   const credential = appKeyCredential(response)
   const types = Array.isArray(credential.type)
     ? credential.type
     : [credential.type]
-  expect(types).toContain('TestAppKey')
+  expect(types).toEqual(['VerifiableCredential', 'AppKeyCredential'])
   const subjectDid = credential.credentialSubject.id
   const issuer =
     typeof credential.issuer === 'string'
@@ -230,6 +229,7 @@ test('first-run App Connect mints an app key and grants over its collection', as
   expect(subjectDid).toMatch(/^did:key:/)
   expect(issuer).toBe(subjectDid)
   expect(credential.credentialSubject.origin).toBe(APP_ORIGIN)
+  expect(credential.credentialSubject.appUrl).toBe(APP.appUrl)
 
   // A grant over the app's collection, delegated to the app-key subject DID.
   expect(response.data.zcap.length).toBeGreaterThanOrEqual(1)
@@ -305,5 +305,35 @@ test('an AppConnectQuery mixed with QueryByExample is blocked as malformed', asy
     page.getByText("This site didn't send a request this wallet can read.")
   ).toBeVisible({ timeout: 15000 })
   // Blocked before login -- no passphrase form.
+  await expect(page.locator('input[type="password"]')).toHaveCount(0)
+})
+
+test('an appUrl that is not same-origin with the request is blocked', async ({
+  page
+}) => {
+  // The `appUrl` scopes the app-key identity WITHIN the attested requesting
+  // origin, so a cross-origin one is malformed: honoring it would let a site
+  // name another site's application. Rejected at classification time, before
+  // any login form is shown. The absolute-URL and no-fragment rules fail the
+  // same way.
+  await injectGetEvent(page, {
+    origin: APP_ORIGIN,
+    query: [
+      {
+        type: 'AppConnectQuery',
+        app: { name: 'Test App', appUrl: 'https://phisher.example/editor' },
+        capabilityQuery: []
+      }
+    ],
+    challenge: 'chal-cross-origin',
+    domain: APP_DOMAIN
+  })
+
+  await page.goto('/#/wallet/get')
+  await page.reload()
+
+  await expect(
+    page.getByText("This site didn't send a request this wallet can read.")
+  ).toBeVisible({ timeout: 15000 })
   await expect(page.locator('input[type="password"]')).toHaveCount(0)
 })

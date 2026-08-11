@@ -25,7 +25,7 @@
 import type { StorageManager } from '@/stores/storageManager'
 import type { User } from '@/types/auth'
 import { multibaseOf } from '@interop/wallet-core/webvh'
-import { appKeyOrigin } from '@/lib/appKey'
+import { appKeyAppUrl, appKeyOrigin } from '@interop/wallet-core/request'
 import { issuerId, subjectId } from '@/lib/vcShape'
 
 /**
@@ -77,6 +77,13 @@ export interface ConnectedApp {
    * The CHAPI requesting origin the app key is bound to.
    */
   origin: string
+  /**
+   * The application URL the app key is scoped to within that origin, when the
+   * credential carries one (absent on a legacy, pre-`appUrl` key). Two
+   * applications sharing an origin are distinct connected apps and are told
+   * apart by this value.
+   */
+  appUrl?: string
   /**
    * The app-key credential's subject (self-issued) did:key.
    */
@@ -336,6 +343,9 @@ export async function listConnectedApps({
       cid,
       name,
       origin,
+      ...(appKeyAppUrl(credential) !== undefined && {
+        appUrl: appKeyAppUrl(credential)
+      }),
       subjectDid: subject,
       connectedAt: typeof issuanceDate === 'string' ? issuanceDate : undefined,
       grants: latestLogin ? loginGrants(latestLogin.doc.object) : [],

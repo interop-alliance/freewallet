@@ -41,7 +41,7 @@
     "@interop/social-core": "^0.8.0",
     "@interop/storage-core": "^0.5.0",
     "@interop/vc": "^11.0.6",
-    "@interop/verifier-core": "^3.5.3",
+    "@interop/verifier-core": "^3.5.4",
     "@interop/wallet-core": "^0.24.0",
     "@interop/was-client": "^0.32.1",
     "@interop/webkms-client": "^14.7.1",

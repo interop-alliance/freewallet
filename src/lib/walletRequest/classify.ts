@@ -1,12 +1,13 @@
 /**
  * Classification of incoming VC API messages. The CHAPI-event wrapping, the
- * query-normalization helpers, and the DID-Auth detection now live in
+ * query-normalization helpers, the DID-Auth detection, and the App Connect
+ * query validation (`appConnectRequestOf`) all live in
  * `@interop/wallet-core/request` and are re-exported here. This module keeps
- * only Freewallet's App Connect-aware layer: `appConnectRequestOf`, and the
- * `classifyRequest` / `isDidAuthOnly` that carry the App Connect axis (the
- * shared classifier covers the three VPR-spec query types).
+ * only Freewallet's App Connect-aware `classifyRequest` / `isDidAuthOnly`,
+ * which carry the App Connect axis the shared profile does not have.
  */
 import {
+  appConnectRequestOf,
   isDIDAuthRequested,
   queriesOf as sharedQueriesOf,
   zcapQueriesOf
@@ -16,21 +17,19 @@ import type {
   IVPRQuery as ISpecVPRQuery
 } from '@interop/wallet-core/request'
 import type {
-  IAppConnectCapabilityQuery,
-  IAppConnectQuery,
-  IAppConnectRequest,
   IQueryByExample,
   IVPRDetails,
-  IVPRQuery,
   WalletRequestProfile
 } from './types'
 
 export {
+  appConnectRequestOf,
   classifyCHAPIGetEvent,
   classifyCHAPIStoreEvent,
   credentialsOf,
   isDIDAuthRequested,
   credentialQueriesOf,
+  serializedAppUrl,
   zcapQueriesOf,
   didAuthMethodSupported
 } from '@interop/wallet-core/request'
@@ -50,107 +49,47 @@ export function queriesOf(request: IVPRDetails): ISpecVPRQuery[] {
 }
 
 /**
- * Extracts the App Connect request from a query set, when one is present. An
- * `AppConnectQuery` is one mental model per popup: the request must not also
- * carry `QueryByExample` or standalone zcap queries, at most one
- * `AppConnectQuery` is allowed, and its `app` block must name the display
- * name and the `credentialType` / `vocabBase` pair the wallet needs to match
- * or mint the app-key credential. Violations throw; classification-time
- * callers surface the throw as a malformed-request state. The capability
- * queries are normalized to an array (absent means "no grants requested" --
- * a connect that only recovers the app key is legal), and each entry is
- * rebuilt from an allowlist of the declared fields (`referenceId`,
- * `allowedAction`, `invocationTarget`): the type-level Omit does not bind an
- * actual request body, so any other wire-level field -- a smuggled `reason`,
- * an attacker-chosen `controller`, a future display-bearing addition -- is
- * made unrepresentable here, before the entries reach the profile the
- * consent screen and the delegation path read.
- *
- * @param queries {IVPRQuery[]}
- * @returns {IAppConnectRequest | null}
- */
-export function appConnectRequestOf(
-  queries: IVPRQuery[]
-): IAppConnectRequest | null {
-  const appConnectQueries = queries.filter(
-    (query): query is IAppConnectQuery => query.type === 'AppConnectQuery'
-  )
-  if (appConnectQueries.length === 0) {
-    return null
-  }
-  if (appConnectQueries.length > 1) {
-    throw new Error('More than one AppConnectQuery found, exiting.')
-  }
-  const mixed = queries.some(
-    query =>
-      query.type === 'QueryByExample' ||
-      query.type === 'AuthorizationCapabilityQuery' ||
-      query.type === 'ZcapQuery'
-  )
-  if (mixed) {
-    throw new Error(
-      'An AppConnectQuery cannot be combined with QueryByExample or ' +
-        'standalone capability queries.'
-    )
-  }
-  const { app, capabilityQuery } = appConnectQueries[0]
-  if (
-    !app ||
-    typeof app.name !== 'string' ||
-    typeof app.credentialType !== 'string' ||
-    typeof app.vocabBase !== 'string'
-  ) {
-    throw new Error(
-      'An AppConnectQuery is missing its app name / credentialType / ' +
-        'vocabBase.'
-    )
-  }
-  const rawQueries =
-    capabilityQuery === undefined
-      ? []
-      : Array.isArray(capabilityQuery)
-        ? capabilityQuery
-        : [capabilityQuery]
-  const capabilityQueries: IAppConnectCapabilityQuery[] = rawQueries.map(
-    detail => {
-      if (!detail || typeof detail !== 'object') {
-        throw new Error(
-          'An AppConnectQuery carries a malformed capabilityQuery entry.'
-        )
-      }
-      const { referenceId, allowedAction, invocationTarget } = detail
-      return {
-        ...(referenceId !== undefined && { referenceId }),
-        ...(allowedAction !== undefined && { allowedAction }),
-        invocationTarget
-      }
-    }
-  )
-  return { app, capabilityQueries }
-}
-
-/**
  * Classifies a VPR body onto the independent axes the consent screen and
  * response assembly work from: whether DID Authentication is requested, and
  * separately the credential (`QueryByExample`), capability
  * (`AuthorizationCapabilityQuery` / `ZcapQuery`), and App Connect
  * (`AppConnectQuery`) content asked for. Any combination of the first three
  * is valid, including zcap-only; an App Connect request excludes the
- * credential and standalone capability queries (enforced by
- * `appConnectRequestOf`).
+ * credential and standalone capability queries (enforced by the shared
+ * `appConnectRequestOf`, which also validates the `app.appUrl` against the
+ * attested requesting origin).
  *
- * @param request {IVPRDetails}
+ * @param options {object}
+ * @param options.request {IVPRDetails}
+ * @param [options.origin] {string} - The attested requesting origin. Required
+ *   whenever the body carries an `AppConnectQuery`, whose `appUrl` is
+ *   meaningless without an origin to validate it against; a request that
+ *   carries one without an origin is malformed and throws.
  * @returns {WalletRequestProfile}
  */
-export function classifyRequest(request: IVPRDetails): WalletRequestProfile {
+export function classifyRequest({
+  request,
+  origin
+}: {
+  request: IVPRDetails
+  origin?: string
+}): WalletRequestProfile {
   const queries = queriesOf(request)
+  const carriesAppConnect = queries.some(
+    query => (query.type as string) === 'AppConnectQuery'
+  )
+  if (carriesAppConnect && !origin) {
+    throw new Error('An App Connect request requires a requesting origin.')
+  }
   return {
     didAuth: isDIDAuthRequested({ queries }),
     vcQueries: queries.filter(
       (query): query is IQueryByExample => query.type === 'QueryByExample'
     ),
     zcapRequests: zcapQueriesOf(queries),
-    appConnect: appConnectRequestOf(queries)
+    appConnect: carriesAppConnect
+      ? appConnectRequestOf({ queries, origin: origin! })
+      : null
   }
 }
 

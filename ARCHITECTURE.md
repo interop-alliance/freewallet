@@ -17,7 +17,6 @@ src/components/     Shared React components
   credentialDetails/  Credential detail sub-components
   storage/          Storage browser sub-components
 src/lib/            Pure business logic (no React)
-  appKey.ts         App Connect app-key credential (match + mint)
   kms.ts            WebKMS keystore provisioning (ensureKeystore)
   resolveWalletInput.ts  The one door for free-form text (paste box, QR),
                     over the shared wallet-input classifier
@@ -621,15 +620,22 @@ credential plus delegated storage capabilities in one signed presentation.
 The request VPR carries a `DIDAuthentication` query plus one
 `AppConnectQuery`:
 
-- `app: { name, credentialType, vocabBase }` -- the display name for the
-  consent screen and the pair that parameterizes the app-key credential;
+- `app: { name, appUrl }` -- the display name for the consent screen and the
+  application's canonical URL, which scopes the app-key identity within the
+  requesting origin. The `appUrl` must parse as an absolute URL, carry no
+  fragment, and be same-origin with the attested requesting origin; any
+  violation makes the query malformed. Everything downstream stores and
+  compares the parsed URL's serialization, so spellings differing only in a
+  default port, percent-encoding case, or dot-segments do not name distinct
+  applications;
 - `capabilityQuery: [...]` -- the usual capability descriptors _minus_
   `controller` (the wallet fills it) and `reason` (the App Connect consent
   screen supersedes per-grant reasons).
 
 An `AppConnectQuery` is one mental model per popup: mixing it with
 `QueryByExample` or standalone capability queries is rejected at
-classification time (`classify.ts`), and wallets that predate it fail closed
+classification time (the shared `appConnectRequestOf`), and wallets that
+predate it fail closed
 (the app surfaces an "update Freewallet" error) rather than degrading into a
 partial generic flow.
 
@@ -640,19 +646,25 @@ spec** (<https://github.com/interop-alliance/app-connect-spec>; local
 checkout `../app-connect-spec` -- read `spec.md` there instead of fetching
 the rendered version).
 
-The key design move: **the wallet mints the app-key seed**
-(`src/lib/appKey.ts`). The seed is a client secret that must never transit
-a server,
-so on first run the wallet generates 32 random bytes, derives the did:key
+The whole app-key module -- the wire constants, the match / mint / legacy
+re-issue paths, and the store-time refusal policy -- lives in
+`@interop/wallet-core/request` (`appKey.ts` there), shared with DCW; the
+`AppConnectQuery` validation (`appConnectRequestOf`) lives beside it in that
+package's `classify.ts`. Freewallet's half is consent UI, credential storage,
+and the delegation machinery.
+
+The key design move: **the wallet mints the app-key seed**. The seed is a
+client secret that must never transit a server, so on first run the wallet generates 32 random bytes, derives the did:key
 via `CapabilityAgent.fromSeed({ seed, keyName: 'app-key' })` (the `keyName`
 string is load-bearing -- it must match was-react's derivation exactly),
 self-issues the credential (issuer == subject == seed-derived DID, seed
 base64url-no-pad in `credentialSubject.seed`), and saves it to its own
 credential store under the same consent -- no second popup. On a returning
 visit the stored credential is matched by the `AppKeyCredential` marker type
-AND `credentialType` AND `credentialSubject.origin === ` the CHAPI requesting
-origin, so a phishing origin can neither recover nor be handed another
-origin's key (the app-side origin check in was-react's `parseSeedCredential`
+AND `credentialSubject.appUrl === ` the request's serialized `appUrl` AND
+`credentialSubject.origin === ` the CHAPI requesting origin, so a phishing
+origin can neither recover nor be handed another origin's key, and two
+applications sharing an origin are kept apart by their `appUrl`s (the app-side origin check in was-react's `parseSeedCredential`
 stays as defense in depth).
 
 A match additionally requires that the credential's subject DID **re-derive
@@ -666,22 +678,27 @@ check is local and deterministic (the seed is right there; re-derive with the
 same `CapabilityAgent.fromSeed` call that minted it) and fails closed on an
 absent, non-base64url, or wrong-length seed. Binding authenticates internal
 consistency only, not provenance -- a fully attacker-generated credential (its
-own fresh seed, the victim app's `origin` and `credentialType`) binds
-perfectly -- so the match also drops any candidate whose `issuanceDate` is
-missing, does not parse, or sits more than a day in the future (fail-closed:
-the ranking compares raw strings, where an unparseable '9999-...' still sorts
-first): the far-future date is what would let such a plant win the
-latest-first ranking durably, while the day of grace keeps a genuine key
-minted on a clock-skewed sibling client matchable (excluding it would mint a
-duplicate key that cannot open the app's existing data). The wallet's own
-mint path always stamps a parseable ISO date, so nothing legitimate is
-dropped.
+own fresh seed, the victim app's `origin` and `appUrl`) binds perfectly --
+which is why the store-time refusal below, not the binding, is the door that
+keeps plants out. Candidates are ranked latest-first over the _instant_ each
+`issuanceDate` denotes rather than over the raw string, so a comparison
+manipulable by the spelling of a date (a numeric offset, differing
+fractional-second precision) cannot reopen the planted-credential path in a
+narrower form; an absent or unparseable date sorts last.
+
+A connect that finds no current-shape key looks once more for a **legacy**
+(pre-`appUrl`) key on the origin, and re-issues it in place under the SAME
+seed -- a fresh mint would roll the seed and orphan the identity the app
+encrypted its data under, so it must never be the migration path. The
+mapping is recoverable only when unambiguous: two distinct legacy identities
+on one origin yield nothing and the connect proceeds as a genuine first run,
+since re-issuing the wrong one would hand an application another's identity.
+The superseded legacy record is retired once the re-issue is stored.
 
 **Externally arriving app keys are refused at store time, unconditionally.**
 Every minted app key carries the marker type `AppKeyCredential`
 (`https://w3id.org/byoe#AppKeyCredential` -- one stable IRI for every app,
-defined in the inline `@context`, never interpolated from `vocabBase`), which
-turns "presents
+defined in the static inline `@context`), which turns "presents
 as an app key" into a term check rather than a shape heuristic. Be clear about
 what the marker is: the `type` array of a planted credential is
 attacker-controlled like everything else in it, so the marker is a
@@ -708,13 +725,13 @@ enrolled wallet clients can write (`private-credentials` is a protected
 collection -- RP and share grants on it are read-only) and each of those
 clients enforces the same refusal at its own door; and the space half of an
 import writes opaque resources into the user's own Space server-side. For
-both, the match-time binding and future-date checks remain the backstop.
+both, the match-time binding remains the backstop.
 
-The claim terms are shared, not per-app: `seed` and `origin` map to
-`https://w3id.org/byoe#seed` / `https://w3id.org/byoe#origin`, since they
-mean the same thing in every app.
-`vocabBase` namespaces only the app's own type term. The JSON keys are
-unchanged.
+The credential's shape is identical for every application: the `type` array
+is the fixed two-entry `["VerifiableCredential", "AppKeyCredential"]`, and
+the inline `@context` is one static object mapping `appUrl`, `seed`, and
+`origin` to their `https://w3id.org/byoe#` IRIs. Which application a
+credential belongs to is the `credentialSubject.appUrl` claim, not a type.
 
 Because the wallet delegates to the subject DID of the credential it just
 matched or minted, the request never needs to name a controller DID --
@@ -853,7 +870,7 @@ Security notes:
 - **Per-user app identity**: an app key is minted from 32 fresh random bytes
   inside the connecting user's own wallet and stored in that user's own
   credential store, so the app's DID -- and therefore the X25519 recipient
-  key derived from it -- is scoped to the **(user, origin, credentialType)**
+  key derived from it -- is scoped to the **(user, origin, `appUrl`)**
   triple. The same app connected by two users gets two unrelated DIDs. This
   is deliberately independent randomness per user rather than a derivation
   over (app, user): there is no cross-user linkability between an app's
@@ -918,7 +935,8 @@ cascades, and the permanent wire-level constants.
   (listing, disconnect policy, the revocation cascade orchestrator, the
   login-time roster policy), `/descriptors`, `/identity`, `/space` (collection
   layout, activity builders, `was-link`), `/request` (classification,
-  matching, VP composition, exchanges), `/display`, and `/sync` (only the
+  matching, VP composition, exchanges, and the App Connect app-key
+  credential), `/display`, and `/sync` (only the
   contacts LWW conflict resolution -- freewallet keeps its own RxDB
   replication driver in `src/lib/sync/`, over the wire contract from
   `@interop/was-client/sync`).
@@ -961,16 +979,18 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   mediator is `authn.io`.
 - **App Connect** — the one-popup app login: a CHAPI `get` whose VPR carries
   an `AppConnectQuery`, answered with an app-key credential (matched by
-  origin and seed-to-subject binding, or minted wallet-side on first run)
+  origin, `appUrl`, and seed-to-subject binding, or minted wallet-side on
+  first run)
   plus capabilities delegated to
   its subject DID, in a single signed presentation. See "App Connect" under
   Architecture.
 - **App key** — a self-issued credential holding a 32-byte seed in
   `credentialSubject.seed`, bound to a requesting origin in
-  `credentialSubject.origin`; issuer and subject are the seed-derived
+  `credentialSubject.origin` and to the application's canonical URL in
+  `credentialSubject.appUrl`; issuer and subject are the seed-derived
   did:key (`CapabilityAgent.fromSeed`, `keyName: 'app-key'`). It is how a
   BYOE app keeps its identity/encryption root in the user's wallet
-  (`src/lib/appKey.ts`). Every app key carries the marker type
+  (`@interop/wallet-core/request`). Every app key carries the marker type
   `AppKeyCredential` (`https://w3id.org/byoe#AppKeyCredential`); any
   externally arriving credential carrying the marker is refused at store
   time, binding or not -- app keys are wallet-minted, never imported.
@@ -978,7 +998,7 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   (app, user) pair: a keypair that can be a zcap grantee, a delegation
   `controller`, or an entry in a collection's key-epoch roster. For a BYOE app
   it is the **app key**'s subject DID above, scoped to
-  `(user, origin, credentialType)` and stable across browsers because the
+  `(user, origin, appUrl)` and stable across browsers because the
   wallet custodies the seed and re-issues it on a browser-attested origin
   match — a client-only SPA holds no durable secret of its own, so its
   identity is stable by custody, with the origin as the anchor. Deliberately

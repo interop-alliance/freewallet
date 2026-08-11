@@ -53,7 +53,10 @@ import {
   WALLET_STANDARD_COLLECTIONS,
   WAS_SERVER_URL
 } from '@/app.config'
-import { assertMintedAppKey, assertStorableAppKey } from '@/lib/appKey'
+import {
+  assertMintedAppKey,
+  assertStorableAppKey
+} from '@interop/wallet-core/request'
 import { getOrCreateWriterId } from '@/lib/writerId'
 import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
 import {
@@ -820,8 +823,9 @@ export class StorageManager {
    * write (`private-credentials` is a protected collection -- RP and share
    * grants on it are read-only), and each of those clients enforces this same
    * refusal at its own door; the pulled bodies are also EDV envelopes the
-   * sync layer could not inspect. The match-time seed binding and skew cutoff
-   * in `appKey.ts` remain the backstop for anything that slips past.
+   * sync layer could not inspect. The match-time seed binding in
+   * `@interop/wallet-core/request` remains the backstop for anything that
+   * slips past.
    *
    * @param options {object}
    * @param options.credential {IVerifiableCredential}
@@ -845,9 +849,9 @@ export class StorageManager {
    * would refuse -- external ingest never stores a marker credential, so the
    * one legitimate producer gets its own entry point instead of a bypass flag
    * on the shared one. Still asserts the mint invariants (`assertMintedAppKey`
-   * in `src/lib/appKey.ts`: marker present, subject DID derived from the
-   * carried seed) so this door cannot be misused to store a foreign app key
-   * either.
+   * in `@interop/wallet-core/request`: marker present, subject DID derived
+   * from the carried seed) so this door cannot be misused to store a foreign
+   * app key either.
    *
    * @param options {object}
    * @param options.credential {IVerifiableCredential}

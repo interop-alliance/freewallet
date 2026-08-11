@@ -30,14 +30,13 @@ import {
   AppKeyMintInvariantError,
   AppKeyRefusedError,
   mintAppKeyCredential
-} from '@/lib/appKey'
+} from '@interop/wallet-core/request'
 import { BrowserStore } from './browserStore'
 import { StorageManager } from './storageManager'
 
 const app = {
   name: 'Text Editor',
-  credentialType: 'TextEditorAppKey',
-  vocabBase: 'urn:text-editor:vocab#'
+  appUrl: 'https://app.example/editor'
 }
 const origin = 'https://app.example'
 
