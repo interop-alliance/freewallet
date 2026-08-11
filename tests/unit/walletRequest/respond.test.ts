@@ -13,7 +13,8 @@ const state = vi.hoisted(() => ({
   zcaps: [] as unknown[],
   processThrows: null as Error | null,
   historyThrows: false,
-  deliverThrows: false
+  deliverThrows: false,
+  appConnectResult: undefined as { firstRun: boolean } | undefined
 }))
 
 class FakeZcapUnavailableError extends Error {}
@@ -31,7 +32,7 @@ vi.mock('@/lib/walletRequest/processRequest', () => ({
     return {
       verifiablePresentation: { type: 'VerifiablePresentation' },
       zcaps: state.zcaps,
-      appConnect: undefined
+      appConnect: state.appConnectResult
     }
   })
 }))
@@ -69,13 +70,23 @@ function makeSession() {
   } as unknown as Parameters<typeof composeAndDeliverResponse>[0]['session']
 }
 
-async function respond({ exchangeUrl }: { exchangeUrl?: string } = {}) {
+type RespondSession = Parameters<typeof composeAndDeliverResponse>[0]['session']
+
+async function respond({
+  exchangeUrl,
+  session = makeSession(),
+  requestProfile = profile
+}: {
+  exchangeUrl?: string
+  session?: RespondSession
+  requestProfile?: typeof profile
+} = {}) {
   return composeAndDeliverResponse({
     request: { query: [] } as unknown as Parameters<
       typeof composeAndDeliverResponse
     >[0]['request'],
-    session: makeSession(),
-    profile,
+    session,
+    profile: requestProfile,
     requestOrigin: 'https://app.example',
     selectedVCs: [],
     exchangeUrl
@@ -88,6 +99,7 @@ beforeEach(() => {
   state.processThrows = null
   state.historyThrows = false
   state.deliverThrows = false
+  state.appConnectResult = undefined
 })
 
 describe('composeAndDeliverResponse', () => {
@@ -123,6 +135,33 @@ describe('composeAndDeliverResponse', () => {
     expect(failure).toBeInstanceOf(WalletResponseFailure)
     expect((failure as InstanceType<typeof WalletResponseFailure>).reason).toBe(
       'zcapUnavailable'
+    )
+  })
+
+  it('records the validated appUrl on an App Connect Login activity', async () => {
+    state.appConnectResult = { firstRun: true }
+    const session = makeSession()
+    const appConnectProfile = {
+      didAuth: true,
+      vcQueries: [],
+      zcapRequests: [],
+      appConnect: {
+        app: { name: 'Text Editor', appUrl: 'https://app.example/editor' },
+        capabilityQueries: []
+      }
+    } as unknown as typeof profile
+
+    await respond({ session, requestProfile: appConnectProfile })
+
+    expect(session.storage.addHistoryLogin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        origin: 'https://app.example',
+        appConnect: {
+          name: 'Text Editor',
+          firstRun: true,
+          appUrl: 'https://app.example/editor'
+        }
+      })
     )
   })
 

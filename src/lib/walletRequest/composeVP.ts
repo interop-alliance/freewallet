@@ -7,9 +7,10 @@
  * the user's did:key) and enforces Freewallet's stricter DID Auth rule (a
  * `domain` is required, where the shared guard requires only a `challenge`).
  *
- * The shared `composeVp` defaults its `vocabBaseIri` to
- * `https://w3id.org/byoe#` (the shared BYOE vocabulary), which is the
- * namespace Freewallet embeds its grant terms under -- no override is passed.
+ * The shared `composeVp` appends the hosted App Connect context URL
+ * (`https://w3id.org/byoe/app-connect/v1`) when grants or the App Connect
+ * marker are embedded; the loader below resolves it from the bundled
+ * `byoe-context` document, so no fetch happens at signing time.
  */
 import { composeVp } from '@interop/wallet-core/request'
 import type { PresentationSigner } from '@interop/wallet-core/request'

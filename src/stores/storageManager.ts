@@ -1845,9 +1845,11 @@ export class StorageManager {
    *   allowedActions: string[]; expires: string; zcap?: IZcap }>}   each grant
    *   carries its display summary plus, when available, the full delegated
    *   capability document (`zcap`) kept verbatim so it can be revoked later
-   * @param [options.appConnect] {{ name: string; firstRun: boolean }}   set
-   *   for an App Connect login: the app's display name and whether the app
-   *   key was minted on this connect (first run) or matched (returning)
+   * @param [options.appConnect] {{ name: string; firstRun: boolean;
+   *   appUrl?: string }}   set for an App Connect login: the app's display
+   *   name, whether the app key was minted on this connect (first run) or
+   *   matched (returning), and the validated request's `appUrl` -- what tells
+   *   two apps sharing an origin apart
    * @returns {Promise<void>}
    */
   async addHistoryLogin({
@@ -1865,7 +1867,7 @@ export class StorageManager {
       expires: string
       zcap?: IZcap
     }>
-    appConnect?: { name: string; firstRun: boolean }
+    appConnect?: { name: string; firstRun: boolean; appUrl?: string }
   }) {
     await this.#recordActivity(id =>
       buildHistoryLogin({ user, origin, grants, appConnect, id })
