@@ -1,5 +1,25 @@
 # History
 
+## 0.31.0 - TBD
+
+### Changed
+
+- The `unlock-methods` registry is now a protected collection: a capability
+  query naming it (as a `#private-collection` descriptor or a plain URL) is
+  capped read-only instead of getting the full app-collection action
+  vocabulary, is never treated as needing provisioning, and a
+  `#public-collection` grant naming it is refused outright. App revocation
+  likewise no longer treats it as app-provisioned.
+- The protected-collection set, the app-revocation exclusion, and the storage
+  browser's system grouping all derive from one list of the account's system
+  collections (`SYSTEM_COLLECTIONS` in `src/app.config.ts`) rather than three
+  local enumerations. That list is now wallet-core's shared Space layout:
+  `unlock-methods` joins `WALLET_SPACE_SYSTEM_SPECS`
+  (`@interop/wallet-core` 0.27.0), which `SYSTEM_COLLECTIONS` maps directly,
+  so every wallet provisioning an account's Space agrees on it. The local
+  `UNLOCK_METHODS_COLLECTION` / `UNLOCK_METHODS_RESOURCE` definitions are
+  re-exported from `@interop/wallet-core/space` instead.
+
 ## 0.30.0 - TBD
 
 ### Changed

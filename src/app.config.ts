@@ -11,7 +11,8 @@ import {
   PRIVATE_CREDENTIALS_COLLECTION,
   PUBLIC_CREDENTIALS_COLLECTION,
   WALLET_ACTIVITY_COLLECTION,
-  WALLET_SPACE_SYNCED_SPECS
+  WALLET_SPACE_SYNCED_SPECS,
+  WALLET_SPACE_SYSTEM_SPECS
 } from '@interop/wallet-core/space'
 
 const env = import.meta.env
@@ -134,12 +135,16 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
 // and immutable, same as `wallet-activity`.
 export const SYNCED_COLLECTIONS: Array<{ key: string; id: string }> =
   WALLET_STANDARD_COLLECTIONS.map(({ key, id }) => ({ key, id }))
-// The system collections and resource names that carry the account's identity
-// and key material -- the world-readable `id` collection (`did.json`,
-// `did.jsonl`), the private `key-map` collection (`keys.json`, plus the
-// `user-key.jsonl` roster log addressed via `@interop/wallet-core/space`'s
-// `USER_KEY_ROSTER_LOG_RESOURCE` at its wallet-core call sites), and the
-// unlock Space's `keyring` collection (`keyring.json`). They are
+// The system collections and resource names that carry the account's identity,
+// key, and unlock-method state -- the world-readable `id` collection
+// (`did.json`, `did.jsonl`), the private `key-map` collection (`keys.json`,
+// plus the `user-key.jsonl` roster log addressed via
+// `@interop/wallet-core/space`'s `USER_KEY_ROSTER_LOG_RESOURCE` at its
+// wallet-core call sites), the private `unlock-methods` collection
+// (`methods.json`, the registry of the account's unlock methods -- it gets no
+// RxDB replica and no background replication, and is read/written directly
+// like the keyring record, remote as source of truth, last-write-wins), and
+// the unlock Space's `keyring` collection (`keyring.json`). They are
 // shared wallet Space layout, declared once in `@interop/wallet-core/space`
 // and re-exported here so app-side call sites keep one config import.
 export {
@@ -149,7 +154,9 @@ export {
   ID_COLLECTION,
   KEY_MAP_COLLECTION,
   KEYRING_COLLECTION,
-  KEYRING_RESOURCE
+  KEYRING_RESOURCE,
+  UNLOCK_METHODS_COLLECTION,
+  UNLOCK_METHODS_RESOURCE
 } from '@interop/wallet-core/space'
 
 // Whether to provision and publish the user's did:webvh DID log alongside the
@@ -187,17 +194,23 @@ export const PASSKEY_PRF_INPUT = new TextEncoder().encode(
 // orphans every registered passkey.
 export const PASSKEY_RP_ID = env.VITE_PASSKEY_RP_ID || undefined
 
-// The unlock-methods registry: a single collection in the user's DATA Space
-// (not the unlock Space) holding one `methods.json` resource -- the list of an
-// account's unlock methods (passphrase, passkeys). Deliberately kept out of
-// WALLET_STANDARD_COLLECTIONS / SYNCED_COLLECTIONS: it gets no RxDB replica and
-// no background replication, and is read/written directly like the keyring
-// record (remote as source of truth, last-write-wins).
-export const UNLOCK_METHODS_COLLECTION = {
-  id: 'unlock-methods',
-  name: 'Unlock Methods'
-}
-export const UNLOCK_METHODS_RESOURCE = 'methods.json'
+// The account's system collections in its DATA Space: the collections the
+// wallet provisions and maintains for itself, holding identity, key, and
+// unlock-method state rather than wallet contents. The list is
+// `@interop/wallet-core/space`'s shared Space layout
+// (`WALLET_SPACE_SYSTEM_SPECS`, the non-synced half of the provisioning
+// roster), so every wallet provisioning an account's Space agrees on what a
+// system collection is. It is the one list every system-collection rule
+// derives from -- the protected-grant ceiling (an app may read but never write
+// them), the app-revocation exclusion (they are never app-provisioned, so
+// recipient rotation skips them), and the storage browser's grouping -- so a
+// future system collection cannot be added to one of those and silently missed
+// by the others.
+export const SYSTEM_COLLECTIONS: Array<{ id: string; name: string }> =
+  WALLET_SPACE_SYSTEM_SPECS.map(({ collectionId, name }) => ({
+    id: collectionId,
+    name
+  }))
 
 // Lifetime of the management zcap an unlock identity delegates to the data
 // identity at bind time (`src/session/keyring.ts`). Deliberately long-lived
