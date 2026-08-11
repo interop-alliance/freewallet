@@ -57,8 +57,8 @@ importers:
         specifier: ^11.0.6
         version: 11.0.6
       '@interop/verifier-core':
-        specifier: ^3.5.3
-        version: 3.5.3
+        specifier: ^3.5.4
+        version: 3.5.4
       '@interop/wallet-core':
         specifier: ^0.24.0
         version: 0.24.0(@interop/jsonld-signatures@11.8.4)
@@ -641,10 +641,6 @@ packages:
     resolution: {integrity: sha512-2HzrQW2rod60zQWWQ9aXvY86dhx2YMQZzKWR53HXQUQq7SGaf26s7/yMhB0PbKso4tAkQCiE/AbEdJqIta8OxA==}
     engines: {node: '>=24.0'}
 
-  '@interop/security-document-loader@9.5.1':
-    resolution: {integrity: sha512-ru9imW5H4a9l/cPxtsJF5cWBksVJsvyMpNcIxjknn269k72OR22v+n+AbVyBWdoqb7H5Evcs3XpFXjHmR91P5A==}
-    engines: {node: '>=24.0'}
-
   '@interop/social-core@0.8.0':
     resolution: {integrity: sha512-jWxCO8hqBIBjFHUk3h9iIaMM0BW2K4zE+JsCpu42AgA/eycC42+Y1kcf4HFeqd/HbCZuaIw4jIjdw3ElO9RNzQ==}
     engines: {node: '>=24.0'}
@@ -661,8 +657,8 @@ packages:
     resolution: {integrity: sha512-3NiJ1Pdb3jfFD9ad0nC5WZcGHtHex0cgfiALR17v+wWnRPjipfXHb1ojHcFPFOHjVMqGEHOgydt8THMfd7movA==}
     engines: {node: '>=24.0'}
 
-  '@interop/verifier-core@3.5.3':
-    resolution: {integrity: sha512-3cFFlZZz8mKwLiT8GFLeL3Nr49UOO7fP77Cwj7mEXWh15S/OKEpqpAHEePQ9p1T7fusbUVVmk7W+/AVHU1r1Fw==}
+  '@interop/verifier-core@3.5.4':
+    resolution: {integrity: sha512-OBnDT3gBgBrfO2bT90RXLZNpfn1eqvOO1aiczi+ooKNciBkCTOGCXQm+ozs4n1ksNnCHF+D6g3GNUFkyS3o8sw==}
     engines: {node: '>=24.0'}
 
   '@interop/wallet-core@0.24.0':
@@ -1360,10 +1356,6 @@ packages:
 
   buffer@6.0.3:
     resolution: {integrity: sha512-FTiCpNxtwiZZHEZbcbTIcZjERVICn9yq/pDFkTl95/AxzD1naBctN7YO68riM/gLSDY7sdrMby8hofADYuuqOA==}
-
-  byoe-context@0.2.0:
-    resolution: {integrity: sha512-fp6X8+ly/3mAhFQxbvVAxhL4+P6JxpxtQ6rSaS6KpqUAy9O7aC8R5WnAUVz15+tCzj77ye9A3vMTpYcpYGFy7A==}
-    engines: {node: '>=24.0'}
 
   byoe-context@0.3.0:
     resolution: {integrity: sha512-rkC7G1C/kfO1KQ/B2j2vA9jTei56mZxO6aBdgKiiFTj+eEFAs+HRXFFyiwGA4V9klsItOijQOaCW+nc+j9oTSA==}
@@ -4039,34 +4031,6 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/security-document-loader@9.5.1':
-    dependencies:
-      '@digitalbazaar/data-integrity-context': 2.0.1
-      '@digitalbazaar/multikey-context': 2.0.1
-      '@digitalbazaar/vc-bitstring-status-list-context': 1.1.0
-      '@digitalbazaar/vc-status-list-context': 3.1.1
-      '@digitalbazaar/zcap-context': 2.0.1
-      '@digitalcredentials/credentials-v2-context': 1.0.0
-      '@digitalcredentials/open-badges-context': 3.0.0
-      '@interop/data-integrity-core': 8.4.0
-      '@interop/did-io': 4.1.0
-      '@interop/did-method-key': 7.3.4
-      '@interop/did-web-resolver': 6.3.0
-      '@interop/ecdsa-multikey': 2.3.3
-      '@interop/ed25519-verification-key': 8.0.3
-      '@interop/http-client': 1.0.5
-      aes-key-wrapping-2019-context: 1.0.3
-      byoe-context: 0.2.0
-      credentials-context: 2.0.0
-      did-context: 3.1.1
-      ed25519-signature-2020-context: 1.1.0
-      html-entities: 2.6.0
-      jsonld-document-loader: 2.3.0
-      sha256-hmac-key-2019-context: 1.0.3
-      x25519-key-agreement-2020-context: 1.0.0
-    transitivePeerDependencies:
-      - react-native-get-random-values
-
   '@interop/social-core@0.8.0': {}
 
   '@interop/storage-core@0.5.0':
@@ -4088,7 +4052,7 @@ snapshots:
       '@interop/jsonld-signatures': 11.8.4
       credentials-context: 2.0.0
 
-  '@interop/verifier-core@3.5.3':
+  '@interop/verifier-core@3.5.4':
     dependencies:
       '@interop/data-integrity-core': 8.4.0
       '@interop/data-integrity-proof': 3.4.3
@@ -4099,7 +4063,7 @@ snapshots:
       '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.4)
       '@interop/ed25519-verification-key': 8.0.3
       '@interop/jsonld-signatures': 11.8.4
-      '@interop/security-document-loader': 9.5.1
+      '@interop/security-document-loader': 10.0.0
       '@interop/vc': 11.0.6
       '@interop/vc-bitstring-status-list': 3.0.4
       ajv: 8.20.0
@@ -4842,8 +4806,6 @@ snapshots:
     dependencies:
       base64-js: 1.5.1
       ieee754: 1.2.1
-
-  byoe-context@0.2.0: {}
 
   byoe-context@0.3.0: {}
 

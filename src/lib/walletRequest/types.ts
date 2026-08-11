@@ -4,13 +4,17 @@
  * `@interop/wallet-core/request` (this module was the extraction seed); they are
  * re-exported here so existing `@/lib/walletRequest` importers are unaffected.
  *
- * This file keeps only what stays app-side: Freewallet's App Connect protocol
- * extension, and the widened query union / request profile that carry it (the
- * shared vocabulary covers just the three VPR-spec query types).
+ * The App Connect protocol extension -- its `app` block, query, and classified
+ * request -- now lives in `@interop/wallet-core/request` too and is re-exported
+ * here. This file keeps only the widened query union / request profile that
+ * carry it (the shared vocabulary's own union covers just the three VPR-spec
+ * query types).
  *
  * @see https://w3c-ccg.github.io/vp-request-spec/
  */
 import type {
+  IAppConnectQuery,
+  IAppConnectRequest,
   ICapabilityQueryDetail,
   IQueryByExample,
   IVPRInteract,
@@ -37,54 +41,12 @@ export type {
   CHAPIStoreEvent,
   IVerifiableCredential,
   IVerifiablePresentation,
-  IZcap
+  IZcap,
+  IAppConnectApp,
+  IAppConnectCapabilityQuery,
+  IAppConnectQuery,
+  IAppConnectRequest
 } from '@interop/wallet-core/request'
-
-/**
- * A requested capability within an App Connect request: the same shape as
- * `ICapabilityQueryDetail` minus `controller` (the wallet fills it with the
- * app-key credential's subject DID -- the request cannot name a DID it does
- * not know yet) and minus `reason` (the App Connect consent screen supersedes
- * per-grant reason lines).
- */
-export type IAppConnectCapabilityQuery = Omit<
-  ICapabilityQueryDetail,
-  'controller' | 'reason'
->
-
-/**
- * The app identity an App Connect request presents: a display `name` for the
- * consent screen, plus the `credentialType` / `vocabBase` pair that
- * parameterizes the app-key credential the wallet matches (returning user) or
- * mints (first run).
- */
-export type IAppConnectApp = {
-  name: string
-  credentialType: string
-  vocabBase: string
-}
-
-/**
- * "Connect this app to the user's wallet and Space" -- a single-round request
- * that combines app-key recovery-or-minting with capability delegation. The
- * wallet finds (or self-issues) the app-key credential for the requesting
- * origin, delegates the requested capabilities to its subject DID, and
- * returns credential + grants in one signed presentation.
- */
-export type IAppConnectQuery = {
-  type: 'AppConnectQuery'
-  app: IAppConnectApp
-  capabilityQuery?: IAppConnectCapabilityQuery | IAppConnectCapabilityQuery[]
-}
-
-/**
- * An App Connect request as classified onto the `WalletRequestProfile`: the
- * app identity plus its capability queries normalized to an array.
- */
-export type IAppConnectRequest = {
-  app: IAppConnectApp
-  capabilityQueries: IAppConnectCapabilityQuery[]
-}
 
 /**
  * The query union Freewallet dispatches on: the three VPR-spec query types

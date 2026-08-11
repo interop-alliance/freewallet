@@ -6,13 +6,16 @@
  * `domain` is required whenever DID Authentication is requested (the shared
  * layer requires only a `challenge`).
  */
-import { processRequest as sharedProcessRequest } from '@interop/wallet-core/request'
+import {
+  isDIDAuthRequested,
+  processRequest as sharedProcessRequest
+} from '@interop/wallet-core/request'
 import type {
   IVPRDetails as ISpecVPRDetails,
   WalletResponse
 } from '@interop/wallet-core/request'
 import type { Session } from '@/types/auth'
-import { classifyRequest } from './classify'
+import { queriesOf } from './classify'
 import { presentationSignerFor } from './composeVP'
 import { processAppConnect } from './appConnect'
 import { processZcaps } from './processZcaps'
@@ -51,7 +54,11 @@ export async function processRequest({
   selectedVCs?: IVerifiableCredential[]
   expectedAppKeyDid?: string
 }): Promise<WalletResponse> {
-  const { didAuth, appConnect } = classifyRequest(request)
+  const queries = queriesOf(request)
+  const didAuth = isDIDAuthRequested({ queries })
+  const appConnectRequested = queries.some(
+    query => (query.type as string) === 'AppConnectQuery'
+  )
 
   // Freewallet's stricter DID Auth rule: a `domain` is required whenever DID
   // Authentication is requested (the shared layer requires only a `challenge`).
@@ -63,7 +70,7 @@ export async function processRequest({
   // path; the App Connect branch resolves its own signer inside
   // `processAppConnect`. Resolve the (possibly KMS-backed) did:web signer only
   // when it will actually be used, so App Connect avoids a redundant KMS lookup.
-  const presentationSigner = appConnect
+  const presentationSigner = appConnectRequested
     ? { signer: session.profile.keyAgent!.getSigner(), holder: session.user.id }
     : await presentationSignerFor(session)
 
@@ -77,11 +84,11 @@ export async function processRequest({
     processors: {
       processZcaps: ({ zcapRequests }) =>
         processZcaps({ zcapRequests, session }),
-      // `appConnect` is non-null whenever this branch runs: the shared layer
-      // only invokes `processAppConnect` for a request carrying an
-      // `AppConnectQuery`, which `classifyRequest` above already parsed (or
-      // threw on) into `appConnect`.
+      // The shared layer validates the `AppConnectQuery` (its `app.appUrl`
+      // against the attested origin) and hands the validated request in, so
+      // nothing is re-parsed here.
       processAppConnect: ({
+        appConnect,
         origin,
         challenge,
         domain,
@@ -89,7 +96,7 @@ export async function processRequest({
         cryptosuite
       }) =>
         processAppConnect({
-          appConnect: appConnect!,
+          appConnect,
           session,
           origin,
           challenge,

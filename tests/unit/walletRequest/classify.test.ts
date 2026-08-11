@@ -181,7 +181,7 @@ describe('zcapQueriesOf', () => {
 
 describe('classifyRequest', () => {
   it('classifies a DID-Auth-only request', () => {
-    const profile = classifyRequest(details([didAuthQuery]))
+    const profile = classifyRequest({ request: details([didAuthQuery]) })
     expect(profile).toEqual({
       didAuth: true,
       vcQueries: [],
@@ -191,42 +191,52 @@ describe('classifyRequest', () => {
   })
 
   it('classifies a VC-only request', () => {
-    const profile = classifyRequest(details([queryByExample]))
+    const profile = classifyRequest({ request: details([queryByExample]) })
     expect(profile.didAuth).toBe(false)
     expect(profile.vcQueries).toEqual([queryByExample])
     expect(profile.zcapRequests).toEqual([])
   })
 
   it('classifies a zcap-only request', () => {
-    const profile = classifyRequest(details([authorizationCapabilityQuery]))
+    const profile = classifyRequest({
+      request: details([authorizationCapabilityQuery])
+    })
     expect(profile.didAuth).toBe(false)
     expect(profile.vcQueries).toEqual([])
     expect(profile.zcapRequests).toEqual([capabilityDetail])
   })
 
   it('classifies a combined DIDAuth + VC + zcap request', () => {
-    const profile = classifyRequest(
-      details([didAuthQuery, queryByExample, authorizationCapabilityQuery])
-    )
+    const profile = classifyRequest({
+      request: details([
+        didAuthQuery,
+        queryByExample,
+        authorizationCapabilityQuery
+      ])
+    })
     expect(profile.didAuth).toBe(true)
     expect(profile.vcQueries).toEqual([queryByExample])
     expect(profile.zcapRequests).toEqual([capabilityDetail])
   })
 
   it('handles a single (non-array) query object', () => {
-    const profile = classifyRequest(details(didAuthQuery))
+    const profile = classifyRequest({ request: details(didAuthQuery) })
     expect(profile.didAuth).toBe(true)
   })
 
   it('round-trips the legacy demo request (ZcapQuery + DIDAuthentication)', () => {
-    const profile = classifyRequest(details([didAuthQuery, legacyZcapQuery]))
+    const profile = classifyRequest({
+      request: details([didAuthQuery, legacyZcapQuery])
+    })
     expect(profile.didAuth).toBe(true)
     expect(profile.zcapRequests).toEqual([capabilityDetail])
   })
 
   it('throws on a capabilityQuery-less zcap query (malformed request)', () => {
     expect(() =>
-      classifyRequest(details([{ type: 'ZcapQuery' } as IVPRQuery]))
+      classifyRequest({
+        request: details([{ type: 'ZcapQuery' } as IVPRQuery])
+      })
     ).toThrow(/missing its capabilityQuery detail/)
   })
 })

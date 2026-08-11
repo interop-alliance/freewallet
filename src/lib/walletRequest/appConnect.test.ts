@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
 import type { Session } from '@/types/auth'
 import type { StoredCredential } from '@/types/credential'
-import { mintAppKeyCredential } from '@/lib/appKey'
+import { mintAppKeyCredential } from '@interop/wallet-core/request'
 import { appConnectZcapRequests, processAppConnect } from './appConnect'
 import type { IZcap } from './types'
 
@@ -14,8 +14,7 @@ import { processZcaps } from './processZcaps'
 
 const APP = {
   name: 'Text Editor',
-  credentialType: 'TextEditorAppKey',
-  vocabBase: 'urn:text-editor:vocab#'
+  appUrl: 'https://app.example/editor'
 }
 const ORIGIN = 'https://app.example'
 const CAPABILITY_QUERY = {
@@ -35,17 +34,21 @@ async function fakeSession({
   stored = []
 }: {
   stored?: StoredCredential[]
-} = {}): Promise<{ session: Session; added: unknown[] }> {
+} = {}): Promise<{ session: Session; added: unknown[]; deleted: string[] }> {
   const keyAgent = await CapabilityAgent.fromSecret({
     secret: new Uint8Array(32).fill(9),
     handle: 'test'
   })
   const added: unknown[] = []
+  const deleted: string[] = []
   const session = {
     user: { id: keyAgent.id },
     profile: { keyAgent },
     storage: {
       listCredentials: async () => stored,
+      deleteCredential: async ({ cid }: { cid: string }) => {
+        deleted.push(cid)
+      },
       // The mint path stores through its own door, never `addCredential`
       // (which refuses every marker credential).
       addMintedAppKey: async (entry: unknown) => {
@@ -53,7 +56,7 @@ async function fakeSession({
       }
     }
   } as unknown as Session
-  return { session, added }
+  return { session, added, deleted }
 }
 
 beforeEach(() => {
@@ -195,6 +198,46 @@ describe('processAppConnect', () => {
       })
     ).rejects.toThrow(/changed between consent and approval/)
     expect(processZcaps).not.toHaveBeenCalled()
+  })
+
+  it('re-issues a legacy key in place rather than minting a new identity', async () => {
+    // A key from before the `appUrl` model: same seed, same subject DID, no
+    // `credentialSubject.appUrl` claim. Re-issuing must preserve the identity
+    // (a fresh mint would roll the seed and orphan the app's encrypted data).
+    const { credential, subjectDid } = await mintAppKeyCredential({
+      app: APP,
+      origin: ORIGIN
+    })
+    const legacy = {
+      ...credential,
+      credentialSubject: { ...credential.credentialSubject, appUrl: undefined }
+    } as typeof credential
+    delete (legacy.credentialSubject as { appUrl?: unknown }).appUrl
+    const stored = [{ cid: 'cid-legacy', vc: legacy }] as StoredCredential[]
+    const { session, added, deleted } = await fakeSession({ stored })
+
+    const response = await processAppConnect({
+      appConnect: { app: APP, capabilityQueries: [] },
+      session,
+      origin: ORIGIN,
+      didAuthRequested: false
+    })
+
+    // Returning, not first run, and the same identity as the legacy key.
+    expect(response.appConnect).toEqual({ firstRun: false, subjectDid })
+    // The re-issued credential was stored through the mint door, and the
+    // superseded legacy record was retired so a second application on this
+    // origin cannot later claim it.
+    expect(added).toHaveLength(1)
+    expect(deleted).toEqual(['cid-legacy'])
+    const presentation = response.verifiablePresentation as {
+      verifiableCredential?: Array<{
+        credentialSubject: { id: string; appUrl?: string }
+      }>
+    }
+    expect(presentation.verifiableCredential?.[0].credentialSubject).toEqual(
+      expect.objectContaining({ id: subjectDid, appUrl: APP.appUrl })
+    )
   })
 
   it('skips delegation when no capabilities were requested', async () => {

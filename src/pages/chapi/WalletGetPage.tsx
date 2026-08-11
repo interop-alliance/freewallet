@@ -81,7 +81,11 @@ import {
   type ResolvedGrant,
   type WalletRequestProfile
 } from '@/lib/walletRequest'
-import { appKeySubjectDid, findAppKeyCredential } from '@/lib/appKey'
+import {
+  appKeySubjectDid,
+  findAppKeyCredential,
+  findLegacyAppKeyCredential
+} from '@interop/wallet-core/request'
 import { fetchAppManifest, type AppManifestInfo } from '@/lib/appManifest'
 import { ZcapGrantsPanel } from './ZcapGrantsPanel'
 import { SiteProvidedText } from './SiteProvidedText'
@@ -268,7 +272,7 @@ export function WalletGetPage() {
         setPageState('blocked')
         return
       }
-      const requestProfile = classifyRequest(details)
+      const requestProfile = classifyRequest({ request: details, origin })
 
       setRequest(details)
       setRequestReason(reasonFrom(queries))
@@ -387,14 +391,22 @@ export function WalletGetPage() {
       // the first-run vs returning consent copy and the grants preview. The
       // approve-time processing repeats the lookup authoritatively.
       if (profile.appConnect) {
-        const existing = await findAppKeyCredential({
-          credentials: stored,
-          credentialType: profile.appConnect.app.credentialType,
-          origin: requestOrigin
-        })
-        const existingDid = existing
-          ? (appKeySubjectDid(existing.vc) ?? '')
-          : ''
+        const credentials = stored.map(({ vc }) => vc)
+        // The same match-then-legacy-fallback order the approve-time
+        // processing runs: a legacy (pre-`appUrl`) key is re-issued in place
+        // under the same seed, so its DID is the one the consent screen must
+        // preview and the connect is a returning one, not a first run.
+        const existing =
+          (await findAppKeyCredential({
+            credentials,
+            appUrl: profile.appConnect.app.appUrl,
+            origin: requestOrigin
+          })) ??
+          (await findLegacyAppKeyCredential({
+            credentials,
+            origin: requestOrigin
+          }))
+        const existingDid = existing ? (appKeySubjectDid(existing) ?? '') : ''
         setAppKeyFirstRun(!existing)
         setPreviewedAppKeyDid(existingDid || null)
         if (

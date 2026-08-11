@@ -28,8 +28,7 @@ const APP_URL = 'http://localhost:5274'
 
 const APP = {
   name: 'Test App',
-  credentialType: 'TestAppKey',
-  vocabBase: 'urn:test-app:vocab#'
+  appUrl: 'https://app.example/editor'
 }
 const APP_ORIGIN = 'https://app.example'
 const APP_DOMAIN = 'app.example'

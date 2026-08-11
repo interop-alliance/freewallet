@@ -1,5 +1,31 @@
 # History
 
+## 0.29.0 - TBD
+
+### Changed
+
+- **BREAKING**: App Connect is now on the spec's `appUrl` model. An
+  `AppConnectQuery`'s `app` block is `{ name, appUrl }` -- the
+  `credentialType` / `vocabBase` pair is gone -- and the `appUrl` must be an
+  absolute URL, carry no fragment, and be same-origin with the attested
+  requesting origin (any violation is a malformed request). App-key
+  credentials carry the fixed two-entry type array
+  `["VerifiableCredential", "AppKeyCredential"]`, a static inline `@context`,
+  and a `credentialSubject.appUrl` claim; matching is on that claim plus the
+  origin, so the app identity is scoped to (user, origin, `appUrl`). No
+  dual-read: old-shape requests are no longer recognized.
+- A connect that finds no current-shape app key re-issues a legacy
+  (pre-`appUrl`) key for the origin in place under the same seed, preserving
+  the app's identity and its access to already-encrypted data; the superseded
+  record is retired. Two distinct legacy identities on one origin are treated
+  as a first run rather than guessed at.
+- `src/lib/appKey.ts` is removed: the app-key constants, matching, minting,
+  legacy re-issue, and store-time refusal policy now come from
+  `@interop/wallet-core/request`, as does the `AppConnectQuery` validation
+  that replaced the local `appConnectRequestOf`. `classifyRequest` now takes
+  `{ request, origin }` -- the origin the `appUrl` is validated against.
+- `ConnectedApp` entries carry the app key's `appUrl` when it has one.
+
 ## 0.28.0 - TBD
 
 ### Changed

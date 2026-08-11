@@ -29,7 +29,7 @@ import {
   mapPopupLoginError
 } from '@/session/completePopupLogin'
 import type { Session } from '@/types/auth'
-import { AppKeyRefusedError } from '@/lib/appKey'
+import { AppKeyRefusedError } from '@interop/wallet-core/request'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
 import { chapiStyles } from '@/styles/appStyles'
@@ -171,7 +171,9 @@ export function WalletStorePage() {
         // exchange is resumed once they have logged in.
         const request = opening.verifiablePresentationRequest
         if (!opening.verifiablePresentation && request) {
-          const { didAuth, vcQueries, zcapRequests } = classifyRequest(request)
+          const { didAuth, vcQueries, zcapRequests } = classifyRequest({
+            request
+          })
           if (!didAuth || vcQueries.length > 0 || zcapRequests.length > 0) {
             throw new Error(
               `The exchange at ${exchange} asked for something other than DID ` +

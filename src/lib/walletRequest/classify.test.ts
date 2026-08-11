@@ -110,7 +110,7 @@ describe('queriesOf', () => {
   })
 
   it('classifies an empty VPR body without throwing', () => {
-    expect(classifyRequest({})).toEqual({
+    expect(classifyRequest({ request: {} })).toEqual({
       didAuth: false,
       vcQueries: [],
       zcapRequests: [],
@@ -119,12 +119,12 @@ describe('queriesOf', () => {
   })
 })
 
-describe('appConnectRequestOf (via classifyRequest)', () => {
+describe('classifyRequest (App Connect axis)', () => {
   const app = {
     name: 'Text Editor',
-    credentialType: 'TextEditorAppKey',
-    vocabBase: 'urn:text-editor:vocab#'
+    appUrl: 'https://app.example/editor'
   }
+  const origin = 'https://app.example'
   const capabilityQuery = {
     referenceId: 'text-editor-document',
     allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
@@ -134,12 +134,15 @@ describe('appConnectRequestOf (via classifyRequest)', () => {
     }
   }
 
-  it('classifies an App Connect request with DID Auth', () => {
+  it('carries the App Connect axis alongside DID Auth', () => {
     const profile = classifyRequest({
-      query: [
-        { type: 'DIDAuthentication', acceptedMethods: [{ method: 'key' }] },
-        { type: 'AppConnectQuery', app, capabilityQuery: [capabilityQuery] }
-      ]
+      request: {
+        query: [
+          { type: 'DIDAuthentication', acceptedMethods: [{ method: 'key' }] },
+          { type: 'AppConnectQuery', app, capabilityQuery: [capabilityQuery] }
+        ]
+      },
+      origin
     })
     expect(profile.didAuth).toBe(true)
     expect(profile.appConnect).toEqual({
@@ -150,96 +153,32 @@ describe('appConnectRequestOf (via classifyRequest)', () => {
     expect(profile.zcapRequests).toEqual([])
   })
 
-  it('normalizes a single (non-array) capabilityQuery', () => {
-    const profile = classifyRequest({
-      query: [{ type: 'AppConnectQuery', app, capabilityQuery }]
-    })
-    expect(profile.appConnect?.capabilityQueries).toEqual([capabilityQuery])
-  })
-
-  it('allowlists capabilityQuery fields, dropping smuggled wire fields', () => {
-    // The type-level Omit does not bind an actual request body: a wire-level
-    // entry can carry a `reason` (the App Connect consent screen supersedes
-    // per-grant reasons) or a `controller` (the wallet fills it with the
-    // app-key subject DID). Classification rebuilds each entry from the
-    // declared fields, so neither can reach the profile.
-    const smuggled = {
-      ...capabilityQuery,
-      reason: 'Totally legitimate reason from the requesting site',
-      controller: 'did:key:z6MkAttacker'
-    }
-    const profile = classifyRequest({
-      query: [{ type: 'AppConnectQuery', app, capabilityQuery: [smuggled] }]
-    })
-    expect(profile.appConnect?.capabilityQueries).toEqual([capabilityQuery])
-    expect(profile.appConnect?.capabilityQueries[0]).not.toHaveProperty(
-      'reason'
-    )
-    expect(profile.appConnect?.capabilityQueries[0]).not.toHaveProperty(
-      'controller'
-    )
-  })
-
-  it('classifies an absent capabilityQuery as no grants requested', () => {
-    const profile = classifyRequest({
-      query: [{ type: 'AppConnectQuery', app }]
-    })
-    expect(profile.appConnect?.capabilityQueries).toEqual([])
-  })
-
-  it('rejects mixing with QueryByExample', () => {
+  it('requires a requesting origin to classify an AppConnectQuery', () => {
+    // The `appUrl` is validated against the attested origin, so classifying
+    // without one would have nothing to validate against.
     expect(() =>
       classifyRequest({
-        query: [
-          { type: 'AppConnectQuery', app },
-          { type: 'QueryByExample', credentialQuery: { example: {} } }
-        ]
+        request: { query: [{ type: 'AppConnectQuery', app }] }
       })
-    ).toThrow(/cannot be combined/)
+    ).toThrow(/requires a requesting origin/)
   })
 
-  it('rejects mixing with a standalone capability query', () => {
+  it('surfaces a malformed app block as a throw', () => {
+    // The rules themselves (absolute URL, no fragment, same-origin) are the
+    // shared classifier's; this only pins that they reach the popup as throws.
     expect(() =>
       classifyRequest({
-        query: [
-          { type: 'AppConnectQuery', app },
-          {
-            type: 'AuthorizationCapabilityQuery',
-            capabilityQuery: {
-              controller: 'did:key:z6Mk...',
-              ...capabilityQuery
+        request: {
+          query: [
+            {
+              type: 'AppConnectQuery',
+              app: { name: 'Text Editor', appUrl: 'https://phisher.example/x' }
             }
-          }
-        ]
+          ]
+        },
+        origin
       })
-    ).toThrow(/cannot be combined/)
-  })
-
-  it('rejects more than one AppConnectQuery', () => {
-    expect(() =>
-      classifyRequest({
-        query: [
-          { type: 'AppConnectQuery', app },
-          { type: 'AppConnectQuery', app }
-        ]
-      })
-    ).toThrow(/More than one AppConnectQuery/)
-  })
-
-  it('rejects a missing app block', () => {
-    expect(() =>
-      classifyRequest({ query: [{ type: 'AppConnectQuery' } as never] })
-    ).toThrow(/missing its app name/)
-  })
-
-  it('rejects a malformed capabilityQuery entry', () => {
-    expect(() =>
-      classifyRequest({
-        query: [
-          { type: 'AppConnectQuery', app, capabilityQuery: ['nope'] as never }
-        ]
-      })
-    ).toThrow(/malformed capabilityQuery/)
+    ).toThrow(/same-origin/)
   })
 })
 
