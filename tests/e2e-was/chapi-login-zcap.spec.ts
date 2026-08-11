@@ -86,7 +86,7 @@ test('login VPR provisions a collection and returns Space-rooted grants', async 
             allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
             controller: RP_DID,
             invocationTarget: {
-              type: 'https://w3id.org/byoe#collection',
+              type: 'https://w3id.org/byoe#private-collection',
               name: 'example-app-data'
             }
           },

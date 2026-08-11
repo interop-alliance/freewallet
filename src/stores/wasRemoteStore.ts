@@ -28,11 +28,7 @@ import {
   type Resource,
   type Space
 } from '@interop/was-client'
-import {
-  createEdvEncryption,
-  resourceDescriptorStore,
-  type EncryptionDescriptorStore
-} from '@interop/was-client/edv'
+import { createEdvEncryption } from '@interop/was-client/edv'
 import { publicCredentialUrl as buildPublicCredentialUrl } from '@interop/wallet-core/space'
 import {
   wasClientLabelsStore,
@@ -49,7 +45,6 @@ import {
   DID_KEYS_RESOURCE,
   ID_COLLECTION,
   KEY_MAP_COLLECTION,
-  USER_KEY_ROSTER_RESOURCE,
   UNLOCK_METHODS_COLLECTION,
   UNLOCK_METHODS_RESOURCE,
   WALLET_STANDARD_COLLECTIONS
@@ -65,7 +60,7 @@ import type { ImportSpaceSummary } from '@/stores/storageManager'
 import {
   deriveSpaceId,
   errorStatus,
-  WAS_KEY_EPOCH_HEADER
+  KEY_EPOCH_HEADER
 } from '@interop/was-client/sync'
 import { provisionWalletSpace } from '@interop/wallet-core/space'
 import {
@@ -398,27 +393,6 @@ export class WASRemoteStore {
       .space(this.spaceId)
       .collection(KEY_MAP_COLLECTION.id)
       .resource(DID_KEYS_RESOURCE)
-  }
-
-  /**
-   * Returns the descriptor store over the user key wrap-set roster
-   * (`key-map/user-key.json`): the `resourceDescriptorStore` adapter, so the was-client
-   * recipient primitives read/CAS-write the roster through the seam. The
-   * `plaintext` handle override skips the collection describe -- the roster is
-   * read before/independently of the collection's description, and the
-   * `key-map` collection is provisioned plaintext for good (a descriptor resource
-   * must not itself be EDV-encoded, or the store's write preconditions would
-   * not be honored).
-   *
-   * @returns {EncryptionDescriptorStore}
-   */
-  userKeyRosterStore(): EncryptionDescriptorStore {
-    return resourceDescriptorStore({
-      resource: this.was
-        .space(this.spaceId)
-        .collection(KEY_MAP_COLLECTION.id, { encryption: 'plaintext' })
-        .resource(USER_KEY_ROSTER_RESOURCE)
-    })
   }
 
   /**
@@ -885,7 +859,7 @@ export class WASRemoteStore {
    * content-derived id collided) and is reported as not-created rather than
    * thrown.
    *
-   * When `epoch` is given, it is stamped as the `WAS-Key-Epoch` header exactly
+   * When `epoch` is given, it is stamped as the `Key-Epoch` header exactly
    * as background replication does (the sync port's `putContent`), so a
    * remote-direct write records the key epoch its envelope was encrypted under.
    *
@@ -911,7 +885,7 @@ export class WASRemoteStore {
     const collectionId = this.#collectionId(logicalKey)
     const headers: Record<string, string> = { 'if-none-match': '*' }
     if (epoch !== undefined) {
-      headers[WAS_KEY_EPOCH_HEADER] = epoch
+      headers[KEY_EPOCH_HEADER] = epoch
     }
     try {
       await this.was.request({

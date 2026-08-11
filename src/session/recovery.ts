@@ -5,7 +5,7 @@
  * verification method stands in the did:webvh document (unmarked -- a
  * recovery key is the keyAgreement-only case, so client listings keyed on
  * `capabilityInvocation` never see it), its user key wrap stands in the
- * `key-map/user-key.json`
+ * `key-map/user-key.jsonl`
  * roster (maintained for free by rotation fan-out), and its update-key hash
  * stands committed in `nextKeyHashes` -- decryption standing, authority
  * latent, the key material existing nowhere until the code is typed.
@@ -61,14 +61,13 @@ import {
 } from '@interop/wallet-core/keyring'
 import {
   addUserKeyRosterRecipient,
-  userKeyRosterDescriptorStore,
-  userKeyRosterEpochsSigner,
   userKeyVaultKeys,
   readUserKeyRoster,
   rotateUserKeyRoster,
   type UserKey,
   type RosterRecipientDocument
 } from '@interop/wallet-core/keys'
+import { accountRosterStore, sessionRosterStore } from '@/session/rosterStore'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
   delegationKeyInDocument,
@@ -490,7 +489,7 @@ export async function issueRecoveryCode({
 
   // 1. Decryption material first: the code's wrap into every roster epoch.
   await addUserKeyRosterRecipient({
-    store: remoteStore.userKeyRosterStore(),
+    store: sessionRosterStore({ profile: session.profile, idb }),
     recipient: {
       id: client.recipientKid,
       publicKeyMultibase: client.keyAgreementKeyMultibase
@@ -802,10 +801,14 @@ export async function recoverAccountWithCode({
   // epoch (owner: the spent code's KAK, whose wraps stand since issuance),
   // read the standing user key, then the mandatory rotation off the spent code --
   // it is presumed compromised the moment it is typed.
-  const rosterStore = userKeyRosterDescriptorStore({
-    storageServerUrl: pointer.host,
+  // The log-governed store, signing appends with the NEW client's just-
+  // published key; its controller view verifies the log fresh, so it sees the
+  // continuation entries that enrolled that key.
+  const rosterStore = accountRosterStore({
     zcapClient: newZcapClient,
-    spaceId: pointer.spaceId
+    keyAgent: newClientAgents.keyAgent,
+    pointer: { did: pointer.did, spaceId: pointer.spaceId, host: pointer.host },
+    idb
   })
   await addUserKeyRosterRecipient({
     store: rosterStore,
@@ -827,10 +830,9 @@ export async function recoverAccountWithCode({
     spaceId: pointer.spaceId,
     idb
   })
-  // The just-updated, locally verified document: the root of trust the roster
-  // reads verify the epoch-configuration signature against (this client holds
-  // no cached user key, so every read here adopts an epoch from the roster), and
-  // the recipient source for the rotation below.
+  // The just-updated, locally verified document: the recipient source for
+  // the rotation below. (Roster provenance is the store's own: every read
+  // resolves from the log's verified head, anchored in this same document.)
   const { doc } = await verifyAccountLog({
     did: pointer.did,
     spaceId: pointer.spaceId,
@@ -839,8 +841,7 @@ export async function recoverAccountWithCode({
   const preRotation = await readUserKeyRoster({
     store: rosterStore,
     clientKeyAgreementKey: newClientAgents.keyAgreementKey,
-    pinnedEpochId,
-    document: doc
+    pinnedEpochId
   })
   if (!preRotation) {
     throw new Error(
@@ -858,16 +859,12 @@ export async function recoverAccountWithCode({
   await rotateUserKeyRoster({
     store: rosterStore,
     document: doc,
-    retireRecipientId: spent.recipientKid,
-    signEpochs: userKeyRosterEpochsSigner({
-      keyAgent: newClientAgents.keyAgent
-    })
+    retireRecipientId: spent.recipientKid
   })
   const postRotation = await readUserKeyRoster({
     store: rosterStore,
     clientKeyAgreementKey: newClientAgents.keyAgreementKey,
-    pinnedEpochId,
-    document: doc
+    pinnedEpochId
   })
   if (!postRotation) {
     throw new Error('The user key roster vanished during recovery.')
@@ -1074,16 +1071,11 @@ export async function revokeRecoveryCode({
   entry: RecoveryCodeUnlockMethod
   idb?: IDBFactory
 }): Promise<void> {
-  const {
-    remoteStore,
-    pointer,
-    clientWebvhKeys,
-    clientKeyAgreementKey,
-    keyAgent
-  } = requireEnrolledClientContext({
-    session,
-    action: 'Recovery-code revocation'
-  })
+  const { remoteStore, pointer, clientWebvhKeys, clientKeyAgreementKey } =
+    requireEnrolledClientContext({
+      session,
+      action: 'Recovery-code revocation'
+    })
 
   // 1. The document entry out (idempotent).
   await removeRecoveryKey({
@@ -1104,19 +1096,17 @@ export async function revokeRecoveryCode({
     profile: session.profile,
     pointer
   })
-  const rosterStore = remoteStore.userKeyRosterStore()
+  const rosterStore = sessionRosterStore({ profile: session.profile, idb })
   await rotateUserKeyRoster({
     store: rosterStore,
     document: doc,
-    retireRecipientId: entry.recoveryKid,
-    signEpochs: userKeyRosterEpochsSigner({ keyAgent })
+    retireRecipientId: entry.recoveryKid
   })
   const read = await readUserKeyRoster({
     store: rosterStore,
     userKey: session.profile.userKey,
     clientKeyAgreementKey,
-    pinnedEpochId: await loadUserKeyEpochPin({ spaceId: pointer.spaceId, idb }),
-    document: doc
+    pinnedEpochId: await loadUserKeyEpochPin({ spaceId: pointer.spaceId, idb })
   })
   let rotatedUserKey: UserKey | undefined
   if (read) {

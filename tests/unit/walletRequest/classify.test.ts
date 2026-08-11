@@ -33,7 +33,7 @@ const capabilityDetail: ICapabilityQueryDetail = {
   allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
   controller: 'did:key:z6MkrRP',
   invocationTarget: {
-    type: 'https://w3id.org/byoe#collection',
+    type: 'https://w3id.org/byoe#private-collection',
     name: 'example-app-data'
   }
 }

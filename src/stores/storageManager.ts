@@ -17,7 +17,7 @@
  * come back empty. The remote-direct backend therefore reads and writes the
  * standard synced collections straight over the remote WAS collections,
  * reproducing verbatim what background replication would have pushed (the raw
- * EDV envelope under its content-derived id, `WAS-Key-Epoch` stamped) so the
+ * EDV envelope under its content-derived id, `Key-Epoch` stamped) so the
  * main app pulls popup writes cleanly. Both backends share the session's
  * per-collection ciphers, so the envelope/id/epoch logic lives once. The
  * remote-direct backend is selected only when a remote store is configured; a
@@ -66,10 +66,8 @@ import {
   type DidWebKeyMapV2
 } from '@interop/wallet-core/webvh'
 import { promoteKeystoreController, rebindKeystoreAgent } from '@/lib/kms'
-import {
-  ensureUserKeyRoster,
-  userKeyRosterEpochsSigner
-} from '@interop/wallet-core/keys'
+import { ensureUserKeyRoster } from '@interop/wallet-core/keys'
+import { accountRosterStore } from '@/session/rosterStore'
 import { mintRecordEncryption } from '@interop/wallet-core/keyring'
 import {
   acquireDescriptor,
@@ -1573,47 +1571,6 @@ export class StorageManager {
           console.warn('Collection key-epoch provisioning failed:', err)
         }
       }
-      // Ensure the user key wrap-set roster (`key-map/user-key.json`) exists,
-      // create-if-absent through the descriptor-store seam: an absent roster is
-      // initialized with the account's user key as its first epoch, wrapped to
-      // this client's own key-agreement key, and the created epoch is pinned
-      // as the latest seen. An existing roster is left untouched (the
-      // login-time read authenticates it). Non-fatal like DID provisioning:
-      // the idempotent ensure resumes on the next login.
-      if (
-        profile?.userKey &&
-        profile?.clientKeyAgreementKey &&
-        profile?.keyAgent
-      ) {
-        try {
-          const descriptor = await ensureUserKeyRoster({
-            store: this.#remoteStore.userKeyRosterStore(),
-            userKey: profile.userKey,
-            clientKeyAgreementKey: profile.clientKeyAgreementKey,
-            signEpochs: userKeyRosterEpochsSigner({
-              keyAgent: profile.keyAgent
-            })
-          })
-          // Pin only an epoch this session already holds the key for: the
-          // ensure serves an existing roster back UNVALIDATED (no epochsMac
-          // check, no continuity check, no unwrap), so a served epoch id is
-          // not evidence. The session's own user key is -- it came from the checked
-          // login-time read or the local client-key record -- and the save
-          // itself is monotonic, so a rolled-back descriptor can never drag
-          // the pin backward and a fabricated one can never push it onto an
-          // epoch no enrolled client authenticated.
-          if (descriptor.currentEpoch === profile.userKey.id) {
-            await savePinFromDescriptor({
-              spaceId: this.#remoteStore.spaceId,
-              epochId: descriptor.currentEpoch,
-              descriptor,
-              idb
-            })
-          }
-        } catch (err) {
-          console.warn('user key roster provisioning failed:', err)
-        }
-      }
       // Provision and publish the user's did:web DID (only when a keystore
       // agent is present). Runs here, after the Space and `id` collection
       // exist. Non-fatal like keystore provisioning: a KMS/WAS hiccup must not
@@ -1682,6 +1639,58 @@ export class StorageManager {
           }
         } catch (err) {
           console.warn('did:web provisioning failed:', err)
+        }
+      }
+      // Ensure the user key wrap-set roster (the `key-map/user-key.jsonl`
+      // resource log) exists, create-if-absent through the log-governed
+      // descriptor-store seam: an absent roster is initialized with the
+      // account's user key as its first epoch, wrapped to this client's own
+      // key-agreement key, and the created epoch is pinned as the latest
+      // seen. Runs after DID provisioning, not before: the roster log's
+      // entry proofs anchor in the account's did:webvh document, so the
+      // genesis append needs the published log to verify against. An
+      // existing roster is left untouched (the login-time read verifies
+      // it). Non-fatal like DID provisioning: the idempotent ensure resumes
+      // on the next login.
+      const rosterDid = profile?.didWebvh?.did ?? profile?.accountPointer?.did
+      if (
+        profile?.userKey &&
+        profile.clientKeyAgreementKey &&
+        profile.keyAgent &&
+        isWebvhDid(rosterDid)
+      ) {
+        try {
+          const descriptor = await ensureUserKeyRoster({
+            store: accountRosterStore({
+              zcapClient: profile.zcapClient,
+              keyAgent: profile.keyAgent,
+              pointer: {
+                did: rosterDid,
+                spaceId: this.#remoteStore.spaceId,
+                host: this.#remoteStore.storageServerUrl
+              },
+              idb
+            }),
+            userKey: profile.userKey,
+            clientKeyAgreementKey: profile.clientKeyAgreementKey
+          })
+          // Pin only an epoch this session already holds the key for: the
+          // ensure serves an existing roster back without the continuity and
+          // unwrap checks of the full login-time read, so a served epoch id
+          // alone is not evidence. The session's own user key is -- it came
+          // from the checked login-time read or the local client-key record
+          // -- and the save itself is monotonic, so a rolled-back descriptor
+          // can never drag the pin backward.
+          if (descriptor.currentEpoch === profile.userKey.id) {
+            await savePinFromDescriptor({
+              spaceId: this.#remoteStore.spaceId,
+              epochId: descriptor.currentEpoch,
+              descriptor,
+              idb
+            })
+          }
+        } catch (err) {
+          console.warn('user key roster provisioning failed:', err)
         }
       }
     }

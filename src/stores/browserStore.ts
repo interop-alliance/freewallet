@@ -238,7 +238,7 @@ export class BrowserStore {
    * @param options.data {Json}
    * @param [options.epoch] {string}   the key-epoch id the envelope was
    *   encrypted under, stored on the row so the sync layer can push it as the
-   *   `WAS-Key-Epoch` header; absent for a plaintext or pre-epoch write
+   *   `Key-Epoch` header; absent for a plaintext or pre-epoch write
    * @returns {Promise<void>}
    */
   async #insertDoc({
@@ -274,7 +274,7 @@ export class BrowserStore {
    * @param options.data {Json}
    * @param [options.epoch] {string}   the key-epoch id the re-encrypted body was
    *   written under, re-stamped on the row so replication pushes the current
-   *   `WAS-Key-Epoch`; absent for a plaintext write
+   *   `Key-Epoch`; absent for a plaintext write
    * @returns {Promise<void>}
    */
   async #updateDoc({
@@ -1078,7 +1078,7 @@ export class BrowserStore {
     // existing id verbatim (binding the envelope to the true resource id --
     // including a legacy uuid row id) and advances the EDV `sequence` from the
     // prior envelope, then re-stamp the epoch so replication pushes the current
-    // `WAS-Key-Epoch` for the rewritten body. A plaintext prior row (or no
+    // `Key-Epoch` for the rewritten body. A plaintext prior row (or no
     // cipher) falls back to the inserters' encrypt seam -- `encryptUpdate`
     // needs a prior envelope to advance from.
     if (cipherForRead?.encryptUpdate && isEncryptedEnvelope(data)) {

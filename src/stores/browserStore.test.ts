@@ -89,7 +89,7 @@ async function initLocalStore({
 /**
  * A fake DocCipher whose every encrypt surfaces a fixed `epoch` id (mimicking a
  * multi-recipient cipher writing under the descriptor's `currentEpoch`), so a test
- * can assert the remote-direct write stamped it as `WAS-Key-Epoch`.
+ * can assert the remote-direct write stamped it as `Key-Epoch`.
  */
 function makeFakeEpochCipher(epoch: string): DocCipher {
   return {
@@ -1141,7 +1141,7 @@ describe('StorageManager (local-first facade)', () => {
  * `listSyncedResources` / `getSyncedResource` / `putSyncedResource` /
  * `deleteSyncedResource` surface the remote-direct backend calls.
  * `putSyncedResource` honors the create-if-absent contract (a second write to
- * an existing id reports `created: false`) and records any `WAS-Key-Epoch`
+ * an existing id reports `created: false`) and records any `Key-Epoch`
  * stamp under `epochs`, so a test can assert a remote-direct write carried it.
  */
 function makeFakeRemoteStore(): {
@@ -1280,7 +1280,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     expect(await localStore.listCredentials()).toHaveLength(1)
   })
 
-  it('stamps the WAS-Key-Epoch on the remote-direct credential and history writes', async () => {
+  it('stamps the Key-Epoch on the remote-direct credential and history writes', async () => {
     const ciphers = {
       privateCredentials: makeFakeEpochCipher('epoch-cred'),
       walletActivity: makeFakeEpochCipher('epoch-hist')

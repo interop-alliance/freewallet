@@ -11,11 +11,10 @@
  * `https://w3id.org/byoe#` (the shared BYOE vocabulary), which is the
  * namespace Freewallet embeds its grant terms under -- no override is passed.
  */
-import {
-  composeVp,
-  documentLoader as sharedDocumentLoader
-} from '@interop/wallet-core/request'
+import { composeVp } from '@interop/wallet-core/request'
 import type { PresentationSigner } from '@interop/wallet-core/request'
+import { securityLoader } from '@interop/security-document-loader'
+import { contexts as byoeContexts } from 'byoe-context'
 import type { Session } from '@/types/auth'
 import { kmsAuthenticationSigner } from '@/lib/didWeb'
 import type {
@@ -25,11 +24,18 @@ import type {
 } from './types'
 
 /**
- * Shared JSON-LD document loader for presentation and credential signing.
- * Exported so single-VC issuance (`src/lib/loginCredential.ts`) reuses the
- * same context resolution the VP compose path uses.
+ * Freewallet's JSON-LD document loader for presentation and credential
+ * signing: the standard security contexts plus the BYOE App Connect context,
+ * registered here (not bundled in the security loader) so BYOE vocabulary
+ * additions ship with a `byoe-context` bump alone. Exported so single-VC
+ * issuance (`src/lib/loginCredential.ts`) reuses the same context resolution
+ * the VP compose path uses.
  */
-export const documentLoader = sharedDocumentLoader
+const loader = securityLoader({ fetchRemoteContexts: true })
+for (const [url, context] of byoeContexts) {
+  loader.addStatic(url, context)
+}
+export const documentLoader = loader.build()
 
 /**
  * Resolves the authentication signer and holder DID for the session: the
@@ -109,6 +115,7 @@ export async function composeVP({
     didAuthRequested,
     cryptosuite,
     zcaps,
-    appConnect
+    appConnect,
+    documentLoader
   })
 }

@@ -25,6 +25,7 @@ import {
 import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
 import { setClientLabel } from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
+import { sessionRosterStore } from '@/session/rosterStore'
 import { saveUserKeyEpochPin } from '@/lib/sessionKey'
 import { deriveUnlockIdentity, KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { bindPassphrase, fetchKeyring } from '@/session/keyring'
@@ -38,8 +39,8 @@ import type { Session } from '@/types/auth'
  * the enrollee's screen. Guards that this session can actually run the
  * ceremony (a configured WAS server, and this client's own did:webvh update
  * keys and key-agreement key in memory), then runs the shared push-order
- * ceremony: the user key wrap lands in `key-map/user-key.json` first, and only then the
- * two did:webvh log entries publish.
+ * ceremony: the user key wrap lands in the `key-map/user-key.jsonl` roster log
+ * first, and only then the two did:webvh log entries publish.
  *
  * @param options {object}
  * @param options.request {EnrollmentRequest}   the parsed connect code
@@ -73,7 +74,7 @@ export async function approveEnrollment({
     request,
     clientWebvhKeys,
     clientKeyAgreementKey,
-    userKeyRosterStore: remoteStore.userKeyRosterStore(),
+    userKeyRosterStore: sessionRosterStore({ profile }),
     idStore: remoteStore.webvhIdStore()
   }).finally(() => invalidateVerifiedLog({ profile }))
   if (label?.trim()) {

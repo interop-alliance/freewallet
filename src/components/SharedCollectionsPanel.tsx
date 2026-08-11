@@ -12,7 +12,7 @@
  * plainly.
  *
  * There is deliberately no "add share" action here. A share is initiated from
- * the consent screen of a `https://w3id.org/byoe#shared-collection` capability request (a
+ * the consent screen of a `https://w3id.org/byoe#shared-wallet-collection` capability request (a
  * connected app asking, over CHAPI, to read and decrypt one of these
  * collections); this panel is where the resulting grant is reviewed and
  * removed.

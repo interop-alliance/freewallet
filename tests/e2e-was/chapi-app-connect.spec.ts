@@ -93,7 +93,7 @@ function appConnectQuery() {
           referenceId: APP_COLLECTION,
           allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
           invocationTarget: {
-            type: 'https://w3id.org/byoe#collection',
+            type: 'https://w3id.org/byoe#private-collection',
             name: APP_COLLECTION
           }
         }

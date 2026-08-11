@@ -57,7 +57,7 @@
  * collection it provisions, so a duplicate name later in the same request
  * resolves against it as an existing collection.
  *
- * A `https://w3id.org/byoe#shared-collection` grant is the share flow: it asks not just to
+ * A `https://w3id.org/byoe#shared-wallet-collection` grant is the share flow: it asks not just to
  * fetch one of the wallet's own encrypted collections but to DECRYPT it. It
  * leaves the ordinary delegation loop entirely and routes to
  * `StorageManager.shareCollection`, which grants both axes -- the read-only
@@ -223,7 +223,7 @@ export function existingCollectionsFrom(
 
 /**
  * The target class and public flag for a target resolving onto a named
- * collection -- shared by the string-URL and `https://w3id.org/byoe#collection` forms so the
+ * collection -- shared by the string-URL and `https://w3id.org/byoe#private-collection` forms so the
  * ceiling parity holds whichever way the target arrives: protected wallet
  * collections first (their read-only ceiling is the strictest), then a
  * collection the Space already serves world-readable (the add-only
@@ -272,7 +272,7 @@ interface ResolvedTarget {
   // A `https://w3id.org/byoe#public-collection` grant: provisioned plaintext with a
   // collection-level PublicCanRead policy, so anyone on the web can read it.
   isPublic: boolean
-  // A `https://w3id.org/byoe#shared-collection` grant: the grantee joins the collection's
+  // A `https://w3id.org/byoe#shared-wallet-collection` grant: the grantee joins the collection's
   // key-epoch roster and can DECRYPT it, not merely fetch ciphertext. Always an
   // encrypted standard collection, always read-only.
   isShare: boolean
@@ -432,13 +432,13 @@ function parseSpaceUrl({
  *   origin, a path that escapes the Space, a target carrying a query or
  *   fragment, a first segment that is not a valid collection id --
  *   unsatisfiable;
- * - `{ type: 'https://w3id.org/byoe#collection', name }` -- `${spaceUrl}/${name}` after
+ * - `{ type: 'https://w3id.org/byoe#private-collection', name }` -- `${spaceUrl}/${name}` after
  *   validating `name`, flagged `needsProvisioning` unless it is a standard
  *   collection (and `encrypted` for the two EDV collections). Like the string
  *   form, classed public-collection when the collection already is -- with
  *   nothing to provision, exactly as if it had been asked for as a
  *   `https://w3id.org/byoe#public-collection` re-grant;
- * - `{ type: 'https://w3id.org/byoe#public-collection', name }` -- like `https://w3id.org/byoe#collection`
+ * - `{ type: 'https://w3id.org/byoe#public-collection', name }` -- like `https://w3id.org/byoe#private-collection`
  *   but flagged `isPublic`: provisioned plaintext with a world-readable
  *   (PublicCanRead) policy. Unsatisfiable on a protected wallet collection --
  *   an RP must never be able to flip the user's own collections public -- and
@@ -446,7 +446,7 @@ function parseSpaceUrl({
  *   public collection is only ever created public, never converted. The
  *   idempotent re-grant on an already-public collection stays satisfiable,
  *   with nothing to provision;
- * - `{ type: 'https://w3id.org/byoe#shared-collection', name }` -- like `https://w3id.org/byoe#collection`
+ * - `{ type: 'https://w3id.org/byoe#shared-wallet-collection', name }` -- like `https://w3id.org/byoe#private-collection`
  *   but flagged `isShare`: the grantee also joins the collection's key-epoch
  *   roster, so it can decrypt what it fetches. `name` must be one of the
  *   ENCRYPTED standard collections; anything else (a plaintext collection, an
@@ -494,7 +494,7 @@ export function resolveInvocationTarget({
     }
     // The collection id is the first path segment after the Space URL, so a
     // URL under a standard collection (or at a resource inside one) is capped
-    // exactly like its `https://w3id.org/byoe#collection` descriptor form.
+    // exactly like its `https://w3id.org/byoe#private-collection` descriptor form.
     return {
       ...SATISFIABLE_DEFAULTS,
       invocationTarget: url,
@@ -513,7 +513,7 @@ export function resolveInvocationTarget({
     }
   }
 
-  if (descriptor?.type === 'https://w3id.org/byoe#collection') {
+  if (descriptor?.type === 'https://w3id.org/byoe#private-collection') {
     const { name } = descriptor
     if (!isCollectionName(name)) {
       return UNSATISFIABLE
@@ -579,7 +579,7 @@ export function resolveInvocationTarget({
     }
   }
 
-  if (descriptor?.type === 'https://w3id.org/byoe#shared-collection') {
+  if (descriptor?.type === 'https://w3id.org/byoe#shared-wallet-collection') {
     const { name } = descriptor
     // Only the encrypted standard collections have a key-epoch roster to
     // escrow a reader into; everything else (a plaintext collection, an RP

@@ -70,7 +70,7 @@ export interface ControllerProfile {
   // This client's own (identity) X25519 key-agreement key -- the Montgomery
   // twin of the client's Ed25519 did:key pair, kept distinct from the
   // user-key-backed `keyAgreementKey` above. It is the client's entry in the user key
-  // wrap-set roster (`key-map/user-key.json`): rotation wraps the fresh user key to it,
+  // wrap-set roster (`key-map/user-key.jsonl`): rotation wraps the fresh user key to it,
   // and a roster read unwraps with it.
   clientKeyAgreementKey?: IKeyAgreementKey
   // WebKMS keystore agent, bound to the user's keystore on the configured
