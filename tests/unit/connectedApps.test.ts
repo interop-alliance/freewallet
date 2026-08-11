@@ -21,18 +21,21 @@ import {
 const APP_DID = 'did:key:zApp'
 
 /**
- * A self-issued app-key StoredCredential bound to an origin.
+ * A self-issued app-key StoredCredential bound to an origin, and (unless it is
+ * a legacy pre-`appUrl` key) to an `appUrl` within it.
  */
 function appKeyCredential({
   cid,
   did = APP_DID,
   origin,
+  appUrl,
   name = 'Example app key',
   issuanceDate = '2026-07-01T00:00:00Z'
 }: {
   cid: string
   did?: string
   origin: string
+  appUrl?: string
   name?: string
   issuanceDate?: string
 }): StoredCredential {
@@ -44,7 +47,12 @@ function appKeyCredential({
       name,
       issuer: did,
       issuanceDate,
-      credentialSubject: { id: did, origin, seed: 'c2VlZA' }
+      credentialSubject: {
+        id: did,
+        origin,
+        ...(appUrl !== undefined && { appUrl }),
+        seed: 'c2VlZA'
+      }
     } as unknown as StoredCredential['vc']
   }
 }
@@ -64,13 +72,19 @@ function ordinaryCredential(cid: string): StoredCredential {
   }
 }
 
+/**
+ * An App Connect Login activity row. Omitting `appUrl` produces a row in the
+ * shape written before activities recorded one.
+ */
 function loginActivity({
   origin,
+  appUrl,
   name,
   created,
   grants = []
 }: {
   origin: string
+  appUrl?: string
   name: string
   created: string
   grants?: Array<{
@@ -82,11 +96,19 @@ function loginActivity({
   }>
 }) {
   return {
-    id: `login-${created}`,
+    id: `login-${created}-${name}`,
     doc: {
       type: ['Login'],
       summary: `Connected ${name} (${origin}) to wallet.`,
-      object: { origin, zcaps: grants, appConnect: { name, firstRun: false } },
+      object: {
+        origin,
+        zcaps: grants,
+        appConnect: {
+          name,
+          firstRun: false,
+          ...(appUrl !== undefined && { appUrl })
+        }
+      },
       created
     }
   }
@@ -156,6 +178,140 @@ describe('listConnectedApps', () => {
     expect(app.connectedAt).toBe('2026-07-01T00:00:00Z')
     expect(app.grants).toHaveLength(1)
     expect(app.grants[0].allowedActions).toEqual(['GET', 'PUT'])
+  })
+
+  it('tells two apps sharing an origin apart by their appUrl', async () => {
+    const origin = 'https://app.example'
+    const editorUrl = 'https://app.example/editor'
+    const readerUrl = 'https://app.example/reader'
+    const storage = fakeStorage({
+      credentials: [
+        appKeyCredential({ cid: 'c-editor', origin, appUrl: editorUrl }),
+        appKeyCredential({
+          cid: 'c-reader',
+          did: 'did:key:zReader',
+          origin,
+          appUrl: readerUrl
+        })
+      ],
+      history: [
+        loginActivity({
+          origin,
+          appUrl: editorUrl,
+          name: 'Editor',
+          created: '2026-07-05T00:00:00Z',
+          grants: [
+            {
+              id: 'urn:zcap:editor',
+              target: 'https://was.example/space/x/editor-data',
+              allowedActions: ['GET'],
+              expires: '2027-08-01T00:00:00Z'
+            }
+          ]
+        }),
+        loginActivity({
+          origin,
+          appUrl: readerUrl,
+          name: 'Reader',
+          created: '2026-07-09T00:00:00Z',
+          grants: [
+            {
+              id: 'urn:zcap:reader',
+              target: 'https://was.example/space/x/reader-data',
+              allowedActions: ['GET'],
+              expires: '2027-08-01T00:00:00Z'
+            }
+          ]
+        })
+      ]
+    })
+
+    const apps = await listConnectedApps({ storage })
+
+    const editor = apps.find(app => app.cid === 'c-editor')
+    const reader = apps.find(app => app.cid === 'c-reader')
+    expect(editor).toMatchObject({
+      name: 'Editor',
+      appUrl: editorUrl,
+      lastConnectedAt: '2026-07-05T00:00:00Z'
+    })
+    expect(editor?.grants.map(grant => grant.id)).toEqual(['urn:zcap:editor'])
+    expect(reader).toMatchObject({
+      name: 'Reader',
+      appUrl: readerUrl,
+      lastConnectedAt: '2026-07-09T00:00:00Z'
+    })
+    expect(reader?.grants.map(grant => grant.id)).toEqual(['urn:zcap:reader'])
+  })
+
+  it('joins an appUrl-scoped key to an older row that recorded no appUrl', async () => {
+    const origin = 'https://app.example'
+    const storage = fakeStorage({
+      credentials: [
+        appKeyCredential({
+          cid: 'c-app',
+          origin,
+          appUrl: 'https://app.example/editor'
+        })
+      ],
+      history: [
+        loginActivity({
+          origin,
+          name: 'Example App',
+          created: '2026-07-05T00:00:00Z',
+          grants: [
+            {
+              id: 'urn:zcap:legacy',
+              target: 'https://was.example/space/x/private-credentials',
+              allowedActions: ['GET'],
+              expires: '2027-08-01T00:00:00Z'
+            }
+          ]
+        })
+      ]
+    })
+
+    const [app] = await listConnectedApps({ storage })
+
+    expect(app.name).toBe('Example App')
+    expect(app.lastConnectedAt).toBe('2026-07-05T00:00:00Z')
+    expect(app.grants.map(grant => grant.id)).toEqual(['urn:zcap:legacy'])
+  })
+
+  it("never lends another app's appUrl-scoped row to a sibling app", async () => {
+    const origin = 'https://app.example'
+    const storage = fakeStorage({
+      credentials: [
+        appKeyCredential({
+          cid: 'c-editor',
+          origin,
+          appUrl: 'https://app.example/editor',
+          name: 'Editor app key'
+        })
+      ],
+      history: [
+        loginActivity({
+          origin,
+          appUrl: 'https://app.example/reader',
+          name: 'Reader',
+          created: '2026-07-09T00:00:00Z',
+          grants: [
+            {
+              id: 'urn:zcap:reader',
+              target: 'https://was.example/space/x/reader-data',
+              allowedActions: ['GET'],
+              expires: '2027-08-01T00:00:00Z'
+            }
+          ]
+        })
+      ]
+    })
+
+    const [app] = await listConnectedApps({ storage })
+
+    expect(app.name).toBe('Editor')
+    expect(app.grants).toEqual([])
+    expect(app.lastConnectedAt).toBeUndefined()
   })
 
   it('falls back to the stripped credential name when no Login matches', async () => {

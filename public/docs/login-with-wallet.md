@@ -45,7 +45,7 @@ Send a `VerifiablePresentation` request whose `query` combines any of:
             "allowedAction": ["GET", "HEAD", "PUT", "POST", "DELETE"],
             "controller": "did:key:z6MkrRP...your RP DID...",
             "invocationTarget": {
-              "type": "https://w3id.org/byoe#collection",
+              "type": "https://w3id.org/byoe#private-collection",
               "name": "example-app-data"
             }
           }
@@ -64,7 +64,7 @@ The wallet does not expose which WAS server or Space the user uses; you
 describe the target abstractly and the wallet maps it onto its own Space
 (provisioning a named collection if it does not exist yet):
 
-- `{ "type": "https://w3id.org/byoe#collection", "name": "<collection-id>" }` -- a named
+- `{ "type": "https://w3id.org/byoe#private-collection", "name": "<collection-id>" }` -- a named
   collection. `name` must match `^[a-z0-9][a-z0-9-]{0,63}$`. A new collection
   is provisioned plaintext and non-public (reachable only through your grant).
 - `{ "type": "https://w3id.org/byoe#public-collection", "name": "<collection-id>" }` -- a
@@ -72,7 +72,7 @@ describe the target abstractly and the wallet maps it onto its own Space
   on the web can read it without a capability. Writes still require your grant.
   Refused on any of the wallet's own collections -- an RP can never make the
   user's existing data world-readable.
-- `{ "type": "https://w3id.org/byoe#shared-collection", "name": "<collection-id>" }` -- read
+- `{ "type": "https://w3id.org/byoe#shared-wallet-collection", "name": "<collection-id>" }` -- read
   **and decrypt** one of the wallet's own encrypted collections: your DID joins
   the collection's key-epoch roster, so you see plaintext rather than
   ciphertext. `name` must be one of the encrypted standard collections, your
@@ -97,7 +97,7 @@ descriptor refuses visibly rather than degrading into something weaker.
 the grant. Two of the wallet's standard collections (`private-credentials`,
 `wallet-activity`) are encrypted at rest; an ordinary grant on them exposes
 only ciphertext (the wallet's vault key never leaves the wallet) -- decryption
-is what `https://w3id.org/byoe#shared-collection` adds.
+is what `https://w3id.org/byoe#shared-wallet-collection` adds.
 
 ### `allowedAction` and the action ceilings
 
@@ -114,9 +114,9 @@ you asked for:
 | ------------------------------------------------------ | -------------------------------------- |
 | whole Space (`https://w3id.org/byoe#space`)                          | `GET`, `HEAD`                          |
 | a wallet collection (standard, `id`, `key-map`)        | `GET`, `HEAD`                          |
-| a share (`https://w3id.org/byoe#shared-collection`)                  | `GET`, `HEAD`                          |
+| a share (`https://w3id.org/byoe#shared-wallet-collection`)                  | `GET`, `HEAD`                          |
 | a public collection (`https://w3id.org/byoe#public-collection`)      | `GET`, `HEAD`, `POST`                  |
-| your own provisioned collection (`https://w3id.org/byoe#collection`) | `GET`, `HEAD`, `POST`, `PUT`, `DELETE` |
+| your own provisioned collection (`https://w3id.org/byoe#private-collection`) | `GET`, `HEAD`, `POST`, `PUT`, `DELETE` |
 
 A public collection is **add-only** on purpose: it is plaintext and
 world-readable, so a write there is publication under the user's identity and

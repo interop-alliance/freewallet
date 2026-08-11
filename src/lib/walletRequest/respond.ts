@@ -46,7 +46,9 @@ export class WalletResponseFailure extends Error {
  * connected an app, or authenticated the user's DID -- the capabilities
  * `processRequest` actually delegated (threaded out alongside the VP), rather
  * than read back off the composed VP's embedded `zcap` array; for App Connect,
- * also the app name and whether the app key was minted on this connect.
+ * also the app name, the app's `appUrl`, and whether the app key was minted on
+ * this connect. Recording the `appUrl` is what lets the Applications panel
+ * attribute a connect to one of several apps sharing an origin.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -102,7 +104,13 @@ async function recordLoginActivity({
       appConnectResult && profile.appConnect
         ? {
             name: profile.appConnect.app.name,
-            firstRun: appConnectResult.firstRun
+            firstRun: appConnectResult.firstRun,
+            // The classified request's `appUrl` is already the validated,
+            // parsed URL's serialization (`appConnectRequestOf` checked it is
+            // absolute, fragment-free, and same-origin with the attested
+            // requesting origin), so it joins byte-for-byte with the app-key
+            // credential's `credentialSubject.appUrl`.
+            appUrl: profile.appConnect.app.appUrl
           }
         : undefined
   })

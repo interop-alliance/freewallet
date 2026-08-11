@@ -1,5 +1,16 @@
 # History
 
+## 0.30.0 - TBD
+
+### Changed
+
+- App Connect Login activities record the connected app's `appUrl` alongside
+  the display name and first-run flag (`@interop/wallet-core` 0.26.0).
+- `listConnectedApps` joins app-key credentials to Login activities on
+  `appUrl` when both carry one, so several apps on one origin get their own
+  name, grants, and last-connected timestamp; activities written without an
+  `appUrl` still join by origin.
+
 ## 0.29.0 - TBD
 
 ### Changed

@@ -603,7 +603,7 @@ same per-collection ciphers the local store uses -- so the envelope, id, and
 key-epoch logic lives once. A write reproduces verbatim what background
 replication would have pushed (the raw EDV envelope under its content-derived
 envelope-hash id, created with `If-None-Match: *`, stamped with the same
-`WAS-Key-Epoch`), so the main app's replication pulls it cleanly. An
+`Key-Epoch`), so the main app's replication pulls it cleanly. An
 unknown-epoch read (a rekey by another client) drives the same one-time descriptor
 refresh the local backend uses, so a fresh-epoch credential is never dropped.
 Contacts are not reachable in a popup, so the remote-direct backend rejects
@@ -781,12 +781,12 @@ connected app rotates the epoch off the app's key for each such collection
 indivisibly), so a revoked app cannot decrypt future writes -- the honest
 ceiling being that ciphertext it already fetched stays readable to it.
 
-## Sharing a wallet collection (`https://w3id.org/byoe#shared-collection`)
+## Sharing a wallet collection (`https://w3id.org/byoe#shared-wallet-collection`)
 
 The collections above are ones an app created. **Sharing** is the other
 direction: letting a grantee read and _decrypt_ one of the wallet's own
 encrypted collections. It is asked for with a distinct invocation-target
-descriptor -- `{ type: 'https://w3id.org/byoe#shared-collection', name }` --
+descriptor -- `{ type: 'https://w3id.org/byoe#shared-wallet-collection', name }` --
 in either channel (a standalone `AuthorizationCapabilityQuery`, or an
 `AppConnectQuery.capabilityQuery`). A distinct descriptor type rather than a
 flag on the existing shape is load-bearing: an unknown `type` already resolves
@@ -829,7 +829,7 @@ axis while leaving the grantee in the key roster.
 
 **The grantee's half lives in `@interop/was-react`.** An app declares the
 wallet-owned collections it wants in `WasAppConfig.sharedCollections`, which
-adds the `https://w3id.org/byoe#shared-collection` descriptors to its App
+adds the `https://w3id.org/byoe#shared-wallet-collection` descriptors to its App
 Connect request; on approval a `SharedCollectionReader` fetches the Collection Description through
 the delegated read zcap, builds the epoch-aware cipher from the descriptor, and
 decrypts the raw envelopes locally. The key it decrypts with is the app's
@@ -863,7 +863,7 @@ Security notes:
   re-grant on an already-public collection delegates without re-provisioning
   -- and any target naming an already-public collection gets the add-only
   public ceiling and skips provisioning whether it arrives as a
-  `#public-collection` descriptor, a `#collection` descriptor, or a plain
+  `#public-collection` descriptor, a `#private-collection` descriptor, or a plain
   URL string.
 - **Challenge/domain**: unchanged DIDAuth verification app-side in
   was-react.
@@ -1017,7 +1017,7 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   per user, so it is not 1:1 with a replica.
 - **Share** — granting a third party read AND decrypt access to one of the
   wallet's own encrypted collections, asked for with a
-  `https://w3id.org/byoe#shared-collection` invocation-target descriptor. One
+  `https://w3id.org/byoe#shared-wallet-collection` invocation-target descriptor. One
   `shareCollection` call grants both axes: a read-only Collection zcap and an
   entry in the collection's key-epoch roster. Removed from Settings >
   Shared collections, never by expiry. See "Sharing a wallet collection".

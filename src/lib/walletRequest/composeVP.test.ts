@@ -6,12 +6,14 @@ import { composeVP } from './composeVP'
 
 /**
  * Signing-path tests for the App Connect response marker: the `appConnect`
- * member is a JSON literal term added to the VP `@context`, and the DIDAuth
- * proof must canonicalize (safe mode) and cover it rather than reject it.
+ * member is defined by the hosted App Connect context appended to the VP
+ * `@context`, and the DIDAuth proof must canonicalize (safe mode) and cover it
+ * rather than reject it.
  */
 
 const CHALLENGE = 'test-challenge-123'
 const DOMAIN = 'https://app.example'
+const APP_CONNECT_CONTEXT_URL = 'https://w3id.org/byoe/app-connect/v1'
 
 let session: Session
 
@@ -38,13 +40,7 @@ describe('composeVP with an appConnect marker', () => {
 
     expect(presentation.appConnect).toEqual({ firstRun: true })
     const contexts = presentation['@context'] as Array<string | object>
-    expect(
-      contexts.some(
-        entry =>
-          typeof entry === 'object' &&
-          'appConnect' in (entry as Record<string, unknown>)
-      )
-    ).toBe(true)
+    expect(contexts).toContain(APP_CONNECT_CONTEXT_URL)
     expect(presentation.proof).toBeDefined()
   })
 
@@ -77,12 +73,6 @@ describe('composeVP with an appConnect marker', () => {
 
     expect(presentation.appConnect).toBeUndefined()
     const contexts = presentation['@context'] as Array<string | object>
-    expect(
-      contexts.every(
-        entry =>
-          typeof entry !== 'object' ||
-          !('appConnect' in (entry as Record<string, unknown>))
-      )
-    ).toBe(true)
+    expect(contexts).not.toContain(APP_CONNECT_CONTEXT_URL)
   })
 })
