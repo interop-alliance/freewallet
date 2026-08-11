@@ -119,7 +119,7 @@ class FakeWasServer {
           throw new WasSyncConflictError()
         }
         // The port implements `WasSyncPort` directly, so the `epoch` param stands
-        // in for the `WAS-Key-Epoch` header the real server stamps (absent leaves
+        // in for the `Key-Epoch` header the real server stamps (absent leaves
         // no stamp).
         this.docs.set(id, {
           version: (existing?.version ?? 0) + 1,
@@ -269,7 +269,7 @@ describe('WAS replication (RxDB + fake server)', () => {
       data: { hello: 'world' }
     })
 
-    // Push carries the epoch to the server (its `WAS-Key-Epoch` stamp).
+    // Push carries the epoch to the server (its `Key-Epoch` stamp).
     await eventually(
       () => server.epochFor('cid-epoch') === 'epoch-1',
       () => replication.reSync()

@@ -47,7 +47,7 @@ export const RP_ZCAP_WRITE_TTL_MS =
   (Number(env.VITE_RP_ZCAP_WRITE_TTL_HOURS) || 168) * 60 * 60 * 1000
 
 // Lifetime of the read-only capability delegated by a *share* grant (a
-// `https://w3id.org/byoe#shared-collection` request, which also escrows the grantee into the
+// `https://w3id.org/byoe#shared-wallet-collection` request, which also escrows the grantee into the
 // collection's key-epoch roster). Default 365 days: deliberately long, because
 // expiry is the wrong removal mechanism here. The two axes of a share come
 // apart at expiry -- the pull zcap dies but the epoch escrow does not, leaving
@@ -136,8 +136,10 @@ export const SYNCED_COLLECTIONS: Array<{ key: string; id: string }> =
   WALLET_STANDARD_COLLECTIONS.map(({ key, id }) => ({ key, id }))
 // The system collections and resource names that carry the account's identity
 // and key material -- the world-readable `id` collection (`did.json`,
-// `did.jsonl`), the private `key-map` collection (`keys.json`, `user-key.json`),
-// and the unlock Space's `keyring` collection (`keyring.json`). They are
+// `did.jsonl`), the private `key-map` collection (`keys.json`, plus the
+// `user-key.jsonl` roster log addressed via `@interop/wallet-core/space`'s
+// `USER_KEY_ROSTER_LOG_RESOURCE` at its wallet-core call sites), and the
+// unlock Space's `keyring` collection (`keyring.json`). They are
 // shared wallet Space layout, declared once in `@interop/wallet-core/space`
 // and re-exported here so app-side call sites keep one config import.
 export {
@@ -147,8 +149,7 @@ export {
   ID_COLLECTION,
   KEY_MAP_COLLECTION,
   KEYRING_COLLECTION,
-  KEYRING_RESOURCE,
-  USER_KEY_ROSTER_RESOURCE
+  KEYRING_RESOURCE
 } from '@interop/wallet-core/space'
 
 // Whether to provision and publish the user's did:webvh DID log alongside the

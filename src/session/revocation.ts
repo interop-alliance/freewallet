@@ -20,8 +20,8 @@ import {
   type RevokedClientKeys
 } from '@interop/wallet-core/webvh'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
-import { userKeyRosterEpochsSigner } from '@interop/wallet-core/keys'
 import type { Session } from '@/types/auth'
+import { sessionRosterStore } from '@/session/rosterStore'
 import { savePinFromDescriptor, loadUserKeyEpochPin } from '@/lib/sessionKey'
 import { getUnlockMethods } from '@/session/unlockMethods'
 import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
@@ -141,8 +141,11 @@ export async function revokeEnrolledClient({
       entries.map(entry => deriveNextKeyHash(entry.updateKeyMultibase))
     ),
     ownSigningKeyMultibase: clientSigningKeyMultibase({ keyAgent }),
-    signEpochs: userKeyRosterEpochsSigner({ keyAgent }),
-    rosterStore: remoteStore.userKeyRosterStore(),
+    // The log-governed roster store resolves its controller view through the
+    // session's verified-log memo -- invalidated just above and again by the
+    // cascade's own document edit -- so the rotation's log append anchors at
+    // the post-edit head: the sealing append.
+    rosterStore: sessionRosterStore({ profile: session.profile, idb }),
     ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
     clientKeyAgreementKey,
     pinnedEpochId,

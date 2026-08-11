@@ -84,7 +84,6 @@ function sessionWith({ pointer = POINTER } = {}): Session {
     storage: {
       remoteStore: {
         clientLabelsStore: () => ({}),
-        userKeyRosterStore: () => ({}),
         webvhIdStore: () => ({})
       }
     },

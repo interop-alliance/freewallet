@@ -8,7 +8,7 @@ const DESCRIPTOR: ICapabilityQueryDetail = {
   referenceId: 'docs',
   allowedAction: ['GET'],
   invocationTarget: {
-    type: 'https://w3id.org/byoe#collection',
+    type: 'https://w3id.org/byoe#private-collection',
     name: 'docs'
   },
   controller: 'did:key:z6MkTest'

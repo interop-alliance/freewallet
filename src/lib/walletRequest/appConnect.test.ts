@@ -22,7 +22,7 @@ const CAPABILITY_QUERY = {
   referenceId: 'text-editor-document',
   allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
   invocationTarget: {
-    type: 'https://w3id.org/byoe#collection',
+    type: 'https://w3id.org/byoe#private-collection',
     name: 'text-editor-document'
   }
 }

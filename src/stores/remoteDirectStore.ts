@@ -22,7 +22,7 @@
  * envelope-hash id and the key-epoch stamp come from `cipher.encrypt`, so a
  * remote-direct write reproduces verbatim what background replication would have
  * pushed (the raw EDV envelope under its content-derived id, created with
- * `If-None-Match: *`, stamped with the same `WAS-Key-Epoch`) and the main app's
+ * `If-None-Match: *`, stamped with the same `Key-Epoch`) and the main app's
  * replication pulls popup writes cleanly.
  *
  * Contacts (and their revisions) are not reachable in a popup -- neither CHAPI

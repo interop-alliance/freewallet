@@ -49,6 +49,10 @@ vi.mock('@/lib/sessionKey', () => ({
   })
 }))
 
+vi.mock('@/session/rosterStore', () => ({
+  sessionRosterStore: vi.fn(() => ({ rosterStore: true }))
+}))
+
 vi.mock('@/session/unlockMethods', () => ({
   getUnlockMethods: vi.fn(async () => null),
   rewrapUnlockMethodsRecord: vi.fn(async () => {
@@ -177,7 +181,6 @@ function sessionWith(
     'remoteStore' in overrides
       ? overrides.remoteStore
       : {
-          userKeyRosterStore: vi.fn(() => ({ rosterStore: true })),
           webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true }))
         }
   return {

@@ -5,11 +5,11 @@
  * what ordinary login relies on -- the keyring cache (the offline / no-WAS
  * copy of the account-pointer record), this client's wrapped client-key
  * records, the account-pointer pins, the user key roster-epoch pins, the
- * unlock-methods registry cache, and the passkey-safety notices. None of it
- * is secret on its own: the keyring, client-key, and unlock-methods records
- * are ciphertext, inert without the passphrase-derived key; the pointer and
- * roster-epoch pins and the passkey-safety notice are local integrity/UI
- * state, not secrets.
+ * roster log's chain-head pins, the unlock-methods registry cache, and the
+ * passkey-safety notices. None of it is secret on its own: the keyring,
+ * client-key, and unlock-methods records are ciphertext, inert without the
+ * passphrase-derived key; the pointer, roster-epoch, and chain-head pins and
+ * the passkey-safety notice are local integrity/UI state, not secrets.
  *
  * Two kinds of entries live here and must not be conflated: the keyring and
  * unlock-methods entries are CACHES of remote records (refreshed on a hit,
@@ -17,6 +17,11 @@
  * copy of this client's key set, never reconstructible from a server or a
  * passphrase, deleted only by the explicit unlock-method lifecycle flows.
  */
+import type {
+  ResourceLogHeadPin,
+  ResourceLogPinStore
+} from '@interop/wallet-core/resourceLog'
+
 const SESSION_DB_NAME = 'freewallet-session'
 const SESSION_STORE = 'session'
 
@@ -370,7 +375,7 @@ export async function deleteAccountPointerPin({
 /**
  * The object-store key under which an account's user key roster-epoch pin
  * lives -- keyed by the data Space id, which identifies the roster resource
- * the pin guards (`key-map/user-key.json` in that Space).
+ * the pin guards (`key-map/user-key.jsonl` in that Space).
  *
  * @param spaceId {string}   the data Space id
  * @returns {string}
@@ -551,6 +556,94 @@ export async function deleteUserKeyEpochPin({
   await withSessionStore(
     'readwrite',
     store => store.delete(userKeyEpochPinKey(spaceId)),
+    idb
+  )
+}
+
+/**
+ * The object-store key under which an account's roster-log chain-head pin
+ * lives -- keyed by the data Space id, like the roster-epoch pin, since both
+ * guard the same `key-map/user-key.jsonl` resource in that Space.
+ *
+ * @param spaceId {string}   the data Space id
+ * @returns {string}
+ */
+function userKeyLogPinKey(spaceId: string): string {
+  return `user-key-log-pin/${spaceId}`
+}
+
+/**
+ * Builds the durable chain-head pin store for an account's user key roster
+ * log, backed by the session database. The pin records the log's verified
+ * identity (method, SCID) and latest verified head, and is what turns one-shot
+ * log verification into continuity: a served log that forks, rolls back, or
+ * switches identity against the pin is refused rather than adopted (see
+ * `@interop/wallet-core/resourceLog`). Plaintext local state, like the epoch
+ * pin beside it. The wallet-core verifier owns the write discipline (advance
+ * after full verification only), so this store is a plain read/write seam.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {ResourceLogPinStore}
+ */
+export function userKeyLogPinStore({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): ResourceLogPinStore {
+  const key = userKeyLogPinKey(spaceId)
+  return {
+    async read(): Promise<ResourceLogHeadPin | null> {
+      const stored = await withSessionStore(
+        'readonly',
+        store => store.get(key),
+        idb
+      )
+      if (stored === null || stored === undefined) {
+        return null
+      }
+      const { method, scid, head } = stored as Partial<ResourceLogHeadPin>
+      if (
+        typeof method !== 'string' ||
+        typeof scid !== 'string' ||
+        typeof head !== 'string'
+      ) {
+        return null
+      }
+      return { method, scid, head }
+    },
+    async write(pin: ResourceLogHeadPin): Promise<void> {
+      await withSessionStore(
+        'readwrite',
+        store => store.put({ ...pin, pinnedAt: Date.now() }, key),
+        idb
+      )
+    }
+  }
+}
+
+/**
+ * Deletes the roster-log chain-head pin for an account -- account deletion and
+ * Space wipes, beside `deleteUserKeyEpochPin`.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deleteUserKeyLogPin({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.delete(userKeyLogPinKey(spaceId)),
     idb
   )
 }

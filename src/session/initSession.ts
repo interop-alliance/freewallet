@@ -22,16 +22,16 @@ import {
   isWebvhDid,
   webvhCapabilityAgent,
   webvhZcapClient,
-  type ClientWebvhUpdateKeys
+  type ClientWebvhUpdateKeys,
+  type ICapabilityAgent
 } from '@interop/wallet-core/webvh'
 import {
   mintUserKey,
-  userKeyRosterDescriptorStore,
-  userKeyRosterEpochsSigner,
   userKeyVaultKeys,
   type UserKey,
   type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
+import { accountRosterStore, sessionRosterStore } from '@/session/rosterStore'
 import {
   checkUserKeyRosterAtLogin as sharedCheckUserKeyRosterAtLogin,
   convergeUserKeyRosterToAccount
@@ -200,18 +200,29 @@ export async function initSessionFromSeed({
         })
       : Promise.resolve(undefined)
 
-  // The direct user key roster read (`key-map/user-key.json`): confirms the cached user key
+  // The direct user key roster read (the `key-map/user-key.jsonl` log's
+  // verified head): confirms the cached user key
   // current, or -- on an epoch mismatch (a rotation by another client) --
   // delivers the fresh user key, which the session adopts and `persistClientKeys`
   // writes into this client's client-key record. Runs before the storage clients are built, since the vault
   // keys below must be the CURRENT user key's. The read result is retained: its
   // descriptor feeds the cascade-completion sweep fired further down.
+  // Gated on a promoted pointer: the log-governed roster anchors its entry
+  // proofs in the did:webvh document, so an unpromoted account has no roster
+  // to read.
   let activeUserKey = userKey
   let rosterRead: UserKeyRosterReadResult | null = null
   const spaceId = accountPointer?.spaceId ?? deriveSpaceId(keyAgent.id)
-  if (userKey && !isGuest && WAS_SERVER_URL && accountPointer?.did) {
+  if (
+    userKey &&
+    !isGuest &&
+    WAS_SERVER_URL &&
+    accountPointer &&
+    isWebvhDid(accountPointer.did)
+  ) {
     rosterRead = await checkUserKeyRosterAtLogin({
       zcapClient: sessionZcapClient,
+      keyAgent,
       pointer: { ...accountPointer, did: accountPointer.did },
       spaceId,
       userKey,
@@ -313,7 +324,6 @@ export async function initSessionFromSeed({
             await convergeRosterToDocument({
               session,
               pointer: accountPointer,
-              zcapClient: sessionZcapClient,
               spaceId,
               userKey: loginUserKey,
               descriptor: loginDescriptor,
@@ -371,7 +381,6 @@ export async function initSessionFromSeed({
  * @param options.session {Session}   the live session, whose vault keys and
  *   ciphers adopt a rotation
  * @param [options.pointer] {AccountPointer}
- * @param options.zcapClient {ZcapClient}   the session's signing client
  * @param options.spaceId {string}   the data Space id
  * @param options.userKey {UserKey}   the login's current per-user key
  * @param options.descriptor {CollectionEncryption}   the login's roster read
@@ -386,7 +395,6 @@ export async function initSessionFromSeed({
 async function convergeRosterToDocument({
   session,
   pointer,
-  zcapClient,
   spaceId,
   userKey,
   descriptor,
@@ -396,7 +404,6 @@ async function convergeRosterToDocument({
 }: {
   session: Session
   pointer?: AccountPointer
-  zcapClient: ZcapClient
   spaceId: string
   userKey: UserKey
   descriptor: CollectionEncryption
@@ -415,15 +422,10 @@ async function convergeRosterToDocument({
         spaceId: pointer.spaceId,
         host: pointer.host
       },
-      store: userKeyRosterDescriptorStore({
-        storageServerUrl: WAS_SERVER_URL,
-        zcapClient,
-        spaceId
-      }),
+      store: sessionRosterStore({ profile: session.profile, idb }),
       userKey,
       descriptor,
       clientKeyAgreementKey,
-      signEpochs: userKeyRosterEpochsSigner({ keyAgent }),
       pinnedEpochId: await loadUserKeyEpochPin({ spaceId, idb }),
       // Adoption is app-side: persisted for the next login, pinned, and
       // swapped into the live session -- all before the collection fan-out
@@ -447,18 +449,21 @@ async function convergeRosterToDocument({
 }
 
 /**
- * The login-time user key roster check: one direct compare-and-swap-style read of
- * `key-map/user-key.json` with the session's root signing key, before any storage
- * client exists. Returns the full roster read -- `rotated` marks whether the
+ * The login-time user key roster check: one direct read of the
+ * `key-map/user-key.jsonl` roster log's verified head with the session's root
+ * signing key, before any storage client exists. Returns the full roster read
+ * -- `rotated` marks whether the
  * roster's current epoch differs from the cached user key (a rotation by another
  * client), and the descriptor feeds the cascade-completion sweep -- or
  * `null` when no roster exists yet (an account whose provisioning has not
- * created it -- the idempotent ensure will). Either way the served roster is
- * authenticated (`epochsMac`) and checked against the locally pinned
- * latest-seen epoch, and the pin advances to the epoch just seen.
+ * created it -- the idempotent ensure will). Either way the served roster
+ * resolves only from a verified log head (entry proofs anchored in the
+ * account's did:webvh document, the chain-head pin enforced) and is checked
+ * against the locally pinned latest-seen epoch, and both pins advance to what
+ * was just verified.
  *
- * Failure semantics: the three roster refusals -- a rolled-back/replayed
- * roster, a configuration that fails authentication, and a current epoch
+ * Failure semantics: the roster refusals -- a fabricated or discontinuous
+ * roster log, a rolled-back/replayed roster, and a current epoch
  * this client cannot unwrap -- rethrow and refuse the login (the same
  * continuity class as a substituted account pointer). Anything else (an
  * unreachable server, offline) warns and returns `null`, so offline logins
@@ -466,6 +471,8 @@ async function convergeRosterToDocument({
  *
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the session's root signing client
+ * @param options.keyAgent {ICapabilityAgent}   this client's signing key
+ *   agent, for the store's log appends and pin custody
  * @param options.spaceId {string}   the data Space id
  * @param options.userKey {UserKey}   the cached per-user key
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
@@ -475,6 +482,7 @@ async function convergeRosterToDocument({
  */
 async function checkUserKeyRosterAtLogin({
   zcapClient,
+  keyAgent,
   pointer,
   spaceId,
   userKey,
@@ -482,6 +490,7 @@ async function checkUserKeyRosterAtLogin({
   idb
 }: {
   zcapClient: ZcapClient
+  keyAgent: ICapabilityAgent
   pointer: AccountPointer & { did: string }
   spaceId: string
   userKey: UserKey
@@ -489,16 +498,16 @@ async function checkUserKeyRosterAtLogin({
   idb?: IDBFactory
 }): Promise<UserKeyRosterReadResult | null> {
   return await sharedCheckUserKeyRosterAtLogin({
-    store: userKeyRosterDescriptorStore({
-      storageServerUrl: WAS_SERVER_URL,
+    store: accountRosterStore({
       zcapClient,
-      spaceId
+      keyAgent,
+      pointer: {
+        did: pointer.did,
+        spaceId: pointer.spaceId,
+        host: pointer.host
+      },
+      idb
     }),
-    pointer: {
-      did: pointer.did,
-      spaceId: pointer.spaceId,
-      host: pointer.host
-    },
     userKey,
     clientKeyAgreementKey,
     pinnedEpochId: await loadUserKeyEpochPin({ spaceId, idb }),

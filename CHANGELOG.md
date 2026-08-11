@@ -4,6 +4,39 @@
 
 ### Changed
 
+- **BREAKING**: The user key wrap-set roster is now log-governed
+  (`@interop/wallet-core` 0.24.0, `@interop/was-client` 0.32.1): the roster
+  lives as the `key-map/user-key.jsonl` resource log, reads resolve only to
+  the log's verified head (entry proofs checked against the locally verified
+  did:webvh document, a durable chain-head pin -- new `userKeyLogPinStore` in
+  the session database -- refusing rollbacks and forks), and writes are
+  signed log appends. The new `src/session/rosterStore.ts` builders
+  (`sessionRosterStore` / `accountRosterStore`) replace
+  `WASRemoteStore.userKeyRosterStore()` and the retired point-state
+  `key-map/user-key.json` resource; the retired detached epoch-configuration
+  signature (`signEpochs` / `userKeyRosterEpochsSigner`) and the `epochsMac`
+  MAC are gone with them (their tamper checks are subsumed by log
+  verification). Roster provisioning now runs after did:webvh provisioning,
+  since the log genesis anchors in the published account document, and the
+  login-time roster read is gated on a promoted (did:webvh) account pointer.
+- Renamed the two App Connect collection-descriptor type IRIs, following the
+  spec: `https://w3id.org/byoe#collection` is now
+  `https://w3id.org/byoe#private-collection`, and
+  `https://w3id.org/byoe#shared-collection` is now
+  `https://w3id.org/byoe#shared-wallet-collection` (the request-processing
+  branches in `walletRequest/processZcaps.ts`, the consent panels, and the
+  tests). No dual-read: old-IRI requests are no longer recognized.
+- Renamed the key-epoch write header to `Key-Epoch`
+  (`@interop/was-client` 0.32.0's `KEY_EPOCH_HEADER`); requires a WAS server
+  release that reads the new spelling.
+
+- The wallet now builds its own JSON-LD document loader (in
+  `walletRequest/composeVP.ts`) and registers the BYOE App Connect context
+  (`byoe-context@^0.3.0`, adds the `appUrl` term) on it directly, passing the
+  loader into the shared VP compose path; update to
+  `@interop/security-document-loader@10` (which no longer bundles that
+  context).
+
 - Wallet Space provisioning now runs through the shared one-shot
   `provisionWalletSpace` from `@interop/wallet-core/space`, and
   `WALLET_STANDARD_COLLECTIONS` is derived from the shared
