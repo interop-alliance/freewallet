@@ -364,6 +364,8 @@
     "title": "Freewallet Dashboard",
     "addCredential": "Add Credential",
     "credentialsHeading": "Credentials",
+    "searchPlaceholder": "Search credentials...",
+    "noResults": "No credentials match your search.",
     "loadError": "Could not load your credentials. Please try again.",
     "undecryptable_one": "{{count}} credential could not be decrypted. It may be corrupted or saved under a different passphrase.",
     "undecryptable_other": "{{count}} credentials could not be decrypted. They may be corrupted or saved under a different passphrase.",
@@ -387,7 +389,9 @@
   "contacts": {
     "title": "Contacts",
     "addContacts": "Add Contacts",
-    "empty": "No contacts yet."
+    "empty": "No contacts yet.",
+    "searchPlaceholder": "Search contacts...",
+    "noResults": "No contacts match your search."
   },
   "contactDetail": {
     "title": "Contact details"

@@ -364,6 +364,8 @@
     "title": "Panel de Freewallet",
     "addCredential": "Añadir credencial",
     "credentialsHeading": "Credenciales",
+    "searchPlaceholder": "Buscar credenciales...",
+    "noResults": "Ninguna credencial coincide con su búsqueda.",
     "loadError": "No se pudieron cargar sus credenciales. Inténtelo de nuevo.",
     "undecryptable_one": "No se pudo descifrar {{count}} credencial. Puede estar dañada o guardada con otra frase de contraseña.",
     "undecryptable_other": "No se pudieron descifrar {{count}} credenciales. Pueden estar dañadas o guardadas con otra frase de contraseña.",
@@ -387,7 +389,9 @@
   "contacts": {
     "title": "Contactos",
     "addContacts": "Añadir contactos",
-    "empty": "Todavía no hay contactos."
+    "empty": "Todavía no hay contactos.",
+    "searchPlaceholder": "Buscar contactos...",
+    "noResults": "Ningún contacto coincide con su búsqueda."
   },
   "contactDetail": {
     "title": "Detalle del contacto"
