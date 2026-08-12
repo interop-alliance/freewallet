@@ -1765,15 +1765,14 @@ export class StorageManager {
 
   /**
    * Records (in the `wallet-activity` collection) a credential activity,
-   * stamping the shared-package summary/object with the credential's
-   * display title so the History page can render a title link without
-   * re-deriving it from the (possibly already-deleted) credential.
+   * carrying the credential's display title into the shared builder so the
+   * History page can render a title link without re-deriving it from the
+   * (possibly already-deleted) credential.
    *
    * @param options {object}
    * @param options.cid {string} - CID of the credential (used as history object id).
    * @param options.title {string} - Display title of the credential at the time of the event.
    * @param options.user {User} - Session user object (used to record history object actor).
-   * @param options.verb {string} - Past-tense verb for the summary line (e.g. "created").
    * @param options.buildActivity {function} - The `@interop/wallet-core` builder for this event.
    * @returns {Promise<void>}
    */
@@ -1781,25 +1780,19 @@ export class StorageManager {
     cid,
     title,
     user,
-    verb,
     buildActivity
   }: {
     cid: string
     title: string
     user: User
-    verb: string
     buildActivity: (options: {
       cid: string
+      title: string
       user: User
       id: string
     }) => WalletActivity
   }) {
-    await this.#recordActivity(id => {
-      const activity = buildActivity({ cid, user, id })
-      activity.summary = `Credential ${verb}: ${title}`
-      activity.object = { cid, title }
-      return activity
-    })
+    await this.#recordActivity(id => buildActivity({ cid, title, user, id }))
   }
 
   /**
@@ -1824,7 +1817,6 @@ export class StorageManager {
       cid,
       title,
       user,
-      verb: 'created',
       buildActivity: buildHistoryCredentialCreated
     })
   }
@@ -1851,7 +1843,6 @@ export class StorageManager {
       cid,
       title,
       user,
-      verb: 'deleted',
       buildActivity: buildHistoryCredentialDeleted
     })
   }
@@ -1877,7 +1868,6 @@ export class StorageManager {
       cid,
       title,
       user,
-      verb: 'shared',
       buildActivity: buildHistoryCredentialShared
     })
   }
@@ -1903,7 +1893,6 @@ export class StorageManager {
       cid,
       title,
       user,
-      verb: 'unshared',
       buildActivity: buildHistoryCredentialUnshared
     })
   }

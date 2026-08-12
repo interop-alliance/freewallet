@@ -3,14 +3,12 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
-import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import Button from '@mui/material/Button'
 import {
   MdAddCircleOutline,
   MdClose,
   MdQrCodeScanner,
-  MdSearch,
   MdSync
 } from 'react-icons/md'
 import { Link as RouterLink, useNavigate } from 'react-router'
@@ -23,10 +21,11 @@ import { loadPasskeySafetyNotice } from '@/lib/sessionKey'
 import { syncController } from '@/stores/syncController'
 import { flattenSearchValues } from '@/lib/searchValues'
 import { useSearch } from '@/hooks/useSearch'
-import { dashboardStyles, historyStyles } from '@/styles/appStyles'
+import { dashboardStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialCard } from '@/components/CredentialCard'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { SearchField } from '@/components/SearchField'
 import { ScanCredentialQrDialog } from '@/components/ScanCredentialQrDialog'
 import type { StoredCredential } from '@/types/credential'
 
@@ -294,24 +293,11 @@ export function DashboardPage() {
           </Button>
         </Stack>
         {!loading && credentials.length > 0 && (
-          <TextField
-            size="small"
+          <SearchField
             value={query}
-            onChange={event => setQuery(event.target.value)}
+            onChange={setQuery}
             placeholder={t('dashboard.searchPlaceholder')}
-            sx={{ ...historyStyles.searchField, mt: 2 }}
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <Box
-                    component="span"
-                    sx={{ display: 'flex', color: 'text.secondary', mr: 1 }}
-                  >
-                    <MdSearch />
-                  </Box>
-                )
-              }
-            }}
+            sx={{ mt: 2 }}
           />
         )}
         {loading ? (

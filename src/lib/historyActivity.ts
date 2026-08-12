@@ -40,8 +40,8 @@ export interface CredentialActivityInfo {
 export function credentialActivityInfo(
   doc: WalletActivity
 ): CredentialActivityInfo | null {
-  const verbType = (doc.type ?? []).find(
-    type => type in CREDENTIAL_ACTIVITY_VERBS
+  const verbType = (doc.type ?? []).find(type =>
+    Object.hasOwn(CREDENTIAL_ACTIVITY_VERBS, type)
   )
   if (!verbType || !doc.summary?.startsWith('Credential ')) {
     return null

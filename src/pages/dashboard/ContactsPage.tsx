@@ -7,32 +7,45 @@ import Card from '@mui/material/Card'
 import CardActionArea from '@mui/material/CardActionArea'
 import CardContent from '@mui/material/CardContent'
 import Stack from '@mui/material/Stack'
-import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { FuseOptionKey } from 'fuse.js'
 import {
   compareContactsByName,
+  getDids,
   initialsFor,
   secondaryLineFor
 } from '@interop/social-core'
-import { MdSearch } from 'react-icons/md'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { SearchField } from '@/components/SearchField'
 import { useAuthStore } from '@/stores/authStore'
 import { useSearch } from '@/hooks/useSearch'
 import { flattenSearchValues } from '@/lib/searchValues'
-import { historyStyles } from '@/styles/appStyles'
 import type { StoredContact } from '@/types/contact'
+
+// Plumbing fields a person would never search for -- record identifiers, the
+// starred flag (which would otherwise be indexed as the words 'true'/'false'),
+// and the per-entry label strings ('home', 'work', ...) -- are excluded, so
+// they cannot fuzzy-match a real query.
+const CONTACT_NON_SEARCHABLE_FIELDS = ['id', 'nativeId', 'isStarred', 'label']
 
 // Declared outside the component so this array is the same object on every
 // render; useSearch's index is memoized on it, so a fresh array each render
 // would rebuild the index on every keystroke. The one `getFn` key pulls out
 // every value in the contact instead of naming fields one by one, so search
-// covers the whole contact, not just a few chosen fields.
+// covers the whole contact, not just a few chosen fields; `getDids` adds the
+// contact's DIDs in their unmangled form, since a DID is stored as an
+// `http(s)://did:` url entry that a pasted `did:key:...` would not match.
 const CONTACT_SEARCH_KEYS: FuseOptionKey<StoredContact>[] = [
-  { name: 'contactFields', getFn: item => flattenSearchValues(item.contact) }
+  {
+    name: 'contactFields',
+    getFn: item => [
+      ...flattenSearchValues(item.contact, CONTACT_NON_SEARCHABLE_FIELDS),
+      ...getDids(item.contact)
+    ]
+  }
 ]
 
 export function ContactsPage() {
@@ -164,24 +177,10 @@ export function ContactsPage() {
         </Button>
 
         {!loading && contacts.length > 0 && (
-          <TextField
-            size="small"
+          <SearchField
             value={query}
-            onChange={event => setQuery(event.target.value)}
+            onChange={setQuery}
             placeholder={t('contacts.searchPlaceholder')}
-            sx={historyStyles.searchField}
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <Box
-                    component="span"
-                    sx={{ display: 'flex', color: 'text.secondary', mr: 1 }}
-                  >
-                    <MdSearch />
-                  </Box>
-                )
-              }
-            }}
           />
         )}
       </Stack>

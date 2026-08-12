@@ -27,7 +27,11 @@ export function flattenSearchValues(
     } else if (typeof node === 'number' || typeof node === 'boolean') {
       values.push(String(node))
     } else if (Array.isArray(node)) {
-      stack.push(...node)
+      // Pushed one at a time rather than spread as call arguments, which
+      // throws a RangeError once the array is large enough.
+      for (const value of node) {
+        stack.push(value)
+      }
     } else if (typeof node === 'object') {
       for (const [key, value] of Object.entries(node)) {
         if (!excludeKeys.includes(key)) {
