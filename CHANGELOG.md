@@ -2,6 +2,15 @@
 
 ## 0.34.0 - TBD
 
+### Changed
+
+- Lift the `#public-collection` grant action ceiling from add-only
+  (`GET`/`HEAD`/`POST`) to the full WAS action vocabulary, matching the App
+  Connect spec: published content is still the app's own data, and
+  un-publishing or revising it is data management like any other write. The
+  create-only rule (a public grant never converts an existing non-public
+  collection) is unchanged.
+
 ### Fixed
 
 - Match wallet-core's security refusals (`ResourceLogContinuityError`,

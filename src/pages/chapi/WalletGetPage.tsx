@@ -379,7 +379,8 @@ export function WalletGetPage() {
       // The existing collections' public state, consulted by grant
       // resolution: a public grant that would convert an existing collection
       // resolves unsatisfiable, and a target naming an already-public
-      // collection is capped add-only. Fetched once for the preview; the
+      // collection is classed public-collection. Fetched once for the
+      // preview; the
       // approve-time delegation re-fetches its own authoritative snapshot.
       const existingCollections = wantsGrants
         ? existingCollectionsFrom(

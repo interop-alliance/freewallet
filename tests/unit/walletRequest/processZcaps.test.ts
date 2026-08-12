@@ -793,7 +793,7 @@ describe('existing-collection state (create-only public collections)', () => {
     })
   })
 
-  it('caps a string target naming a public collection add-only', () => {
+  it('classes a string target naming a public collection public-collection', () => {
     for (const invocationTarget of [
       `${SPACE_URL}/example-app-public`,
       `${SPACE_URL}/example-app-public/some-resource`
@@ -809,13 +809,19 @@ describe('existing-collection state (create-only public collections)', () => {
       })
       expect(grant.target.targetClass).toBe('public-collection')
       expect(grant.target.isPublic).toBe(true)
-      expect(grant.allowedActions).toEqual(['GET', 'HEAD', 'POST'])
+      expect(grant.allowedActions).toEqual([
+        'GET',
+        'HEAD',
+        'POST',
+        'PUT',
+        'DELETE'
+      ])
     }
   })
 
-  it('caps a plain collection descriptor naming a public collection too', () => {
-    // Ceiling parity holds for every spelling of the target, so asking via
-    // `#collection` cannot recover the full RP-collection vocabulary either.
+  it('classes a plain collection descriptor naming a public collection too', () => {
+    // Class parity holds for every spelling of the target, so asking via
+    // `#collection` cannot dodge the isPublic flag or the provisioning skip.
     const grant = resolveGrant({
       descriptor: {
         controller: RP_DID,
@@ -835,7 +841,13 @@ describe('existing-collection state (create-only public collections)', () => {
     // policy is never re-applied and no recipient roster is ever set up on a
     // world-readable collection.
     expect(grant.target.needsProvisioning).toBe(false)
-    expect(grant.allowedActions).toEqual(['GET', 'HEAD', 'POST'])
+    expect(grant.allowedActions).toEqual([
+      'GET',
+      'HEAD',
+      'POST',
+      'PUT',
+      'DELETE'
+    ])
   })
 
   it('keeps the full ceiling on an existing private RP collection', () => {
@@ -1008,24 +1020,30 @@ describe('resolveGrant action handling', () => {
     expect(grant.write).toBe(false)
   })
 
-  it('caps a public RP collection to add-only', () => {
-    // A write to a plaintext world-readable target is not data management but
-    // publication under the user's identity, and irreversible in practice: an
-    // RP may add to what it published, never rewrite or retract it.
+  it('grants a public RP collection the full vocabulary', () => {
+    // Published content is still the RP's own data, and un-publishing is as
+    // much data management as publishing: PUT and DELETE survive, the same as
+    // on a private RP collection (the App Connect registry ceiling).
     const grant = resolveGrant({
       descriptor: publicCollectionDetail,
       spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grant.target.isPublic).toBe(true)
-    expect(grant.allowedActions).toEqual(['GET', 'HEAD', 'POST'])
+    expect(grant.allowedActions).toEqual([
+      'GET',
+      'HEAD',
+      'POST',
+      'PUT',
+      'DELETE'
+    ])
     expect(grant.write).toBe(true)
   })
 })
 
 describe('resolveGrant action vocabulary', () => {
   /**
-   * A capability query on an RP collection (the only class whose ceiling is the
+   * A capability query on an RP collection (a class whose ceiling is the
    * full vocabulary, so normalization is what the assertion is measuring).
    *
    * @param allowedAction {ICapabilityQueryDetail['allowedAction']}
@@ -1286,7 +1304,7 @@ describe('processZcaps', () => {
     expect(writeExpires).toBeLessThan(readExpires)
   })
 
-  it('provisions a public collection as public and delegates an add-only zcap', async () => {
+  it('provisions a public collection as public and delegates the full vocabulary', async () => {
     delegated.length = 0
     ensureCalls.length = 0
     const before = Date.now()
@@ -1306,10 +1324,9 @@ describe('processZcaps', () => {
     }
     expect(zcap.invocationTarget).toBe(`${SPACE_URL}/example-app-public`)
     // Public covers only unauthenticated reads; writes stay capability-only,
-    // and are capped to add-only, with the ordinary write TTL. A write to a
-    // plaintext world-readable target is publication under the user's identity
-    // and irreversible in practice, so PUT and DELETE are dropped.
-    expect(zcap.allowedAction).toEqual(['GET', 'HEAD', 'POST'])
+    // with the ordinary write TTL and the full vocabulary (in ceiling order):
+    // published content is still the RP's own data, so PUT and DELETE survive.
+    expect(zcap.allowedAction).toEqual(['GET', 'HEAD', 'POST', 'PUT', 'DELETE'])
     const expiresMs = new Date(zcap.expires).getTime()
     expect(Math.abs(expiresMs - (before + WRITE_TTL_MS))).toBeLessThan(
       60 * 1000
@@ -1379,10 +1396,10 @@ describe('processZcaps', () => {
     expect(ensureCalls).toEqual([])
     expect(
       (zcaps[0] as unknown as { allowedAction: string[] }).allowedAction
-    ).toEqual(['GET', 'HEAD', 'POST'])
+    ).toEqual(['GET', 'HEAD', 'POST', 'PUT', 'DELETE'])
   })
 
-  it('caps a string-target grant on an existing public collection add-only', async () => {
+  it('grants a string target on an existing public collection the full vocabulary', async () => {
     collectionListing = [{ id: 'example-app-public', isPublic: true }]
     delegated.length = 0
     ensureCalls.length = 0
@@ -1400,7 +1417,7 @@ describe('processZcaps', () => {
     expect(zcaps).toHaveLength(1)
     expect(
       (zcaps[0] as unknown as { allowedAction: string[] }).allowedAction
-    ).toEqual(['GET', 'HEAD', 'POST'])
+    ).toEqual(['GET', 'HEAD', 'POST', 'PUT', 'DELETE'])
   })
 
   it('never re-provisions a #collection grant naming an existing public collection', async () => {
@@ -1424,7 +1441,7 @@ describe('processZcaps', () => {
       appProvisioning: true
     })
     // The `#collection` spelling of an existing public collection is the
-    // idempotent public re-grant: add-only, nothing provisioned -- so the
+    // idempotent public re-grant: nothing provisioned -- so the
     // public policy is not re-applied, and on App Connect no recipient
     // roster is set up on a world-readable plaintext collection.
     expect(zcaps).toHaveLength(1)
@@ -1432,7 +1449,7 @@ describe('processZcaps', () => {
     expect(provisionCalls).toEqual([])
     expect(
       (zcaps[0] as unknown as { allowedAction: string[] }).allowedAction
-    ).toEqual(['GET', 'HEAD', 'POST'])
+    ).toEqual(['GET', 'HEAD', 'POST', 'PUT', 'DELETE'])
   })
 
   it('refuses a same-request public grant on a just-provisioned private collection', async () => {
@@ -1468,11 +1485,11 @@ describe('processZcaps', () => {
     expect(ensureCalls).toEqual([])
   })
 
-  it('caps a same-request string target on a just-provisioned public collection', async () => {
+  it('classes a same-request string target on a just-provisioned public collection', async () => {
     // The mirror order: the first descriptor provisions a public collection,
     // the second reaches the same collection as a plain URL asking for the
-    // full vocabulary. The live snapshot classes it public-collection, so
-    // PUT/DELETE are dropped rather than granted on a world-readable target.
+    // full vocabulary. The live snapshot classes it public-collection, so the
+    // grant lands without re-provisioning the world-readable target.
     delegated.length = 0
     ensureCalls.length = 0
     const zcaps = await processZcaps({
@@ -1491,7 +1508,7 @@ describe('processZcaps', () => {
     expect(ensureCalls).toEqual([{ id: 'example-app-public', isPublic: true }])
     expect(
       (zcaps[1] as unknown as { allowedAction: string[] }).allowedAction
-    ).toEqual(['GET', 'HEAD', 'POST'])
+    ).toEqual(['GET', 'HEAD', 'POST', 'PUT', 'DELETE'])
   })
 
   it('routes a share grant to shareCollection, not the delegation loop', async () => {

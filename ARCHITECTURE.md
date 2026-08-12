@@ -947,8 +947,8 @@ Security notes:
 - **Grant scope**: unchanged from the generic capability-query model; the
   requested actions are normalized against the closed WAS action vocabulary
   and intersected with the ceiling for the target's class (whole Space,
-  protected collection, and share read-only; public collection add-only; an
-  app-provisioned private collection the full vocabulary), and the consent
+  protected collection, and share read-only; public collections and
+  app-provisioned private collections the full vocabulary), and the consent
   screen shows exactly what `resolveGrants` resolved. A grant left with no
   permitted action is unsatisfiable, never delegated empty. Resolution also
   consults the existing collections' state (a snapshot fetched from the
@@ -959,8 +959,8 @@ Security notes:
   `#public-collection` grant naming an existing non-public collection
   (another app's, possibly encrypted) is unsatisfiable, and the idempotent
   re-grant on an already-public collection delegates without re-provisioning
-  -- and any target naming an already-public collection gets the add-only
-  public ceiling and skips provisioning whether it arrives as a
+  -- and any target naming an already-public collection is classed
+  public-collection and skips provisioning whether it arrives as a
   `#public-collection` descriptor, a `#private-collection` descriptor, or a plain
   URL string.
 - **Challenge/domain**: unchanged DIDAuth verification app-side in

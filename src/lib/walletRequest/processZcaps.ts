@@ -22,11 +22,12 @@
  *   the user's own credentials, published identity, key material, or
  *   unlock-method registry;
  * - a share -- read-only (see below);
- * - a public collection -- add-only: reads plus `POST`, never `PUT` or
- *   `DELETE`. A write to a plaintext world-readable target is not data
- *   management but publication under the user's identity, and irreversible in
- *   practice, so an RP may add to what it published but never rewrite or
- *   retract it;
+ * - a public collection -- the full vocabulary, the same as a private RP
+ *   collection: published content is still the RP's own data, and
+ *   un-publishing (`DELETE`) or revising (`PUT`) it is as much data management
+ *   as publishing it. Retraction removes the stored copy, not copies already
+ *   fetched -- the nature of publication, not a reason to forbid it. The
+ *   consent warning and the shorter write TTL are what bound it;
  * - an RP-provisioned private collection -- the full vocabulary, subject to the
  *   consent screen and the shorter write TTL.
  *
@@ -36,8 +37,9 @@
  * Space URL either way) -- a string target cannot bypass it. Resolution also
  * consults the existing collections' state (`collections`, a snapshot the
  * caller fetches from the user's Space), so a target naming a collection that
- * is ALREADY world-readable gets the public-collection ceiling whichever form
- * it arrives in. A request whose
+ * is ALREADY world-readable is classed public-collection whichever form it
+ * arrives in (flagged for the consent warning, never re-provisioned). A
+ * request whose
  * actions are all dropped or all above its class's ceiling renders the grant
  * unsatisfiable rather than empty: an empty `allowedAction` array means "every
  * action" in the zcap model.
@@ -146,11 +148,12 @@ const ACTION_CEILINGS: Record<TargetClass, readonly WasAction[]> = {
   'protected-collection': ['GET', 'HEAD'],
   // A share hands over decryption as well as fetch; it is never a write grant.
   share: ['GET', 'HEAD'],
-  // Add-only. The collection is plaintext and world-readable, so a write there
-  // is publication under the user's identity and irreversible in practice
-  // (retracting removes the link, not the copies already fetched): an app may
-  // add to what it published, but never rewrite or retract it.
-  'public-collection': ['GET', 'HEAD', 'POST'],
+  // The full vocabulary, the same as a private RP collection (per the App
+  // Connect spec's descriptor registry): published content is still the RP's
+  // own data, and un-publishing is as much data management as publishing.
+  // Retraction removes the stored copy, not copies already fetched -- the
+  // nature of publication, not a reason to forbid it.
+  'public-collection': ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
   // An RP-provisioned private collection is the RP's own data: the full
   // vocabulary, bounded by the consent screen and the shorter write TTL.
   collection: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']
@@ -225,9 +228,10 @@ export function existingCollectionsFrom(
  * collection -- shared by the string-URL and `https://w3id.org/byoe#private-collection` forms so the
  * ceiling parity holds whichever way the target arrives: protected wallet
  * collections first (their read-only ceiling is the strictest), then a
- * collection the Space already serves world-readable (the add-only
- * public-collection ceiling -- a write there is publication, however the
- * request spelled the target), and only then the full RP-collection class.
+ * collection the Space already serves world-readable (the public-collection
+ * class -- the same full-vocabulary ceiling, but flagged `isPublic` for the
+ * consent warning and never re-provisioned, however the request spelled the
+ * target), and only then the full RP-collection class.
  *
  * @param options {object}
  * @param options.collectionId {string}
@@ -424,9 +428,9 @@ function parseSpaceUrl({
  *   `spaceUrl` (`parseSpaceUrl`), with the collection id taken from the first
  *   path segment after the Space URL, so a URL under a standard collection (or
  *   at a resource inside one) is flagged `collectionId` / `encrypted` and gets
- *   the same cap as its descriptor form -- including the add-only
- *   public-collection cap when the named collection is already
- *   world-readable. The Space URL itself, with or without
+ *   the same cap as its descriptor form -- including the public-collection
+ *   class when the named collection is already world-readable. The Space URL
+ *   itself, with or without
  *   a trailing slash, is a whole-Space grant. Any other string -- a foreign
  *   origin, a path that escapes the Space, a target carrying a query or
  *   fragment, a first segment that is not a valid collection id --
@@ -531,7 +535,7 @@ export function resolveInvocationTarget({
       // flags provisioning: the provisioning step is idempotent and, on the App
       // Connect path, is what re-admits a reconnecting app to an existing
       // collection's recipient roster. An existing PUBLIC collection never
-      // does: it is classed public-collection (add-only) whichever way the
+      // does: it is classed public-collection whichever way the
       // target is spelled, and re-provisioning it here would re-run the
       // public-policy setup on a live collection -- or, on App Connect, set
       // up a recipient roster on a world-readable plaintext collection.
@@ -822,14 +826,15 @@ export async function processZcaps({
   // The existing collections' public state, fetched fresh at delegation time
   // (the consent preview resolves against its own snapshot): resolution
   // refuses a public grant that would convert an existing collection, and
-  // caps any target naming an already-public collection add-only. A failed
+  // classes any target naming an already-public collection public-collection.
+  // A failed
   // listing fails the request rather than resolving against assumed-absent
   // collections. The snapshot is mutable on purpose: the loop below records
   // each collection it provisions, so a later descriptor in the SAME request
   // resolves against what the request has already created -- a duplicate name
   // cannot flip a just-provisioned private collection public (the
   // create-only rule sees it as existing), and a target naming a
-  // just-provisioned public collection gets the add-only public ceiling.
+  // just-provisioned public collection resolves as the idempotent re-grant.
   const collections = new Map(
     existingCollectionsFrom(await session.storage.listCollectionPublicStates())
   )
