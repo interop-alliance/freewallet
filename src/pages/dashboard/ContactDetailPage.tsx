@@ -140,10 +140,22 @@ function DidListSection({
   )
 }
 
-function nameRowsFor(
-  contact: ContactData,
+/**
+ * Builds the "details" section rows (name parts and organization) for a
+ * contact, skipping the members it does not carry.
+ *
+ * @param options {object}
+ * @param options.contact {ContactData} The contact being displayed.
+ * @param options.t {Function} The i18n translation function.
+ * @returns {object[]} The label / value rows.
+ */
+function nameRowsFor({
+  contact,
+  t
+}: {
+  contact: ContactData
   t: (key: string) => string
-): { label: string; value: string }[] {
+}): { label: string; value: string }[] {
   const rows: { label: string; value: string }[] = []
   if (contact.givenName) {
     rows.push({ label: t('contactForm.firstName'), value: contact.givenName })
@@ -261,20 +273,20 @@ export function ContactDetailPage() {
 
           <FieldSection
             label={t('contact.sections.details')}
-            rows={nameRowsFor(contact, t)}
+            rows={nameRowsFor({ contact, t })}
           />
           <FieldSection
             label={t('contact.sections.phone')}
-            rows={(contact.phoneNumbers ?? []).map(p => ({
-              label: p.label,
-              value: p.number
+            rows={(contact.phoneNumbers ?? []).map(phone => ({
+              label: phone.label,
+              value: phone.number
             }))}
           />
           <FieldSection
             label={t('contact.sections.email')}
-            rows={(contact.emailAddresses ?? []).map(e => ({
-              label: e.label,
-              value: e.email
+            rows={(contact.emailAddresses ?? []).map(email => ({
+              label: email.label,
+              value: email.email
             }))}
           />
           <DidListSection dids={getDids(contact)} t={t} />

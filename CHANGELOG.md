@@ -25,6 +25,9 @@
 - AGENTS.md cross-references the standing measures for cross-repo changes
   (blast-radius enumeration, the spec repos' parties-to-the-contract tables,
   the breaking-release doc audit, counterpart tests).
+- Code-style sweep over the contact pages and `writerId.ts`: positional
+  helpers moved to options objects, single-letter callback parameters
+  renamed, and a module header added. No behavior change.
 - The share row on the App Connect consent screen no longer hedges its
   coverage: a share escrows the reader into every existing key epoch, so it
   covers everything already stored, and the "items stored before this

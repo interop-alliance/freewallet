@@ -86,19 +86,19 @@ export function ContactFormPage() {
         setOrganization(contact.organization ?? '')
         setNote(contact.note ?? '')
         setPhoneNumbers(
-          (contact.phoneNumbers ?? []).map(p => ({
-            label: p.label,
-            value: p.number,
-            digits: p.digits,
-            countryCode: p.countryCode,
-            id: p.id
+          (contact.phoneNumbers ?? []).map(phone => ({
+            label: phone.label,
+            value: phone.number,
+            digits: phone.digits,
+            countryCode: phone.countryCode,
+            id: phone.id
           }))
         )
         setEmailAddresses(
-          (contact.emailAddresses ?? []).map(e => ({
-            label: e.label,
-            value: e.email,
-            id: e.id
+          (contact.emailAddresses ?? []).map(email => ({
+            label: email.label,
+            value: email.email,
+            id: email.id
           }))
         )
         // `getDids` dedupes, so a contact merged from another replica does not
@@ -121,15 +121,29 @@ export function ContactFormPage() {
     }
   }, [session, contactId, isEditing])
 
-  function updateRow(
-    rows: LabeledRow[],
-    setRows: (rows: LabeledRow[]) => void,
-    index: number,
+  /**
+   * Applies a patch to one row of a phone / email list.
+   *
+   * @param options {object}
+   * @param options.rows {LabeledRow[]} The current list.
+   * @param options.setRows {Function} Setter for the list.
+   * @param options.index {number} Position of the row to patch.
+   * @param options.patch {Partial<LabeledRow>} The members to overwrite.
+   */
+  function updateRow({
+    rows,
+    setRows,
+    index,
+    patch
+  }: {
+    rows: LabeledRow[]
+    setRows: (rows: LabeledRow[]) => void
+    index: number
     patch: Partial<LabeledRow>
-  ) {
+  }) {
     setRows(
-      rows.map((row, i) => {
-        if (i !== index) {
+      rows.map((row, rowIndex) => {
+        if (rowIndex !== index) {
           return row
         }
         // A changed value invalidates the number-derived `digits` /
@@ -198,13 +212,30 @@ export function ContactFormPage() {
     }
   }
 
-  function renderRows(
-    heading: string,
-    valueLabel: string,
-    rows: LabeledRow[],
-    setRows: (rows: LabeledRow[]) => void,
+  /**
+   * Renders one labeled-row section (phone numbers, email addresses): a
+   * label / value field pair per row, plus the add and remove controls.
+   *
+   * @param options {object}
+   * @param options.heading {string} Section heading.
+   * @param options.valueLabel {string} Label for the value field.
+   * @param options.rows {LabeledRow[]} The current list.
+   * @param options.setRows {Function} Setter for the list.
+   * @param options.testIdPrefix {string} Prefix for the per-row React keys.
+   */
+  function renderRows({
+    heading,
+    valueLabel,
+    rows,
+    setRows,
+    testIdPrefix
+  }: {
+    heading: string
+    valueLabel: string
+    rows: LabeledRow[]
+    setRows: (rows: LabeledRow[]) => void
     testIdPrefix: string
-  ) {
+  }) {
     return (
       <Box sx={contactFormStyles.rowsSection}>
         <Typography variant="overline" color="text.secondary">
@@ -219,8 +250,13 @@ export function ContactFormPage() {
           >
             <TextField
               value={row.label}
-              onChange={e =>
-                updateRow(rows, setRows, index, { label: e.target.value })
+              onChange={event =>
+                updateRow({
+                  rows,
+                  setRows,
+                  index,
+                  patch: { label: event.target.value }
+                })
               }
               label={t('contactForm.label')}
               size="small"
@@ -228,15 +264,22 @@ export function ContactFormPage() {
             />
             <TextField
               value={row.value}
-              onChange={e =>
-                updateRow(rows, setRows, index, { value: e.target.value })
+              onChange={event =>
+                updateRow({
+                  rows,
+                  setRows,
+                  index,
+                  patch: { value: event.target.value }
+                })
               }
               label={valueLabel}
               size="small"
               fullWidth
             />
             <IconButton
-              onClick={() => setRows(rows.filter((_, i) => i !== index))}
+              onClick={() =>
+                setRows(rows.filter((_, rowIndex) => rowIndex !== index))
+              }
               aria-label={t('contactForm.removeRow')}
               size="small"
             >
@@ -286,9 +329,11 @@ export function ContactFormPage() {
           >
             <TextField
               value={did}
-              onChange={e =>
+              onChange={event =>
                 applyDidEdit(
-                  dids.map((row, i) => (i === index ? e.target.value : row))
+                  dids.map((row, rowIndex) =>
+                    rowIndex === index ? event.target.value : row
+                  )
                 )
               }
               label={t('contactForm.did')}
@@ -302,7 +347,9 @@ export function ContactFormPage() {
               }
             />
             <IconButton
-              onClick={() => applyDidEdit(dids.filter((_, i) => i !== index))}
+              onClick={() =>
+                applyDidEdit(dids.filter((_, rowIndex) => rowIndex !== index))
+              }
               aria-label={t('contactForm.removeRow')}
               size="small"
             >
@@ -342,8 +389,8 @@ export function ContactFormPage() {
 
           <TextField
             value={displayName}
-            onChange={e => {
-              setDisplayName(e.target.value)
+            onChange={event => {
+              setDisplayName(event.target.value)
               if (errorMessage) {
                 setErrorMessage('')
               }
@@ -353,42 +400,42 @@ export function ContactFormPage() {
           />
           <TextField
             value={givenName}
-            onChange={e => setGivenName(e.target.value)}
+            onChange={event => setGivenName(event.target.value)}
             label={t('contactForm.firstName')}
             fullWidth
           />
           <TextField
             value={familyName}
-            onChange={e => setFamilyName(e.target.value)}
+            onChange={event => setFamilyName(event.target.value)}
             label={t('contactForm.lastName')}
             fullWidth
           />
           <TextField
             value={organization}
-            onChange={e => setOrganization(e.target.value)}
+            onChange={event => setOrganization(event.target.value)}
             label={t('contactForm.organization')}
             fullWidth
           />
 
-          {renderRows(
-            t('contact.sections.phone'),
-            t('contactForm.phoneNumber'),
-            phoneNumbers,
-            setPhoneNumbers,
-            'contact-phone'
-          )}
-          {renderRows(
-            t('contact.sections.email'),
-            t('contactForm.emailAddress'),
-            emailAddresses,
-            setEmailAddresses,
-            'contact-email'
-          )}
+          {renderRows({
+            heading: t('contact.sections.phone'),
+            valueLabel: t('contactForm.phoneNumber'),
+            rows: phoneNumbers,
+            setRows: setPhoneNumbers,
+            testIdPrefix: 'contact-phone'
+          })}
+          {renderRows({
+            heading: t('contact.sections.email'),
+            valueLabel: t('contactForm.emailAddress'),
+            rows: emailAddresses,
+            setRows: setEmailAddresses,
+            testIdPrefix: 'contact-email'
+          })}
           {renderDids()}
 
           <TextField
             value={note}
-            onChange={e => setNote(e.target.value)}
+            onChange={event => setNote(event.target.value)}
             label={t('contactForm.note')}
             multiline
             minRows={3}
