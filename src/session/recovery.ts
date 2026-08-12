@@ -539,8 +539,10 @@ export async function issueRecoveryCode({
 
 /**
  * The narrow store the recovery continuation writes through: public fetches
- * for the world-readable log, and the delegated PUT (the record's zcap,
- * invoked by the code-derived did:key client) for `did.jsonl`.
+ * for the world-readable log (carrying the response ETag as the ceremony's
+ * compare-and-swap token), and the delegated PUT (the record's zcap, invoked
+ * by the code-derived did:key client) for `did.jsonl`, forwarding the
+ * ceremony's conditional-write preconditions.
  *
  * @param options {object}
  * @param options.pointer {AccountPointer}
@@ -577,23 +579,42 @@ function delegatedLogStore({
           `Fetching "${resourceId}" failed (HTTP ${response.status}).`
         )
       }
-      return response.text()
+      return {
+        text: await response.text(),
+        etag: response.headers.get('etag') ?? undefined
+      }
     },
     async putIdResource({
       resourceId,
       content,
-      contentType
+      contentType,
+      ifMatch,
+      ifNoneMatch
     }: {
       resourceId: string
       content: object | string
       contentType?: string
+      ifMatch?: string
+      ifNoneMatch?: boolean
     }) {
       const serialized =
         typeof content === 'string' ? content : JSON.stringify(content)
+      const headers: Record<string, string> = {
+        'content-type': contentType ?? 'application/json'
+      }
+      if (ifMatch !== undefined) {
+        headers['if-match'] = ifMatch
+      }
+      if (ifNoneMatch) {
+        headers['if-none-match'] = '*'
+      }
+      // A failed precondition (HTTP 412) surfaces from `was.request` as
+      // was-client's `PreconditionFailedError` -- the exact name the
+      // `WebvhIdStore` seam contract requires for the ceremony's rebase.
       await was.request({
         path: `/space/${pointer.spaceId}/${ID_COLLECTION.id}/${resourceId}`,
         method: 'PUT',
-        headers: { 'content-type': contentType ?? 'application/json' },
+        headers,
         body: new TextEncoder().encode(serialized),
         capability: delegation
       })

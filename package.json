@@ -42,7 +42,7 @@
     "@interop/storage-core": "^0.6.0",
     "@interop/vc": "^11.0.6",
     "@interop/verifier-core": "^3.5.4",
-    "@interop/wallet-core": "^0.30.1",
+    "@interop/wallet-core": "^0.31.0",
     "@interop/was-client": "^0.34.0",
     "@interop/webkms-client": "^14.7.1",
     "@interop/x25519-key-agreement-key": "^5.2.1",

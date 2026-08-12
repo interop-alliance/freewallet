@@ -4,6 +4,15 @@
 
 ### Changed
 
+- Loading a single contact is now a `findOne` point read (at most one
+  decrypt) instead of decrypting every `contacts` row; a contact delete's
+  pre-delete snapshot stops paying that full scan too.
+- A contact's revision history is read through a new local-only `contactId`
+  projection index over `contacts-history` (never replicated; the wire body
+  stays an opaque EDV envelope, matching the mobile wallet's local design),
+  so other contacts' revisions are skipped without decryption. The index is
+  populated at write time and lazily backfilled on read, so each history row
+  is decrypted at most once per browser.
 - The Dashboard, Contacts, and History search boxes share one `SearchField`
   component and a page-neutral style constant.
 - AGENTS.md cross-references the standing measures for cross-repo changes

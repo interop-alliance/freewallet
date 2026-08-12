@@ -54,6 +54,34 @@ import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'
 
 /**
+ * The local-only projection index over the append-only `contacts-history`
+ * collection: one row per history row, carrying just that row's id and the
+ * `contactId` its (encrypted) revision belongs to. It exists so a single
+ * contact's history can be read without decrypting every other contact's
+ * revisions, and it never leaves this browser -- it is deliberately not a
+ * `WALLET_STANDARD_COLLECTIONS` entry, so nothing replicates it and the wire
+ * body stays an opaque EDV envelope.
+ *
+ * Privacy: the index stores only the opaque `contactId` uuid beside the row
+ * id -- never any part of the decrypted snapshot -- so what it exposes at rest
+ * locally is revision grouping and per-contact revision counts, nothing about
+ * the contact itself.
+ *
+ * RxDB requires an explicit `maxLength` on every indexed string field.
+ */
+const contactsHistoryIndexSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 256 },
+    contactId: { type: 'string', maxLength: 256 }
+  },
+  required: ['id', 'contactId'],
+  indexes: ['contactId']
+} as const
+
+/**
  * The local active replica of the wallet's standard collections, stored in
  * IndexedDB via RxDB/Dexie. Documents use the same synced-doc shape the
  * replication adapter moves over the wire, so a local write is directly
@@ -63,6 +91,11 @@ export class BrowserStore {
   public dbPrefix: string
   public db?: RxDatabase
   #collections?: Record<string, RxCollection<SyncedDoc>>
+  // The local-only `contacts-history` projection index (see
+  // {@link contactsHistoryIndexSchema}). Held in its own member rather than in
+  // `#collections`, which is typed to `SyncedDoc` and enumerates exactly the
+  // collections that replicate.
+  #contactsHistoryIndex?: RxCollection<{ id: string; contactId: string }>
   #storage: RxStorage<unknown, unknown>
   #ciphers?: Record<string, DocCipher>
   // Count of rows the most recent list read had to skip because their envelope
@@ -202,6 +235,19 @@ export class BrowserStore {
     this.#collections = (await db.addCollections(
       collectionsConfig
     )) as unknown as Record<string, RxCollection<SyncedDoc>>
+    // The local-only `contacts-history` projection index, added alongside the
+    // standard collections but deliberately NOT one of them: this collection
+    // must never sync (`WALLET_STANDARD_COLLECTIONS` drives replication and
+    // remote provisioning), so it is created here and kept out of
+    // `#collections`.
+    const indexCollections = await db.addCollections({
+      contactsHistoryIndex: { schema: contactsHistoryIndexSchema }
+    })
+    this.#contactsHistoryIndex =
+      indexCollections.contactsHistoryIndex as unknown as RxCollection<{
+        id: string
+        contactId: string
+      }>
     this.db = db
     console.log('Initialized local wallet collections for user:', user.id)
   }
@@ -913,13 +959,13 @@ export class BrowserStore {
    * the shared {@link _decryptedRows} tolerance (and its decrypt cache) that the
    * credential and history reads use.
    *
-   * Every head passes through `upgradeContactHeadPayload` -- the single read
-   * choke point for contact heads (`listContacts` / `loadContact` both go
-   * through here), so a row written before the current `ContactData` postal
-   * shape is seen by the rest of the app, and by any save that carries its
-   * untouched fields forward, in the current shape. The upgrade is idempotent,
-   * so a row already in the current shape is unaffected, and a re-save
-   * therefore produces no spurious last-write-wins edit.
+   * Every head passes through `upgradeContactHeadPayload` (as does
+   * {@link loadContact}'s point read), so a row written before the current
+   * `ContactData` postal shape is seen by the rest of the app, and by any
+   * save that carries its untouched fields forward, in the current shape.
+   * The upgrade is idempotent, so a row already in the current shape is
+   * unaffected, and a re-save therefore produces no spurious
+   * last-write-wins edit.
    *
    * @returns {Promise<Array<{ rowId: string; head: ContactHeadPayload }>>}
    */
@@ -955,6 +1001,14 @@ export class BrowserStore {
   }
 
   /**
+   * Loads one contact by row id -- a `findOne` point read plus at most one
+   * decrypt (the row id IS the RxDB primary key), never the full-collection
+   * scan {@link listContacts} pays. Mirrors the scan's per-row tolerance: a
+   * row whose envelope will not decrypt under the current KAK (or names an
+   * unknown key epoch) resolves to `undefined`, exactly as the scan would
+   * have skipped it. The head passes through the same idempotent
+   * `upgradeContactHeadPayload` read-side upgrade as {@link #contactEntries}.
+   *
    * @param options {object}
    * @param options.id {string}
    * @returns {Promise<StoredContact | undefined>}
@@ -964,17 +1018,30 @@ export class BrowserStore {
   }: {
     id: string
   }): Promise<StoredContact | undefined> {
-    const entry = (await this.#contactEntries()).find(
-      ({ rowId }) => rowId === id
-    )
-    return entry
-      ? {
-          id: entry.rowId,
-          contactId: entry.head.contactId ?? entry.rowId,
-          contact: entry.head.contact,
-          updatedAt: entry.head.updatedAt
-        }
-      : undefined
+    const doc = await this.rxCollection('contacts').findOne(id).exec()
+    if (!doc) {
+      return undefined
+    }
+    const { data } = doc.toMutableJSON()
+    const cipher = this.#ciphers?.contacts
+    let raw: Json
+    if (cipher && isEncryptedEnvelope(data)) {
+      try {
+        raw = await cipher.decrypt({ envelope: data! })
+      } catch (err) {
+        console.warn(`Skipping undecryptable "contacts" row "${id}":`, err)
+        return undefined
+      }
+    } else {
+      raw = data as Json
+    }
+    const head = upgradeContactHeadPayload(raw as unknown as ContactHeadPayload)
+    return {
+      id,
+      contactId: head.contactId ?? id,
+      contact: head.contact,
+      updatedAt: head.updatedAt
+    }
   }
 
   /**
@@ -1136,15 +1203,68 @@ export class BrowserStore {
     // row); the passed `id` is only the plaintext-store key, so a plaintext
     // revision gets a fresh uuid. The epoch is now stamped too (via
     // {@link _insertEncrypted}), matching the other encrypted writers.
-    await this.#insertEncrypted({
+    const { rowId } = await this.#insertEncrypted({
       logicalKey: 'contactsHistory',
       id: uuidv7(),
       data: revision as unknown as Json
     })
+    await this.#indexContactRevision({ rowId, contactId: revision.contactId })
+  }
+
+  /**
+   * Records one history row's `rowId -> contactId` projection in the local-only
+   * index, best-effort: the index is a read accelerator, so a failure here must
+   * never fail the revision write -- the row simply gets decrypted once by a
+   * later read, which backfills it.
+   *
+   * The mapping is permanently valid: history rows are content-addressed and
+   * immutable, so a row id names one envelope, hence one revision, forever. An
+   * index row whose history row has since disappeared is harmless -- reads walk
+   * the history rows and consult the index, never the other way round.
+   *
+   * @param options {object}
+   * @param options.rowId {string}
+   * @param options.contactId {string}
+   * @returns {Promise<void>}
+   */
+  async #indexContactRevision({
+    rowId,
+    contactId
+  }: {
+    rowId: string
+    contactId: string
+  }): Promise<void> {
+    try {
+      await this.#contactsHistoryIndex?.insertIfNotExists({
+        id: rowId,
+        contactId
+      })
+    } catch (err) {
+      console.warn(`Failed to index "contacts-history" row "${rowId}":`, err)
+    }
   }
 
   /**
    * Lists a single contact's revision history, most recent first.
+   *
+   * `contacts-history` is append-only and grows without bound, so this read
+   * does not decrypt it: the local-only projection index
+   * ({@link contactsHistoryIndexSchema}) answers "which contact does this row
+   * belong to?" in plaintext, and a row the index attributes to another
+   * contact is skipped with zero cryptographic work. Only rows attributed to
+   * the requested contact -- plus any row not yet in the index -- are
+   * decrypted, and every decrypt of a previously unindexed row backfills the
+   * index with its TRUE `contactId` (matching or not). Fresh revisions are
+   * indexed at write time, so the amortized cost of a read is one decrypt per
+   * revision of the requested contact, and each historical row is decrypted at
+   * most once ever per browser.
+   *
+   * Per-row tolerance mirrors {@link #decryptedRows}: a plaintext (legacy or
+   * cipher-less) body passes through; an {@link UnknownEpochError} row is
+   * skipped uncached AND left unindexed, since it is possibly-fresh data
+   * behind a stale descriptor that must stay retryable after a descriptor
+   * refresh; any other decrypt failure is warned, skipped, and likewise left
+   * unindexed.
    *
    * @param options {object}
    * @param options.contactId {string}
@@ -1155,22 +1275,80 @@ export class BrowserStore {
   }: {
     contactId: string
   }): Promise<Array<ContactRevisionPayload>> {
-    const { entries } = await this.#decryptedRows({
-      logicalKey: 'contactsHistory',
-      sort: 'desc'
-    })
+    const docs = await this.rxCollection('contactsHistory')
+      .find({ sort: [{ updatedAt: 'desc' }] })
+      .exec()
+    const indexRows = (await this.#contactsHistoryIndex?.find().exec()) ?? []
+    const contactIdByRow = new Map<string, string>(
+      indexRows.map(row => [row.id, row.contactId])
+    )
+    const cipher = this.#ciphers?.contactsHistory
+    const decryptCache = this.#cacheFor('contactsHistory')
+    // Each needed decrypt is independent, so they run together; the fold below
+    // walks the results in document order, keeping the returned revisions in
+    // exactly the `updatedAt` descending order the query produced.
+    const rows = await Promise.all(
+      docs.map(async doc => {
+        const { id, data } = doc.toMutableJSON()
+        const indexed = contactIdByRow.get(id)
+        if (indexed !== undefined && indexed !== contactId) {
+          // The whole win: another contact's revision, skipped undecrypted.
+          return { id, skipped: true }
+        }
+        if (!cipher || !isEncryptedEnvelope(data)) {
+          return { id, plaintext: data as Json, indexed }
+        }
+        const cached = decryptCache.get(id)
+        if (cached !== undefined) {
+          return { id, plaintext: cached, indexed }
+        }
+        try {
+          const plaintext = await cipher.decrypt({ envelope: data! })
+          decryptCache.set(id, plaintext)
+          return { id, plaintext, indexed }
+        } catch (err) {
+          return { id, indexed, err }
+        }
+      })
+    )
     const revisions: ContactRevisionPayload[] = []
-    for (const { data } of entries) {
+    const backfill: Array<{ rowId: string; contactId: string }> = []
+    for (const { id, skipped, plaintext, indexed, err } of rows) {
+      if (skipped) {
+        continue
+      }
+      if (err) {
+        if (err instanceof UnknownEpochError) {
+          // Possibly-fresh data behind a stale descriptor: skip it uncached and
+          // unindexed so a descriptor refresh can pick it up on a later read.
+          console.warn(
+            `Skipping unknown-epoch "contactsHistory" row "${id}":`,
+            err
+          )
+        } else {
+          console.warn(
+            `Skipping undecryptable "contactsHistory" row "${id}":`,
+            err
+          )
+        }
+        continue
+      }
       // Same idempotent read-side upgrade as the head reads, so a snapshot
       // stored before the current `ContactData` postal shape views and
       // restores in the current shape.
       const revision = upgradeContactRevisionPayload(
-        data as unknown as ContactRevisionPayload
+        plaintext as unknown as ContactRevisionPayload
       )
+      if (indexed === undefined && revision.contactId) {
+        backfill.push({ rowId: id, contactId: revision.contactId })
+      }
       if (revision.contactId === contactId) {
         revisions.push(revision)
       }
     }
+    // Best-effort, and after the fold so a slow index write never delays the
+    // revisions the caller asked for.
+    await Promise.all(backfill.map(entry => this.#indexContactRevision(entry)))
     return revisions
   }
 
@@ -1330,6 +1508,7 @@ export class BrowserStore {
       await this.db.remove()
       this.db = undefined
       this.#collections = undefined
+      this.#contactsHistoryIndex = undefined
     }
     // Guarded: absent under the memory storage used in unit tests.
     if (typeof indexedDB !== 'undefined') {
@@ -1392,6 +1571,7 @@ export class BrowserStore {
       await this.db.close()
       this.db = undefined
       this.#collections = undefined
+      this.#contactsHistoryIndex = undefined
     }
   }
 }
