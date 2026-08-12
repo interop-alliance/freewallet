@@ -6,6 +6,10 @@
 
 - The Dashboard, Contacts, and History search boxes share one `SearchField`
   component and a page-neutral style constant.
+- The share row on the App Connect consent screen no longer hedges its
+  coverage: a share escrows the reader into every existing key epoch, so it
+  covers everything already stored, and the "items stored before this
+  wallet's first share may not be included" sentence is dropped (en and es).
 
 ### Added
 

@@ -690,7 +690,7 @@
       "zcapReadOnlyNote": "Solo lectura",
       "zcapEncryptedNote": "Esta colección está cifrada: este sitio solo verá texto cifrado.",
       "zcapShareWarning": "Esto otorga acceso de lectura Y descifrado a esta colección: no solo obtenerla, sino leer lo que contiene.",
-      "zcapShareExisting": "Esto abarca todo lo que haya en la colección desde el momento en que lo apruebe, no solo lo que se agregue después. Es posible que no se incluyan los elementos guardados antes de que esta billetera compartiera esta colección por primera vez.",
+      "zcapShareExisting": "Esto abarca todo lo que haya en la colección desde el momento en que lo apruebe, no solo lo que se agregue después.",
       "zcapShareCeiling": "Podrá quitar el acceso más adelante, lo que impide lecturas futuras, pero no puede recuperar lo que ya se haya leído.",
       "zcapShareExpiry": "El permiso de obtención vence en {{days}} días; la capacidad de descifrar no vence por sí sola.",
       "zcapShareRevokeNote": "(puede quitar a este lector en cualquier momento desde la Configuración de la billetera)",

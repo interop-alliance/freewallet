@@ -690,7 +690,7 @@
       "zcapReadOnlyNote": "Read-only",
       "zcapEncryptedNote": "This collection is encrypted -- this site will only see ciphertext.",
       "zcapShareWarning": "This grants read AND decrypt access to this collection -- not just fetching it, but reading what is inside.",
-      "zcapShareExisting": "This covers everything in the collection from the moment you approve, not only what is added later. Items stored before this wallet's first share of this collection may not be included.",
+      "zcapShareExisting": "This covers everything in the collection from the moment you approve, not only what is added later.",
       "zcapShareCeiling": "You can remove access later, which stops future reads -- but it cannot take back anything already read.",
       "zcapShareExpiry": "The fetch permission expires in {{days}} days; being able to decrypt does not expire on its own.",
       "zcapShareRevokeNote": "(you can remove this reader any time from wallet Settings)",

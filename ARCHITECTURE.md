@@ -788,9 +788,11 @@ app seed never enters the grant path: the wallet derives the app's recipient
 key from a public identifier it already has. The app derives the private half
 from its own controller key, so the app and the wallet -- holding the vault KAK
 -- both read the collection, while the WAS server only ever stores ciphertext.
-Provisioning is idempotent: no epochs yet ->
-`initRecipients([owner, app])`; a reconnect after revoke -> `addRecipient(app)`;
-already present -> no-op. The wallet ensures the collection exists without
+Provisioning is idempotent: the collection gets epoch[0] wrapped to the owner
+create-if-absent (`ensureFirstEpoch`, adopting an existing roster rather than
+overwriting it), then a first connect or a reconnect after revoke escrows the
+app into every epoch (`addRecipient(app)`); already present -> no-op. The
+wallet ensures the collection exists without
 clobbering an existing `encryption` descriptor, so an established epoch roster is
 never dropped. Public (`https://w3id.org/byoe#public-collection`) grants
 stay plaintext and world-readable as before; only private app collections are
@@ -848,11 +850,14 @@ screen is visually distinct from every other grant and says three things: the
 grant is read _and_ decrypt; it covers the collection's contents from the
 moment of approval, not only future writes; and removing access later stops
 future reads but cannot take back what has already been read. The second line
-is hedged for a reason: on a collection's FIRST share the epoch roster is
-created lazily (`initRecipients`), and resources written before it are
-single-recipient envelopes sealed to the owner's vault KAK alone. Nothing
-re-encrypts them, so the new reader can fetch but not decrypt those -- the
-owner keeps reading them through the permanent pre-epoch tolerance path. Removal is the Settings "Shared collections"
+is stated without a hedge because the epoch model makes it true: every
+encrypted collection carries epoch[0] from provisioning (wrapped to the user
+key, recipient zero), so a share is always an `addRecipient` that escrows the
+grantee into every existing epoch -- no rotation, and no envelope in the
+collection sits outside an epoch the grantee now holds. An epoch-less
+descriptor is refused fail-closed rather than seeded lazily at share time (it
+can only mean an unprovisioned or torn collection), so there is no legacy
+single-recipient residue a reader could fetch but not decrypt. Removal is the Settings "Shared collections"
 panel (`unshareCollection`), not expiry -- the share TTL
 (`SHARE_ZCAP_TTL_MS`) is deliberately long, because expiry would end the pull
 axis while leaving the grantee in the key roster.
@@ -1049,7 +1054,8 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   wallet's own encrypted collections, asked for with a
   `https://w3id.org/byoe#shared-wallet-collection` invocation-target descriptor. One
   `shareCollection` call grants both axes: a read-only Collection zcap and an
-  entry in the collection's key-epoch roster. Removed from Settings >
+  entry in every one of the collection's key epochs (escrowed by
+  `addRecipient`, so the share covers what is already stored). Removed from Settings >
   Shared collections, never by expiry. See "Sharing a wallet collection".
 - **WAS (Wallet Attached Storage)** — an HTTP protocol for storing arbitrary
   resources in user-owned Spaces. Requests are authorized via ZCap.
