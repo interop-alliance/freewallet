@@ -4,6 +4,13 @@
 
 ### Changed
 
+- Update to `@interop/wallet-core@0.31.0`: every did:webvh ceremony now
+  publishes `did.jsonl` as a compare-and-swap on the read its entry was built
+  on, so two clients extending the log concurrently can never silently erase
+  each other's entries; a lost race re-runs the ceremony on the new head. The
+  shared `wasWebvhIdStore` carries this with no app change; the recovery
+  continuation's delegated log store now returns the log's ETag on read and
+  forwards the `ifMatch` / `ifNoneMatch` preconditions on its delegated PUT.
 - Loading a single contact is now a `findOne` point read (at most one
   decrypt) instead of decrypting every `contacts` row; a contact delete's
   pre-delete snapshot stops paying that full scan too.

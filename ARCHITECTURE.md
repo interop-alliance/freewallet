@@ -161,6 +161,18 @@ and it preserves every other client's update key while swapping only its
 own. `keys.json`'s webvh block narrows to `{ did }` -- key roles no longer
 live server-side.
 
+**Conditional publish.** Every ceremony publishes `did.jsonl` as a
+compare-and-swap on the ETag of the read its entry was built on, so two
+clients extending the log concurrently never silently erase each other's
+entries; a lost race surfaces as wallet-core's typed `WebvhLogConflictError`
+and the ceremony re-runs itself on the new head (`withLogConflictRetry`).
+The shared `wasWebvhIdStore` carries the ETag and preconditions for every
+enrolled-client ceremony; the recovery continuation's delegated store
+(`delegatedLogStore` in `src/session/recovery.ts`) does the same over its
+public log fetch and delegated PUT. The `did.json` projection PUT stays
+unconditional -- it runs only behind a won log CAS, and the log is the
+source of truth.
+
 **Controller promotion by ordering.** The Space id is an independent random
 identifier minted at signup (`mintSpaceId`) and carried in the account
 pointer -- deliberately not a hash of any controller, since the did:webvh id
