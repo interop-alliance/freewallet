@@ -410,7 +410,7 @@
     },
     "deleteDialog": {
       "title": "Delete this contact?",
-      "message": "This will permanently remove the contact from your wallet."
+      "message": "This will permanently remove {{name}} from your wallet."
     }
   },
   "contactForm": {
@@ -436,6 +436,10 @@
   "contactHistory": {
     "title": "Contact history",
     "empty": "No history yet.",
+    "writer": "Writer {{writerId}}",
+    "restore": "Restore this version",
+    "restored": "Contact restored.",
+    "restoreError": "Could not restore this version. Please try again.",
     "actions": {
       "create": "Created",
       "update": "Updated",

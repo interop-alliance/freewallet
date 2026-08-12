@@ -82,6 +82,51 @@ const contactsHistoryIndexSchema = {
 } as const
 
 /**
+ * Orders two contact revisions newest first by the LOGICAL timestamp their
+ * payloads carry, not by the order the local rows happened to be written --
+ * the same `ORDER BY timestamp DESC, writerId DESC` the mobile wallet applies
+ * to its `contact_revisions` table, so a history replicated from another
+ * writer reads identically in both wallets.
+ *
+ * Timestamps are compared as parsed instants, falling back to a lexical
+ * comparison of the raw strings when either side is unparseable or the two
+ * instants are equal -- ISO stamps minted by different writers differ in
+ * fractional-second precision, so the raw strings are only a tiebreak, never
+ * the primary key. Equal timestamps are broken by `writerId` descending, the
+ * same "lexically greater writerId wins" convention as social-core's
+ * `remotePayloadWins`.
+ *
+ * @param first {ContactRevisionPayload}
+ * @param second {ContactRevisionPayload}
+ * @returns {number}
+ */
+function compareContactRevisionsNewestFirst(
+  first: ContactRevisionPayload,
+  second: ContactRevisionPayload
+): number {
+  const firstInstant = Date.parse(first.timestamp ?? '')
+  const secondInstant = Date.parse(second.timestamp ?? '')
+  if (
+    Number.isFinite(firstInstant) &&
+    Number.isFinite(secondInstant) &&
+    firstInstant !== secondInstant
+  ) {
+    return secondInstant - firstInstant
+  }
+  const firstStamp = first.timestamp ?? ''
+  const secondStamp = second.timestamp ?? ''
+  if (firstStamp !== secondStamp) {
+    return firstStamp < secondStamp ? 1 : -1
+  }
+  const firstWriter = first.writerId ?? ''
+  const secondWriter = second.writerId ?? ''
+  if (firstWriter === secondWriter) {
+    return 0
+  }
+  return firstWriter < secondWriter ? 1 : -1
+}
+
+/**
  * The local active replica of the wallet's standard collections, stored in
  * IndexedDB via RxDB/Dexie. Documents use the same synced-doc shape the
  * replication adapter moves over the wire, so a local write is directly
@@ -1245,7 +1290,11 @@ export class BrowserStore {
   }
 
   /**
-   * Lists a single contact's revision history, most recent first.
+   * Lists a single contact's revision history, most recent first -- ordered by
+   * the logical `timestamp` each revision payload carries (`writerId`
+   * descending breaks a tie), never by local row insertion order, so a history
+   * whose rows arrived out of order still reads chronologically
+   * ({@link compareContactRevisionsNewestFirst}).
    *
    * `contacts-history` is append-only and grows without bound, so this read
    * does not decrypt it: the local-only projection index
@@ -1285,8 +1334,8 @@ export class BrowserStore {
     const cipher = this.#ciphers?.contactsHistory
     const decryptCache = this.#cacheFor('contactsHistory')
     // Each needed decrypt is independent, so they run together; the fold below
-    // walks the results in document order, keeping the returned revisions in
-    // exactly the `updatedAt` descending order the query produced.
+    // walks the results in document order, which is only the walk order -- the
+    // returned revisions are sorted by their logical timestamp at the end.
     const rows = await Promise.all(
       docs.map(async doc => {
         const { id, data } = doc.toMutableJSON()
@@ -1349,6 +1398,7 @@ export class BrowserStore {
     // Best-effort, and after the fold so a slow index write never delays the
     // revisions the caller asked for.
     await Promise.all(backfill.map(entry => this.#indexContactRevision(entry)))
+    revisions.sort(compareContactRevisionsNewestFirst)
     return revisions
   }
 

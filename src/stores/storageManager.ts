@@ -2791,17 +2791,24 @@ export class StorageManager {
   /**
    * Rewrites a contact's row in place and appends its `update` revision.
    *
+   * Restoring an earlier version is the same write with `action: 'restore'`:
+   * the snapshot replaces the contact wholesale and the appended revision
+   * records which of the two it was.
+   *
    * @param options {object}
    * @param options.id {string}
    * @param options.contact {ContactData}
+   * @param [options.action] {'update' | 'restore'}
    * @returns {Promise<StoredContact>}
    */
   async updateContact({
     id,
-    contact
+    contact,
+    action = 'update'
   }: {
     id: string
     contact: ContactData
+    action?: 'update' | 'restore'
   }): Promise<StoredContact> {
     const writerId = getOrCreateWriterId()
     const stored = await this.#store.updateContact({
@@ -2811,7 +2818,7 @@ export class StorageManager {
     })
     await this.#recordContactRevision({
       contactId: stored.contactId,
-      action: 'update',
+      action,
       snapshot: contact,
       writerId
     })

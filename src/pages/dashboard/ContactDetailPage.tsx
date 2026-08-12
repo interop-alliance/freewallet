@@ -318,7 +318,9 @@ export function ContactDetailPage() {
         <DialogTitle>{t('contact.deleteDialog.title')}</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            {t('contact.deleteDialog.message')}
+            {t('contact.deleteDialog.message', {
+              name: contact.displayName
+            })}
           </DialogContentText>
         </DialogContent>
         <DialogActions sx={{ gap: 1, px: 3, pb: 2 }}>

@@ -70,16 +70,20 @@ function tick(): Promise<void> {
  */
 function revisionFor({
   contactId,
-  displayName
+  displayName,
+  timestamp,
+  writer = writerId
 }: {
   contactId: string
   displayName: string
+  timestamp?: string
+  writer?: string
 }): ContactRevisionPayload {
   return {
     contactId,
     action: 'update',
-    timestamp: new Date().toISOString(),
-    writerId,
+    timestamp: timestamp ?? new Date().toISOString(),
+    writerId: writer,
     snapshot: { displayName } as ContactData
   }
 }
@@ -132,19 +136,32 @@ describe('contacts-history projection index', () => {
   })
 
   it('returns only the requested contact revisions, most recent first', async () => {
-    // Rows are ordered by their `updatedAt` write stamp, whose resolution is a
-    // millisecond, so the writes are spaced to make the expected order the
-    // only order.
+    // The rows are written in the opposite order to their logical timestamps
+    // (and spaced so their `updatedAt` write stamps, whose resolution is a
+    // millisecond, really do differ), so only the payload timestamp can
+    // produce the expected order.
     await store.addContactRevision({
-      revision: revisionFor({ contactId: 'contact-a', displayName: 'A one' })
+      revision: revisionFor({
+        contactId: 'contact-a',
+        displayName: 'A two',
+        timestamp: '2026-08-12T10:00:02.000Z'
+      })
     })
     await tick()
     await store.addContactRevision({
-      revision: revisionFor({ contactId: 'contact-b', displayName: 'B one' })
+      revision: revisionFor({
+        contactId: 'contact-b',
+        displayName: 'B one',
+        timestamp: '2026-08-12T10:00:03.000Z'
+      })
     })
     await tick()
     await store.addContactRevision({
-      revision: revisionFor({ contactId: 'contact-a', displayName: 'A two' })
+      revision: revisionFor({
+        contactId: 'contact-a',
+        displayName: 'A one',
+        timestamp: '2026-08-12T10:00:01.000Z'
+      })
     })
 
     const revisions = await store.listContactRevisions({
@@ -158,6 +175,60 @@ describe('contacts-history projection index', () => {
     expect(
       revisions.every(revision => revision.contactId === 'contact-a')
     ).toBe(true)
+  })
+
+  it('breaks a timestamp tie on writerId, descending', async () => {
+    const timestamp = '2026-08-12T10:00:00.000Z'
+    for (const writer of ['writer-b', 'writer-a', 'writer-c']) {
+      await store.addContactRevision({
+        revision: revisionFor({
+          contactId: 'contact-a',
+          displayName: writer,
+          timestamp,
+          writer
+        })
+      })
+      await tick()
+    }
+
+    const revisions = await store.listContactRevisions({
+      contactId: 'contact-a'
+    })
+    expect(revisions.map(revision => revision.writerId)).toEqual([
+      'writer-c',
+      'writer-b',
+      'writer-a'
+    ])
+  })
+
+  it('falls back to a lexical comparison for an unparseable timestamp', async () => {
+    await store.addContactRevision({
+      revision: revisionFor({
+        contactId: 'contact-a',
+        displayName: 'parseable',
+        timestamp: '2026-08-12T10:00:00.000Z'
+      })
+    })
+    await tick()
+    await store.addContactRevision({
+      revision: revisionFor({
+        contactId: 'contact-a',
+        displayName: 'nonsense',
+        timestamp: 'not-a-timestamp'
+      })
+    })
+
+    const revisions = await store.listContactRevisions({
+      contactId: 'contact-a'
+    })
+    expect(revisions).toHaveLength(2)
+    // Lexically, 'not-a-timestamp' sorts after the ISO stamp, so it comes
+    // first under a newest-first order -- the point being that the read
+    // returns both rows rather than throwing.
+    expect(revisions.map(revision => revision.snapshot.displayName)).toEqual([
+      'nonsense',
+      'parseable'
+    ])
   })
 
   it('skips write-time indexed rows of other contacts without decrypting', async () => {

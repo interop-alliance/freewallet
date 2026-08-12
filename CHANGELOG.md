@@ -53,6 +53,17 @@
   "generate a new code and try again".
 - New dependency `qrcode.react` for QR rendering (the wallet could only
   decode QR codes before).
+- Contact history rows expand (one at a time) to a per-field snapshot view
+  and a "Restore this version" action, which rewrites the contact with that
+  snapshot through the ordinary update path and appends a `restore` revision
+  -- the previously dead `restore` action gains its producer. Each row also
+  shows a writer-attribution line (the first 8 characters of the revision's
+  `writerId`), matching the mobile wallet.
+- Contact revision history is now ordered by the logical `timestamp` each
+  revision payload carries (`writerId` breaks ties), not local row insertion
+  order, so a history replicated from another wallet reads chronologically
+  on every replica.
+- The contact delete confirmation names the contact being deleted.
 
 ## 0.31.0 - TBD
 
