@@ -72,6 +72,14 @@ that file's header; the rules that apply when working an item:
 - Work discovered mid-implementation gets its own FW-N item immediately,
   noting `discovered-from: FW-N` in its prose.
 
+For a cross-repo change (a spec, a wire contract, or a shared `@interop/*`
+API), four standing measures apply: the item carries a `touches:` field
+enumerating the blast radius (schema in isomorphic-lib-template's AGENTS.md),
+the consumers to walk are the "Parties to this contract" tables in the spec
+repos' AGENTS.md files, a breaking release runs the doc-vs-code audit in the
+template's "Releasing" section, and the contract's counterpart tests (e.g.
+was-react's `walletCoreCounterpart.test.ts`) must stay green.
+
 ## Conventions
 
 Code style, refactoring, JSDoc, comment, and error-handling conventions live in

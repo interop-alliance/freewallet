@@ -6,6 +6,9 @@
 
 - The Dashboard, Contacts, and History search boxes share one `SearchField`
   component and a page-neutral style constant.
+- AGENTS.md cross-references the standing measures for cross-repo changes
+  (blast-radius enumeration, the spec repos' parties-to-the-contract tables,
+  the breaking-release doc audit, counterpart tests).
 - The share row on the App Connect consent screen no longer hedges its
   coverage: a share escrows the reader into every existing key epoch, so it
   covers everything already stored, and the "items stored before this
