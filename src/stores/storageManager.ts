@@ -78,7 +78,8 @@ import {
   DescriptorRefreshPolicy,
   type EncryptionDescriptorCache
 } from '@interop/wallet-core/descriptors'
-import { savePinFromDescriptor } from '@/lib/sessionKey'
+import { accountLogPinStore, savePinFromDescriptor } from '@/lib/sessionKey'
+import { ResourceLogContinuityError } from '@interop/wallet-core/resourceLog'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import { SHAREABLE_COLLECTIONS as ENCRYPTED_STANDARD_COLLECTIONS } from '@/session/shares'
 import {
@@ -1630,6 +1631,11 @@ export class StorageManager {
                   'The client key-agreement key has no public multibase.'
                 )
               }
+              // The account pointer's DID is what this run expects the
+              // published log to resolve to -- but only once it is a webvh
+              // DID: a first signup has none yet, and wallet-core then falls
+              // back to the keys.json webvh block.
+              const pointerDid = profile.accountPointer?.did
               const { did: webvhDid } = await ensureDidWebvh({
                 idStore: this.#remoteStore.webvhIdStore(),
                 wasServerUrl: this.#remoteStore.storageServerUrl,
@@ -1641,7 +1647,15 @@ export class StorageManager {
                   }),
                   keyAgreementKeyMultibase
                 },
-                updateKeys: profile.clientWebvhKeys
+                updateKeys: profile.clientWebvhKeys,
+                expectedDid: isWebvhDid(pointerDid) ? pointerDid : undefined,
+                // The provisioning read runs under the same chain-head pin
+                // the login-time account-log reads use, so a truncated or
+                // substituted log is refused before any entry is built on it.
+                pinStore: accountLogPinStore({
+                  spaceId: this.#remoteStore.spaceId,
+                  idb
+                })
               })
               if (webvhDid) {
                 profile.didWebvh = { did: webvhDid }
@@ -1650,7 +1664,22 @@ export class StorageManager {
               // an earlier verification is dropped.
               invalidateVerifiedLog({ profile })
             } catch (err) {
-              console.warn('did:webvh provisioning failed:', err)
+              // A continuity refusal other than a rollback is a security
+              // signal, not a hiccup: the served log forked or switched
+              // identity against this browser's pinned head. Provisioning
+              // stays non-fatal (login must not break here), but the refusal
+              // is logged as an error -- the later account-log reads in the
+              // same login run the same pin and surface it to the user. A
+              // rollback may be no more than replication lag (nothing rolled
+              // back was adopted), so it warns like everything else.
+              if (
+                err instanceof ResourceLogContinuityError &&
+                err.reason !== 'rollback'
+              ) {
+                console.error('did:webvh provisioning refused:', err)
+              } else {
+                console.warn('did:webvh provisioning failed:', err)
+              }
             }
           }
         } catch (err) {

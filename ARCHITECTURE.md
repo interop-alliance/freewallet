@@ -193,7 +193,15 @@ may be nothing worse than replication lag -- nothing rolled back is
 adopted, and a caller with a cached document view may carry on with what it
 has. Ceremony-path `did.jsonl` reads additionally check the resolved DID
 against the account pointer (`expectedDid` on the revocation cascade and
-the recovery ceremonies).
+the recovery ceremonies). The two log-publishing ceremonies on this repo's
+own paths carry both checks too: the login-time provisioning
+(`ensureDidWebvh`) and the settings-page update-key rotation
+(`rotateWebvhUpdateKey`) each read the log under the same pin store and the
+account's DID, so a truncated or substituted log is refused before an entry
+is built on it. Provisioning stays non-fatal either way (a hiccup must not
+fail login), but a non-`rollback` continuity refusal is logged as an error
+-- the later account-log reads in the same login hit the same pin and
+surface it to the user.
 
 **Controller promotion by ordering.** The Space id is an independent random
 identifier minted at signup (`mintSpaceId`) and carried in the account

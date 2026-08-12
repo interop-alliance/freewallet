@@ -8,7 +8,7 @@
  */
 import { base64urlnopad } from '@scure/base'
 import type { IZcap } from '@interop/data-integrity-core'
-import { rotateWebvhUpdateKey } from '@interop/wallet-core/webvh'
+import { isWebvhDid, rotateWebvhUpdateKey } from '@interop/wallet-core/webvh'
 import { deriveUnlockIdentity, KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
   bindPassphrase,
@@ -34,6 +34,7 @@ import {
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
 import {
+  accountLogPinStore,
   deletePasskeySafetyNotice,
   deleteUserKeyEpochPin
 } from '@/lib/sessionKey'
@@ -428,6 +429,10 @@ export async function addAccountPassphrase({
  * record (and the in-memory profile) before and after the log extends, so a
  * crash mid-rotation resumes from durable state.
  *
+ * The read the rotation builds on runs under this browser's account-log
+ * chain-head pin and the account's own DID, so a truncated or substituted log
+ * is refused (`ResourceLogContinuityError`) before any entry is published.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @returns {Promise<void>}
@@ -443,6 +448,10 @@ export async function rotateAccountUpdateKey({
   if (!remoteStore || !updateKeys || !persistClientKeys) {
     throw new Error('Rotating the update key needs an enrolled remote account.')
   }
+  const pointerDid = session.profile.accountPointer?.did
+  const expectedDid =
+    session.profile.didWebvh?.did ??
+    (isWebvhDid(pointerDid) ? pointerDid : undefined)
   try {
     await rotateWebvhUpdateKey({
       idStore: remoteStore.webvhIdStore(),
@@ -450,7 +459,9 @@ export async function rotateAccountUpdateKey({
       persistUpdateKeys: async next => {
         await persistClientKeys({ webvhUpdateKeys: next })
         session.profile.clientWebvhKeys = next
-      }
+      },
+      expectedDid,
+      pinStore: accountLogPinStore({ spaceId: remoteStore.spaceId })
     })
   } finally {
     // The rotation publishes a log entry (and a torn rotation may have

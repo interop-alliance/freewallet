@@ -1,5 +1,16 @@
 # History
 
+## 0.33.0 - TBD
+
+### Changed
+
+- Update to `@interop/wallet-core@0.33.0`: the did:webvh provisioning
+  (`ensureDidWebvh`, at login) and the settings-page update-key rotation
+  (`rotateWebvhUpdateKey`) now read `did.jsonl` under this browser's
+  account-log chain-head pin and the expected account DID, so a truncated or
+  substituted log is refused before an entry is built on it. Provisioning
+  stays non-fatal, logging a non-`rollback` continuity refusal as an error.
+
 ## 0.32.0 - TBD
 
 ### Changed
