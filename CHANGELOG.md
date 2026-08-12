@@ -2,6 +2,11 @@
 
 ## 0.32.0 - TBD
 
+### Changed
+
+- The Dashboard, Contacts, and History search boxes share one `SearchField`
+  component and a page-neutral style constant.
+
 ### Added
 
 - Settings > Connected wallets gained an "Onboard another wallet" invite

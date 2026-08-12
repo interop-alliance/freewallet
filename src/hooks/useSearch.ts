@@ -20,7 +20,8 @@ import Fuse, { type FuseOptionKey } from 'fuse.js'
  * @param [options.threshold] {number} - Fuse.js match threshold (0 = exact,
  *   1 = match anything). Defaults to `0.35`.
  * @param [options.minMatchCharLength] {number} - Minimum query length before
- *   a fuzzy match counts. Defaults to `2`.
+ *   a fuzzy match counts; a shorter query leaves the list unfiltered rather
+ *   than matching nothing. Defaults to `2`.
  * @returns {{ query: string, setQuery: (query: string) => void, results: T[] }}
  */
 export function useSearch<T>({
@@ -51,10 +52,13 @@ export function useSearch<T>({
   // consumers key their own memos on it.
   const results = useMemo(() => {
     const normalizedQuery = query.trim()
-    return normalizedQuery
-      ? fuse.search(normalizedQuery).map(result => result.item)
-      : items
-  }, [fuse, query, items])
+    // A query below `minMatchCharLength` can never match, so searching would
+    // blank the whole list on the first keystroke -- leave it unfiltered.
+    if (normalizedQuery.length < minMatchCharLength) {
+      return items
+    }
+    return fuse.search(normalizedQuery).map(result => result.item)
+  }, [fuse, query, items, minMatchCharLength])
 
   return { query, setQuery, results }
 }

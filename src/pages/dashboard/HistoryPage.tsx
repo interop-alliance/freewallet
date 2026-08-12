@@ -5,7 +5,6 @@ import {
   Typography,
   Tabs,
   Tab,
-  TextField,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -27,7 +26,8 @@ import type { WalletActivity } from '@/stores/storageManager'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { JsonHighlight } from '@/components/JsonHighlight'
-import { MdClose, MdSearch } from 'react-icons/md'
+import { SearchField } from '@/components/SearchField'
+import { MdClose } from 'react-icons/md'
 import { formatRelativeTime } from '@/lib/formatRelativeTime'
 import { historyStyles, infoBoxStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
@@ -43,15 +43,23 @@ type HistoryItem = { id: string; doc: WalletActivity }
 
 // Module-level so it's referentially stable across renders -- it feeds
 // `useSearch`'s memoized index, which is keyed on this array.
+// `doc.object` carries `{ cid, title }` on credential activities (and a bare
+// cid string on older records, where these two keys are simply absent -- Fuse
+// tolerates that), so pasting a cid finds its activities.
 const HISTORY_SEARCH_KEYS: FuseOptionKey<HistoryItem>[] = [
   { name: 'doc.summary', weight: 0.7 },
-  { name: 'doc.type', weight: 0.3 }
+  { name: 'doc.type', weight: 0.3 },
+  { name: 'doc.object.title', weight: 0.5 },
+  { name: 'doc.object.cid', weight: 0.2 }
 ]
 
 export function HistoryPage() {
   const { t, i18n } = useTranslation()
   const session = useAuthStore(state => state.session)
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([])
+  // The cids the wallet still holds, so an activity about a credential that
+  // has since been deleted does not render a link to a missing page.
+  const [existingCids, setExistingCids] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
 
   const [tab, setTab] = useState<HistoryTab>('all')
@@ -66,9 +74,11 @@ export function HistoryPage() {
   }, [selectedItem])
 
   // Single-credential activities (create/share/unshare) get a title link to
-  // the credential; a deleted credential has nothing left to link to, so its
-  // title renders as plain text. Every other activity (login, app revoke,
-  // collection share) falls back to its plain `summary` line.
+  // the credential, but only while the wallet still holds it: a deletion
+  // activity, or an activity about a credential deleted since, has nothing
+  // left to link to, so its title renders as plain text. Every other activity
+  // (login, app revoke, collection share) falls back to its plain `summary`
+  // line.
   function renderActivityLine(doc: WalletActivity) {
     const info = credentialActivityInfo(doc)
     if (!info) {
@@ -78,7 +88,7 @@ export function HistoryPage() {
     const verbText = t(`history.credentialVerbs.${info.verb}`)
     return (
       <>
-        {info.verb === 'deleted' ? (
+        {info.verb === 'deleted' || !existingCids.has(info.cid) ? (
           titleText
         ) : (
           <Link
@@ -134,9 +144,18 @@ export function HistoryPage() {
       if (!session?.storage) {
         return
       }
-      const items = await session.storage.listHistoryItems()
+      const [items, credentials] = await Promise.all([
+        session.storage.listHistoryItems(),
+        // Only used to decide which titles link, so a failed read degrades to
+        // plain-text titles rather than failing the whole page.
+        session.storage.listCredentials().catch(err => {
+          console.error('Could not load credentials:', err)
+          return []
+        })
+      ])
       if (!cancelled) {
         setHistoryItems(items)
+        setExistingCids(new Set(credentials.map(({ cid }) => cid)))
         setLoading(false)
       }
     }
@@ -156,24 +175,10 @@ export function HistoryPage() {
       ) : (
         <>
           <Box sx={historyStyles.toolbar}>
-            <TextField
-              size="small"
+            <SearchField
               value={query}
-              onChange={event => setQuery(event.target.value)}
+              onChange={setQuery}
               placeholder={t('history.searchPlaceholder')}
-              sx={historyStyles.searchField}
-              slotProps={{
-                input: {
-                  startAdornment: (
-                    <Box
-                      component="span"
-                      sx={{ display: 'flex', color: 'text.secondary', mr: 1 }}
-                    >
-                      <MdSearch />
-                    </Box>
-                  )
-                }
-              }}
             />
             <Tabs
               value={tab}

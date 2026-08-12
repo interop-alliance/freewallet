@@ -501,6 +501,14 @@ export const infoBoxStyles = {
   }
 } as const
 
+/**
+ * The shared search box's width -- page-neutral, since the same field is
+ * used by the credentials, history, and contacts pages.
+ */
+export const searchFieldStyles = {
+  width: { xs: '100%', sm: 320 }
+} as const
+
 export const historyStyles = {
   toolbar: {
     mt: 3,
@@ -510,9 +518,6 @@ export const historyStyles = {
   },
   tabs: {
     minHeight: 'auto'
-  },
-  searchField: {
-    width: { xs: '100%', sm: 320 }
   },
   timestampRow: {
     mt: 0.5,

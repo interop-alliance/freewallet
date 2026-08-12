@@ -60,8 +60,8 @@ importers:
         specifier: ^3.5.4
         version: 3.5.4
       '@interop/wallet-core':
-        specifier: ^0.29.0
-        version: 0.29.0(@interop/jsonld-signatures@11.8.4)
+        specifier: ^0.30.0
+        version: 0.30.0(@interop/jsonld-signatures@11.8.4)
       '@interop/was-client':
         specifier: ^0.33.0
         version: 0.33.0(@interop/jsonld-signatures@11.8.4)
@@ -655,8 +655,8 @@ packages:
     resolution: {integrity: sha512-OBnDT3gBgBrfO2bT90RXLZNpfn1eqvOO1aiczi+ooKNciBkCTOGCXQm+ozs4n1ksNnCHF+D6g3GNUFkyS3o8sw==}
     engines: {node: '>=24.0'}
 
-  '@interop/wallet-core@0.29.0':
-    resolution: {integrity: sha512-jbDr0bs2myp9OEFpZE6xE4oTFkxqFnzE59F03XWFziksBTp8oK9nweOj8Cq7kUCDqOtX+4V5t2TiIyxnhE15Ig==}
+  '@interop/wallet-core@0.30.0':
+    resolution: {integrity: sha512-EiHheuK/jKPJwfw5J3hFvjsVf35Mn7ySBwLRw891EBo0/U109xNwQV4ZlOyduqPbGBSUnVLE1bnaKvElVdkteQ==}
     engines: {node: '>=24.0'}
 
   '@interop/was-client@0.33.0':
@@ -1596,8 +1596,8 @@ packages:
   ed25519-signature-2020-context@1.1.0:
     resolution: {integrity: sha512-dBGSmoUIK6h2vadDctrDnhhTO01PR2hJk0mRNEfrRDPCjaIwrfy4J+eziEQ9Q1m8By4f/CSRgKM1h53ydKfdNg==}
 
-  electron-to-chromium@1.5.403:
-    resolution: {integrity: sha512-MQsYmdaLzvaCX5j+ZZBr5Fm6uCCnPQcRtlvmvRlWqrXy+BH2O4ffXIAScF+JQznQWB9brWp4lSD9Z4yNmaf2BA==}
+  electron-to-chromium@1.5.404:
+    resolution: {integrity: sha512-3WJtd7/lVq2Jnuz6wed1l9+1ZD2u2Tet1/1NBc4Iedkmgbu+I7YuAqdAQ8T+VZtnwysMsAf3IqSq9D1gyZjA2g==}
 
   emoji-regex@8.0.0:
     resolution: {integrity: sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A==}
@@ -4038,7 +4038,7 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/wallet-core@0.29.0(@interop/jsonld-signatures@11.8.4)':
+  '@interop/wallet-core@0.30.0(@interop/jsonld-signatures@11.8.4)':
     dependencies:
       '@interop/data-integrity-core': 8.4.0
       '@interop/data-integrity-proof': 3.4.3
@@ -4743,7 +4743,7 @@ snapshots:
     dependencies:
       baseline-browser-mapping: 2.11.13
       caniuse-lite: 1.0.30001809
-      electron-to-chromium: 1.5.403
+      electron-to-chromium: 1.5.404
       node-releases: 2.0.53
       update-browserslist-db: 1.3.1(browserslist@4.28.8)
 
@@ -4988,7 +4988,7 @@ snapshots:
 
   ed25519-signature-2020-context@1.1.0: {}
 
-  electron-to-chromium@1.5.403: {}
+  electron-to-chromium@1.5.404: {}
 
   emoji-regex@8.0.0: {}
 
