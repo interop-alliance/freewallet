@@ -393,7 +393,7 @@ Its posture is deliberately split. **Decryption stands**: the code's
 (an ordinary, deliberately unmarked Multikey entry -- a recovery key is the
 keyAgreement-only case, so client listings keyed on `capabilityInvocation`
 never see it, and the document does not label which keyAgreement key is the
-recovery one), and its user key wrap stands in the `key-map/user-key.json`
+recovery one), and its user key wrap stands in the `key-map/user-key.jsonl`
 roster -- both maintained for free by rotation fan-out. **Authority stays latent**:
 the code's update key joins `updateKeys` nowhere; only its hash is committed
 in `nextKeyHashes`, and the one bridge into the zcap profile is a pre-minted
@@ -474,7 +474,7 @@ client, synchronously, in dependency order:
    verification method leaves the document. There are no per-collection
    revoke calls anywhere in the cascade; apps a revoked client had
    connected reconnect through the ordinary App Connect flow.
-2. **The user key rotation** in the `key-map/user-key.json` roster
+2. **The user key rotation** in the `key-map/user-key.jsonl` roster
    (`rotateUserKeyRoster`), recipients resolved from the just-updated verified
    document -- the roster delivers, never sources, so the revoked client's
    entry is dropped even before the retire filter. An account with no roster
@@ -1066,7 +1066,8 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   directly. No blockchain or registry needed. Freewallet derives each user's
   DID from their passphrase via `CapabilityAgent.fromSecret()`.
 - **CID (Content-addressed Identifier)** — a base64url-encoded SHA-256 hash of
-  the canonicalized credential JSON (`cidFrom()` in `src/lib/cidFrom.ts`).
+  the canonicalized credential JSON (`cidFrom()` from
+  `@interop/was-client/sync`).
   Used as the primary key for stored credentials.
 - **ZCap (Authorization Capability)** — the authorization model used to sign
   HTTP requests to the WAS server. Clients sign requests with their Ed25519
@@ -1150,7 +1151,7 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   at login from the local client-key record with the unlock-derived key
   (legacy accounts minted before the user key fall back to the seed-derived
   twin), then checked against the user key wrap-set roster
-  (`key-map/user-key.json`), which confirms the cached copy current or
+  (`key-map/user-key.jsonl`), which confirms the cached copy current or
   delivers a rotated one. Never replicated in unwrapped form
   and never held by the KMS; it is present for the life of every session.
 - **Session** — the in-memory object (`src/types/auth.ts`) holding the logged-in
