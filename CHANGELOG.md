@@ -1,5 +1,24 @@
 # History
 
+## 0.32.0 - TBD
+
+### Added
+
+- Settings > Connected wallets gained an "Onboard another wallet" invite
+  card: it creates an ephemeral exchange on the configured WAS server (the
+  exchanger URL is derived from it; no new environment variable) with a
+  `WalletOnboardingQuery` VPR as the stored request, renders the exchange's
+  interaction URL (`.../protocols?iuv=1`) as a QR code and as copyable text,
+  counts the invite down (~5 minutes, inside the server's exchange TTL), and
+  polls the exchange (~3s, per-instance with an AbortController, cleaned up
+  on cancel/unmount); expiry surfaces as "code expired -- generate a new
+  one". The create/poll module lives in `src/lib/onboardingInvite.ts`
+  (`@interop/wallet-core` 0.29.0, which carries the account pointer and
+  controller in the query). The consent panel that consumes the poll result
+  is a follow-up.
+- New dependency `qrcode.react` for QR rendering (the wallet could only
+  decode QR codes before).
+
 ## 0.31.0 - TBD
 
 ### Changed

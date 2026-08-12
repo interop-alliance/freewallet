@@ -45,6 +45,7 @@ import {
   type AccountClientView
 } from '@/session/clients'
 import { approveEnrollment } from '@/lib/enrollment'
+import { OnboardInviteCard } from '@/components/OnboardInviteCard'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { showToast } from '@/stores/toastStore'
 
@@ -76,6 +77,9 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
   const [enrolling, setEnrolling] = useState(false)
   const [enrollDone, setEnrollDone] = useState(false)
   const [enrollError, setEnrollError] = useState(false)
+  // The onboard-another-wallet invite card. Independent of the paste dialog
+  // above: they are two ways into the same ceremony, never one state machine.
+  const [onboardCardOpen, setOnboardCardOpen] = useState(false)
 
   const loadClients = useCallback(async () => {
     try {
@@ -409,10 +413,25 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
           >
             {enrolling ? t('settings.enrolling') : t('settings.enrollClient')}
           </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            sx={{ borderRadius: 2, px: 2, py: 1 }}
+            disabled={onboardCardOpen}
+            onClick={() => setOnboardCardOpen(true)}
+          >
+            {t('settings.onboardClient')}
+          </Button>
           <Typography variant="body2" color="text.secondary">
             {t('settings.enrollClientHint')}
           </Typography>
         </Stack>
+      )}
+      {canEnroll && onboardCardOpen && (
+        <OnboardInviteCard
+          session={session}
+          onCancel={() => setOnboardCardOpen(false)}
+        />
       )}
       {enrollDone && (
         <Typography variant="body2" color="success.main">

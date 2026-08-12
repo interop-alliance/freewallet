@@ -60,8 +60,8 @@ importers:
         specifier: ^3.5.4
         version: 3.5.4
       '@interop/wallet-core':
-        specifier: ^0.28.0
-        version: 0.28.0(@interop/jsonld-signatures@11.8.4)
+        specifier: ^0.29.0
+        version: 0.29.0(@interop/jsonld-signatures@11.8.4)
       '@interop/was-client':
         specifier: ^0.33.0
         version: 0.33.0(@interop/jsonld-signatures@11.8.4)
@@ -119,6 +119,9 @@ importers:
       qr-scanner:
         specifier: ^1.4.2
         version: 1.4.2
+      qrcode.react:
+        specifier: ^4.2.0
+        version: 4.2.0(react@19.2.8)
       query-string:
         specifier: ^9.5.0
         version: 9.5.0
@@ -652,8 +655,8 @@ packages:
     resolution: {integrity: sha512-OBnDT3gBgBrfO2bT90RXLZNpfn1eqvOO1aiczi+ooKNciBkCTOGCXQm+ozs4n1ksNnCHF+D6g3GNUFkyS3o8sw==}
     engines: {node: '>=24.0'}
 
-  '@interop/wallet-core@0.28.0':
-    resolution: {integrity: sha512-M35lirohQzVUAidTRdVcVanlL4jNugSTuX0sCO/tblTDlHm18sNG7eNijj+YrqhdYwjfK0zyLm1XbiGHpeMfhA==}
+  '@interop/wallet-core@0.29.0':
+    resolution: {integrity: sha512-jbDr0bs2myp9OEFpZE6xE4oTFkxqFnzE59F03XWFziksBTp8oK9nweOj8Cq7kUCDqOtX+4V5t2TiIyxnhE15Ig==}
     engines: {node: '>=24.0'}
 
   '@interop/was-client@0.33.0':
@@ -2724,6 +2727,11 @@ packages:
   qr-scanner@1.4.2:
     resolution: {integrity: sha512-kV1yQUe2FENvn59tMZW6mOVfpq9mGxGf8l6+EGaXUOd4RBOLg7tRC83OrirM5AtDvZRpdjdlXURsHreAOSPOUw==}
 
+  qrcode.react@4.2.0:
+    resolution: {integrity: sha512-QpgqWi8rD9DsS9EP3z7BT+5lY5SFhsqGjpgW5DY/i3mK4M9DTBNz3ErMi8BWYEfI3L0d8GIbGmcdFAS1uIRGjA==}
+    peerDependencies:
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
   query-string@9.5.0:
     resolution: {integrity: sha512-YlJmwNyi0RGYjlxYcuDncMsxFU7YyutbuI7gTm8ySxIGBlwx5yiBCOD5ig9ZNoHkawk/1Dey0N5mEfcUybMVAA==}
     engines: {node: '>=18'}
@@ -4030,7 +4038,7 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/wallet-core@0.28.0(@interop/jsonld-signatures@11.8.4)':
+  '@interop/wallet-core@0.29.0(@interop/jsonld-signatures@11.8.4)':
     dependencies:
       '@interop/data-integrity-core': 8.4.0
       '@interop/data-integrity-proof': 3.4.3
@@ -6386,6 +6394,10 @@ snapshots:
   qr-scanner@1.4.2:
     dependencies:
       '@types/offscreencanvas': 2019.7.3
+
+  qrcode.react@4.2.0(react@19.2.8):
+    dependencies:
+      react: 19.2.8
 
   query-string@9.5.0:
     dependencies:
