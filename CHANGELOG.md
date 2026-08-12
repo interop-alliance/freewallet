@@ -1,5 +1,17 @@
 # History
 
+## 0.34.0 - TBD
+
+### Fixed
+
+- Match wallet-core's security refusals (`ResourceLogContinuityError`,
+  `UserKeyRosterContinuityError`, `UserKeyRosterIntegrityError`,
+  `UserKeyRosterUnwrapError`) on `err.name` rather than `instanceof`, at the
+  login-page error classifier and the login-time did:webvh provisioning. Those
+  errors are raised inside app-injected seams, so a linked or duplicated copy
+  of `@interop/wallet-core` could otherwise make the check miss and show a
+  generic setup-failure message instead of the specific refusal.
+
 ## 0.33.0 - TBD
 
 ### Changed

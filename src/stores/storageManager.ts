@@ -79,7 +79,6 @@ import {
   type EncryptionDescriptorCache
 } from '@interop/wallet-core/descriptors'
 import { accountLogPinStore, savePinFromDescriptor } from '@/lib/sessionKey'
-import { ResourceLogContinuityError } from '@interop/wallet-core/resourceLog'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import { SHAREABLE_COLLECTIONS as ENCRYPTED_STANDARD_COLLECTIONS } from '@/session/shares'
 import {
@@ -1671,10 +1670,15 @@ export class StorageManager {
               // is logged as an error -- the later account-log reads in the
               // same login run the same pin and surface it to the user. A
               // rollback may be no more than replication lag (nothing rolled
-              // back was adopted), so it warns like everything else.
+              // back was adopted), so it warns like everything else. Matched
+              // on `err.name` rather than `instanceof`: the refusal is raised
+              // inside wallet-core, whose copy here can differ from the one
+              // this file imports (a linked checkout, or a duplicate through
+              // the dependency tree).
               if (
-                err instanceof ResourceLogContinuityError &&
-                err.reason !== 'rollback'
+                (err as { name?: unknown } | null)?.name ===
+                  'ResourceLogContinuityError' &&
+                (err as { reason?: unknown }).reason !== 'rollback'
               ) {
                 console.error('did:webvh provisioning refused:', err)
               } else {

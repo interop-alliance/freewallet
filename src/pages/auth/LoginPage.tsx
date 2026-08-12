@@ -20,12 +20,6 @@ import {
   AccountPointerChangedError,
   KeyringRecordUnusableError
 } from '@/session/keyring'
-import {
-  UserKeyRosterContinuityError,
-  UserKeyRosterIntegrityError,
-  UserKeyRosterUnwrapError
-} from '@interop/wallet-core/keys'
-import { ResourceLogContinuityError } from '@interop/wallet-core/resourceLog'
 import { backfillPassphraseUnlockMethod } from '@/session/unlockMethods'
 import { checkRecoveryHealth } from '@/session/recovery'
 import { showToast } from '@/stores/toastStore'
@@ -44,6 +38,23 @@ import {
 import { registerWallet } from '@/lib/registerWallet'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import type { AuthLocationState } from '@/types/auth'
+
+/**
+ * The `name` of a thrown value, if it carries one.
+ *
+ * The wallet-core refusals below are matched on `err.name` rather than
+ * `instanceof`: they are raised inside app-injected seams, and the copy of
+ * `@interop/wallet-core` that raised them can differ from the copy this file
+ * imports (a linked checkout, or a duplicate through the dependency tree), so
+ * an `instanceof` check would silently miss the refusal and fall through to
+ * the generic setup-failed arm. Errors defined in this app keep `instanceof`.
+ *
+ * @param err {unknown}
+ * @returns {unknown}
+ */
+function errorName(err: unknown): unknown {
+  return (err as { name?: unknown } | null)?.name
+}
 
 /**
  * Maps a login failure to the i18n key its message lives under, logging the
@@ -76,26 +87,26 @@ function loginErrorKey({
   // The account-log continuity refusal: the served did:webvh log is a
   // rollback, a fork, or an identity switch against the chain head this
   // browser has pinned.
-  if (err instanceof ResourceLogContinuityError) {
+  if (errorName(err) === 'ResourceLogContinuityError') {
     console.error(`${label} refused:`, err)
     return 'auth.errors.accountLogContinuity'
   }
   // The rollback refusal: the served key roster sits behind the epoch this
   // browser has already seen.
-  if (err instanceof UserKeyRosterContinuityError) {
+  if (errorName(err) === 'UserKeyRosterContinuityError') {
     console.error(`${label} refused:`, err)
     return 'auth.errors.userKeyRosterContinuity'
   }
   // The served key roster failed authentication -- a fabricated or tampered
   // epoch configuration.
-  if (err instanceof UserKeyRosterIntegrityError) {
+  if (errorName(err) === 'UserKeyRosterIntegrityError') {
     console.error(`${label} refused:`, err)
     return 'auth.errors.userKeyRosterIntegrity'
   }
   // A torn enrollment: this browser's key is published for the account, but
   // the key roster holds no wrap for it, so the session cannot recover the
   // account key.
-  if (err instanceof UserKeyRosterUnwrapError) {
+  if (errorName(err) === 'UserKeyRosterUnwrapError') {
     console.error(`${label} failed:`, err)
     return 'auth.errors.userKeyRosterUnwrap'
   }

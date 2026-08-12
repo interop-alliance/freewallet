@@ -60,8 +60,8 @@ importers:
         specifier: ^3.5.4
         version: 3.5.4
       '@interop/wallet-core':
-        specifier: ^0.33.0
-        version: 0.33.0(@interop/jsonld-signatures@11.8.4)
+        specifier: ^0.34.0
+        version: 0.34.0(@interop/jsonld-signatures@11.8.4)
       '@interop/was-client':
         specifier: ^0.34.0
         version: 0.34.0(@interop/jsonld-signatures@11.8.4)
@@ -655,8 +655,8 @@ packages:
     resolution: {integrity: sha512-OBnDT3gBgBrfO2bT90RXLZNpfn1eqvOO1aiczi+ooKNciBkCTOGCXQm+ozs4n1ksNnCHF+D6g3GNUFkyS3o8sw==}
     engines: {node: '>=24.0'}
 
-  '@interop/wallet-core@0.33.0':
-    resolution: {integrity: sha512-ug51dkJu1/7isls8sookW8gGaq+DUnLggrchCL/u1zZwz2uTNOk4Df1b2qJlQSc/mH28RrMLKuOHX4+7f0OApQ==}
+  '@interop/wallet-core@0.34.0':
+    resolution: {integrity: sha512-ruxXzg+F6oCLbktf80pq4yqCxoFcKz0HkpVBIgDCcW5m76qBQJc7OmRNlKJrAzEfr4bqOObjwpNSAH6+vMoyqw==}
     engines: {node: '>=24.0'}
 
   '@interop/was-client@0.34.0':
@@ -4038,7 +4038,7 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/wallet-core@0.33.0(@interop/jsonld-signatures@11.8.4)':
+  '@interop/wallet-core@0.34.0(@interop/jsonld-signatures@11.8.4)':
     dependencies:
       '@interop/data-integrity-core': 8.4.0
       '@interop/data-integrity-proof': 3.4.3
