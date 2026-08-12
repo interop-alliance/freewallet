@@ -25,6 +25,7 @@ import {
   UserKeyRosterIntegrityError,
   UserKeyRosterUnwrapError
 } from '@interop/wallet-core/keys'
+import { ResourceLogContinuityError } from '@interop/wallet-core/resourceLog'
 import { backfillPassphraseUnlockMethod } from '@/session/unlockMethods'
 import { checkRecoveryHealth } from '@/session/recovery'
 import { showToast } from '@/stores/toastStore'
@@ -71,6 +72,13 @@ function loginErrorKey({
   if (err instanceof AccountPointerChangedError) {
     console.error(`${label} refused:`, err)
     return 'auth.errors.accountPointerChanged'
+  }
+  // The account-log continuity refusal: the served did:webvh log is a
+  // rollback, a fork, or an identity switch against the chain head this
+  // browser has pinned.
+  if (err instanceof ResourceLogContinuityError) {
+    console.error(`${label} refused:`, err)
+    return 'auth.errors.accountLogContinuity'
   }
   // The rollback refusal: the served key roster sits behind the epoch this
   // browser has already seen.

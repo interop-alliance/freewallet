@@ -4,6 +4,17 @@
 
 ### Changed
 
+- Update to `@interop/wallet-core@0.32.0`: the account's did:webvh log now
+  carries a durable chain-head pin (`accountLogPinStore` in the session
+  database, keyed by the data Space id beside the roster-log pin), so a
+  served `did.jsonl` that is a rollback, a fork, or an SCID/method switch
+  against the pinned head is refused rather than adopted. The pin rides the
+  verified-log memo, the roster store's controller resolution, the recovery
+  flows, and enrollment completion (first contact establishes it,
+  trust-on-first-use); the login page renders the refusal. Ceremony-path
+  `did.jsonl` reads (the revocation cascade, recovery-code issuance /
+  revocation / continuation) now also check the resolved DID against the
+  account pointer via `expectedDid`.
 - Update to `@interop/wallet-core@0.31.0`: every did:webvh ceremony now
   publishes `did.jsonl` as a compare-and-swap on the read its entry was built
   on, so two clients extending the log concurrently can never silently erase

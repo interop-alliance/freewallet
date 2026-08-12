@@ -21,7 +21,7 @@ src/lib/            Pure business logic (no React)
   resolveWalletInput.ts  The one door for free-form text (paste box, QR),
                     over the shared wallet-input classifier
   sessionKey.ts     freewallet-session IndexedDB caches (keyring, unlock
-                    methods, passkey-safety notices)
+                    methods, pins, passkey-safety notices)
   corsProxy.ts      The one CORS-proxy path (`VITE_CORS_PROXY_URL`), used by
                     the pasted-URL credential fetch and the registries fetch
   viewMappers/      Transform raw credential data into display-ready values
@@ -172,6 +172,28 @@ enrolled-client ceremony; the recovery continuation's delegated store
 public log fetch and delegated PUT. The `did.json` projection PUT stays
 unconditional -- it runs only behind a won log CAS, and the log is the
 source of truth.
+
+**The account-log chain-head pin.** Resolving the world-readable log is
+one-shot verification: a valid PREFIX of the real log carries the same
+genesis, so the same SCID and DID, and a ceremony built on it would
+republish erased enrollments and undone revocations as durable state. So
+every `verifyAccountLog` read carries a durable chain-head pin
+(`accountLogPinStore` in the session database, keyed by the data Space id
+under its own key, beside the account-pointer pin and the two roster pins):
+a served log that is a rollback, a fork, or an SCID/method switch against
+the pinned head is refused (wallet-core's `ResourceLogContinuityError` --
+the same seam and refusal class as the roster log's pin), established at
+first contact (trust-on-first-use) and advanced only by a log verifying
+past it, never regressed. The pin rides the verified-log memo
+(`src/session/verifiedLog.ts`), the bare-parts roster store's controller
+resolution, the recovery flows' direct reads, and the enrollment
+completion's first contact; the login page renders the refusal
+(`auth.errors.accountLogContinuity`). A `rollback` is the one reason that
+may be nothing worse than replication lag -- nothing rolled back is
+adopted, and a caller with a cached document view may carry on with what it
+has. Ceremony-path `did.jsonl` reads additionally check the resolved DID
+against the account pointer (`expectedDid` on the revocation cascade and
+the recovery ceremonies).
 
 **Controller promotion by ordering.** The Space id is an independent random
 identifier minted at signup (`mintSpaceId`) and carried in the account

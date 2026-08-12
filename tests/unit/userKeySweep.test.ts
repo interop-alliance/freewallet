@@ -56,6 +56,10 @@ vi.mock('@/lib/sessionKey', () => ({
   userKeyLogPinStore: vi.fn(() => ({
     read: async () => null,
     write: async () => undefined
+  })),
+  accountLogPinStore: vi.fn(() => ({
+    read: async () => null,
+    write: async () => undefined
   }))
 }))
 
