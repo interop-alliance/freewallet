@@ -39,10 +39,10 @@ import {
 } from '@interop/was-client'
 import {
   addRecipient,
-  ensureFirstEpoch,
   removeRecipient,
   type RecipientPublicKey
 } from '@interop/was-client/edv'
+import { ensureIndexedFirstEpoch } from '@interop/wallet-core/keys'
 import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
 import {
@@ -100,6 +100,7 @@ import {
   type SyncedCollectionStore
 } from '@/stores/remoteDirectStore'
 import { UnknownEpochError } from '@interop/was-client/edv'
+import { KeyUnwrapError } from '@interop/was-client'
 import { uuidv7 } from 'uuidv7'
 import {
   ACTIVITY_TYPE,
@@ -158,7 +159,9 @@ function currentEpochRecipientKids({
  * epoch-refresh readers bucket on: an `UnknownEpochError` (a rekey the cached
  * descriptor has not caught up to) becomes the refresh signal, and any other
  * failure is logged and degrades to `undefined`, so the caller can fall back
- * to the raw envelope.
+ * to the raw envelope. A `KeyUnwrapError` (the epoch is on the descriptor but
+ * this wallet holds no key for it) is one of those other failures: it is never
+ * the refresh signal, since no refresh can grant a key.
  *
  * @param options {object}
  * @param options.cipher {DocCipher}
@@ -181,6 +184,14 @@ async function decryptEnvelope({
   } catch (err) {
     if (err instanceof UnknownEpochError) {
       return { value: undefined, unknownEpoch: true }
+    }
+    if (err instanceof KeyUnwrapError) {
+      console.warn(
+        `This wallet is not a recipient of the key epoch of a resource from ` +
+          `${source}:`,
+        err
+      )
+      return { value: undefined, unknownEpoch: false }
     }
     console.warn(`Could not decrypt resource envelope from ${source}:`, err)
     return { value: undefined, unknownEpoch: false }
@@ -1278,13 +1289,16 @@ export class StorageManager {
    * zero (policy -- the user is a recipient of every encrypted collection in
    * their own Space) alongside the app's identity key-agreement key. The
    * collection is ensured to exist and declared `'edv'` without clobbering an
-   * existing descriptor, then `ensureFirstEpoch` installs epoch[0] wrapped to
-   * the owner alone -- create-if-absent, adopting a roster an earlier
-   * provision landed, so every app collection carries its key epochs from
-   * birth (the first-epoch mint runs only here, at provisioning). The app is
-   * then always escrowed in by `addRecipient` (into every epoch -- adds are
-   * cheap) unless the current epoch already wraps to it (reconnect with no
-   * intervening revoke: a no-op).
+   * existing descriptor, then `ensureIndexedFirstEpoch` installs epoch[0]
+   * wrapped to the owner alone, together with the collection's blinded-index
+   * HMAC key -- create-if-absent, adopting a roster an earlier provision
+   * landed, so every app collection carries its key epochs from birth (the
+   * first-epoch mint runs only here, at provisioning). A collection whose
+   * roster predates the blinded index is adopted as it stands, without an
+   * HMAC key. The app is then always escrowed in by `addRecipient` (into every
+   * epoch, and into the HMAC key's wrap set -- adds are cheap) unless the
+   * current epoch already wraps to it (reconnect with no intervening revoke: a
+   * no-op).
    *
    * The app never needs the vault KAK and the wallet never needs the app seed
    * at all (the recipient is derived from the app's controller DID, and the
@@ -1319,7 +1333,7 @@ export class StorageManager {
     // zero) create-if-absent -- an existing roster is adopted, never
     // overwritten.
     await remote.ensureEncryptedCollection({ id: collectionId })
-    const { descriptor: current } = await ensureFirstEpoch({
+    const { descriptor: current } = await ensureIndexedFirstEpoch({
       collection,
       recipients: [ownerRecipient({ keyAgreementKey })]
     })

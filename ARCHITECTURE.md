@@ -510,6 +510,17 @@ collections -- so a mid-cascade crash strands nothing permanently. The
 honest ceiling is unchanged: ciphertext the revoked client already fetched
 stays readable to it, and old epochs open to keys it already held.
 
+One key deliberately survives every rotation: a collection's blinded-index
+HMAC key. It is minted with epoch[0] at provisioning and wrapped to each
+recipient on the `encryption` descriptor, but it never rotates -- blinded
+index tokens must compare across the collection's whole history, and a
+fresh key would orphan every existing `indexed` entry. Recipient removal
+only drops the leaver's wrap. A removed recipient therefore keeps the
+blinding key and, colluding with the server, could confirm guessed
+attribute values indefinitely. That is a guessing oracle, not a read path:
+the server still gates the query endpoint on the pull grant, and the
+content keys rotate as described above.
+
 The standing backstop is the **cascade-completion sweep**: session creation
 re-runs stages 2 and 3 in the background on every login whose roster read
 succeeded, chained behind collection provisioning and exposed as
@@ -852,9 +863,16 @@ key from a public identifier it already has. The app derives the private half
 from its own controller key, so the app and the wallet -- holding the vault KAK
 -- both read the collection, while the WAS server only ever stores ciphertext.
 Provisioning is idempotent: the collection gets epoch[0] wrapped to the owner
-create-if-absent (`ensureFirstEpoch`, adopting an existing roster rather than
-overwriting it), then a first connect or a reconnect after revoke escrows the
-app into every epoch (`addRecipient(app)`); already present -> no-op. The
+create-if-absent (`ensureIndexedFirstEpoch` from `@interop/wallet-core/keys`,
+adopting an existing roster rather than overwriting it), then a first connect
+or a reconnect after revoke escrows the
+app into every epoch (`addRecipient(app)`); already present -> no-op.
+Epoch[0] is minted together with the collection's blinded-index HMAC key,
+wrapped to the same recipient roster, so the app can declare searchable
+attributes and query the collection (was-client's `declareIndex` / `find`).
+The blinded-index key is installed at provisioning or never: a collection
+provisioned before blind-index support is adopted as-is and stays
+unindexable. The
 wallet ensures the collection exists without
 clobbering an existing `encryption` descriptor, so an established epoch roster is
 never dropped. Public (`https://w3id.org/byoe#public-collection`) grants
@@ -874,7 +892,11 @@ from the fetched Collection Description (no seed at read time). Revoking a
 connected app rotates the epoch off the app's key for each such collection
 (`removeRecipient`, which rotates then revokes the pull-axis grants
 indivisibly), so a revoked app cannot decrypt future writes -- the honest
-ceiling being that ciphertext it already fetched stays readable to it.
+ceiling being that ciphertext it already fetched stays readable to it. The
+blinded-index key is deliberately not rotated on revoke (see "Client
+revocation and the epoch cascade" for the asymmetry): the revoked app keeps
+the ability to compute blinded terms, while the query endpoint itself stays
+behind the revoked pull grant.
 
 ## Sharing a wallet collection (`https://w3id.org/byoe#shared-wallet-collection`)
 
@@ -923,7 +945,11 @@ can only mean an unprovisioned or torn collection), so there is no legacy
 single-recipient residue a reader could fetch but not decrypt. Removal is the Settings "Shared collections"
 panel (`unshareCollection`), not expiry -- the share TTL
 (`SHARE_ZCAP_TTL_MS`) is deliberately long, because expiry would end the pull
-axis while leaving the grantee in the key roster.
+axis while leaving the grantee in the key roster. A share also escrows the
+grantee into the collection's blinded-index HMAC key when the descriptor
+carries one; removal drops that wrap but never rotates the key (see "Client
+revocation and the epoch cascade" for why, and what a removed grantee
+keeps).
 
 **The grantee's half lives in `@interop/was-react`.** An app declares the
 wallet-owned collections it wants in `WasAppConfig.sharedCollections`, which

@@ -13,6 +13,7 @@ import { cidFrom } from '@interop/was-client/sync'
 import type { Json } from '@/lib/sync'
 import { BrowserStore } from './browserStore'
 import { UnknownEpochError, type DocCipher } from '@interop/was-client/edv'
+import { KeyUnwrapError } from '@interop/was-client'
 import { PublicCopyRetractionError, StorageManager } from './storageManager'
 import { RemoteDirectStore } from './remoteDirectStore'
 import type { WASRemoteStore } from './wasRemoteStore'
@@ -618,6 +619,34 @@ function makeUnknownEpochCipher(): DocCipher {
   }
 }
 
+/**
+ * A fake cipher whose `decrypt` always throws `KeyUnwrapError` -- standing in
+ * for a row whose key epoch IS on the collection's descriptor but which this
+ * wallet holds no key for (it was never a recipient, or was removed and the
+ * epoch rotated). `encrypt` still produces a normal fake envelope.
+ */
+function makeNoEpochKeyCipher(): DocCipher {
+  return {
+    async encrypt({ data }: { data: Json }) {
+      fakeCipherCounter += 1
+      const id = `z6NoKeyEnvelope${fakeCipherCounter}`
+      return {
+        id,
+        envelope: {
+          id,
+          sequence: 0,
+          jwe: { ciphertext: JSON.stringify(data) }
+        } as Json
+      }
+    },
+    async decrypt() {
+      throw new KeyUnwrapError(
+        'No epoch key for collection "private-credentials".'
+      )
+    }
+  }
+}
+
 describe('BrowserStore (key epochs)', () => {
   it('stores the epoch the cipher stamped on the row', async () => {
     const { localStore } = await initLocalStore({
@@ -681,6 +710,49 @@ describe('BrowserStore (key epochs)', () => {
     expect(
       await localStore.rxCollection('privateCredentials').find().exec()
     ).toHaveLength(1)
+  })
+
+  it('never purges a row this wallet holds no epoch key for', async () => {
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        privateCredentials: makeNoEpochKeyCipher(),
+        walletActivity: makeNoEpochKeyCipher()
+      }
+    })
+    const credential = makeCredential('Alice')
+    await localStore.rxCollection('privateCredentials').insert({
+      id: 'z6NoKey',
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: {
+        id: 'z6NoKey',
+        sequence: 0,
+        jwe: { ciphertext: JSON.stringify(credential) }
+      } as Json
+    })
+
+    const listed = await localStore.listCredentials()
+
+    // The row is skipped and counted on its own axis: it is another reader's
+    // data, so it is neither purgeable garbage nor a descriptor-refresh signal.
+    expect(listed).toHaveLength(0)
+    expect(localStore.noEpochKeyCredentials).toBe(1)
+    expect(localStore.undecryptableCredentials).toBe(0)
+    expect(localStore.unknownEpochCredentials).toBe(0)
+
+    // The purge leaves it in place.
+    expect(await localStore.purgeUndecryptableCredentials()).toBe(0)
+    expect(
+      await localStore.rxCollection('privateCredentials').find().exec()
+    ).toHaveLength(1)
+
+    // A later key grant (a wider cipher) makes the same row readable.
+    localStore.setCiphers({
+      privateCredentials: makeFakeCipher(),
+      walletActivity: makeFakeCipher()
+    })
+    expect(await localStore.listCredentials()).toHaveLength(1)
+    expect(localStore.noEpochKeyCredentials).toBe(0)
   })
 
   it('setCiphers swaps the injected cipher for a subsequent read', async () => {
@@ -1376,6 +1448,33 @@ describe('RemoteDirectStore', () => {
     })
     expect(await store.listCredentials()).toEqual([{ cid, vc: credential }])
     expect(store.unknownEpochCredentials).toBe(0)
+  })
+
+  it('never purges a remote resource this wallet holds no epoch key for', async () => {
+    const { remoteStore, collections } = makeFakeRemoteStore()
+    const credential = makeCredential('Alice')
+    const good = makeFakeCipher()
+    const { id, envelope } = await good.encrypt({
+      data: credential as unknown as Json
+    })
+    collections.set('privateCredentials', new Map([[id, envelope]]))
+
+    const store = new RemoteDirectStore({
+      remoteStore,
+      ciphers: {
+        privateCredentials: makeNoEpochKeyCipher(),
+        walletActivity: makeFakeCipher()
+      }
+    })
+
+    expect(await store.listCredentials()).toHaveLength(0)
+    expect(store.noEpochKeyCredentials).toBe(1)
+    expect(store.undecryptableCredentials).toBe(0)
+    expect(store.unknownEpochCredentials).toBe(0)
+
+    // The purge deletes from the SERVER, so this bucket must stay out of it.
+    expect(await store.purgeUndecryptableCredentials()).toBe(0)
+    expect(collections.get('privateCredentials')!.size).toBe(1)
   })
 
   it('dedupes adds against the session cache without re-listing per item', async () => {

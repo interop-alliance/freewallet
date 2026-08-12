@@ -1,5 +1,36 @@
 # History
 
+## 0.35.0 - TBD
+
+### Added
+
+- Encrypted collections are indexable from birth: provisioning now mints a
+  blinded-index HMAC key alongside epoch[0] and installs it on the
+  `encryption` descriptor, wrapped to each recipient's key-agreement key --
+  the standard collections via `@interop/wallet-core@0.35.0`'s
+  `ensureIndexedFirstEpoch`, and App Connect app-provisioned private
+  collections through the same helper. `addRecipient` (app connect, shares)
+  escrows the new recipient into the key; `removeRecipient` (app revocation,
+  unshare) drops the leaver's wrap without rotating the key, since blinded
+  tokens must compare across the collection's whole history. Collections
+  provisioned before blind-index support are adopted as-is and stay
+  unindexable. The resulting revocation asymmetry (a removed recipient keeps
+  the blinding key) is documented in ARCHITECTURE.md.
+
+### Changed
+
+- Update to `@interop/was-client@0.35.0` and `@interop/storage-core@0.8.0`.
+
+### Fixed
+
+- Classify a `KeyUnwrapError` decrypt failure (the row's key epoch is on the
+  collection's descriptor, but this wallet holds no key for it) on its own
+  axis in `BrowserStore` and `RemoteDirectStore`, rather than as undecryptable
+  garbage. Such rows are skipped and counted as `noEpochKeyCredentials`, never
+  cached, and never removed by "Remove undecryptable" -- which in the
+  remote-direct backend deletes from the WAS server. They also drive no
+  descriptor refresh, since a refresh cannot grant a key.
+
 ## 0.34.0 - TBD
 
 ### Changed

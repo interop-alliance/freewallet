@@ -38,6 +38,7 @@ import {
   UnknownEpochError,
   type DocCipher
 } from '@interop/was-client/edv'
+import { KeyUnwrapError } from '@interop/was-client'
 import type { StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'
@@ -68,6 +69,7 @@ export interface SyncedCollectionStore {
   purgeUndecryptableCredentials(): Promise<number>
   readonly unknownEpochCredentials: number
   readonly unknownEpochHistory: number
+  readonly noEpochKeyCredentials: number
   addHistoryItem(options: {
     resourceId: string
     activity: WalletActivity
@@ -113,6 +115,11 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   #undecryptableCredentials = 0
   #unknownEpochCredentials = 0
   #unknownEpochHistory = 0
+  // Count of resources the last read skipped because this wallet holds no key
+  // for their key epoch (never a recipient, or removed and the epoch rotated).
+  // Never purged -- they are another reader's data, not garbage -- and they
+  // drive no descriptor refresh, which could not help.
+  #noEpochKeyCredentials = 0
   // Session cache of the remote `private-credentials` contents, so a batch of
   // adds does not re-list-and-decrypt the whole collection per item (it is
   // rebuilt by every list read and maintained incrementally on add/delete).
@@ -215,6 +222,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     const index = new Map<string, Set<string>>()
     const undecryptableRowIds: string[] = []
     let unknownEpoch = 0
+    let noEpochKey = 0
     // The rows decrypt in parallel; the fold below then walks them in list
     // order, so the entry ordering and the per-row failure buckets match what
     // a sequential pass produced.
@@ -248,6 +256,15 @@ export class RemoteDirectStore implements SyncedCollectionStore {
             err
           )
           unknownEpoch += 1
+        } else if (err instanceof KeyUnwrapError) {
+          // This wallet is not a recipient of the resource's key epoch: skip it,
+          // but never purge it -- a purge here would delete it from the server.
+          console.warn(
+            `Skipping remote private-credentials resource "${resourceId}": ` +
+              `this wallet is not a recipient of its key epoch:`,
+            err
+          )
+          noEpochKey += 1
         } else {
           // One undecryptable remote row must not brick the whole popup list.
           console.warn(
@@ -271,6 +288,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     this.#undecryptableCredentialRowIds = undecryptableRowIds
     this.#undecryptableCredentials = undecryptableRowIds.length
     this.#unknownEpochCredentials = unknownEpoch
+    this.#noEpochKeyCredentials = noEpochKey
     this.#credentialsLoaded = true
   }
 
@@ -377,8 +395,14 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     return this.#unknownEpochHistory
   }
 
+  get noEpochKeyCredentials(): number {
+    return this.#noEpochKeyCredentials
+  }
+
   async purgeUndecryptableCredentials(): Promise<number> {
-    // A fresh scan collects the current undecryptable resource ids.
+    // A fresh scan collects the current undecryptable resource ids. Only that
+    // bucket is deleted: unknown-epoch resources and resources this wallet
+    // holds no key for stay on the server.
     await this.#loadCredentialEntries()
     for (const resourceId of this.#undecryptableCredentialRowIds) {
       await this.#remote.deleteSyncedResource({
@@ -454,6 +478,16 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       if (err) {
         if (err instanceof UnknownEpochError) {
           unknownEpoch += 1
+          continue
+        }
+        if (err instanceof KeyUnwrapError) {
+          // Not a recipient of this resource's key epoch: skip it, and keep it
+          // out of the refresh signal -- a descriptor refresh cannot help.
+          console.warn(
+            `Skipping remote wallet-activity resource "${resourceId}": this ` +
+              `wallet is not a recipient of its key epoch:`,
+            err
+          )
           continue
         }
         console.warn(

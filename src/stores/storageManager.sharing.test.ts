@@ -32,7 +32,8 @@ import {
 import {
   ensureFirstEpoch,
   initRecipients,
-  removeRecipient
+  removeRecipient,
+  resolveHmacKey
 } from '@interop/was-client/edv'
 import { mintRecordEncryption } from '@/session/recordEnvelope'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
@@ -278,17 +279,20 @@ async function buildCiphers(
  * carries its epochs and always `addRecipient`s. Returns the descriptors
  * (keyed by WAS collection id) to build the ciphers and seed the
  * StorageManager with, so a mid-test cipher rebuild keeps every collection
- * readable.
+ * readable. `blindedIndex` mints each collection's blinded-index HMAC key
+ * alongside epoch[0], as wallet provisioning does.
  */
 async function provisionFakeRemote(
   owner: { keyAgreementKey: IKeyAgreementKey },
-  remoteStore: WASRemoteStore
+  remoteStore: WASRemoteStore,
+  { blindedIndex = false }: { blindedIndex?: boolean } = {}
 ): Promise<Record<string, CollectionEncryption>> {
   const descriptors: Record<string, CollectionEncryption> = {}
   for (const id of ['private-credentials', 'wallet-activity']) {
     const { descriptor } = await ensureFirstEpoch({
       collection: remoteStore.collectionHandle({ collectionId: id }),
-      recipients: [ownerRecipient({ keyAgreementKey: owner.keyAgreementKey })]
+      recipients: [ownerRecipient({ keyAgreementKey: owner.keyAgreementKey })],
+      blindedIndex
     })
     descriptors[id] = descriptor
   }
@@ -358,6 +362,38 @@ function currentEpochKids(descriptor: CollectionEncryption): string[] {
     entry => entry.id === descriptor.currentEpoch
   )
   return (epoch?.recipients ?? []).map(recipient => recipient.header.kid)
+}
+
+/**
+ * The JWE-recipient kids of a descriptor's blinded-index HMAC key wrap set.
+ */
+function hmacKids(descriptor: CollectionEncryption): string[] {
+  return (descriptor.hmac?.recipients ?? []).map(
+    recipient => recipient.header.kid
+  )
+}
+
+/**
+ * Resolves a blinding key with the given key-agreement key, returning the
+ * refusal instead of throwing so a test can assert on its `name` (errors cross
+ * a package boundary here, so they are matched by name, never `instanceof`).
+ */
+async function resolveHmacOutcome({
+  descriptor,
+  keyAgreementKey
+}: {
+  descriptor: CollectionEncryption
+  keyAgreementKey: IKeyAgreementKey
+}): Promise<{ id?: string; errorName?: string }> {
+  try {
+    const key = await resolveHmacKey({
+      encryption: descriptor,
+      keyAgreementKey
+    })
+    return { id: key?.id }
+  } catch (err) {
+    return { errorName: (err as Error).name }
+  }
 }
 
 afterEach(async () => {
@@ -514,6 +550,55 @@ describe('StorageManager.unshareCollection', () => {
     expect(
       history.some(({ doc }) => doc.type?.includes('CollectionUnshare'))
     ).toBe(true)
+  })
+
+  it('escrows the grantee into the blinding-key wrap set and drops it on unshare', async () => {
+    const owner = await generateKey()
+    const reader = await generateKey()
+    const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore, {
+      blindedIndex: true
+    })
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
+    const { zcapClient } = makeFakeZcapClient()
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+    const profile = makeProfile(owner, zcapClient)
+
+    const { descriptor: shared } = await storage.shareCollection({
+      profile,
+      user,
+      collectionId: 'private-credentials',
+      recipient: ownerRecipient({ keyAgreementKey: reader.keyAgreementKey }),
+      controller: 'did:key:z6MkReader'
+    })
+
+    // The share covers the blinded index too: the grantee unwraps the key.
+    expect(hmacKids(shared)).toContain(reader.keyAgreementKey.id)
+    expect(
+      await resolveHmacOutcome({
+        descriptor: shared,
+        keyAgreementKey: reader.keyAgreementKey
+      })
+    ).toEqual({ id: shared.hmac?.id })
+
+    const rotated = await storage.unshareCollection({
+      profile,
+      user,
+      collectionId: 'private-credentials',
+      recipientId: reader.keyAgreementKey.id!
+    })
+
+    // Removal drops the wrap entry only: the epoch rotated, the key did not.
+    expect(rotated.hmac?.id).toBe(shared.hmac?.id)
+    expect(hmacKids(rotated)).not.toContain(reader.keyAgreementKey.id)
+    expect(hmacKids(rotated)).toContain(owner.keyAgreementKey.id)
   })
 
   it('lists current shares from the descriptor roster minus the owner', async () => {
@@ -942,6 +1027,105 @@ describe('StorageManager.provisionAppCollection', () => {
     expect(descriptor2.currentEpoch).toBe(descriptor1.currentEpoch)
     expect(collection('app-docs').descriptor().epochs).toHaveLength(1)
   })
+
+  it('installs a blinded-index HMAC key wrapped to the owner and the app', async () => {
+    const owner = await generateKey()
+    const app = await generateKey()
+    const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+
+    const descriptor = await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+    })
+
+    expect(descriptor.hmac?.id).toMatch(/^urn:uuid:/)
+    expect(descriptor.hmac?.type).toBe('Sha256HmacKey2019')
+    // The key is minted with epoch[0] (owner) and escrowed to the app by the
+    // same `addRecipient` that put it on the epoch roster.
+    expect(hmacKids(descriptor)).toEqual(
+      expect.arrayContaining([owner.keyAgreementKey.id, app.keyAgreementKey.id])
+    )
+  })
+
+  it('lets the app unwrap the blinding key from the descriptor and its own key alone', async () => {
+    const owner = await generateKey()
+    const app = await generateKey()
+    const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+
+    await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+    })
+
+    // What an App Connect grantee holds: the fetched Collection Description's
+    // descriptor and its own key-agreement key -- no other material.
+    const fetched = await remoteStore.collectionEncryption({
+      collectionId: 'app-docs'
+    })
+    const outcome = await resolveHmacOutcome({
+      descriptor: fetched!,
+      keyAgreementKey: app.keyAgreementKey
+    })
+    expect(outcome.errorName).toBeUndefined()
+    expect(outcome.id).toMatch(/^urn:uuid:/)
+    expect(outcome.id).toBe(fetched!.hmac?.id)
+  })
+
+  it('adopts a pre-blind-index epoch roster without installing an HMAC key', async () => {
+    const owner = await generateKey()
+    const app = await generateKey()
+    const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+
+    // A collection provisioned before blind-index support: epoch[0], no `hmac`.
+    const { descriptor: legacy } = await ensureFirstEpoch({
+      collection: remoteStore.collectionHandle({ collectionId: 'app-docs' }),
+      recipients: [ownerRecipient({ keyAgreementKey: owner.keyAgreementKey })]
+    })
+    expect(legacy.hmac).toBeUndefined()
+
+    const descriptor = await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+    })
+
+    // The roster is adopted as it stands: the app is escrowed in, and the
+    // collection stays unindexable rather than the ask being refused.
+    expect(descriptor.hmac).toBeUndefined()
+    expect(descriptor.currentEpoch).toBe(legacy.currentEpoch)
+    expect(currentEpochKids(descriptor)).toEqual(
+      expect.arrayContaining([owner.keyAgreementKey.id, app.keyAgreementKey.id])
+    )
+  })
 })
 
 describe('StorageManager.revokeAppCollectionRecipients', () => {
@@ -1021,6 +1205,71 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     expect((revoked as Array<{ id: string }>).map(zcap => zcap.id)).toContain(
       'z-app-docs'
     )
+  })
+
+  it('drops the app from the blinding-key wrap set without rotating the key', async () => {
+    const owner = await generateKey()
+    const app = await generateKey()
+    const { remoteStore } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+
+    const provisioned = await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+    })
+    const hmacId = provisioned.hmac?.id
+
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+    const target = 'https://was.example/space/s-space/app-docs'
+    await storage.addHistoryLogin({
+      user,
+      origin: APP_ORIGIN,
+      grants: [
+        {
+          id: 'g-app-docs',
+          target,
+          allowedActions: ['GET', 'HEAD'],
+          expires: future,
+          zcap: delegatedZcap({ id: 'z-app-docs', target, expires: future })
+        }
+      ],
+      appConnect: { name: 'Example App', firstRun: true }
+    })
+
+    await storage.revokeAppCollectionRecipients({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT
+    })
+
+    const descriptor = await remoteStore.collectionEncryption({
+      collectionId: 'app-docs'
+    })
+    // The key never rotates -- blinded tokens must compare across the
+    // collection's whole history -- so only the app's wrap entry goes.
+    expect(descriptor!.hmac?.id).toBe(hmacId)
+    expect(hmacKids(descriptor!)).not.toContain(app.keyAgreementKey.id)
+    expect(
+      await resolveHmacOutcome({
+        descriptor: descriptor!,
+        keyAgreementKey: app.keyAgreementKey
+      })
+    ).toEqual({ errorName: 'EncryptionError' })
+    // The owner still resolves the same key.
+    expect(
+      await resolveHmacOutcome({
+        descriptor: descriptor!,
+        keyAgreementKey: owner.keyAgreementKey
+      })
+    ).toEqual({ id: hmacId })
   })
 
   it('ignores grants on standard/protected collections', async () => {

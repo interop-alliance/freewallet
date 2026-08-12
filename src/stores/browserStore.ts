@@ -49,6 +49,7 @@ import {
   UnknownEpochError,
   type DocCipher
 } from '@interop/was-client/edv'
+import { KeyUnwrapError } from '@interop/was-client'
 import type { StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'
@@ -158,6 +159,12 @@ export class BrowserStore {
   // caller can refresh the descriptor and re-read.
   #unknownEpochCredentials = 0
   #unknownEpochHistory = 0
+  // Count of rows the most recent list read had to skip because this wallet
+  // holds no key for their (known) key epoch -- KeyUnwrapError: it was never a
+  // recipient, or was removed and the epoch rotated. Like the unknown-epoch
+  // rows they are skipped, NOT cached, and never purged; unlike them a
+  // descriptor refresh cannot help, so they drive no refresh.
+  #noEpochKeyCredentials = 0
   // Session-lifetime decrypt cache, keyed first by logical collection key and
   // then by RxDB row id, holding each envelope row's decrypted plaintext so a
   // row is decrypted at most once per session. Every read (list, load-one,
@@ -410,8 +417,8 @@ export class BrowserStore {
    * The single decrypt-read skeleton shared by every collection: reads the live
    * rows in the requested order, decrypting envelope rows (through the
    * per-collection cache) and passing legacy plaintext rows through, and sorts
-   * each decrypt failure into one of two buckets so a caller stays tolerant of a
-   * single bad row rather than failing the whole read.
+   * each decrypt failure into one of three buckets so a caller stays tolerant of
+   * a single bad row rather than failing the whole read.
    *
    * A row whose envelope will not decrypt under the current KAK (corrupted,
    * replicated verbatim from another identity, or written under a mismatched
@@ -419,7 +426,12 @@ export class BrowserStore {
    * envelope names an UNKNOWN key epoch ({@link UnknownEpochError}) is collected
    * separately in `unknownEpochRowIds` and NOT cached: it is possibly-fresh data
    * behind a stale descriptor, so a caller can refresh the descriptor (rebuild the cipher
-   * via {@link setCiphers}) and re-read rather than deleting it.
+   * via {@link setCiphers}) and re-read rather than deleting it. A row whose
+   * epoch IS on the descriptor but which this wallet holds no key for
+   * ({@link KeyUnwrapError} -- never a recipient, or removed and the epoch
+   * rotated) is collected in `noEpochKeyRowIds` and likewise NOT cached: it is
+   * real data belonging to someone else's read set, so it is never purged, and
+   * a descriptor refresh cannot help it (only a later key grant can).
    *
    * `fromEnvelope` distinguishes a decrypted envelope row from a plaintext
    * passthrough, which the credential caller needs (a plaintext row is keyed by
@@ -439,7 +451,7 @@ export class BrowserStore {
    *   pass false for a mutable, rewritten-in-place collection
    * @returns {Promise<{ entries: Array<{ rowId: string; data: Json;
    *   fromEnvelope: boolean }>; undecryptableRowIds: string[];
-   *   unknownEpochRowIds: string[] }>}
+   *   unknownEpochRowIds: string[]; noEpochKeyRowIds: string[] }>}
    */
   async #decryptedRows({
     logicalKey,
@@ -453,6 +465,7 @@ export class BrowserStore {
     entries: Array<{ rowId: string; data: Json; fromEnvelope: boolean }>
     undecryptableRowIds: string[]
     unknownEpochRowIds: string[]
+    noEpochKeyRowIds: string[]
   }> {
     const docs = await this.rxCollection(logicalKey)
       .find({ sort: [{ updatedAt: sort }] })
@@ -463,6 +476,7 @@ export class BrowserStore {
       []
     const undecryptableRowIds: string[] = []
     const unknownEpochRowIds: string[] = []
+    const noEpochKeyRowIds: string[] = []
     // Every row's decrypt is independent, so they run together; the fold below
     // then walks them in list order, keeping the entry ordering and the
     // per-row failure buckets exactly as a sequential pass produced them.
@@ -495,6 +509,17 @@ export class BrowserStore {
             err
           )
           unknownEpochRowIds.push(id)
+        } else if (err instanceof KeyUnwrapError) {
+          // This wallet is not a recipient of the row's key epoch. Real data,
+          // permanently unreadable here: skip it (uncached) but never purge it,
+          // and keep it out of the refresh signal -- a descriptor refresh cannot
+          // grant a key.
+          console.warn(
+            `Skipping "${logicalKey}" row "${id}": this wallet is not a ` +
+              `recipient of its key epoch:`,
+            err
+          )
+          noEpochKeyRowIds.push(id)
         } else {
           console.warn(
             `Skipping undecryptable "${logicalKey}" row "${id}":`,
@@ -506,7 +531,12 @@ export class BrowserStore {
       }
       entries.push({ rowId: id, data: plaintext as Json, fromEnvelope })
     }
-    return { entries, undecryptableRowIds, unknownEpochRowIds }
+    return {
+      entries,
+      undecryptableRowIds,
+      unknownEpochRowIds,
+      noEpochKeyRowIds
+    }
   }
 
   /**
@@ -593,6 +623,19 @@ export class BrowserStore {
   }
 
   /**
+   * The count of `private-credentials` rows the most recent
+   * {@link listCredentials} call had to skip because this wallet holds no key
+   * for their key epoch (it was never a recipient, or was removed and the epoch
+   * rotated). Like {@link unknownEpochCredentials} these rows are never purged;
+   * unlike them, no descriptor refresh can make them readable.
+   *
+   * @returns {number}
+   */
+  get noEpochKeyCredentials(): number {
+    return this.#noEpochKeyCredentials
+  }
+
+  /**
    * The count of `wallet-activity` rows the most recent
    * {@link listHistoryItems} call had to skip for the same reason.
    *
@@ -642,19 +685,26 @@ export class BrowserStore {
    * stale descriptor, not purgeable garbage, so a caller can refresh the descriptor and
    * re-read rather than deleting it.
    *
+   * A row this wallet holds no key for (`KeyUnwrapError`: never a recipient of
+   * that epoch, or removed and the epoch rotated) is collected in
+   * `noEpochKeyRowIds` and likewise NOT cached. It is another reader's data, not
+   * garbage: it is never purged, and no descriptor refresh can make it readable.
+   *
    * @returns {Promise<{ entries: Array<{ rowId: string; cid: string;
    *   vc: IVerifiableCredential }>; undecryptableRowIds: string[];
-   *   unknownEpochRowIds: string[] }>}
+   *   unknownEpochRowIds: string[]; noEpochKeyRowIds: string[] }>}
    */
   async #credentialEntries(): Promise<{
     entries: Array<{ rowId: string; cid: string; vc: IVerifiableCredential }>
     undecryptableRowIds: string[]
     unknownEpochRowIds: string[]
+    noEpochKeyRowIds: string[]
   }> {
     const {
       entries: rows,
       undecryptableRowIds,
-      unknownEpochRowIds
+      unknownEpochRowIds,
+      noEpochKeyRowIds
     } = await this.#decryptedRows({
       logicalKey: 'privateCredentials',
       sort: 'asc'
@@ -691,7 +741,12 @@ export class BrowserStore {
     }
     this.#credentialCidIndex = cidIndex
     this.#credentialsIndexed = true
-    return { entries, undecryptableRowIds, unknownEpochRowIds }
+    return {
+      entries,
+      undecryptableRowIds,
+      unknownEpochRowIds,
+      noEpochKeyRowIds
+    }
   }
 
   /**
@@ -848,6 +903,9 @@ export class BrowserStore {
    * shown (corrupted, or written under a mismatched KAK). Returns the number
    * of rows removed.
    *
+   * Only the `undecryptableRowIds` bucket is purged. Unknown-epoch rows and rows
+   * this wallet holds no epoch key for are real data and are left in place.
+   *
    * @returns {Promise<number>}
    */
   async purgeUndecryptableCredentials(): Promise<number> {
@@ -866,10 +924,15 @@ export class BrowserStore {
    * @returns {Promise<Array<StoredCredential>>}
    */
   async listCredentials(): Promise<Array<StoredCredential>> {
-    const { entries, undecryptableRowIds, unknownEpochRowIds } =
-      await this.#credentialEntries()
+    const {
+      entries,
+      undecryptableRowIds,
+      unknownEpochRowIds,
+      noEpochKeyRowIds
+    } = await this.#credentialEntries()
     this.#undecryptableCredentials = undecryptableRowIds.length
     this.#unknownEpochCredentials = unknownEpochRowIds.length
+    this.#noEpochKeyCredentials = noEpochKeyRowIds.length
     const seen = new Set<string>()
     const credentials: StoredCredential[] = []
     for (const { cid, vc } of entries) {
@@ -1312,8 +1375,9 @@ export class BrowserStore {
    * cipher-less) body passes through; an {@link UnknownEpochError} row is
    * skipped uncached AND left unindexed, since it is possibly-fresh data
    * behind a stale descriptor that must stay retryable after a descriptor
-   * refresh; any other decrypt failure is warned, skipped, and likewise left
-   * unindexed.
+   * refresh; a {@link KeyUnwrapError} row (no key for its epoch on this wallet)
+   * is skipped the same way, retryable after a later key grant; any other
+   * decrypt failure is warned, skipped, and likewise left unindexed.
    *
    * @param options {object}
    * @param options.contactId {string}
@@ -1372,6 +1436,14 @@ export class BrowserStore {
           // unindexed so a descriptor refresh can pick it up on a later read.
           console.warn(
             `Skipping unknown-epoch "contactsHistory" row "${id}":`,
+            err
+          )
+        } else if (err instanceof KeyUnwrapError) {
+          // Not a recipient of this row's key epoch: skip it uncached and
+          // unindexed, so a later key grant can still surface it.
+          console.warn(
+            `Skipping "contactsHistory" row "${id}": this wallet is not a ` +
+              `recipient of its key epoch:`,
             err
           )
         } else {
