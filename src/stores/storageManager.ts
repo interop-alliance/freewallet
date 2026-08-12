@@ -31,7 +31,7 @@ import type {
 } from '@interop/data-integrity-core'
 import { generateZcapUri } from '@interop/ezcap'
 import type { ContactData, ContactRevisionPayload } from '@interop/social-core'
-import type { RxCollection } from 'rxdb/plugins/core'
+import type { RxCollection, RxStorage } from 'rxdb/plugins/core'
 import {
   ValidationError,
   type CollectionEncryption,
@@ -723,7 +723,8 @@ export class StorageManager {
     user,
     profile,
     isGuest = false,
-    remoteDirect = false
+    remoteDirect = false,
+    storage: rxStorage
   }: {
     user: User
     profile: ControllerProfile
@@ -731,6 +732,9 @@ export class StorageManager {
     // Route credential + history operations straight to the remote WAS
     // collections (the CHAPI popup path, whose local IndexedDB is partitioned).
     remoteDirect?: boolean
+    // An explicit RxDB storage for the local active replica, in place of the
+    // default IndexedDB/Dexie one (the unit tests' memory storage).
+    storage?: RxStorage<unknown, unknown>
   }) {
     // Guest sessions never touch the remote WAS server -- they get no remote
     // replica. This keeps guest mode usable as a fallback even when the
@@ -787,7 +791,11 @@ export class StorageManager {
     })
 
     // The local store is always the active replica.
-    const { localStore } = await BrowserStore.initClient({ user, ciphers })
+    const { localStore } = await BrowserStore.initClient({
+      user,
+      storage: rxStorage,
+      ciphers
+    })
     let userExists = await localStore.userExists()
     if (remoteStore) {
       // A returning user may be on a fresh browser (no local db yet) but have
