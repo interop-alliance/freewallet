@@ -7,8 +7,10 @@
  *
  * Every run is per-instance: one `AbortController` in a ref cancels the poll
  * on cancel, on unmount, on expiry, and before a regenerated invite starts.
- * The consent panel that interprets the response is a separate surface; this
- * card only holds the raw response once it arrives.
+ * Once a response arrives it is parsed here and handed to
+ * `OnboardConsentPanel`, which owns the fingerprint comparison, the consent
+ * copy, and the approval; a response that does not parse ends the invite with
+ * "generate a new code" rather than a partial render.
  */
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -21,9 +23,14 @@ import { QRCodeSVG } from 'qrcode.react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { composeWalletOnboardingRequest } from '@interop/wallet-core/request'
+import {
+  parseOnboardingResponse,
+  type EnrollmentRequest
+} from '@interop/wallet-core/enrollment'
 import type { Session } from '@/types/auth'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { OnboardConsentPanel } from '@/components/OnboardConsentPanel'
 import {
   createOnboardingExchange,
   OnboardingExchangeGoneError,
@@ -34,9 +41,11 @@ import {
 /**
  * Where the card is in the invite's life: creating the exchange, offering a
  * live code, expired (server-gone or the countdown ran out), the other
- * wallet's response in hand, or a failed create.
+ * wallet's response in hand, a response that could not be read, or a failed
+ * create.
  */
-type InvitePhase = 'creating' | 'live' | 'expired' | 'received' | 'error'
+type InvitePhase =
+  'creating' | 'live' | 'expired' | 'received' | 'invalid' | 'error'
 
 /**
  * Formats a remaining duration as `m:ss` for the countdown line.
@@ -54,9 +63,11 @@ function formatRemaining({ remainingMs }: { remainingMs: number }): string {
 
 export function OnboardInviteCard({
   session,
+  onApproved,
   onCancel
 }: {
   session: Session
+  onApproved: () => void
   onCancel: () => void
 }) {
   const { t } = useTranslation()
@@ -64,8 +75,11 @@ export function OnboardInviteCard({
   const [interactionUrl, setInteractionUrl] = useState('')
   const [deadline, setDeadline] = useState(0)
   const [remainingMs, setRemainingMs] = useState(ONBOARDING_INVITE_TTL_MS)
-  // Held for the consent panel that consumes it; nothing renders it yet.
-  const [, setResponse] = useState<unknown>(null)
+  // What the consent panel renders, once a response parses.
+  const [consent, setConsent] = useState<{
+    request: EnrollmentRequest
+    label?: string
+  } | null>(null)
   // Bumping this re-runs the create-and-poll effect with a fresh exchange.
   const [attempt, setAttempt] = useState(0)
   const abortRef = useRef<AbortController | null>(null)
@@ -82,7 +96,7 @@ export function OnboardInviteCard({
     async function inviteAnotherWallet() {
       setPhase('creating')
       setInteractionUrl('')
-      setResponse(null)
+      setConsent(null)
       setRemainingMs(ONBOARDING_INVITE_TTL_MS)
       let exchangeUrl: string
       try {
@@ -122,8 +136,17 @@ export function OnboardInviteCard({
         if (cancelled) {
           return
         }
-        setResponse(response)
-        setPhase('received')
+        // A malformed envelope has one remedy -- a fresh code -- so it ends
+        // the invite in its own phase rather than half-rendering a consent
+        // screen.
+        try {
+          const parsed = parseOnboardingResponse({ body: response })
+          setConsent({ request: parsed.request, label: parsed.label })
+          setPhase('received')
+        } catch (err) {
+          console.warn("Could not read the other wallet's response:", err)
+          setPhase('invalid')
+        }
       } catch (err) {
         if (cancelled || controller.signal.aborted) {
           return
@@ -180,7 +203,9 @@ export function OnboardInviteCard({
       }}
     >
       <Typography variant="subtitle1">
-        {t('settings.onboardCardTitle')}
+        {phase === 'received'
+          ? t('settings.onboardConsentTitle')
+          : t('settings.onboardCardTitle')}
       </Typography>
 
       {phase === 'creating' && (
@@ -200,10 +225,17 @@ export function OnboardInviteCard({
         <Alert severity="warning">{t('settings.onboardExpired')}</Alert>
       )}
 
-      {phase === 'received' && (
-        <Alert severity="success">
-          {t('settings.onboardResponseReceived')}
-        </Alert>
+      {phase === 'invalid' && (
+        <Alert severity="error">{t('settings.onboardInvalidResponse')}</Alert>
+      )}
+
+      {phase === 'received' && consent && (
+        <OnboardConsentPanel
+          session={session}
+          consent={consent}
+          onApproved={onApproved}
+          onCancel={onCancel}
+        />
       )}
 
       {phase === 'live' && (
@@ -251,21 +283,29 @@ export function OnboardInviteCard({
         </>
       )}
 
-      <Stack direction="row" sx={{ gap: 1, mt: 1 }}>
-        {(phase === 'expired' || phase === 'error') && (
-          <Button
-            variant="contained"
-            size="small"
-            sx={{ borderRadius: 2 }}
-            onClick={() => setAttempt(current => current + 1)}
-          >
-            {t('settings.onboardGenerateNew')}
+      {/* In `received` the consent panel owns the actions. */}
+      {phase !== 'received' && (
+        <Stack direction="row" sx={{ gap: 1, mt: 1 }}>
+          {(phase === 'expired' ||
+            phase === 'error' ||
+            phase === 'invalid') && (
+            <Button
+              variant="contained"
+              size="small"
+              sx={{ borderRadius: 2 }}
+              onClick={() => {
+                setConsent(null)
+                setAttempt(current => current + 1)
+              }}
+            >
+              {t('settings.onboardGenerateNew')}
+            </Button>
+          )}
+          <Button size="small" onClick={onCancel}>
+            {t('common.cancel')}
           </Button>
-        )}
-        <Button size="small" onClick={onCancel}>
-          {t('common.cancel')}
-        </Button>
-      </Stack>
+        </Stack>
+      )}
     </Card>
   )
 }

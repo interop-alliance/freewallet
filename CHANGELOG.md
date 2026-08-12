@@ -14,8 +14,15 @@
   on cancel/unmount); expiry surfaces as "code expired -- generate a new
   one". The create/poll module lives in `src/lib/onboardingInvite.ts`
   (`@interop/wallet-core` 0.29.0, which carries the account pointer and
-  controller in the query). The consent panel that consumes the poll result
-  is a follow-up.
+  controller in the query).
+- When the other wallet responds, the invite card swaps to an onboarding
+  consent panel ("Onboard this wallet?"): the enrollee's did:key fingerprint
+  with the compare-with-the-other-screen instruction leading, a full-peer
+  warning and the honest disconnect ceiling, and an editable label prefilled
+  from the response envelope's suggestion. Approve drives the existing
+  `approveEnrollment` + `setClientLabel` path; a malformed or invalid
+  response envelope (bad connect code, oversize label) surfaces as
+  "generate a new code and try again".
 - New dependency `qrcode.react` for QR rendering (the wallet could only
   decode QR codes before).
 

@@ -244,8 +244,7 @@ account, without any secret ever leaving either side. The new client mints
 its whole key set locally -- client seed, did:webvh update-key seeds -- and
 only PUBLIC halves travel, as a compact **connect code**
 (`freewallet-connect:<base64url(JSON)>`) carried point-to-point: pasted
-between two browsers today, and QR-renderable unchanged for a camera-holding
-wallet later. A rendezvous-server transport remains future work. Nothing
+between two browsers, or carried over the rendezvous transport below. Nothing
 travels back over the channel: the account pointer comes out of the keyring
 (the enrollee holds the passphrase), and the user key comes back through the
 wrap-set roster. Both screens display the new client's did:key fingerprint,
@@ -283,6 +282,37 @@ alone -- re-running with the same code converges: a tear after the roster
 write leaves an orphan wrap (invisible to authorization, harmless), a tear
 between the log entries is detected from the standing `nextKeyHashes`
 commitments (the add entry alone is appended, never a fork).
+
+**The rendezvous transport (onboarding another wallet).** When the enrollee
+is a camera-holding wallet rather than a browser with a paste box, the same
+ceremony runs over the WAS server's ephemeral-exchanges facet
+(`/workflows/ephemeral/exchanges` -- unauthenticated, capability-URL
+posture: the unguessable exchange URL is the only access control, and it
+travels point-to-point in the QR). Settings > Connected wallets > "Onboard
+another wallet" creates an exchange whose stored request is a
+`WalletOnboardingQuery` VPR carrying the account pointer and controller
+(`composeWalletOnboardingRequest`), renders the exchange's interaction URL
+(`.../protocols?iuv=1`) as a QR code, and polls
+(`src/lib/onboardingInvite.ts`, `OnboardInviteCard`). The other wallet scans
+it, begins the exchange, mints its key set, and posts back an
+onboarding-response envelope -- the ordinary `freewallet-connect:` code
+verbatim plus a suggested display label, nothing else
+(`encodeOnboardingResponse` / `parseOnboardingResponse` in
+`@interop/wallet-core/enrollment`; an oversize or malformed envelope is
+refused whole, surfaced as "generate a new code and try again"). Poll
+completion swaps the card to a consent panel (`OnboardConsentPanel`) that
+leads with the fingerprint comparison -- the mandatory trust anchor, since
+anyone holding the exchange URL could inject a response -- states the
+full-peer consequence (an enrolled wallet reads and changes everything in
+the Space, connects apps, onboards or disconnects other wallets, issues and
+revokes recovery codes) and the honest disconnect ceiling, and prefills an
+editable label from the envelope's suggestion. Approval drives the same
+`approveEnrollment` + `setClientLabel` path as the paste dialog; the
+enrollee then completes the ceremony off the world-readable log as usual.
+The channel carries only the four public key multibases and the label: the
+account pointer travels inside the stored request (the exchange URL is its
+confidentiality bound), and the user key still comes back through the
+wrap-set roster.
 
 ## Recovery codes (`@interop/wallet-core/recovery`)
 

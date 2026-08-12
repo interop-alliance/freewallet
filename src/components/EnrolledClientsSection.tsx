@@ -80,6 +80,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
   // The onboard-another-wallet invite card. Independent of the paste dialog
   // above: they are two ways into the same ceremony, never one state machine.
   const [onboardCardOpen, setOnboardCardOpen] = useState(false)
+  const [onboardDone, setOnboardDone] = useState(false)
 
   const loadClients = useCallback(async () => {
     try {
@@ -418,7 +419,10 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
             size="small"
             sx={{ borderRadius: 2, px: 2, py: 1 }}
             disabled={onboardCardOpen}
-            onClick={() => setOnboardCardOpen(true)}
+            onClick={() => {
+              setOnboardDone(false)
+              setOnboardCardOpen(true)
+            }}
           >
             {t('settings.onboardClient')}
           </Button>
@@ -430,12 +434,22 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       {canEnroll && onboardCardOpen && (
         <OnboardInviteCard
           session={session}
+          onApproved={() => {
+            setOnboardCardOpen(false)
+            setOnboardDone(true)
+            void loadClients()
+          }}
           onCancel={() => setOnboardCardOpen(false)}
         />
       )}
       {enrollDone && (
         <Typography variant="body2" color="success.main">
           {t('settings.enrollSuccess')}
+        </Typography>
+      )}
+      {onboardDone && (
+        <Typography variant="body2" color="success.main">
+          {t('settings.onboardSuccess')}
         </Typography>
       )}
 
