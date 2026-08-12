@@ -34,7 +34,7 @@ function credentialJsonEntries(data: Uint8Array): ParsedTarEntry[] {
       entry.type === 'file' &&
       entry.name.startsWith(CREDENTIALS_PREFIX) &&
       isTopLevelJson(entry.name, CREDENTIALS_PREFIX)
-  }).sort((a, b) => a.name.localeCompare(b.name))
+  }).sort((left, right) => left.name.localeCompare(right.name))
 }
 
 function parseCredentialEntry(entry: ParsedTarEntry): IVerifiableCredential[] {

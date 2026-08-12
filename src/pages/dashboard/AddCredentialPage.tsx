@@ -64,8 +64,8 @@ export function AddCredentialPage() {
           minRows={4}
           placeholder={t('addCredential.placeholder')}
           value={input}
-          onChange={e => {
-            setInput(e.target.value)
+          onChange={event => {
+            setInput(event.target.value)
             if (error) {
               setError(null)
             }

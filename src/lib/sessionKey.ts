@@ -5,7 +5,8 @@
  * what ordinary login relies on -- the keyring cache (the offline / no-WAS
  * copy of the account-pointer record), this client's wrapped client-key
  * records, the account-pointer pins, the user key roster-epoch pins, the
- * roster log's chain-head pins, the unlock-methods registry cache, and the
+ * roster-log and account-log chain-head pins, the unlock-methods registry
+ * cache, and the
  * passkey-safety notices. None of it is secret on its own: the keyring,
  * client-key, and unlock-methods records are ciphertext, inert without the
  * passphrase-derived key; the pointer, roster-epoch, and chain-head pins and
@@ -594,7 +595,27 @@ export function userKeyLogPinStore({
   spaceId: string
   idb?: IDBFactory
 }): ResourceLogPinStore {
-  const key = userKeyLogPinKey(spaceId)
+  return logPinStoreAt({ key: userKeyLogPinKey(spaceId), idb })
+}
+
+/**
+ * A durable chain-head pin store over one session-database key. Each pinned
+ * log gets its OWN store key: `ResourceLogPinStore` holds exactly one pin, so
+ * sharing a key across logs would have each verification clobber the other's
+ * pin.
+ *
+ * @param options {object}
+ * @param options.key {string}   the object-store key the pin lives under
+ * @param [options.idb] {IDBFactory}
+ * @returns {ResourceLogPinStore}
+ */
+function logPinStoreAt({
+  key,
+  idb
+}: {
+  key: string
+  idb?: IDBFactory
+}): ResourceLogPinStore {
   return {
     async read(): Promise<ResourceLogHeadPin | null> {
       const stored = await withSessionStore(
@@ -644,6 +665,67 @@ export async function deleteUserKeyLogPin({
   await withSessionStore(
     'readwrite',
     store => store.delete(userKeyLogPinKey(spaceId)),
+    idb
+  )
+}
+
+/**
+ * The object-store key under which an account's did:webvh account-log
+ * chain-head pin lives -- keyed by the data Space id like the roster-log pin,
+ * but under its OWN key, since a pin store holds exactly one pin and the two
+ * logs must never clobber each other's.
+ *
+ * @param spaceId {string}   the data Space id
+ * @returns {string}
+ */
+function accountLogPinKey(spaceId: string): string {
+  return `account-log-pin/${spaceId}`
+}
+
+/**
+ * Builds the durable chain-head pin store for the account's did:webvh log
+ * (`id/did.jsonl`), backed by the session database. Same seam and refusal
+ * class as the roster-log pin beside it: a served account log that forks,
+ * rolls back, or switches SCID/method against the pinned head is refused
+ * rather than adopted (see `verifyAccountLog` in
+ * `@interop/wallet-core/webvh`). The wallet-core verifier owns the write
+ * discipline (trust-on-first-use, advance after full verification only), so
+ * this store is a plain read/write seam.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {ResourceLogPinStore}
+ */
+export function accountLogPinStore({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): ResourceLogPinStore {
+  return logPinStoreAt({ key: accountLogPinKey(spaceId), idb })
+}
+
+/**
+ * Deletes the account-log chain-head pin for an account -- account deletion
+ * and Space wipes, beside `deleteUserKeyLogPin`.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deleteAccountLogPin({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.delete(accountLogPinKey(spaceId)),
     idb
   )
 }

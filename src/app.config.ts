@@ -1,5 +1,5 @@
 /**
- * Application configuration — environment variable exports and app-wide
+ * Application configuration -- environment variable exports and app-wide
  * constants.
  */
 import type { EntityIdentityRegistry } from '@interop/verifier-core'

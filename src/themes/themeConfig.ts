@@ -107,10 +107,13 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   }
 }
 
-export function buildMuiThemeOptions(
-  themeId: AppThemeId,
+export function buildMuiThemeOptions({
+  themeId,
+  mode
+}: {
+  themeId: AppThemeId
   mode: ThemeMode
-): ThemeOptions {
+}): ThemeOptions {
   const definition = THEME_DEFINITIONS[themeId]
   const palette = definition.palette[mode]
   const themeButtonOverrides =

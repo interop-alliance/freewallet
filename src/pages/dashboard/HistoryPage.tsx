@@ -226,7 +226,10 @@ export function HistoryPage() {
                     {doc?.created && (
                       <Box sx={historyStyles.timestampRow}>
                         <Typography variant="caption" color="text.secondary">
-                          {formatRelativeTime(doc.created, i18n.language)}
+                          {formatRelativeTime({
+                            input: doc.created,
+                            locale: i18n.language
+                          })}
                         </Typography>
                         <Button
                           size="small"

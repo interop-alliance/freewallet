@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next'
 // Lazily loaded: DocContent pulls in the react-markdown/remark stack, which
 // would otherwise land in the eager entry chunk (this provider wraps the app).
 const DocContent = lazy(() =>
-  import('@/components/DocContent').then(m => ({ default: m.DocContent }))
+  import('@/components/DocContent').then(mod => ({ default: mod.DocContent }))
 )
 
 export function InfoBoxProvider({ children }: { children: ReactNode }) {

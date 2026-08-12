@@ -39,16 +39,16 @@ function payload(
 
 describe('verifyResultToChecklist', () => {
   it('maps a fully valid credential to five positive steps', () => {
-    const result = verifyResultToChecklist(
-      payload([
+    const result = verifyResultToChecklist({
+      raw: payload([
         { id: 'valid_signature', valid: true },
         { id: 'registered_issuer', valid: true },
         { id: 'revocation_status', valid: true },
         { id: 'expiration', valid: true }
       ]),
-      BASE_VC,
+      credential: BASE_VC,
       t
-    )
+    })
 
     expect(result.supportedFormat.valid).toBe(true)
     expect(result.supportedFormat.status).toBe('positive')
@@ -62,8 +62,8 @@ describe('verifyResultToChecklist', () => {
   })
 
   it('marks an unknown issuer as a warning, not a hard failure', () => {
-    const result = verifyResultToChecklist(
-      payload([
+    const result = verifyResultToChecklist({
+      raw: payload([
         { id: 'valid_signature', valid: true },
         {
           id: 'registered_issuer',
@@ -73,9 +73,9 @@ describe('verifyResultToChecklist', () => {
           }
         }
       ]),
-      BASE_VC,
+      credential: BASE_VC,
       t
-    )
+    })
 
     expect(result.issuer.valid).toBe(false)
     expect(result.issuer.status).toBe('warning')
@@ -85,15 +85,15 @@ describe('verifyResultToChecklist', () => {
   })
 
   it('marks expiration failure as a warning when other checks pass', () => {
-    const result = verifyResultToChecklist(
-      payload([
+    const result = verifyResultToChecklist({
+      raw: payload([
         { id: 'valid_signature', valid: true },
         { id: 'registered_issuer', valid: true },
         { id: 'expiration', valid: false }
       ]),
-      BASE_VC,
+      credential: BASE_VC,
       t
-    )
+    })
 
     expect(result.expiration.valid).toBe(false)
     expect(result.expiration.status).toBe('warning')
@@ -102,18 +102,18 @@ describe('verifyResultToChecklist', () => {
   })
 
   it('marks revocation failure as a hard failure', () => {
-    const result = verifyResultToChecklist(
-      payload([
+    const result = verifyResultToChecklist({
+      raw: payload([
         { id: 'valid_signature', valid: true },
         { id: 'registered_issuer', valid: true },
         { id: 'revocation_status', valid: false }
       ]),
-      {
+      credential: {
         ...BASE_VC,
         credentialStatus: { id: 'status:1' }
       } as IVerifiableCredential,
       t
-    )
+    })
 
     expect(result.revocation.valid).toBe(false)
     expect(result.revocation.status).toBe('negative')
@@ -121,11 +121,14 @@ describe('verifyResultToChecklist', () => {
   })
 
   it('reports unsupported credential types as a hard failure', () => {
-    const result = verifyResultToChecklist(
-      payload([{ id: 'valid_signature', valid: true }]),
-      { ...BASE_VC, type: ['CustomCredential'] } as IVerifiableCredential,
+    const result = verifyResultToChecklist({
+      raw: payload([{ id: 'valid_signature', valid: true }]),
+      credential: {
+        ...BASE_VC,
+        type: ['CustomCredential']
+      } as IVerifiableCredential,
       t
-    )
+    })
 
     expect(result.supportedFormat.valid).toBe(false)
     expect(result.supportedFormat.status).toBe('negative')
@@ -133,22 +136,22 @@ describe('verifyResultToChecklist', () => {
   })
 
   it('shows no expiration date when the credential has none', () => {
-    const result = verifyResultToChecklist(
-      payload([{ id: 'valid_signature', valid: true }]),
-      BASE_VC,
+    const result = verifyResultToChecklist({
+      raw: payload([{ id: 'valid_signature', valid: true }]),
+      credential: BASE_VC,
       t
-    )
+    })
 
     expect(result.expiration.valid).toBe(true)
     expect(result.expiration.message).toBe('has no expiration date set')
   })
 
   it('defaults revocation to valid when no credentialStatus is present', () => {
-    const result = verifyResultToChecklist(
-      payload([{ id: 'valid_signature', valid: true }]),
-      BASE_VC,
+    const result = verifyResultToChecklist({
+      raw: payload([{ id: 'valid_signature', valid: true }]),
+      credential: BASE_VC,
       t
-    )
+    })
 
     expect(result.revocation.valid).toBe(true)
     expect(result.revocation.message).toBe('has not been revoked')

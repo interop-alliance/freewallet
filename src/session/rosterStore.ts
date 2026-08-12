@@ -18,7 +18,9 @@
  *
  * The chain-head pin is durable either way (`userKeyLogPinStore`, keyed by
  * the data Space id in the session database), so log continuity spans logins,
- * not just one session.
+ * not just one session. The bare-parts builder's own `verifyAccountLog` read
+ * carries the account-log chain-head pin (`accountLogPinStore`) the same way;
+ * the session builder's read gets it inside the verified-log memo.
  */
 import type { ZcapClient } from '@interop/ezcap'
 import type { EncryptionDescriptorStore } from '@interop/was-client/edv'
@@ -34,7 +36,7 @@ import {
 } from '@interop/wallet-core/webvh'
 import type { AccountLogPointer } from '@interop/wallet-core/clients'
 import type { ControllerProfile } from '@/types/auth'
-import { userKeyLogPinStore } from '@/lib/sessionKey'
+import { accountLogPinStore, userKeyLogPinStore } from '@/lib/sessionKey'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 
 /**
@@ -75,7 +77,8 @@ export function accountRosterStore({
       pending ??= verifyAccountLog({
         did: pointer.did,
         spaceId: pointer.spaceId,
-        host: pointer.host
+        host: pointer.host,
+        pinStore: accountLogPinStore({ spaceId: pointer.spaceId, idb })
       }).then(
         ({ log }) => webvhResourceLogController({ did: pointer.did, log }),
         err => {

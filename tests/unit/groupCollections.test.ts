@@ -64,16 +64,19 @@ describe('groupCollections', () => {
   it('prefers the canonical name for wallet collections over the stored one', () => {
     // A pre-rename space still stores the old provisioning-time name.
     expect(
-      getCollectionDisplayName(
-        collection(
+      getCollectionDisplayName({
+        collection: collection(
           'public-credentials',
           'Publicly Shared Verifiable Credentials'
         ),
         t
-      )
+      })
     ).toEqual('Verifiable Credentials (Publicly Shared)')
     expect(
-      getCollectionDisplayName(collection('some-app-data', 'App Data'), t)
+      getCollectionDisplayName({
+        collection: collection('some-app-data', 'App Data'),
+        t
+      })
     ).toEqual('App Data')
   })
 

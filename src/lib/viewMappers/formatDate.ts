@@ -26,7 +26,22 @@ export function formatDate({
   }
 }
 
-export function formatDateTime(date: Date, locale: string): string {
+/**
+ * Formats a `Date` to a human-readable date and time, falling back to the ISO
+ * form on a formatting error.
+ *
+ * @param options {object}
+ * @param options.date {Date}
+ * @param options.locale {string}
+ * @returns {string}
+ */
+export function formatDateTime({
+  date,
+  locale
+}: {
+  date: Date
+  locale: string
+}): string {
   try {
     return new Intl.DateTimeFormat(locale, {
       dateStyle: 'medium',

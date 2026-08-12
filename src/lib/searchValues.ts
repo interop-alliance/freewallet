@@ -7,14 +7,18 @@
  * as its own array entry (rather than one joined blob) so Fuse.js matches
  * against short field values instead of fuzzy-matching across a huge string.
  *
- * @param root {unknown}
- * @param [excludeKeys] {string[]}
+ * @param options {object}
+ * @param options.root {unknown}
+ * @param [options.excludeKeys] {string[]}
  * @returns {string[]}
  */
-export function flattenSearchValues(
-  root: unknown,
-  excludeKeys: string[] = []
-): string[] {
+export function flattenSearchValues({
+  root,
+  excludeKeys = []
+}: {
+  root: unknown
+  excludeKeys?: string[]
+}): string[] {
   const values: string[] = []
   const stack: unknown[] = [root]
   while (stack.length > 0) {

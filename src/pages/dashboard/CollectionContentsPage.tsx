@@ -129,7 +129,8 @@ export function CollectionContentsPage() {
           return
         }
 
-        const match = collections.find(c => c.id === collectionId) ?? null
+        const match =
+          collections.find(collection => collection.id === collectionId) ?? null
         setCollection(match)
 
         if (!match) {
@@ -283,7 +284,7 @@ export function CollectionContentsPage() {
     if (!collection) {
       return t('storage.collectionContentsTitle')
     }
-    return getCollectionDisplayName(collection, t)
+    return getCollectionDisplayName({ collection, t })
   }, [collection, t])
 
   const subtitle = useMemo(() => {

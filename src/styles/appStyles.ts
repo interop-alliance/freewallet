@@ -262,7 +262,7 @@ export const dashboardStyles = {
     flexShrink: 0
   },
   /**
-   * Dashboard page — Credentials block
+   * Dashboard page -- Credentials block
    */
   credentialsSection: {
     mt: 4
@@ -634,7 +634,7 @@ export const storageStyles = {
   },
 
   /**
-   * Collections overview — vertical list of folder rows (Finder-like).
+   * Collections overview -- vertical list of folder rows (Finder-like).
    */
   collectionsWrap: {
     mt: 3,
@@ -766,7 +766,7 @@ export const storageStyles = {
   },
 
   /**
-   * Collection contents page — header + file table.
+   * Collection contents page -- header + file table.
    */
   contentsWrap: {
     mt: 3,

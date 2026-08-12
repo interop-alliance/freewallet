@@ -23,8 +23,8 @@ function lazyNamed<
 
 // LandingPage and ProtectedRoute are eager: LandingPage is the lightweight
 // unauthenticated entry point, and ProtectedRoute is a tiny auth gate. Every
-// other route is lazily code-split so its (often heavy) dependencies — rxdb,
-// jsonld, verifier-core, qr-scanner — stay out of the initial bundle.
+// other route is lazily code-split so its (often heavy) dependencies -- rxdb,
+// jsonld, verifier-core, qr-scanner -- stay out of the initial bundle.
 const LoginPage = lazyNamed(() => import('@/pages/auth/LoginPage'), 'LoginPage')
 const SignupPage = lazyNamed(
   () => import('@/pages/auth/SignupPage'),
@@ -134,7 +134,7 @@ function App() {
         <Route path="/guest-login" element={<GuestLoginPage />} />
         <Route path="/logout" element={<LogoutPage />} />
 
-        {/* CHAPI wallet UI — no ProtectedRoute, runs in a CHAPI-managed popup */}
+        {/* CHAPI wallet UI -- no ProtectedRoute, runs in a CHAPI-managed popup */}
         <Route path="/wallet/get" element={<WalletGetPage />} />
         <Route path="/wallet/store" element={<WalletStorePage />} />
 

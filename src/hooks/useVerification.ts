@@ -78,7 +78,7 @@ async function verifyAndMap(
   const verifyPayload = await verifyCredential(credential)
   const raw = verifyPayload as Record<string, unknown>
   return {
-    result: verifyResultToChecklist(raw, credential, t),
+    result: verifyResultToChecklist({ raw, credential, t }),
     issuerRegistry: issuerRegistryInfoFromVerifyPayload(raw)
   }
 }
@@ -89,11 +89,15 @@ async function verifyAndMap(
  * cache miss and by the imperative `verify()` re-check, which always bypasses
  * the cache.
  */
-async function verifyAndStore(
-  credential: IVerifiableCredential,
-  t: TFunction,
+async function verifyAndStore({
+  credential,
+  t,
+  language
+}: {
+  credential: IVerifiableCredential
+  t: TFunction
   language: string
-): Promise<VerificationCacheEntry> {
+}): Promise<VerificationCacheEntry> {
   const mapped = await verifyAndMap(credential, t)
   const entry: VerificationCacheEntry = {
     checkedAt: Date.now(),
@@ -135,7 +139,7 @@ export function useVerification(
       setLoading(true)
       setError(null)
       try {
-        const entry = await verifyAndStore(subject, t, language)
+        const entry = await verifyAndStore({ credential: subject, t, language })
         if (isStale?.()) {
           return
         }

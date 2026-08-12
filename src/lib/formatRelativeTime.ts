@@ -28,10 +28,13 @@ function formatterFor(locale?: string | string[]): Intl.RelativeTimeFormat {
   return formatter
 }
 
-export function formatRelativeTime(
-  input: string,
+export function formatRelativeTime({
+  input,
+  locale
+}: {
+  input: string
   locale?: string | string[]
-): string {
+}): string {
   const date = new Date(input)
   if (Number.isNaN(date.getTime())) {
     return ''

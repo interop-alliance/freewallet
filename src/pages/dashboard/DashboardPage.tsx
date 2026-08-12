@@ -38,7 +38,8 @@ import type { StoredCredential } from '@/types/credential'
 const CREDENTIAL_SEARCH_KEYS: FuseOptionKey<StoredCredential>[] = [
   {
     name: 'vcFields',
-    getFn: item => flattenSearchValues(item.vc, ['proof'])
+    getFn: item =>
+      flattenSearchValues({ root: item.vc, excludeKeys: ['proof'] })
   }
 ]
 

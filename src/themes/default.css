@@ -1,5 +1,5 @@
 /*
- * Default theme — neutralizes shared .fw-* layout hooks used in JSX.
+ * Default theme -- neutralizes shared .fw-* layout hooks used in JSX.
  * West Coast-specific visuals live in west-coast.css; pages share one markup structure.
  */
 html[data-theme='default'] {

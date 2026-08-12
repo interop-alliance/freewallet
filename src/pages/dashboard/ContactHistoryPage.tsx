@@ -219,10 +219,10 @@ export function ContactHistoryPage() {
                     color={ACTION_COLOR[revision.action]}
                   />
                   <Typography variant="body2" color="text.secondary">
-                    {formatDateTime(
-                      new Date(revision.timestamp),
-                      i18n.language
-                    )}
+                    {formatDateTime({
+                      date: new Date(revision.timestamp),
+                      locale: i18n.language
+                    })}
                   </Typography>
                 </Stack>
                 <Typography variant="body1" sx={{ mt: 1 }}>

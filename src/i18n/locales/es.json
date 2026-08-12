@@ -13,9 +13,9 @@
     "logIn": "Iniciar sesión",
     "cancel": "Cancelar",
     "close": "Cerrar",
-    "saving": "Guardando…",
+    "saving": "Guardando...",
     "save": "Guardar",
-    "verifying": "Verificando…",
+    "verifying": "Verificando...",
     "continue": "Continuar",
     "done": "Listo",
     "store": "Guardar",
@@ -64,7 +64,7 @@
     "publishedDidProvisioned": "Publicado",
     "publishedDidNone": "No publicado",
     "rotateUpdateKey": "Rotar clave de actualización",
-    "rotating": "Rotando…",
+    "rotating": "Rotando...",
     "rotateUpdateKeyHint": "Revela la clave preparada y confirma una nueva. Añade una entrada al registro público del DID.",
     "rotateConfirmTitle": "¿Rotar la clave de actualización did:webvh?",
     "rotateConfirmMessage": "Esto añade una nueva entrada a su registro de DID público y de solo anexión: la clave de actualización preparada se revela y se activa, y se confirma una nueva clave preparada. Esta acción no se puede deshacer.",
@@ -512,7 +512,7 @@
     "resourceTitle": "Archivo",
     "resourceNotFound": "No se encontró el archivo en esta carpeta.",
     "resourceLoadError": "No se pudo cargar el archivo.",
-    "loadingResource": "Cargando archivo…",
+    "loadingResource": "Cargando archivo...",
     "download": "Descargar",
     "copySnippet": "Copiar",
     "copied": "¡Copiado!",
@@ -588,7 +588,7 @@
     "unrecognized": "Emisor no reconocido",
     "viewDetail": "Ver detalle del emisor",
     "detailTitle": "Detalle del emisor",
-    "linksDisabledWarning": "Enlaces deshabilitados — emisor no reconocido",
+    "linksDisabledWarning": "Enlaces deshabilitados -- emisor no reconocido",
     "unknownRegistry": "Registro desconocido",
     "governanceInfo": "Más información sobre gobernanza",
     "name": "Nombre del emisor",
@@ -653,7 +653,7 @@
     "professionalAffiliations": "Afiliaciones profesionales"
   },
   "logout": {
-    "message": "Cerrando sesión…"
+    "message": "Cerrando sesión..."
   },
   "chapi": {
     "accountNotFound": "Cuenta no encontrada. Cree su billetera en la aplicación principal primero.",
@@ -669,7 +669,7 @@
       "requestedBy": "Solicitado por",
       "selectPrompt": "Seleccione una credencial para compartir:",
       "noMatches": "No hay credenciales coincidentes en su billetera.",
-      "sharing": "Compartiendo credencial…",
+      "sharing": "Compartiendo credencial...",
       "didAuthTitle": "Solicitud de autenticación DID",
       "didAuthPrompt": "{{origin}} está solicitando autenticación DID.",
       "didAuthUnsupported": "Esta solicitud requiere un método DID que esta billetera no admite.",
@@ -710,7 +710,7 @@
         "firstRun": "{{appName}} guardará una clave de aplicación en su billetera para que pueda abrir sus datos en otros dispositivos.",
         "returning": "{{appName}} quiere usar la clave de aplicación guardada en su billetera.",
         "connect": "Conectar",
-        "connecting": "Conectando…"
+        "connecting": "Conectando..."
       }
     },
     "store": {
@@ -722,14 +722,14 @@
   },
   "verification": {
     "panelTitle": "Verificación y validación de la credencial",
-    "verifyingCredential": "Verificando credencial…",
+    "verifyingCredential": "Verificando credencial...",
     "lastChecked": "Última comprobación: {{datetime}}",
     "summaryOk": "Esta credencial se verificó correctamente.",
     "summaryExpired": "Esta credencial ha vencido, pero su prueba criptográfica sigue siendo válida.",
     "summaryWarning": "Esta credencial tiene avisos de verificación.",
     "summaryFail": "Esta credencial no se verificó correctamente.",
     "checklistSubtitle": "Esta credencial:",
-    "badgeVerifying": "Verificando…",
+    "badgeVerifying": "Verificando...",
     "badgeWarning": "Aviso",
     "badgeNotVerified": "No verificada",
     "badgeVerified": "Verificada",

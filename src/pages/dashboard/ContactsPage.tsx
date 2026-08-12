@@ -42,7 +42,10 @@ const CONTACT_SEARCH_KEYS: FuseOptionKey<StoredContact>[] = [
   {
     name: 'contactFields',
     getFn: item => [
-      ...flattenSearchValues(item.contact, CONTACT_NON_SEARCHABLE_FIELDS),
+      ...flattenSearchValues({
+        root: item.contact,
+        excludeKeys: CONTACT_NON_SEARCHABLE_FIELDS
+      }),
       ...getDids(item.contact)
     ]
   }

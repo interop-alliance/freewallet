@@ -89,9 +89,11 @@ function ResourceRow({
 }) {
   const { t } = useTranslation()
   const displayName = getResourceDisplayName(resource)
-  const typeLabel = getResourceTypeLabel(resource, t)
+  const typeLabel = getResourceTypeLabel({ resource, t })
   const modifiedIso = getResourceModifiedIso(resource)
-  const modified = modifiedIso ? formatRelativeTime(modifiedIso, locale) : ''
+  const modified = modifiedIso
+    ? formatRelativeTime({ input: modifiedIso, locale })
+    : ''
 
   return (
     <TableRow
@@ -106,9 +108,9 @@ function ResourceRow({
       }}
       tabIndex={0}
       role="button"
-      onKeyDown={(e: KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
+      onKeyDown={(event: KeyboardEvent) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
           onOpen()
         }
       }}

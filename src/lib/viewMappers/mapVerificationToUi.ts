@@ -41,15 +41,20 @@ function checklistLabels(t: TFunction): Record<ChecklistMsgKey, string> {
  * Freewallet's localized messages. Thin `TFunction` wrapper over the shared
  * `buildVerificationChecklist` (which takes an injected `labels` map).
  *
- * @param raw {Record<string, unknown>}
- * @param credential {IVerifiableCredential}
- * @param t {TFunction}
+ * @param options {object}
+ * @param options.raw {Record<string, unknown>}
+ * @param options.credential {IVerifiableCredential}
+ * @param options.t {TFunction}
  * @returns {VerificationResult}
  */
-export function verifyResultToChecklist(
-  raw: Record<string, unknown>,
-  credential: IVerifiableCredential,
+export function verifyResultToChecklist({
+  raw,
+  credential,
+  t
+}: {
+  raw: Record<string, unknown>
+  credential: IVerifiableCredential
   t: TFunction
-): VerificationResult {
+}): VerificationResult {
   return buildVerificationChecklist(raw, credential, checklistLabels(t))
 }

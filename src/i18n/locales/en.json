@@ -13,9 +13,9 @@
     "logIn": "Log in",
     "cancel": "Cancel",
     "close": "Close",
-    "saving": "Saving…",
+    "saving": "Saving...",
     "save": "Save",
-    "verifying": "Verifying…",
+    "verifying": "Verifying...",
     "continue": "Continue",
     "done": "Done",
     "store": "Store",
@@ -64,7 +64,7 @@
     "publishedDidProvisioned": "Published",
     "publishedDidNone": "Not published",
     "rotateUpdateKey": "Rotate update key",
-    "rotating": "Rotating…",
+    "rotating": "Rotating...",
     "rotateUpdateKeyHint": "Reveals the staged key and commits a fresh one. Appends an entry to the public DID log.",
     "rotateConfirmTitle": "Rotate the did:webvh update key?",
     "rotateConfirmMessage": "This appends a new entry to your public, append-only DID log: the staged update key is revealed and activated, and a fresh staged key is committed. This cannot be undone.",
@@ -506,13 +506,13 @@
     "backToCollection": "Back to folder",
     "deleteCollection": "Delete Collection",
     "deleteCollectionConfirmTitle": "Delete this collection?",
-    "deleteCollectionConfirm": "This permanently deletes \"{{name}}\" and all {{count}} files in it. This cannot be undone — consider exporting your space as a backup first.",
+    "deleteCollectionConfirm": "This permanently deletes \"{{name}}\" and all {{count}} files in it. This cannot be undone -- consider exporting your space as a backup first.",
     "deleteCollectionError": "Could not delete this collection. Please try again.",
     "collectionDeleted": "Collection deleted.",
     "resourceTitle": "File",
     "resourceNotFound": "File not found in this folder.",
     "resourceLoadError": "Could not load this file.",
-    "loadingResource": "Loading file…",
+    "loadingResource": "Loading file...",
     "download": "Download",
     "copySnippet": "Copy",
     "copied": "Copied!",
@@ -588,7 +588,7 @@
     "unrecognized": "Unrecognized issuer",
     "viewDetail": "View Issuer Detail",
     "detailTitle": "Issuer Detail",
-    "linksDisabledWarning": "Links disabled — unrecognized issuer",
+    "linksDisabledWarning": "Links disabled -- unrecognized issuer",
     "unknownRegistry": "Unknown Registry",
     "governanceInfo": "More info on governance",
     "name": "Issuer Name",
@@ -653,7 +653,7 @@
     "professionalAffiliations": "Professional affiliations"
   },
   "logout": {
-    "message": "Logging out…"
+    "message": "Logging out..."
   },
   "chapi": {
     "accountNotFound": "Account not found. Please create your wallet from the main app first.",
@@ -669,7 +669,7 @@
       "requestedBy": "Requested by",
       "selectPrompt": "Select a credential to share:",
       "noMatches": "No matching credentials in your wallet.",
-      "sharing": "Sharing credential…",
+      "sharing": "Sharing credential...",
       "didAuthTitle": "DID Authentication request",
       "didAuthPrompt": "{{origin}} is requesting DID Authentication.",
       "didAuthUnsupported": "This request asks for a DID method this wallet doesn't support.",
@@ -710,7 +710,7 @@
         "firstRun": "{{appName}} will keep an app key in your wallet so you can open your data on other devices.",
         "returning": "{{appName}} wants to use the app key saved in your wallet.",
         "connect": "Connect",
-        "connecting": "Connecting…"
+        "connecting": "Connecting..."
       }
     },
     "store": {
@@ -722,14 +722,14 @@
   },
   "verification": {
     "panelTitle": "Credential verification and validation",
-    "verifyingCredential": "Verifying credential…",
+    "verifyingCredential": "Verifying credential...",
     "lastChecked": "Last checked: {{datetime}}",
     "summaryOk": "This credential was verified successfully.",
     "summaryExpired": "This credential has expired but its cryptographic proof is still valid.",
     "summaryWarning": "This credential has verification warnings.",
     "summaryFail": "This credential was not verified successfully.",
     "checklistSubtitle": "This credential:",
-    "badgeVerifying": "Verifying…",
+    "badgeVerifying": "Verifying...",
     "badgeWarning": "Warning",
     "badgeNotVerified": "Not verified",
     "badgeVerified": "Verified",

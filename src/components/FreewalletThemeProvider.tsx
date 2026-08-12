@@ -48,7 +48,7 @@ export function FreewalletThemeProvider({ children }: { children: ReactNode }) {
   }, [mode])
 
   const muiTheme = useMemo(
-    () => createTheme(buildMuiThemeOptions(themeId, mode)),
+    () => createTheme(buildMuiThemeOptions({ themeId, mode })),
     [themeId, mode]
   )
 

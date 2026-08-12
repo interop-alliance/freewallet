@@ -134,6 +134,9 @@ export async function revokeEnrolledClient({
     idStore: remoteStore.webvhIdStore(),
     updateKeys: clientWebvhKeys,
     revokedClient: client,
+    // The cascade's own did.jsonl read must resolve to the account the
+    // session's pointer names.
+    expectedDid: pointer.did,
     // The standing recovery codes' update-key hashes, so the document edit can
     // tell the revoked client's staged commitment apart from a latent recovery
     // commitment (the one ambiguous log shape).

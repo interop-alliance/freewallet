@@ -119,6 +119,7 @@ import {
   rewrapUnlockRegistryToUserKey
 } from '@/session/userKeyAdoption'
 import {
+  accountLogPinStore,
   deleteAccountPointerPin,
   deleteClientKeyRecord,
   deleteKeyringCache,
@@ -504,7 +505,8 @@ export async function issueRecoveryCode({
     recovery: {
       keyAgreementKeyMultibase: client.keyAgreementKeyMultibase,
       updateKeyMultibase: client.updateKeyMultibase
-    }
+    },
+    expectedDid: pointer.did
   })
   invalidateVerifiedLog({ profile: session.profile })
 
@@ -735,11 +737,15 @@ export async function recoverAccountWithCode({
         'recovered on the roster model.'
     )
   }
-  // Verify the world-readable log locally before invoking anything.
+  // Verify the world-readable log locally before invoking anything. The
+  // recovering browser normally holds no account-log chain-head pin yet
+  // (this read is its first contact), which is exactly the pin's
+  // trust-on-first-use establishment.
   await verifyAccountLog({
     did: pointer.did,
     spaceId: pointer.spaceId,
-    host: pointer.host
+    host: pointer.host,
+    pinStore: accountLogPinStore({ spaceId: pointer.spaceId, idb })
   })
 
   // Mint the NEW ordinary client and the replacement code -- in memory only
@@ -776,6 +782,9 @@ export async function recoverAccountWithCode({
   })
   const continuation = await recoverWebvhClient({
     store: logStore,
+    // The ceremony's own did.jsonl reads must resolve to the account the
+    // record's pointer names.
+    expectedDid: pointer.did,
     recovery: {
       updateSeed: spent.updateSeed,
       keyAgreementKeyMultibase: spent.keyAgreementKeyMultibase,
@@ -857,7 +866,8 @@ export async function recoverAccountWithCode({
   const { doc } = await verifyAccountLog({
     did: pointer.did,
     spaceId: pointer.spaceId,
-    host: pointer.host
+    host: pointer.host,
+    pinStore: accountLogPinStore({ spaceId: pointer.spaceId, idb })
   })
   const preRotation = await readUserKeyRoster({
     store: rosterStore,
@@ -1105,7 +1115,8 @@ export async function revokeRecoveryCode({
     recovery: {
       keyAgreementKeyMultibase: entry.keyAgreementKeyMultibase,
       updateKeyMultibase: entry.updateKeyMultibase
-    }
+    },
+    expectedDid: pointer.did
   })
 
   // 2. The user key rotation off the code's wrap, recipients resolved from the

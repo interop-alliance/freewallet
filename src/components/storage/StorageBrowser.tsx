@@ -129,7 +129,7 @@ function CollectionFolderCard({
   muted?: boolean
 }) {
   const { t } = useTranslation()
-  const displayName = getCollectionDisplayName(collection, t)
+  const displayName = getCollectionDisplayName({ collection, t })
   const total = collection.totalItems ?? 0
   const targetPath = `/storage/collections/${encodeURIComponent(collection.id)}`
 

@@ -221,7 +221,7 @@ export function CollectionResourcePage() {
         }
 
         const matchCollection =
-          collections.find(c => c.id === collectionId) ?? null
+          collections.find(collection => collection.id === collectionId) ?? null
 
         if (!matchCollection) {
           setErrorKey('storage.collectionNotFound')
@@ -235,7 +235,7 @@ export function CollectionResourcePage() {
           return
         }
 
-        const matchResource = items.find(r => r.id === resourceId) ?? null
+        const matchResource = items.find(item => item.id === resourceId) ?? null
         setResource(matchResource)
 
         if (!matchResource) {

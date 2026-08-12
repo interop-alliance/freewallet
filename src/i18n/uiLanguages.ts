@@ -12,18 +12,18 @@ export type UiLanguageCode = (typeof UI_LANGUAGES)[number]['code']
 const UI_LANGUAGE_STORAGE_KEY = 'fw-ui-language'
 
 export function languageOptionLabel(code: UiLanguageCode): string {
-  const row = UI_LANGUAGES.find(l => l.code === code)
+  const row = UI_LANGUAGES.find(lang => lang.code === code)
   return row ? `${row.code} | ${row.name}` : code
 }
 
 export function supportedUiLanguageCodes(): UiLanguageCode[] {
-  return UI_LANGUAGES.map(l => l.code)
+  return UI_LANGUAGES.map(lang => lang.code)
 }
 
 function isUiLanguageCode(
   value: string | null | undefined
 ): value is UiLanguageCode {
-  return UI_LANGUAGES.some(l => l.code === value)
+  return UI_LANGUAGES.some(lang => lang.code === value)
 }
 
 /**

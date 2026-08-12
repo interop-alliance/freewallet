@@ -50,11 +50,15 @@ function usageHeroMeta(t: TFunction, unit: string): string {
   return t('storage.quota.unitUsed', { unit })
 }
 
-function formatMeasuredLabel(
-  t: TFunction,
-  locale: string,
+function formatMeasuredLabel({
+  t,
+  locale,
+  measuredAt
+}: {
+  t: TFunction
+  locale: string
   measuredAt: string
-): string {
+}): string {
   const date = new Date(measuredAt)
   if (Number.isNaN(date.getTime())) {
     return t('storage.quota.measuredRecently')
@@ -81,7 +85,11 @@ function QuotaReadyContent({ quota }: { quota: StorageQuotaView }) {
   const { t, i18n } = useTranslation()
   const { amount, unit } = formatBytesParts(quota.usageBytes)
   const heroMeta = usageHeroMeta(t, unit)
-  const measuredLabel = formatMeasuredLabel(t, i18n.language, quota.measuredAt)
+  const measuredLabel = formatMeasuredLabel({
+    t,
+    locale: i18n.language,
+    measuredAt: quota.measuredAt
+  })
 
   return (
     <Stack spacing={2}>

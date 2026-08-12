@@ -26,7 +26,7 @@ import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
 import { setClientLabel } from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
 import { sessionRosterStore } from '@/session/rosterStore'
-import { saveUserKeyEpochPin } from '@/lib/sessionKey'
+import { accountLogPinStore, saveUserKeyEpochPin } from '@/lib/sessionKey'
 import { deriveUnlockIdentity, KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { bindPassphrase, fetchKeyring } from '@/session/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
@@ -151,7 +151,10 @@ export async function completeEnrollment({
   const { userKey, latestEpochId } = await completeEnrollmentCore({
     clientSeed,
     webvhUpdateKeys,
-    pointer
+    pointer,
+    // The enrolling browser's first contact with the account log establishes
+    // its chain-head pin (trust-on-first-use); later logins verify against it.
+    accountLogPinStore: accountLogPinStore({ spaceId: pointer.spaceId, idb })
   })
   await saveUserKeyEpochPin({
     spaceId: pointer.spaceId,

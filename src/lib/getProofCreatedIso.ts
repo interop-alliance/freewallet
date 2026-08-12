@@ -1,11 +1,11 @@
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 
 export function getProofCreatedIso(vc: IVerifiableCredential): string {
-  const p = vc.proof
-  if (p == null) {
+  const proof = vc.proof
+  if (proof == null) {
     return ''
   }
-  const first = Array.isArray(p) ? p[0] : p
+  const first = Array.isArray(proof) ? proof[0] : proof
   if (!first || typeof first !== 'object') {
     return ''
   }

@@ -32,7 +32,10 @@ describe('formatDate', () => {
 
 describe('formatDateTime', () => {
   it('formats a Date into a medium date with short time', () => {
-    const formatted = formatDateTime(new Date('2025-06-15T12:00:00Z'), 'en-US')
+    const formatted = formatDateTime({
+      date: new Date('2025-06-15T12:00:00Z'),
+      locale: 'en-US'
+    })
     expect(formatted).toMatch(/2025/)
   })
 })

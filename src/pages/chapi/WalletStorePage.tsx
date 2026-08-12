@@ -231,16 +231,16 @@ export function WalletStorePage() {
       setLoginError(t(result.errorKey))
       return
     }
-    const s = result.session
+    const popupSession = result.session
     try {
       // Session creation fired `ensureUserCollections` as `session.storageReady`;
       // wait for the collections to be provisioned/opened before storing into
       // them.
-      await s.storageReady
-      setSession(s)
+      await popupSession.storageReady
+      setSession(popupSession)
       if (pendingDIDAuth) {
         setPageState('authenticating')
-        void authenticate({ session: s, pending: pendingDIDAuth })
+        void authenticate({ session: popupSession, pending: pendingDIDAuth })
       } else {
         setPageState('confirming')
       }

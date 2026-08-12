@@ -282,7 +282,7 @@ export function SignupPage() {
                     id="signup-passphrase"
                     name="signup-passphrase"
                     value={passphrase}
-                    onChange={e => setPassphrase(e.target.value)}
+                    onChange={event => setPassphrase(event.target.value)}
                     type="password"
                     autoComplete="new-password"
                     sx={authStyles.input}
@@ -372,7 +372,7 @@ export function SignupPage() {
               placeholder="alice@example.com"
               type="email"
               value={email}
-              onChange={e => setEmail(e.target.value)}
+              onChange={event => setEmail(event.target.value)}
               autoComplete="email"
               error={!emailValid}
               helperText={

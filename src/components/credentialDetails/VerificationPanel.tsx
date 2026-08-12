@@ -64,12 +64,17 @@ function ChecklistRow({ step }: { step: VerificationStep }) {
   )
 }
 
-function summaryMessageFor(
-  error: Error | null,
-  pending: boolean,
-  result: UseVerificationReturn['result'],
+function summaryMessageFor({
+  error,
+  pending,
+  result,
+  t
+}: {
+  error: Error | null
+  pending: boolean
+  result: UseVerificationReturn['result']
   t: ReturnType<typeof useTranslation>['t']
-): string {
+}): string {
   if (pending) {
     return ''
   }
@@ -101,7 +106,7 @@ export function VerificationPanel({
   const { t, i18n } = useTranslation()
   const { result, loading, error, lastCheckedAt } = verification
   const pending = loading || (!result && !error)
-  const summaryMessage = summaryMessageFor(error, pending, result, t)
+  const summaryMessage = summaryMessageFor({ error, pending, result, t })
 
   return (
     <Box sx={sx.vpCard}>
@@ -137,7 +142,10 @@ export function VerificationPanel({
               {lastCheckedAt && (
                 <Typography sx={sx.vpLastCheckedInline}>
                   {t('verification.lastChecked', {
-                    datetime: formatDateTime(lastCheckedAt, i18n.language)
+                    datetime: formatDateTime({
+                      date: lastCheckedAt,
+                      locale: i18n.language
+                    })
                   })}
                 </Typography>
               )}

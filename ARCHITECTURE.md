@@ -209,13 +209,13 @@ the session and the user logs in again. The vault is
 therefore always unlocked while a session exists (the KAK is present) and
 simply gone once it ends; there is no "locked vault" state.
 
-## The user key wrap-set roster (`key-map/user-key.json`)
+## The user key wrap-set roster (`key-map/user-key.jsonl`)
 
 The user key (formerly PUK) -- recipient zero of every encrypted collection --
-has one remote home: a roster resource in the private, capability-gated `key-map`
+has one remote home: a roster in the private, capability-gated `key-map`
 collection (deliberately outside the synced collections; no local replica, no
-background replication). Its body is a `CollectionEncryption` descriptor stored
-verbatim, and **the roster's current key epoch IS the current user key**:
+background replication). Its state is a `CollectionEncryption` descriptor, and
+**the roster's current key epoch IS the current user key**:
 the epoch id is the user key's did:key, and the epoch secret -- the user
 key's raw 32-byte key -- is wrapped once per enrolled wallet client, to that
 client's own (identity) key-agreement key (`profile.clientKeyAgreementKey`,
@@ -224,30 +224,51 @@ not a source of authority: each client keeps the user key in its own local
 state under the unlock layer (the client-key record), and the roster's epoch
 stamp marks a cached copy stale.
 
-Everything goes through was-client's descriptor-store seam (the plain-JSON-
-resource adapter): read-with-etag, compare-and-swap writes, and a guarded
-create for the initially-absent roster -- no descriptor logic is reimplemented
-wallet-side (`@interop/wallet-core/keys`; the store handles live in
-`wasRemoteStore.ts`). Provisioning (`ensureUserCollections`) initializes the
-roster idempotently with the account's existing user key as the first epoch;
-login performs one direct read (`initSessionFromSeed`, before the storage
-clients are built) that either confirms the cached user key current or -- on an
-epoch mismatch, a rotation by another client -- unwraps the fresh user key with
-this client's own key, adopts it for the session, and persists it into the
-client-key record.
+The roster is **log-governed**: it lives as the resource log
+`key-map/user-key.jsonl`, with no point-state companion resource. wallet-core's
+`userKeyRosterDescriptorStore` (`@interop/wallet-core/keys`) exposes that log
+as an ordinary descriptor store -- reads resolve only to the log's VERIFIED
+head (chain, entry proofs, and the durable chain-head pin all checked before
+any descriptor is handed out), writes are signed log appends -- so was-client's
+roster machinery (`initRecipients` / `addRecipient` / `removeRecipient`, with
+their compare-and-swap retry loops) drives the log without knowing it, and no
+descriptor logic is reimplemented wallet-side. The wiring is two builders in
+`src/session/rosterStore.ts`: `accountRosterStore`, from the bare parts (a
+signing client, a key agent, an account pointer naming a did:webvh), for
+callers with no session profile -- the login-time read and the recovery
+continuation -- and `sessionRosterStore` for a live session, which resolves the
+controller view through the profile's verified-log memo so a ceremony that just
+extended the account log anchors its appends at the post-edit head. The
+chain-head pin is durable either way (`userKeyLogPinStore` in the session
+database, keyed by the data Space id), so log continuity spans logins.
 
-A resource-hosted descriptor gets none of the server-side epoch invariants a
-Collection Description enforces, so three client-side guards are load-bearing
-alone against a tampering host: the descriptor's `epochsMac` (a fabricated epoch
-configuration fails authentication and is refused); a locally pinned
-latest-seen roster epoch (`src/lib/sessionKey.ts`, beside the account-pointer
-pin -- a served roster that rolls back behind the pin is refused, so a
-stale-roster replay lands in the same accepted continuity class as a
-substituted account pointer); and, at rotation time, a recipient resolver
-backed by the locally verified did:webvh document -- a roster entry with no
-matching `keyAgreement` verification method is dropped and never receives a
-wrap, so a server-injected entry sits ignored (wraps are minted only by
-enrolled clients, against log-verified keys).
+Provisioning (`ensureUserCollections`) initializes the roster idempotently with
+the account's existing user key as the first epoch, and runs after did:webvh
+provisioning rather than before it: the log's entry proofs anchor in the
+published account document, so the genesis append needs a log to verify
+against. Login performs one direct read (`initSessionFromSeed`, before the
+storage clients are built), gated on a promoted (did:webvh) account pointer,
+that either confirms the cached user key current or -- on an epoch mismatch, a
+rotation by another client -- unwraps the fresh user key with this client's own
+key, adopts it for the session, and persists it into the client-key record.
+
+Three client-side guards are load-bearing against a tampering host. First the
+resource log itself: roster state is adopted only from a verified head, whose
+entry proofs must be signed by keys the independently verified did:webvh
+document lists under `assertionMethod` at the anchored version
+(`ResourceLogIntegrityError`), and whose chain-head pin refuses rollbacks,
+forks, and SCID or method switches (`ResourceLogContinuityError`) -- log
+verification subsumes both the retired detached epoch-configuration signature
+and the retired `epochsMac`. Second, the locally pinned latest-seen roster
+epoch (`src/lib/sessionKey.ts`, beside the account-pointer pin): a served
+roster that rolls back behind the pin is refused
+(`UserKeyRosterContinuityError`), and it is kept beside the chain-head pin
+because it still guards a client whose chain-head pin was lost with a
+reinstall. Third, at rotation time, a recipient resolver backed by the locally
+verified did:webvh document -- a roster entry with no matching `keyAgreement`
+verification method is dropped and never receives a wrap, so a server-injected
+entry sits ignored (wraps are minted only by enrolled clients, against
+log-verified keys).
 
 ## The client enrollment ceremony (`@interop/wallet-core/enrollment`)
 
@@ -272,7 +293,7 @@ The flow, quorum-of-one (any single enrolled client can enroll):
    compares the fingerprint, approves (`approveEnrollment`). Push, not pull,
    in the recovery-anchor order -- decryption material before authorization:
    the user key is wrapped to the new client's key-agreement key in
-   `key-map/user-key.json` FIRST (`addUserKeyRosterRecipient`, escrow
+   `key-map/user-key.jsonl` FIRST (`addUserKeyRosterRecipient`, escrow
    semantics: every epoch, so pre-enrollment history decrypts), and only then
    the two
    did:webvh log entries (`enrollWebvhClient`) -- a sparse **commit** entry

@@ -59,8 +59,8 @@ export function groupCollections({
   system: StorageCollection[]
 } {
   const byDisplayName = (left: StorageCollection, right: StorageCollection) =>
-    getCollectionDisplayName(left, t).localeCompare(
-      getCollectionDisplayName(right, t)
+    getCollectionDisplayName({ collection: left, t }).localeCompare(
+      getCollectionDisplayName({ collection: right, t })
     )
   const known = (ids: string[]) =>
     collections.filter(({ id }) => ids.includes(id)).sort(byDisplayName)
@@ -78,10 +78,22 @@ export function groupCollections({
   }
 }
 
-export function getCollectionDisplayName(
-  collection: StorageCollection,
+/**
+ * Resolves the display name for a collection, preferring the canonical
+ * translated name for a wallet collection over its stored one.
+ *
+ * @param options {object}
+ * @param options.collection {StorageCollection}
+ * @param options.t {TFunction}
+ * @returns {string}
+ */
+export function getCollectionDisplayName({
+  collection,
+  t
+}: {
+  collection: StorageCollection
   t: TFunction
-): string {
+}): string {
   const canonical = CANONICAL_COLLECTION_NAMES.get(collection.id)
   if (canonical) {
     return t(`storage.collectionNames.${collection.id}`, {
@@ -106,10 +118,13 @@ export function getResourceDisplayName(resource: StorageResource): string {
  * Resolves a "Type" label for a resource. Prefers structured `type` fields,
  * then a readable shorthand derived from `contentType`.
  */
-export function getResourceTypeLabel(
-  resource: StorageResource,
+export function getResourceTypeLabel({
+  resource,
+  t
+}: {
+  resource: StorageResource
   t: TFunction
-): string {
+}): string {
   if (resource.type && resource.type.length > 0) {
     // Prefer the most specific structured type
     return resource.type[resource.type.length - 1]

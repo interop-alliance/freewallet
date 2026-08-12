@@ -16,8 +16,8 @@ export function CHAPILoginForm({
   const [passphrase, setPassphrase] = useState('')
   const [loading, setLoading] = useState(false)
 
-  async function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
-    e.preventDefault()
+  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault()
     if (!passphrase) {
       return
     }
@@ -44,7 +44,7 @@ export function CHAPILoginForm({
         type="password"
         placeholder={t('chapi.passphrasePlaceholder')}
         value={passphrase}
-        onChange={e => setPassphrase(e.target.value)}
+        onChange={event => setPassphrase(event.target.value)}
         autoComplete="current-password"
         size="small"
         fullWidth

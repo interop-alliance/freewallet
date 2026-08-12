@@ -1,5 +1,5 @@
 /*
- * West Coast theme — design tokens + styles for .fw-* hooks used in JSX.
+ * West Coast theme -- design tokens + styles for .fw-* hooks used in JSX.
  * Typography/buttons stay in MUI (themeConfig.ts) and landingStyles.ts.
  */
 html[data-theme='west-coast'] {

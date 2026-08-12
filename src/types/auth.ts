@@ -1,7 +1,7 @@
 /**
  * Core session and identity types. Session is the single source of truth for
  * who is logged in; it lives in-memory only (authStore.ts) and is discarded on
- * page refresh — the passphrase is never persisted.
+ * page refresh -- the passphrase is never persisted.
  *
  * Shape is broadly compatible with Auth.js / next-auth for future portability.
  */
@@ -43,7 +43,7 @@ export interface ICapabilityAgent {
 }
 
 /**
- * Wallet user — compatible with Auth.js / next-auth. `id` is a did:key DID.
+ * Wallet user -- compatible with Auth.js / next-auth. `id` is a did:key DID.
  */
 export interface User {
   id: string

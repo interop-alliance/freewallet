@@ -38,7 +38,11 @@ import {
 } from '@interop/wallet-core/clients'
 import { swapSessionVaultKeys } from '@/session/userKeyAdoption'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
-import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
+import {
+  accountLogPinStore,
+  loadUserKeyEpochPin,
+  savePinFromDescriptor
+} from '@/lib/sessionKey'
 import { StorageManager } from '@/stores/storageManager'
 import { fetchKeyring, KeyringRecordUnusableError } from '@/session/keyring'
 import type {
@@ -427,6 +431,7 @@ async function convergeRosterToDocument({
       descriptor,
       clientKeyAgreementKey,
       pinnedEpochId: await loadUserKeyEpochPin({ spaceId, idb }),
+      accountLogPinStore: accountLogPinStore({ spaceId, idb }),
       // Adoption is app-side: persisted for the next login, pinned, and
       // swapped into the live session -- all before the collection fan-out
       // runs against it.
