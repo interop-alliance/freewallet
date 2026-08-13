@@ -19,7 +19,6 @@
  * hand-built ezcap requests. The `WasClient` wraps the ezcap `ZcapClient` that
  * carries the user's invocation signer.
  */
-import { base64urlnopad } from '@scure/base'
 import type { ZcapClient } from '@interop/ezcap'
 import {
   WasClient,
@@ -87,11 +86,11 @@ export type ICollectionsSet = Map<string, string>
  * `hash(unlock did:key)` addressing -- that derivation is a discovery
  * convention, not an identity.
  *
- * @returns {string}
+ * The mint itself is the shared one from `@interop/wallet-core/genesis`, so
+ * both wallet apps mint the same shape; re-exported under this name because
+ * the app imports it from here.
  */
-export function mintSpaceId(): string {
-  return base64urlnopad.encode(crypto.getRandomValues(new Uint8Array(32)))
-}
+export { mintSpaceId } from '@interop/wallet-core/genesis'
 
 export class WASRemoteStore {
   public storageServerUrl: string
@@ -298,6 +297,19 @@ export class WASRemoteStore {
       controllerDid: this.controller
     })
 
+    this.bindCollectionMap()
+  }
+
+  /**
+   * Binds the local collection map (logical name to WAS base URL) for the
+   * synced feeds. Split out of `ensureUserCollections` so a caller that
+   * provisioned the Space through the shared account-genesis ceremony -- which
+   * runs the same `provisionWalletSpace` -- still gets the map without
+   * provisioning twice.
+   *
+   * @returns {void}
+   */
+  bindCollectionMap(): void {
     const collections: ICollectionsSet = new Map()
     for (const { key, id } of WALLET_STANDARD_COLLECTIONS) {
       collections.set(key, this.#collectionBaseUrl(id))

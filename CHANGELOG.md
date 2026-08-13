@@ -1,6 +1,20 @@
 # History
 
-## 0.35.0 - TBD
+## 0.36.0 - TBD
+
+### Changed
+
+- Update to `@interop/wallet-core@0.36.0` and consume its shared
+  account-genesis ceremony (`@interop/wallet-core/genesis`). Signup's key
+  mint is now `mintAccountKeySet`, `mintSpaceId` re-exports the shared mint,
+  and login-time remote provisioning calls `ensureAccountGenesis` once for
+  the Space provisioning, did:web key map, did:webvh genesis, user key roster,
+  and collection key epochs. The keyring bind, the `userExists` probe, the
+  pointer backfill, and controller promotion stay in freewallet's own flow
+  (the ceremony is called with `promoteController: false`). Sessions with no
+  did:webvh -- the flag off, no keystore agent, or no client update keys /
+  user key -- keep the reduced path (Space provisioning, key epochs,
+  did:web), and a failed Space provisioning stays fatal.
 
 ### Added
 

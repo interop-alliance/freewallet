@@ -60,16 +60,14 @@ import { getOrCreateWriterId } from '@/lib/writerId'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
 import {
-  clientSigningKeyMultibase,
   didKeyZcapClient,
-  ensureDidWebvh,
   isWebvhDid,
   webvhCapabilityAgent,
   webvhZcapClient,
   type DidWebKeyMapV2
 } from '@interop/wallet-core/webvh'
+import { ensureAccountGenesis } from '@interop/wallet-core/genesis'
 import { promoteKeystoreController, rebindKeystoreAgent } from '@/lib/kms'
-import { ensureUserKeyRoster } from '@interop/wallet-core/keys'
 import { accountRosterStore } from '@/session/rosterStore'
 import { mintRecordEncryption } from '@interop/wallet-core/keyring'
 import {
@@ -1568,175 +1566,128 @@ export class StorageManager {
           console.warn('Space controller promotion failed:', err)
         }
       }
-      await this.#remoteStore.ensureUserCollections({ user })
-      // The provisioning two-step's EDV-bearing second half: install key
-      // epoch[0] on every encrypted roster collection, wrapped to the
-      // account's user key -- create-if-absent, adopting whatever an earlier
-      // provisioner landed. Runs before login completes (and so before
-      // replication starts), keeping the descriptor-before-first-content-push
-      // invariant. Warn-and-continue like the neighbouring steps: without
-      // epochs the affected collections' ciphers refuse fail-closed (nothing
-      // leaks plaintext), and the idempotent ensure resumes on the next
-      // login.
-      if (profile?.userKey) {
-        try {
-          await this.#remoteStore.ensureSpaceEpochs({
-            userKey: profile.userKey
-          })
-          // A fresh signup built this session's ciphers before the Space
-          // existed, so every encrypted collection's descriptor was
-          // unavailable and its cipher refuses. Now that epoch[0] is
-          // installed, refresh the descriptors and rebuild the ciphers --
-          // only when a descriptor is still missing its epochs, so an
-          // ordinary login (descriptors fetched at session init) adds no
-          // requests.
-          if (
-            ENCRYPTED_COLLECTION_IDS.some(
-              collectionId => !this.#descriptors[collectionId]?.epochs?.length
-            )
-          ) {
-            await this.refreshEncryptedDescriptors()
-          }
-        } catch (err) {
-          console.warn('Collection key-epoch provisioning failed:', err)
+      const remoteStore = this.#remoteStore
+      // Provision and publish the user's did:web DID (only when a keystore
+      // agent is present). Runs after the Space and `id` collection exist --
+      // on the ceremony path below, wallet-core calls this closure at that
+      // exact point and threads the parsed keys.json (with any webvh block)
+      // into the did:webvh genesis, so steady state stays one keys.json read
+      // total. Non-fatal like keystore provisioning: a KMS/WAS hiccup must
+      // not fail login; the settings page surfaces the unprovisioned state,
+      // and the idempotent flow resumes on the next login.
+      const provideDidWebKeys = async (): Promise<
+        DidWebKeyMapV2 | undefined
+      > => {
+        // Defensive: both paths below already gate on the keystore agent.
+        if (!profile?.keystoreAgent) {
+          return undefined
+        }
+        const did = didWebFromSpace({
+          wasServerUrl: remoteStore.storageServerUrl,
+          spaceId: remoteStore.spaceId
+        })
+        const keys = await ensureDidWeb({
+          keystoreAgent: profile.keystoreAgent,
+          remoteStore,
+          did
+        })
+        profile.didWeb = { did, keys }
+        return keys as DidWebKeyMapV2
+      }
+      // A fresh signup built this session's ciphers before the Space
+      // existed, so every encrypted collection's descriptor was unavailable
+      // and its cipher refuses. Once epoch[0] is installed, refresh the
+      // descriptors and rebuild the ciphers -- only when a descriptor is
+      // still missing its epochs, so an ordinary login (descriptors fetched
+      // at session init) adds no requests.
+      const refreshDescriptorsWithoutEpochs = async () => {
+        if (
+          ENCRYPTED_COLLECTION_IDS.some(
+            collectionId => !this.#descriptors[collectionId]?.epochs?.length
+          )
+        ) {
+          await this.refreshEncryptedDescriptors()
         }
       }
-      // Provision and publish the user's did:web DID (only when a keystore
-      // agent is present). Runs here, after the Space and `id` collection
-      // exist. Non-fatal like keystore provisioning: a KMS/WAS hiccup must not
-      // fail login; the settings page surfaces the unprovisioned state, and
-      // the idempotent flow resumes on the next login.
-      if (profile?.keystoreAgent) {
+      if (
+        ENABLE_DID_WEBVH &&
+        profile?.keystoreAgent &&
+        profile.clientWebvhKeys &&
+        profile.keyAgent &&
+        profile.clientKeyAgreementKey &&
+        profile.userKey
+      ) {
+        // The full account-genesis ceremony, whose stage order lives in
+        // `@interop/wallet-core/genesis` so both wallet apps encode it
+        // identically: Space provisioning, did:web key map, did:webvh
+        // genesis, the user key roster (strictly after the DID publication,
+        // since the roster log's entry proofs anchor in the published
+        // document), and key epoch[0] on every encrypted collection. Every
+        // stage detects its own completion from durable state, so a torn run
+        // heals by re-running at the next login.
+        //
+        // Controller promotion is NOT part of this call
+        // (`promoteController: false`): freewallet's account pointer must
+        // durably name the did:webvh before the controller PUT, so signup
+        // promotes after its keyring re-bind (`backfillPointerAndPromote`)
+        // and a pointer-promoted login heals at the head of this method.
+        const { userKey, keyAgent, clientKeyAgreementKey } = profile
+        // The account pointer's DID is what this run expects the published
+        // log to resolve to -- but only once it is a webvh DID: a first
+        // signup has none yet, and wallet-core then falls back to the
+        // keys.json webvh block.
+        const pointerDid = profile.accountPointer?.did
         try {
-          const did = didWebFromSpace({
-            wasServerUrl: this.#remoteStore.storageServerUrl,
-            spaceId: this.#remoteStore.spaceId
-          })
-          const keys = await ensureDidWeb({
-            keystoreAgent: profile.keystoreAgent,
-            remoteStore: this.#remoteStore,
-            did
-          })
-          profile.didWeb = { did, keys }
-
-          // Provision and publish the did:webvh log alongside did:web, in
-          // its own try so a webvh hiccup never rolls back the did:web
-          // provisioning. Gated on the opt-out flag, and on this client
-          // holding its update-key seeds and identity keys (the document
-          // carries a verification method per enrolled client, and the log
-          // can only be extended with the client-held update key).
-          // `ensureDidWeb` returned the parsed keys.json (with any webvh
-          // block), threaded in so steady state stays one keys.json read
-          // total.
-          if (
-            ENABLE_DID_WEBVH &&
-            profile.clientWebvhKeys &&
-            profile.keyAgent &&
-            profile.clientKeyAgreementKey
-          ) {
-            try {
-              const { publicKeyMultibase: keyAgreementKeyMultibase } =
-                profile.clientKeyAgreementKey as unknown as {
-                  publicKeyMultibase?: string
-                }
-              if (!keyAgreementKeyMultibase) {
-                throw new Error(
-                  'The client key-agreement key has no public multibase.'
-                )
-              }
-              // The account pointer's DID is what this run expects the
-              // published log to resolve to -- but only once it is a webvh
-              // DID: a first signup has none yet, and wallet-core then falls
-              // back to the keys.json webvh block.
-              const pointerDid = profile.accountPointer?.did
-              const { did: webvhDid } = await ensureDidWebvh({
-                idStore: this.#remoteStore.webvhIdStore(),
-                wasServerUrl: this.#remoteStore.storageServerUrl,
-                spaceId: this.#remoteStore.spaceId,
-                didWebKeys: keys as DidWebKeyMapV2,
-                clientKeys: {
-                  signingKeyMultibase: clientSigningKeyMultibase({
-                    keyAgent: profile.keyAgent
-                  }),
-                  keyAgreementKeyMultibase
-                },
-                updateKeys: profile.clientWebvhKeys,
-                expectedDid: isWebvhDid(pointerDid) ? pointerDid : undefined,
-                // The provisioning read runs under the same chain-head pin
-                // the login-time account-log reads use, so a truncated or
-                // substituted log is refused before any entry is built on it.
-                pinStore: accountLogPinStore({
-                  spaceId: this.#remoteStore.spaceId,
-                  idb
-                })
-              })
-              if (webvhDid) {
-                profile.didWebvh = { did: webvhDid }
-              }
+          const result = await ensureAccountGenesis({
+            was: remoteStore.was,
+            wasServerUrl: remoteStore.storageServerUrl,
+            spaceId: remoteStore.spaceId,
+            keyAgent,
+            clientKeyAgreementKey,
+            userKey,
+            updateKeys: profile.clientWebvhKeys,
+            idStore: remoteStore.webvhIdStore(),
+            provideDidWebKeys,
+            ...(isWebvhDid(pointerDid) ? { expectedDid: pointerDid } : {}),
+            // The provisioning read runs under the same chain-head pin the
+            // login-time account-log reads use, so a truncated or
+            // substituted log is refused before any entry is built on it.
+            accountLogPinStore: accountLogPinStore({
+              spaceId: remoteStore.spaceId,
+              idb
+            }),
+            onDidPublished: async ({ did }) => {
+              profile.didWebvh = { did }
               // Provisioning publishes (or extends) the log, so any memo of
               // an earlier verification is dropped.
               invalidateVerifiedLog({ profile })
-            } catch (err) {
-              // A continuity refusal other than a rollback is a security
-              // signal, not a hiccup: the served log forked or switched
-              // identity against this browser's pinned head. Provisioning
-              // stays non-fatal (login must not break here), but the refusal
-              // is logged as an error -- the later account-log reads in the
-              // same login run the same pin and surface it to the user. A
-              // rollback may be no more than replication lag (nothing rolled
-              // back was adopted), so it warns like everything else. Matched
-              // on `err.name` rather than `instanceof`: the refusal is raised
-              // inside wallet-core, whose copy here can differ from the one
-              // this file imports (a linked checkout, or a duplicate through
-              // the dependency tree).
-              if (
-                (err as { name?: unknown } | null)?.name ===
-                  'ResourceLogContinuityError' &&
-                (err as { reason?: unknown }).reason !== 'rollback'
-              ) {
-                console.error('did:webvh provisioning refused:', err)
-              } else {
-                console.warn('did:webvh provisioning failed:', err)
-              }
+            },
+            rosterStoreFor: ({ did }) =>
+              accountRosterStore({
+                zcapClient: profile.zcapClient,
+                keyAgent,
+                pointer: {
+                  did,
+                  spaceId: remoteStore.spaceId,
+                  host: remoteStore.storageServerUrl
+                },
+                idb
+              }),
+            promoteController: false
+          })
+          remoteStore.bindCollectionMap()
+          // The stages the ceremony collects rather than throwing on: each
+          // keeps the warn it had when this method sequenced the stages
+          // itself, and each resumes on the next login.
+          for (const { stage, error } of result.failed) {
+            if (stage === 'didWebKeys') {
+              console.warn('did:web provisioning failed:', error)
+            } else if (stage === 'roster') {
+              console.warn('user key roster provisioning failed:', error)
+            } else {
+              console.warn('Collection key-epoch provisioning failed:', error)
             }
           }
-        } catch (err) {
-          console.warn('did:web provisioning failed:', err)
-        }
-      }
-      // Ensure the user key wrap-set roster (the `key-map/user-key.jsonl`
-      // resource log) exists, create-if-absent through the log-governed
-      // descriptor-store seam: an absent roster is initialized with the
-      // account's user key as its first epoch, wrapped to this client's own
-      // key-agreement key, and the created epoch is pinned as the latest
-      // seen. Runs after DID provisioning, not before: the roster log's
-      // entry proofs anchor in the account's did:webvh document, so the
-      // genesis append needs the published log to verify against. An
-      // existing roster is left untouched (the login-time read verifies
-      // it). Non-fatal like DID provisioning: the idempotent ensure resumes
-      // on the next login.
-      const rosterDid = profile?.didWebvh?.did ?? profile?.accountPointer?.did
-      if (
-        profile?.userKey &&
-        profile.clientKeyAgreementKey &&
-        profile.keyAgent &&
-        isWebvhDid(rosterDid)
-      ) {
-        try {
-          const descriptor = await ensureUserKeyRoster({
-            store: accountRosterStore({
-              zcapClient: profile.zcapClient,
-              keyAgent: profile.keyAgent,
-              pointer: {
-                did: rosterDid,
-                spaceId: this.#remoteStore.spaceId,
-                host: this.#remoteStore.storageServerUrl
-              },
-              idb
-            }),
-            userKey: profile.userKey,
-            clientKeyAgreementKey: profile.clientKeyAgreementKey
-          })
           // Pin only an epoch this session already holds the key for: the
           // ensure serves an existing roster back without the continuity and
           // unwrap checks of the full login-time read, so a served epoch id
@@ -1744,16 +1695,81 @@ export class StorageManager {
           // from the checked login-time read or the local client-key record
           // -- and the save itself is monotonic, so a rolled-back descriptor
           // can never drag the pin backward.
-          if (descriptor.currentEpoch === profile.userKey.id) {
+          const descriptor = result.rosterDescriptor
+          if (descriptor && descriptor.currentEpoch === userKey.id) {
             await savePinFromDescriptor({
-              spaceId: this.#remoteStore.spaceId,
+              spaceId: remoteStore.spaceId,
               epochId: descriptor.currentEpoch,
               descriptor,
               idb
             })
           }
+          if (result.epochs) {
+            await refreshDescriptorsWithoutEpochs()
+          }
         } catch (err) {
-          console.warn('user key roster provisioning failed:', err)
+          // The Space itself never came up: nothing downstream has anywhere
+          // to write, so this stays fatal exactly as the standalone
+          // `ensureUserCollections` was -- login's `storageReady` rejects
+          // rather than warning. Matched on `err.name` for the same reason
+          // the continuity refusal below is.
+          if (
+            (err as { name?: unknown } | null)?.name ===
+            'AccountGenesisSpaceError'
+          ) {
+            throw err
+          }
+          // A continuity refusal other than a rollback is a security signal,
+          // not a hiccup: the served log forked or switched identity against
+          // this browser's pinned head. Provisioning stays non-fatal (login
+          // must not break here), but the refusal is logged as an error --
+          // the later account-log reads in the same login run the same pin
+          // and surface it to the user. A rollback may be no more than
+          // replication lag (nothing rolled back was adopted), so it warns
+          // like everything else. Matched on `err.name` rather than
+          // `instanceof`: the refusal is raised inside wallet-core, whose
+          // copy here can differ from the one this file imports (a linked
+          // checkout, or a duplicate through the dependency tree).
+          if (
+            (err as { name?: unknown } | null)?.name ===
+              'ResourceLogContinuityError' &&
+            (err as { reason?: unknown }).reason !== 'rollback'
+          ) {
+            console.error('did:webvh provisioning refused:', err)
+          } else {
+            console.warn('did:webvh provisioning failed:', err)
+          }
+        }
+      } else {
+        // No did:webvh in this session (the flag is off, or there is no
+        // keystore agent, or this client holds no update-key seeds /
+        // identity keys / user key), so the genesis and roster stages have
+        // nothing to run on: provision the Space, install the key epochs,
+        // and publish did:web on their own.
+        await remoteStore.ensureUserCollections({ user })
+        // The provisioning two-step's EDV-bearing second half: install key
+        // epoch[0] on every encrypted roster collection, wrapped to the
+        // account's user key -- create-if-absent, adopting whatever an
+        // earlier provisioner landed. Runs before login completes (and so
+        // before replication starts), keeping the
+        // descriptor-before-first-content-push invariant. Warn-and-continue:
+        // without epochs the affected collections' ciphers refuse
+        // fail-closed (nothing leaks plaintext), and the idempotent ensure
+        // resumes on the next login.
+        if (profile?.userKey) {
+          try {
+            await remoteStore.ensureSpaceEpochs({ userKey: profile.userKey })
+            await refreshDescriptorsWithoutEpochs()
+          } catch (err) {
+            console.warn('Collection key-epoch provisioning failed:', err)
+          }
+        }
+        if (profile?.keystoreAgent) {
+          try {
+            await provideDidWebKeys()
+          } catch (err) {
+            console.warn('did:web provisioning failed:', err)
+          }
         }
       }
     }

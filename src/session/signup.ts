@@ -12,11 +12,9 @@ import {
   KEYRING_KDF,
   type AccountPointer
 } from '@interop/wallet-core/keyring'
-import { mintClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
-import { mintUserKey } from '@interop/wallet-core/keys'
+import { mintAccountKeySet as mintSharedAccountKeySet } from '@interop/wallet-core/genesis'
 import { PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { savePasskeySafetyNotice } from '@/lib/sessionKey'
-import { mintSpaceId } from '@/stores/wasRemoteStore'
 import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
 import {
   bindPassphrase,
@@ -44,17 +42,25 @@ import type { Session } from '@/types/auth'
  * it. Built before session creation so the storage clients bind to the minted
  * id.
  *
+ * The mint itself is wallet-core's shared `mintAccountKeySet` (both wallet
+ * apps mint the same set); this wrapper only maps it onto the local names and
+ * folds the Space id into the account pointer.
+ *
  * @returns {Promise<{ seed: Uint8Array, userKey: object, webvhUpdateKeys: object,
  *   pointer?: AccountPointer }>}
  */
 async function mintAccountKeySet() {
-  const seed = crypto.getRandomValues(new Uint8Array(32))
-  const userKey = await mintUserKey()
-  const webvhUpdateKeys = await mintClientWebvhUpdateKeys()
+  const { spaceId, clientSeed, userKey, updateKeys } =
+    await mintSharedAccountKeySet()
   const pointer: AccountPointer | undefined = WAS_SERVER_URL
-    ? { spaceId: mintSpaceId(), host: WAS_SERVER_URL }
+    ? { spaceId, host: WAS_SERVER_URL }
     : undefined
-  return { seed, userKey, webvhUpdateKeys, pointer }
+  return {
+    seed: clientSeed,
+    userKey,
+    webvhUpdateKeys: updateKeys,
+    pointer
+  }
 }
 
 /**

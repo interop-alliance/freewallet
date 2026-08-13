@@ -226,6 +226,34 @@ or delegation verifies iff its verification method is in the resolved
 document now -- so a delegation signed by a since-revoked client stops
 verifying the moment its VM leaves the document.
 
+## Account genesis (`@interop/wallet-core/genesis`)
+
+The stage order of a new account's provisioning is shared with the mobile
+wallet rather than encoded here: `mintAccountKeySet` mints the whole key set
+locally (Space id, client seed, user key, did:webvh update-key seeds), and
+`ensureAccountGenesis` runs the ordered ceremony -- Space provisioning under
+this client's did:key, the did:web key map, the did:webvh genesis, the user
+key roster (strictly after the DID publication), and key epoch[0] on every
+encrypted collection. Every stage detects its own completion from durable
+state, so a torn run heals by re-running at the next login.
+
+`StorageManager.#provisionUserCollections` is the one caller: it supplies
+the did:web provisioning as the ceremony's `provideDidWebKeys` closure and
+the roster store builder as `rosterStoreFor`, adopts the published DID in
+`onDidPublished` (which also drops the verified-log memo), and maps the
+ceremony's collected per-stage failures onto the warns each stage had
+before. A session with no did:webvh (the flag off, no keystore agent, or no
+client update keys / user key) keeps the reduced path: Space provisioning,
+key epochs, did:web. A Space that never came up stays the one fatal stage:
+the ceremony's `AccountGenesisSpaceError` is rethrown, so login fails rather
+than continuing with nowhere to write.
+
+What stays in freewallet's own flow: the keyring bind before any data Space
+exists, the passphrase signup's `userExists` probe, the pointer backfill
+after the DID is published, and the controller promotion after it -- so the
+ceremony is called with `promoteController: false` and
+`ensurePromotedController` keeps promoting (and healing) as before.
+
 ## Session persistence
 
 Sessions are **in-memory only**. A fresh login builds the whole `Session` --
@@ -272,11 +300,11 @@ extended the account log anchors its appends at the post-edit head. The
 chain-head pin is durable either way (`userKeyLogPinStore` in the session
 database, keyed by the data Space id), so log continuity spans logins.
 
-Provisioning (`ensureUserCollections`) initializes the roster idempotently with
-the account's existing user key as the first epoch, and runs after did:webvh
-provisioning rather than before it: the log's entry proofs anchor in the
-published account document, so the genesis append needs a log to verify
-against. Login performs one direct read (`initSessionFromSeed`, before the
+Provisioning initializes the roster idempotently with the account's existing
+user key as the first epoch, as the account-genesis ceremony's roster stage
+(see "Account genesis" above) -- after did:webvh provisioning rather than
+before it: the log's entry proofs anchor in the published account document,
+so the genesis append needs a log to verify against. Login performs one direct read (`initSessionFromSeed`, before the
 storage clients are built), gated on a promoted (did:webvh) account pointer,
 that either confirms the cached user key current or -- on an epoch mismatch, a
 rotation by another client -- unwraps the fresh user key with this client's own
@@ -1055,7 +1083,8 @@ cascades, and the permanent wire-level constants.
   they surface; the full set used here: `/webvh` (the did:webvh log and the
   document halves of the ceremonies), `/keys` (+ `/keys/clientKeyRecord`; the
   user key, its wrap-set roster, the client-key record codec, client labels),
-  `/keyring` (the unlock layer), `/enrollment`, `/recovery`, `/clients`
+  `/keyring` (the unlock layer), `/genesis` (the account-genesis key mint and
+  ceremony), `/enrollment`, `/recovery`, `/clients`
   (listing, disconnect policy, the revocation cascade orchestrator, the
   login-time roster policy), `/descriptors`, `/identity`, `/space` (collection
   layout, activity builders, `was-link`), `/request` (classification,
