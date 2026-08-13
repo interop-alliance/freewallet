@@ -18,14 +18,12 @@ import { useTranslation } from 'react-i18next'
 
 const primaryNavItems = [
   { labelKey: 'nav.dashboard', to: '/dashboard' },
-  { labelKey: 'nav.contacts', to: '/contacts' }
+  { labelKey: 'nav.contacts', to: '/contacts' },
+  { labelKey: 'nav.applications', to: '/applications' },
+  { labelKey: 'nav.storage', to: '/storage' }
 ] as const
 
-const settingsNavItems = [
-  { labelKey: 'nav.applications', to: '/applications' },
-  { labelKey: 'nav.storage', to: '/storage' },
-  { labelKey: 'nav.history', to: '/history' }
-] as const
+const settingsNavItems = [{ labelKey: 'nav.history', to: '/history' }] as const
 
 export function DashboardLayout({
   title,

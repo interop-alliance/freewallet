@@ -301,7 +301,7 @@
     "contacts": "Contactos",
     "settings": "Ajustes",
     "applications": "Aplicaciones",
-    "storage": "Almacenamiento",
+    "storage": "Tus datos",
     "history": "Historial"
   },
   "applications": {
@@ -445,7 +445,7 @@
     }
   },
   "storage": {
-    "title": "Almacenamiento",
+    "title": "Tus datos",
     "spaceConnected": "Espacio (conectado):",
     "noRemoteSpace": "No hay un espacio de almacenamiento remoto conectado.",
     "viewDetails": "Ver detalles",

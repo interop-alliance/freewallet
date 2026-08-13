@@ -1,5 +1,14 @@
 # History
 
+## 0.38.0 - TBD
+
+### Changed
+
+- Move the Applications and Storage links out of the Settings group in the
+  left nav; they now sit at the top level beside Dashboard and Contacts.
+- Rename the Storage page's display label to "Your Data" ("Tus datos" in
+  Spanish). Routes and identifiers are unchanged.
+
 ## 0.37.0 - 2026-08-13
 
 ### Added

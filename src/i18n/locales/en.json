@@ -301,7 +301,7 @@
     "contacts": "Contacts",
     "settings": "Settings",
     "applications": "Applications",
-    "storage": "Storage",
+    "storage": "Your Data",
     "history": "History"
   },
   "applications": {
@@ -445,7 +445,7 @@
     }
   },
   "storage": {
-    "title": "Storage",
+    "title": "Your Data",
     "spaceConnected": "Space (connected):",
     "noRemoteSpace": "No remote storage space is connected.",
     "viewDetails": "View details",
