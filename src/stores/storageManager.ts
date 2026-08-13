@@ -83,7 +83,8 @@ import {
   createEdvDocCipher,
   isEncryptedEnvelope,
   ownerRecipient,
-  type DocCipher
+  type DocCipher,
+  type EdvDocCipher
 } from '@interop/was-client/edv'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import type { Json, SyncedDoc } from '@/lib/sync'
@@ -312,6 +313,106 @@ function warnDescriptorFetchError(
 }
 
 /**
+ * The localStorage cache for a collection's stored `/meta` value, under
+ * `freewallet:collection-meta:<spaceId>:<collectionId>`. On an encrypted
+ * collection its `custom` is the opaque encrypted metadata envelope carrying
+ * the persisted blinded-index schema, which the ciphers install so wallet
+ * writes emit the same blinded `indexed` entries a Collection-handle write
+ * does. Same posture as the descriptor cache: the offline fallback, with a
+ * corrupt entry (or a non-browser environment) read as absent and writes
+ * no-oping without localStorage.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}
+ * @returns {object}   `readMeta` / `writeMeta` over the cache
+ */
+function localStorageMetaCache({ spaceId }: { spaceId: string }): {
+  readMeta(options: {
+    collectionId: string
+  }): Promise<{ custom?: unknown } | undefined>
+  writeMeta(options: {
+    collectionId: string
+    meta: { custom?: unknown }
+  }): Promise<void>
+} {
+  const cacheKey = (collectionId: string): string =>
+    `freewallet:collection-meta:${spaceId}:${collectionId}`
+  return {
+    async readMeta({ collectionId }) {
+      if (typeof localStorage === 'undefined') {
+        return undefined
+      }
+      const raw = localStorage.getItem(cacheKey(collectionId))
+      if (!raw) {
+        return undefined
+      }
+      try {
+        return JSON.parse(raw) as { custom?: unknown }
+      } catch {
+        return undefined
+      }
+    },
+    async writeMeta({ collectionId, meta }) {
+      if (typeof localStorage === 'undefined') {
+        return
+      }
+      localStorage.setItem(cacheKey(collectionId), JSON.stringify(meta))
+    }
+  }
+}
+
+/**
+ * Fetches each encrypted collection's stored `/meta` value best-effort
+ * (concurrently, like the descriptor acquisition it rides beside), caching
+ * each success and falling back to the cached copy on a fetch failure. A
+ * collection with no stored metadata gets no entry -- its cipher then has no
+ * schema to install, which is exactly the no-index case.
+ *
+ * @param options {object}
+ * @param options.source {object}   the `collectionMeta` fetch (the remote
+ *   store)
+ * @param [options.cache] {object}   the localStorage meta cache
+ * @param options.collectionIds {string[]}
+ * @returns {Promise<Record<string, { custom?: unknown }>>}   keyed by WAS
+ *   collection id
+ */
+async function acquireCollectionMetas({
+  source,
+  cache,
+  collectionIds
+}: {
+  source: {
+    collectionMeta(options: {
+      collectionId: string
+    }): Promise<{ custom?: unknown } | undefined>
+  }
+  cache?: ReturnType<typeof localStorageMetaCache>
+  collectionIds: string[]
+}): Promise<Record<string, { custom?: unknown }>> {
+  const entries = await Promise.all(
+    collectionIds.map(async collectionId => {
+      try {
+        const meta = await source.collectionMeta({ collectionId })
+        if (meta !== undefined) {
+          await cache?.writeMeta({ collectionId, meta })
+          return [collectionId, meta] as const
+        }
+        return undefined
+      } catch (err) {
+        console.warn(
+          `Could not fetch the stored metadata for collection ` +
+            `"${collectionId}"; falling back to the cached copy.`,
+          err
+        )
+      }
+      const cached = await cache?.readMeta({ collectionId })
+      return cached !== undefined ? ([collectionId, cached] as const) : undefined
+    })
+  )
+  return Object.fromEntries(entries.filter(entry => entry !== undefined))
+}
+
+/**
  * Thrown when a credential's live public copy could not be retracted, so the
  * delete of the private credential was refused rather than left to strand a
  * world-readable orphan. See {@link StorageManager.deleteCredential}.
@@ -361,10 +462,18 @@ export class StorageManager {
   // The last-known per-collection encryption descriptors, keyed by WAS collection
   // id, that the current ciphers were built from.
   #descriptors: Record<string, CollectionEncryption>
+  // The last-known per-collection stored `/meta` values (the `custom` envelope
+  // carrying the persisted blinded-index schema), keyed by WAS collection id,
+  // installed onto the ciphers at every (re)build so wallet writes emit
+  // blinded `indexed` entries. Acquired and refreshed beside the descriptors.
+  #metas: Record<string, { custom?: unknown }>
   // The durable (localStorage) descriptor cache for this account's Space -- the
   // offline fallback descriptor acquisition falls back to. Only set with a remote
   // store (a guest / no-WAS session has no descriptors to cache).
   #descriptorCache?: EncryptionDescriptorCache
+  // The durable (localStorage) collection-metadata cache, beside the
+  // descriptor cache and under the same posture.
+  #metaCache?: ReturnType<typeof localStorageMetaCache>
   // The once-per-collection-per-session unknown-epoch refresh guard, shared by
   // the standard and the app-provisioned encrypted collections, so a genuinely
   // foreign envelope cannot drive a refresh loop. Its `reset` re-arms a
@@ -398,7 +507,8 @@ export class StorageManager {
     ciphers,
     remoteDirect = false,
     vaultKeys,
-    descriptors
+    descriptors,
+    metas
   }: {
     localStore: BrowserStore
     remoteStore?: WASRemoteStore
@@ -409,14 +519,19 @@ export class StorageManager {
       keyResolver: IKeyResolver
     }
     descriptors?: Record<string, CollectionEncryption>
+    metas?: Record<string, { custom?: unknown }>
   }) {
     this.#localStore = localStore
     this.#remoteStore = remoteStore
     this.#ciphers = ciphers
     this.#vaultKeys = vaultKeys
     this.#descriptors = descriptors ?? {}
+    this.#metas = metas ?? {}
     this.#descriptorCache = remoteStore
       ? localStorageDescriptorCache({ spaceId: remoteStore.spaceId })
+      : undefined
+    this.#metaCache = remoteStore
+      ? localStorageMetaCache({ spaceId: remoteStore.spaceId })
       : undefined
     // Remote-direct routing is only meaningful when a remote store is configured
     // (a guest / no-WAS session always uses the local BrowserStore).
@@ -537,16 +652,23 @@ export class StorageManager {
    * @param options.keyResolver {IKeyResolver}
    * @param [options.descriptors] {Record<string, CollectionEncryption>}   per-
    *   collection encryption descriptors, keyed by WAS collection id
+   * @param [options.metas] {Record<string, { custom?: unknown }>}   per-
+   *   collection stored `/meta` values, keyed by WAS collection id; a
+   *   collection whose descriptor declares a blinded-index key gets its
+   *   persisted index schema installed from it, so wallet writes carry the
+   *   same blinded `indexed` entries a Collection-handle write does
    * @returns {Promise<Record<string, DocCipher>>}
    */
   static async #buildCiphers({
     keyAgreementKey,
     keyResolver,
-    descriptors
+    descriptors,
+    metas
   }: {
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
     descriptors?: Record<string, CollectionEncryption>
+    metas?: Record<string, { custom?: unknown }>
   }) {
     const cipherEntries = await Promise.all(
       ENCRYPTED_STANDARD_COLLECTIONS.map(async ({ key, id, idDerivation }) => {
@@ -559,23 +681,69 @@ export class StorageManager {
         // plaintext path, silently storing (and pushing) plaintext into an
         // encrypted collection, and an epoch-less descriptor would make the
         // whole rebuild throw, taking the healthy collections down with it.
-        const cipher = encryption?.epochs?.length
-          ? await createEdvDocCipher({
-              keyAgreementKey,
-              keyResolver,
-              collectionId: id,
-              // The collection spec's id mint ('random' for the mutable
-              // contacts head, 'content' for the content-addressed
-              // collections), so a minted id follows the spec and can key
-              // the row.
-              idDerivation,
-              encryption
-            })
-          : StorageManager.#refusingCipher({ collectionId: id })
+        if (!encryption?.epochs?.length) {
+          return [key, StorageManager.#refusingCipher({ collectionId: id })]
+        }
+        const cipher = await createEdvDocCipher({
+          keyAgreementKey,
+          keyResolver,
+          collectionId: id,
+          // The collection spec's id mint ('random' for the mutable
+          // contacts head, 'content' for the content-addressed
+          // collections), so a minted id follows the spec and can key
+          // the row.
+          idDerivation,
+          encryption
+        })
+        await StorageManager.#installIndexSchema({
+          cipher,
+          collectionId: id,
+          meta: metas?.[id]
+        })
         return [key, cipher]
       })
     )
     return Object.fromEntries(cipherEntries)
+  }
+
+  /**
+   * Installs a collection's persisted blinded-index schema onto a
+   * freshly-built cipher, best-effort: indexing is auxiliary to encryption, so
+   * a metadata value the cipher cannot decode (a stale cached copy sealed
+   * under an epoch this descriptor no longer lists, say) degrades to the
+   * schema-less cipher -- writes stay encrypted, they just carry no `indexed`
+   * entries until the next refresh -- rather than failing the whole cipher
+   * build. `applyMeta` itself is a no-op on a collection whose descriptor
+   * declares no blinded-index key.
+   *
+   * @param options {object}
+   * @param options.cipher {EdvDocCipher}
+   * @param options.collectionId {string}
+   * @param [options.meta] {object}   the collection's stored `/meta` value
+   * @returns {Promise<void>}
+   */
+  static async #installIndexSchema({
+    cipher,
+    collectionId,
+    meta
+  }: {
+    cipher: EdvDocCipher
+    collectionId: string
+    meta?: { custom?: unknown }
+  }): Promise<void> {
+    if (meta === undefined) {
+      return
+    }
+    try {
+      await cipher.applyMeta(meta)
+    } catch (err) {
+      console.warn(
+        `Could not install the index schema for collection ` +
+          `"${collectionId}"; writes will carry no blinded index entries ` +
+          'until the metadata refreshes.',
+        err
+      )
+    }
   }
 
   /**
@@ -620,7 +788,8 @@ export class StorageManager {
     const ciphers = await StorageManager.#buildCiphers({
       keyAgreementKey: this.#vaultKeys.keyAgreementKey,
       keyResolver: this.#vaultKeys.keyResolver,
-      descriptors: this.#descriptors
+      descriptors: this.#descriptors,
+      metas: this.#metas
     })
     this.#ciphers = ciphers
     // Swap into the active backend (the local store in the normal case, the
@@ -630,11 +799,12 @@ export class StorageManager {
   }
 
   /**
-   * Refreshes every encrypted collection's descriptor from the remote store, caches
-   * them, and rebuilds + swaps the ciphers. Called when a local read reports
-   * unknown-epoch rows -- a rekey emits no change-feed entry, so the local
-   * cipher may be built from a stale descriptor. No-op without a remote store or
-   * vault keys.
+   * Refreshes every encrypted collection's descriptor -- and its stored
+   * `/meta`, so an index schema declared mid-session reaches the rebuilt
+   * ciphers -- from the remote store, caches them, and rebuilds + swaps the
+   * ciphers. Called when a local read reports unknown-epoch rows -- a rekey
+   * emits no change-feed entry, so the local cipher may be built from a stale
+   * descriptor. No-op without a remote store or vault keys.
    *
    * @returns {Promise<void>}
    */
@@ -642,12 +812,19 @@ export class StorageManager {
     if (!this.#remoteStore || !this.#vaultKeys || !this.#descriptorCache) {
       return
     }
-    this.#descriptors = await acquireDescriptors({
-      source: this.#remoteStore,
-      cache: this.#descriptorCache,
-      collectionIds: ENCRYPTED_COLLECTION_IDS,
-      onFetchError: warnDescriptorFetchError
-    })
+    ;[this.#descriptors, this.#metas] = await Promise.all([
+      acquireDescriptors({
+        source: this.#remoteStore,
+        cache: this.#descriptorCache,
+        collectionIds: ENCRYPTED_COLLECTION_IDS,
+        onFetchError: warnDescriptorFetchError
+      }),
+      acquireCollectionMetas({
+        source: this.#remoteStore,
+        cache: this.#metaCache,
+        collectionIds: ENCRYPTED_COLLECTION_IDS
+      })
+    ])
     await this.#rebuildCiphers()
   }
 
@@ -767,25 +944,40 @@ export class StorageManager {
         profile
       }))
     }
-    // Fetch the current encryption descriptor for each encrypted standard
-    // collection best-effort (concurrently -- login is not gated on a serial
-    // chain of describes), caching each success and falling back to the cached
-    // copy on a fetch failure. A collection whose descriptor cannot be
-    // acquired gets a fail-closed refusing cipher below. With no remote store
-    // (guest / no-WAS) the descriptors are minted locally instead -- every
-    // encrypted collection carries its key epochs from birth, server or not.
-    const descriptors = remoteStore
-      ? await acquireDescriptors({
-          source: remoteStore,
-          cache: localStorageDescriptorCache({ spaceId: remoteStore.spaceId }),
-          collectionIds: ENCRYPTED_COLLECTION_IDS,
-          onFetchError: warnDescriptorFetchError
-        })
-      : await localOnlyDescriptors({
-          userId: user.id,
-          keyAgreementKey,
-          persist: !isGuest
-        })
+    // Fetch the current encryption descriptor -- and the stored `/meta`,
+    // whose `custom` envelope carries the persisted blinded-index schema --
+    // for each encrypted standard collection best-effort (concurrently --
+    // login is not gated on a serial chain of describes), caching each
+    // success and falling back to the cached copy on a fetch failure. A
+    // collection whose descriptor cannot be acquired gets a fail-closed
+    // refusing cipher below. With no remote store (guest / no-WAS) the
+    // descriptors are minted locally instead -- every encrypted collection
+    // carries its key epochs from birth, server or not -- and there is no
+    // metadata to fetch (no index schema can have been declared).
+    const [descriptors, metas] = remoteStore
+      ? await Promise.all([
+          acquireDescriptors({
+            source: remoteStore,
+            cache: localStorageDescriptorCache({
+              spaceId: remoteStore.spaceId
+            }),
+            collectionIds: ENCRYPTED_COLLECTION_IDS,
+            onFetchError: warnDescriptorFetchError
+          }),
+          acquireCollectionMetas({
+            source: remoteStore,
+            cache: localStorageMetaCache({ spaceId: remoteStore.spaceId }),
+            collectionIds: ENCRYPTED_COLLECTION_IDS
+          })
+        ])
+      : [
+          await localOnlyDescriptors({
+            userId: user.id,
+            keyAgreementKey,
+            persist: !isGuest
+          }),
+          {}
+        ]
 
     // One document cipher per encrypted collection, built from the session's
     // passphrase-derived key material (guests included -- their random secret
@@ -796,7 +988,8 @@ export class StorageManager {
     const ciphers = await StorageManager.#buildCiphers({
       keyAgreementKey,
       keyResolver,
-      descriptors
+      descriptors,
+      metas
     })
 
     // The local store is always the active replica.
@@ -817,7 +1010,8 @@ export class StorageManager {
       ciphers,
       remoteDirect,
       vaultKeys: { keyAgreementKey, keyResolver },
-      descriptors
+      descriptors,
+      metas
     })
     return { storage, userExists }
   }
@@ -1223,12 +1417,32 @@ export class StorageManager {
             return { value: undefined, unknownEpoch: false }
           }
           this.#appDescriptors[collectionId] = descriptor
-          cipher = await createEdvDocCipher({
+          const built = await createEdvDocCipher({
             keyAgreementKey,
             keyResolver,
             collectionId,
             encryption: descriptor
           })
+          // Install the collection's persisted blinded-index schema (its
+          // stored `/meta`), best-effort like the descriptor fetch above, so
+          // this cached cipher matches the standard-collection ones -- a
+          // schema-less cipher still decrypts, it just could not emit
+          // `indexed` entries.
+          try {
+            const meta = await remote.collectionMeta({ collectionId })
+            await StorageManager.#installIndexSchema({
+              cipher: built,
+              collectionId,
+              meta
+            })
+          } catch (err) {
+            console.warn(
+              `Could not fetch the stored metadata for app collection ` +
+                `"${collectionId}":`,
+              err
+            )
+          }
+          cipher = built
           this.#appCiphers[collectionId] = cipher
         }
         return await decryptEnvelope({

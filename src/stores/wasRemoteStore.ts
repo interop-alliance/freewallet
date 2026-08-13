@@ -252,6 +252,53 @@ export class WASRemoteStore {
   }
 
   /**
+   * Reads a collection's stored `/meta` value raw, through a
+   * plaintext-override handle -- so on an encrypted collection `custom` stays
+   * the opaque encrypted metadata envelope (which carries the persisted
+   * blinded-index schema), the shape `createEdvDocCipher`'s `meta` input and
+   * `applyMeta` take. No keys are needed for the fetch; the envelope is
+   * decrypted later, by the cipher it is handed to. Returns `undefined` when
+   * the collection is missing, the server has no metadata support, or no
+   * `custom` value is stored. Network errors throw through: callers treat the
+   * fetch as best-effort and fall back to a cached copy.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id
+   * @returns {Promise<{ custom?: unknown } | undefined>}
+   */
+  async collectionMeta({
+    collectionId
+  }: {
+    collectionId: string
+  }): Promise<{ custom?: unknown } | undefined> {
+    let meta
+    try {
+      meta = await this.was
+        .space(this.spaceId)
+        .collection(collectionId, { encryption: 'plaintext' })
+        .meta()
+    } catch (err) {
+      // Matched on name, not instanceof: the error class may come from a
+      // different copy of was-client than the one this module imported.
+      if ((err as Error)?.name === 'NotImplementedError') {
+        return undefined
+      }
+      throw err
+    }
+    if (!meta) {
+      return undefined
+    }
+    // The plaintext-override codec reports an absent `custom` as `{}`; an
+    // actual stored value on an encrypted collection is a non-empty envelope.
+    const { custom } = meta
+    const isAbsent =
+      custom === undefined ||
+      custom === null ||
+      (typeof custom === 'object' && Object.keys(custom).length === 0)
+    return isAbsent ? undefined : { custom }
+  }
+
+  /**
    * The `Collection` handle for a standard collection, invoked with the root
    * capability -- used by the recipient operations (`initRecipients` /
    * `addRecipient` / `removeRecipient`), which rewrite the Collection

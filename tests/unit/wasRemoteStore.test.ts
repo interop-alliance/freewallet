@@ -270,6 +270,95 @@ describe('WASRemoteStore.fetchCollectionResource', () => {
   })
 })
 
+describe('WASRemoteStore.collectionMeta', () => {
+  /**
+   * A stubbed `was` client whose collection handle answers `meta()` with the
+   * given value (or rejects with the given error), plus the `collection` spy so
+   * a test can assert the plaintext-override handle it was opened with.
+   *
+   * @param options {object}
+   * @param [options.meta] {unknown}   what `meta()` resolves to
+   * @param [options.error] {unknown}  what `meta()` rejects with instead
+   * @returns {object}   the store plus the `collection` spy
+   */
+  function storeWithMeta({
+    meta,
+    error
+  }: {
+    meta?: unknown
+    error?: unknown
+  }): { store: WASRemoteStore; collection: ReturnType<typeof vi.fn> } {
+    const metaFn = error
+      ? vi.fn().mockRejectedValue(error)
+      : vi.fn().mockResolvedValue(meta)
+    const collection = vi.fn().mockReturnValue({ meta: metaFn })
+    const space = vi.fn().mockReturnValue({ collection })
+    return {
+      store: storeWithStubbedClient({ space }),
+      collection
+    }
+  }
+
+  it('returns the stored custom envelope verbatim', async () => {
+    const custom = { jwe: { ciphertext: 'opaque-metadata' } }
+    const { store, collection } = storeWithMeta({
+      meta: { custom, name: 'ignored' }
+    })
+
+    await expect(
+      store.collectionMeta({ collectionId: 'private-credentials' })
+    ).resolves.toEqual({ custom })
+    // The raw (still encrypted) value is what the cipher decodes, so the
+    // handle must be opened with the plaintext codec override.
+    expect(collection).toHaveBeenCalledWith('private-credentials', {
+      encryption: 'plaintext'
+    })
+  })
+
+  it('returns undefined when the collection has no metadata resource', async () => {
+    const { store } = storeWithMeta({ meta: null })
+
+    await expect(
+      store.collectionMeta({ collectionId: 'private-credentials' })
+    ).resolves.toBeUndefined()
+  })
+
+  it('returns undefined for an absent custom value', async () => {
+    // The plaintext-override codec reports an absent `custom` as `{}`.
+    const { store } = storeWithMeta({ meta: { custom: {} } })
+
+    await expect(
+      store.collectionMeta({ collectionId: 'private-credentials' })
+    ).resolves.toBeUndefined()
+
+    const { store: noCustom } = storeWithMeta({ meta: { name: 'no custom' } })
+    await expect(
+      noCustom.collectionMeta({ collectionId: 'private-credentials' })
+    ).resolves.toBeUndefined()
+  })
+
+  it('returns undefined when the server lacks metadata support', async () => {
+    // Matched on `name`, not `instanceof`: the error class may come from
+    // another copy of was-client.
+    const notImplemented = Object.assign(new Error('no metadata here'), {
+      name: 'NotImplementedError'
+    })
+    const { store } = storeWithMeta({ error: notImplemented })
+
+    await expect(
+      store.collectionMeta({ collectionId: 'private-credentials' })
+    ).resolves.toBeUndefined()
+  })
+
+  it('rethrows any other error', async () => {
+    const { store } = storeWithMeta({ error: new Error('network down') })
+
+    await expect(
+      store.collectionMeta({ collectionId: 'private-credentials' })
+    ).rejects.toThrow('network down')
+  })
+})
+
 describe('WASRemoteStore.listSyncedResources', () => {
   it('lists resource ids/urls of a standard collection (id-addressed)', async () => {
     const items = [

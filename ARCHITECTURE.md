@@ -900,7 +900,14 @@ wrapped to the same recipient roster, so the app can declare searchable
 attributes and query the collection (was-client's `declareIndex` / `find`).
 The blinded-index key is installed at provisioning or never: a collection
 provisioned before blind-index support is adopted as-is and stays
-unindexable. The
+unindexable. The wallet's own writes carry the same blinded `indexed`
+entries a Collection-handle write does: each encrypted collection's doc
+cipher installs the persisted index schema from the collection's stored
+`/meta` (its `custom` is an opaque encrypted envelope, so it is fetched
+without keys and decrypted by the cipher), acquired and cached beside the
+encryption descriptors and refetched on the same unknown-epoch descriptor
+refresh -- so an index declared mid-session reaches the ciphers at the next
+descriptor refresh or login. The
 wallet ensures the collection exists without
 clobbering an existing `encryption` descriptor, so an established epoch roster is
 never dropped. Public (`https://w3id.org/byoe#public-collection`) grants

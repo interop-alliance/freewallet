@@ -18,6 +18,17 @@
 
 ### Added
 
+- Wallet-written envelopes now carry blinded `indexed` entries on collections
+  with a declared index schema, matching Collection-handle writes -- so a
+  credential the wallet stores is findable by an app's `find()` without a
+  rewrite. Each encrypted collection's doc cipher installs the persisted
+  index schema from the collection's stored `/meta` (via
+  `@interop/was-client@0.36.0`'s `createEdvDocCipher` `meta` input /
+  `applyMeta`), acquired keyless and cached beside the encryption
+  descriptors, refetched on the unknown-epoch descriptor refresh, and applied
+  to the lazily built app-collection ciphers too. A metadata value the cipher
+  cannot decode degrades to a schema-less cipher (writes stay encrypted,
+  without `indexed` entries) rather than failing the build.
 - Encrypted collections are indexable from birth: provisioning now mints a
   blinded-index HMAC key alongside epoch[0] and installs it on the
   `encryption` descriptor, wrapped to each recipient's key-agreement key --
@@ -33,7 +44,7 @@
 
 ### Changed
 
-- Update to `@interop/was-client@0.35.0` and `@interop/storage-core@0.8.0`.
+- Update to `@interop/was-client@0.36.0` and `@interop/storage-core@0.8.0`.
 
 ### Fixed
 

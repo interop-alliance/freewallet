@@ -14,7 +14,7 @@
  *
  * @vitest-environment node
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type {
   IKeyAgreementKey,
@@ -30,6 +30,8 @@ import {
   type Space
 } from '@interop/was-client'
 import {
+  addRecipient,
+  createEdvEncryption,
   ensureFirstEpoch,
   initRecipients,
   removeRecipient,
@@ -130,10 +132,16 @@ function makeFakeRemote(): {
     resourceId: string
     body: Json
   }): void
+  setCollectionMeta(options: {
+    collectionId: string
+    meta: { custom?: unknown } | undefined
+  }): void
 } {
   const spaceId = 's-space'
   const spaceUrl = 'https://was.example/space/s-space'
   const revoked: unknown[] = []
+  // The stored `/meta` value per collection, as `collectionMeta` serves it.
+  const metas = new Map<string, { custom?: unknown }>()
   const collections = new Map<string, ReturnType<typeof makeFakeCollection>>()
   const collection = (collectionId: string) => {
     let entry = collections.get(collectionId)
@@ -170,6 +178,11 @@ function makeFakeRemote(): {
     spaceUrl,
     async collectionEncryption({ collectionId }: { collectionId: string }) {
       return collection(collectionId).descriptor()
+    },
+    async collectionMeta({ collectionId }: { collectionId: string }) {
+      // The real store reports "nothing stored" as undefined; a collection a
+      // test never seeded metadata for has no index schema to install.
+      return metas.get(collectionId)
     },
     async ensureEncryptedCollection({ id }: { id: string }) {
       // The fake collection is declared `edv` from birth, so this mirrors the
@@ -235,7 +248,26 @@ function makeFakeRemote(): {
   }) => {
     resourcesFor(logicalKey).set(resourceId, body)
   }
-  return { remoteStore, revoked, collection, seedResource }
+  const setCollectionMeta = ({
+    collectionId,
+    meta
+  }: {
+    collectionId: string
+    meta: { custom?: unknown } | undefined
+  }) => {
+    if (meta === undefined) {
+      metas.delete(collectionId)
+      return
+    }
+    metas.set(collectionId, meta)
+  }
+  return {
+    remoteStore,
+    revoked,
+    collection,
+    seedResource,
+    setCollectionMeta
+  }
 }
 
 /**
@@ -270,6 +302,78 @@ async function buildCiphers(
     ])
   )
   return Object.fromEntries(entries)
+}
+
+/**
+ * A one-attribute index schema, as `collection.declareIndex()` would have
+ * persisted it into the collection's stored metadata.
+ */
+const INDEX_SCHEMA = {
+  revision: 1,
+  indexes: [{ attribute: 'content.issuer', addedIn: 1 }]
+}
+
+/**
+ * Mints the collection's stored `/meta` value the way a Collection-handle
+ * `declareIndex` would: the schema encrypted into a metadata envelope by the
+ * same EDV codec, AEAD-bound to the collection id, under the collection's own
+ * descriptor and keys. What `WASRemoteStore.collectionMeta` would hand back.
+ *
+ * @param options {object}
+ * @param options.collectionId {string}
+ * @param options.encryption {CollectionEncryption}
+ * @param options.keys {object}   the owner's key material
+ * @param [options.schema] {object}   defaults to {@link INDEX_SCHEMA}
+ * @returns {Promise<{ custom: unknown }>}
+ */
+async function mintCollectionMeta({
+  collectionId,
+  encryption,
+  keys,
+  schema = INDEX_SCHEMA
+}: {
+  collectionId: string
+  encryption: CollectionEncryption
+  keys: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
+  schema?: typeof INDEX_SCHEMA
+}): Promise<{ custom: unknown }> {
+  const provider = createEdvEncryption({ resolveKeys: async () => keys })
+  const codec = await provider.codecFor({
+    spaceId: 'local',
+    collectionId,
+    scheme: 'edv',
+    encryption
+  })
+  if (!codec) {
+    throw new Error(`No codec for collection "${collectionId}".`)
+  }
+  const { custom } = await codec.encodeMeta({ custom: { indexSchema: schema } })
+  return { custom }
+}
+
+/**
+ * The blinded index entries of a stored EDV envelope.
+ *
+ * @param envelope {unknown}
+ * @returns {Array<Record<string, unknown>>}
+ */
+function indexedOf(envelope: unknown): Array<Record<string, unknown>> {
+  return (
+    (envelope as { indexed?: Array<Record<string, unknown>> }).indexed ?? []
+  )
+}
+
+/**
+ * The EDV envelopes stored in the local `private-credentials` replica.
+ *
+ * @param localStore {BrowserStore}
+ * @returns {Promise<unknown[]>}
+ */
+async function storedCredentialEnvelopes(
+  localStore: BrowserStore
+): Promise<unknown[]> {
+  const docs = await localStore.rxCollection('privateCredentials').find().exec()
+  return docs.map(doc => (doc.toJSON() as { data: unknown }).data)
 }
 
 /**
@@ -1516,5 +1620,197 @@ describe('StorageManager unknown-epoch refresh', () => {
     // backend's cipher via setCiphers, and re-reads -- returning the fresh row.
     const listed = await storage.listCredentials()
     expect(listed).toEqual([{ cid, vc: credential }])
+  })
+
+  it('refetches the collection metadata, so later writes carry index entries', async () => {
+    const owner = await generateKey()
+    const extra = await generateKey()
+    const { remoteStore, setCollectionMeta } = makeFakeRemote()
+
+    // A blinded-index collection on epoch 1, with a second reader to remove.
+    const descriptors = await provisionFakeRemote(owner, remoteStore, {
+      blindedIndex: true
+    })
+    const collectionHandle = remoteStore.collectionHandle({
+      collectionId: 'private-credentials'
+    })
+    const descriptor1 = await addRecipient({
+      collection: collectionHandle,
+      recipient: ownerRecipient({ keyAgreementKey: extra.keyAgreementKey }),
+      owner: { keyAgreementKey: owner.keyAgreementKey }
+    })
+    descriptors['private-credentials'] = descriptor1
+
+    // The session's ciphers are built from the epoch-1 descriptor, and no
+    // collection metadata existed yet -- so writes carry no index entries.
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+    await storage.addCredential({ credential: makeCredential('Alice'), user })
+    const beforeEnvelopes = await storedCredentialEnvelopes(localStore)
+    expect(beforeEnvelopes).toHaveLength(1)
+    expect(indexedOf(beforeEnvelopes[0])).toEqual([])
+
+    // Another client rotates the collection to epoch 2 and declares an index,
+    // so the server now serves both a newer descriptor and a stored metadata
+    // envelope.
+    const descriptor2 = await removeRecipient({
+      collection: collectionHandle,
+      space: remoteStore.spaceHandle(),
+      recipientId: extra.keyAgreementKey.id!,
+      revoke: []
+    })
+    setCollectionMeta({
+      collectionId: 'private-credentials',
+      meta: await mintCollectionMeta({
+        collectionId: 'private-credentials',
+        encryption: descriptor2,
+        keys: owner
+      })
+    })
+
+    // A credential lands locally under epoch 2 (as replication would),
+    // unreadable by the stale epoch-1 cipher.
+    const epoch2Cipher = await createEdvDocCipher({
+      keyAgreementKey: owner.keyAgreementKey,
+      keyResolver: owner.keyResolver,
+      collectionId: 'private-credentials',
+      encryption: descriptor2
+    })
+    const credential = makeCredential('Bob')
+    const cid = await cidFrom({ doc: credential })
+    const { id, envelope, epoch } = await epoch2Cipher.encrypt({
+      data: credential as unknown as Json
+    })
+    await localStore.rxCollection('privateCredentials').insert({
+      id,
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      epoch,
+      data: envelope
+    })
+
+    // The unknown-epoch read refreshes the descriptor AND the metadata, so the
+    // rebuilt cipher writes blinded index entries from here on.
+    const listed = await storage.listCredentials()
+    expect(listed.map(entry => entry.cid)).toContain(cid)
+
+    await storage.addCredential({ credential: makeCredential('Carol'), user })
+    const afterEnvelopes = await storedCredentialEnvelopes(localStore)
+    expect(afterEnvelopes).toHaveLength(3)
+    expect(
+      afterEnvelopes.filter(stored => indexedOf(stored).length > 0)
+    ).toHaveLength(1)
+  })
+})
+
+describe('StorageManager blinded index writes', () => {
+  /**
+   * A StorageManager over a blinded-index-provisioned fake remote, with its
+   * ciphers built from the same descriptors (no metadata applied yet).
+   *
+   * @returns {Promise<object>}   the manager, its local store, the owner keys,
+   *   the descriptors, and the fake remote's metadata setter
+   */
+  async function makeIndexableManager(): Promise<{
+    storage: StorageManager
+    localStore: BrowserStore
+    user: User
+    owner: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
+    descriptors: Record<string, CollectionEncryption>
+    setCollectionMeta: ReturnType<typeof makeFakeRemote>['setCollectionMeta']
+  }> {
+    const owner = await generateKey()
+    const { remoteStore, setCollectionMeta } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore, {
+      blindedIndex: true
+    })
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+    return { storage, localStore, user, owner, descriptors, setCollectionMeta }
+  }
+
+  it('writes no index entries for a collection with no stored metadata', async () => {
+    const { storage, localStore, user } = await makeIndexableManager()
+
+    // The fake remote serves no metadata, so the rebuilt ciphers have no
+    // schema to install -- the pre-index behavior.
+    await storage.refreshEncryptedDescriptors()
+    await storage.addCredential({ credential: makeCredential('Alice'), user })
+
+    const envelopes = await storedCredentialEnvelopes(localStore)
+    expect(envelopes).toHaveLength(1)
+    expect(indexedOf(envelopes[0])).toEqual([])
+  })
+
+  it('writes blinded index entries once the collection metadata declares a schema', async () => {
+    const { storage, localStore, user, owner, descriptors, setCollectionMeta } =
+      await makeIndexableManager()
+    setCollectionMeta({
+      collectionId: 'private-credentials',
+      meta: await mintCollectionMeta({
+        collectionId: 'private-credentials',
+        encryption: descriptors['private-credentials']!,
+        keys: owner
+      })
+    })
+
+    await storage.refreshEncryptedDescriptors()
+    await storage.addCredential({ credential: makeCredential('Alice'), user })
+
+    const envelopes = await storedCredentialEnvelopes(localStore)
+    expect(envelopes).toHaveLength(1)
+    const indexed = indexedOf(envelopes[0])
+    expect(indexed).toHaveLength(1)
+    expect((indexed[0] as { hmac: { id: string } }).hmac.id).toBe(
+      descriptors['private-credentials']!.hmac!.id
+    )
+    // Blinded: neither the attribute name nor the issuer value is in the clear.
+    expect(JSON.stringify(indexed)).not.toContain('issuer')
+    expect(JSON.stringify(indexed)).not.toContain('z6MkTestIssuer')
+    // The credential still round-trips through the same cipher.
+    const listed = await storage.listCredentials()
+    expect(listed).toHaveLength(1)
+  })
+
+  it('degrades to a schema-less cipher when the metadata cannot be decoded', async () => {
+    const { storage, localStore, user, setCollectionMeta } =
+      await makeIndexableManager()
+    // Garbage in place of the metadata envelope: indexing is auxiliary, so the
+    // write must still succeed, just without index entries.
+    setCollectionMeta({
+      collectionId: 'private-credentials',
+      meta: { custom: { not: 'an envelope' } }
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      await storage.refreshEncryptedDescriptors()
+      await storage.addCredential({ credential: makeCredential('Alice'), user })
+
+      const envelopes = await storedCredentialEnvelopes(localStore)
+      expect(envelopes).toHaveLength(1)
+      expect(indexedOf(envelopes[0])).toEqual([])
+      expect(
+        warn.mock.calls.some(call =>
+          String(call[0]).includes('Could not install the index schema')
+        )
+      ).toBe(true)
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
