@@ -406,7 +406,9 @@ async function acquireCollectionMetas({
         )
       }
       const cached = await cache?.readMeta({ collectionId })
-      return cached !== undefined ? ([collectionId, cached] as const) : undefined
+      return cached !== undefined
+        ? ([collectionId, cached] as const)
+        : undefined
     })
   )
   return Object.fromEntries(entries.filter(entry => entry !== undefined))

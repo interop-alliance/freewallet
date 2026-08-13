@@ -27,6 +27,7 @@ import {
   type Collection,
   type CollectionEncryption,
   type IZcap,
+  type ResourceMetadataCustom,
   type Space
 } from '@interop/was-client'
 import {
@@ -347,7 +348,11 @@ async function mintCollectionMeta({
   if (!codec) {
     throw new Error(`No codec for collection "${collectionId}".`)
   }
-  const { custom } = await codec.encodeMeta({ custom: { indexSchema: schema } })
+  const { custom } = await codec.encodeMeta({
+    // The same cast was-client's own declareIndex applies: the index schema
+    // rides inside `custom` beyond the declared `name` / `tags` members.
+    custom: { indexSchema: schema } as ResourceMetadataCustom
+  })
   return { custom }
 }
 

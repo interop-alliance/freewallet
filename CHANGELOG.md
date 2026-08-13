@@ -4,6 +4,13 @@
 
 ### Changed
 
+- Update to `@interop/wallet-core@0.37.0` and consume its onboarding-invite
+  transport: `createOnboardingExchange`, `pollOnboardingExchange`,
+  `OnboardingExchangeGoneError`, and the poll/TTL constants now come from
+  `@interop/wallet-core/enrollment`, and the local
+  `src/lib/onboardingInvite.ts` copy (with its unit test, whose coverage
+  lives in wallet-core's own suite) is removed. No behavior change.
+
 - Update to `@interop/wallet-core@0.36.0` and consume its shared
   account-genesis ceremony (`@interop/wallet-core/genesis`). Signup's key
   mint is now `mintAccountKeySet`, `mintSpaceId` re-exports the shared mint,

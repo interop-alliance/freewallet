@@ -24,19 +24,16 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { composeWalletOnboardingRequest } from '@interop/wallet-core/request'
 import {
+  createOnboardingExchange,
+  ONBOARDING_INVITE_TTL_MS,
   parseOnboardingResponse,
+  pollOnboardingExchange,
   type EnrollmentRequest
 } from '@interop/wallet-core/enrollment'
 import type { Session } from '@/types/auth'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { OnboardConsentPanel } from '@/components/OnboardConsentPanel'
-import {
-  createOnboardingExchange,
-  OnboardingExchangeGoneError,
-  ONBOARDING_INVITE_TTL_MS,
-  pollOnboardingExchange
-} from '@/lib/onboardingInvite'
 
 /**
  * Where the card is in the invite's life: creating the exchange, offering a
@@ -151,7 +148,10 @@ export function OnboardInviteCard({
         if (cancelled || controller.signal.aborted) {
           return
         }
-        if (err instanceof OnboardingExchangeGoneError) {
+        // Matched by name, not instanceof: the class lives in
+        // @interop/wallet-core, and a linked or duplicated copy of the
+        // package would make an instanceof check silently miss.
+        if ((err as Error)?.name === 'OnboardingExchangeGoneError') {
           setPhase('expired')
           return
         }
