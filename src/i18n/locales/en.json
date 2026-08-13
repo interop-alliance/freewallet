@@ -365,6 +365,7 @@
   "contacts": {
     "title": "Contacts",
     "addContacts": "Add Contacts",
+    "back": "Back to Contacts",
     "empty": "No contacts yet.",
     "searchPlaceholder": "Search contacts...",
     "noResults": "No contacts match your search."

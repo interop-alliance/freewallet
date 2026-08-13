@@ -8,6 +8,9 @@
   30 seconds, `VITE_WAS_SYNC_POLL_MS`; `0` disables), so rows another wallet
   pushes mid-session appear without a re-login. The timer skips ticks while
   offline and is torn down on logout.
+- The Contact Detail page carries a back link to the Contacts list.
+- The Contacts page carries a Sync button (matching the Dashboard's) that
+  kicks an immediate replication cycle and reloads the contact list.
 
 ### Changed
 

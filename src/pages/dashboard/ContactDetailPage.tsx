@@ -15,7 +15,7 @@ import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
-import { MdContentCopy } from 'react-icons/md'
+import { MdArrowBack, MdContentCopy } from 'react-icons/md'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
@@ -24,7 +24,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { NotFoundPage } from '@/pages/NotFoundPage'
-import { contactDetailStyles } from '@/styles/appStyles'
+import { contactDetailStyles, storageStyles } from '@/styles/appStyles'
 import { getDids, initialsFor, type ContactData } from '@interop/social-core'
 
 function FieldSection({
@@ -252,6 +252,16 @@ export function ContactDetailPage() {
 
   return (
     <DashboardLayout title={t('contactDetail.title')}>
+      <Button
+        component={RouterLink}
+        to="/contacts"
+        startIcon={<MdArrowBack />}
+        sx={storageStyles.backToStorageButton}
+        variant="text"
+      >
+        {t('contacts.back')}
+      </Button>
+
       {deleteError && (
         <Alert severity="error" sx={{ mt: 2 }}>
           {t('contact.deleteError')}

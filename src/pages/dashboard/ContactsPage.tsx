@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Avatar from '@mui/material/Avatar'
 import Box from '@mui/material/Box'
@@ -8,6 +8,7 @@ import CardActionArea from '@mui/material/CardActionArea'
 import CardContent from '@mui/material/CardContent'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import { MdSync } from 'react-icons/md'
 import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { FuseOptionKey } from 'fuse.js'
@@ -21,8 +22,10 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { SearchField } from '@/components/SearchField'
 import { useAuthStore } from '@/stores/authStore'
+import { syncController } from '@/stores/syncController'
 import { useSearch } from '@/hooks/useSearch'
 import { flattenSearchValues } from '@/lib/searchValues'
+import { dashboardStyles } from '@/styles/appStyles'
 import type { StoredContact } from '@/types/contact'
 
 // Plumbing fields a person would never search for -- record identifiers, the
@@ -57,12 +60,36 @@ export function ContactsPage() {
   const [contacts, setContacts] = useState<StoredContact[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   const {
     query,
     setQuery,
     results: searchedContacts
   } = useSearch({ items: contacts, keys: CONTACT_SEARCH_KEYS })
+
+  // `isStale` lets the mount effect drop a read whose effect was cleaned up;
+  // the imperative refreshes never cancel and pass nothing.
+  const loadContacts = useCallback(
+    async (isStale?: () => boolean) => {
+      if (!session?.storage) {
+        return
+      }
+      const stored = await session.storage.listContacts()
+      if (isStale?.()) {
+        return
+      }
+      // The shared list order, so the same account lists identically on
+      // every replica.
+      setContacts(
+        [...stored].sort((left, right) =>
+          compareContactsByName(left.contact, right.contact)
+        )
+      )
+      setLoadError(false)
+    },
+    [session]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -72,17 +99,7 @@ export function ContactsPage() {
         return
       }
       try {
-        const stored = await session.storage.listContacts()
-        if (!cancelled) {
-          // The shared list order, so the same account lists identically on
-          // every replica.
-          setContacts(
-            [...stored].sort((left, right) =>
-              compareContactsByName(left.contact, right.contact)
-            )
-          )
-          setLoadError(false)
-        }
+        await loadContacts(() => cancelled)
       } catch (err) {
         console.error('Could not load contacts:', err)
         if (!cancelled) {
@@ -99,7 +116,23 @@ export function ContactsPage() {
     return () => {
       cancelled = true
     }
-  }, [session])
+  }, [session, loadContacts])
+
+  async function handleSync() {
+    setSyncing(true)
+    try {
+      // Kick an immediate replication cycle (no-op for guests / no remote);
+      // pulled changes land in the local replica in the background.
+      syncController.reSync()
+      await loadContacts()
+    } catch (err) {
+      console.error('Could not refresh contacts:', err)
+      setLoadError(true)
+    } finally {
+      // Always release the Sync button, even on a failed refresh.
+      setSyncing(false)
+    }
+  }
 
   function renderContacts() {
     if (contacts.length === 0) {
@@ -177,6 +210,19 @@ export function ContactsPage() {
           sx={{ borderRadius: 2, px: 2.5, py: 1 }}
         >
           {t('contacts.addContacts')}
+        </Button>
+
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={handleSync}
+          disabled={syncing}
+          startIcon={
+            <MdSync size={16} style={dashboardStyles.syncIcon(syncing)} />
+          }
+          sx={dashboardStyles.syncButton}
+        >
+          {t('common.sync')}
         </Button>
 
         {!loading && contacts.length > 0 && (
