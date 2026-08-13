@@ -53,7 +53,6 @@ import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { RecoveryCodesSection } from '@/components/RecoveryCodesSection'
 import { EnrolledClientsSection } from '@/components/EnrolledClientsSection'
-import { SharedCollectionsPanel } from '@/components/SharedCollectionsPanel'
 import { dashboardStyles } from '@/styles/appStyles'
 import { type ReactNode, useEffect, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
@@ -971,13 +970,6 @@ export function SettingsPage() {
             <EnrolledClientsSection session={session} />
             <Divider />
             <RecoveryCodesSection session={session} />
-          </>
-        )}
-
-        {session && (
-          <>
-            <Divider />
-            <SharedCollectionsPanel session={session} />
           </>
         )}
 

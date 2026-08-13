@@ -56,8 +56,12 @@ export async function provisionNewWallet({
   // panel would otherwise show "Unnamed wallet"). Only a did:webvh account
   // has that panel, and only a remote store has somewhere to write the
   // label; best-effort either way.
-  if (storage.remoteStore && !session.isGuest && profile.didWebvh &&
-    profile.keyAgent) {
+  if (
+    storage.remoteStore &&
+    !session.isGuest &&
+    profile.didWebvh &&
+    profile.keyAgent
+  ) {
     try {
       await setClientLabel({
         store: storage.remoteStore.clientLabelsStore(),

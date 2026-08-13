@@ -767,6 +767,23 @@ export const storageStyles = {
   folderSyncChip: {
     flexShrink: 0
   },
+  folderShareChip: {
+    flexShrink: 0
+  },
+
+  /**
+   * Collection shares dialog -- one card per reader.
+   */
+  sharedReaderCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 0.5,
+    p: 1.5
+  },
+  sharedRemoveButton: {
+    borderRadius: 2,
+    alignSelf: 'flex-start'
+  },
 
   /**
    * Collection contents page -- header + file table.

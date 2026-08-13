@@ -13,9 +13,11 @@ import {
   MdChevronRight,
   MdFolder,
   MdFolderOpen,
-  MdSettings
+  MdSettings,
+  MdShare
 } from 'react-icons/md'
 import type { StorageCollection } from '@/lib/storage'
+import type { CollectionShare } from '@/session/shares'
 import type { SyncStatus } from '@/stores/syncStatusStore'
 import { formatBytes } from '@/lib/formatBytes'
 import { storageStyles } from '@/styles/appStyles'
@@ -36,11 +38,15 @@ const SYNC_CHIP_COLOR: Record<
 export function CollectionsOverview({
   collections,
   usageByCollection,
-  syncStatuses
+  syncStatuses,
+  sharesByCollection,
+  onShowShares
 }: {
   collections: StorageCollection[]
   usageByCollection?: Map<string, number>
   syncStatuses?: Record<string, SyncStatus>
+  sharesByCollection?: Record<string, CollectionShare[]>
+  onShowShares?: (collectionId: string) => void
 }) {
   const { t } = useTranslation()
 
@@ -63,6 +69,8 @@ export function CollectionsOverview({
         collections={contents}
         usageByCollection={usageByCollection}
         syncStatuses={syncStatuses}
+        sharesByCollection={sharesByCollection}
+        onShowShares={onShowShares}
       />
       {app.length > 0 && (
         <CollectionGroup
@@ -71,6 +79,8 @@ export function CollectionsOverview({
           collections={app}
           usageByCollection={usageByCollection}
           syncStatuses={syncStatuses}
+          sharesByCollection={sharesByCollection}
+          onShowShares={onShowShares}
         />
       )}
       <CollectionGroup
@@ -78,6 +88,8 @@ export function CollectionsOverview({
         collections={system}
         usageByCollection={usageByCollection}
         syncStatuses={syncStatuses}
+        sharesByCollection={sharesByCollection}
+        onShowShares={onShowShares}
         muted
       />
     </Stack>
@@ -95,6 +107,8 @@ function CollectionGroup({
   collections,
   usageByCollection,
   syncStatuses,
+  sharesByCollection,
+  onShowShares,
   muted = false
 }: {
   title: string
@@ -102,6 +116,8 @@ function CollectionGroup({
   collections: StorageCollection[]
   usageByCollection?: Map<string, number>
   syncStatuses?: Record<string, SyncStatus>
+  sharesByCollection?: Record<string, CollectionShare[]>
+  onShowShares?: (collectionId: string) => void
   muted?: boolean
 }) {
   if (collections.length === 0) {
@@ -131,6 +147,8 @@ function CollectionGroup({
             collection={collection}
             usageBytes={usageByCollection?.get(collection.id)}
             syncStatus={syncStatuses?.[collection.id]}
+            shareCount={sharesByCollection?.[collection.id]?.length}
+            onShowShares={onShowShares}
             muted={muted}
           />
         ))}
@@ -143,11 +161,15 @@ function CollectionFolderCard({
   collection,
   usageBytes,
   syncStatus,
+  shareCount,
+  onShowShares,
   muted = false
 }: {
   collection: StorageCollection
   usageBytes?: number
   syncStatus?: SyncStatus
+  shareCount?: number
+  onShowShares?: (collectionId: string) => void
   muted?: boolean
 }) {
   const { t } = useTranslation()
@@ -220,6 +242,22 @@ function CollectionFolderCard({
         >
           {t('storage.resourceCount', { count: total })}
         </Typography>
+        {shareCount != null && shareCount > 0 && onShowShares && (
+          <Chip
+            size="small"
+            color="info"
+            variant="outlined"
+            icon={<MdShare />}
+            label={t('storage.sharedChip', { count: shareCount })}
+            sx={storageStyles.folderShareChip}
+            onClick={event => {
+              // The whole row is a link, so the chip has to keep its click.
+              event.preventDefault()
+              event.stopPropagation()
+              onShowShares(collection.id)
+            }}
+          />
+        )}
         {syncStatus && (
           <Chip
             size="small"

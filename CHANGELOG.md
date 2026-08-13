@@ -18,6 +18,10 @@
   synced collection's entry now carries its status chip (left of the
   storage usage column), and the standalone Settings "Sync" section is
   removed.
+- Move the shared-collections management from Settings to the Storage page:
+  a shared collection's entry now carries a "Shared" chip that opens a
+  dialog listing its readers and removing their access, and the standalone
+  Settings "Shared collections" section is removed.
 
 ### Fixed
 

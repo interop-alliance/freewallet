@@ -980,8 +980,9 @@ grantee into every existing epoch -- no rotation, and no envelope in the
 collection sits outside an epoch the grantee now holds. An epoch-less
 descriptor is refused fail-closed rather than seeded lazily at share time (it
 can only mean an unprovisioned or torn collection), so there is no legacy
-single-recipient residue a reader could fetch but not decrypt. Removal is the Settings "Shared collections"
-panel (`unshareCollection`), not expiry -- the share TTL
+single-recipient residue a reader could fetch but not decrypt. Removal is the
+shares dialog behind a collection row's "Shared" chip in the Storage
+collection list (`unshareCollection`), not expiry -- the share TTL
 (`SHARE_ZCAP_TTL_MS`) is deliberately long, because expiry would end the pull
 axis while leaving the grantee in the key roster. A share also escrows the
 grantee into the collection's blinded-index HMAC key when the descriptor
@@ -1184,8 +1185,9 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   `https://w3id.org/byoe#shared-wallet-collection` invocation-target descriptor. One
   `shareCollection` call grants both axes: a read-only Collection zcap and an
   entry in every one of the collection's key epochs (escrowed by
-  `addRecipient`, so the share covers what is already stored). Removed from Settings >
-  Shared collections, never by expiry. See "Sharing a wallet collection".
+  `addRecipient`, so the share covers what is already stored). Removed from
+  the Storage page's collection list (the row's "Shared" chip opens the
+  shares dialog), never by expiry. See "Sharing a wallet collection".
 - **WAS (Wallet Attached Storage)** — an HTTP protocol for storing arbitrary
   resources in user-owned Spaces. Requests are authorized via ZCap.
   See [the spec](https://w3c-ccg.github.io/wallet-attached-storage-spec/).

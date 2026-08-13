@@ -1,7 +1,9 @@
 /**
- * The "Shared collections" settings surface's glue: which of the wallet's own
+ * The shares surface's glue -- the Storage page's collection list and the
+ * dialog behind each row's "Shared" chip: which of the wallet's own
  * collections can be shared, who currently reads them, and removing one
- * reader. The panel renders and confirms; the reads and the removal live here.
+ * reader. The dialog renders and confirms; the reads and the removal live
+ * here.
  */
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 import type { Session } from '@/types/auth'
@@ -42,7 +44,7 @@ export async function listSharedCollections({
 }: {
   session: Session
 }): Promise<Record<string, CollectionShare[]>> {
-  // One history scan for the whole panel: every shareable collection's reader
+  // One history scan for the whole listing: every shareable collection's reader
   // labels come out of the same activity list.
   const items = await session.storage.listHistoryItems()
   const entries = await Promise.all(

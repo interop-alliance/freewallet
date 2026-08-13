@@ -9,8 +9,10 @@ import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { DashboardLayout } from '@/components/DashboardLayout'
+import { CollectionSharesDialog } from '@/components/storage/CollectionSharesDialog'
 import { CollectionsOverview } from '@/components/storage/StorageBrowser'
 import { StorageQuotaCard } from '@/components/storage/StorageQuotaCard'
+import { getCollectionDisplayName } from '@/components/storage/displayUtils'
 import { useAuthStore } from '@/stores/authStore'
 import { useSyncStatusStore } from '@/stores/syncStatusStore'
 import { showToast } from '@/stores/toastStore'
@@ -20,6 +22,7 @@ import { quotaViewFromReport, writesRestricted } from '@/lib/storageQuota'
 import type { StorageQuotaStatus } from '@/types/storageQuota'
 import type { ImportSpaceSummary } from '@/stores/storageManager'
 import { parseImportTarFile } from '@/lib/import'
+import { listSharedCollections, type CollectionShare } from '@/session/shares'
 import { SYNCED_COLLECTIONS } from '@/app.config'
 
 /**
@@ -59,6 +62,13 @@ export const StoragePage = () => {
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [collectionsRefreshKey, setCollectionsRefreshKey] = useState(0)
+  const [sharesByCollection, setSharesByCollection] = useState<
+    Record<string, CollectionShare[]>
+  >({})
+  const [sharesRefreshKey, setSharesRefreshKey] = useState(0)
+  const [sharesDialogCollectionId, setSharesDialogCollectionId] = useState<
+    string | null
+  >(null)
   const [quotaStatus, setQuotaStatus] = useState<StorageQuotaStatus>({
     kind: 'loading'
   })
@@ -155,6 +165,38 @@ export const StoragePage = () => {
       cancelled = true
     }
   }, [hasRemoteStorage, session, t, collectionsRefreshKey, loadQuota])
+
+  // The reader rosters behind each collection row's "Shared" chip. A failure
+  // is non-blocking: the chips simply do not appear, and the storage listing
+  // itself stays usable.
+  useEffect(() => {
+    if (!hasRemoteStorage || !session) {
+      return
+    }
+
+    let cancelled = false
+    const activeSession = session
+
+    async function loadShares() {
+      try {
+        const record = await listSharedCollections({ session: activeSession })
+        if (!cancelled) {
+          setSharesByCollection(record)
+        }
+      } catch (err) {
+        console.error('Could not load the collection shares:', err)
+        if (!cancelled) {
+          setSharesByCollection({})
+        }
+      }
+    }
+
+    void loadShares()
+
+    return () => {
+      cancelled = true
+    }
+  }, [hasRemoteStorage, session, sharesRefreshKey])
 
   const handleExportSpace = async () => {
     if (!session?.storage) {
@@ -264,6 +306,13 @@ export const StoragePage = () => {
     }
   }
 
+  const sharesDialogCollection = collections.find(
+    collection => collection.id === sharesDialogCollectionId
+  )
+  const sharesDialogCollectionName = sharesDialogCollection
+    ? getCollectionDisplayName({ collection: sharesDialogCollection, t })
+    : (sharesDialogCollectionId ?? '')
+
   const importBlocked =
     quotaStatus.kind === 'ready' && writesRestricted(quotaStatus.quota)
 
@@ -345,9 +394,22 @@ export const StoragePage = () => {
                 syncStatuses[id] ?? 'idle'
               ])
             )}
+            sharesByCollection={sharesByCollection}
+            onShowShares={setSharesDialogCollectionId}
           />
         )}
       </Box>
+
+      {session && sharesDialogCollectionId && (
+        <CollectionSharesDialog
+          session={session}
+          collectionId={sharesDialogCollectionId}
+          collectionName={sharesDialogCollectionName}
+          shares={sharesByCollection[sharesDialogCollectionId] ?? []}
+          onClose={() => setSharesDialogCollectionId(null)}
+          onRemoved={() => setSharesRefreshKey(key => key + 1)}
+        />
+      )}
     </DashboardLayout>
   )
 }

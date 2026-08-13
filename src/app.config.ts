@@ -52,9 +52,9 @@ export const RP_ZCAP_WRITE_TTL_MS =
 // collection's key-epoch roster). Default 365 days: deliberately long, because
 // expiry is the wrong removal mechanism here. The two axes of a share come
 // apart at expiry -- the pull zcap dies but the epoch escrow does not, leaving
-// a reader in the roster (and in the settings list) who can no longer fetch.
-// The Settings "Shared collections" panel is the removal mechanism: it rotates
-// the epoch and revokes the zcap indivisibly.
+// a reader in the roster (and in the shares list) who can no longer fetch.
+// The Storage page's shares dialog is the removal mechanism: it rotates the
+// epoch and revokes the zcap indivisibly.
 export const SHARE_ZCAP_TTL_MS =
   (Number(env.VITE_SHARE_ZCAP_TTL_HOURS) || 8760) * 60 * 60 * 1000
 
