@@ -12,6 +12,8 @@
 - Fix the Connected wallets action button labels overflowing the button
   bounds (the row now wraps and the buttons no longer flex-shrink below
   their label width).
+- Label the first enrolled client "Freewallet" at signup, so a fresh
+  account's Connected wallets panel no longer shows "Unnamed wallet".
 
 ## 0.36.0 - 2026-08-13
 

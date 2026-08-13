@@ -159,6 +159,13 @@ export {
   UNLOCK_METHODS_RESOURCE
 } from '@interop/wallet-core/space'
 
+// Default display label written for the first enrolled client at signup
+// (`key-map/client-labels.json`). Later clients get their labels at
+// enrollment approval; this one has no approving screen, so the wallet
+// names itself. Stored data, not display-time i18n: a label must read the
+// same from every client that lists it.
+export const DEFAULT_CLIENT_LABEL = 'Freewallet'
+
 // Whether to provision and publish the user's did:webvh DID log alongside the
 // did:web document. An opt-out flag: default `true` (freewallet acts
 // as a did:webvh demo platform, publishing the log out of the box), disabled
