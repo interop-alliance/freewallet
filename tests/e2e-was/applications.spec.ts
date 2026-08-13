@@ -331,7 +331,7 @@ test.describe('The Applications revocation surface', () => {
       await expect(
         page.getByRole('link', { name: 'Applications page' })
       ).toBeVisible({ timeout: 30_000 })
-      await page.getByRole('button', { name: 'Enroll another wallet' }).click()
+      await page.getByRole('button', { name: 'Connect another wallet' }).click()
       await fillSettled(page.getByTestId('enroll-code-input'), code)
       await fillSettled(page.getByTestId('enroll-label-input'), 'Office laptop')
       await page.getByRole('button', { name: 'Approve', exact: true }).click()

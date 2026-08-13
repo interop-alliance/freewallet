@@ -1,9 +1,12 @@
 /**
- * The inviter's onboarding invite card, shown in place under Settings >
- * Connected wallets: it creates an ephemeral exchange carrying a
+ * The connect-another-wallet card, shown in place under Settings > Connected
+ * wallets: it creates an ephemeral exchange carrying a
  * `WalletOnboardingQuery`, shows the resulting interaction URL as a QR code
  * (and as copyable text), counts the invite down, and polls the exchange for
- * the other wallet's response.
+ * the other wallet's response. The caller may pass a `pasteSection` -- the
+ * paste-a-connect-code form for enrolling another browser -- which renders in
+ * the same card as the alternative to the QR invite; the two are independent
+ * ways into the same ceremony, never one state machine.
  *
  * Every run is per-instance: one `AbortController` in a ref cancels the poll
  * on cancel, on unmount, on expiry, and before a regenerated invite starts.
@@ -17,10 +20,11 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CircularProgress from '@mui/material/CircularProgress'
+import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { QRCodeSVG } from 'qrcode.react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { composeWalletOnboardingRequest } from '@interop/wallet-core/request'
 import {
@@ -61,11 +65,15 @@ function formatRemaining({ remainingMs }: { remainingMs: number }): string {
 export function OnboardInviteCard({
   session,
   onApproved,
-  onCancel
+  onCancel,
+  cancelDisabled = false,
+  pasteSection
 }: {
   session: Session
   onApproved: () => void
   onCancel: () => void
+  cancelDisabled?: boolean
+  pasteSection?: ReactNode
 }) {
   const { t } = useTranslation()
   const [phase, setPhase] = useState<InvitePhase>('creating')
@@ -205,8 +213,14 @@ export function OnboardInviteCard({
       <Typography variant="subtitle1">
         {phase === 'received'
           ? t('settings.onboardConsentTitle')
-          : t('settings.onboardCardTitle')}
+          : t('settings.connectCardTitle')}
       </Typography>
+
+      {phase !== 'received' && (
+        <Typography variant="body2" color="text.secondary">
+          {t('settings.connectInstructions')}
+        </Typography>
+      )}
 
       {phase === 'creating' && (
         <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
@@ -240,9 +254,6 @@ export function OnboardInviteCard({
 
       {phase === 'live' && (
         <>
-          <Typography variant="body2" color="text.secondary">
-            {t('settings.onboardInstructions')}
-          </Typography>
           {/* The QR keeps a white ground so it scans in dark mode too. */}
           <Box
             sx={{
@@ -283,6 +294,16 @@ export function OnboardInviteCard({
         </>
       )}
 
+      {/* The paste-a-connect-code alternative stands whatever the invite's
+          phase (an expired or failed invite never blocks it); only the
+          consent panel replaces it. */}
+      {phase !== 'received' && pasteSection && (
+        <>
+          <Divider sx={{ my: 1 }} />
+          {pasteSection}
+        </>
+      )}
+
       {/* In `received` the consent panel owns the actions. */}
       {phase !== 'received' && (
         <Stack direction="row" sx={{ gap: 1, mt: 1 }}>
@@ -301,7 +322,7 @@ export function OnboardInviteCard({
               {t('settings.onboardGenerateNew')}
             </Button>
           )}
-          <Button size="small" onClick={onCancel}>
+          <Button size="small" disabled={cancelDisabled} onClick={onCancel}>
             {t('common.cancel')}
           </Button>
         </Stack>

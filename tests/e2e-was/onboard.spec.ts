@@ -107,7 +107,7 @@ test.describe('wallet onboarding over rendezvous', () => {
     await signupViaWizard(page, testInfo)
     await page.goto('/#/settings')
     await expect(page.getByText('Connected wallets')).toBeVisible()
-    await page.getByRole('button', { name: 'Onboard another wallet' }).click()
+    await page.getByRole('button', { name: 'Connect another wallet' }).click()
     await expect(page.getByTestId('onboard-invite-card')).toBeVisible({
       timeout: 30_000
     })

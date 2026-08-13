@@ -112,7 +112,7 @@ test.describe('Client enrollment ceremony', () => {
       // Client 1 approves the code from Settings: the enrolling half of the
       // ceremony (roster wrap first, then the two log entries).
       await page.goto('/#/settings')
-      await page.getByRole('button', { name: 'Enroll another wallet' }).click()
+      await page.getByRole('button', { name: 'Connect another wallet' }).click()
       await fillSettled(page.getByTestId('enroll-code-input'), code)
       await expect(page.getByText(/New client key: did:key:z6Mk/)).toBeVisible()
       await page.getByRole('button', { name: 'Approve', exact: true }).click()

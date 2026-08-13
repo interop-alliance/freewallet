@@ -5,7 +5,8 @@
  * enrolled -- they stay in the Applications surface), marks the client this
  * session runs in, renames clients (labels live in
  * `key-map/client-labels.json`; the document carries key material only),
- * starts the enroll-another-wallet ceremony, and disconnects a client by
+ * starts the connect-another-wallet ceremony (one card offering both the QR
+ * invite and the pasted connect code), and disconnects a client by
  * driving the full revocation cascade -- with honest copy about the last
  * enrolled client (disconnecting it would abandon update authority; a
  * recovery code is the answer to "my only browser is gone").
@@ -65,10 +66,10 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
   const [disconnecting, setDisconnecting] = useState(false)
   const [disconnectError, setDisconnectError] = useState(false)
   const [cascadeWarning, setCascadeWarning] = useState(false)
-  // The enroll-another-wallet ceremony (the enrolling side): the pasted
+  // The paste-code half of the connect card (the enrolling side): the pasted
   // connect code, its parsed request when valid, the new client's label, and
-  // the ceremony state.
-  const [enrollDialogOpen, setEnrollDialogOpen] = useState(false)
+  // the ceremony state. Independent of the QR invite the same card shows:
+  // they are two ways into the same ceremony, never one state machine.
   const [enrollCode, setEnrollCode] = useState('')
   const [enrollRequest, setEnrollRequest] = useState<EnrollmentRequest | null>(
     null
@@ -77,9 +78,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
   const [enrolling, setEnrolling] = useState(false)
   const [enrollDone, setEnrollDone] = useState(false)
   const [enrollError, setEnrollError] = useState(false)
-  // The onboard-another-wallet invite card. Independent of the paste dialog
-  // above: they are two ways into the same ceremony, never one state machine.
-  const [onboardCardOpen, setOnboardCardOpen] = useState(false)
+  const [connectCardOpen, setConnectCardOpen] = useState(false)
   const [onboardDone, setOnboardDone] = useState(false)
 
   const loadClients = useCallback(async () => {
@@ -231,7 +230,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
         label: enrollLabel
       })
       setEnrollDone(true)
-      setEnrollDialogOpen(false)
+      setConnectCardOpen(false)
       setEnrollCode('')
       setEnrollRequest(null)
       await loadClients()
@@ -393,14 +392,18 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       )}
 
       {canEnroll && (
-        <Stack direction="row" sx={{ alignItems: 'center', gap: 2, mt: 1 }}>
+        <Stack
+          direction="row"
+          sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 2, mt: 1 }}
+        >
           <Button
             variant="outlined"
             size="small"
-            sx={{ borderRadius: 2, px: 2, py: 1 }}
-            disabled={enrolling}
+            sx={{ borderRadius: 2, flexShrink: 0 }}
+            disabled={connectCardOpen}
             onClick={() => {
               setEnrollDone(false)
+              setOnboardDone(false)
               setEnrollError(false)
               setEnrollCode('')
               setEnrollRequest(null)
@@ -409,37 +412,85 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
                   number: (clients?.length ?? 1) + 1
                 })
               )
-              setEnrollDialogOpen(true)
+              setConnectCardOpen(true)
             }}
           >
-            {enrolling ? t('settings.enrolling') : t('settings.enrollClient')}
-          </Button>
-          <Button
-            variant="outlined"
-            size="small"
-            sx={{ borderRadius: 2, px: 2, py: 1 }}
-            disabled={onboardCardOpen}
-            onClick={() => {
-              setOnboardDone(false)
-              setOnboardCardOpen(true)
-            }}
-          >
-            {t('settings.onboardClient')}
+            {t('settings.connectClient')}
           </Button>
           <Typography variant="body2" color="text.secondary">
-            {t('settings.enrollClientHint')}
+            {t('settings.connectClientHint')}
           </Typography>
         </Stack>
       )}
-      {canEnroll && onboardCardOpen && (
+      {canEnroll && connectCardOpen && (
         <OnboardInviteCard
           session={session}
           onApproved={() => {
-            setOnboardCardOpen(false)
+            setConnectCardOpen(false)
             setOnboardDone(true)
             void loadClients()
           }}
-          onCancel={() => setOnboardCardOpen(false)}
+          onCancel={() => setConnectCardOpen(false)}
+          cancelDisabled={enrolling}
+          pasteSection={
+            <Stack sx={{ gap: 1.5 }}>
+              <Typography variant="body2" color="text.secondary">
+                {t('settings.enrollConfirmMessage')}
+              </Typography>
+              <TextField
+                fullWidth
+                size="small"
+                multiline
+                minRows={3}
+                label={t('settings.enrollCodeLabel')}
+                value={enrollCode}
+                onChange={event => handleEnrollCodeChange(event.target.value)}
+                error={enrollCode.trim().length > 0 && !enrollRequest}
+                helperText={
+                  enrollCode.trim().length > 0 && !enrollRequest
+                    ? t('settings.enrollCodeInvalid')
+                    : undefined
+                }
+                slotProps={{
+                  htmlInput: { 'data-testid': 'enroll-code-input' }
+                }}
+              />
+              <TextField
+                fullWidth
+                size="small"
+                label={t('settings.clients.nameLabel')}
+                value={enrollLabel}
+                onChange={event => setEnrollLabel(event.target.value)}
+                slotProps={{
+                  htmlInput: { 'data-testid': 'enroll-label-input' }
+                }}
+              />
+              {enrollRequest && (
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ wordBreak: 'break-all' }}
+                >
+                  {t('settings.enrollFingerprint', {
+                    did: enrollmentClientDid({ request: enrollRequest })
+                  })}
+                </Typography>
+              )}
+              {enrollError && (
+                <Alert severity="error">{t('settings.enrollError')}</Alert>
+              )}
+              <Button
+                variant="contained"
+                size="small"
+                sx={{ alignSelf: 'flex-start', borderRadius: 2 }}
+                loading={enrolling}
+                disabled={!enrollRequest}
+                onClick={() => void handleEnroll()}
+              >
+                {t('settings.enrollConfirmAction')}
+              </Button>
+            </Stack>
+          }
         />
       )}
       {enrollDone && (
@@ -504,85 +555,6 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
             onClick={() => void handleDisconnect()}
           >
             {t('settings.clients.disconnectConfirmAction')}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={enrollDialogOpen}
-        onClose={() => {
-          if (!enrolling) {
-            setEnrollDialogOpen(false)
-          }
-        }}
-        fullWidth
-      >
-        <DialogTitle>{t('settings.enrollConfirmTitle')}</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            {t('settings.enrollConfirmMessage')}
-          </DialogContentText>
-          <TextField
-            fullWidth
-            size="small"
-            multiline
-            minRows={3}
-            label={t('settings.enrollCodeLabel')}
-            value={enrollCode}
-            onChange={event => handleEnrollCodeChange(event.target.value)}
-            error={enrollCode.trim().length > 0 && !enrollRequest}
-            helperText={
-              enrollCode.trim().length > 0 && !enrollRequest
-                ? t('settings.enrollCodeInvalid')
-                : undefined
-            }
-            slotProps={{
-              htmlInput: { 'data-testid': 'enroll-code-input' }
-            }}
-            sx={{ mt: 2 }}
-          />
-          <TextField
-            fullWidth
-            size="small"
-            label={t('settings.clients.nameLabel')}
-            value={enrollLabel}
-            onChange={event => setEnrollLabel(event.target.value)}
-            slotProps={{
-              htmlInput: { 'data-testid': 'enroll-label-input' }
-            }}
-            sx={{ mt: 2 }}
-          />
-          {enrollRequest && (
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ mt: 2, wordBreak: 'break-all' }}
-            >
-              {t('settings.enrollFingerprint', {
-                did: enrollmentClientDid({ request: enrollRequest })
-              })}
-            </Typography>
-          )}
-          {enrollError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {t('settings.enrollError')}
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => setEnrollDialogOpen(false)}
-            disabled={enrolling}
-          >
-            {t('common.cancel')}
-          </Button>
-          <Button
-            variant="contained"
-            onClick={() => void handleEnroll()}
-            loading={enrolling}
-            disabled={!enrollRequest}
-          >
-            {t('settings.enrollConfirmAction')}
           </Button>
         </DialogActions>
       </Dialog>

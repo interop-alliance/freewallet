@@ -95,7 +95,7 @@ test.describe('The Settings connected-wallets surface', () => {
 
       // Client 1 approves from the connected-wallets panel, naming the new
       // wallet at approval time.
-      await page.getByRole('button', { name: 'Enroll another wallet' }).click()
+      await page.getByRole('button', { name: 'Connect another wallet' }).click()
       await fillSettled(page.getByTestId('enroll-code-input'), code)
       await expect(page.getByText(/New client key: did:key:z6Mk/)).toBeVisible()
       await fillSettled(page.getByTestId('enroll-label-input'), 'Office laptop')

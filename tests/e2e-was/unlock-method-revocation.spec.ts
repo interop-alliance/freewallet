@@ -264,7 +264,7 @@ test.describe('Unlock-method revocation from another client', () => {
 
       // Client 1 approves the enrollment from Settings.
       await page.goto('/#/settings')
-      await page.getByRole('button', { name: 'Enroll another wallet' }).click()
+      await page.getByRole('button', { name: 'Connect another wallet' }).click()
       await fillSettled(page.getByTestId('enroll-code-input'), connectCode)
       await expect(page.getByText(/New client key: did:key:z6Mk/)).toBeVisible()
       await page.getByRole('button', { name: 'Approve', exact: true }).click()

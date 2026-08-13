@@ -1,5 +1,18 @@
 # History
 
+## 0.37.0 - TBD
+
+### Changed
+
+- Merge the Settings "Enroll another wallet" and "Onboard another wallet"
+  entry points into a single "Connect another wallet" button. It opens one
+  card offering both paths at once: the QR onboarding invite (with its
+  copyable link) and the paste-a-connect-code form. The paste form stays
+  available when the invite fails or expires.
+- Fix the Connected wallets action button labels overflowing the button
+  bounds (the row now wraps and the buttons no longer flex-shrink below
+  their label width).
+
 ## 0.36.0 - 2026-08-13
 
 ### Changed

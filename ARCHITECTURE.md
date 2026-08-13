@@ -347,7 +347,7 @@ The flow, quorum-of-one (any single enrolled client can enroll):
 1. **Enrollee** (login page, from the not-enrolled state): "Connect this
    browser" mints the key set (`mintEnrollmentRequest`) and shows the code.
    Nothing is durable yet.
-2. **Enrolling client** (Settings > Enroll another wallet): pastes the code,
+2. **Enrolling client** (Settings > Connect another wallet): pastes the code,
    compares the fingerprint, approves (`approveEnrollment`). Push, not pull,
    in the recovery-anchor order -- decryption material before authorization:
    the user key is wrapped to the new client's key-agreement key in
@@ -379,12 +379,14 @@ is a camera-holding wallet rather than a browser with a paste box, the same
 ceremony runs over the WAS server's ephemeral-exchanges facet
 (`/workflows/ephemeral/exchanges` -- unauthenticated, capability-URL
 posture: the unguessable exchange URL is the only access control, and it
-travels point-to-point in the QR). Settings > Connected wallets > "Onboard
-another wallet" creates an exchange whose stored request is a
+travels point-to-point in the QR). Settings > Connected wallets > "Connect
+another wallet" opens one card offering both halves of the ceremony -- the
+QR invite and the paste-a-connect-code form. The invite side creates an
+exchange whose stored request is a
 `WalletOnboardingQuery` VPR carrying the account pointer and controller
 (`composeWalletOnboardingRequest`), renders the exchange's interaction URL
 (`.../protocols?iuv=1`) as a QR code, and polls
-(`src/lib/onboardingInvite.ts`, `OnboardInviteCard`). The other wallet scans
+(`OnboardInviteCard`). The other wallet scans
 it, begins the exchange, mints its key set, and posts back an
 onboarding-response envelope -- the ordinary `freewallet-connect:` code
 verbatim plus a suggested display label, nothing else
@@ -624,7 +626,8 @@ at the login-time sweep). The last enrolled client cannot be disconnected --
 that would abandon the account's update authority (it is also always the
 current client from its own session, and self-revocation is refused) -- and
 the panel says so, pointing at recovery-code issuance instead. The
-enroll-another-wallet entry point (the enrollment ceremony's approving half)
+connect-another-wallet entry point (the enrollment ceremony's approving half:
+one card offering both the QR onboarding invite and the pasted connect code)
 lives in this panel.
 
 **The Applications sibling knows the current-key-set rule.** The
