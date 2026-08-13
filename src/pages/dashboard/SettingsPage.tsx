@@ -58,24 +58,8 @@ import { dashboardStyles } from '@/styles/appStyles'
 import { type ReactNode, useEffect, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
-import {
-  DATE_FMT,
-  KMS_SERVER_URL,
-  PASSWORD_RULES,
-  SYNCED_COLLECTIONS
-} from '@/app.config'
-import { useSyncStatusStore, type SyncStatus } from '@/stores/syncStatusStore'
+import { DATE_FMT, KMS_SERVER_URL, PASSWORD_RULES } from '@/app.config'
 import { setLoginHandle } from '@/lib/loginCredential'
-
-const SYNC_CHIP_COLOR: Record<
-  SyncStatus,
-  'default' | 'info' | 'success' | 'error'
-> = {
-  idle: 'default',
-  syncing: 'info',
-  synced: 'success',
-  error: 'error'
-}
 
 /**
  * A single label/value settings row: a fixed-width label column and a value
@@ -119,7 +103,6 @@ export function SettingsPage() {
   const { t, i18n } = useTranslation()
   const session = useAuthStore(state => state.session)
   const logout = useAuthStore(state => state.logout)
-  const syncStatuses = useSyncStatusStore(state => state.statuses)
   const { displayInfoBox } = useInfoBox()
   const [deleteError, setDeleteError] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -977,30 +960,6 @@ export function SettingsPage() {
             </Stack>
           </>
         )}
-
-        <Divider />
-
-        <Stack sx={{ gap: 1 }}>
-          <Typography variant="h6">{t('settings.syncSection')}</Typography>
-          {hasRemoteStorage ? (
-            SYNCED_COLLECTIONS.map(({ id }) => {
-              const status = syncStatuses[id] ?? 'idle'
-              return (
-                <SettingRow key={id} label={id}>
-                  <Chip
-                    size="small"
-                    color={SYNC_CHIP_COLOR[status]}
-                    label={t(`settings.syncStatus.${status}`)}
-                  />
-                </SettingRow>
-              )
-            })
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              {t('settings.syncNone')}
-            </Typography>
-          )}
-        </Stack>
 
         {session && !session.isGuest && (
           <>

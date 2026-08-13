@@ -764,6 +764,9 @@ export const storageStyles = {
     textAlign: 'right',
     fontVariantNumeric: 'tabular-nums'
   },
+  folderSyncChip: {
+    flexShrink: 0
+  },
 
   /**
    * Collection contents page -- header + file table.

@@ -1,5 +1,6 @@
 import {
   Box,
+  Chip,
   List,
   ListItem,
   ListItemButton,
@@ -15,18 +16,31 @@ import {
   MdSettings
 } from 'react-icons/md'
 import type { StorageCollection } from '@/lib/storage'
+import type { SyncStatus } from '@/stores/syncStatusStore'
 import { formatBytes } from '@/lib/formatBytes'
 import { storageStyles } from '@/styles/appStyles'
 import { getCollectionDisplayName, groupCollections } from './displayUtils'
 import { EncryptedAccessIcon, PublicAccessIcon } from './AccessIcon'
 import { StorageEmptyState } from './EmptyState'
 
+const SYNC_CHIP_COLOR: Record<
+  SyncStatus,
+  'default' | 'info' | 'success' | 'error'
+> = {
+  idle: 'default',
+  syncing: 'info',
+  synced: 'success',
+  error: 'error'
+}
+
 export function CollectionsOverview({
   collections,
-  usageByCollection
+  usageByCollection,
+  syncStatuses
 }: {
   collections: StorageCollection[]
   usageByCollection?: Map<string, number>
+  syncStatuses?: Record<string, SyncStatus>
 }) {
   const { t } = useTranslation()
 
@@ -48,6 +62,7 @@ export function CollectionsOverview({
         title={t('storage.groupWalletContents')}
         collections={contents}
         usageByCollection={usageByCollection}
+        syncStatuses={syncStatuses}
       />
       {app.length > 0 && (
         <CollectionGroup
@@ -55,12 +70,14 @@ export function CollectionsOverview({
           description={t('storage.groupAppCollectionsDescription')}
           collections={app}
           usageByCollection={usageByCollection}
+          syncStatuses={syncStatuses}
         />
       )}
       <CollectionGroup
         title={t('storage.groupSystemCollections')}
         collections={system}
         usageByCollection={usageByCollection}
+        syncStatuses={syncStatuses}
         muted
       />
     </Stack>
@@ -77,12 +94,14 @@ function CollectionGroup({
   description,
   collections,
   usageByCollection,
+  syncStatuses,
   muted = false
 }: {
   title: string
   description?: string
   collections: StorageCollection[]
   usageByCollection?: Map<string, number>
+  syncStatuses?: Record<string, SyncStatus>
   muted?: boolean
 }) {
   if (collections.length === 0) {
@@ -111,6 +130,7 @@ function CollectionGroup({
             key={collection.id}
             collection={collection}
             usageBytes={usageByCollection?.get(collection.id)}
+            syncStatus={syncStatuses?.[collection.id]}
             muted={muted}
           />
         ))}
@@ -122,10 +142,12 @@ function CollectionGroup({
 function CollectionFolderCard({
   collection,
   usageBytes,
+  syncStatus,
   muted = false
 }: {
   collection: StorageCollection
   usageBytes?: number
+  syncStatus?: SyncStatus
   muted?: boolean
 }) {
   const { t } = useTranslation()
@@ -198,6 +220,14 @@ function CollectionFolderCard({
         >
           {t('storage.resourceCount', { count: total })}
         </Typography>
+        {syncStatus && (
+          <Chip
+            size="small"
+            color={SYNC_CHIP_COLOR[syncStatus]}
+            label={t(`storage.syncStatus.${syncStatus}`)}
+            sx={storageStyles.folderSyncChip}
+          />
+        )}
         {usageBytes != null && (
           <Typography
             variant="body2"

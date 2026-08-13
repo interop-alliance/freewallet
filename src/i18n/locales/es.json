@@ -45,14 +45,6 @@
     "deleteError": "No se pudieron eliminar los datos de su cuenta. Inténtelo de nuevo.",
     "about": "Acerca de",
     "version": "Freewallet versión {{version}}",
-    "syncSection": "Sincronización",
-    "syncNone": "No hay almacenamiento remoto configurado; sus datos permanecen en este dispositivo.",
-    "syncStatus": {
-      "idle": "Inactivo",
-      "syncing": "Sincronizando...",
-      "synced": "Sincronizado",
-      "error": "Error de sincronización (se reintentará)"
-    },
     "unpromotedAccount": "Esta cuenta no ha terminado de configurar su identidad publicada (un paso de configuración falló anteriormente). Las billeteras conectadas y los códigos de recuperación no estarán disponibles hasta que se complete; se reintenta automáticamente en cada inicio de sesión.",
     "kmsSection": "Gestión de claves",
     "kmsNone": "No hay un servidor de gestión de claves configurado; las claves permanecen en este dispositivo.",
@@ -484,6 +476,12 @@
     "publicAccess": "Lectura pública",
     "encrypted": "Cifrado",
     "resourceCount": "{{count}} recursos",
+    "syncStatus": {
+      "idle": "Inactivo",
+      "syncing": "Sincronizando...",
+      "synced": "Sincronizado",
+      "error": "Error de sincronización (se reintentará)"
+    },
     "collectionNames": {
       "private-credentials": "Credenciales verificables",
       "public-credentials": "Credenciales verificables (compartidas públicamente)",

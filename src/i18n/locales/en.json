@@ -45,14 +45,6 @@
     "deleteError": "Could not delete your account data. Please try again.",
     "about": "About",
     "version": "Freewallet version {{version}}",
-    "syncSection": "Sync",
-    "syncNone": "No remote storage is configured; your data stays on this device.",
-    "syncStatus": {
-      "idle": "Idle",
-      "syncing": "Syncing...",
-      "synced": "Synced",
-      "error": "Sync error (will retry)"
-    },
     "unpromotedAccount": "This account has not finished setting up its published identity (a setup step failed earlier). Connected wallets and recovery codes are unavailable until it completes; it is retried automatically at each sign-in.",
     "kmsSection": "Key management",
     "kmsNone": "No key management server is configured; keys stay on this device.",
@@ -484,6 +476,12 @@
     "publicAccess": "Public Readable",
     "encrypted": "Encrypted",
     "resourceCount": "{{count}} resources",
+    "syncStatus": {
+      "idle": "Idle",
+      "syncing": "Syncing...",
+      "synced": "Synced",
+      "error": "Sync error (will retry)"
+    },
     "collectionNames": {
       "private-credentials": "Verifiable Credentials",
       "public-credentials": "Verifiable Credentials (Publicly Shared)",

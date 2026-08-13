@@ -14,6 +14,10 @@
   their label width).
 - Label the first enrolled client "Freewallet" at signup, so a fresh
   account's Connected wallets panel no longer shows "Unnamed wallet".
+- Move the sync status display from Settings to the Storage page: each
+  synced collection's entry now carries its status chip (left of the
+  storage usage column), and the standalone Settings "Sync" section is
+  removed.
 
 ## 0.36.0 - 2026-08-13
 

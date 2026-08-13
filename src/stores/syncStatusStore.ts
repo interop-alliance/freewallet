@@ -2,8 +2,8 @@
  * Zustand store holding per-collection replication status, mirroring the WAS
  * spec's planned per-replica sync-status vocabulary. The sync controller writes
  * to it off the RxDB replication `active$` / `error$` streams; UI (e.g. a header
- * indicator or the Settings page) reads from it. In-memory only, like the
- * session -- cleared on logout.
+ * indicator or the Storage page's collection listing) reads from it. In-memory
+ * only, like the session -- cleared on logout.
  */
 import { create } from 'zustand'
 

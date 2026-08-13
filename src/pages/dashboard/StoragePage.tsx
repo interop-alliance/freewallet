@@ -12,6 +12,7 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { CollectionsOverview } from '@/components/storage/StorageBrowser'
 import { StorageQuotaCard } from '@/components/storage/StorageQuotaCard'
 import { useAuthStore } from '@/stores/authStore'
+import { useSyncStatusStore } from '@/stores/syncStatusStore'
 import { showToast } from '@/stores/toastStore'
 import { storageStyles } from '@/styles/appStyles'
 import type { StorageCollection } from '@/lib/storage'
@@ -19,6 +20,7 @@ import { quotaViewFromReport, writesRestricted } from '@/lib/storageQuota'
 import type { StorageQuotaStatus } from '@/types/storageQuota'
 import type { ImportSpaceSummary } from '@/stores/storageManager'
 import { parseImportTarFile } from '@/lib/import'
+import { SYNCED_COLLECTIONS } from '@/app.config'
 
 /**
  * Visually-hidden style for the file input wrapped by the import Button
@@ -61,6 +63,7 @@ export const StoragePage = () => {
     kind: 'loading'
   })
   const hasRemoteStorage = Boolean(session?.storage?.hasRemoteStorage)
+  const syncStatuses = useSyncStatusStore(state => state.statuses)
 
   const loadQuota = useCallback(async () => {
     if (!hasRemoteStorage || !session?.storage) {
@@ -336,6 +339,12 @@ export const StoragePage = () => {
                 ? quotaStatus.quota.usageByCollection
                 : undefined
             }
+            syncStatuses={Object.fromEntries(
+              SYNCED_COLLECTIONS.map(({ id }) => [
+                id,
+                syncStatuses[id] ?? 'idle'
+              ])
+            )}
           />
         )}
       </Box>
