@@ -19,6 +19,9 @@ vi.mock('@/app.config', () => ({
   WAS_SERVER_URL: 'https://was.example',
   WAS_SYNC_BATCH_SIZE: undefined,
   WAS_SYNC_RETRY_MS: undefined,
+  // 0 disables the pull poll timer; poll behavior has its own suite
+  // (src/stores/syncController.test.ts)
+  WAS_SYNC_POLL_MS: 0,
   SYNCED_COLLECTIONS: [
     { key: 'privateCredentials', id: 'private-credentials' },
     { key: 'publicCredentials', id: 'public-credentials' },

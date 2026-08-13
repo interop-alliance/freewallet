@@ -14,6 +14,12 @@
  * promptly rather than waiting out the backoff. Status is driven off
  * `active$` / `error$` into the `syncStatusStore` for the UI.
  *
+ * Pulls ARE polled: the server offers no live change stream yet (no
+ * `pull.stream$`), so a timer re-runs the pull cycle every `WAS_SYNC_POLL_MS`
+ * (skipped while offline, torn down on `stop()`) to surface rows another
+ * wallet pushed mid-session. An interim measure until server-side live
+ * streaming replaces it.
+ *
  * The collection set is data-driven (`SYNCED_COLLECTIONS`, projected from the
  * standard collections): every standard collection replicates through the same
  * adapter. The encrypted ones
@@ -26,6 +32,7 @@ import {
   SYNCED_COLLECTIONS,
   WAS_SERVER_URL,
   WAS_SYNC_BATCH_SIZE,
+  WAS_SYNC_POLL_MS,
   WAS_SYNC_RETRY_MS
 } from '@/app.config'
 import type { SyncCheckpoint, SyncedDoc, WasSyncPort } from '@/lib/sync'
@@ -51,6 +58,7 @@ interface CollectionReplication {
 class SyncController {
   #replications: CollectionReplication[] = []
   #onlineHandler?: () => void
+  #pollTimer?: ReturnType<typeof setInterval>
   #started = false
   // Serializes every lifecycle transition (start / stop / restart) onto a
   // single chain so overlapping login / logout calls can never interleave and
@@ -187,6 +195,19 @@ class SyncController {
       // immediately rather than waiting out RxDB's backoff tick.
       this.#onlineHandler = () => this.reSync()
       window.addEventListener('online', this.#onlineHandler)
+
+      // Poll for pulls: replication has no live stream from the server
+      // (no `pull.stream$` yet), so without a timer a row another wallet
+      // pushes after this session's initial pull sits on the server until a
+      // push, an `online` event, or a re-login. Skipped while offline (the
+      // `online` handler above already resyncs on reconnect).
+      if (WAS_SYNC_POLL_MS > 0) {
+        this.#pollTimer = setInterval(() => {
+          if (navigator.onLine) {
+            this.reSync()
+          }
+        }, WAS_SYNC_POLL_MS)
+      }
     } catch (err) {
       console.error('Failed to start sync controller:', err)
       // Tear down any partial state cleanly. Call the internal `#stop()`
@@ -218,6 +239,10 @@ class SyncController {
    * @returns {Promise<void>}
    */
   async #stop(): Promise<void> {
+    if (this.#pollTimer !== undefined) {
+      clearInterval(this.#pollTimer)
+      this.#pollTimer = undefined
+    }
     if (this.#onlineHandler) {
       window.removeEventListener('online', this.#onlineHandler)
       this.#onlineHandler = undefined

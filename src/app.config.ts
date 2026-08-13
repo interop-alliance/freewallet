@@ -67,6 +67,13 @@ export const WAS_SYNC_RETRY_MS = env.VITE_WAS_SYNC_RETRY_MS
 export const WAS_SYNC_BATCH_SIZE = env.VITE_WAS_SYNC_BATCH_SIZE
   ? Number(env.VITE_WAS_SYNC_BATCH_SIZE)
   : undefined
+// `VITE_WAS_SYNC_POLL_MS` -- interval between background pull polls
+// (`reSync()` across the running replications), so rows another wallet
+// pushes mid-session land without a re-login. `0` disables polling. An
+// interim measure until server-side live streaming (`pull.stream$`) exists.
+export const WAS_SYNC_POLL_MS = env.VITE_WAS_SYNC_POLL_MS
+  ? Number(env.VITE_WAS_SYNC_POLL_MS)
+  : 30_000
 
 // The RxDB collection key per synced wallet-Space collection id -- the only
 // app-local binding left in the roster; everything byte-significant (the

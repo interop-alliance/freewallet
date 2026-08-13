@@ -2,6 +2,13 @@
 
 ## 0.37.0 - TBD
 
+### Added
+
+- Background sync now polls for remote changes on a timer (default every
+  30 seconds, `VITE_WAS_SYNC_POLL_MS`; `0` disables), so rows another wallet
+  pushes mid-session appear without a re-login. The timer skips ticks while
+  offline and is torn down on logout.
+
 ### Changed
 
 - Merge the Settings "Enroll another wallet" and "Onboard another wallet"
