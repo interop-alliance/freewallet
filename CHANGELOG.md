@@ -19,6 +19,14 @@
   storage usage column), and the standalone Settings "Sync" section is
   removed.
 
+### Fixed
+
+- Updated to `@interop/wallet-core` 0.38.0, which stores wallet onboarding
+  invitations on the ephemeral exchange in their VC-API shape (wrapped in
+  `verifiablePresentationRequest`). Invitations minted before this were
+  stored unwrapped, so the joining wallet could not recognize them and gave
+  up without joining; only the corrected shape is supported.
+
 ## 0.36.0 - 2026-08-13
 
 ### Changed
