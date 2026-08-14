@@ -13,6 +13,12 @@
   Existing app-key rows in `private-credentials` are deleted by a login-time
   sweep rather than migrated; affected apps reconnect as a first run. The
   legacy pre-`appUrl` app-key re-issue path is removed.
+- The login-time app-key sweep now retires a stranded app's live authority
+  before deleting its row: the app's recorded storage grants are revoked and
+  it is rotated out of its app-provisioned collections' key-epoch rosters
+  (the same path revoking a connected app uses). A row whose revocation
+  fails is left in place and retried at the next login instead of being
+  deleted with its grants still live.
 - Move the Applications and Storage links out of the Settings group in the
   left nav; they now sit at the top level beside Dashboard and Contacts.
 - Rename the Storage page's display label to "Your Data" ("Tus datos" in

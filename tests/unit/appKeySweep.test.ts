@@ -97,6 +97,16 @@ function fakeStorage(stored: StoredCredential[]) {
   const rows = [...stored]
   const storage = {
     listCredentials: vi.fn(async () => [...rows]),
+    // The sweep retires a stranded key's live authority before deleting its
+    // row; the revoke-before-delete ordering has its own suite
+    // (`src/session/appKeySweep.test.ts`), so here they just succeed.
+    listHistoryItems: vi.fn(async () => []),
+    revokeAppCollectionRecipients: vi.fn(async () => ({
+      collections: 0,
+      rotated: 0,
+      failed: 0
+    })),
+    revokeAppGrants: vi.fn(async () => ({ revoked: 0, skipped: 0 })),
     deleteCredential: vi.fn(async ({ cid }: { cid: string }) => {
       const index = rows.findIndex(row => row.cid === cid)
       if (index >= 0) {
