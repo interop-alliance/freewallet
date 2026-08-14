@@ -60,8 +60,8 @@ importers:
         specifier: ^3.5.4
         version: 3.5.4
       '@interop/wallet-core':
-        specifier: ^0.38.0
-        version: 0.38.0(@interop/jsonld-signatures@11.8.4)
+        specifier: ^0.39.0
+        version: 0.39.0(@interop/jsonld-signatures@11.8.4)
       '@interop/was-client':
         specifier: ^0.38.2
         version: 0.38.2(@interop/jsonld-signatures@11.8.4)
@@ -526,10 +526,6 @@ packages:
       react-native-get-random-values:
         optional: true
 
-  '@interop/data-integrity-core@8.4.0':
-    resolution: {integrity: sha512-j7Y9BthxKWdPx6d3q96jHnDJXj08BWE++JeWJ0jhqJJbdvCMPgenU2g/MUrlZqe3TtF52ULlYJFYRoWwTDVGdg==}
-    engines: {node: '>=24.0'}
-
   '@interop/data-integrity-core@8.5.0':
     resolution: {integrity: sha512-PUyyasGGzfJqfpFAljixhNcrk9hyx97oRlQsjU3QOpmW4LslL9Ym0QB4gEXIrJrLyDtXA6BS3sQltMs2bhdUGw==}
     engines: {node: '>=24.0'}
@@ -659,8 +655,8 @@ packages:
     resolution: {integrity: sha512-OBnDT3gBgBrfO2bT90RXLZNpfn1eqvOO1aiczi+ooKNciBkCTOGCXQm+ozs4n1ksNnCHF+D6g3GNUFkyS3o8sw==}
     engines: {node: '>=24.0'}
 
-  '@interop/wallet-core@0.38.0':
-    resolution: {integrity: sha512-svWMw0PBcatcEjC+sKcrarWph1CF9JSSe1+tDRsldLQrLA0ZZUxU0XG/loZ+goNprGS8CdqCyeF1uEVOwpYSIA==}
+  '@interop/wallet-core@0.39.0':
+    resolution: {integrity: sha512-/AAEWs0TnHqw8mSZ+WGHIC/rKTi4Qfms1zpHtTcMdc6PDKWGqNtfLoiA8lcQyAYd0GsNKL1+uGGp6lua6ySb0Q==}
     engines: {node: '>=24.0'}
 
   '@interop/was-client@0.38.2':
@@ -3823,8 +3819,6 @@ snapshots:
     dependencies:
       '@scure/base': 2.3.0
 
-  '@interop/data-integrity-core@8.4.0': {}
-
   '@interop/data-integrity-core@8.5.0': {}
 
   '@interop/data-integrity-proof@3.4.3':
@@ -3903,7 +3897,7 @@ snapshots:
 
   '@interop/edv-client@17.8.0':
     dependencies:
-      '@interop/data-integrity-core': 8.4.0
+      '@interop/data-integrity-core': 8.5.0
       '@interop/http-client': 1.0.5
       '@interop/http-signature-zcap-invoke': 6.2.4
       '@interop/lru-memoize': 4.0.3
@@ -3948,7 +3942,7 @@ snapshots:
   '@interop/jsonld-signatures@11.8.4':
     dependencies:
       '@digitalbazaar/security-context': 1.0.1
-      '@interop/data-integrity-core': 8.4.0
+      '@interop/data-integrity-core': 8.5.0
       '@interop/jsonld': 9.0.3
       fast-text-encoding: 1.0.6
       rdf-canonize: 5.0.0
@@ -3967,7 +3961,7 @@ snapshots:
 
   '@interop/minimal-cipher@7.8.1':
     dependencies:
-      '@interop/data-integrity-core': 8.4.0
+      '@interop/data-integrity-core': 8.5.0
       '@interop/ecdsa-multikey': 2.3.3
       '@noble/ciphers': 2.3.0
       '@noble/curves': 2.3.0
@@ -4044,7 +4038,7 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/wallet-core@0.38.0(@interop/jsonld-signatures@11.8.4)':
+  '@interop/wallet-core@0.39.0(@interop/jsonld-signatures@11.8.4)':
     dependencies:
       '@interop/data-integrity-core': 8.5.0
       '@interop/data-integrity-proof': 3.4.3

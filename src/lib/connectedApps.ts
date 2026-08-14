@@ -2,8 +2,10 @@
  * Connected-applications model for the Applications settings section. A
  * connected app is one the user linked through the App Connect CHAPI flow: the
  * wallet holds a self-issued app-key credential for it (in the encrypted
- * `private-credentials` collection) and each connect wrote a Login activity to
- * `wallet-activity` recording the display name and the storage grants.
+ * `app-connections` collection, kept apart from the user's own credentials
+ * because each row carries that app's private seed) and each connect wrote a
+ * Login activity to `wallet-activity` recording the display name and the
+ * storage grants.
  *
  * `listConnectedApps` joins those two sources into one entry per app-key
  * credential: the credential supplies the origin, subject DID, and connected
@@ -28,8 +30,12 @@
 import type { StorageManager } from '@/stores/storageManager'
 import type { User } from '@/types/auth'
 import { multibaseOf } from '@interop/wallet-core/webvh'
-import { appKeyAppUrl, appKeyOrigin } from '@interop/wallet-core/request'
-import { issuerId, subjectId } from '@/lib/vcShape'
+import {
+  appKeyAppUrl,
+  appKeyOrigin,
+  presentsAsAppKey
+} from '@interop/wallet-core/request'
+import { subjectId } from '@/lib/vcShape'
 
 /**
  * One storage capability an app was granted, summarized as recorded on the
@@ -299,8 +305,9 @@ function isAppConnectLoginFor({
 }
 
 /**
- * Lists the user's connected applications, one per self-issued app-key
- * credential, joined with the latest matching App Connect Login activity.
+ * Lists the user's connected applications, one per app-key credential in the
+ * `app-connections` collection, joined with the latest matching App Connect
+ * Login activity.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
@@ -312,7 +319,7 @@ export async function listConnectedApps({
   storage: StorageManager
 }): Promise<ConnectedApp[]> {
   const [credentials, history] = await Promise.all([
-    storage.listCredentials(),
+    storage.listAppKeys(),
     storage.listHistoryItems()
   ])
 
@@ -356,20 +363,21 @@ export async function listConnectedApps({
 
   const apps: ConnectedApp[] = []
   for (const { cid, vc: credential } of credentials) {
-    const issuer = issuerId(credential.issuer)
     const subject = subjectId(credential)
     const origin = appKeyOrigin(credential)
-    // A connected app's key is self-issued (issuer == subject) and bound to
-    // an origin; anything else is an ordinary stored credential.
-    if (!issuer || !subject || issuer !== subject || !origin) {
+    // The collection holds app keys only, so the row check is the marker type
+    // plus the two members this listing reads: anything else in there (an
+    // opaque row planted server-side through a space import, say) is not
+    // something the page can render or revoke.
+    if (!presentsAsAppKey(credential) || !subject || !origin) {
       continue
     }
 
     // The latest matching App Connect Login supplies the raw display name, the
     // grants, and the last-connected timestamp. Matching prefers this app's
-    // own `appUrl` and falls back to the origin only for rows that recorded no
-    // `appUrl` -- or, for a legacy key that has no `appUrl` itself, to the
-    // origin outright, exactly as before.
+    // own `appUrl` and falls back to the origin for activities an older wallet
+    // recorded before the `appUrl` claim existed. The origin-only branch is
+    // the same fallback for a key carrying no `appUrl` of its own.
     const appUrl = appKeyAppUrl(credential)
     const latestLogin =
       appUrl !== undefined
@@ -470,7 +478,7 @@ export async function revokeAppAccess({
           subjectDid: app.subjectDid,
           items
         })
-  await storage.deleteCredential({ cid: app.cid })
+  await storage.deleteAppKey({ cid: app.cid })
   await storage.addHistoryAppRevoke({
     user,
     origin: app.origin,

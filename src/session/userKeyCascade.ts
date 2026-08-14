@@ -25,7 +25,7 @@ import {
   type UserKeyCascadeResult
 } from '@interop/wallet-core/keys'
 import type { CascadeCollections } from '@interop/wallet-core/clients'
-import { SHAREABLE_COLLECTIONS as ENCRYPTED_STANDARD_COLLECTIONS } from '@/session/shares'
+import { ENCRYPTED_STANDARD_COLLECTIONS } from '@/app.config'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
 export type { UserKeyCascadeResult } from '@interop/wallet-core/keys'

@@ -27,13 +27,18 @@ const CAPABILITY_QUERY = {
 }
 
 /**
- * A minimal session whose storage records added credentials and
- * lists a caller-provided set. The keyAgent signs the DIDAuth proof.
+ * A minimal session whose storage records added app keys and lists a
+ * caller-provided set. Two listings, deliberately distinct: `appKeys` is the
+ * dedicated `app-connections` collection the match path reads, `credentials`
+ * the user's own credential store, which the match path must never consult.
+ * The keyAgent signs the DIDAuth proof.
  */
 async function fakeSession({
-  stored = []
+  appKeys = [],
+  credentials = []
 }: {
-  stored?: StoredCredential[]
+  appKeys?: StoredCredential[]
+  credentials?: StoredCredential[]
 } = {}): Promise<{ session: Session; added: unknown[]; deleted: string[] }> {
   const keyAgent = await CapabilityAgent.fromSecret({
     secret: new Uint8Array(32).fill(9),
@@ -45,7 +50,8 @@ async function fakeSession({
     user: { id: keyAgent.id },
     profile: { keyAgent },
     storage: {
-      listCredentials: async () => stored,
+      listAppKeys: async () => appKeys,
+      listCredentials: async () => credentials,
       deleteCredential: async ({ cid }: { cid: string }) => {
         deleted.push(cid)
       },
@@ -91,7 +97,9 @@ describe('processAppConnect', () => {
     })
 
     expect(response.appConnect?.firstRun).toBe(true)
-    expect(added).toHaveLength(1)
+    // The mint door takes the credential alone: the row lands in
+    // `app-connections` and no credential-created activity is attributed.
+    expect(added).toEqual([{ credential: expect.anything() }])
     const subjectDid = response.appConnect?.subjectDid
     expect(subjectDid).toMatch(/^did:key:/)
     // The delegation used the minted key's DID as the controller.
@@ -114,7 +122,7 @@ describe('processAppConnect', () => {
       origin: ORIGIN
     })
     const stored = [{ cid: 'cid-1', vc: credential }] as StoredCredential[]
-    const { session, added } = await fakeSession({ stored })
+    const { session, added } = await fakeSession({ appKeys: stored })
 
     const response = await processAppConnect({
       appConnect: { app: APP, capabilityQueries: [CAPABILITY_QUERY] },
@@ -143,7 +151,7 @@ describe('processAppConnect', () => {
       origin: 'https://phisher.example'
     })
     const stored = [{ cid: 'cid-1', vc: credential }] as StoredCredential[]
-    const { session, added } = await fakeSession({ stored })
+    const { session, added } = await fakeSession({ appKeys: stored })
 
     const response = await processAppConnect({
       appConnect: { app: APP, capabilityQueries: [] },
@@ -164,7 +172,7 @@ describe('processAppConnect', () => {
       origin: ORIGIN
     })
     const stored = [{ cid: 'cid-1', vc: credential }] as StoredCredential[]
-    const { session } = await fakeSession({ stored })
+    const { session } = await fakeSession({ appKeys: stored })
 
     const response = await processAppConnect({
       appConnect: { app: APP, capabilityQueries: [] },
@@ -186,7 +194,7 @@ describe('processAppConnect', () => {
       origin: ORIGIN
     })
     const stored = [{ cid: 'cid-1', vc: credential }] as StoredCredential[]
-    const { session } = await fakeSession({ stored })
+    const { session } = await fakeSession({ appKeys: stored })
 
     await expect(
       processAppConnect({
@@ -200,21 +208,27 @@ describe('processAppConnect', () => {
     expect(processZcaps).not.toHaveBeenCalled()
   })
 
-  it('re-issues a legacy key in place rather than minting a new identity', async () => {
-    // A key from before the `appUrl` model: same seed, same subject DID, no
-    // `credentialSubject.appUrl` claim. Re-issuing must preserve the identity
-    // (a fresh mint would roll the seed and orphan the app's encrypted data).
+  it('never finds an app key left in the credential store', async () => {
+    // A key from before app keys got their own collection, in the shape the
+    // dropped re-issue path used to recover: same origin, no
+    // `credentialSubject.appUrl` claim, sitting among the ordinary
+    // credentials. The match path reads `app-connections` only, so it is
+    // invisible -- the connect is a genuine first run under a fresh identity,
+    // and the stranded row is the login-time sweep's business, not this
+    // path's.
     const { credential, subjectDid } = await mintAppKeyCredential({
       app: APP,
       origin: ORIGIN
     })
     const legacy = {
       ...credential,
-      credentialSubject: { ...credential.credentialSubject, appUrl: undefined }
+      credentialSubject: { ...credential.credentialSubject }
     } as typeof credential
     delete (legacy.credentialSubject as { appUrl?: unknown }).appUrl
-    const stored = [{ cid: 'cid-legacy', vc: legacy }] as StoredCredential[]
-    const { session, added, deleted } = await fakeSession({ stored })
+    const stranded = [{ cid: 'cid-legacy', vc: legacy }] as StoredCredential[]
+    const { session, added, deleted } = await fakeSession({
+      credentials: stranded
+    })
 
     const response = await processAppConnect({
       appConnect: { app: APP, capabilityQueries: [] },
@@ -223,20 +237,22 @@ describe('processAppConnect', () => {
       didAuthRequested: false
     })
 
-    // Returning, not first run, and the same identity as the legacy key.
-    expect(response.appConnect).toEqual({ firstRun: false, subjectDid })
-    // The re-issued credential was stored through the mint door, and the
-    // superseded legacy record was retired so a second application on this
-    // origin cannot later claim it.
+    expect(response.appConnect?.firstRun).toBe(true)
+    expect(response.appConnect?.subjectDid).not.toBe(subjectDid)
+    // Minted through the mint door, and nothing was deleted from the
+    // credential store on this path.
     expect(added).toHaveLength(1)
-    expect(deleted).toEqual(['cid-legacy'])
+    expect(deleted).toEqual([])
     const presentation = response.verifiablePresentation as {
       verifiableCredential?: Array<{
         credentialSubject: { id: string; appUrl?: string }
       }>
     }
     expect(presentation.verifiableCredential?.[0].credentialSubject).toEqual(
-      expect.objectContaining({ id: subjectDid, appUrl: APP.appUrl })
+      expect.objectContaining({
+        id: response.appConnect?.subjectDid,
+        appUrl: APP.appUrl
+      })
     )
   })
 

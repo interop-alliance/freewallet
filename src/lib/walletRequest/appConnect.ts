@@ -10,13 +10,10 @@
  * `appConnectZcapRequests`.
  */
 import type { Session } from '@/types/auth'
-import type { StoredCredential } from '@/types/credential'
 import {
   appKeySubjectDid,
   findAppKeyCredential,
-  findLegacyAppKeyCredential,
-  mintAppKeyCredential,
-  reissueAppKeyCredential
+  mintAppKeyCredential
 } from '@interop/wallet-core/request'
 import { composeVP } from './composeVP'
 import { processZcaps } from './processZcaps'
@@ -58,16 +55,14 @@ export function appConnectZcapRequests({
  * Processes an App Connect request on the consent-approved path:
  *
  * 1. finds the stored app-key credential for the app's `appUrl` and the
- *    requesting origin (the wallet-side origin binding: a phishing origin can
- *    neither recover nor be handed another origin's key);
- * 2. on no match, looks for a legacy (pre-`appUrl`) key on the origin and
- *    re-issues it in place under the same seed, so the app keeps the identity
- *    and the encrypted data it already has; the legacy record is retired;
- * 3. on neither, mints a fresh one (32-byte seed, seed-derived did:key,
- *    self-issued) and saves it to the wallet's credential store -- a
+ *    requesting origin, in the `app-connections` collection (the wallet-side
+ *    origin binding: a phishing origin can neither recover nor be handed
+ *    another origin's key);
+ * 2. on no match -- a first run -- mints a fresh one (32-byte seed,
+ *    seed-derived did:key, self-issued) and saves it to `app-connections`, a
  *    wallet-internal store under the same consent, no second popup;
- * 4. delegates the requested capabilities to the credential's subject DID;
- * 5. composes the response VP carrying the credential, the embedded grants,
+ * 3. delegates the requested capabilities to the credential's subject DID;
+ * 4. composes the response VP carrying the credential, the embedded grants,
  *    and the `firstRun` marker.
  *
  * @param options {object}
@@ -103,7 +98,7 @@ export async function processAppConnect({
   expectedSubjectDid?: string
 }): Promise<WalletResponse> {
   const { app, capabilityQueries } = appConnect
-  const stored = await session.storage.listCredentials()
+  const stored = await session.storage.listAppKeys()
   const credentials = stored.map(({ vc }) => vc)
   const existing = await findAppKeyCredential({
     credentials,
@@ -111,7 +106,7 @@ export async function processAppConnect({
     origin
   })
 
-  let firstRun = !existing
+  const firstRun = !existing
   let credential: IVerifiableCredential
   let subjectDid: string
   if (existing) {
@@ -122,27 +117,14 @@ export async function processAppConnect({
     }
     subjectDid = existingDid
   } else {
-    // No current-shape key: an app that connected before the `appUrl` model
-    // may still hold a legacy one on this origin. Re-issue it in place under
-    // the SAME seed -- a fresh mint would roll the seed and orphan the
-    // identity the app encrypted its data under. Ambiguity (two distinct
-    // legacy identities on the origin) resolves to undefined, which falls
-    // through to a genuine first run.
-    const legacy = await findLegacyAppKeyCredential({ credentials, origin })
-    const issued = legacy
-      ? await reissueAppKeyCredential({ credential: legacy, app, origin })
-      : await mintAppKeyCredential({ app, origin })
+    const issued = await mintAppKeyCredential({ app, origin })
     credential = issued.credential
     subjectDid = issued.subjectDid
-    firstRun = !legacy
     // Store before delegating: if delegation fails, the saved key is simply
     // found as "returning" on the next attempt (the store is idempotent on
     // the credential's content id). Through the mint path's own door --
     // `addCredential` refuses every marker credential, wallet-minted or not.
-    await session.storage.addMintedAppKey({ credential, user: session.user })
-    if (legacy) {
-      await retireLegacyAppKey({ session, stored, legacy })
-    }
+    await session.storage.addMintedAppKey({ credential })
   }
 
   // The consent screen displayed a recipient DID, so the delegation must go
@@ -187,37 +169,4 @@ export async function processAppConnect({
     appConnect: { firstRun }
   })
   return { verifiablePresentation, zcaps, appConnect: { firstRun, subjectDid } }
-}
-
-/**
- * Removes the legacy app-key record a re-issue superseded, so a second
- * application on the same origin cannot later pick it up as ITS legacy key and
- * be handed this application's identity. Best-effort: the re-issued credential
- * is already stored and outranks the legacy one on every subsequent match, so
- * a failed delete leaves a harmless duplicate rather than a broken connect.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.stored {StoredCredential[]}   the listing the match ran over
- * @param options.legacy {IVerifiableCredential}   the superseded credential
- * @returns {Promise<void>}
- */
-async function retireLegacyAppKey({
-  session,
-  stored,
-  legacy
-}: {
-  session: Session
-  stored: StoredCredential[]
-  legacy: IVerifiableCredential
-}): Promise<void> {
-  const record = stored.find(({ vc }) => vc === legacy)
-  if (!record) {
-    return
-  }
-  try {
-    await session.storage.deleteCredential({ cid: record.cid })
-  } catch (err) {
-    console.warn('Could not retire the superseded legacy app key:', err)
-  }
 }

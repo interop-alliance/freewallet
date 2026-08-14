@@ -195,6 +195,17 @@ export class BrowserStore {
   // this session. Reset by `setCiphers` (a wider cipher can reveal rows the last
   // scan skipped as unknown-epoch), forcing the next `addCredential` to rebuild.
   #credentialsIndexed = false
+  // Count of `app-connections` rows the most recent {@link listAppKeys} call
+  // had to skip because their envelope named a key epoch this instance's
+  // cipher does not know -- the same signal as `#unknownEpochCredentials`, and
+  // load-bearing here: an app key read as absent would mint a second identity
+  // for the app rather than merely hiding a row.
+  #unknownEpochAppKeys = 0
+  // The content cid of each decrypted `app-connections` envelope row, keyed by
+  // row id (the app-key sibling of `#credentialCidByRow`). The collection
+  // holds one row per connected app, so it is scanned per call rather than
+  // carrying a session-wide cid index.
+  #appKeyCidByRow = new Map<string, string>()
 
   constructor({
     dbPrefix,
@@ -946,6 +957,139 @@ export class BrowserStore {
   }
 
   /**
+   * Reads every live `app-connections` row, oldest first, resolving each to
+   * its content cid + decrypted app-key credential -- the app-key sibling of
+   * {@link _credentialEntries}, without the session-wide cid index: the
+   * collection holds one row per connected app, so a full scan per call is
+   * cheap. Envelope rows are decrypted (their cid recomputed and memoized per
+   * row id), plaintext rows pass through keyed by their row id. Rows that will
+   * not decrypt are skipped exactly as in the credential scan.
+   *
+   * @returns {Promise<{ entries: Array<{ rowId: string; cid: string;
+   *   vc: IVerifiableCredential }>; unknownEpochRowIds: string[] }>}
+   */
+  async #appKeyEntries(): Promise<{
+    entries: Array<{ rowId: string; cid: string; vc: IVerifiableCredential }>
+    unknownEpochRowIds: string[]
+  }> {
+    const { entries: rows, unknownEpochRowIds } = await this.#decryptedRows({
+      logicalKey: 'appConnections',
+      sort: 'asc'
+    })
+    const entries: Array<{
+      rowId: string
+      cid: string
+      vc: IVerifiableCredential
+    }> = []
+    for (const { rowId, data, fromEnvelope } of rows) {
+      const vc = data as unknown as IVerifiableCredential
+      let cid: string
+      if (fromEnvelope) {
+        cid = this.#appKeyCidByRow.get(rowId) ?? (await cidFrom({ doc: vc }))
+        this.#appKeyCidByRow.set(rowId, cid)
+      } else {
+        // A plaintext row IS keyed by its content cid.
+        cid = rowId
+      }
+      entries.push({ rowId, cid, vc })
+    }
+    return { entries, unknownEpochRowIds }
+  }
+
+  /**
+   * Adds an app-key credential to the local `app-connections` collection --
+   * the wallet's own mint path is the only writer. Like
+   * {@link addCredential} the row is the credential's EDV envelope under a
+   * content-derived envelope-hash id and idempotence is by the credential's
+   * content cid (encryption is nondeterministic, so the row id cannot carry
+   * it). Returns whether a row was actually inserted.
+   *
+   * @param options {object}
+   * @param options.cid {string}
+   * @param options.credential {IVerifiableCredential}
+   * @returns {Promise<boolean>}
+   */
+  async addAppKey({
+    cid,
+    credential
+  }: {
+    cid: string
+    credential: IVerifiableCredential
+  }): Promise<boolean> {
+    const { entries } = await this.#appKeyEntries()
+    if (entries.some(entry => entry.cid === cid)) {
+      return false
+    }
+    const { rowId } = await this.#insertEncrypted({
+      logicalKey: 'appConnections',
+      id: cid,
+      data: credential as unknown as Json
+    })
+    this.#cacheFor('appConnections').set(rowId, credential as unknown as Json)
+    this.#appKeyCidByRow.set(rowId, cid)
+    return true
+  }
+
+  /**
+   * Lists the stored app-key credentials, oldest first, collapsing duplicate
+   * rows carrying the same credential to their oldest copy.
+   *
+   * @returns {Promise<Array<StoredCredential>>}
+   */
+  async listAppKeys(): Promise<Array<StoredCredential>> {
+    const { entries, unknownEpochRowIds } = await this.#appKeyEntries()
+    this.#unknownEpochAppKeys = unknownEpochRowIds.length
+    const seen = new Set<string>()
+    const appKeys: StoredCredential[] = []
+    for (const { cid, vc } of entries) {
+      if (seen.has(cid)) {
+        continue
+      }
+      seen.add(cid)
+      appKeys.push({ cid, vc })
+    }
+    return appKeys
+  }
+
+  /**
+   * Deletes an app-key credential by content cid, removing every row that
+   * carries it (each removal is a soft delete replication pushes as a
+   * tombstone).
+   *
+   * @param options {object}
+   * @param options.cid {string}
+   * @returns {Promise<void>}
+   */
+  async deleteAppKey({ cid }: { cid: string }): Promise<void> {
+    const { entries } = await this.#appKeyEntries()
+    for (const entry of entries) {
+      if (entry.cid !== cid) {
+        continue
+      }
+      const doc = await this.rxCollection('appConnections')
+        .findOne(entry.rowId)
+        .exec()
+      if (doc) {
+        await doc.remove()
+      }
+      this.#cacheFor('appConnections').delete(entry.rowId)
+      this.#appKeyCidByRow.delete(entry.rowId)
+    }
+  }
+
+  /**
+   * The count of `app-connections` rows the most recent {@link listAppKeys}
+   * call had to skip because their envelope named a key epoch this instance's
+   * cipher does not know. Drives the same one-time descriptor refresh the
+   * credential read uses.
+   *
+   * @returns {number}
+   */
+  get unknownEpochAppKeys(): number {
+    return this.#unknownEpochAppKeys
+  }
+
+  /**
    * Writes a credential's world-readable copy into the local
    * `public-credentials` collection, keyed by its content cid. The sync
    * controller replicates it to the remote WAS Collection in the background.
@@ -1615,6 +1759,7 @@ export class BrowserStore {
     this.#credentialCidByRow.clear()
     this.#credentialCidIndex.clear()
     this.#credentialsIndexed = false
+    this.#appKeyCidByRow.clear()
   }
 
   /**

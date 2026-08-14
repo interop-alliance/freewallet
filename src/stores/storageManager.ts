@@ -47,6 +47,7 @@ import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
 import {
   ENABLE_DID_WEBVH,
+  ENCRYPTED_STANDARD_COLLECTIONS,
   RP_ZCAP_TTL_MS,
   SYSTEM_COLLECTIONS,
   WALLET_STANDARD_COLLECTIONS,
@@ -78,7 +79,6 @@ import {
 } from '@interop/wallet-core/descriptors'
 import { accountLogPinStore, savePinFromDescriptor } from '@/lib/sessionKey'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
-import { SHAREABLE_COLLECTIONS as ENCRYPTED_STANDARD_COLLECTIONS } from '@/session/shares'
 import {
   createEdvDocCipher,
   isEncryptedEnvelope,
@@ -1066,26 +1066,61 @@ export class StorageManager {
    * from the carried seed) so this door cannot be misused to store a foreign
    * app key either.
    *
+   * The row lands in the dedicated `app-connections` collection, never in
+   * `private-credentials`, and no credential-created activity is written: the
+   * app-connect Login activity is the record of the connection, and an app key
+   * is not a credential the user acquired.
+   *
    * @param options {object}
    * @param options.credential {IVerifiableCredential}
-   * @param options.user {User}   recorded as the history entry's actor
    * @returns {Promise<void>}
    */
-  async addMintedAppKey({
-    credential,
-    user
-  }: {
-    credential: IVerifiableCredential
-    user: User
-  }) {
+  async addMintedAppKey({ credential }: { credential: IVerifiableCredential }) {
     await assertMintedAppKey(credential)
-    await this.#putCredential({ credential, user })
+    const cid = await cidFrom({ doc: credential })
+    await this.#store.addAppKey({ cid, credential })
   }
 
   /**
-   * The shared store step behind {@link addCredential} and
-   * {@link addMintedAppKey}: content-cid derivation, the idempotent insert,
-   * and the best-effort Create history entry.
+   * The app-key credentials of the connected applications, out of the
+   * dedicated `app-connections` collection -- the match path's input and the
+   * Applications page's listing. Never mixed into {@link listCredentials}: the
+   * credential-wide surfaces (the dashboard, public links, shares) must not be
+   * able to reach an app's private seed.
+   *
+   * @returns {Promise<Array<StoredCredential>>}
+   */
+  async listAppKeys(): Promise<Array<StoredCredential>> {
+    // Unknown-epoch rows mean the cipher may be built from a stale descriptor
+    // (a rekey emits no change-feed entry); refresh the descriptor once and
+    // re-read, as the credential list does. Load-bearing here: an app key
+    // missed by a stale cipher would read as "no key for this app" and mint a
+    // second identity, orphaning what the app encrypted under the first.
+    return this.#readWithEpochRefresh({
+      collectionId: 'app-connections',
+      read: async () => ({
+        value: await this.#store.listAppKeys(),
+        unknownEpoch: this.#store.unknownEpochAppKeys > 0
+      })
+    })
+  }
+
+  /**
+   * Deletes one app-key credential by content cid (app revocation, and the
+   * login-time sweep of app keys stranded in `private-credentials`).
+   *
+   * @param options {object}
+   * @param options.cid {string}
+   * @returns {Promise<void>}
+   */
+  async deleteAppKey({ cid }: { cid: string }): Promise<void> {
+    await this.#store.deleteAppKey({ cid })
+  }
+
+  /**
+   * The store step behind {@link addCredential}: content-cid derivation, the
+   * idempotent insert into `private-credentials`, and the best-effort Create
+   * history entry.
    *
    * @param options {object}
    * @param options.credential {IVerifiableCredential}

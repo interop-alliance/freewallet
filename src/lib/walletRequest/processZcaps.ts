@@ -77,6 +77,7 @@
  */
 import { generateZcapUri } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
+import { APP_CONNECTIONS_COLLECTION } from '@interop/wallet-core/space'
 import {
   RP_ZCAP_TTL_MS,
   RP_ZCAP_WRITE_TTL_MS,
@@ -189,6 +190,36 @@ function isProtectedCollection(collectionId: string | undefined): boolean {
     (SYSTEM_COLLECTIONS.some(entry => entry.id === collectionId) ||
       WALLET_STANDARD_COLLECTIONS.some(entry => entry.id === collectionId))
   )
+}
+
+/**
+ * The collections no grant may ever name, whatever the descriptor spelling and
+ * whatever actions it asks for. `app-connections` holds one app-key credential
+ * per connected app, each carrying that app's private seed in
+ * `credentialSubject.seed`, so even a read-only grant on it would hand the
+ * grantee every other connected app's identity. Read-only-protected (the
+ * treatment of the other standard collections) is therefore not enough here:
+ * a grant naming it is unsatisfiable.
+ *
+ * Deliberately an explicit membership list rather than a roster-derived rule.
+ * The roster's `shareable: false` cannot stand in for it -- `public-credentials`
+ * is also `shareable: false` and is a perfectly ordinary grant target -- and
+ * `encryption && !shareable` would be a coincidence of today's roster rather
+ * than a statement about what the collection holds.
+ */
+const NEVER_GRANTABLE_COLLECTION_IDS: readonly string[] = [
+  APP_CONNECTIONS_COLLECTION
+]
+
+/**
+ * Whether a collection id names a collection no grant may target
+ * ({@link NEVER_GRANTABLE_COLLECTION_IDS}).
+ *
+ * @param collectionId {string | undefined}
+ * @returns {boolean}
+ */
+function isNeverGrantableCollection(collectionId: string | undefined): boolean {
+  return !!collectionId && NEVER_GRANTABLE_COLLECTION_IDS.includes(collectionId)
 }
 
 /**
@@ -452,9 +483,10 @@ function parseSpaceUrl({
  * - `{ type: 'https://w3id.org/byoe#shared-wallet-collection', name }` -- like `https://w3id.org/byoe#private-collection`
  *   but flagged `isShare`: the grantee also joins the collection's key-epoch
  *   roster, so it can decrypt what it fetches. `name` must be one of the
- *   ENCRYPTED standard collections; anything else (a plaintext collection, an
- *   RP collection, the whole Space) is unsatisfiable -- a share is only
- *   meaningful where an epoch roster exists;
+ *   SHAREABLE standard collections; anything else (a plaintext collection, an
+ *   RP collection, the whole Space, `app-connections`) is unsatisfiable -- a
+ *   share is only meaningful where an epoch roster exists, and `app-connections`
+ *   holds the connected apps' private seeds;
  * - `{ type: 'https://w3id.org/byoe#space' }` -- `spaceUrl`, flagged `wholeSpace`;
  * - anything else -- unsatisfiable.
  *
@@ -495,6 +527,11 @@ export function resolveInvocationTarget({
     if (!isCollectionName(segment)) {
       return UNSATISFIABLE
     }
+    // A URL inside a never-grantable collection (or at a resource inside one)
+    // is refused exactly like its descriptor form.
+    if (isNeverGrantableCollection(segment)) {
+      return UNSATISFIABLE
+    }
     // The collection id is the first path segment after the Space URL, so a
     // URL under a standard collection (or at a resource inside one) is capped
     // exactly like its `https://w3id.org/byoe#private-collection` descriptor form.
@@ -519,6 +556,9 @@ export function resolveInvocationTarget({
   if (descriptor?.type === 'https://w3id.org/byoe#private-collection') {
     const { name } = descriptor
     if (!isCollectionName(name)) {
+      return UNSATISFIABLE
+    }
+    if (isNeverGrantableCollection(name)) {
       return UNSATISFIABLE
     }
     const standard = standardCollection(name)
@@ -554,8 +594,10 @@ export function resolveInvocationTarget({
     }
     // A public grant on a protected wallet collection is refused
     // unconditionally: an RP must never be able to make the user's own
-    // credentials, activity log, or published identity world-readable.
-    if (isProtectedCollection(name)) {
+    // credentials, activity log, or published identity world-readable. The
+    // never-grantable collections are already covered by that check; they are
+    // named again so the rule does not depend on the protected set.
+    if (isProtectedCollection(name) || isNeverGrantableCollection(name)) {
       return UNSATISFIABLE
     }
     // A public collection is only ever created public, never converted: a
@@ -582,10 +624,18 @@ export function resolveInvocationTarget({
 
   if (descriptor?.type === 'https://w3id.org/byoe#shared-wallet-collection') {
     const { name } = descriptor
-    // Only the encrypted standard collections have a key-epoch roster to
-    // escrow a reader into; everything else (a plaintext collection, an RP
-    // collection, a made-up name) cannot be shared.
-    if (!standardCollection(name)?.encryption) {
+    // Both conditions, deliberately. Encryption is necessary -- a share
+    // escrows the reader into a key-epoch roster, and there is no roster
+    // where nothing is encrypted -- but not sufficient: `app-connections`
+    // carries epochs and is never shareable, since its rows are the connected
+    // apps' private seeds. Everything else -- a plaintext collection, an RP
+    // collection, a made-up name -- has no roster to escrow a reader into.
+    const shared = standardCollection(name)
+    if (
+      !shared?.encryption ||
+      !shared.shareable ||
+      isNeverGrantableCollection(name)
+    ) {
       return UNSATISFIABLE
     }
     return {

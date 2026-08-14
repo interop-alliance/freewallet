@@ -83,8 +83,7 @@ import {
 } from '@/lib/walletRequest'
 import {
   appKeySubjectDid,
-  findAppKeyCredential,
-  findLegacyAppKeyCredential
+  findAppKeyCredential
 } from '@interop/wallet-core/request'
 import { fetchAppManifest, type AppManifestInfo } from '@/lib/appManifest'
 import { ZcapGrantsPanel } from './ZcapGrantsPanel'
@@ -392,21 +391,16 @@ export function WalletGetPage() {
       // the first-run vs returning consent copy and the grants preview. The
       // approve-time processing repeats the lookup authoritatively.
       if (profile.appConnect) {
-        const credentials = stored.map(({ vc }) => vc)
-        // The same match-then-legacy-fallback order the approve-time
-        // processing runs: a legacy (pre-`appUrl`) key is re-issued in place
-        // under the same seed, so its DID is the one the consent screen must
-        // preview and the connect is a returning one, not a first run.
-        const existing =
-          (await findAppKeyCredential({
-            credentials,
-            appUrl: profile.appConnect.app.appUrl,
-            origin: requestOrigin
-          })) ??
-          (await findLegacyAppKeyCredential({
-            credentials,
-            origin: requestOrigin
-          }))
+        // Over the dedicated `app-connections` collection, exactly as the
+        // approve-time processing matches: app keys never sit among the
+        // ordinary credentials listed above.
+        const appKeys = await loggedIn.storage.listAppKeys()
+        const credentials = appKeys.map(({ vc }) => vc)
+        const existing = await findAppKeyCredential({
+          credentials,
+          appUrl: profile.appConnect.app.appUrl,
+          origin: requestOrigin
+        })
         const existingDid = existing ? (appKeySubjectDid(existing) ?? '') : ''
         setAppKeyFirstRun(!existing)
         setPreviewedAppKeyDid(existingDid || null)

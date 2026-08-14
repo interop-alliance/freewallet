@@ -121,8 +121,27 @@ function makeFakeEpochCipher(epoch: string): DocCipher {
 function encryptedCiphers(): Record<string, DocCipher> {
   return {
     privateCredentials: makeFakeCipher(),
+    appConnections: makeFakeCipher(),
     walletActivity: makeFakeCipher()
   }
+}
+
+/**
+ * A minimal app-key credential body: the storage layer treats it as opaque
+ * JSON, and only the marker type and the seed distinguish it downstream.
+ */
+function makeAppKey(appUrl: string): IVerifiableCredential {
+  return {
+    '@context': ['https://www.w3.org/2018/credentials/v1'],
+    type: ['VerifiableCredential', 'AppKeyCredential'],
+    issuer: 'did:key:z6MkTestApp',
+    credentialSubject: {
+      id: 'did:key:z6MkTestApp',
+      origin: 'https://app.example',
+      appUrl,
+      seed: 'c2VlZA'
+    }
+  } as unknown as IVerifiableCredential
 }
 
 afterEach(async () => {
@@ -339,6 +358,75 @@ describe('BrowserStore (encrypted collections)', () => {
     await localStore.deleteCredential({ cid })
     expect(await collection.find().exec()).toHaveLength(0)
     expect(await localStore.listCredentials()).toHaveLength(0)
+  })
+
+  it('keeps app keys in app-connections, out of the credential collection', async () => {
+    const { localStore } = await initLocalStore({ ciphers: encryptedCiphers() })
+    const appKey = makeAppKey('https://app.example/editor')
+    const cid = await cidFrom({ doc: appKey })
+
+    expect(await localStore.addAppKey({ cid, credential: appKey })).toBe(true)
+
+    // Stored as an envelope under the cipher-minted id, read back by content
+    // cid, and invisible to every credential-wide surface.
+    const rows = await localStore.rxCollection('appConnections').find().exec()
+    expect(rows).toHaveLength(1)
+    expect(
+      (rows[0].toMutableJSON().data as { jwe?: unknown }).jwe
+    ).toBeDefined()
+    expect(await localStore.listAppKeys()).toEqual([{ cid, vc: appKey }])
+    expect(await localStore.listCredentials()).toEqual([])
+  })
+
+  it('dedupes an app-key re-add by content cid despite nondeterministic ids', async () => {
+    const { localStore } = await initLocalStore({ ciphers: encryptedCiphers() })
+    const appKey = makeAppKey('https://app.example/editor')
+    const cid = await cidFrom({ doc: appKey })
+
+    expect(await localStore.addAppKey({ cid, credential: appKey })).toBe(true)
+    expect(await localStore.addAppKey({ cid, credential: appKey })).toBe(false)
+
+    expect(
+      await localStore.rxCollection('appConnections').find().exec()
+    ).toHaveLength(1)
+    expect(await localStore.listAppKeys()).toHaveLength(1)
+  })
+
+  it('deletes every app-key row carrying the cid, and re-adds after', async () => {
+    const ciphers = encryptedCiphers()
+    const { localStore } = await initLocalStore({ ciphers })
+    const appKey = makeAppKey('https://app.example/editor')
+    const other = makeAppKey('https://app.example/reader')
+    const cid = await cidFrom({ doc: appKey })
+    const otherCid = await cidFrom({ doc: other })
+    await localStore.addAppKey({ cid: otherCid, credential: other })
+
+    // Two rows carrying the same app key under different ids -- a legacy copy
+    // replicated from remote beside a locally re-keyed one.
+    const collection = localStore.rxCollection('appConnections')
+    for (let copy = 0; copy < 2; copy++) {
+      const { id, envelope } = await ciphers.appConnections.encrypt({
+        data: appKey as unknown as Json
+      })
+      await collection.insert({
+        id,
+        updatedAt: new Date().toISOString(),
+        version: 0,
+        data: envelope
+      })
+    }
+    expect(await collection.find().exec()).toHaveLength(3)
+    // The listing collapses the duplicates to one entry per credential.
+    expect(await localStore.listAppKeys()).toHaveLength(2)
+
+    await localStore.deleteAppKey({ cid })
+
+    expect(await localStore.listAppKeys()).toEqual([
+      { cid: otherCid, vc: other }
+    ])
+    // A re-add after the delete is a genuine insert, not a false dedupe.
+    expect(await localStore.addAppKey({ cid, credential: appKey })).toBe(true)
+    expect(await localStore.listAppKeys()).toHaveLength(2)
   })
 
   it('stores history as envelopes, preserving activity ids and order', async () => {

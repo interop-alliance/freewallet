@@ -139,14 +139,16 @@ test.describe('wallet onboarding over rendezvous', () => {
     const exchangeUrl = exchangeUrlOf({ interactionUrl: secondInteractionUrl })
 
     // The scripted enrollee: begin the exchange (an empty JSON body) and read
-    // the account pointer out of the stored `WalletOnboardingQuery`.
+    // the account pointer out of the stored `WalletOnboardingQuery`. The
+    // stored request arrives wrapped as a VC-API exchange reply
+    // (`{ verifiablePresentationRequest }`).
     const beginResponse = await page.request.post(exchangeUrl, { data: {} })
     expect(beginResponse.ok()).toBe(true)
-    const storedRequest = (await beginResponse.json()) as {
-      query?: IVPRQuery[]
+    const beginBody = (await beginResponse.json()) as {
+      verifiablePresentationRequest?: { query?: IVPRQuery[] }
     }
     const onboarding = walletOnboardingRequestOf({
-      queries: storedRequest.query ?? []
+      queries: beginBody.verifiablePresentationRequest?.query ?? []
     })
     expect(onboarding).not.toBeNull()
     const pointer = {

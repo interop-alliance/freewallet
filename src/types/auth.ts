@@ -174,6 +174,13 @@ export interface Session {
   // resolves `null` when the sweep itself failed (never rejects) -- and
   // absent when there was nothing to sweep from (guest, no WAS, no roster).
   userKeySweep?: Promise<UserKeyCascadeResult | null>
+  // The app-key sweep fired by session creation: deletes app keys stranded in
+  // `private-credentials` by a version that stored them there, now that they
+  // live in `app-connections`. Chained behind `storageReady`, strictly
+  // best-effort -- resolves the number of rows deleted, or `null` when the
+  // sweep itself failed (it never rejects) -- and absent on the flows that
+  // own their own provisioning.
+  appKeySweep?: Promise<number | null>
   expires?: string // ISO date string, matches Auth.js convention
   isGuest: boolean
 }

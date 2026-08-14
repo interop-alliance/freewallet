@@ -3,9 +3,9 @@
  * `StorageManager` routes through, plus the remote-direct implementation of it.
  *
  * `SyncedCollectionStore` is the port: the subset of storage operations that
- * target one of the wallet's standard synced collections (credentials, history,
- * public links, contacts). Two backends satisfy it and are selected ONCE at
- * `StorageManager` construction:
+ * target one of the wallet's standard synced collections (credentials, app
+ * keys, history, public links, contacts). Two backends satisfy it and are
+ * selected ONCE at `StorageManager` construction:
  *
  * - the local active replica, `BrowserStore` (RxDB/IndexedDB), which owns the
  *   envelope/id/epoch orchestration -- the normal case; and
@@ -65,6 +65,13 @@ export interface SyncedCollectionStore {
     cid: string
   }): Promise<IVerifiableCredential | undefined>
   deleteCredential(options: { cid: string }): Promise<void>
+  addAppKey(options: {
+    cid: string
+    credential: IVerifiableCredential
+  }): Promise<boolean>
+  listAppKeys(): Promise<Array<StoredCredential>>
+  deleteAppKey(options: { cid: string }): Promise<void>
+  readonly unknownEpochAppKeys: number
   readonly undecryptableCredentials: number
   purgeUndecryptableCredentials(): Promise<number>
   readonly unknownEpochCredentials: number
@@ -115,6 +122,10 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   #undecryptableCredentials = 0
   #unknownEpochCredentials = 0
   #unknownEpochHistory = 0
+  // Same signal for the `app-connections` collection, so a rekey by another
+  // client cannot make a stored app key read as absent (which would mint a
+  // second identity for the app).
+  #unknownEpochAppKeys = 0
   // Count of resources the last read skipped because this wallet holds no key
   // for their key epoch (never a recipient, or removed and the epoch rotated).
   // Never purged -- they are another reader's data, not garbage -- and they
@@ -190,28 +201,47 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }
 
   /**
-   * Reads every resource of the remote `private-credentials` collection and
-   * resolves each to its content cid + decrypted VC, mirroring
+   * Reads every resource of one content-addressed encrypted collection and
+   * resolves each to its content cid + decrypted document, mirroring
    * `BrowserStore.#credentialEntries` (decrypt envelope rows, pass legacy
    * plaintext rows through keyed by their resource id) and its tolerant
    * bucketing: a row whose envelope will not decrypt under the current KAK is
-   * counted undecryptable (purgeable), a row naming an unknown key epoch is
-   * counted separately so a descriptor refresh can pick it up. Rebuilds the session
-   * cache and the cid index. The per-resource GETs run in parallel.
+   * collected as undecryptable (purgeable), a row naming an unknown key epoch
+   * is counted separately so a descriptor refresh can pick it up, and a row
+   * this wallet holds no key for is counted apart from both (no refresh can
+   * help, and it is another reader's data). The per-resource GETs and the
+   * decrypts run in parallel; the fold walks them in list order, so the entry
+   * ordering and the failure buckets match what a sequential pass produced.
    *
-   * @returns {Promise<void>}
+   * Shared by the credential and app-key reads -- the two collections differ
+   * only in what their callers do with the result (the credential path keeps a
+   * session cache and a purge list, the app-key path scans per call).
+   *
+   * @param options {object}
+   * @param options.logicalKey {string}   'privateCredentials' | 'appConnections'
+   * @returns {Promise<{ entries: Array<{ resourceId: string; cid: string;
+   *   vc: IVerifiableCredential }>; undecryptableRowIds: string[];
+   *   unknownEpoch: number; noEpochKey: number }>}
    */
-  async #loadCredentialEntries(): Promise<void> {
-    const cipher = this.#cipherFor('privateCredentials')
-    const resources = await this.#remote.listSyncedResources({
-      logicalKey: 'privateCredentials'
-    })
+  async #scanContentCollection({
+    logicalKey
+  }: {
+    logicalKey: string
+  }): Promise<{
+    entries: Array<{
+      resourceId: string
+      cid: string
+      vc: IVerifiableCredential
+    }>
+    undecryptableRowIds: string[]
+    unknownEpoch: number
+    noEpochKey: number
+  }> {
+    const cipher = this.#cipherFor(logicalKey)
+    const resources = await this.#remote.listSyncedResources({ logicalKey })
     const bodies = await Promise.all(
       resources.map(({ id }) =>
-        this.#remote.getSyncedResource({
-          logicalKey: 'privateCredentials',
-          resourceId: id
-        })
+        this.#remote.getSyncedResource({ logicalKey, resourceId: id })
       )
     )
     const entries: Array<{
@@ -219,13 +249,9 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       cid: string
       vc: IVerifiableCredential
     }> = []
-    const index = new Map<string, Set<string>>()
     const undecryptableRowIds: string[] = []
     let unknownEpoch = 0
     let noEpochKey = 0
-    // The rows decrypt in parallel; the fold below then walks them in list
-    // order, so the entry ordering and the per-row failure buckets match what
-    // a sequential pass produced.
     const decrypted = await Promise.all(
       bodies.map(async data => {
         if (data === undefined || !isEncryptedEnvelope(data)) {
@@ -251,7 +277,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
           // Possibly-fresh data behind a stale descriptor: skip it so a descriptor
           // refresh can pick it up, never purge it.
           console.warn(
-            `Skipping unknown-epoch remote private-credentials resource ` +
+            `Skipping unknown-epoch remote "${logicalKey}" resource ` +
               `"${resourceId}":`,
             err
           )
@@ -260,7 +286,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
           // This wallet is not a recipient of the resource's key epoch: skip it,
           // but never purge it -- a purge here would delete it from the server.
           console.warn(
-            `Skipping remote private-credentials resource "${resourceId}": ` +
+            `Skipping remote "${logicalKey}" resource "${resourceId}": ` +
               `this wallet is not a recipient of its key epoch:`,
             err
           )
@@ -268,7 +294,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
         } else {
           // One undecryptable remote row must not brick the whole popup list.
           console.warn(
-            `Skipping undecryptable remote private-credentials resource ` +
+            `Skipping undecryptable remote "${logicalKey}" resource ` +
               `"${resourceId}":`,
             err
           )
@@ -280,8 +306,24 @@ export class RemoteDirectStore implements SyncedCollectionStore {
         continue
       }
       const cid = fromEnvelope ? await cidFrom({ doc: vc }) : resourceId
-      this.#indexCredential({ index, cid, resourceId })
       entries.push({ resourceId, cid, vc })
+    }
+    return { entries, undecryptableRowIds, unknownEpoch, noEpochKey }
+  }
+
+  /**
+   * Reads the remote `private-credentials` collection, rebuilding the session
+   * cache, the cid index, and the read counters the facade's epoch-refresh
+   * path consults.
+   *
+   * @returns {Promise<void>}
+   */
+  async #loadCredentialEntries(): Promise<void> {
+    const { entries, undecryptableRowIds, unknownEpoch, noEpochKey } =
+      await this.#scanContentCollection({ logicalKey: 'privateCredentials' })
+    const index = new Map<string, Set<string>>()
+    for (const { resourceId, cid } of entries) {
+      this.#indexCredential({ index, cid, resourceId })
     }
     this.#credentialEntries = entries
     this.#credentialCidIndex = index
@@ -381,6 +423,83 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     this.#credentialEntries = this.#credentialEntries.filter(
       entry => entry.cid !== cid
     )
+  }
+
+  /**
+   * Adds an app-key credential to the remote `app-connections` collection,
+   * idempotent on the credential's content cid (encryption is
+   * nondeterministic, so the row id cannot carry idempotence). Returns whether
+   * a row was actually created.
+   *
+   * The collection is scanned per call rather than cached for the session:
+   * it holds one row per connected app, and an App Connect popup performs at
+   * most one add.
+   *
+   * @param options {object}
+   * @param options.cid {string}
+   * @param options.credential {IVerifiableCredential}
+   * @returns {Promise<boolean>}
+   */
+  async addAppKey({
+    cid,
+    credential
+  }: {
+    cid: string
+    credential: IVerifiableCredential
+  }): Promise<boolean> {
+    const cipher = this.#cipherFor('appConnections')
+    const { entries } = await this.#scanContentCollection({
+      logicalKey: 'appConnections'
+    })
+    if (entries.some(entry => entry.cid === cid)) {
+      return false
+    }
+    const { id, envelope, epoch } = await cipher.encrypt({
+      data: credential as unknown as Json
+    })
+    const { created } = await this.#remote.putSyncedResource({
+      logicalKey: 'appConnections',
+      resourceId: id,
+      body: envelope,
+      epoch
+    })
+    return created
+  }
+
+  async listAppKeys(): Promise<Array<StoredCredential>> {
+    const { entries, unknownEpoch } = await this.#scanContentCollection({
+      logicalKey: 'appConnections'
+    })
+    this.#unknownEpochAppKeys = unknownEpoch
+    const seen = new Set<string>()
+    const appKeys: StoredCredential[] = []
+    for (const { cid, vc } of entries) {
+      if (seen.has(cid)) {
+        continue
+      }
+      seen.add(cid)
+      appKeys.push({ cid, vc })
+    }
+    return appKeys
+  }
+
+  async deleteAppKey({ cid }: { cid: string }): Promise<void> {
+    const { entries } = await this.#scanContentCollection({
+      logicalKey: 'appConnections'
+    })
+    for (const entry of entries) {
+      if (entry.cid !== cid) {
+        continue
+      }
+      await this.#remote.deleteSyncedResource({
+        logicalKey: 'appConnections',
+        resourceId: entry.resourceId
+      })
+    }
+  }
+
+  get unknownEpochAppKeys(): number {
+    return this.#unknownEpochAppKeys
   }
 
   get undecryptableCredentials(): number {

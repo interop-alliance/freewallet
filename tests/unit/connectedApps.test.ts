@@ -1,11 +1,12 @@
 /**
- * Tests for the connected-applications model: `listConnectedApps` joins
- * self-issued app-key credentials with the latest matching App Connect Login
- * activity (name, grants, last-connected timestamp), skipping ordinary
- * credentials; `deriveAppGrantsState` reads the recorded delegation signers
- * against the account's current key set (the current-key-set rule);
- * `revokeAppAccess` deletes the app key and records the revocation, skipping
- * the pointless per-grant server revocation for an orphaned app.
+ * Tests for the connected-applications model: `listConnectedApps` joins the
+ * app-key credentials of the dedicated `app-connections` collection with the
+ * latest matching App Connect Login activity (name, grants, last-connected
+ * timestamp), skipping rows that do not carry the `AppKeyCredential` marker;
+ * `deriveAppGrantsState` reads the recorded delegation signers against the
+ * account's current key set (the current-key-set rule); `revokeAppAccess`
+ * deletes the app key from that collection and records the revocation,
+ * skipping the pointless per-grant server revocation for an orphaned app.
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { StorageManager } from '@/stores/storageManager'
@@ -21,8 +22,9 @@ import {
 const APP_DID = 'did:key:zApp'
 
 /**
- * A self-issued app-key StoredCredential bound to an origin, and (unless it is
- * a legacy pre-`appUrl` key) to an `appUrl` within it.
+ * A self-issued app-key StoredCredential carrying the `AppKeyCredential`
+ * marker type, bound to an origin and (unless it is a legacy pre-`appUrl` key)
+ * to an `appUrl` within it.
  */
 function appKeyCredential({
   cid,
@@ -43,7 +45,7 @@ function appKeyCredential({
     cid,
     vc: {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
-      type: ['VerifiableCredential', 'ExampleAppKey'],
+      type: ['VerifiableCredential', 'AppKeyCredential'],
       name,
       issuer: did,
       issuanceDate,
@@ -58,16 +60,22 @@ function appKeyCredential({
 }
 
 /**
- * A plain (non-self-issued) stored credential that must be ignored.
+ * A row in the collection that carries no `AppKeyCredential` marker -- what an
+ * opaque resource planted server-side (through a space import, say) looks like
+ * to the listing. It must be ignored: the page can neither render nor revoke
+ * it.
  */
-function ordinaryCredential(cid: string): StoredCredential {
+function unmarkedRow(cid: string): StoredCredential {
   return {
     cid,
     vc: {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential'],
       issuer: 'did:key:zIssuer',
-      credentialSubject: { id: 'did:key:zSubject' }
+      credentialSubject: {
+        id: 'did:key:zSubject',
+        origin: 'https://app.example'
+      }
     } as unknown as StoredCredential['vc']
   }
 }
@@ -114,17 +122,23 @@ function loginActivity({
   }
 }
 
+/**
+ * A storage stub over the two collections the listing joins: the app keys of
+ * `app-connections` and the wallet activity log. `listCredentials` is
+ * deliberately absent -- the connected-apps surface must never reach for the
+ * user's own credentials.
+ */
 function fakeStorage({
-  credentials,
+  appKeys,
   history
 }: {
-  credentials: StoredCredential[]
+  appKeys: StoredCredential[]
   history: Array<{ id: string; doc: unknown }>
 }) {
   return {
-    listCredentials: vi.fn(async () => credentials),
+    listAppKeys: vi.fn(async () => appKeys),
     listHistoryItems: vi.fn(async () => history),
-    deleteCredential: vi.fn(async () => {}),
+    deleteAppKey: vi.fn(async () => {}),
     addHistoryAppRevoke: vi.fn(async () => {}),
     revokeAppCollectionRecipients: vi.fn(async () => ({
       collections: 0,
@@ -139,8 +153,8 @@ describe('listConnectedApps', () => {
   it('joins an app-key credential with its latest Login activity', async () => {
     const origin = 'https://app.example'
     const storage = fakeStorage({
-      credentials: [
-        ordinaryCredential('c-plain'),
+      appKeys: [
+        unmarkedRow('c-plain'),
         appKeyCredential({ cid: 'c-app', origin })
       ],
       history: [
@@ -185,7 +199,7 @@ describe('listConnectedApps', () => {
     const editorUrl = 'https://app.example/editor'
     const readerUrl = 'https://app.example/reader'
     const storage = fakeStorage({
-      credentials: [
+      appKeys: [
         appKeyCredential({ cid: 'c-editor', origin, appUrl: editorUrl }),
         appKeyCredential({
           cid: 'c-reader',
@@ -247,7 +261,7 @@ describe('listConnectedApps', () => {
   it('joins an appUrl-scoped key to an older row that recorded no appUrl', async () => {
     const origin = 'https://app.example'
     const storage = fakeStorage({
-      credentials: [
+      appKeys: [
         appKeyCredential({
           cid: 'c-app',
           origin,
@@ -281,7 +295,7 @@ describe('listConnectedApps', () => {
   it("never lends another app's appUrl-scoped row to a sibling app", async () => {
     const origin = 'https://app.example'
     const storage = fakeStorage({
-      credentials: [
+      appKeys: [
         appKeyCredential({
           cid: 'c-editor',
           origin,
@@ -316,7 +330,7 @@ describe('listConnectedApps', () => {
 
   it('falls back to the stripped credential name when no Login matches', async () => {
     const storage = fakeStorage({
-      credentials: [
+      appKeys: [
         appKeyCredential({
           cid: 'c-app',
           origin: 'https://app.example',
@@ -334,9 +348,16 @@ describe('listConnectedApps', () => {
     expect(apps[0].lastConnectedAt).toBeUndefined()
   })
 
-  it('ignores credentials that are not self-issued or lack an origin', async () => {
+  it('ignores rows without the marker, and marked rows missing an origin', async () => {
+    // The collection holds app keys only, so the row check is the marker type
+    // plus the two members the listing reads (subject DID and origin).
+    const marked = appKeyCredential({
+      cid: 'c-originless',
+      origin: 'https://app.example'
+    })
+    delete (marked.vc.credentialSubject as { origin?: unknown }).origin
     const storage = fakeStorage({
-      credentials: [ordinaryCredential('c-plain')],
+      appKeys: [unmarkedRow('c-plain'), marked],
       history: []
     })
 
@@ -346,7 +367,7 @@ describe('listConnectedApps', () => {
   it('extracts the delegation signer from a recorded full zcap', async () => {
     const origin = 'https://app.example'
     const storage = fakeStorage({
-      credentials: [appKeyCredential({ cid: 'c-app', origin })],
+      appKeys: [appKeyCredential({ cid: 'c-app', origin })],
       history: [
         loginActivity({
           origin,
@@ -456,7 +477,7 @@ describe('revokeAppAccess', () => {
   }
 
   it('revokes grants, deletes the app key, and records the revocation', async () => {
-    const storage = fakeStorage({ credentials: [], history: [] })
+    const storage = fakeStorage({ appKeys: [], history: [] })
 
     const outcome = await revokeAppAccess({ storage, user, app })
 
@@ -473,7 +494,7 @@ describe('revokeAppAccess', () => {
       subjectDid: APP_DID,
       items: []
     })
-    expect(storage.deleteCredential).toHaveBeenCalledWith({ cid: 'c-app' })
+    expect(storage.deleteAppKey).toHaveBeenCalledWith({ cid: 'c-app' })
     expect(storage.addHistoryAppRevoke).toHaveBeenCalledWith({
       user,
       origin: 'https://app.example',
@@ -485,7 +506,7 @@ describe('revokeAppAccess', () => {
   })
 
   it('skips the server grant revocation for an orphaned app', async () => {
-    const storage = fakeStorage({ credentials: [], history: [] })
+    const storage = fakeStorage({ appKeys: [], history: [] })
 
     const outcome = await revokeAppAccess({
       storage,
@@ -504,7 +525,7 @@ describe('revokeAppAccess', () => {
       subjectDid: APP_DID,
       items: []
     })
-    expect(storage.deleteCredential).toHaveBeenCalledWith({ cid: 'c-app' })
+    expect(storage.deleteAppKey).toHaveBeenCalledWith({ cid: 'c-app' })
     expect(storage.addHistoryAppRevoke).toHaveBeenCalledWith({
       user,
       origin: 'https://app.example',
@@ -516,7 +537,7 @@ describe('revokeAppAccess', () => {
   })
 
   it('does not delete the credential when grant revocation fails', async () => {
-    const storage = fakeStorage({ credentials: [], history: [] })
+    const storage = fakeStorage({ appKeys: [], history: [] })
     ;(storage.revokeAppGrants as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error('network down')
     )
@@ -524,7 +545,7 @@ describe('revokeAppAccess', () => {
     await expect(revokeAppAccess({ storage, user, app })).rejects.toThrow(
       'network down'
     )
-    expect(storage.deleteCredential).not.toHaveBeenCalled()
+    expect(storage.deleteAppKey).not.toHaveBeenCalled()
     expect(storage.addHistoryAppRevoke).not.toHaveBeenCalled()
   })
 })

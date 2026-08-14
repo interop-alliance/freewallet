@@ -8,6 +8,7 @@ import {
   CONTACTS_HISTORY_COLLECTION
 } from '@interop/social-core'
 import {
+  APP_CONNECTIONS_COLLECTION,
   PRIVATE_CREDENTIALS_COLLECTION,
   PUBLIC_CREDENTIALS_COLLECTION,
   WALLET_ACTIVITY_COLLECTION,
@@ -84,6 +85,7 @@ export const WAS_SYNC_POLL_MS = env.VITE_WAS_SYNC_POLL_MS
 const RXDB_KEY_BY_COLLECTION_ID: Record<string, string> = {
   [PRIVATE_CREDENTIALS_COLLECTION]: 'privateCredentials',
   [PUBLIC_CREDENTIALS_COLLECTION]: 'publicCredentials',
+  [APP_CONNECTIONS_COLLECTION]: 'appConnections',
   [WALLET_ACTIVITY_COLLECTION]: 'walletActivity',
   [CONTACTS_COLLECTION]: 'contacts',
   [CONTACTS_HISTORY_COLLECTION]: 'contactsHistory'
@@ -99,6 +101,13 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
   // encrypted and supply its own keys). Set-once / immutable on the server.
   // Derived from the spec's `'edv'` / `'plaintext'` encryption string.
   encryption?: { scheme: 'edv' }
+  // Whether the collection may be offered on the wallet's share surface (the
+  // `https://w3id.org/byoe#shared-wallet-collection` grant allowlist and the
+  // storage page's share dialog). Projected verbatim from the spec: it is a
+  // narrower predicate than `encryption`, since a collection can carry a key
+  // epoch roster and still never be shareable (`app-connections`, whose rows
+  // are the connected apps' private seeds).
+  shareable: boolean
   // How the collection's cipher mints a document id, from the collection spec:
   // 'content' (content-addressed, immutable) or 'random' (the mutable
   // stable-id head model -- `contacts`). Only meaningful on an encrypted
@@ -122,9 +131,22 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
     ...(spec.encryption === 'edv' && {
       encryption: { scheme: 'edv' as const }
     }),
+    shareable: spec.shareable,
     idDerivation: spec.idDerivation
   }
 })
+
+/**
+ * The encrypted standard collections -- the ones carrying an EDV encryption
+ * descriptor, and so a key-epoch roster. The one home of that predicate: the
+ * cipher build, the descriptor acquisition, and the user-key cascade fan-out
+ * import this set rather than re-running the filter. Deliberately distinct
+ * from the shareable set (`SHAREABLE_COLLECTIONS` in `src/session/shares.ts`):
+ * every collection here has keys to rotate, but not every one of them may be
+ * offered to a reader.
+ */
+export const ENCRYPTED_STANDARD_COLLECTIONS =
+  WALLET_STANDARD_COLLECTIONS.filter(({ encryption }) => encryption)
 
 // The WAS collections replicated by the sync controller: every standard
 // collection, projected down to the (key, id) pair the collection-agnostic

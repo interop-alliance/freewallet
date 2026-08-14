@@ -38,6 +38,7 @@ import {
 } from '@interop/wallet-core/clients'
 import { swapSessionVaultKeys } from '@/session/userKeyAdoption'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
+import { sweepStrandedAppKeys } from '@/session/appKeySweep'
 import {
   accountLogPinStore,
   loadUserKeyEpochPin,
@@ -300,6 +301,21 @@ export async function initSessionFromSeed({
   if (provisionStorage) {
     const storageReady = storage.ensureUserCollections({ user, profile, idb })
     session.storageReady = storageReady
+
+    // The app-key sweep: app keys now live in their own `app-connections`
+    // collection, so any left in `private-credentials` by an earlier version
+    // are deleted here rather than migrated -- their seeds must not stay
+    // reachable from the credential-wide surfaces (a public link, a share of
+    // the credentials collection). Chained behind provisioning and strictly
+    // best-effort, like the cascade sweep below: a failed sweep never fails
+    // the login, and the next login runs it again.
+    session.appKeySweep = storageReady
+      .catch(() => {})
+      .then(() => sweepStrandedAppKeys({ storage }))
+      .catch((err): null => {
+        console.warn('The stranded app-key sweep failed:', err)
+        return null
+      })
 
     // The cascade-completion sweep: with the roster in hand (the direct read
     // above) and a remote store attached, re-run the collection fan-out of

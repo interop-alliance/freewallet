@@ -656,9 +656,9 @@ describe('resolveInvocationTarget', () => {
     })
   })
 
-  it('resolves a share of every encrypted standard collection', () => {
-    // The rule is "any standard collection with an encryption descriptor", so the
-    // contacts collections are shareable on the same terms as credentials.
+  it('resolves a share of every shareable standard collection', () => {
+    // The rule is the roster's `shareable` flag, so the contacts collections
+    // are shareable on the same terms as credentials.
     for (const name of ['wallet-activity', 'contacts', 'contacts-history']) {
       expect(
         resolveInvocationTarget({
@@ -673,11 +673,14 @@ describe('resolveInvocationTarget', () => {
     }
   })
 
-  it('refuses a share of anything but an encrypted standard collection', () => {
+  it('refuses a share of anything but a shareable standard collection', () => {
     // Plaintext standard collection, the `id` / `key-map` collections, an RP
     // collection, a made-up name, a missing name -- none has an epoch roster.
+    // `app-connections` does have one and is refused all the same: its rows
+    // are the connected apps' private seeds.
     for (const name of [
       'public-credentials',
+      'app-connections',
       'id',
       'key-map',
       'unlock-methods',
@@ -695,6 +698,37 @@ describe('resolveInvocationTarget', () => {
           collections: NO_COLLECTIONS
         }).satisfiable
       ).toBe(false)
+    }
+  })
+
+  it('refuses every descriptor spelling that names app-connections', () => {
+    // The collection holds one app-key credential per connected app, each
+    // carrying that app's private seed, so a grant naming it is unsatisfiable
+    // rather than merely read-only -- whichever spelling it arrives in, and
+    // whether it names the collection or a resource inside it.
+    for (const descriptor of [
+      `${SPACE_URL}/app-connections`,
+      `${SPACE_URL}/app-connections/some-resource`,
+      {
+        type: 'https://w3id.org/byoe#private-collection',
+        name: 'app-connections'
+      },
+      {
+        type: 'https://w3id.org/byoe#public-collection',
+        name: 'app-connections'
+      },
+      {
+        type: 'https://w3id.org/byoe#shared-wallet-collection',
+        name: 'app-connections'
+      }
+    ]) {
+      const target = resolveInvocationTarget({
+        descriptor,
+        spaceUrl: SPACE_URL,
+        collections: NO_COLLECTIONS
+      })
+      expect(target.satisfiable).toBe(false)
+      expect(target.targetClass).toBeUndefined()
     }
   })
 

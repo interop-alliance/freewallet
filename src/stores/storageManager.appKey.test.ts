@@ -6,7 +6,14 @@
  * presenting as an app key -- whether or not it binds to its own seed, since a
  * fully attacker-generated credential binds perfectly. Only the wallet's own
  * mint path stores one, through its own door (`addMintedAppKey`), which in
- * turn refuses anything that does not carry the mint invariants.
+ * turn refuses anything that does not carry the mint invariants and writes to
+ * the dedicated `app-connections` collection.
+ *
+ * The second half covers that collection's surface: `addMintedAppKey` /
+ * `listAppKeys` / `deleteAppKey`, their idempotence on the credential's
+ * content cid, and the two separations that keep an app's seed out of the
+ * credential-wide surfaces (no row among the credentials, no
+ * credential-created activity).
  *
  * The manager runs over a real BrowserStore on memory RxDB with real EDV
  * ciphers and no remote store, so a stored credential really round-trips
@@ -66,6 +73,7 @@ async function makeStorage(): Promise<{ storage: StorageManager; user: User }> {
   const ciphers: Record<string, DocCipher> = {}
   for (const [logicalKey, collectionId] of [
     ['privateCredentials', 'private-credentials'],
+    ['appConnections', 'app-connections'],
     ['walletActivity', 'wallet-activity']
   ]) {
     // Every encrypted collection carries a key-epoch roster from birth, so
@@ -135,21 +143,13 @@ describe('StorageManager.addCredential app-key screening', () => {
     expect(await storage.listCredentials()).toEqual([])
   })
 
-  it('stores a wallet-minted app key through addMintedAppKey', async () => {
-    const { storage, user } = await makeStorage()
-    const { credential } = await mintAppKeyCredential({ app, origin })
-    await storage.addMintedAppKey({ credential, user })
-    const listed = await storage.listCredentials()
-    expect(listed).toHaveLength(1)
-    expect(listed[0].vc).toEqual(credential)
-  })
-
   it('addMintedAppKey refuses a credential that does not bind', async () => {
-    const { storage, user } = await makeStorage()
+    const { storage } = await makeStorage()
     await expect(
-      storage.addMintedAppKey({ credential: await plantedAppKey(), user })
+      storage.addMintedAppKey({ credential: await plantedAppKey() })
     ).rejects.toThrow(AppKeyMintInvariantError)
     expect(await storage.listCredentials()).toEqual([])
+    expect(await storage.listAppKeys()).toEqual([])
   })
 
   it('stores an ordinary credential that merely carries seed / origin claims', async () => {
@@ -166,5 +166,70 @@ describe('StorageManager.addCredential app-key screening', () => {
     } as unknown as IVerifiableCredential
     await storage.addCredential({ credential: ordinary, user })
     expect(await storage.listCredentials()).toHaveLength(1)
+  })
+})
+
+describe('StorageManager app-key collection surface', () => {
+  it('stores a wallet-minted app key in app-connections, apart from the credentials', async () => {
+    const { storage } = await makeStorage()
+    const { credential } = await mintAppKeyCredential({ app, origin })
+
+    await storage.addMintedAppKey({ credential })
+
+    const appKeys = await storage.listAppKeys()
+    expect(appKeys).toHaveLength(1)
+    expect(appKeys[0].vc).toEqual(credential)
+    // The credential-wide surfaces (the dashboard, public links, shares) must
+    // not be able to reach the app's seed, so the key is nowhere among them.
+    expect(await storage.listCredentials()).toEqual([])
+  })
+
+  it('writes no credential-created activity for a minted app key', async () => {
+    // The app-connect Login activity is the record of the connection; an app
+    // key is not a credential the user acquired, so History gets no row.
+    const { storage } = await makeStorage()
+    const { credential } = await mintAppKeyCredential({ app, origin })
+
+    await storage.addMintedAppKey({ credential })
+
+    expect(await storage.listHistoryItems()).toEqual([])
+  })
+
+  it('is idempotent on a re-store of the same app key (content cid)', async () => {
+    // JWE encryption is nondeterministic, so the row id cannot carry
+    // idempotence -- the credential's content cid does.
+    const { storage } = await makeStorage()
+    const { credential } = await mintAppKeyCredential({ app, origin })
+
+    await storage.addMintedAppKey({ credential })
+    await storage.addMintedAppKey({ credential })
+
+    expect(await storage.listAppKeys()).toHaveLength(1)
+  })
+
+  it('lists two apps apart and deletes one by cid', async () => {
+    const { storage } = await makeStorage()
+    const editor = await mintAppKeyCredential({ app, origin })
+    const reader = await mintAppKeyCredential({
+      app: { name: 'Reader', appUrl: 'https://app.example/reader' },
+      origin
+    })
+    await storage.addMintedAppKey({ credential: editor.credential })
+    await storage.addMintedAppKey({ credential: reader.credential })
+
+    const listed = await storage.listAppKeys()
+    expect(listed.map(({ vc }) => vc)).toEqual([
+      editor.credential,
+      reader.credential
+    ])
+
+    await storage.deleteAppKey({ cid: listed[0].cid })
+
+    expect((await storage.listAppKeys()).map(({ vc }) => vc)).toEqual([
+      reader.credential
+    ])
+    // Deleting an already-absent app key is a no-op, not an error.
+    await storage.deleteAppKey({ cid: listed[0].cid })
+    expect(await storage.listAppKeys()).toHaveLength(1)
   })
 })

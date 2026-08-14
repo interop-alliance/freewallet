@@ -38,7 +38,8 @@ describe('groupCollections', () => {
         collection('key-map', 'Key Map'),
         collection('private-credentials', 'Verifiable Credentials'),
         collection('contacts', 'Contacts'),
-        collection('contacts-history', 'Contacts History')
+        collection('contacts-history', 'Contacts History'),
+        collection('app-connections', 'App Connections')
       ]
     })
 
@@ -48,9 +49,12 @@ describe('groupCollections', () => {
       'private-credentials',
       'public-credentials'
     ])
-    // Sorted by display name: Contacts History, Identity, Key Map, Unlock
-    // Methods, Wallet Activity Log.
+    // Sorted by display name: App Connections, Contacts History, Identity,
+    // Key Map, Unlock Methods, Wallet Activity Log. The app keys are wallet
+    // plumbing, not wallet contents -- nothing on the credential surfaces
+    // reaches them.
     expect(system.map(({ id }) => id)).toEqual([
+      'app-connections',
       'contacts-history',
       'id',
       'key-map',

@@ -6,9 +6,10 @@ import { fillSettled, signupViaWizard } from './helpers'
  * carrying an `AppConnectQuery` (plus DID Authentication) replaces the generic
  * consent sections with the app-centric "Connect {app}?" panel. On the
  * approve path the wallet match-or-mints the app-key credential for the
- * requesting origin, delegates the requested collection capabilities to that
- * credential's subject DID, and returns credential + grants + a `firstRun`
- * marker in one signed presentation.
+ * requesting origin, stores it in the dedicated `app-connections` collection
+ * (never among the user's own credentials), delegates the requested collection
+ * capabilities to that credential's subject DID, and returns credential +
+ * grants + a `firstRun` marker in one signed presentation.
  *
  * Like `chapi-login-zcap.spec.ts`, this runs against the local WAS teaching
  * server so the wallet provisions the app's collection and delegates real,
@@ -269,6 +270,46 @@ test('returning App Connect reuses the same app key and marks firstRun false', a
   const secondSubjectDid = appKeyCredential(second).credentialSubject.id
   expect(secondSubjectDid).toBe(firstSubjectDid)
   expect(second.data.appConnect.firstRun).toBe(false)
+})
+
+test('the minted app key lands in app-connections, never on the credentials list', async ({
+  page
+}, testInfo) => {
+  test.slow()
+
+  // App keys live in their own `app-connections` collection: each row carries
+  // that app's private seed, so it must stay out of every credential-wide
+  // surface (the dashboard, the credential detail route, public links,
+  // shares).
+  const { passphrase } = await signupViaWizard(page, testInfo)
+  const token = `${Date.now()}-w${testInfo.workerIndex}`
+
+  await connectViaPopup(page, {
+    passphrase,
+    challenge: `chal-collection-${token}`,
+    firstRun: true
+  })
+
+  // Back in the main app (the popup route reload dropped its session).
+  await page.goto('/#/login')
+  await fillSettled(page.locator('input[type="password"]'), passphrase)
+  await page.getByRole('button', { name: 'Log in', exact: true }).click()
+  await expect(page).toHaveURL(/#\/dashboard/, { timeout: 60_000 })
+
+  // The credential list, synced until the signup credential shows: the app key
+  // written by the popup is never among the cards.
+  const firstCredential = page.getByRole('link', { name: /Credential/ }).first()
+  await expect(async () => {
+    await page.getByRole('button', { name: 'Sync' }).click()
+    await expect(firstCredential).toBeVisible({ timeout: 5_000 })
+  }).toPass({ timeout: 90_000 })
+  await expect(page.getByRole('link', { name: /app key/i })).toHaveCount(0)
+
+  // The Storage page lists the dedicated collection (wallet system group).
+  await page.goto('/#/storage')
+  await expect(page.getByText('App Connections')).toBeVisible({
+    timeout: 60_000
+  })
 })
 
 test('an AppConnectQuery mixed with QueryByExample is blocked as malformed', async ({

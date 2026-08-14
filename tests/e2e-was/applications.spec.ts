@@ -10,7 +10,9 @@ import { fillSettled, signupViaWizard } from './helpers'
  * `clients.spec.ts`. An app connected through App Connect lists on
  * `/applications` with its recorded grants; revoking it retires the grant
  * server-side (asserted by invoking the delegated zcap from the test runner
- * with the app's own seed-derived key, before and after). An app whose
+ * with the app's own seed-derived key, before and after), removes the app key
+ * from `app-connections` (so a reconnect is a first run under a fresh
+ * identity). An app whose
  * grants were signed by a since-disconnected wallet client shows as
  * orphaned -- "reconnect needed", the current-key-set rule already killed
  * its grants -- and revoking it skips the per-grant POSTs while still
@@ -297,6 +299,17 @@ test.describe('The Applications revocation surface', () => {
     }
     expect(revokedStatus).toBeDefined()
     expect(revokedStatus!).toBeGreaterThanOrEqual(400)
+
+    // Reconnecting after the revoke is a genuine first run: the app key was
+    // deleted from `app-connections` with the revocation, so the wallet mints
+    // a fresh identity rather than handing back the revoked one.
+    const reconnected = await connectViaPopup(page, {
+      passphrase,
+      challenge: `${challenge}-again`
+    })
+    expect(appKeyCredential(reconnected).credentialSubject.id).not.toBe(
+      credential.credentialSubject.id
+    )
   })
 
   test('an app connected from a disconnected wallet shows as orphaned', async ({

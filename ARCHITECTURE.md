@@ -653,12 +653,13 @@ the marker, never to failing the page.
 
 The local `BrowserStore` (RxDB over Dexie/IndexedDB) is always the **active
 replica**: every credential, public-link, and history read/write targets it,
-online or offline, guest or not. One local database per user holds all three
-standard collections (`private-credentials`, `public-credentials`,
-`wallet-activity`) on the generic synced-doc schema
+online or offline, guest or not. One local database per user holds every
+standard collection (`private-credentials`, `public-credentials`,
+`wallet-activity`, `contacts`, `contacts-history`, `app-connections`) on the
+generic synced-doc schema
 (`{ id, updatedAt, version, data }`, see `src/lib/sync/syncedDocSchema.ts`).
 
-The encrypted collections (`private-credentials`, `wallet-activity`) store
+The encrypted collections (all of the above except `public-credentials`) store
 **EDV envelopes**, not plaintext -- encrypted-at-rest locally and opaque to
 the server. A per-collection document cipher (`createEdvDocCipher` from
 `@interop/was-client/edv`, built from the session's vault KAK) encrypts at write
@@ -671,7 +672,7 @@ public data) and keyed directly by `cid`.
 
 When `VITE_WAS_SERVER_URL` is set (and the session is not a guest), a remote
 WAS Space is attached as a **sync target**: the `SyncController`
-(`src/stores/syncController.ts`) replicates all three local collections to
+(`src/stores/syncController.ts`) replicates every synced local collection to
 their remote WAS Collection counterparts in the background via the
 collection-agnostic adapter in `src/lib/sync/`, which ships stored bodies
 (plaintext or envelope) verbatim and never touches keys. Each replication
@@ -698,7 +699,7 @@ A user's remote Space is identified by an independent random `spaceId`
 minted at signup and carried in the account pointer (unlock Spaces keep
 `spaceId = base64url(SHA-256(unlock did:key))` as a discovery convention).
 Collections created on first login: `private-credentials`, `public-credentials`,
-`wallet-activity`.
+`wallet-activity`, `contacts`, `contacts-history`, `app-connections`.
 
 ## CHAPI integration
 
@@ -781,8 +782,8 @@ spec** (<https://github.com/interop-alliance/app-connect-spec>; local
 checkout `../app-connect-spec` -- read `spec.md` there instead of fetching
 the rendered version).
 
-The whole app-key module -- the wire constants, the match / mint / legacy
-re-issue paths, and the store-time refusal policy -- lives in
+The whole app-key module -- the wire constants, the match and mint paths,
+and the store-time refusal policy -- lives in
 `@interop/wallet-core/request` (`appKey.ts` there), shared with DCW; the
 `AppConnectQuery` validation (`appConnectRequestOf`) lives beside it in that
 package's `classify.ts`. Freewallet's half is consent UI, credential storage,
@@ -793,8 +794,8 @@ client secret that must never transit a server, so on first run the wallet gener
 via `CapabilityAgent.fromSeed({ seed, keyName: 'app-key' })` (the `keyName`
 string is load-bearing -- it must match was-react's derivation exactly),
 self-issues the credential (issuer == subject == seed-derived DID, seed
-base64url-no-pad in `credentialSubject.seed`), and saves it to its own
-credential store under the same consent -- no second popup. On a returning
+base64url-no-pad in `credentialSubject.seed`), and saves it to the dedicated
+`app-connections` collection under the same consent -- no second popup. On a returning
 visit the stored credential is matched by the `AppKeyCredential` marker type
 AND `credentialSubject.appUrl === ` the request's serialized `appUrl` AND
 `credentialSubject.origin === ` the CHAPI requesting origin, so a phishing
@@ -821,14 +822,26 @@ manipulable by the spelling of a date (a numeric offset, differing
 fractional-second precision) cannot reopen the planted-credential path in a
 narrower form; an absent or unparseable date sorts last.
 
-A connect that finds no current-shape key looks once more for a **legacy**
-(pre-`appUrl`) key on the origin, and re-issues it in place under the SAME
-seed -- a fresh mint would roll the seed and orphan the identity the app
-encrypted its data under, so it must never be the migration path. The
-mapping is recoverable only when unambiguous: two distinct legacy identities
-on one origin yield nothing and the connect proceeds as a genuine first run,
-since re-issuing the wrong one would hand an application another's identity.
-The superseded legacy record is retired once the re-issue is stored.
+**App keys live in their own collection.** Every app key is stored in
+`app-connections` -- a synced, EDV-encrypted, content-addressed collection
+just like the credential replica, but structurally separate from it: the
+credential-wide surfaces (the dashboard list, credential detail, public-link
+creation, credential delete, collection shares) are scoped to
+`private-credentials` and can never reach a seed, with no filtering code.
+The collection is never shareable (`shareable: false` on its roster spec)
+and no grant may name it: a capability descriptor or URL naming the
+collection is unsatisfiable in grant resolution, not merely read-only. (A
+whole-Space read grant still covers its ciphertext, as for every private
+collection -- the grantee is not an epoch recipient, so it decrypts
+nothing.) Match and consent-preview candidates come from
+`StorageManager.listAppKeys()`, so ordinary stored credentials never enter
+the match. There is no migration from the old in-`private-credentials`
+placement and no legacy (pre-`appUrl`) re-issue path: an idempotent
+login-time sweep deletes stranded app-key rows from `private-credentials`
+(marker-typed or matching the old self-issued-with-origin shape), and an
+affected app reconnects through the ordinary flow as a first run -- its
+prior identity, and whatever it encrypted under it, is deliberately
+orphaned (the greenfield re-provision posture).
 
 **Externally arriving app keys are refused at store time, unconditionally.**
 Every minted app key carries the marker type `AppKeyCredential`
@@ -851,12 +864,14 @@ present the user with a credential it will never act on. The marker is
 _required_ at match time rather than merely tolerated, so a credential can
 only reach the delegation path by carrying it -- which is exactly what the
 store-time refusal screens. The wallet's own mint path stores through its own
-door (`StorageManager.addMintedAppKey`, called only by `processAppConnect`),
+door (`StorageManager.addMintedAppKey`, called only by `processAppConnect`,
+writing into `app-connections`),
 which itself asserts the mint invariants so it cannot be misused to store a
 foreign key. Two ingest paths sit outside the door, deliberately: the
 background sync pull writes pulled rows into the local replica directly, but
 it replicates the account's own remote collections, which only the account's
-enrolled wallet clients can write (`private-credentials` is a protected
+enrolled wallet clients can write (`app-connections` is never grantable at
+all, and `private-credentials` is a protected
 collection -- RP and share grants on it are read-only) and each of those
 clients enforces the same refusal at its own door; and the space half of an
 import writes opaque resources into the user's own Space server-side. For
@@ -956,10 +971,11 @@ share grant therefore leaves the ordinary delegation loop in `processZcaps`
 entirely; there is no code path that grants one axis without the other.
 
 **The recipient key is derived, not transmitted.** `name` must be one of the
-encrypted standard collections -- every `WALLET_STANDARD_COLLECTIONS` entry
-carrying an `encryption` descriptor, so today `private-credentials`,
+shareable standard collections -- every `WALLET_STANDARD_COLLECTIONS` entry
+whose roster spec carries `shareable: true`, so today `private-credentials`,
 `wallet-activity`, `contacts`, and `contacts-history` -- since sharing is
-meaningless where no epoch roster exists. The grantee's X25519 key is derived
+meaningless where no epoch roster exists, and `app-connections` is encrypted
+but deliberately never shareable (its rows carry app seeds). The grantee's X25519 key is derived
 from the `did:key` the request
 already names as `controller` (`x25519RecipientFromDidKey` from
 `@interop/was-client/edv`, the same Ed25519-to-Montgomery conversion the
@@ -1032,7 +1048,7 @@ Security notes:
   was-react.
 - **Per-user app identity**: an app key is minted from 32 fresh random bytes
   inside the connecting user's own wallet and stored in that user's own
-  credential store, so the app's DID -- and therefore the X25519 recipient
+  `app-connections` collection, so the app's DID -- and therefore the X25519 recipient
   key derived from it -- is scoped to the **(user, origin, `appUrl`)**
   triple. The same app connected by two users gets two unrelated DIDs. This
   is deliberately independent randomness per user rather than a derivation
@@ -1159,6 +1175,8 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   `AppKeyCredential` (`https://w3id.org/byoe#AppKeyCredential`); any
   externally arriving credential carrying the marker is refused at store
   time, binding or not -- app keys are wallet-minted, never imported.
+  Stored in the dedicated `app-connections` collection (synced, encrypted,
+  never shareable, never grantable), not among the user's credentials.
 - **Client / `clientId`** — the keyed, custodied, revocable identity of an
   (app, user) pair: a keypair that can be a zcap grantee, a delegation
   `controller`, or an entry in a collection's key-epoch roster. For a BYOE app
@@ -1198,7 +1216,7 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   Owned by one controller.
 - **Collection** — a named grouping of Resources within a Space.
   Standard collections: `private-credentials`, `public-credentials`,
-  `wallet-activity`.
+  `wallet-activity`, `contacts`, `contacts-history`, `app-connections`.
 - **Resource** — an individual stored item (JSON or binary) within a
   Collection.
 - **Controller** — the `did:key` DID that owns a Space. Its Ed25519 key signs

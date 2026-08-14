@@ -4,6 +4,15 @@
 
 ### Changed
 
+- Store app-key credentials in a dedicated `app-connections` collection
+  (synced, encrypted) instead of `private-credentials`. App keys no longer
+  appear on the credentials dashboard, credential detail, public links, or
+  credential delete, and no "credential created" activity row is written for
+  them. The new collection can never be shared or granted to an app or
+  relying party, so a collection share can no longer expose an app's seed.
+  Existing app-key rows in `private-credentials` are deleted by a login-time
+  sweep rather than migrated; affected apps reconnect as a first run. The
+  legacy pre-`appUrl` app-key re-issue path is removed.
 - Move the Applications and Storage links out of the Settings group in the
   left nav; they now sit at the top level beside Dashboard and Contacts.
 - Rename the Storage page's display label to "Your Data" ("Tus datos" in

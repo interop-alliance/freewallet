@@ -486,6 +486,7 @@
     "collectionNames": {
       "private-credentials": "Credenciales verificables",
       "public-credentials": "Credenciales verificables (compartidas públicamente)",
+      "app-connections": "Conexiones de aplicaciones",
       "wallet-activity": "Registro de actividad de la billetera",
       "id": "Identidad",
       "key-map": "Mapa de claves",
