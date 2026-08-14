@@ -411,6 +411,7 @@
     }
   },
   "contactHistory": {
+    "back": "Volver al contacto",
     "title": "Historial del contacto",
     "empty": "Todavía no hay historial.",
     "writer": "Autor {{writerId}}",

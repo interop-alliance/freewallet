@@ -7,8 +7,9 @@ import Chip from '@mui/material/Chip'
 import Collapse from '@mui/material/Collapse'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { useNavigate, useParams } from 'react-router'
+import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import { MdArrowBack } from 'react-icons/md'
 import {
   getDids,
   snapshotLines,
@@ -20,6 +21,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { formatDateTime } from '@/lib/viewMappers/formatDate'
+import { storageStyles } from '@/styles/appStyles'
 
 const ACTION_COLOR: Record<
   ContactRevisionPayload['action'],
@@ -254,6 +256,16 @@ export function ContactHistoryPage() {
 
   return (
     <DashboardLayout title={t('contactHistory.title')}>
+      <Button
+        component={RouterLink}
+        to={`/contacts/${contactId}`}
+        startIcon={<MdArrowBack />}
+        sx={storageStyles.backToStorageButton}
+        variant="text"
+      >
+        {t('contactHistory.back')}
+      </Button>
+
       {restoreError && (
         <Alert severity="error" sx={{ mt: 2 }}>
           {t('contactHistory.restoreError')}

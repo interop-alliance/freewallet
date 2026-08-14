@@ -411,6 +411,7 @@
     }
   },
   "contactHistory": {
+    "back": "Back to contact",
     "title": "Contact history",
     "empty": "No history yet.",
     "writer": "Writer {{writerId}}",
