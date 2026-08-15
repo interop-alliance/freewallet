@@ -80,6 +80,18 @@ repos' AGENTS.md files, a breaking release runs the doc-vs-code audit in the
 template's "Releasing" section, and the contract's counterpart tests (e.g.
 was-react's `walletCoreCounterpart.test.ts`) must stay green.
 
+## Ecosystem conventions
+
+- Cross-repo lessons (invariants, gotchas, and process recipes that span
+  repos) live in the ecosystem learnings file,
+  [byoe-ecosystem/LEARNINGS.md](https://github.com/interop-alliance/byoe-ecosystem/blob/main/LEARNINGS.md)
+  (usually checked out beside this repo as `../byoe-ecosystem`). Read it at
+  the start of any cross-repo task, and write a cross-repo lesson produced
+  by a task here into it in the same working session, not later.
+- Cross-repo decisions are recorded as `decisions/NNNN-slug.md` in the repo
+  that owns the contract; the convention and template are canonical in
+  [isomorphic-lib-template's `decisions/`](https://github.com/interop-alliance/isomorphic-lib-template/tree/main/decisions).
+
 ## Conventions
 
 Code style, refactoring, JSDoc, comment, and error-handling conventions live in

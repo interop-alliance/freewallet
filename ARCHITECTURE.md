@@ -550,7 +550,10 @@ adopts the rotated user key in place. A login-time health check watches for
 signing client's verification method leaves the document (current-key-set
 rule), which would brick recovery exactly when it is needed -- and nudges
 regeneration; a client revocation re-mints the affected delegations itself
-as part of its cascade.
+as part of its cascade. The re-mint core (the rot check, the skip policy,
+the binding-carried-forward re-wrap) and the delegation builder live in
+`@interop/wallet-core/recovery`; `src/session/recovery.ts` binds them to
+the session's signers, the storage URL, and the unlock-methods registry.
 
 Two standing boundary rules: **the passphrase must never become a recovery
 entry** -- a standing document VM for the primary low-entropy credential
