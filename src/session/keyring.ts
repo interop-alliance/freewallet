@@ -357,8 +357,16 @@ function accountPointerPersister({
 }): (pointer: AccountPointer) => Promise<void> {
   return async pointer => {
     // Stamped here rather than left to the codec, so the pin advances to the
-    // exact timestamp the record carries without re-reading it.
-    const createdAt = new Date().toISOString()
+    // exact timestamp the record carries without re-reading it. Floored over
+    // both the record being rewritten and this client's local pin, so a
+    // client whose clock lags behind whichever client bound last still writes
+    // a record that supersedes what everyone has pinned.
+    const createdAt = nextRecordCreatedAt({
+      floors: [
+        found.createdAt,
+        await loadKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
+      ]
+    })
     const record = await wrapKeyringRecord({
       controller: found.controller,
       email: found.email,
@@ -533,6 +541,34 @@ function keyringUnwrapError(err: unknown): Error {
   return isRecordProofError(err)
     ? new KeyringRecordForgedError({ cause: err })
     : new KeyringRecordUnusableError({ cause: err })
+}
+
+/**
+ * The bind timestamp to stamp on a record this client is about to write: now,
+ * or one millisecond past the newest floor when a floor is already at or ahead
+ * of now. The floors are timestamps the new record must supersede -- the
+ * record it replaces, and this client's own freshness pin -- so a client whose
+ * clock lags another's does not write a record every client then refuses as a
+ * rollback. Absent and unparseable floors are ignored.
+ *
+ * @param options {object}
+ * @param options.floors {Array<string | null | undefined>}   ISO timestamps
+ *   the returned stamp must be strictly newer than
+ * @returns {string}
+ */
+function nextRecordCreatedAt({
+  floors
+}: {
+  floors: Array<string | null | undefined>
+}): string {
+  let millis = Date.now()
+  for (const floor of floors) {
+    const parsed = floor ? Date.parse(floor) : Number.NaN
+    if (!Number.isNaN(parsed) && parsed >= millis) {
+      millis = parsed + 1
+    }
+  }
+  return new Date(millis).toISOString()
 }
 
 /**
@@ -911,8 +947,13 @@ export async function bindUnlockSecret({
 }> {
   const unlock = derived ?? (await deriveUnlockIdentity({ secret, kdf }))
   // The bind timestamp is stamped here rather than left to the codec, so this
-  // client seeds its freshness pin with exactly what it signed.
-  const createdAt = new Date().toISOString()
+  // client seeds its freshness pin with exactly what it signed. It is floored
+  // over the local pin: every rebind site has already fetched (and pinned) the
+  // standing record, so flooring over the pin guarantees the new record
+  // supersedes it even when another client's clock ran ahead of this one.
+  const createdAt = nextRecordCreatedAt({
+    floors: [await loadKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })]
+  })
   const record = await wrapKeyringRecord({
     controller,
     email,

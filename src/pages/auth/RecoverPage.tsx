@@ -57,7 +57,9 @@ export function RecoverPage() {
    * Maps a recovery failure onto the page's honest error states: a mistyped
    * code, a code that resolves to nothing (never issued, revoked, or spent),
    * a revoked-while-record-survived code, an unreachable server ("could not
-   * check", never "no account"), and everything else.
+   * check", never "no account"), an account-log continuity refusal (a
+   * rollback reads as "could not check", a fork or an identity switch gets
+   * its own message), and everything else.
    */
   const errorKeyFor = (err: unknown): string => {
     if (err instanceof RecoveryCodeInvalidError) {
@@ -74,6 +76,16 @@ export function RecoverPage() {
     }
     if (isStorageUnreachable(err)) {
       return 'auth.recover.errors.couldNotCheck'
+    }
+    // The account-log continuity refusal, matched on `name` rather than
+    // `instanceof`: wallet-core may be linked rather than resolved, which
+    // duplicates class identity. A rollback may be nothing worse than
+    // replication lag, so it reads as "could not check"; a fork or an
+    // SCID/method switch is the real continuity refusal.
+    if ((err as Error | null)?.name === 'ResourceLogContinuityError') {
+      return (err as { reason?: string }).reason === 'rollback'
+        ? 'auth.recover.errors.couldNotCheck'
+        : 'auth.recover.errors.accountLogContinuity'
     }
     return 'auth.recover.errors.failed'
   }

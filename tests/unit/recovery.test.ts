@@ -41,14 +41,18 @@ vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
 }))
 
 const clientsState = vi.hoisted(() => ({
-  signingKeys: [] as string[]
+  signingKeys: [] as string[],
+  signingKeysError: undefined as unknown
 }))
 
 vi.mock('@interop/wallet-core/clients', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/clients')>()),
-  currentAccountSigningKeys: vi.fn(
-    async () => new Set(clientsState.signingKeys)
-  )
+  currentAccountSigningKeys: vi.fn(async () => {
+    if (clientsState.signingKeysError) {
+      throw clientsState.signingKeysError
+    }
+    return new Set(clientsState.signingKeys)
+  })
 }))
 
 const registryState = vi.hoisted(() => ({
@@ -84,6 +88,7 @@ vi.mock('@/session/unlockMethods', async importOriginal => ({
 }))
 
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
+import { WasError } from '@interop/was-client'
 import {
   deriveUnlockIdentity,
   type AccountPointer
@@ -210,6 +215,7 @@ beforeEach(() => {
   wasState.getError = undefined
   registryState.record = null
   clientsState.signingKeys = []
+  clientsState.signingKeysError = undefined
   logState.verificationMethod = []
   logState.nextKeyHashes = []
   logState.verifications = 0
@@ -297,6 +303,29 @@ describe('recovery record proof (the mixed-signer policy)', () => {
     await expect(locateRecoveryAccount({ code })).rejects.toBeInstanceOf(
       RecoveryBindingError
     )
+  })
+
+  it('rethrows an unreachable storage server unchanged, never as forged', async () => {
+    const signer = await accountSigner({ secret: 'an enrolled client key' })
+    // A WasError with no HTTP status: the account-log fetch never reached
+    // the server, so the record could not be CHECKED.
+    const networkError = new WasError('fetch failed')
+    clientsState.signingKeysError = networkError
+    const { code } = await storeRecordForCode({ signer })
+    await expect(locateRecoveryAccount({ code })).rejects.toBe(networkError)
+  })
+
+  it('rethrows an account-log rollback refusal unchanged', async () => {
+    const signer = await accountSigner({ secret: 'an enrolled client key' })
+    // Constructed by shape rather than imported: the refusal is matched on
+    // `name`, since a linked wallet-core duplicates class identity.
+    const continuityError = Object.assign(new Error('served log is behind'), {
+      name: 'ResourceLogContinuityError',
+      reason: 'rollback'
+    })
+    clientsState.signingKeysError = continuityError
+    const { code } = await storeRecordForCode({ signer })
+    await expect(locateRecoveryAccount({ code })).rejects.toBe(continuityError)
   })
 })
 

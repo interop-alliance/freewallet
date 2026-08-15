@@ -42,6 +42,22 @@
   legitimate host or Space migration under one DID.
 - New login error states for a forged or tampered keyring record and for a
   rolled-back record, in both locales.
+- Keyring-freshness pin writes are transactional and forward-only, and every
+  record write site stamps its bind timestamp above both the record it
+  replaces and the local pin. A client whose clock lags another's can no
+  longer write a record every other client then refuses as a rollback.
+- The account-genesis log read now carries a chain-head pin on every login,
+  including the pre-promotion window: a spaceId-keyed bridging pin at first
+  contact (adopted into the DID-keyed pin when the log publishes), and the
+  locally recorded published DID (with `expectedDid`) on later heal logins
+  whose pointer backfill never landed. A signup torn between log
+  publication and the pointer backfill no longer heals against an unpinned
+  log.
+- The recovery locate step no longer reports an unreachable storage server
+  or an account-log continuity refusal as a forged record: a network
+  failure surfaces as "could not check", a continuity rollback (possibly
+  replication lag) does too, and a fork or identity switch gets its own
+  error message in both locales.
 
 ## 0.38.0 - 2026-08-14
 

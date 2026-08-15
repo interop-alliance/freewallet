@@ -291,6 +291,7 @@
         "revoked": "This recovery code has been revoked or already used; it can no longer recover the wallet.",
         "unavailable": "Recovery codes require a storage server, and this deployment has none configured.",
         "couldNotCheck": "The storage server could not be reached, so the code could not be checked. This does not mean the code is wrong -- please try again once you are back online.",
+        "accountLogContinuity": "The storage server returned a version of the account's history that conflicts with what this browser has already verified, so the check was stopped as a precaution. Nothing was changed, and this does not mean the code is wrong. If you did not expect this, contact your storage provider.",
         "failed": "Recovery failed. Please try again.",
         "loginFailed": "The wallet was recovered but logging in failed. Try logging in with your new passphrase from the login page."
       }

@@ -305,9 +305,14 @@ function keyringFreshnessPinKey(spaceId: string): string {
  * forging one; the pin is what stops it replaying an older record it once
  * served legitimately -- a rollback that would send this client at a pointer
  * the account has since moved off. A record older than the pin is refused
- * (see `fetchKeyring` in `src/session/keyring.ts`); an equal or newer one
- * advances it, so the pin only ever moves forward. Plaintext local state: a
- * bind time is not a secret, only a continuity prior.
+ * (see `fetchKeyring` in `src/session/keyring.ts`).
+ *
+ * The forward-only discipline is enforced here rather than assumed of the
+ * callers: the read and the conditional write run in ONE readwrite
+ * transaction, and a write older than the stored pin is a warn-and-no-op
+ * (an equal one restates it harmlessly). A stored timestamp that does not
+ * parse is treated as absent. Plaintext local state: a bind time is not a
+ * secret, only a continuity prior.
  *
  * @param options {object}
  * @param options.spaceId {string}   the unlock Space id
@@ -324,15 +329,53 @@ export async function saveKeyringFreshnessPin({
   createdAt: string
   idb?: IDBFactory
 }): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store =>
-      store.put(
-        { createdAt, pinnedAt: Date.now() },
-        keyringFreshnessPinKey(spaceId)
-      ),
-    idb
-  )
+  const db = await openSessionDb({ idb })
+  try {
+    // Read and conditional write in ONE readwrite transaction, so the
+    // compare-and-set cannot interleave with another tab's pin advance. The
+    // put is issued synchronously from the read's success handler, which is
+    // what keeps the transaction alive across the decision.
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(SESSION_STORE, 'readwrite')
+      const store = transaction.objectStore(SESSION_STORE)
+      const key = keyringFreshnessPinKey(spaceId)
+      const read = store.get(key)
+      read.onerror = () => reject(read.error)
+      read.onsuccess = () => {
+        const stored = freshnessPinFrom(read.result)
+        const storedTime = stored ? Date.parse(stored) : Number.NaN
+        if (!Number.isNaN(storedTime) && storedTime > Date.parse(createdAt)) {
+          console.warn(
+            'Refusing to move the keyring-freshness pin backward; keeping ' +
+              'the stored pin.',
+            { storedCreatedAt: stored, createdAt }
+          )
+          resolve()
+          return
+        }
+        const write = store.put({ createdAt, pinnedAt: Date.now() }, key)
+        write.onerror = () => reject(write.error)
+        write.onsuccess = () => resolve()
+      }
+    })
+  } finally {
+    db.close()
+  }
+}
+
+/**
+ * The pinned bind timestamp in a stored freshness-pin record, or `null` when
+ * the record is absent or malformed.
+ *
+ * @param stored {unknown}   the raw object-store value
+ * @returns {string | null}
+ */
+function freshnessPinFrom(stored: unknown): string | null {
+  if (stored === null || stored === undefined) {
+    return null
+  }
+  const { createdAt } = stored as { createdAt?: unknown }
+  return typeof createdAt === 'string' && createdAt ? createdAt : null
 }
 
 /**
@@ -351,16 +394,13 @@ export async function loadKeyringFreshnessPin({
   spaceId: string
   idb?: IDBFactory
 }): Promise<string | null> {
-  const stored = await withSessionStore(
-    'readonly',
-    store => store.get(keyringFreshnessPinKey(spaceId)),
-    idb
+  return freshnessPinFrom(
+    await withSessionStore(
+      'readonly',
+      store => store.get(keyringFreshnessPinKey(spaceId)),
+      idb
+    )
   )
-  if (stored === null || stored === undefined) {
-    return null
-  }
-  const { createdAt } = stored as { createdAt?: unknown }
-  return typeof createdAt === 'string' ? createdAt : null
 }
 
 /**
@@ -748,6 +788,197 @@ export async function deleteAccountLogPin({
     store => store.delete(accountLogPinKey(accountDid)),
     idb
   )
+}
+
+/**
+ * The object-store key under which the PRE-PROMOTION account-log chain-head
+ * pin lives -- keyed by the data Space id, since the account DID this pin will
+ * belong to does not exist yet.
+ *
+ * @param spaceId {string}   the data Space id
+ * @returns {string}
+ */
+function bridgingAccountLogPinKey(spaceId: string): string {
+  return `account-log-head/space/${spaceId}`
+}
+
+/**
+ * Builds the bridging (pre-promotion) chain-head pin store for the account's
+ * did:webvh log, keyed by the data Space id. The DID-keyed slot cannot be
+ * keyed before the DID exists, and a log read carrying NO pin skips the
+ * continuity check entirely -- so a signup, or a signup torn between the log
+ * publication and the account-pointer backfill, would build on whatever log
+ * the host serves. This slot gives that window a pin, so a truncated or
+ * substituted log is refused there too.
+ *
+ * The slot is a bridge, not a home: once the log publishes, the DID is known
+ * and `adoptBridgingAccountLogPin` moves the pin into the DID-keyed slot.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {ResourceLogPinStore}
+ */
+export function bridgingAccountLogPinStore({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): ResourceLogPinStore {
+  return logPinStoreAt({ key: bridgingAccountLogPinKey(spaceId), idb })
+}
+
+/**
+ * Deletes the bridging account-log chain-head pin -- account deletion and
+ * Space wipes, beside the DID-keyed pins.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deleteBridgingAccountLogPin({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.delete(bridgingAccountLogPinKey(spaceId)),
+    idb
+  )
+}
+
+/**
+ * The object-store key under which this client's local "which account DID did
+ * this data Space's log publish" mapping lives.
+ *
+ * @param spaceId {string}   the data Space id
+ * @returns {string}
+ */
+function accountDidForSpaceKey(spaceId: string): string {
+  return `account-did/space/${spaceId}`
+}
+
+/**
+ * Records, locally, the account DID the data Space's log published as. A
+ * signup torn between the log publication and the account-pointer backfill
+ * heals at a later login whose pointer still names no did:webvh; this mapping
+ * is what lets that heal key the DID-keyed chain-head pin and state an
+ * `expectedDid` anyway, since the log was published in this browser.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param options.accountDid {string}   the published account did:webvh
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function saveAccountDidForSpace({
+  spaceId,
+  accountDid,
+  idb
+}: {
+  spaceId: string
+  accountDid: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store =>
+      store.put(
+        { accountDid, savedAt: Date.now() },
+        accountDidForSpaceKey(spaceId)
+      ),
+    idb
+  )
+}
+
+/**
+ * Loads the account DID this client saw a data Space's log publish as, or
+ * `null` when it has never seen one.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<string | null>}
+ */
+export async function loadAccountDidForSpace({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<string | null> {
+  const stored = await withSessionStore(
+    'readonly',
+    store => store.get(accountDidForSpaceKey(spaceId)),
+    idb
+  )
+  if (stored === null || stored === undefined) {
+    return null
+  }
+  const { accountDid } = stored as { accountDid?: unknown }
+  return typeof accountDid === 'string' && accountDid ? accountDid : null
+}
+
+/**
+ * Deletes the local Space-to-account-DID mapping -- account deletion and Space
+ * wipes, beside the pins.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deleteAccountDidForSpace({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await withSessionStore(
+    'readwrite',
+    store => store.delete(accountDidForSpaceKey(spaceId)),
+    idb
+  )
+}
+
+/**
+ * Moves a bridging (Space-keyed) account-log pin into the DID-keyed slot once
+ * the DID is known, then drops the bridging row.
+ *
+ * A non-empty DID-keyed slot is left exactly as it is: that pin was advanced
+ * by reads that verified against the DID-keyed continuity prior, so a slot
+ * that never consulted it must not clobber it (the bridging slot only ever
+ * covered the window before the DID existed).
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the data Space id
+ * @param options.accountDid {string}   the published account did:webvh
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function adoptBridgingAccountLogPin({
+  spaceId,
+  accountDid,
+  idb
+}: {
+  spaceId: string
+  accountDid: string
+  idb?: IDBFactory
+}): Promise<void> {
+  const bridging = await bridgingAccountLogPinStore({ spaceId, idb }).read()
+  if (bridging) {
+    const pinned = await accountLogPinStore({ accountDid, idb }).read()
+    if (!pinned) {
+      await accountLogPinStore({ accountDid, idb }).write(bridging)
+    }
+  }
+  await deleteBridgingAccountLogPin({ spaceId, idb })
 }
 
 /**

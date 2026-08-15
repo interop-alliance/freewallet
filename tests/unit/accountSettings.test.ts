@@ -63,6 +63,12 @@ vi.mock('@/lib/sessionKey', () => ({
   }),
   deleteUserKeyEpochPin: vi.fn(async () => {
     state.calls.push('deleteUserKeyEpochPin')
+  }),
+  deleteBridgingAccountLogPin: vi.fn(async () => {
+    state.calls.push('deleteBridgingAccountLogPin')
+  }),
+  deleteAccountDidForSpace: vi.fn(async () => {
+    state.calls.push('deleteAccountDidForSpace')
   })
 }))
 
@@ -117,13 +123,17 @@ describe('deleteAccount', () => {
     })
     expect(result).toBe('deleted')
     // The local continuity pins go with the account: the keyring retirement
-    // drops the pointer pin, and the key-roster epoch pin is cleared beside it.
+    // drops the pointer pin, and the key-roster epoch pin plus the Space-keyed
+    // bookkeeping (the bridging account-log pin and the Space-to-DID mapping)
+    // are cleared beside it.
     expect(state.calls).toEqual([
       'verifyPassphrase',
       'wipeStorage',
       'deleteKeyring',
       'deletePasskeySafetyNotice',
-      'deleteUserKeyEpochPin'
+      'deleteUserKeyEpochPin',
+      'deleteBridgingAccountLogPin',
+      'deleteAccountDidForSpace'
     ])
   })
 

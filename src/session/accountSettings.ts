@@ -35,6 +35,8 @@ import {
 } from '@/session/unlockMethods'
 import {
   accountLogPinStore,
+  deleteAccountDidForSpace,
+  deleteBridgingAccountLogPin,
   deletePasskeySafetyNotice,
   deleteUserKeyEpochPin
 } from '@/lib/sessionKey'
@@ -581,6 +583,19 @@ export async function deleteAccount({
         await deleteUserKeyEpochPin({ accountDid })
       } catch (err) {
         console.warn('Could not delete the key-roster epoch pin:', err)
+      }
+    }
+    // The Space-keyed continuity bookkeeping of the same account: the bridging
+    // (pre-promotion) account-log pin and the local Space-to-DID mapping. Dead
+    // rows once the Space is wiped, and the mapping must not answer for a
+    // Space id a later account could reuse.
+    const spaceId = session.profile.accountPointer?.spaceId
+    if (spaceId) {
+      try {
+        await deleteBridgingAccountLogPin({ spaceId })
+        await deleteAccountDidForSpace({ spaceId })
+      } catch (err) {
+        console.warn('Could not delete the Space-keyed continuity state:', err)
       }
     }
   }

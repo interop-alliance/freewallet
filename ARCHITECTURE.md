@@ -115,7 +115,13 @@ moved off stays authentic forever. So each client keeps a **freshness pin**
 (plaintext local state, per unlock credential): the newest signed `createdAt`
 it has accepted. A record older than the pin is refused as a rollback
 (`KeyringRecordRolledBackError`); an equal or newer one is accepted and
-advances the pin, which only ever moves forward. Nothing compares pointers: a
+advances the pin, which only ever moves forward -- the pin write itself is a
+transactional forward-only compare-and-set, so no write site can move it
+backward. The stamps are wall-clock, made safe against clock skew by a floor:
+every record write site stamps `max(now, fetched record's createdAt + 1ms,
+local pin + 1ms)`, so a rebind after a fast-clock client's bind still
+supersedes it and cannot wedge other clients into the rollback refusal.
+Nothing compares pointers: a
 record naming an account this client has never seen is followed wherever it
 points, as long as it is validly signed and not stale -- a rebind, a host
 migration, and a fresh account bound under a reused passphrase are all
@@ -234,9 +240,15 @@ rollback or a fork against the pinned head is refused there too. The pins
 therefore travel with the account across a legitimate host or Space
 migration under one DID, where the migrated log must still extend the
 pinned head; a pointer naming a DIFFERENT DID stays the loud refusal it
-already is, and a new account (a new DID) gets a fresh slot. Nothing is
-keyed before promotion: all three pins only ever hold content once a
-did:webvh exists, so the pre-promotion window needs no pin story.
+already is, and a new account (a new DID) gets a fresh slot. The
+pre-promotion window -- a signup torn between log publication and the
+pointer backfill, healing on a later login whose pointer names no did:webvh
+yet -- is not left unpinned: the genesis ceremony's log read always carries
+a pin store. On true first contact it is a spaceId-keyed **bridging pin**,
+adopted into the DID-keyed slot (only when that slot is empty) the moment
+the log publishes; the published DID is also persisted locally keyed by the
+data Space id, so every later pre-promotion heal login runs under the
+DID-keyed pin with `expectedDid` even though the pointer has not caught up.
 
 **Controller promotion by ordering.** The Space id is an independent random
 identifier minted at signup (`mintSpaceId`) and carried in the account
@@ -494,6 +506,11 @@ The record carries no email and the locate step shows none: a self-declared
 display string was exactly the deception payload a forged record could show
 as "this is your wallet", and with the pointer code-authenticated the cue is
 unnecessary -- `/recover` confirms only that the code located an account.
+The locate step keeps the module's error discipline: a network failure from
+the account-log fetch rethrows unchanged and surfaces as "could not check",
+and an account-log continuity refusal is never relabeled as a forged record
+-- a `rollback` (possibly mere replication lag) reads as could-not-check,
+while a fork or identity switch surfaces as its own continuity refusal.
 
 Issuance (Settings > Recovery codes, `issueRecoveryCode` in
 `src/session/recovery.ts`) runs in the recovery-anchor order -- decryption

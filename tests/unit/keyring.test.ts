@@ -30,7 +30,8 @@ import { createEdvDocCipher } from '@interop/was-client/edv'
 import {
   loadClientKeyRecord,
   loadKeyringCache,
-  loadKeyringFreshnessPin
+  loadKeyringFreshnessPin,
+  saveKeyringFreshnessPin
 } from '@/lib/sessionKey'
 import {
   KEYRING_CACHE_TTL_MS,
@@ -940,6 +941,34 @@ describe('record freshness (the rollback pin)', () => {
     await expect(
       fetchKeyring({ passphrase: 'rebind passphrase', idb, kdf: KDF })
     ).rejects.toThrow(KeyringRecordRolledBackError)
+  })
+
+  it('binds above a pin set by a client with a faster clock', async () => {
+    // The skew lockout: another client bound with a clock running ahead, so
+    // this client's pin sits in the future. A rebind stamped with a bare
+    // `Date.now()` would be refused as a rollback by every client (including
+    // this one); flooring over the local pin keeps the rebind acceptable.
+    const idb = createFakeIdb()
+    const passphrase = 'clock skew passphrase'
+    const { spaceId } = await unlockFor(passphrase)
+    const future = new Date(Date.now() + 3_600_000).toISOString()
+    await saveKeyringFreshnessPin({ spaceId, createdAt: future, idb })
+
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase,
+      pointer: { ...POINTER, spaceId: 'rebound-space' },
+      idb,
+      kdf: KDF
+    })
+
+    const pinned = await loadKeyringFreshnessPin({ spaceId, idb })
+    expect(Date.parse(pinned!)).toBeGreaterThan(Date.parse(future))
+
+    // And the record the rebind wrote is accepted, not refused as a rollback.
+    const found = await fetchKeyring({ passphrase, idb, kdf: KDF })
+    expect(found!.pointer!.spaceId).toBe('rebound-space')
   })
 
   it('drops the pin on a remote miss (the continuity prior is stale)', async () => {

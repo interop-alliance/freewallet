@@ -291,6 +291,7 @@
         "revoked": "Este código de recuperación fue revocado o ya usado; ya no puede recuperar la cartera.",
         "unavailable": "Los códigos de recuperación requieren un servidor de almacenamiento y esta instalación no tiene ninguno configurado.",
         "couldNotCheck": "No se pudo contactar con el servidor de almacenamiento, así que el código no pudo comprobarse. Esto no significa que el código sea incorrecto: inténtalo de nuevo cuando vuelvas a estar en línea.",
+        "accountLogContinuity": "El servidor de almacenamiento devolvió una versión del historial de la cuenta que entra en conflicto con lo que este navegador ya verificó, por lo que la comprobación se detuvo por precaución. No se cambió nada y esto no significa que el código sea incorrecto. Si no esperabas esto, contacta con tu proveedor de almacenamiento.",
         "failed": "La recuperación falló. Inténtalo de nuevo.",
         "loginFailed": "La cartera se recuperó pero el inicio de sesión falló. Intenta iniciar sesión con tu nueva frase de contraseña desde la página de inicio."
       }

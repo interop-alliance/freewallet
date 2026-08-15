@@ -135,6 +135,7 @@ import {
   loadUserKeyEpochPin,
   savePinFromDescriptor
 } from '@/lib/sessionKey'
+import { isStorageUnreachable } from '@/lib/storageErrors'
 import { WASRemoteStore } from '@/stores/wasRemoteStore'
 
 // Re-exported for the pages, so the UI layer keeps one recovery import.
@@ -699,6 +700,19 @@ async function readRecoveryRecord({ code }: { code: string }) {
 }
 
 /**
+ * Whether the given error is the account-log chain-head continuity refusal
+ * (a rollback, a fork, or an SCID/method switch against the pinned head).
+ * Matched on `name`, never `instanceof`: the shared wallet-core package may
+ * be linked rather than resolved, so its class identity can be duplicated.
+ *
+ * @param err {unknown}
+ * @returns {boolean}
+ */
+function isResourceLogContinuityError(err: unknown): boolean {
+  return (err as Error | null)?.name === 'ResourceLogContinuityError'
+}
+
+/**
  * Settles a pending recovery-record proof: a record the code's own unlock key
  * did not sign is only acceptable when an enrolled client of the account the
  * code-authenticated pointer names signed it -- the pointer's binding was
@@ -706,6 +720,14 @@ async function readRecoveryRecord({ code }: { code: string }) {
  * fetched here belongs to the account the code was issued for, never to an
  * account a forging host substituted. A `'verified'` state passes through
  * untouched; anything the document's current signing keys cannot account for
+ * refuses with `RecoveryRecordForgedError`.
+ *
+ * A failure is classified before it is wrapped, so "could not check" never
+ * reads as "forged": an unreachable storage server (the account-log fetch)
+ * rethrows unchanged, and so does a `ResourceLogContinuityError` for every
+ * reason -- a `rollback` may be nothing worse than replication lag, and a
+ * fork or an SCID/method switch is a continuity refusal with its own
+ * surface. Neither is evidence that the RECORD was forged. Everything else
  * refuses with `RecoveryRecordForgedError`.
  *
  * @param options {object}
@@ -764,6 +786,18 @@ async function completeRecoveryRecordProof({
       label: 'recovery'
     })
   } catch (err) {
+    // Could-not-check, not forged: the account-log fetch may simply have
+    // failed to reach the storage server.
+    if (isStorageUnreachable(err)) {
+      throw err
+    }
+    // The account-log continuity refusal has its own surface (and a
+    // `rollback` may be only replication lag), so it is never restated as a
+    // forged record. Matched on `name` rather than `instanceof`: wallet-core
+    // may be linked rather than resolved, duplicating class identity.
+    if (isResourceLogContinuityError(err)) {
+      throw err
+    }
     throw new RecoveryRecordForgedError({ cause: err })
   }
 }
@@ -821,7 +855,9 @@ export interface RecoveryOutcome {
  * whose posture the log no longer commits throws
  * `RecoveryKeyNotCommittedError` (revoked while its record survived); a
  * network failure rethrows unchanged, so "could not check" never reads as
- * "no account".
+ * "no account"; and an account-log continuity refusal
+ * (`ResourceLogContinuityError`, any reason) rethrows unchanged too, so it
+ * never reads as a forged record.
  *
  * @param options {object}
  * @param options.code {string}   the typed recovery code

@@ -77,7 +77,14 @@ import {
   DescriptorRefreshPolicy,
   type EncryptionDescriptorCache
 } from '@interop/wallet-core/descriptors'
-import { accountLogPinStore, savePinFromDescriptor } from '@/lib/sessionKey'
+import {
+  accountLogPinStore,
+  adoptBridgingAccountLogPin,
+  bridgingAccountLogPinStore,
+  loadAccountDidForSpace,
+  saveAccountDidForSpace,
+  savePinFromDescriptor
+} from '@/lib/sessionKey'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import {
   createEdvDocCipher,
@@ -1888,6 +1895,17 @@ export class StorageManager {
         // signup has none yet, and wallet-core then falls back to the
         // keys.json webvh block.
         const pointerDid = profile.accountPointer?.did
+        // A signup torn between the log publication and the pointer backfill
+        // heals here at a later login whose pointer still names no did:webvh
+        // -- but the log WAS published in this browser, so the DID is known
+        // locally and both the pin and the expectation can still be keyed by
+        // it (see `saveAccountDidForSpace`).
+        const knownDid = isWebvhDid(pointerDid)
+          ? pointerDid
+          : ((await loadAccountDidForSpace({
+              spaceId: remoteStore.spaceId,
+              idb
+            })) ?? undefined)
         try {
           const result = await ensureAccountGenesis({
             was: remoteStore.was,
@@ -1899,27 +1917,48 @@ export class StorageManager {
             updateKeys: profile.clientWebvhKeys,
             idStore: remoteStore.webvhIdStore(),
             provideDidWebKeys,
-            ...(isWebvhDid(pointerDid) ? { expectedDid: pointerDid } : {}),
+            ...(knownDid ? { expectedDid: knownDid } : {}),
             // The provisioning read runs under the same chain-head pin the
-            // login-time account-log reads use, so a truncated or
-            // substituted log is refused before any entry is built on it.
-            // The pin is keyed by the account DID, so a first signup -- whose
-            // pointer names none yet -- carries none: there is no published
-            // log for it to be a continuity prior over, and the genesis this
-            // run publishes is pinned by the reads that follow it.
-            ...(isWebvhDid(pointerDid)
-              ? {
-                  accountLogPinStore: accountLogPinStore({
-                    accountDid: pointerDid,
-                    idb
-                  })
-                }
-              : {}),
+            // login-time account-log reads use, so a truncated or substituted
+            // log is refused before any entry is built on it. Every run
+            // carries one, keyed three ways: by the pointer's DID when the
+            // account is promoted, by the DID this browser saw the log
+            // publish as when the pointer backfill never landed, and -- at
+            // true first contact, where no DID exists anywhere yet -- by the
+            // data Space id, a bridging slot the publication then adopts into
+            // the DID-keyed one.
+            accountLogPinStore: knownDid
+              ? accountLogPinStore({ accountDid: knownDid, idb })
+              : bridgingAccountLogPinStore({
+                  spaceId: remoteStore.spaceId,
+                  idb
+                }),
             onDidPublished: async ({ did }) => {
               profile.didWebvh = { did }
               // Provisioning publishes (or extends) the log, so any memo of
               // an earlier verification is dropped.
               invalidateVerifiedLog({ profile })
+              // The DID is known from here on: record it against the Space so
+              // a later pre-promotion heal keys the DID-keyed pin, and move
+              // the bridging pin into that slot. Best-effort -- local
+              // continuity bookkeeping must not fail provisioning.
+              try {
+                await saveAccountDidForSpace({
+                  spaceId: remoteStore.spaceId,
+                  accountDid: did,
+                  idb
+                })
+                await adoptBridgingAccountLogPin({
+                  spaceId: remoteStore.spaceId,
+                  accountDid: did,
+                  idb
+                })
+              } catch (err) {
+                console.warn(
+                  'Could not adopt the bridging account-log pin:',
+                  err
+                )
+              }
             },
             rosterStoreFor: ({ did }) =>
               accountRosterStore({

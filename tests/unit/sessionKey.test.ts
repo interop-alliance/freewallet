@@ -8,7 +8,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   accountLogPinStore,
+  adoptBridgingAccountLogPin,
+  bridgingAccountLogPinStore,
+  deleteAccountDidForSpace,
   deleteKeyringCache,
+  loadAccountDidForSpace,
+  loadKeyringFreshnessPin,
+  saveAccountDidForSpace,
+  saveKeyringFreshnessPin,
   deletePasskeySafetyNotice,
   loadKeyringCache,
   loadPasskeySafetyNotice,
@@ -312,6 +319,118 @@ describe('continuity pins keyed by the account DID', () => {
     await accountLogPinStore({ accountDid, idb }).write(HEAD)
     await expect(
       userKeyLogPinStore({ accountDid, idb }).read()
+    ).resolves.toBeNull()
+  })
+})
+
+describe('keyring-freshness pin', () => {
+  const SPACE_ID = 'unlock-space-a'
+  const OLDER = '2026-08-01T00:00:00.000Z'
+  const NEWER = '2026-08-02T00:00:00.000Z'
+
+  it('advances the pin on a newer write', async () => {
+    const idb = createFakeIdb()
+    await saveKeyringFreshnessPin({ spaceId: SPACE_ID, createdAt: OLDER, idb })
+    await saveKeyringFreshnessPin({ spaceId: SPACE_ID, createdAt: NEWER, idb })
+    await expect(
+      loadKeyringFreshnessPin({ spaceId: SPACE_ID, idb })
+    ).resolves.toBe(NEWER)
+  })
+
+  it('refuses to move the pin backward', async () => {
+    const idb = createFakeIdb()
+    await saveKeyringFreshnessPin({ spaceId: SPACE_ID, createdAt: NEWER, idb })
+    await saveKeyringFreshnessPin({ spaceId: SPACE_ID, createdAt: OLDER, idb })
+    await expect(
+      loadKeyringFreshnessPin({ spaceId: SPACE_ID, idb })
+    ).resolves.toBe(NEWER)
+  })
+
+  it('restates an equal pin harmlessly', async () => {
+    const idb = createFakeIdb()
+    await saveKeyringFreshnessPin({ spaceId: SPACE_ID, createdAt: NEWER, idb })
+    await saveKeyringFreshnessPin({ spaceId: SPACE_ID, createdAt: NEWER, idb })
+    await expect(
+      loadKeyringFreshnessPin({ spaceId: SPACE_ID, idb })
+    ).resolves.toBe(NEWER)
+  })
+})
+
+describe('the bridging (pre-promotion) account-log pin', () => {
+  const SPACE_ID = 'space-a'
+  const ACCOUNT_DID = 'did:webvh:QmScidA:example.com:space-a'
+  const HEAD = {
+    method: 'did:webvh:1.0',
+    scid: 'QmScidA',
+    head: 'entry-hash-1'
+  }
+  const LATER_HEAD = {
+    method: 'did:webvh:1.0',
+    scid: 'QmScidA',
+    head: 'entry-hash-9'
+  }
+
+  it('round-trips a pin under the Space id', async () => {
+    const idb = createFakeIdb()
+    await bridgingAccountLogPinStore({ spaceId: SPACE_ID, idb }).write(HEAD)
+    await expect(
+      bridgingAccountLogPinStore({ spaceId: SPACE_ID, idb }).read()
+    ).resolves.toEqual(HEAD)
+    // Distinct from the DID-keyed slot the publication adopts it into.
+    await expect(
+      accountLogPinStore({ accountDid: ACCOUNT_DID, idb }).read()
+    ).resolves.toBeNull()
+  })
+
+  it('adopts into an empty DID-keyed slot and drops the bridging row', async () => {
+    const idb = createFakeIdb()
+    await bridgingAccountLogPinStore({ spaceId: SPACE_ID, idb }).write(HEAD)
+    await adoptBridgingAccountLogPin({
+      spaceId: SPACE_ID,
+      accountDid: ACCOUNT_DID,
+      idb
+    })
+    await expect(
+      accountLogPinStore({ accountDid: ACCOUNT_DID, idb }).read()
+    ).resolves.toEqual(HEAD)
+    await expect(
+      bridgingAccountLogPinStore({ spaceId: SPACE_ID, idb }).read()
+    ).resolves.toBeNull()
+  })
+
+  it('leaves a non-empty DID-keyed slot untouched, still dropping the row', async () => {
+    const idb = createFakeIdb()
+    await accountLogPinStore({ accountDid: ACCOUNT_DID, idb }).write(LATER_HEAD)
+    await bridgingAccountLogPinStore({ spaceId: SPACE_ID, idb }).write(HEAD)
+    await adoptBridgingAccountLogPin({
+      spaceId: SPACE_ID,
+      accountDid: ACCOUNT_DID,
+      idb
+    })
+    await expect(
+      accountLogPinStore({ accountDid: ACCOUNT_DID, idb }).read()
+    ).resolves.toEqual(LATER_HEAD)
+    await expect(
+      bridgingAccountLogPinStore({ spaceId: SPACE_ID, idb }).read()
+    ).resolves.toBeNull()
+  })
+
+  it('round-trips the Space-to-account-DID mapping', async () => {
+    const idb = createFakeIdb()
+    await expect(
+      loadAccountDidForSpace({ spaceId: SPACE_ID, idb })
+    ).resolves.toBeNull()
+    await saveAccountDidForSpace({
+      spaceId: SPACE_ID,
+      accountDid: ACCOUNT_DID,
+      idb
+    })
+    await expect(
+      loadAccountDidForSpace({ spaceId: SPACE_ID, idb })
+    ).resolves.toBe(ACCOUNT_DID)
+    await deleteAccountDidForSpace({ spaceId: SPACE_ID, idb })
+    await expect(
+      loadAccountDidForSpace({ spaceId: SPACE_ID, idb })
     ).resolves.toBeNull()
   })
 })
