@@ -162,7 +162,13 @@ Its document is the enrolled-client roster: each enrolled wallet client
 contributes its Ed25519 verification method (published under
 `authentication`, `assertionMethod`, `capabilityInvocation`, AND
 `capabilityDelegation`) and its X25519 twin under `keyAgreement` -- ids are
-`<did:webvh>#<multibase>` with `controller: <did:webvh>`. One KMS-held VM
+`<did:webvh>#<multibase>`. The signing method carries
+`controller: <did:webvh>`; the key-agreement method carries
+`controller: did:key:<the client's signing multibase>`, a marker that says
+which client the key belongs to. Every reader pairs a client with its
+key-agreement key by that marker -- the client listing, the revocation
+removal, and the roster's recipient resolver alike -- so nothing re-derives
+a twin to find it. One KMS-held VM
 (`authentication`) remains as a server-side convenience; the KMS-held
 `keyAgreement` VM is deliberately NOT in the document -- the `keyAgreement`
 relation is the source of record for user-key wrap recipients, and no
@@ -371,8 +377,9 @@ roster that rolls back behind the pin is refused
 (`UserKeyRosterContinuityError`), and it is kept beside the chain-head pin
 because it still guards a client whose chain-head pin was lost with a
 reinstall. Third, at rotation time, a recipient resolver backed by the locally
-verified did:webvh document -- a roster entry with no matching `keyAgreement`
-verification method is dropped and never receives a wrap, so a server-injected
+verified did:webvh document -- a roster entry with no `keyAgreement`
+verification method marked for that client is dropped and never receives a
+wrap, so a server-injected
 entry sits ignored (wraps are minted only by enrolled clients, against
 log-verified keys).
 
@@ -415,6 +422,18 @@ The flow, quorum-of-one (any single enrolled client can enroll):
    under the passphrase's unlock layer (stamping the account controller, so
    the login-time identity check binds the record to the account), and logs
    in as an ordinary enrolled client.
+
+**The connect code's keys must be canonical.** The enrolling client refuses a
+code whose key-agreement key is not the canonical X25519 twin of its signing
+key (`assertCanonicalEnrollmentKeys`, run inside the connect-code parse, so
+the refusal lands before anything is published). That is what keeps the
+document's controller marker honest: a client's key-agreement method is
+published under `controller: did:key:<its signing multibase>`, a claim every
+reader trusts to pair the two, and without the check an enrollee could
+publish a key-agreement key nobody else can pair with its signing key. The
+refusal reaches both approval surfaces -- the paste dialog shows it under the
+code field, and a scanned onboarding response ends the invite with the
+generate-a-fresh-code copy.
 
 Every stage is idempotent and the ceremony is resumable from durable state
 alone -- re-running with the same code converges: a tear after the roster
@@ -576,7 +595,8 @@ client, synchronously, in dependency order:
 
 1. **The document edit** (`revokeWebvhClient` in
    `@interop/wallet-core/webvh`): the revoked client's two verification
-   methods, its update key, and both its standing `nextKeyHashes`
+   methods (the key-agreement one found by its controller marker, never
+   re-derived), its update key, and both its standing `nextKeyHashes`
    commitments (the carry-over hash and the staged hash -- the latter
    recovered by log attribution, since leaving an opaque committed hash
    behind would be a re-seizure credential via the reveal mechanism) leave
@@ -692,7 +712,8 @@ the client's verification methods revealed its initial key, and each entry
 retiring the attributed key while revealing exactly one replacement is that
 client's self-rotation -- an ambiguous attribution disables disconnect for
 the row rather than guessing) and its enrollment moment (`versionTime` of
-the publishing entry). A listed row with all three key members is exactly a
+the publishing entry). A listed row with both key members -- its signing key
+and its active update key -- is exactly a
 `RevokedClientKeys` (`revokedClientKeysFor`), so Disconnect drives the
 client-revocation epoch cascade verbatim. Which rows can be disconnected at
 all is the shared `disconnectEligibility` policy (self, last-wallet, and

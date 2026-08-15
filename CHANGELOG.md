@@ -4,6 +4,11 @@
 
 ### Changed
 
+- Enrollment now refuses a connect code whose key-agreement key is not the
+  canonical X25519 twin of its signing key, before anything is published.
+  The refusal is surfaced on both approval surfaces: its own copy under the
+  paste dialog's code field, and the generate-a-fresh-code state on the QR
+  onboarding flow.
 - The revocation cascade's roster appends now anchor at the post-edit
   document head through the shared orchestrator's controller floor, set from
   the document edit's own post-edit log, instead of relying on the session's

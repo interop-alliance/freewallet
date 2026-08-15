@@ -70,6 +70,7 @@
     "enrollConfirmMessage": "En el navegador nuevo, introduzca su frase de contraseña en la página de inicio de sesión y elija \"Conectar este navegador\". Pegue aquí el código de conexión que muestra.",
     "enrollCodeLabel": "Código de conexión",
     "enrollCodeInvalid": "Este no es un código de conexión válido.",
+    "enrollCodeNotCanonical": "La clave de acuerdo de claves de este código de conexión no corresponde a su clave de firma, así que esta billetera no se puede conectar. Genere un código de conexión nuevo en la otra billetera e inténtelo de nuevo.",
     "enrollFingerprint": "Clave del cliente nuevo: {{did}}. Compárela con la huella mostrada en el navegador nuevo antes de aprobar.",
     "enrollConfirmAction": "Aprobar",
     "enrollSuccess": "El navegador nuevo quedó inscrito. Termine de conectar en ese navegador.",

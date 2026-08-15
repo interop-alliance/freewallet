@@ -70,6 +70,7 @@
     "enrollConfirmMessage": "On the new browser, enter your passphrase on the login page and choose \"Connect this browser\". Paste the connect code it shows here.",
     "enrollCodeLabel": "Connect code",
     "enrollCodeInvalid": "This is not a valid connect code.",
+    "enrollCodeNotCanonical": "This connect code's key-agreement key does not match its signing key, so this wallet cannot be connected. Generate a fresh connect code on the other wallet and try again.",
     "enrollFingerprint": "New client key: {{did}}. Compare it with the fingerprint shown on the new browser before approving.",
     "enrollConfirmAction": "Approve",
     "enrollSuccess": "The new browser was enrolled. Finish connecting on that browser.",

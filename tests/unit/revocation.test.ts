@@ -100,7 +100,6 @@ const POINTER = {
 
 const REVOKED: RevokedClientKeys = {
   signingKeyMultibase: 'z6MkRevokedClient',
-  keyAgreementKeyMultibase: 'z6LSRevokedClient',
   updateKeyMultibase: 'z6MkRevokedUpdate'
 }
 
@@ -113,7 +112,7 @@ const FRESH_USER_KEY = {
   secret: new Uint8Array(32).fill(2)
 }
 const ROSTER_DESCRIPTOR = { epochs: [{ id: FRESH_USER_KEY.id }] }
-const DOCUMENT = { id: 'did:webvh:doc' }
+const DOCUMENT = { id: 'did:webvh:doc', verificationMethod: [] }
 
 /**
  * A stand-in for the shared orchestrator that drives its callbacks in the

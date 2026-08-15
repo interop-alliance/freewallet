@@ -143,7 +143,9 @@ export function OnboardInviteCard({
         }
         // A malformed envelope has one remedy -- a fresh code -- so it ends
         // the invite in its own phase rather than half-rendering a consent
-        // screen.
+        // screen. The parse also decodes the connect code inside, so a code
+        // whose key-agreement key is not the canonical X25519 twin of its
+        // signing key is refused here, with the same remedy.
         try {
           const parsed = parseOnboardingResponse({ body: response })
           setConsent({ request: parsed.request, label: parsed.label })

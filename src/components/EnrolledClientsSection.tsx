@@ -50,6 +50,20 @@ import { OnboardInviteCard } from '@/components/OnboardInviteCard'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { showToast } from '@/stores/toastStore'
 
+/**
+ * Whether a connect-code parse failure is the canonicality refusal -- a code
+ * whose key-agreement key is not the canonical X25519 twin of its signing
+ * key. wallet-core throws a plain `Error` for it, so the message is the only
+ * handle; anything else falls back to the generic invalid-code copy.
+ *
+ * @param options {object}
+ * @param options.err {unknown}   the error `parseEnrollmentRequest` threw
+ * @returns {boolean}
+ */
+function isCanonicalKeyRefusal({ err }: { err: unknown }): boolean {
+  return /canonical X25519 twin/i.test((err as Error)?.message ?? '')
+}
+
 export function EnrolledClientsSection({ session }: { session: Session }) {
   const { t, i18n } = useTranslation()
   const canManage = canManageAccountClients({ session })
@@ -72,6 +86,11 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
   // they are two ways into the same ceremony, never one state machine.
   const [enrollCode, setEnrollCode] = useState('')
   const [enrollRequest, setEnrollRequest] = useState<EnrollmentRequest | null>(
+    null
+  )
+  // Which refusal the pasted code met, as an i18n key -- `null` while the
+  // code is empty or parses.
+  const [enrollCodeErrorKey, setEnrollCodeErrorKey] = useState<string | null>(
     null
   )
   const [enrollLabel, setEnrollLabel] = useState('')
@@ -196,18 +215,31 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
    * Tracks the pasted connect code, parsing it eagerly so the dialog can show
    * the new client's key fingerprint (for the on-screen comparison) before
    * anything is approved.
+   *
+   * A code whose key-agreement key is not the canonical X25519 twin of its
+   * signing key is refused by the parse itself, before anything is published,
+   * and gets its own copy: nothing about it can be fixed by re-typing, so
+   * "not a valid connect code" would send the person looking in the wrong
+   * place.
    */
   const handleEnrollCodeChange = (code: string) => {
     setEnrollCode(code)
     setEnrollError(false)
     if (!code.trim()) {
       setEnrollRequest(null)
+      setEnrollCodeErrorKey(null)
       return
     }
     try {
       setEnrollRequest(parseEnrollmentRequest({ code }))
-    } catch {
+      setEnrollCodeErrorKey(null)
+    } catch (err) {
       setEnrollRequest(null)
+      setEnrollCodeErrorKey(
+        isCanonicalKeyRefusal({ err })
+          ? 'settings.enrollCodeNotCanonical'
+          : 'settings.enrollCodeInvalid'
+      )
     }
   }
 
@@ -233,6 +265,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       setConnectCardOpen(false)
       setEnrollCode('')
       setEnrollRequest(null)
+      setEnrollCodeErrorKey(null)
       await loadClients()
     } catch (err) {
       console.error('Enrolling the new wallet client failed:', err)
@@ -407,6 +440,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
               setEnrollError(false)
               setEnrollCode('')
               setEnrollRequest(null)
+              setEnrollCodeErrorKey(null)
               setEnrollLabel(
                 t('settings.clients.defaultLabel', {
                   number: (clients?.length ?? 1) + 1
@@ -445,11 +479,9 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
                 label={t('settings.enrollCodeLabel')}
                 value={enrollCode}
                 onChange={event => handleEnrollCodeChange(event.target.value)}
-                error={enrollCode.trim().length > 0 && !enrollRequest}
+                error={Boolean(enrollCodeErrorKey)}
                 helperText={
-                  enrollCode.trim().length > 0 && !enrollRequest
-                    ? t('settings.enrollCodeInvalid')
-                    : undefined
+                  enrollCodeErrorKey ? t(enrollCodeErrorKey) : undefined
                 }
                 slotProps={{
                   htmlInput: { 'data-testid': 'enroll-code-input' }
