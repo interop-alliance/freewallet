@@ -47,6 +47,7 @@ import {
   type PasskeyRegistration
 } from '@/lib/passkey'
 import { bindUnlockSecret, deleteUnlockMethod } from '@/session/keyring'
+import { zcapExpiring } from '@interop/wallet-core/recovery'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
 import {
@@ -92,7 +93,9 @@ export interface PassphraseUnlockMethod {
  * unwraps. The backup flags are captured at registration so a future UI can
  * warn about device-bound (not synced) passkeys. `manageCapability` -- when
  * present -- is the management zcap that allows tap-free revocation of this
- * passkey (deletion of its unlock Space) with the session's root key.
+ * passkey (deletion of its unlock Space) with the session's root key; it
+ * lives one year, refreshed near expiry by a login with this passkey (the
+ * backfill's passkey branch).
  */
 export interface PasskeyUnlockMethod {
   type: 'passkey'
@@ -116,7 +119,10 @@ export interface PasskeyUnlockMethod {
  * `delegationKeyId` (the verification method that signed the record's
  * `did.jsonl` delegation -- what the login-time health check tests against
  * the current document, since a delegation signed by a since-removed client
- * stops verifying under the current-key-set rule). Public halves only; the
+ * stops verifying under the current-key-set rule), and `delegationExpires`
+ * (the delegation's ISO 8601 expiry -- the health check flags one expired
+ * or inside the renewal window, since the one-year TTL now lapses within a
+ * code's expected lifetime). Public halves only; the
  * code itself is never stored anywhere.
  *
  * The last three members are what let the revocation cascade RE-MINT a
@@ -125,7 +131,10 @@ export interface PasskeyUnlockMethod {
  * pair identifies the public key the re-wrapped record is encrypted to (the
  * record carries no secrets, so re-encryption needs none). Entries issued
  * before these fields exist fall back to the health check's regenerate
- * nudge.
+ * nudge. The entry's `manageCapability` is the one zcap here with no refresh
+ * path: only the code's own unlock identity can re-delegate it, so it runs
+ * out on the same annual clock as the `did.jsonl` delegation, whose expiry
+ * nudge drives regeneration of both.
  */
 export interface RecoveryCodeUnlockMethod {
   type: 'recovery-code'
@@ -137,6 +146,7 @@ export interface RecoveryCodeUnlockMethod {
   keyAgreementKeyMultibase: string
   updateKeyMultibase: string
   delegationKeyId?: string
+  delegationExpires?: string
   recoveryClientDid?: string
   unlockKeyAgreementKeyId?: string
   unlockKeyAgreementKeyMultibase?: string
@@ -702,9 +712,12 @@ export function upsertPassphraseUnlockMethod({
  * passphrase login (`profile.unlockMethod.type === 'passphrase'`) with the
  * vault unlocked, it records (or corrects) the passphrase entry's unlock Space
  * and management zcap -- created at first passphrase login, updated after a
- * passphrase change made elsewhere, and completed once the profile carries a
- * management capability the stored entry lacks. Any other session (a passkey
- * login) writes nothing -- but still returns the existing
+ * passphrase change made elsewhere, completed once the profile carries a
+ * management capability the stored entry lacks, and refreshed when the stored
+ * one is expired or inside the renewal window (every login mints a fresh
+ * one-year delegation). A passkey session performs the same expiry refresh on
+ * its own passkey entry (matched on unlock Space) and otherwise writes
+ * nothing -- but still returns the existing
  * registry when it can be read, so callers (the Settings passkeys section)
  * can use this as their load-plus-backfill entry point for any session.
  *
@@ -738,10 +751,42 @@ export async function backfillPassphraseUnlockMethod({
   }
 
   let record = await getUnlockMethods({ session, idb })
-  // Only a passphrase full session can backfill; any other session (a passkey
-  // login) just reports the registry as it stands -- never null when one
-  // exists, so a Settings load through this function cannot mistake an
-  // account with passkeys for one with no registry.
+  // A passkey full session refreshes only its own entry's management zcap
+  // (matched on unlock Space): the login minted a fresh delegation, and the
+  // stored copy goes stale at the one-year TTL. It never creates entries.
+  if (unlockMethod?.type === 'passkey') {
+    if (!record || !unlockMethod.manageCapability) {
+      return record
+    }
+    const stored = record.methods.find(
+      (method): method is PasskeyUnlockMethod =>
+        method.type === 'passkey' &&
+        method.unlockSpaceId === unlockMethod.unlockSpaceId
+    )
+    const stale =
+      !!stored &&
+      (!stored.manageCapability ||
+        zcapExpiring({
+          expires: (stored.manageCapability as { expires?: string }).expires
+        }))
+    if (!stale) {
+      return record
+    }
+    const nextRecord = {
+      ...record,
+      methods: record.methods.map(method =>
+        method === stored
+          ? { ...stored, manageCapability: unlockMethod.manageCapability }
+          : method
+      )
+    }
+    await putUnlockMethods({ session, record: nextRecord, idb })
+    return nextRecord
+  }
+  // Only a passphrase full session can backfill; any other session just
+  // reports the registry as it stands -- never null when one exists, so a
+  // Settings load through this function cannot mistake an account with
+  // passkeys for one with no registry.
   if (unlockMethod?.type !== 'passphrase') {
     return record
   }
@@ -759,11 +804,17 @@ export async function backfillPassphraseUnlockMethod({
 
   // Write only when the stored entry is missing, points at a stale unlock Space
   // (a passphrase change happened elsewhere), or lacks a management capability
-  // the profile now carries.
+  // the profile now carries -- or holds one that is expired or inside the
+  // renewal window (the login minted a fresh one-year delegation to replace
+  // it with).
   const changed =
     !existing ||
     existing.unlockSpaceId !== unlockSpaceId ||
-    (!!manageCapability && !existing.manageCapability)
+    (!!manageCapability &&
+      (!existing.manageCapability ||
+        zcapExpiring({
+          expires: (existing.manageCapability as { expires?: string }).expires
+        })))
   if (!changed) {
     return record
   }

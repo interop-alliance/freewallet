@@ -18,6 +18,21 @@
 - A collection descriptor whose current epoch is missing from its own epoch
   list is now refused fail-closed during the user key cascade and reported
   per collection, instead of being evaluated against the last epoch.
+- The recovery delegation's lifetime drops from ten years to one year
+  (NIST SP 800-57 cryptoperiod guidance), with a 30-day renewal window.
+  Registry entries record the delegation's expiry (`delegationExpires`,
+  stamped at issuance and re-mint), and the login-time recovery health
+  check flags an expired or expiring delegation the same way it flags rot
+  (wallet-core 0.42.0's shared `zcapExpiring` predicate; the revocation
+  cascade's re-mint refreshes such delegations automatically).
+- The unlock-Space management zcap's lifetime (`UNLOCK_MANAGE_ZCAP_TTL_MS`)
+  drops from ten years to one year under the same policy. Every passphrase
+  or passkey login already mints a fresh delegation; the registry backfill
+  now replaces a stored copy that is expired or inside the renewal window,
+  for the passphrase entry and for a passkey login's own entry. A recovery
+  code's management zcap cannot be re-delegated without the code and runs
+  out on the same annual clock as its `did.jsonl` delegation, whose expiry
+  nudge drives regeneration of both.
 
 - The recovery-delegation builder and the revocation cascade's delegation
   re-mint core moved to `@interop/wallet-core/recovery`

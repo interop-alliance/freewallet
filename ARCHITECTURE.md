@@ -567,10 +567,15 @@ cascade, unlock Space deleted, registry entry dropped; the live session
 adopts the rotated user key in place. A login-time health check watches for
 **delegation rot** -- the stored delegation stops chaining the moment its
 signing client's verification method leaves the document (current-key-set
-rule), which would brick recovery exactly when it is needed -- and nudges
-regeneration; a client revocation re-mints the affected delegations itself
-as part of its cascade. The re-mint core (the rot check, the skip policy,
-the binding-carried-forward re-wrap) and the delegation builder live in
+rule), which would brick recovery exactly when it is needed -- and for
+**delegation expiry**: the delegation's TTL is one year (NIST SP 800-57
+cryptoperiod guidance), so the registry entry records its `expires` and a
+delegation expired or inside the 30-day renewal window is flagged the same
+way. The check nudges regeneration; a client revocation re-mints the
+affected delegations itself as part of its cascade, and the same expiry
+predicate makes it refresh a near-lapse delegation too. The re-mint core
+(the staleness checks, the skip policy, the binding-carried-forward
+re-wrap) and the delegation builder live in
 `@interop/wallet-core/recovery`; `src/session/recovery.ts` binds them to
 the session's signers, the storage URL, and the unlock-methods registry.
 

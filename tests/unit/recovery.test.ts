@@ -204,7 +204,10 @@ function entryFor({
     unlockSpaceId: 'unlock-space-test',
     recoveryKid: client.recipientKid,
     keyAgreementKeyMultibase: client.keyAgreementKeyMultibase,
-    updateKeyMultibase: client.updateKeyMultibase
+    updateKeyMultibase: client.updateKeyMultibase,
+    delegationExpires: new Date(
+      Date.now() + 365 * 24 * 60 * 60 * 1000
+    ).toISOString()
   }
 }
 
@@ -500,6 +503,24 @@ describe('checkRecoveryHealth and the current-key-set rule', () => {
     })
     expect(flags).toHaveLength(1)
     expect(flags[0]?.delegationRotted).toBe(true)
+    expect(flags[0]?.delegationExpiring).toBe(false)
+    expect(flags[0]?.postureMissing).toBe(false)
+  })
+
+  it('flags an entry whose delegation is inside the renewal window', async () => {
+    const entry = {
+      ...(await standingEntry({
+        delegationKeyId: `${POINTER.did}#${SIGNING_KEY}`
+      })),
+      delegationExpires: new Date(Date.now() + 1000).toISOString()
+    }
+    const flags = await checkRecoveryHealth({
+      session: healthSession(),
+      entries: [entry]
+    })
+    expect(flags).toHaveLength(1)
+    expect(flags[0]?.delegationRotted).toBe(false)
+    expect(flags[0]?.delegationExpiring).toBe(true)
     expect(flags[0]?.postureMissing).toBe(false)
   })
 

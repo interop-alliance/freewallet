@@ -224,6 +224,24 @@ const FAKE_CAP = {
 } as unknown as IZcap
 
 /**
+ * A stand-in management zcap expiring the given interval from now, for the
+ * backfill's expiry-refresh cases.
+ *
+ * @param options {object}
+ * @param options.msFromNow {number}
+ * @returns {IZcap}
+ */
+function capExpiringIn({ msFromNow }: { msFromNow: number }): IZcap {
+  return {
+    id: `urn:zcap:test-management-${msFromNow}`,
+    invocationTarget: 'https://was.example.test/space/unlock-space-abc',
+    expires: new Date(Date.now() + msFromNow).toISOString()
+  } as unknown as IZcap
+}
+
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
+
+/**
  * A passkey registry entry, optionally carrying a management capability.
  *
  * @param [options] {object}
@@ -633,6 +651,131 @@ describe('backfillPassphraseUnlockMethod', () => {
     )
     expect(entry!.unlockSpaceId).toBe('new-ps-space')
     expect(entry!.createdAt).toBe('2026-01-01T00:00:00.000Z')
+  })
+
+  it('refreshes the passphrase entry when its management zcap nears expiry', async () => {
+    const idb = createFakeIdb()
+    const fresh = capExpiringIn({ msFromNow: ONE_YEAR_MS })
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'ps-space',
+      manageCapability: fresh
+    })
+    const existing: PassphraseUnlockMethod = {
+      type: 'passphrase',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      unlockSpaceId: 'ps-space',
+      manageCapability: capExpiringIn({ msFromNow: 1000 })
+    }
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [existing]
+      },
+      idb
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const entry = result!.methods.find(
+      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+    )
+    expect(entry!.manageCapability).toEqual(fresh)
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+  })
+
+  it('leaves a passphrase entry with a fresh management zcap alone', async () => {
+    const idb = createFakeIdb()
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'ps-space',
+      manageCapability: capExpiringIn({ msFromNow: ONE_YEAR_MS })
+    })
+    const stored = capExpiringIn({ msFromNow: ONE_YEAR_MS / 2 })
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            unlockSpaceId: 'ps-space',
+            manageCapability: stored
+          }
+        ]
+      },
+      idb
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const entry = result!.methods.find(
+      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+    )
+    expect(entry!.manageCapability).toEqual(stored)
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+  })
+
+  it('a passkey session refreshes its own expiring management zcap', async () => {
+    const idb = createFakeIdb()
+    const fresh = capExpiringIn({ msFromNow: ONE_YEAR_MS })
+    const session = await makeSession()
+    session.profile.unlockMethod = {
+      type: 'passkey',
+      unlockSpaceId: 'unlock-space-abc',
+      manageCapability: fresh
+    }
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          passkeyEntry({
+            manageCapability: capExpiringIn({ msFromNow: 1000 })
+          })
+        ]
+      },
+      idb
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const entry = result!.methods.find(
+      (method): method is PasskeyUnlockMethod => method.type === 'passkey'
+    )
+    expect(entry!.manageCapability).toEqual(fresh)
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+  })
+
+  it('a passkey session with a fresh stored zcap writes nothing', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession()
+    session.profile.unlockMethod = {
+      type: 'passkey',
+      unlockSpaceId: 'unlock-space-abc',
+      manageCapability: capExpiringIn({ msFromNow: ONE_YEAR_MS })
+    }
+    const stored = capExpiringIn({ msFromNow: ONE_YEAR_MS / 2 })
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [passkeyEntry({ manageCapability: stored })]
+      },
+      idb
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const entry = result!.methods.find(
+      (method): method is PasskeyUnlockMethod => method.type === 'passkey'
+    )
+    expect(entry!.manageCapability).toEqual(stored)
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
   })
 
   it('is idempotent: a second call writes nothing', async () => {

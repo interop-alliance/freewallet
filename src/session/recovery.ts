@@ -28,12 +28,14 @@
  *   rotated off the code's wrap, the same collection cascade, unlock Space
  *   deleted, registry entry dropped, and the live session adopting the
  *   rotated key in place.
- * - `checkRecoveryHealth` -- the login-time delegation-rot check: a stored
- *   delegation chains only while its signing client's verification method is
- *   in the current document, and a rotted delegation bricks recovery exactly
- *   when it is needed. Client revocation re-mints rotted delegations
- *   automatically (`remintRecoveryDelegations`); the check remains the
- *   backstop for entries that predate the re-mint fields.
+ * - `checkRecoveryHealth` -- the login-time delegation staleness check: a
+ *   stored delegation chains only while its signing client's verification
+ *   method is in the current document (rot), lapses at its one-year expiry,
+ *   and either way bricks recovery exactly when it is needed. Client
+ *   revocation re-mints stale delegations automatically
+ *   (`remintRecoveryDelegations`); the check remains the backstop for
+ *   entries that predate the re-mint fields and for expiry between
+ *   revocations.
  */
 import { WasClient } from '@interop/was-client'
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
@@ -88,6 +90,7 @@ import {
   removeRecoveryKey,
   unwrapRecoveryRecord,
   wrapRecoveryRecord,
+  zcapExpiring,
   type RecoveryClient,
   type RecoveryLogStore,
   type RecoveryRecordProofState
@@ -288,6 +291,7 @@ function recoveryRegistryEntry({
   unlockKeyAgreementKeyMultibase?: string
 }): RecoveryCodeUnlockMethod {
   const delegationKeyId = delegationProofKeyId(delegation)
+  const delegationExpires = (delegation as { expires?: string }).expires
   return {
     type: 'recovery-code',
     label,
@@ -299,6 +303,7 @@ function recoveryRegistryEntry({
     updateKeyMultibase: client.updateKeyMultibase,
     recoveryClientDid: client.clientDid,
     ...(delegationKeyId ? { delegationKeyId } : {}),
+    ...(delegationExpires ? { delegationExpires } : {}),
     ...(unlockKeyAgreementKeyId ? { unlockKeyAgreementKeyId } : {}),
     ...(unlockKeyAgreementKeyMultibase
       ? { unlockKeyAgreementKeyMultibase }
@@ -1343,6 +1348,7 @@ export async function remintRecoveryDelegations({
 export interface RecoveryHealthFlag {
   entry: RecoveryCodeUnlockMethod
   delegationRotted: boolean
+  delegationExpiring: boolean
   postureMissing: boolean
 }
 
@@ -1350,15 +1356,18 @@ export interface RecoveryHealthFlag {
  * The login-time recovery health check: for each recovery-code
  * registry entry, tests that the stored delegation still chains against the
  * current document (its signing client's verification method is still
- * listed -- the current-key-set rule) and that the code's posture (its
- * `keyAgreement` VM and committed update-key hash) still stands. A rotted
- * delegation bricks recovery exactly when it is needed. The revocation
- * cascade re-mints rotted delegations automatically
- * (`remintRecoveryDelegations`); this check is the backstop for entries that
- * predate the re-mint fields, whose flag nudges the user to regenerate the
- * code. Both stages ask the one shared predicate
- * (`delegationKeyInDocument`), so an entry recording no delegation key at
- * all -- uncheckable, and therefore not assumed healthy -- is flagged here
+ * listed -- the current-key-set rule), that it is not expired or inside the
+ * renewal window (the one-year TTL lapses within a code's expected
+ * lifetime), and that the code's posture (its `keyAgreement` VM and
+ * committed update-key hash) still stands. A stale delegation bricks
+ * recovery exactly when it is needed. The revocation cascade re-mints stale
+ * delegations automatically (`remintRecoveryDelegations`); this check is
+ * the backstop for entries that predate the re-mint fields -- whose flag
+ * nudges the user to regenerate the code -- and for expiry between
+ * revocations. Both stages ask the same shared predicates
+ * (`delegationKeyInDocument`, `zcapExpiring`), so an entry
+ * recording no delegation key or expiry at all -- uncheckable, and
+ * therefore not assumed healthy -- is flagged here
  * rather than being simultaneously "fine" and "needs re-minting".
  * Returns only the flagged entries; resolves `[]` when there is nothing to
  * check or the account has no recovery codes.
@@ -1413,11 +1422,22 @@ export async function checkRecoveryHealth({
         ? { delegationKeyId: entry.delegationKeyId }
         : {})
     })
+    // The expiry half of the same shared predicate the re-mint uses: a
+    // delegation expired or inside the renewal window (or recording no
+    // expiry) is flagged before it lapses.
+    const delegationExpiring = zcapExpiring({
+      ...(entry.delegationExpires ? { expires: entry.delegationExpires } : {})
+    })
     const postureMissing =
       !publishedMultibases.has(entry.keyAgreementKeyMultibase) ||
       !nextKeyHashes.includes(updateKeyHashes[position])
-    if (delegationRotted || postureMissing) {
-      flags.push({ entry, delegationRotted, postureMissing })
+    if (delegationRotted || delegationExpiring || postureMissing) {
+      flags.push({
+        entry,
+        delegationRotted,
+        delegationExpiring,
+        postureMissing
+      })
     }
   }
   return flags

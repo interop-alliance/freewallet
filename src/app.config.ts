@@ -249,15 +249,20 @@ export const SYSTEM_COLLECTIONS: Array<{ id: string; name: string }> =
   }))
 
 // Lifetime of the management zcap an unlock identity delegates to the data
-// identity at bind time (`src/session/keyring.ts`). Deliberately long-lived
-// (10 years): the capability grants only GET/DELETE on that one unlock Space,
-// so its worst-case leak is denial of a single unlock method (someone deletes
-// that Space -- the method stops working, the wallet stays reachable via the
-// others), never decryption. The WAS server enforces no maximum TTL on Space
-// routes and the zcap is revocable at Space scope, so an unbounded lifetime is
-// acceptable -- and long enough that a lost method stays revocable years later
-// without re-deriving its unlock identity from the (possibly lost) secret.
-export const UNLOCK_MANAGE_ZCAP_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000
+// identity at bind time (`src/session/keyring.ts`): one year, following NIST
+// SP 800-57's one-to-two-year cryptoperiod guidance for signature keys (the
+// same policy as the recovery delegation's RECOVERY_DELEGATION_TTL_MS in
+// wallet-core). The capability grants only GET/DELETE on that one unlock
+// Space (a recovery code's adds PUT), so its worst-case leak is denial of a
+// single unlock method, never decryption; the shorter life bounds how long a
+// leaked one stays usable. Each method has its own refresh path: a
+// passphrase or passkey login mints a fresh delegation every time
+// (`fetchKeyring`), and the registry backfill replaces a stored copy inside
+// the shared renewal window (`zcapExpiring`); a recovery code cannot
+// re-delegate without the code, so its management zcap expires on the same
+// annual clock as its `did.jsonl` delegation, whose health-check nudge
+// drives regeneration of both.
+export const UNLOCK_MANAGE_ZCAP_TTL_MS = 365 * 24 * 60 * 60 * 1000
 
 // Offline-fallback lifetime of a locally cached keyring record when a WAS
 // server is configured (the remote copy is the source of truth and is
