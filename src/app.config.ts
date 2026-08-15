@@ -259,16 +259,6 @@ export const SYSTEM_COLLECTIONS: Array<{ id: string; name: string }> =
 // without re-deriving its unlock identity from the (possibly lost) secret.
 export const UNLOCK_MANAGE_ZCAP_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000
 
-// Lifetime of the PUT-on-`did.jsonl` delegation a recovery code's unlock
-// record carries (`src/session/recovery.ts`). Deliberately long-lived like the
-// management zcap above: a recovery code must work years after issuance, and
-// the delegation's scope is one resource (the world-readable DID log), whose
-// worst-case abuse is a log write that still has to verify against the
-// published hash chain and prerotation commitments to resolve. The login-time
-// recovery health check watches for delegation rot (the signing client's
-// verification method leaving the document) rather than expiry.
-export const RECOVERY_ZCAP_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000
-
 // Offline-fallback lifetime of a locally cached keyring record when a WAS
 // server is configured (the remote copy is the source of truth and is
 // consulted first on every login). Bounds how long a passphrase retired on

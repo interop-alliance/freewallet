@@ -16,6 +16,11 @@
  *   the log (and invalidated the memo) anchor their appends at the post-edit
  *   head.
  *
+ * Both builders return wallet-core's sealable store unwrapped, so the
+ * revocation cascade's controller-floor contract (`setControllerFloor`, set by
+ * the shared orchestrator from the document edit's own post-edit log) reaches
+ * the store as-is.
+ *
  * The chain-head pin is durable either way (`userKeyLogPinStore`, keyed by
  * the account DID in the session database), so log continuity spans logins,
  * not just one session. The bare-parts builder's own `verifyAccountLog` read
@@ -23,11 +28,11 @@
  * the session builder's read gets it inside the verified-log memo.
  */
 import type { ZcapClient } from '@interop/ezcap'
-import type { EncryptionDescriptorStore } from '@interop/was-client/edv'
 import {
   userKeyRosterDescriptorStore,
   userKeyRosterLogSigner
 } from '@interop/wallet-core/keys'
+import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import type { ResourceLogController } from '@interop/wallet-core/resourceLog'
 import {
@@ -55,7 +60,7 @@ import { verifiedAccountLog } from '@/session/verifiedLog'
  *   must name the did:webvh the roster log's entry proofs anchor to
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the chain-head
  *   pin (CHAPI popups thread the Storage Access API handle here)
- * @returns {EncryptionDescriptorStore}
+ * @returns {SealableEncryptionDescriptorStore}
  */
 export function accountRosterStore({
   zcapClient,
@@ -67,7 +72,7 @@ export function accountRosterStore({
   keyAgent: ICapabilityAgent
   pointer: AccountLogPointer
   idb?: IDBFactory
-}): EncryptionDescriptorStore {
+}): SealableEncryptionDescriptorStore {
   let pending: Promise<ResourceLogController> | undefined
   return userKeyRosterDescriptorStore({
     storageServerUrl: pointer.host,
@@ -104,7 +109,7 @@ export function accountRosterStore({
  * @param options.profile {ControllerProfile}   the live session's profile; it
  *   must hold a key agent and an account pointer naming a did:webvh
  * @param [options.idb] {IDBFactory}
- * @returns {EncryptionDescriptorStore}
+ * @returns {SealableEncryptionDescriptorStore}
  */
 export function sessionRosterStore({
   profile,
@@ -112,7 +117,7 @@ export function sessionRosterStore({
 }: {
   profile: ControllerProfile
   idb?: IDBFactory
-}): EncryptionDescriptorStore {
+}): SealableEncryptionDescriptorStore {
   const pointer = profile.accountPointer
   const { keyAgent } = profile
   if (!pointer?.did || !keyAgent) {

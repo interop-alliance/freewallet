@@ -4,6 +4,25 @@
 
 ### Changed
 
+- The revocation cascade's roster appends now anchor at the post-edit
+  document head through the shared orchestrator's controller floor, set from
+  the document edit's own post-edit log, instead of relying on the session's
+  verified-log memo being invalidated first. The roster store builders in
+  `src/session/rosterStore.ts` declare the sealable store type so the
+  contract cannot be stripped by a wrapper.
+- A collection descriptor whose current epoch is missing from its own epoch
+  list is now refused fail-closed during the user key cascade and reported
+  per collection, instead of being evaluated against the last epoch.
+
+- The recovery-delegation builder and the revocation cascade's delegation
+  re-mint core moved to `@interop/wallet-core/recovery`
+  (`delegateLogWrite`, `delegationProofKeyId`, `remintRecoveryDelegations`);
+  `src/session/recovery.ts` keeps only the session/config binding (storage
+  URL, signers, management-zcap client, unlock-methods registry seams). The
+  delegation TTL now comes from the shared `RECOVERY_DELEGATION_TTL_MS`;
+  `RECOVERY_ZCAP_TTL_MS` is removed from `app.config.ts` (same ten-year
+  value).
+
 - Keyring and recovery records are now signed (record v2): an embedded
   `eddsa-jcs-2022` data-integrity proof by the unlock key, verified before
   decrypting, so the storage host can no longer forge a record it encrypted
@@ -58,6 +77,10 @@
   failure surfaces as "could not check", a continuity rollback (possibly
   replication lag) does too, and a fork or identity switch gets its own
   error message in both locales.
+- AGENTS.md and CONTRIBUTING.md gain pointers to the ecosystem-wide
+  conventions: the shared learnings file and decision-record convention in
+  the byoe-ecosystem and isomorphic-lib-template repos, and the
+  contributor-tier note (PRs need tests plus a summary only).
 
 ## 0.38.0 - 2026-08-14
 

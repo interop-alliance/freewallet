@@ -144,10 +144,13 @@ export async function revokeEnrolledClient({
       entries.map(entry => deriveNextKeyHash(entry.updateKeyMultibase))
     ),
     ownSigningKeyMultibase: clientSigningKeyMultibase({ keyAgent }),
-    // The log-governed roster store resolves its controller view through the
-    // session's verified-log memo -- invalidated just above and again by the
-    // cascade's own document edit -- so the rotation's log append anchors at
-    // the post-edit head: the sealing append.
+    // The log-governed roster store, handed over unwrapped: the orchestrator
+    // sets its controller floor from the document edit's own post-edit log
+    // before any roster-side work, so the rotation and the sealing append
+    // anchor at the post-edit head no matter what view the memo still serves.
+    // The memo invalidation above (and in the `.finally`) is for the other
+    // session surfaces, which must not read the revoked client as still
+    // listed.
     rosterStore: sessionRosterStore({ profile: session.profile, idb }),
     ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
     clientKeyAgreementKey,

@@ -591,7 +591,14 @@ client, synchronously, in dependency order:
    document -- the roster delivers, never sources, so the revoked client's
    entry is dropped even before the retire filter. An account with no roster
    yet stops here: the document edit has landed, so the wallet IS
-   disconnected, with nothing to rotate.
+   disconnected, with nothing to rotate. Anchoring at the post-edit head is
+   enforced by the shared orchestrator rather than by the caller's wiring: it
+   sets the roster store's controller floor (`setControllerFloor`) from the
+   edit's own post-edit log before any roster-side work runs, so a stale
+   cached controller view -- the session's verified-log memo, say -- can
+   anchor neither the rotation nor the sealing append at a head that predates
+   the removal. The store the session hands over is wallet-core's sealable
+   store unwrapped, which is what keeps that contract reachable.
 3. **The epoch cascade** (driven by wallet-core over the collections
    `src/session/userKeyCascade.ts` enumerates): every encrypted collection -- the
    encrypted standard collections plus every remotely listed collection
@@ -604,8 +611,12 @@ client, synchronously, in dependency order:
    user key generation -- staleness is detected from durable state alone -- and
    a never-epoch'd collection gets the newest prior generation installed as
    its first epoch (the user key is the epoch construction, so pre-epoch
-   envelopes ARE epoch-`oldUserKey` envelopes). Failures are collected per
-   collection, never aborting the fan-out.
+   envelopes ARE epoch-`oldUserKey` envelopes). A descriptor whose
+   `currentEpoch` names no epoch in its own `epochs` list is refused
+   fail-closed rather than evaluated against the last epoch, matching the
+   roster read's own integrity refusal. Failures are collected per
+   collection, never aborting the fan-out, so such a collection lands in the
+   fan-out's `failed` report and the rest still rotate.
 4. **The recovery re-PUTs** (`remintRecoveryDelegations`): recovery
    delegations the revoked client had signed stopped chaining at step 1;
    the revoking client re-mints them and re-PUTs the unlock records.

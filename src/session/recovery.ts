@@ -37,27 +37,19 @@
  */
 import { WasClient } from '@interop/was-client'
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
-import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
-import type { ZcapClient } from '@interop/ezcap'
-import { RECOVERY_ZCAP_TTL_MS, WAS_SERVER_URL } from '@/app.config'
+import { WAS_SERVER_URL } from '@/app.config'
 import {
-  DID_LOG_RESOURCE,
   ID_COLLECTION,
   DID_DOCUMENT_RESOURCE
 } from '@interop/wallet-core/space'
-import {
-  agentsFromSeed,
-  singleKeyResolver
-} from '@interop/wallet-core/identity'
+import { agentsFromSeed } from '@interop/wallet-core/identity'
 import {
   deriveUnlockIdentity,
   deleteUnlockSpace,
   ensureUnlockSpace,
   getUnlockKeyring,
-  getUnlockKeyringWithCapability,
   putUnlockKeyring,
-  putUnlockKeyringWithCapability,
   recordSignerFromAgent,
   verifyRecordProof,
   type AccountPointer
@@ -67,8 +59,7 @@ import {
   userKeyVaultKeys,
   readUserKeyRoster,
   rotateUserKeyRoster,
-  type UserKey,
-  type RosterRecipientDocument
+  type UserKey
 } from '@interop/wallet-core/keys'
 import { accountRosterStore, sessionRosterStore } from '@/session/rosterStore'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
@@ -86,12 +77,14 @@ import {
   type VerifiedAccountLog
 } from '@interop/wallet-core/clients'
 import {
+  delegateLogWrite,
+  delegationProofKeyId,
   generateRecoveryCode,
   publishRecoveryKey,
   recoverWebvhClient,
   recoveryClientFromCode,
   RECOVERY_KDF,
-  recoveryRecordBinding,
+  remintRecoveryDelegations as remintDelegationsCore,
   removeRecoveryKey,
   unwrapRecoveryRecord,
   wrapRecoveryRecord,
@@ -173,73 +166,6 @@ export class RecoveryCodeNotFoundError extends Error {
     super(message)
     this.name = 'RecoveryCodeNotFoundError'
   }
-}
-
-/**
- * The absolute URL of the account's `did.jsonl` log resource -- the
- * invocation target of the pre-minted recovery delegation.
- *
- * @param options {object}
- * @param options.pointer {AccountPointer}
- * @returns {string}
- */
-function didLogUrl({ pointer }: { pointer: AccountPointer }): string {
-  return new URL(
-    `/space/${pointer.spaceId}/${ID_COLLECTION.id}/${DID_LOG_RESOURCE}`,
-    pointer.host
-  ).toString()
-}
-
-/**
- * The verification method that signed a delegation's proof -- recorded in the
- * registry entry so the health check can test it against the current
- * document without holding the code.
- *
- * @param delegation {IZcap}
- * @returns {string | undefined}
- */
-function delegationProofKeyId(delegation: IZcap): string | undefined {
-  const { proof } = delegation as unknown as {
-    proof?:
-      | { verificationMethod?: string }
-      | Array<{
-          verificationMethod?: string
-        }>
-  }
-  const single = Array.isArray(proof) ? proof[0] : proof
-  return single?.verificationMethod
-}
-
-/**
- * Delegates the narrow log-write bridge to a code-derived client: PUT on the
- * one `did.jsonl` resource, long TTL. The delegation is what lets a
- * latent-authority code write its self-enrolling continuation without any
- * standing invocation presence -- and its narrow scope is what keeps
- * recovery loud (a stolen code must extend the world-readable log before it
- * can read anything).
- *
- * @param options {object}
- * @param options.zcapClient {ZcapClient}   the delegating client (an enrolled
- *   client's promoted signer)
- * @param options.pointer {AccountPointer}
- * @param options.recoveryClientDid {string}
- * @returns {Promise<IZcap>}
- */
-async function delegateLogWrite({
-  zcapClient,
-  pointer,
-  recoveryClientDid
-}: {
-  zcapClient: ZcapClient
-  pointer: AccountPointer
-  recoveryClientDid: string
-}): Promise<IZcap> {
-  return zcapClient.delegate({
-    invocationTarget: didLogUrl({ pointer }),
-    controller: recoveryClientDid,
-    allowedActions: ['PUT'],
-    expires: new Date(Date.now() + RECOVERY_ZCAP_TTL_MS)
-  })
 }
 
 /**
@@ -1353,33 +1279,16 @@ export async function revokeRecoveryCode({
 
 /**
  * Re-mints the recovery delegations the current document no longer backs --
- * the recovery-code delta riding the revocation cascade: revoking a client
- * kills, by the current-key-set rule, every `did.jsonl` delegation that
- * client signed, which would brick recovery exactly when it is needed. For
- * each registry entry whose recorded delegation no longer chains (its
- * signing verification method left the document), this client signs a fresh
- * delegation to the code's signing DID, re-wraps the record to the code's
- * unlock KAK (the public half the registry records -- the record carries no
- * secrets, so re-encryption needs none), re-PUTs it through the entry's
- * management zcap, and updates the registry's `delegationKeyId`.
- *
- * The record's code-authenticated account binding is preserved verbatim: the
- * re-mint reads the standing record through the same management zcap and
- * carries its `binding` frame member forward (the tag rides in the clear; it
- * cannot be recomputed without the code, and does not need to be). A re-mint
- * therefore can never change the pointer or controller the code was issued
- * against -- and after a host migration the tag no longer matches the moved
- * pointer, so codes must be re-issued when the account moves hosts.
- *
- * Best-effort per entry: an entry that predates the re-mint fields (no
- * `recoveryClientDid` / unlock-KAK members, or a GET/DELETE-only management
- * zcap), or whose standing record cannot be read or carries no binding, is
- * skipped and stays flagged by the login-time health check, whose regenerate
- * nudge remains the backstop.
+ * the recovery-code delta riding the revocation cascade. The mechanism, the
+ * skip policy, and the binding-carried-forward re-wrap all live in
+ * `@interop/wallet-core/recovery`; this binding supplies the app seams: the
+ * storage server URL, the session's delegating signer and account record
+ * signer, the management-zcap client factory, and the unlock-methods registry
+ * read/record halves.
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.doc {RosterRecipientDocument}   the locally verified
+ * @param options.doc {PublishedKeyDocument}   the locally verified
  *   did:webvh document, AFTER the revocation edit
  * @param [options.entries] {RecoveryCodeUnlockMethod[]}   the registry's
  *   recovery entries, when the caller already read them (the revocation
@@ -1394,7 +1303,7 @@ export async function remintRecoveryDelegations({
   idb
 }: {
   session: Session
-  doc: RosterRecipientDocument
+  doc: Parameters<typeof remintDelegationsCore>[0]['doc']
   entries?: RecoveryCodeUnlockMethod[]
   idb?: IDBFactory
 }): Promise<{ reminted: number; skipped: number }> {
@@ -1403,108 +1312,29 @@ export async function remintRecoveryDelegations({
   if (!WAS_SERVER_URL || !pointer || !keyAgent) {
     return { reminted: 0, skipped: 0 }
   }
-  // The re-mint holds the code's KAK public half but not its signing key, so
-  // every record it re-PUTs is signed with this client's own account key --
-  // the mixed-signer case a reader settles against the verified document.
-  const recordSigner = recordSignerFromAgent({ keyAgent })
   const entries =
     prefetched ??
     recoveryEntriesOf({ record: await getUnlockMethods({ session, idb }) })
   if (entries.length === 0) {
     return { reminted: 0, skipped: 0 }
   }
-  let reminted = 0
-  let skipped = 0
-  for (const entry of entries) {
-    // The current-key-set rule, decided once in wallet-core: an entry whose
-    // recorded signing key the document no longer publishes -- or that
-    // records no signing key at all -- is rotted.
-    const stands = delegationKeyInDocument({
-      doc,
-      ...(entry.delegationKeyId
-        ? { delegationKeyId: entry.delegationKeyId }
-        : {})
-    })
-    if (stands) {
-      continue
-    }
-    if (
-      !entry.recoveryClientDid ||
-      !entry.unlockKeyAgreementKeyId ||
-      !entry.unlockKeyAgreementKeyMultibase ||
-      !entry.manageCapability
-    ) {
-      // An entry issued before the re-mint fields existed: the health check
-      // keeps flagging it until the code is regenerated.
-      skipped += 1
-      continue
-    }
-    try {
-      // The standing record's code-authenticated binding, carried forward
-      // verbatim (a record with none predates the binding and cannot be
-      // re-minted -- `recoveryRecordBinding` refuses, and the entry is
-      // skipped into the health check's regenerate nudge).
-      const standing = await getUnlockKeyringWithCapability({
-        storageServerUrl: WAS_SERVER_URL,
-        zcapClient: managementZcapClient({
-          session,
-          capability: entry.manageCapability
-        }),
-        spaceId: entry.unlockSpaceId,
-        capability: entry.manageCapability
-      })
-      const binding = recoveryRecordBinding({ record: standing })
-      const delegation = await delegateLogWrite({
-        zcapClient: session.profile.zcapClient,
-        pointer,
-        recoveryClientDid: entry.recoveryClientDid
-      })
-      // The code's unlock KAK, public half only -- exactly enough to
-      // re-encrypt the record to the same recipient the code derives.
-      const unlockKak = (await X25519KeyAgreementKey2020.from({
-        id: entry.unlockKeyAgreementKeyId,
-        controller: entry.unlockKeyAgreementKeyId.split('#')[0],
-        type: 'X25519KeyAgreementKey2020',
-        publicKeyMultibase: entry.unlockKeyAgreementKeyMultibase
-      })) as IKeyAgreementKey
-      const wrapped = await wrapRecoveryRecord({
-        controller: session.profile.accountController ?? session.user.id,
-        pointer,
-        delegation,
-        keyAgreementKey: unlockKak,
-        keyResolver: singleKeyResolver({ keyAgreementKey: unlockKak }),
-        signer: recordSigner,
-        binding
-      })
-      await putUnlockKeyringWithCapability({
-        storageServerUrl: WAS_SERVER_URL,
-        zcapClient: managementZcapClient({
-          session,
-          capability: entry.manageCapability
-        }),
-        spaceId: entry.unlockSpaceId,
-        record: wrapped,
-        capability: entry.manageCapability
-      })
-      const delegationKeyId = delegationProofKeyId(delegation)
-      await recordRecoveryMethod({
-        session,
-        entry: {
-          ...entry,
-          ...(delegationKeyId ? { delegationKeyId } : {})
-        },
-        idb
-      })
-      reminted += 1
-    } catch (err) {
-      console.warn(
-        `Could not re-mint the recovery delegation for "${entry.label}":`,
-        err
-      )
-      skipped += 1
-    }
-  }
-  return { reminted, skipped }
+  return remintDelegationsCore({
+    doc,
+    entries,
+    pointer,
+    controller: session.profile.accountController ?? session.user.id,
+    storageServerUrl: WAS_SERVER_URL,
+    zcapClient: session.profile.zcapClient,
+    // The re-mint holds the code's KAK public half but not its signing key,
+    // so every record it re-PUTs is signed with this client's own account
+    // key -- the mixed-signer case a reader settles against the verified
+    // document.
+    recordSigner: recordSignerFromAgent({ keyAgent }),
+    managementZcapClient: ({ capability }) =>
+      managementZcapClient({ session, capability }),
+    recordEntry: async ({ entry }) =>
+      await recordRecoveryMethod({ session, entry, idb })
+  })
 }
 
 /**
