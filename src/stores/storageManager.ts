@@ -1903,10 +1903,18 @@ export class StorageManager {
             // The provisioning read runs under the same chain-head pin the
             // login-time account-log reads use, so a truncated or
             // substituted log is refused before any entry is built on it.
-            accountLogPinStore: accountLogPinStore({
-              spaceId: remoteStore.spaceId,
-              idb
-            }),
+            // The pin is keyed by the account DID, so a first signup -- whose
+            // pointer names none yet -- carries none: there is no published
+            // log for it to be a continuity prior over, and the genesis this
+            // run publishes is pinned by the reads that follow it.
+            ...(isWebvhDid(pointerDid)
+              ? {
+                  accountLogPinStore: accountLogPinStore({
+                    accountDid: pointerDid,
+                    idb
+                  })
+                }
+              : {}),
             onDidPublished: async ({ did }) => {
               profile.didWebvh = { did }
               // Provisioning publishes (or extends) the log, so any memo of
@@ -1946,10 +1954,18 @@ export class StorageManager {
           // from the checked login-time read or the local client-key record
           // -- and the save itself is monotonic, so a rolled-back descriptor
           // can never drag the pin backward.
+          // The DID the ceremony published (stamped on the profile by
+          // `onDidPublished` above) keys the epoch pin -- including on a
+          // first signup, whose pointer named none when this call started.
           const descriptor = result.rosterDescriptor
-          if (descriptor && descriptor.currentEpoch === userKey.id) {
+          const publishedDid = profile.didWebvh?.did
+          if (
+            descriptor &&
+            publishedDid &&
+            descriptor.currentEpoch === userKey.id
+          ) {
             await savePinFromDescriptor({
-              spaceId: remoteStore.spaceId,
+              accountDid: publishedDid,
               epochId: descriptor.currentEpoch,
               descriptor,
               idb

@@ -13,7 +13,6 @@ import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
-import { deriveSpaceId } from '@interop/was-client/sync'
 import type { ControllerProfile, Session, User } from '@/types/auth'
 import { KMS_SERVER_URL, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
@@ -217,7 +216,6 @@ export async function initSessionFromSeed({
   // to read.
   let activeUserKey = userKey
   let rosterRead: UserKeyRosterReadResult | null = null
-  const spaceId = accountPointer?.spaceId ?? deriveSpaceId(keyAgent.id)
   if (
     userKey &&
     !isGuest &&
@@ -229,7 +227,6 @@ export async function initSessionFromSeed({
       zcapClient: sessionZcapClient,
       keyAgent,
       pointer: { ...accountPointer, did: accountPointer.did },
-      spaceId,
       userKey,
       clientKeyAgreementKey: keyAgreementKey,
       idb
@@ -344,7 +341,6 @@ export async function initSessionFromSeed({
             await convergeRosterToDocument({
               session,
               pointer: accountPointer,
-              spaceId,
               userKey: loginUserKey,
               descriptor: loginDescriptor,
               clientKeyAgreementKey: keyAgreementKey,
@@ -401,7 +397,6 @@ export async function initSessionFromSeed({
  * @param options.session {Session}   the live session, whose vault keys and
  *   ciphers adopt a rotation
  * @param [options.pointer] {AccountPointer}
- * @param options.spaceId {string}   the data Space id
  * @param options.userKey {UserKey}   the login's current per-user key
  * @param options.descriptor {CollectionEncryption}   the login's roster read
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
@@ -415,7 +410,6 @@ export async function initSessionFromSeed({
 async function convergeRosterToDocument({
   session,
   pointer,
-  spaceId,
   userKey,
   descriptor,
   clientKeyAgreementKey,
@@ -424,7 +418,6 @@ async function convergeRosterToDocument({
 }: {
   session: Session
   pointer?: AccountPointer
-  spaceId: string
   userKey: UserKey
   descriptor: CollectionEncryption
   clientKeyAgreementKey: IKeyAgreementKey
@@ -435,10 +428,14 @@ async function convergeRosterToDocument({
   if (!pointer || !isWebvhDid(pointer.did) || !WAS_SERVER_URL || !keyAgent) {
     return { userKey, rosterDescriptor: descriptor }
   }
+  // The did:webvh check above is what makes the pins' account DID available:
+  // the three continuity pins are keyed by it, and an unpromoted account
+  // returned early.
+  const accountDid = pointer.did
   const { userKey: convergedUserKey, descriptor: convergedDescriptor } =
     await convergeUserKeyRosterToAccount({
       pointer: {
-        did: pointer.did,
+        did: accountDid,
         spaceId: pointer.spaceId,
         host: pointer.host
       },
@@ -446,8 +443,8 @@ async function convergeRosterToDocument({
       userKey,
       descriptor,
       clientKeyAgreementKey,
-      pinnedEpochId: await loadUserKeyEpochPin({ spaceId, idb }),
-      accountLogPinStore: accountLogPinStore({ spaceId, idb }),
+      pinnedEpochId: await loadUserKeyEpochPin({ accountDid, idb }),
+      accountLogPinStore: accountLogPinStore({ accountDid, idb }),
       // Adoption is app-side: persisted for the next login, pinned, and
       // swapped into the live session -- all before the collection fan-out
       // runs against it.
@@ -457,7 +454,7 @@ async function convergeRosterToDocument({
         descriptor: read
       }) => {
         await savePinFromDescriptor({
-          spaceId,
+          accountDid,
           epochId: latestEpochId,
           descriptor: read,
           idb
@@ -494,7 +491,8 @@ async function convergeRosterToDocument({
  * @param options.zcapClient {ZcapClient}   the session's root signing client
  * @param options.keyAgent {ICapabilityAgent}   this client's signing key
  *   agent, for the store's log appends and pin custody
- * @param options.spaceId {string}   the data Space id
+ * @param options.pointer {AccountPointer & { did: string }}   the promoted
+ *   account pointer; its `did` keys the continuity pins
  * @param options.userKey {UserKey}   the cached per-user key
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) KAK -- its roster entry
@@ -505,7 +503,6 @@ async function checkUserKeyRosterAtLogin({
   zcapClient,
   keyAgent,
   pointer,
-  spaceId,
   userKey,
   clientKeyAgreementKey,
   idb
@@ -513,17 +510,17 @@ async function checkUserKeyRosterAtLogin({
   zcapClient: ZcapClient
   keyAgent: ICapabilityAgent
   pointer: AccountPointer & { did: string }
-  spaceId: string
   userKey: UserKey
   clientKeyAgreementKey: IKeyAgreementKey
   idb?: IDBFactory
 }): Promise<UserKeyRosterReadResult | null> {
+  const accountDid = pointer.did
   return await sharedCheckUserKeyRosterAtLogin({
     store: accountRosterStore({
       zcapClient,
       keyAgent,
       pointer: {
-        did: pointer.did,
+        did: accountDid,
         spaceId: pointer.spaceId,
         host: pointer.host
       },
@@ -531,12 +528,12 @@ async function checkUserKeyRosterAtLogin({
     }),
     userKey,
     clientKeyAgreementKey,
-    pinnedEpochId: await loadUserKeyEpochPin({ spaceId, idb }),
+    pinnedEpochId: await loadUserKeyEpochPin({ accountDid, idb }),
     // The pin advances to the epoch just authenticated, atomically with the
     // key that authenticated it.
     onRosterRead: async ({ latestEpochId, descriptor }) => {
       await savePinFromDescriptor({
-        spaceId,
+        accountDid,
         epochId: latestEpochId,
         descriptor,
         idb
@@ -572,7 +569,8 @@ async function checkUserKeyRosterAtLogin({
  *
  * `fetchKeyring` rethrows when the remote could not be reached (so the
  * caller's storage-unreachable handling fires rather than misreading it as "no
- * account"), throws `AccountPointerChangedError` on a continuity refusal, and
+ * account"), throws `KeyringRecordForgedError` or
+ * `KeyringRecordRolledBackError` on an authenticity or freshness refusal, and
  * all storage/network errors from session init propagate unchanged.
  *
  * @param options {object}

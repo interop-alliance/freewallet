@@ -336,7 +336,7 @@ describe('the cascade, rotated path', () => {
       remoteStore: session.storage.remoteStore
     })
     expect(vi.mocked(loadUserKeyEpochPin)).toHaveBeenCalledWith(
-      expect.objectContaining({ spaceId: POINTER.spaceId })
+      expect.objectContaining({ accountDid: POINTER.did })
     )
   })
 
@@ -346,7 +346,7 @@ describe('the cascade, rotated path', () => {
 
     expect(vi.mocked(savePinFromDescriptor)).toHaveBeenCalledWith(
       expect.objectContaining({
-        spaceId: POINTER.spaceId,
+        accountDid: POINTER.did,
         epochId: FRESH_USER_KEY.id,
         descriptor: ROSTER_DESCRIPTOR
       })

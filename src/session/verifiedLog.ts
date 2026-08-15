@@ -81,7 +81,7 @@ export function createVerifiedLogCache(): VerifiedLogCache {
         // The durable account-log chain-head pin: a served log that forks,
         // rolls back, or switches identity against it is refused here, before
         // anything downstream reads the memo.
-        pinStore: accountLogPinStore({ spaceId: pointer.spaceId })
+        pinStore: accountLogPinStore({ accountDid: pointer.did })
       }).catch(err => {
         // A failed verification is never the cached answer: drop it so the
         // next caller re-reads (an unreachable host is transient; a genuinely

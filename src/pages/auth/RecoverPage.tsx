@@ -49,7 +49,6 @@ export function RecoverPage() {
   const [busy, setBusy] = useState(false)
   const [errorKey, setErrorKey] = useState<string | null>(null)
   const [code, setCode] = useState('')
-  const [accountEmail, setAccountEmail] = useState<string | undefined>()
   const [passphrase, setPassphrase] = useState('')
   const [passphraseScore, setPassphraseScore] = useState(0)
   const [outcome, setOutcome] = useState<RecoveryOutcome | null>(null)
@@ -92,9 +91,8 @@ export function RecoverPage() {
     try {
       const data = new FormData(event.currentTarget)
       const typed = (data.get('recovery-code') as string) ?? ''
-      const { email } = await locateRecoveryAccount({ code: typed })
+      await locateRecoveryAccount({ code: typed })
       setCode(typed)
-      setAccountEmail(email)
       setStep('passphrase')
     } catch (err) {
       console.warn('Recovery code check failed:', err)
@@ -224,9 +222,7 @@ export function RecoverPage() {
                 sx={authStyles.authCardForm}
               >
                 <Alert severity="success" sx={authStyles.userMessage}>
-                  {accountEmail
-                    ? t('auth.recover.accountFound', { email: accountEmail })
-                    : t('auth.recover.accountFoundNoEmail')}
+                  {t('auth.recover.accountFound')}
                 </Alert>
                 <Typography variant="body2">
                   {t('auth.recover.newPassphraseExplain')}

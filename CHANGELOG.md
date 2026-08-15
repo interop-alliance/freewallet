@@ -1,5 +1,48 @@
 # History
 
+## 0.39.0 - TBD
+
+### Changed
+
+- Keyring and recovery records are now signed (record v2): an embedded
+  `eddsa-jcs-2022` data-integrity proof by the unlock key, verified before
+  decrypting, so the storage host can no longer forge a record it encrypted
+  itself. Old unsigned records are refused as unusable; accounts are
+  re-provisioned, not migrated.
+- Account-pointer equality pinning is replaced by signed freshness pinning:
+  the newest signed record timestamp seen is pinned per unlock credential,
+  an older served record is refused as a rollback, and a newer validly
+  signed record is followed wherever its pointer leads. A new account
+  reusing a since-deleted account's passphrase now logs in cleanly on every
+  machine.
+- Recovery records verify under two signer classes: the code-derived unlock
+  key at issuance (checked before decrypt), or an enrolled client's account
+  key for revocation-cascade re-mints (checked after decrypt against the
+  locally verified account document; recovery refuses an unverifiable
+  record).
+- A recovery record's account binding (`pointer`, `controller`) is MAC'd
+  under a key derived from the code bytes at issuance and verified before
+  the pointer is trusted, so a storage host can no longer redirect recovery
+  into an attacker-controlled account by re-encrypting and re-signing a
+  record of its own. The delegation re-mint preserves the binding verbatim
+  (it reads the standing record through the management zcap), so a re-mint
+  can never change the pointer; codes must be re-issued when the account
+  moves hosts. A record whose tag does not verify, or that carries none, is
+  refused as forged.
+- The recovery record no longer carries the account email, and the recover
+  page's locate step no longer shows one (a self-declared display string
+  was exactly what a forged record could present as "this is your wallet");
+  the post-recovery keyring record starts without an email. The signup
+  email hint now describes the email as a settings label rather than a
+  recovery aid.
+- The three continuity pins (account-log chain head, roster-log chain head,
+  user-key epoch) are keyed by the account DID instead of the data Space
+  id, so a mirrored Space at a fresh spaceId inherits the standing pins
+  instead of a clean trust-on-first-use slate, and pins survive a
+  legitimate host or Space migration under one DID.
+- New login error states for a forged or tampered keyring record and for a
+  rolled-back record, in both locales.
+
 ## 0.38.0 - 2026-08-14
 
 ### Changed

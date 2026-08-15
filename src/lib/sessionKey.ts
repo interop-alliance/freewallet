@@ -4,12 +4,12 @@
  * wallet-storage decisions independently and is shared across tabs) holding
  * what ordinary login relies on -- the keyring cache (the offline / no-WAS
  * copy of the account-pointer record), this client's wrapped client-key
- * records, the account-pointer pins, the user key roster-epoch pins, the
+ * records, the keyring-freshness pins, the user key roster-epoch pins, the
  * roster-log and account-log chain-head pins, the unlock-methods registry
  * cache, and the
  * passkey-safety notices. None of it is secret on its own: the keyring,
  * client-key, and unlock-methods records are ciphertext, inert without the
- * passphrase-derived key; the pointer, roster-epoch, and chain-head pins and
+ * passphrase-derived key; the freshness, roster-epoch, and chain-head pins and
  * the passkey-safety notice are local integrity/UI state, not secrets.
  *
  * Two kinds of entries live here and must not be conflated: the keyring and
@@ -17,6 +17,16 @@
  * droppable on a miss), while a client-key record is PRIMARY state -- the only
  * copy of this client's key set, never reconstructible from a server or a
  * passphrase, deleted only by the explicit unlock-method lifecycle flows.
+ *
+ * The three continuity pins over the account's own state -- the account-log
+ * and roster-log chain-head pins and the roster-epoch pin -- are keyed by the
+ * ACCOUNT DID rather than by the data Space id, so a host that mirrors an
+ * account into a fresh Space id inherits the standing pins instead of a blank
+ * trust-on-first-use slot, and so the pins travel with the account across a
+ * legitimate host or Space migration. The unlock-layer entries (keyring
+ * cache, client-key record, keyring-freshness pin) stay keyed by the unlock
+ * Space id, and the unlock-methods cache and passkey-safety notice by the
+ * data controller.
  */
 import type {
   ResourceLogHeadPin,
@@ -278,79 +288,83 @@ export async function deleteClientKeyRecord({
 }
 
 /**
- * The object-store key under which an unlock method's account-pointer pin
+ * The object-store key under which an unlock method's keyring-freshness pin
  * lives -- keyed by the unlock Space id, like the keyring cache the pin
  * guards.
  *
  * @param spaceId {string}   the unlock Space id
  * @returns {string}
  */
-function accountPointerPinKey(spaceId: string): string {
-  return `account-pointer/${spaceId}`
+function keyringFreshnessPinKey(spaceId: string): string {
+  return `keyring-freshness/${spaceId}`
 }
 
 /**
- * Pins the account pointer this client has seen for an unlock method -- the
- * recorded first-fetch trust bound. A later remote record whose pointer
- * conflicts with the pin is refused rather than followed (see `fetchKeyring`
- * in `src/session/keyring.ts`). The pin is plaintext local state: the pointer
- * is not a secret, only a continuity prior.
+ * Pins the newest signed `createdAt` this client has accepted for an unlock
+ * method's keyring record. The record's own proof is what stops a storage host
+ * forging one; the pin is what stops it replaying an older record it once
+ * served legitimately -- a rollback that would send this client at a pointer
+ * the account has since moved off. A record older than the pin is refused
+ * (see `fetchKeyring` in `src/session/keyring.ts`); an equal or newer one
+ * advances it, so the pin only ever moves forward. Plaintext local state: a
+ * bind time is not a secret, only a continuity prior.
  *
  * @param options {object}
  * @param options.spaceId {string}   the unlock Space id
- * @param options.pointer {unknown}   the account pointer to pin
+ * @param options.createdAt {string}   the record's signed bind timestamp
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function saveAccountPointerPin({
+export async function saveKeyringFreshnessPin({
   spaceId,
-  pointer,
+  createdAt,
   idb
 }: {
   spaceId: string
-  pointer: unknown
+  createdAt: string
   idb?: IDBFactory
 }): Promise<void> {
   await withSessionStore(
     'readwrite',
     store =>
       store.put(
-        { pointer, pinnedAt: Date.now() },
-        accountPointerPinKey(spaceId)
+        { createdAt, pinnedAt: Date.now() },
+        keyringFreshnessPinKey(spaceId)
       ),
     idb
   )
 }
 
 /**
- * Loads the pinned account pointer for an unlock method, or `null` when this
- * client has never seen the account under that method.
+ * Loads the pinned keyring-record bind timestamp for an unlock method, or
+ * `null` when this client has never accepted a record under that method.
  *
  * @param options {object}
  * @param options.spaceId {string}   the unlock Space id
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<unknown | null>}
+ * @returns {Promise<string | null>}
  */
-export async function loadAccountPointerPin({
+export async function loadKeyringFreshnessPin({
   spaceId,
   idb
 }: {
   spaceId: string
   idb?: IDBFactory
-}): Promise<unknown | null> {
+}): Promise<string | null> {
   const stored = await withSessionStore(
     'readonly',
-    store => store.get(accountPointerPinKey(spaceId)),
+    store => store.get(keyringFreshnessPinKey(spaceId)),
     idb
   )
   if (stored === null || stored === undefined) {
     return null
   }
-  return (stored as { pointer?: unknown }).pointer ?? null
+  const { createdAt } = stored as { createdAt?: unknown }
+  return typeof createdAt === 'string' ? createdAt : null
 }
 
 /**
- * Deletes the pinned account pointer for an unlock method -- on a remote
+ * Deletes the keyring-freshness pin for an unlock method -- on a remote
  * 404-shaped miss (the method was retired, so the continuity prior is stale)
  * and in the unlock-method lifecycle flows.
  *
@@ -359,7 +373,7 @@ export async function loadAccountPointerPin({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function deleteAccountPointerPin({
+export async function deleteKeyringFreshnessPin({
   spaceId,
   idb
 }: {
@@ -368,21 +382,26 @@ export async function deleteAccountPointerPin({
 }): Promise<void> {
   await withSessionStore(
     'readwrite',
-    store => store.delete(accountPointerPinKey(spaceId)),
+    store => store.delete(keyringFreshnessPinKey(spaceId)),
     idb
   )
 }
 
 /**
  * The object-store key under which an account's user key roster-epoch pin
- * lives -- keyed by the data Space id, which identifies the roster resource
- * the pin guards (`key-map/user-key.jsonl` in that Space).
+ * lives -- keyed by the ACCOUNT DID, not by the data Space id. A malicious
+ * host that mints a fresh Space id, mirrors the world-readable log and the
+ * ciphertext there, and redirects the account pointer at the copy would
+ * otherwise inherit a blank continuity slot and reset every pin to
+ * trust-on-first-use; keyed by the DID the mirror inherits the standing pins
+ * instead. The pins therefore also travel with the account across a
+ * legitimate host or Space migration under one DID.
  *
- * @param spaceId {string}   the data Space id
+ * @param accountDid {string}   the account's did:webvh
  * @returns {string}
  */
-function userKeyEpochPinKey(spaceId: string): string {
-  return `user-key-epoch/${spaceId}`
+function userKeyEpochPinKey(accountDid: string): string {
+  return `user-key-epoch-pin/${accountDid}`
 }
 
 /**
@@ -402,7 +421,7 @@ function epochPinFrom(stored: unknown): string | null {
 
 /**
  * Pins the latest-seen user key roster epoch for an account -- the continuity
- * prior beside the account-pointer pin. The roster lives as an opaque
+ * prior beside the keyring-freshness pin. The roster lives as an opaque
  * resource the server enforces no descriptor invariants on, so a served roster
  * whose epochs no longer contain (or precede) the pinned epoch is refused as
  * a rollback rather than followed (see `@interop/wallet-core/keys`). Plaintext
@@ -417,7 +436,7 @@ function epochPinFrom(stored: unknown): string | null {
  * rollback into the pin.
  *
  * @param options {object}
- * @param options.spaceId {string}   the data Space id
+ * @param options.accountDid {string}   the account's did:webvh
  * @param options.epochId {string}   the roster's current epoch id (a did:key)
  * @param [options.epochIds] {string[]}   the served roster's append-only
  *   epoch-id order (oldest first), ordering the stored pin against the write
@@ -425,12 +444,12 @@ function epochPinFrom(stored: unknown): string | null {
  * @returns {Promise<void>}
  */
 export async function saveUserKeyEpochPin({
-  spaceId,
+  accountDid,
   epochId,
   epochIds,
   idb
 }: {
-  spaceId: string
+  accountDid: string
   epochId: string
   epochIds?: string[]
   idb?: IDBFactory
@@ -444,7 +463,7 @@ export async function saveUserKeyEpochPin({
     await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction(SESSION_STORE, 'readwrite')
       const store = transaction.objectStore(SESSION_STORE)
-      const key = userKeyEpochPinKey(spaceId)
+      const key = userKeyEpochPinKey(accountDid)
       const read = store.get(key)
       read.onerror = () => reject(read.error)
       read.onsuccess = () => {
@@ -487,7 +506,7 @@ export async function saveUserKeyEpochPin({
  * descriptor in hand pins through here rather than restating the mapping.
  *
  * @param options {object}
- * @param options.spaceId {string}   the data Space id
+ * @param options.accountDid {string}   the account's did:webvh
  * @param options.epochId {string}   the roster's current epoch id (a did:key)
  * @param options.descriptor {{ epochs?: Array<{ id: string }> }}   the served
  *   roster descriptor
@@ -495,18 +514,18 @@ export async function saveUserKeyEpochPin({
  * @returns {Promise<void>}
  */
 export async function savePinFromDescriptor({
-  spaceId,
+  accountDid,
   epochId,
   descriptor,
   idb
 }: {
-  spaceId: string
+  accountDid: string
   epochId: string
   descriptor: { epochs?: Array<{ id: string }> }
   idb?: IDBFactory
 }): Promise<void> {
   await saveUserKeyEpochPin({
-    spaceId,
+    accountDid,
     epochId,
     epochIds: (descriptor.epochs ?? []).map(epoch => epoch.id),
     idb
@@ -518,21 +537,21 @@ export async function savePinFromDescriptor({
  * client has never seen the roster.
  *
  * @param options {object}
- * @param options.spaceId {string}   the data Space id
+ * @param options.accountDid {string}   the account's did:webvh
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<string | null>}
  */
 export async function loadUserKeyEpochPin({
-  spaceId,
+  accountDid,
   idb
 }: {
-  spaceId: string
+  accountDid: string
   idb?: IDBFactory
 }): Promise<string | null> {
   return epochPinFrom(
     await withSessionStore(
       'readonly',
-      store => store.get(userKeyEpochPinKey(spaceId)),
+      store => store.get(userKeyEpochPinKey(accountDid)),
       idb
     )
   )
@@ -543,34 +562,35 @@ export async function loadUserKeyEpochPin({
  * and Space wipes, where the continuity prior is deliberately reset.
  *
  * @param options {object}
- * @param options.spaceId {string}   the data Space id
+ * @param options.accountDid {string}   the account's did:webvh
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 export async function deleteUserKeyEpochPin({
-  spaceId,
+  accountDid,
   idb
 }: {
-  spaceId: string
+  accountDid: string
   idb?: IDBFactory
 }): Promise<void> {
   await withSessionStore(
     'readwrite',
-    store => store.delete(userKeyEpochPinKey(spaceId)),
+    store => store.delete(userKeyEpochPinKey(accountDid)),
     idb
   )
 }
 
 /**
  * The object-store key under which an account's roster-log chain-head pin
- * lives -- keyed by the data Space id, like the roster-epoch pin, since both
- * guard the same `key-map/user-key.jsonl` resource in that Space.
+ * lives -- keyed by the account DID, like the roster-epoch pin, since both
+ * guard the same `key-map/user-key.jsonl` roster of that account (see
+ * `userKeyEpochPinKey` for why the DID rather than the Space id).
  *
- * @param spaceId {string}   the data Space id
+ * @param accountDid {string}   the account's did:webvh
  * @returns {string}
  */
-function userKeyLogPinKey(spaceId: string): string {
-  return `user-key-log-pin/${spaceId}`
+function userKeyLogPinKey(accountDid: string): string {
+  return `user-key-log-head/${accountDid}`
 }
 
 /**
@@ -584,18 +604,18 @@ function userKeyLogPinKey(spaceId: string): string {
  * after full verification only), so this store is a plain read/write seam.
  *
  * @param options {object}
- * @param options.spaceId {string}   the data Space id
+ * @param options.accountDid {string}   the account's did:webvh
  * @param [options.idb] {IDBFactory}
  * @returns {ResourceLogPinStore}
  */
 export function userKeyLogPinStore({
-  spaceId,
+  accountDid,
   idb
 }: {
-  spaceId: string
+  accountDid: string
   idb?: IDBFactory
 }): ResourceLogPinStore {
-  return logPinStoreAt({ key: userKeyLogPinKey(spaceId), idb })
+  return logPinStoreAt({ key: userKeyLogPinKey(accountDid), idb })
 }
 
 /**
@@ -651,35 +671,35 @@ function logPinStoreAt({
  * Space wipes, beside `deleteUserKeyEpochPin`.
  *
  * @param options {object}
- * @param options.spaceId {string}   the data Space id
+ * @param options.accountDid {string}   the account's did:webvh
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 export async function deleteUserKeyLogPin({
-  spaceId,
+  accountDid,
   idb
 }: {
-  spaceId: string
+  accountDid: string
   idb?: IDBFactory
 }): Promise<void> {
   await withSessionStore(
     'readwrite',
-    store => store.delete(userKeyLogPinKey(spaceId)),
+    store => store.delete(userKeyLogPinKey(accountDid)),
     idb
   )
 }
 
 /**
  * The object-store key under which an account's did:webvh account-log
- * chain-head pin lives -- keyed by the data Space id like the roster-log pin,
+ * chain-head pin lives -- keyed by the account DID like the roster-log pin,
  * but under its OWN key, since a pin store holds exactly one pin and the two
  * logs must never clobber each other's.
  *
- * @param spaceId {string}   the data Space id
+ * @param accountDid {string}   the account's did:webvh
  * @returns {string}
  */
-function accountLogPinKey(spaceId: string): string {
-  return `account-log-pin/${spaceId}`
+function accountLogPinKey(accountDid: string): string {
+  return `account-log-head/${accountDid}`
 }
 
 /**
@@ -693,18 +713,18 @@ function accountLogPinKey(spaceId: string): string {
  * this store is a plain read/write seam.
  *
  * @param options {object}
- * @param options.spaceId {string}   the data Space id
+ * @param options.accountDid {string}   the account's did:webvh
  * @param [options.idb] {IDBFactory}
  * @returns {ResourceLogPinStore}
  */
 export function accountLogPinStore({
-  spaceId,
+  accountDid,
   idb
 }: {
-  spaceId: string
+  accountDid: string
   idb?: IDBFactory
 }): ResourceLogPinStore {
-  return logPinStoreAt({ key: accountLogPinKey(spaceId), idb })
+  return logPinStoreAt({ key: accountLogPinKey(accountDid), idb })
 }
 
 /**
@@ -712,20 +732,20 @@ export function accountLogPinStore({
  * and Space wipes, beside `deleteUserKeyLogPin`.
  *
  * @param options {object}
- * @param options.spaceId {string}   the data Space id
+ * @param options.accountDid {string}   the account's did:webvh
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 export async function deleteAccountLogPin({
-  spaceId,
+  accountDid,
   idb
 }: {
-  spaceId: string
+  accountDid: string
   idb?: IDBFactory
 }): Promise<void> {
   await withSessionStore(
     'readwrite',
-    store => store.delete(accountLogPinKey(spaceId)),
+    store => store.delete(accountLogPinKey(accountDid)),
     idb
   )
 }

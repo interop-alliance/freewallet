@@ -91,7 +91,8 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
       controller,
       pointer: POINTER,
       clientKeys: { clientSeed },
-      unlockSpaceId: 'unlock-space-test'
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
     })
     vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
       storage: fakeStorage,
@@ -114,7 +115,8 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
       controller,
       pointer: POINTER,
       clientKeys: { clientSeed },
-      unlockSpaceId: 'unlock-space-test'
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
     })
 
     const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
@@ -129,7 +131,8 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
     vi.mocked(fetchKeyring).mockResolvedValue({
       controller,
       clientKeys: { clientSeed, userKey },
-      unlockSpaceId: 'unlock-space-test'
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
     })
 
     const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
@@ -146,7 +149,8 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
     vi.mocked(fetchKeyring).mockResolvedValue({
       controller,
       clientKeys: { clientSeed },
-      unlockSpaceId: 'unlock-space-test'
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
     })
 
     const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
@@ -165,7 +169,8 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
     vi.mocked(fetchKeyring).mockResolvedValue({
       controller,
       clientKeys: { clientSeed },
-      unlockSpaceId: 'unlock-space-test'
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
     })
 
     const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
@@ -180,7 +185,8 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
     vi.mocked(fetchKeyring).mockResolvedValue({
       controller,
       clientKeys: { clientSeed },
-      unlockSpaceId: 'unlock-space-test'
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
     })
 
     const { session } = await loginWithPassphrase({
@@ -198,7 +204,8 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
     vi.mocked(fetchKeyring).mockResolvedValue({
       controller,
       clientKeys: { clientSeed },
-      unlockSpaceId: 'unlock-space-test'
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
     })
     vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
       storage: fakeStorage,
@@ -217,7 +224,8 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
     vi.mocked(fetchKeyring).mockResolvedValue({
       controller: 'did:key:z6MkWrongControllerForThisSeed',
       clientKeys: { clientSeed: randomSeed() },
-      unlockSpaceId: 'unlock-space-test'
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
     })
 
     await expect(
@@ -234,7 +242,8 @@ describe('loginWithPassphrase -- located but not enrolled', () => {
     vi.mocked(fetchKeyring).mockResolvedValue({
       controller: 'did:key:z6MkDataControllerForTests',
       pointer: POINTER,
-      unlockSpaceId: 'unlock-space-test'
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
     })
 
     const { session, userExists } = await loginWithPassphrase({

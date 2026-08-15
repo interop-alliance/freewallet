@@ -40,6 +40,17 @@ vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
   })
 }))
 
+const clientsState = vi.hoisted(() => ({
+  signingKeys: [] as string[]
+}))
+
+vi.mock('@interop/wallet-core/clients', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/wallet-core/clients')>()),
+  currentAccountSigningKeys: vi.fn(
+    async () => new Set(clientsState.signingKeys)
+  )
+}))
+
 const registryState = vi.hoisted(() => ({
   record: null as null | { version: 1; userHandle: string; methods: unknown[] }
 }))
@@ -79,17 +90,20 @@ import {
 } from '@interop/wallet-core/keyring'
 import {
   generateRecoveryCode,
+  RecoveryBindingError,
   recoveryClientFromCode,
   RECOVERY_KDF,
   wrapRecoveryRecord
 } from '@interop/wallet-core/recovery'
+import type { RecordSigner } from '@interop/wallet-core/keyring'
 import {
   canIssueRecoveryCode,
   checkRecoveryHealth,
   locateRecoveryAccount,
   recordRecoveryMethod,
   RecoveryCodeInvalidError,
-  RecoveryCodeNotFoundError
+  RecoveryCodeNotFoundError,
+  RecoveryRecordForgedError
 } from '@/session/recovery'
 import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
@@ -110,9 +124,20 @@ const DELEGATION = {
 /**
  * Issues a real recovery record for a fresh code into the mocked unlock
  * Space, exactly as issuance would: wrapped to the code's real unlock KAK,
- * keyed by the code's real unlock Space id.
+ * keyed by the code's real unlock Space id, its account binding MAC'd under
+ * the code's own binding key (a legitimate re-mint preserves that tag
+ * verbatim, so a `signer`-overridden fixture carries it too). `pointer` and
+ * `bindingMacKey` overrides build the forged-record fixtures.
  */
-async function storeRecordForCode({ email }: { email?: string } = {}) {
+async function storeRecordForCode({
+  signer,
+  pointer,
+  bindingMacKey
+}: {
+  signer?: RecordSigner
+  pointer?: AccountPointer
+  bindingMacKey?: Uint8Array
+} = {}) {
   const code = generateRecoveryCode()
   const client = await recoveryClientFromCode({ code })
   const unlock = await deriveUnlockIdentity({
@@ -121,14 +146,37 @@ async function storeRecordForCode({ email }: { email?: string } = {}) {
   })
   const record = await wrapRecoveryRecord({
     controller: 'did:key:z6MkAccountController',
-    email,
-    pointer: POINTER,
+    pointer: pointer ?? POINTER,
     delegation: DELEGATION,
     keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-    keyResolver: unlock.keyResolver
+    keyResolver: unlock.keyResolver,
+    // Issuance signs with the code's own unlock key; the revocation
+    // cascade's re-mint passes an enrolled client's account key instead.
+    signer: signer ?? unlock.recordSigner,
+    bindingMacKey: bindingMacKey ?? client.bindingMacKey
   })
   wasState.records.set(unlock.spaceId, record)
   return { code, client }
+}
+
+/**
+ * A signing key standing in for one an enrolled client (or a stranger) holds
+ * -- the re-mint's signer, and the forger's.
+ *
+ * @param options {object}
+ * @param options.secret {string}
+ * @returns {Promise<RecordSigner>}
+ */
+async function accountSigner({
+  secret
+}: {
+  secret: string
+}): Promise<RecordSigner> {
+  const identity = await deriveUnlockIdentity({
+    secret,
+    kdf: RECOVERY_KDF
+  })
+  return identity.recordSigner
 }
 
 /**
@@ -161,6 +209,7 @@ beforeEach(() => {
   wasState.records.clear()
   wasState.getError = undefined
   registryState.record = null
+  clientsState.signingKeys = []
   logState.verificationMethod = []
   logState.nextKeyHashes = []
   logState.verifications = 0
@@ -189,12 +238,65 @@ describe('locateRecoveryAccount error discipline', () => {
     ).rejects.toBe(networkError)
   })
 
-  it('recovers the record email on a hit, formatted code tolerated', async () => {
-    const { code } = await storeRecordForCode({ email: 'user@example.com' })
+  it('resolves on a hit, formatted code tolerated', async () => {
+    const { code } = await storeRecordForCode()
     const formatted = code.replace(/(.{4})(?=.)/g, '$1-')
-    await expect(locateRecoveryAccount({ code: formatted })).resolves.toEqual({
-      email: 'user@example.com'
+    await expect(
+      locateRecoveryAccount({ code: formatted })
+    ).resolves.toBeUndefined()
+  })
+})
+
+describe('recovery record proof (the mixed-signer policy)', () => {
+  it('verifies an issuance-signed record without consulting the document', async () => {
+    const { currentAccountSigningKeys } =
+      await import('@interop/wallet-core/clients')
+    const { code } = await storeRecordForCode()
+    await expect(locateRecoveryAccount({ code })).resolves.toBeUndefined()
+    expect(vi.mocked(currentAccountSigningKeys)).not.toHaveBeenCalled()
+  })
+
+  it('completes a re-minted record against the account document keys', async () => {
+    const signer = await accountSigner({ secret: 'an enrolled client key' })
+    clientsState.signingKeys = [signer.keyMultibase]
+    const { code } = await storeRecordForCode({ signer })
+    await expect(locateRecoveryAccount({ code })).resolves.toBeUndefined()
+  })
+
+  it('refuses a record signed by a key the document does not list', async () => {
+    const signer = await accountSigner({ secret: 'a key nobody enrolled' })
+    clientsState.signingKeys = ['zSomeOtherEnrolledClientKey']
+    const { code } = await storeRecordForCode({ signer })
+    await expect(locateRecoveryAccount({ code })).rejects.toBeInstanceOf(
+      RecoveryRecordForgedError
+    )
+    expect(signer.keyMultibase).not.toBe('zSomeOtherEnrolledClientKey')
+  })
+
+  it('refuses a forged record naming another account (attacker-signed, attacker-pointed)', async () => {
+    // The FW-160 redirect: the host re-encrypts a record of its own to the
+    // code's unlock KAK, points it at an attacker-controlled account, and
+    // signs with a key that account's document really lists -- so the
+    // signature check alone would pass. The account binding is what refuses:
+    // the attacker never holds the code bytes, so no tag it can produce
+    // verifies under the code-derived MAC key.
+    const signer = await accountSigner({ secret: 'an attacker account key' })
+    clientsState.signingKeys = [signer.keyMultibase]
+    const attackerCode = await recoveryClientFromCode({
+      code: generateRecoveryCode()
     })
+    const { code } = await storeRecordForCode({
+      signer,
+      pointer: {
+        did: 'did:webvh:QmAttackerScid:evil.example.test:space:stolen:id',
+        spaceId: 'stolen',
+        host: 'https://evil.example.test'
+      },
+      bindingMacKey: attackerCode.bindingMacKey
+    })
+    await expect(locateRecoveryAccount({ code })).rejects.toBeInstanceOf(
+      RecoveryBindingError
+    )
   })
 })
 

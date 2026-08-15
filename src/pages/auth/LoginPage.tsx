@@ -17,7 +17,8 @@ import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { loginWithPassphrase, loginWithPasskey } from '@/session/initSession'
 import {
-  AccountPointerChangedError,
+  KeyringRecordForgedError,
+  KeyringRecordRolledBackError,
   KeyringRecordUnusableError
 } from '@/session/keyring'
 import { backfillPassphraseUnlockMethod } from '@/session/unlockMethods'
@@ -78,11 +79,17 @@ function loginErrorKey({
   if (isStorageUnreachable(err)) {
     return 'auth.errors.storageUnreachable'
   }
-  // The continuity refusal: the server returned an account pointer that
-  // conflicts with the one this browser has pinned.
-  if (err instanceof AccountPointerChangedError) {
+  // The authenticity refusal: the record's proof was not made by the key the
+  // typed secret derives, so the storage host forged or tampered with it.
+  if (err instanceof KeyringRecordForgedError) {
     console.error(`${label} refused:`, err)
-    return 'auth.errors.accountPointerChanged'
+    return 'auth.errors.keyringForged'
+  }
+  // The replay refusal: a validly signed record, but older than the newest
+  // this browser has accepted for the secret.
+  if (err instanceof KeyringRecordRolledBackError) {
+    console.error(`${label} refused:`, err)
+    return 'auth.errors.keyringRolledBack'
   }
   // The account-log continuity refusal: the served did:webvh log is a
   // rollback, a fork, or an identity switch against the chain head this

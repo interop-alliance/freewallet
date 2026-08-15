@@ -55,8 +55,11 @@ import {
   deleteUnlockSpace,
   ensureUnlockSpace,
   getUnlockKeyring,
+  getUnlockKeyringWithCapability,
   putUnlockKeyring,
   putUnlockKeyringWithCapability,
+  recordSignerFromAgent,
+  verifyRecordProof,
   type AccountPointer
 } from '@interop/wallet-core/keyring'
 import {
@@ -79,16 +82,22 @@ import {
   webvhZcapClient
 } from '@interop/wallet-core/webvh'
 import {
+  currentAccountSigningKeys,
+  type VerifiedAccountLog
+} from '@interop/wallet-core/clients'
+import {
   generateRecoveryCode,
   publishRecoveryKey,
   recoverWebvhClient,
   recoveryClientFromCode,
   RECOVERY_KDF,
+  recoveryRecordBinding,
   removeRecoveryKey,
   unwrapRecoveryRecord,
   wrapRecoveryRecord,
   type RecoveryClient,
-  type RecoveryLogStore
+  type RecoveryLogStore,
+  type RecoveryRecordProofState
 } from '@interop/wallet-core/recovery'
 import type { Session } from '@/types/auth'
 import {
@@ -120,8 +129,8 @@ import {
 } from '@/session/userKeyAdoption'
 import {
   accountLogPinStore,
-  deleteAccountPointerPin,
   deleteClientKeyRecord,
+  deleteKeyringFreshnessPin,
   deleteKeyringCache,
   loadUserKeyEpochPin,
   savePinFromDescriptor
@@ -236,13 +245,14 @@ async function delegateLogWrite({
  * Writes a code's unlock Space and recovery record: ensure the Space, wrap
  * the pointer + delegation to the code's unlock KAK, PUT the record, and
  * delegate the management zcap to the account identity. No local cache and
- * no client-key record: a code is not bound to any browser.
+ * no client-key record: a code is not bound to any browser. An issuance path
+ * by definition (the caller holds the code), so the record's account binding
+ * is MAC'd fresh under the code-derived key.
  *
  * @param options {object}
  * @param options.client {RecoveryClient}
  * @param options.controller {string}   the account did:key, stamped into the
  *   record (an identity label, deliberately not the management grantee)
- * @param [options.email] {string}
  * @param options.pointer {AccountPointer}
  * @param options.delegation {IZcap}
  * @returns {Promise<{ unlockSpaceId: string, manageCapability: IZcap,
@@ -252,13 +262,11 @@ async function delegateLogWrite({
 async function bindRecoveryRecord({
   client,
   controller,
-  email,
   pointer,
   delegation
 }: {
   client: RecoveryClient
   controller: string
-  email?: string
   pointer: AccountPointer
   delegation: IZcap
 }): Promise<{
@@ -279,11 +287,15 @@ async function bindRecoveryRecord({
   })
   const record = await wrapRecoveryRecord({
     controller,
-    email,
     pointer,
     delegation,
     keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-    keyResolver: unlock.keyResolver
+    keyResolver: unlock.keyResolver,
+    // Issuance signs with the code's own unlock key -- the strong path, where
+    // a typed code alone establishes what may have signed the record, so
+    // recovery verifies the proof before decrypting anything.
+    signer: unlock.recordSigner,
+    bindingMacKey: client.bindingMacKey
   })
   await putUnlockKeyring({
     storageServerUrl: WAS_SERVER_URL,
@@ -519,7 +531,6 @@ export async function issueRecoveryCode({
   const bound = await bindRecoveryRecord({
     client,
     controller,
-    email: session.user.email,
     pointer,
     delegation
   })
@@ -625,15 +636,37 @@ function delegatedLogStore({
 }
 
 /**
+ * Thrown when a recovery record's proof is absent, malformed, or made by a key
+ * that is neither the code's own unlock key nor a currently enrolled client of
+ * the account the record names -- the storage host forged or tampered with it.
+ * Recovery refuses rather than acting on the record's pointer and delegation.
+ */
+export class RecoveryRecordForgedError extends Error {
+  constructor({ cause }: { cause?: unknown } = {}) {
+    const detail = cause instanceof Error ? ` ${cause.message}` : ''
+    super(`Forged or tampered recovery record.${detail}`)
+    this.name = 'RecoveryRecordForgedError'
+    this.cause = cause
+  }
+}
+
+/**
  * Reads and unwraps a code's recovery record: derive the client identity and
  * unlock identity, one remote read, one unwrap. Shared by the `/recover`
  * page's locate step and the full recovery flow. Error discipline as on
  * `recoverAccountWithCode`.
  *
+ * The record's signer is mixed (see the module doc): a record signed by the
+ * code's own unlock key is verified here, before decryption. Anything else --
+ * the revocation cascade's re-mint, signed by an enrolled client's account key
+ * -- comes back with a pending `proofState`, which the caller MUST settle with
+ * `completeRecoveryRecordProof` once it has verified the account's did:webvh
+ * log. Nothing about a pending record is trustworthy until then.
+ *
  * @param options {object}
  * @param options.code {string}
- * @returns {Promise<object>}   the client identity, unlock identity, and
- *   record contents
+ * @returns {Promise<object>}   the client identity, unlock identity, the
+ *   stored record, its contents, and its proof state
  */
 async function readRecoveryRecord({ code }: { code: string }) {
   if (!WAS_SERVER_URL) {
@@ -652,43 +685,128 @@ async function readRecoveryRecord({ code }: { code: string }) {
   if (record === null) {
     throw new RecoveryCodeNotFoundError()
   }
-  const contents = await unwrapRecoveryRecord({
+  const { contents, proofState } = await unwrapRecoveryRecord({
     record,
     keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-    keyResolver: unlock.keyResolver
+    keyResolver: unlock.keyResolver,
+    expectedKeyMultibase: unlock.recordSigner.keyMultibase,
+    // The account binding is verified in the unwrap, under the code-derived
+    // MAC key -- so the pointer that comes back is code-authenticated, not
+    // merely what the (host-re-encryptable) record claims.
+    bindingMacKey: client.bindingMacKey
   })
-  return { client, unlock, contents }
+  return { client, unlock, record, contents, proofState }
+}
+
+/**
+ * Settles a pending recovery-record proof: a record the code's own unlock key
+ * did not sign is only acceptable when an enrolled client of the account the
+ * code-authenticated pointer names signed it -- the pointer's binding was
+ * verified under the code-derived MAC key in the unwrap, so the document
+ * fetched here belongs to the account the code was issued for, never to an
+ * account a forging host substituted. A `'verified'` state passes through
+ * untouched; anything the document's current signing keys cannot account for
+ * refuses with `RecoveryRecordForgedError`.
+ *
+ * @param options {object}
+ * @param options.record {unknown}   the stored recovery record, proof included
+ * @param options.proofState {RecoveryRecordProofState}   as `readRecoveryRecord`
+ *   returned it
+ * @param options.pointer {AccountPointer}   the code-authenticated account
+ *   pointer (as `unwrapRecoveryRecord` returned it, its binding verified)
+ * @param [options.verifiedLog] {VerifiedAccountLog}   an already-verified
+ *   account log; fetched and verified here when absent
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+async function completeRecoveryRecordProof({
+  record,
+  proofState,
+  pointer,
+  verifiedLog,
+  idb
+}: {
+  record: unknown
+  proofState: RecoveryRecordProofState
+  pointer: AccountPointer
+  verifiedLog?: VerifiedAccountLog
+  idb?: IDBFactory
+}): Promise<void> {
+  if (proofState === 'verified') {
+    return
+  }
+  try {
+    if (!isWebvhDid(pointer.did)) {
+      throw new Error(
+        'The record names no did:webvh account, so no document can account ' +
+          'for its signer.'
+      )
+    }
+    const logPointer = {
+      did: pointer.did!,
+      spaceId: pointer.spaceId,
+      host: pointer.host
+    }
+    const signingKeys = await currentAccountSigningKeys({
+      pointer: logPointer,
+      ...(verifiedLog
+        ? { verifiedLog }
+        : {
+            accountLogPinStore: accountLogPinStore({
+              accountDid: logPointer.did,
+              idb
+            })
+          })
+    })
+    await verifyRecordProof({
+      record,
+      allowedKeyMultibases: [...signingKeys],
+      label: 'recovery'
+    })
+  } catch (err) {
+    throw new RecoveryRecordForgedError({ cause: err })
+  }
 }
 
 /**
  * The `/recover` page's locate step: whether a typed code resolves to an
- * account, without changing anything. Returns the account email the record
- * carries (shown so the person can confirm it is the expected wallet).
+ * account, without changing anything. Deliberately returns nothing the
+ * record claims: the record no longer carries a display cue (the email it
+ * once carried was exactly the deception payload a forged record could show
+ * as "this is your wallet"), and the account binding plus the settled proof
+ * are what establish the account -- the page confirms only that the code
+ * located one.
  *
  * @param options {object}
  * @param options.code {string}
- * @returns {Promise<{ email?: string }>}
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
  */
 export async function locateRecoveryAccount({
-  code
+  code,
+  idb
 }: {
   code: string
-}): Promise<{ email?: string }> {
-  const { contents } = await readRecoveryRecord({ code })
-  return { email: contents.email }
+  idb?: IDBFactory
+}): Promise<void> {
+  const { record, contents, proofState } = await readRecoveryRecord({ code })
+  await completeRecoveryRecordProof({
+    record,
+    proofState,
+    pointer: contents.pointer,
+    idb
+  })
 }
 
 /**
  * What `recoverAccountWithCode` hands back for the page to finish on: the
- * replacement code to push hard (shown exactly once), the account email the
- * record carried (prefilled into the login), and the spent code's roster kid
- * so the post-login registry update can drop its entry.
+ * replacement code to push hard (shown exactly once) and the spent code's
+ * roster kid so the post-login registry update can drop its entry.
  */
 export interface RecoveryOutcome {
   replacementCode: string
   replacementEntry: RecoveryCodeUnlockMethod
   spentRecoveryKid: string
-  email?: string
 }
 
 /**
@@ -726,7 +844,9 @@ export async function recoverAccountWithCode({
   const {
     client: spent,
     unlock,
-    contents
+    record,
+    contents,
+    proofState
   } = await readRecoveryRecord({
     code
   })
@@ -741,11 +861,22 @@ export async function recoverAccountWithCode({
   // recovering browser normally holds no account-log chain-head pin yet
   // (this read is its first contact), which is exactly the pin's
   // trust-on-first-use establishment.
-  await verifyAccountLog({
+  const verifiedLog = await verifyAccountLog({
     did: pointer.did,
     spaceId: pointer.spaceId,
     host: pointer.host,
-    pinStore: accountLogPinStore({ spaceId: pointer.spaceId, idb })
+    pinStore: accountLogPinStore({ accountDid: pointer.did, idb })
+  })
+
+  // Settle the record's proof before acting on anything it carries. An
+  // issuance-signed record verified before it was decrypted; a re-minted one
+  // is only acceptable if a client the document still lists signed it, which
+  // is knowable only now.
+  await completeRecoveryRecordProof({
+    record,
+    proofState,
+    pointer,
+    verifiedLog
   })
 
   // Mint the NEW ordinary client and the replacement code -- in memory only
@@ -857,7 +988,7 @@ export async function recoverAccountWithCode({
     ownerKeyAgreementKey: spent.agents.keyAgreementKey
   })
   const pinnedEpochId = await loadUserKeyEpochPin({
-    spaceId: pointer.spaceId,
+    accountDid: pointer.did,
     idb
   })
   // The just-updated, locally verified document: the recipient source for
@@ -867,7 +998,7 @@ export async function recoverAccountWithCode({
     did: pointer.did,
     spaceId: pointer.spaceId,
     host: pointer.host,
-    pinStore: accountLogPinStore({ spaceId: pointer.spaceId, idb })
+    pinStore: accountLogPinStore({ accountDid: pointer.did, idb })
   })
   const preRotation = await readUserKeyRoster({
     store: rosterStore,
@@ -902,7 +1033,7 @@ export async function recoverAccountWithCode({
   }
   const newUserKey = postRotation.userKey
   await savePinFromDescriptor({
-    spaceId: pointer.spaceId,
+    accountDid: pointer.did,
     epochId: postRotation.latestEpochId,
     descriptor: postRotation.descriptor,
     idb
@@ -947,7 +1078,7 @@ export async function recoverAccountWithCode({
     })
     await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
     await deleteClientKeyRecord({ spaceId: unlock.spaceId, idb })
-    await deleteAccountPointerPin({ spaceId: unlock.spaceId, idb })
+    await deleteKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
   } catch (err) {
     console.warn("Could not delete the spent code's unlock Space:", err)
   }
@@ -963,7 +1094,6 @@ export async function recoverAccountWithCode({
   const replacementBind = await bindRecoveryRecord({
     client: replacement,
     controller: contents.controller,
-    email: contents.email,
     pointer: replacementPointer,
     delegation: replacementDelegation
   })
@@ -980,13 +1110,15 @@ export async function recoverAccountWithCode({
 
   // Bind the new client under the new passphrase: the keyring record, the
   // local client-key record (client seed + rotated user key + update-key seeds),
-  // the pointer pin, and the management zcap. An ordinary passphrase login
+  // the freshness pin, and the management zcap. An ordinary passphrase login
   // now finds an enrolled client.
+  // Deliberately no email: the recovery record no longer carries one to
+  // inherit (it was the forged-record deception payload), and the recovered
+  // keyring record starts without one.
   await bindPassphrase({
     clientSeed: newClientSeed,
     controller: contents.controller,
     passphrase: newPassphrase,
-    email: contents.email,
     userKey: newUserKey,
     webvhUpdateKeys: newClientUpdateSeeds,
     pointer: replacementPointer,
@@ -1004,8 +1136,7 @@ export async function recoverAccountWithCode({
   return {
     replacementCode,
     replacementEntry,
-    spentRecoveryKid: spent.recipientKid,
-    email: contents.email
+    spentRecoveryKid: spent.recipientKid
   }
 }
 
@@ -1138,12 +1269,12 @@ export async function revokeRecoveryCode({
     store: rosterStore,
     userKey: session.profile.userKey,
     clientKeyAgreementKey,
-    pinnedEpochId: await loadUserKeyEpochPin({ spaceId: pointer.spaceId, idb })
+    pinnedEpochId: await loadUserKeyEpochPin({ accountDid: pointer.did, idb })
   })
   let rotatedUserKey: UserKey | undefined
   if (read) {
     await savePinFromDescriptor({
-      spaceId: pointer.spaceId,
+      accountDid: pointer.did,
       epochId: read.latestEpochId,
       descriptor: read.descriptor,
       idb
@@ -1196,10 +1327,19 @@ export async function revokeRecoveryCode({
  * secrets, so re-encryption needs none), re-PUTs it through the entry's
  * management zcap, and updates the registry's `delegationKeyId`.
  *
+ * The record's code-authenticated account binding is preserved verbatim: the
+ * re-mint reads the standing record through the same management zcap and
+ * carries its `binding` frame member forward (the tag rides in the clear; it
+ * cannot be recomputed without the code, and does not need to be). A re-mint
+ * therefore can never change the pointer or controller the code was issued
+ * against -- and after a host migration the tag no longer matches the moved
+ * pointer, so codes must be re-issued when the account moves hosts.
+ *
  * Best-effort per entry: an entry that predates the re-mint fields (no
  * `recoveryClientDid` / unlock-KAK members, or a GET/DELETE-only management
- * zcap) is skipped and stays flagged by the login-time health check, whose
- * regenerate nudge remains the backstop.
+ * zcap), or whose standing record cannot be read or carries no binding, is
+ * skipped and stays flagged by the login-time health check, whose regenerate
+ * nudge remains the backstop.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -1223,9 +1363,14 @@ export async function remintRecoveryDelegations({
   idb?: IDBFactory
 }): Promise<{ reminted: number; skipped: number }> {
   const pointer = session.profile.accountPointer
-  if (!WAS_SERVER_URL || !pointer) {
+  const keyAgent = session.profile.keyAgent
+  if (!WAS_SERVER_URL || !pointer || !keyAgent) {
     return { reminted: 0, skipped: 0 }
   }
+  // The re-mint holds the code's KAK public half but not its signing key, so
+  // every record it re-PUTs is signed with this client's own account key --
+  // the mixed-signer case a reader settles against the verified document.
+  const recordSigner = recordSignerFromAgent({ keyAgent })
   const entries =
     prefetched ??
     recoveryEntriesOf({ record: await getUnlockMethods({ session, idb }) })
@@ -1259,6 +1404,20 @@ export async function remintRecoveryDelegations({
       continue
     }
     try {
+      // The standing record's code-authenticated binding, carried forward
+      // verbatim (a record with none predates the binding and cannot be
+      // re-minted -- `recoveryRecordBinding` refuses, and the entry is
+      // skipped into the health check's regenerate nudge).
+      const standing = await getUnlockKeyringWithCapability({
+        storageServerUrl: WAS_SERVER_URL,
+        zcapClient: managementZcapClient({
+          session,
+          capability: entry.manageCapability
+        }),
+        spaceId: entry.unlockSpaceId,
+        capability: entry.manageCapability
+      })
+      const binding = recoveryRecordBinding({ record: standing })
       const delegation = await delegateLogWrite({
         zcapClient: session.profile.zcapClient,
         pointer,
@@ -1274,11 +1433,12 @@ export async function remintRecoveryDelegations({
       })) as IKeyAgreementKey
       const wrapped = await wrapRecoveryRecord({
         controller: session.profile.accountController ?? session.user.id,
-        email: session.user.email,
         pointer,
         delegation,
         keyAgreementKey: unlockKak,
-        keyResolver: singleKeyResolver({ keyAgreementKey: unlockKak })
+        keyResolver: singleKeyResolver({ keyAgreementKey: unlockKak }),
+        signer: recordSigner,
+        binding
       })
       await putUnlockKeyringWithCapability({
         storageServerUrl: WAS_SERVER_URL,

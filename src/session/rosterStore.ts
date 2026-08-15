@@ -17,7 +17,7 @@
  *   head.
  *
  * The chain-head pin is durable either way (`userKeyLogPinStore`, keyed by
- * the data Space id in the session database), so log continuity spans logins,
+ * the account DID in the session database), so log continuity spans logins,
  * not just one session. The bare-parts builder's own `verifyAccountLog` read
  * carries the account-log chain-head pin (`accountLogPinStore`) the same way;
  * the session builder's read gets it inside the verified-log memo.
@@ -78,7 +78,7 @@ export function accountRosterStore({
         did: pointer.did,
         spaceId: pointer.spaceId,
         host: pointer.host,
-        pinStore: accountLogPinStore({ spaceId: pointer.spaceId, idb })
+        pinStore: accountLogPinStore({ accountDid: pointer.did, idb })
       }).then(
         ({ log }) => webvhResourceLogController({ did: pointer.did, log }),
         err => {
@@ -88,7 +88,7 @@ export function accountRosterStore({
       )
       return await pending
     },
-    pinStore: userKeyLogPinStore({ spaceId: pointer.spaceId, idb }),
+    pinStore: userKeyLogPinStore({ accountDid: pointer.did, idb }),
     signer: userKeyRosterLogSigner({ keyAgent })
   })
 }
@@ -130,7 +130,7 @@ export function sessionRosterStore({
       const { log } = await verifiedAccountLog({ profile })
       return webvhResourceLogController({ did: pointer.did!, log })
     },
-    pinStore: userKeyLogPinStore({ spaceId, idb }),
+    pinStore: userKeyLogPinStore({ accountDid: pointer.did, idb }),
     signer: userKeyRosterLogSigner({ keyAgent })
   })
 }

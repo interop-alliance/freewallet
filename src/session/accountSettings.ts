@@ -461,7 +461,13 @@ export async function rotateAccountUpdateKey({
         session.profile.clientWebvhKeys = next
       },
       expectedDid,
-      pinStore: accountLogPinStore({ spaceId: remoteStore.spaceId })
+      // The pin is keyed by the account DID, so an account whose pointer has
+      // not been promoted yet has no pin to read: it also has no published
+      // log to be rolled back, and its first login-time provisioning
+      // establishes the pin.
+      ...(expectedDid
+        ? { pinStore: accountLogPinStore({ accountDid: expectedDid }) }
+        : {})
     })
   } finally {
     // The rotation publishes a log entry (and a torn rotation may have
@@ -565,14 +571,14 @@ export async function deleteAccount({
     } catch (err) {
       console.warn('Could not delete the passkey-safety notice:', err)
     }
-    // The pinned key-roster epoch is continuity state about the Space just
-    // wiped: clear it beside the pointer pin `deleteKeyring` drops, so a
-    // re-provisioned account is never refused against a pin from the deleted
-    // one.
-    const dataSpaceId = session.profile.accountPointer?.spaceId
-    if (dataSpaceId) {
+    // The pinned key-roster epoch is continuity state about the account just
+    // wiped: clear it beside the freshness pin `deleteKeyring` drops. Keyed by
+    // the account DID, so a re-provisioned account (a fresh DID) would get a
+    // fresh slot anyway; the delete keeps the dead row from lingering.
+    const accountDid = session.profile.accountPointer?.did
+    if (accountDid) {
       try {
-        await deleteUserKeyEpochPin({ spaceId: dataSpaceId })
+        await deleteUserKeyEpochPin({ accountDid })
       } catch (err) {
         console.warn('Could not delete the key-roster epoch pin:', err)
       }

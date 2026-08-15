@@ -59,9 +59,9 @@ import {
   wrapRecordEnvelope
 } from '@/session/recordEnvelope'
 import {
-  deleteAccountPointerPin,
   deleteClientKeyRecord,
   deleteKeyringCache,
+  deleteKeyringFreshnessPin,
   deleteUnlockMethodsCache,
   loadUnlockMethodsCache,
   saveUnlockMethodsCache
@@ -607,9 +607,9 @@ export async function revokeUnlockMethod({
   await deleteKeyringCache({ spaceId: entry.unlockSpaceId, idb })
   // Retiring the method also retires this client's local records under it:
   // the client-key wrap (other methods keep their own wraps of the same key
-  // set) and the pointer pin.
+  // set) and the freshness pin.
   await deleteClientKeyRecord({ spaceId: entry.unlockSpaceId, idb })
-  await deleteAccountPointerPin({ spaceId: entry.unlockSpaceId, idb })
+  await deleteKeyringFreshnessPin({ spaceId: entry.unlockSpaceId, idb })
   await dropRegistryEntry({ session, entry, idb })
 }
 

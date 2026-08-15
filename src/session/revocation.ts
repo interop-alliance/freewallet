@@ -122,7 +122,7 @@ export async function revokeEnrolledClient({
   // independent of the epoch pin read, so the two round trips run together.
   const [entries, pinnedEpochId] = await Promise.all([
     recoveryEntries({ session, idb }),
-    loadUserKeyEpochPin({ spaceId: pointer.spaceId, idb })
+    loadUserKeyEpochPin({ accountDid: pointer.did, idb })
   ])
 
   // The cascade opens with a document edit, so nothing may keep reading a
@@ -156,7 +156,7 @@ export async function revokeEnrolledClient({
       // The user key and the epoch pin persist together: the pin must never advance
       // without the key that authenticated the roster it advanced to.
       await savePinFromDescriptor({
-        spaceId: pointer.spaceId,
+        accountDid: pointer.did,
         epochId: latestEpochId,
         descriptor,
         idb

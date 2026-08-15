@@ -75,6 +75,7 @@ import {
   checkUserKeyRosterAtLogin,
   convergeUserKeyRosterToAccount
 } from '@interop/wallet-core/clients'
+import { accountLogPinStore, loadUserKeyEpochPin } from '@/lib/sessionKey'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import { StorageManager } from '@/stores/storageManager'
 import { initSessionFromSeed } from '@/session/initSession'
@@ -480,6 +481,14 @@ describe('the roster stage of the sweep', () => {
         descriptor: ROSTER_DESCRIPTOR,
         userKey: OLD_USER_KEY
       })
+    )
+    // The continuity pins are keyed by the account DID, never by the Space
+    // id a substituted pointer could change.
+    expect(vi.mocked(loadUserKeyEpochPin)).toHaveBeenCalledWith(
+      expect.objectContaining({ accountDid: POINTER.did })
+    )
+    expect(vi.mocked(accountLogPinStore)).toHaveBeenCalledWith(
+      expect.objectContaining({ accountDid: POINTER.did })
     )
     // The fresh key is adopted -- persisted for the next login, swapped into
     // the live session -- and the fan-out runs against it.

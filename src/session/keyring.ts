@@ -28,7 +28,8 @@
  *   `{ did, spaceId, host }` (plus the controller and the account email),
  *   wrapped (JWE, ECDH-ES to the unlock KAK) via the same EDV cipher the
  *   wallet already ships -- discovery for a portable credential, never key
- *   material. The retired wrapped data seed is gone: a passphrase on a fresh
+ *   material -- and SIGNED by the unlock identity's own Ed25519 key. The
+ *   retired wrapped data seed is gone: a passphrase on a fresh
  *   browser locates the account but cannot act until that client is enrolled.
  *   The remote copy is the source of truth and is consulted first on every
  *   login; a **local cache** in the `freewallet-session` IndexedDB serves
@@ -39,12 +40,19 @@
  *   -- the private keys exist nowhere else -- so it is deleted only by the
  *   explicit unlock-method lifecycle flows, never on a server answer.
  *
- * **Pointer continuity**: the pointer a client has seen is pinned locally
- * (the recorded first-fetch trust bound). A remote record whose pointer
- * conflicts with the pin throws `AccountPointerChangedError` instead of being
- * followed -- a passphrase-only bootstrap trusts the server at first contact,
- * but a client that has seen the account before does not have to keep
- * trusting a substituted record.
+ * **Record authenticity and freshness**: the record's proof is what stops a
+ * storage host forging one. Its signing key derives from the unlock secret, so
+ * a client that has only ever typed the secret already holds the verification
+ * prior, and the host never holds the signing key -- a substituted record is
+ * refused (`KeyringRecordForgedError`) before it is decrypted, at first contact
+ * as much as at the thousandth. What the signature cannot catch is a REPLAY: a
+ * record the account has since moved off is authentic forever. So each client
+ * pins the newest signed `createdAt` it has accepted for the unlock method, and
+ * refuses a record older than the pin (`KeyringRecordRolledBackError`). Between
+ * the two, a pointer that differs from anything this client has seen is simply
+ * followed: a rebind, a host migration, or a fresh account under a reused
+ * passphrase all produce a newer, validly signed record, and the honest answer
+ * to one is to log in.
  *
  * A passphrase change re-wraps both records under a new unlock identity, PUTs
  * the keyring record to the new unlock Space, then deletes the old unlock
@@ -94,15 +102,15 @@ import {
   wrapRecordEnvelope
 } from '@/session/recordEnvelope'
 import {
-  deleteAccountPointerPin,
   deleteClientKeyRecord,
   deleteKeyringCache,
-  loadAccountPointerPin,
+  deleteKeyringFreshnessPin,
   loadClientKeyRecord,
   loadKeyringCache,
-  saveAccountPointerPin,
+  loadKeyringFreshnessPin,
   saveClientKeyRecord,
-  saveKeyringCache
+  saveKeyringCache,
+  saveKeyringFreshnessPin
 } from '@/lib/sessionKey'
 
 /**
@@ -159,7 +167,7 @@ export interface KeyringFetchResult extends KeyringRecordContents {
   // closure over the unlock identity that produced this hit. In-memory only.
   persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
   // Re-wraps and re-PUTs the keyring record with a changed account pointer
-  // (and refreshes the local cache + pointer pin) without the unlock secret
+  // (and refreshes the local cache + freshness pin) without the unlock secret
   // -- the login-time heal path for a signup whose did:webvh backfill never
   // ran (a KMS hiccup): once a later login's provisioning publishes the log,
   // the pointer can durably adopt the did. In-memory only.
@@ -325,8 +333,9 @@ function clientKeysPersister({
 /**
  * Builds the `persistAccountPointer` closure a fetch result carries: re-wraps
  * the keyring record with a changed account pointer under the same unlock
- * identity, PUTs it (when a WAS server is configured), and refreshes the
- * local cache and the pointer pin. The controller and email are restated from
+ * identity, signs it with that identity's record signer, PUTs it (when a WAS
+ * server is configured), and refreshes the local cache and the freshness pin.
+ * The controller and email are restated from
  * the fetched record -- only the pointer changes. This is the login-time
  * counterpart of signup's did:webvh pointer backfill, for accounts whose
  * backfill never ran (a provisioning hiccup at signup).
@@ -347,12 +356,17 @@ function accountPointerPersister({
   idb?: IDBFactory
 }): (pointer: AccountPointer) => Promise<void> {
   return async pointer => {
+    // Stamped here rather than left to the codec, so the pin advances to the
+    // exact timestamp the record carries without re-reading it.
+    const createdAt = new Date().toISOString()
     const record = await wrapKeyringRecord({
       controller: found.controller,
       email: found.email,
       pointer,
       keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-      keyResolver: unlock.keyResolver
+      keyResolver: unlock.keyResolver,
+      signer: unlock.recordSigner,
+      createdAt
     })
     if (WAS_SERVER_URL) {
       await putUnlockKeyring({
@@ -363,7 +377,7 @@ function accountPointerPersister({
       })
     }
     await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
-    await saveAccountPointerPin({ spaceId: unlock.spaceId, pointer, idb })
+    await saveKeyringFreshnessPin({ spaceId: unlock.spaceId, createdAt, idb })
   }
 }
 
@@ -450,69 +464,88 @@ export class KeyringRecordUnusableError extends Error {
 }
 
 /**
- * Thrown by `fetchKeyring` when the remote keyring record's account pointer
- * conflicts with the pointer this client has pinned for the unlock method --
- * the continuity refusal: a server (or an attacker who can write to it) has
- * substituted where this passphrase resolves to since this client last saw
- * the account. Login is refused rather than misdirected; the pin is left in
- * place so the state is inspectable.
+ * Thrown when a keyring record's Data Integrity proof is absent, malformed, or
+ * made by a key other than the one the typed unlock secret derives -- the
+ * authenticity refusal: the storage host served a record it forged or tampered
+ * with. Distinct from a wrong passphrase (which resolves to a different unlock
+ * Space and simply misses) and from `KeyringRecordUnusableError` (a record this
+ * client's own account genuinely wrote, but cannot read).
  */
-export class AccountPointerChangedError extends Error {
-  pinned: AccountPointer
-  fetched?: AccountPointer
+export class KeyringRecordForgedError extends Error {
+  constructor({ cause }: { cause?: unknown } = {}) {
+    const detail = cause instanceof Error ? ` ${cause.message}` : ''
+    super(`Forged or tampered keyring record.${detail}`)
+    this.name = 'KeyringRecordForgedError'
+    this.cause = cause
+  }
+}
+
+/**
+ * Thrown by `fetchKeyring` when a validly signed keyring record is OLDER than
+ * the newest one this client has accepted for the unlock method -- a replay.
+ * The proof cannot catch this on its own: a record the account has since moved
+ * off stays authentic forever, so a host withholding the current record and
+ * re-serving a superseded one would silently send this client at a stale
+ * account pointer. The pin is left in place so a later, current record is
+ * accepted normally.
+ */
+export class KeyringRecordRolledBackError extends Error {
+  pinnedCreatedAt: string
+  servedCreatedAt: string
   constructor({
-    pinned,
-    fetched
+    pinnedCreatedAt,
+    servedCreatedAt
   }: {
-    pinned: AccountPointer
-    fetched?: AccountPointer
+    pinnedCreatedAt: string
+    servedCreatedAt: string
   }) {
     super(
-      'The account pointer in the keyring record does not match the one ' +
-        'this client has pinned.'
+      `The keyring record served (${servedCreatedAt}) is older than the ` +
+        `newest one this client has accepted (${pinnedCreatedAt}).`
     )
-    this.name = 'AccountPointerChangedError'
-    this.pinned = pinned
-    this.fetched = fetched
+    this.name = 'KeyringRecordRolledBackError'
+    this.pinnedCreatedAt = pinnedCreatedAt
+    this.servedCreatedAt = servedCreatedAt
   }
 }
 
 /**
- * Whether a freshly fetched pointer conflicts with the pinned one. The
- * account location (`spaceId`, `host`) must match exactly, and a pinned did
- * may never change or disappear; a fetched record that ADDS a did to a pin
- * recorded before provisioning published one is a benign upgrade, not a
- * conflict. A record with no pointer at all, against a pin, is a conflict --
- * a WAS-bound record always carries one.
+ * Whether an error came out of wallet-core's record-proof layer. Matched on
+ * `name` rather than `instanceof`: the shared package may be linked rather
+ * than installed, and a duplicated class identity would silently turn the
+ * forgery refusal into a generic unusable-record one.
  *
- * @param options {object}
- * @param options.pinned {AccountPointer}
- * @param [options.fetched] {AccountPointer}
+ * @param err {unknown}
  * @returns {boolean}
  */
-function pointerConflicts({
-  pinned,
-  fetched
-}: {
-  pinned: AccountPointer
-  fetched?: AccountPointer
-}): boolean {
-  if (!fetched) {
-    return true
-  }
-  return (
-    fetched.spaceId !== pinned.spaceId ||
-    fetched.host !== pinned.host ||
-    (pinned.did !== undefined && fetched.did !== pinned.did)
-  )
+function isRecordProofError(err: unknown): boolean {
+  return (err as Error | null)?.name === 'RecordProofError'
 }
 
 /**
- * Enforces pointer continuity for a freshly fetched remote record: refuses a
- * pointer that conflicts with the local pin (throws
- * `AccountPointerChangedError`), and otherwise records/refreshes the pin --
- * the first fetch establishes the trust bound; a benign did upgrade advances
- * it.
+ * Maps an unwrap failure onto its typed refusal: a proof failure is the
+ * host-forgery refusal, anything else is a corrupt/unreadable record.
+ *
+ * @param err {unknown}
+ * @returns {Error}
+ */
+function keyringUnwrapError(err: unknown): Error {
+  return isRecordProofError(err)
+    ? new KeyringRecordForgedError({ cause: err })
+    : new KeyringRecordUnusableError({ cause: err })
+}
+
+/**
+ * Enforces freshness for a verified, unwrapped record: refuses one whose
+ * signed bind timestamp predates the local pin (throws
+ * `KeyringRecordRolledBackError`), and otherwise advances the pin. The first
+ * accepted record establishes it; it only ever moves forward, so an equal
+ * timestamp (the same record, re-read) passes untouched.
+ *
+ * Nothing here inspects the account pointer: a record naming somewhere this
+ * client has never seen is legitimate whenever it is the newest signed one --
+ * a rebind, a host migration, or a fresh account bound under a reused
+ * passphrase.
  *
  * @param options {object}
  * @param options.unlock {UnlockIdentity}
@@ -520,7 +553,7 @@ function pointerConflicts({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-async function enforcePointerContinuity({
+async function enforceRecordFreshness({
   unlock,
   found,
   idb
@@ -529,20 +562,24 @@ async function enforcePointerContinuity({
   found: KeyringRecordContents
   idb?: IDBFactory
 }): Promise<void> {
-  const pinned = (await loadAccountPointerPin({
+  const pinnedCreatedAt = await loadKeyringFreshnessPin({
     spaceId: unlock.spaceId,
     idb
-  })) as AccountPointer | null
-  if (pinned && pointerConflicts({ pinned, fetched: found.pointer })) {
-    throw new AccountPointerChangedError({ pinned, fetched: found.pointer })
-  }
-  if (found.pointer) {
-    await saveAccountPointerPin({
-      spaceId: unlock.spaceId,
-      pointer: found.pointer,
-      idb
+  })
+  if (
+    pinnedCreatedAt &&
+    Date.parse(found.createdAt) < Date.parse(pinnedCreatedAt)
+  ) {
+    throw new KeyringRecordRolledBackError({
+      pinnedCreatedAt,
+      servedCreatedAt: found.createdAt
     })
   }
+  await saveKeyringFreshnessPin({
+    spaceId: unlock.spaceId,
+    createdAt: found.createdAt,
+    idb
+  })
 }
 
 /**
@@ -572,10 +609,14 @@ async function readCachedRecord({
   idb?: IDBFactory
 }): Promise<KeyringFetchResult | null> {
   try {
+    // A cached record is still a signed record and this client holds the
+    // verification key, so it is verified exactly as a remote one is -- the
+    // cache is local state a page script could reach, not a trusted origin.
     const unwrapped = await unwrapKeyringRecord({
       record: cached.record,
       keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-      keyResolver: unlock.keyResolver
+      keyResolver: unlock.keyResolver,
+      expectedKeyMultibase: unlock.recordSigner.keyMultibase
     })
     return await buildFetchResult({
       found: unwrapped,
@@ -596,18 +637,20 @@ async function readCachedRecord({
  * checking it before the cache is what makes a method change (e.g. a
  * passphrase change) on another client take effect here: a found record
  * refreshes the local cache, while a 404-shaped miss (a null record) drops
- * the cached copy and the pointer pin and returns `null` (no account for this
+ * the cached copy and the freshness pin and returns `null` (no account for this
  * secret -- never bound, or retired). The local client-key record is left
  * alone on a miss: it is the only copy of this client's keys, and a server
  * answer must never be able to destroy it. When the remote GET fails
  * (network/unreachable), the cache answers as an offline fallback, but only
  * within `KEYRING_CACHE_TTL_MS`; past that (or with no usable cache) the
  * error rethrows, so the caller sees "could not check" rather than misreading
- * it as "no account". A remote record that fails to unwrap or validate throws
- * `KeyringRecordUnusableError` (corrupt record -- a state distinct from both
- * "no account" and "server unreachable") and never refreshes the cache; one
- * whose pointer conflicts with the local pin throws
- * `AccountPointerChangedError` and is neither cached nor followed. With no
+ * it as "no account". A remote record whose proof does not verify against the
+ * unlock identity's own signing key throws `KeyringRecordForgedError` (the
+ * host forged or tampered with it); one that fails to unwrap or validate for
+ * any other reason throws `KeyringRecordUnusableError` (corrupt record -- a
+ * state distinct from both "no account" and "server unreachable"); one older
+ * than the local freshness pin throws `KeyringRecordRolledBackError` (a
+ * replay). None of the three refreshes the cache. With no
  * WAS server configured the cache is the keyring's only copy, so the lookup
  * is cache-only with no TTL.
  *
@@ -715,11 +758,11 @@ export async function fetchKeyring({
     // A 404-shaped miss: no keyring for this passphrase (never bound, or
     // retired by a passphrase change on this or another client). Drop the
     // cached copy so the retired passphrase cannot keep resolving offline,
-    // and the pointer pin -- the continuity prior is stale once this client
+    // and the freshness pin -- the continuity prior is stale once this client
     // has seen "no account". The client-key record stays: it is primary
     // state, and without a session it is inert anyway.
     await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
-    await deleteAccountPointerPin({ spaceId: unlock.spaceId, idb })
+    await deleteKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
     return null
   }
 
@@ -728,18 +771,20 @@ export async function fetchKeyring({
     found = await unwrapKeyringRecord({
       record,
       keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-      keyResolver: unlock.keyResolver
+      keyResolver: unlock.keyResolver,
+      expectedKeyMultibase: unlock.recordSigner.keyMultibase
     })
   } catch (err) {
-    // A record exists under the correct unlock Space but does not unwrap:
-    // a corrupt/malformed record, not a wrong passphrase (that resolves to
-    // a different Space and misses above). Surface it as its own state --
-    // and never refresh the cache from an unusable record.
-    throw new KeyringRecordUnusableError({ cause: err })
+    // A record exists under the correct unlock Space but does not open: a
+    // forged one (its proof was not made by the key the typed secret derives)
+    // or a corrupt/malformed one. Neither is a wrong passphrase -- that
+    // resolves to a different Space and misses above -- so each surfaces as
+    // its own state, and neither ever refreshes the cache.
+    throw keyringUnwrapError(err)
   }
-  // The continuity check runs before the cache refresh, so a refused record
+  // The freshness check runs before the cache refresh, so a replayed record
   // is neither followed nor allowed to become tomorrow's offline fallback.
-  await enforcePointerContinuity({ unlock, found, idb })
+  await enforceRecordFreshness({ unlock, found, idb })
   await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
   return await buildFetchResult({ found, unlock, mintManageCapability, idb })
 }
@@ -796,9 +841,11 @@ async function buildFetchResult({
 /**
  * Binds an unlock secret to this client's key set and the account it belongs
  * to: derives the unlock identity for the method's KDF, ensures the unlock
- * Space (when WAS is configured), wraps and PUTs the account-pointer keyring
- * record, wraps the client seed + user key into the local client-key record, pins
- * the pointer, and saves the local cache. Throws on failure (the caller
+ * Space (when WAS is configured), wraps, signs, and PUTs the account-pointer
+ * keyring
+ * record, wraps the client seed + user key into the local client-key record,
+ * seeds the freshness pin with the timestamp it just signed, and saves the
+ * local cache. Throws on failure (the caller
  * decides fatality -- fatal for signups). With no WAS server configured the
  * keyring is cache-only, so the account is then only recoverable in this
  * browser profile. Returns the unlock Space id so callers (the unlock-methods
@@ -820,7 +867,7 @@ async function buildFetchResult({
  *   did:webvh update-key seeds, cached in the local client-key record so any
  *   unlock method recovers update authority at login
  * @param [options.pointer] {AccountPointer}   the account pointer the record
- *   carries (and this client pins); absent on no-WAS deployments
+ *   carries; absent on no-WAS deployments
  * @param [options.delegateManagementTo] {string}   an account DID (see
  *   `unlockManagementGrantee`) to delegate the unlock Space management zcap
  *   to (GET/DELETE on this unlock Space). When set and a WAS server is
@@ -863,12 +910,17 @@ export async function bindUnlockSecret({
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
 }> {
   const unlock = derived ?? (await deriveUnlockIdentity({ secret, kdf }))
+  // The bind timestamp is stamped here rather than left to the codec, so this
+  // client seeds its freshness pin with exactly what it signed.
+  const createdAt = new Date().toISOString()
   const record = await wrapKeyringRecord({
     controller,
     email,
     pointer,
     keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-    keyResolver: unlock.keyResolver
+    keyResolver: unlock.keyResolver,
+    signer: unlock.recordSigner,
+    createdAt
   })
 
   let manageCapability: IZcap | undefined
@@ -906,9 +958,7 @@ export async function bindUnlockSecret({
     controller,
     idb
   })
-  if (pointer) {
-    await saveAccountPointerPin({ spaceId: unlock.spaceId, pointer, idb })
-  }
+  await saveKeyringFreshnessPin({ spaceId: unlock.spaceId, createdAt, idb })
 
   return {
     unlockSpaceId: unlock.spaceId,
@@ -1048,7 +1098,8 @@ async function verifyUnlockKeyring({
     unwrapped = await unwrapKeyringRecord({
       record,
       keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-      keyResolver: unlock.keyResolver
+      keyResolver: unlock.keyResolver,
+      expectedKeyMultibase: unlock.recordSigner.keyMultibase
     })
   } catch {
     // A record that does not unwrap for this controller is a wrong passphrase.
@@ -1138,7 +1189,7 @@ export async function verifyPassphrase({
 /**
  * Retires one unlock identity: its unlock Space on the server (best effort)
  * and every local record filed under it (the keyring cache, the client-key
- * record, the account-pointer pin). Shared by `deleteUnlockMethod` and the
+ * record, the keyring-freshness pin). Shared by `deleteUnlockMethod` and the
  * old-identity half of `changePassphrase`.
  *
  * @param options {object}
@@ -1171,16 +1222,16 @@ async function retireUnlockIdentity({
   }
   await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
   await deleteClientKeyRecord({ spaceId: unlock.spaceId, idb })
-  await deleteAccountPointerPin({ spaceId: unlock.spaceId, idb })
+  await deleteKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
   return unlockSpaceDeleted
 }
 
 /**
  * Retires an unlock method's keyring (account deletion, method removal):
  * derives the unlock identity, deletes its unlock Space (when a WAS server is
- * configured), and always clears the local records -- the cache, the pointer
- * pin, and this method's client-key record (an explicit lifecycle flow is the
- * one place a client-key record may be deleted). With no WAS server
+ * configured), and always clears the local records -- the cache, the
+ * freshness pin, and this method's client-key record (an explicit lifecycle
+ * flow is the one place a client-key record may be deleted). With no WAS server
  * configured there is no Space, so `unlockSpaceDeleted` stays `true`.
  *
  * Performs no verification -- a wrong secret derives a different unlock Space

@@ -22,7 +22,10 @@ import {
   completeEnrollmentCore,
   type EnrollmentRequest
 } from '@interop/wallet-core/enrollment'
-import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
+import {
+  isWebvhDid,
+  type ClientWebvhUpdateKeys
+} from '@interop/wallet-core/webvh'
 import { setClientLabel } from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
 import { sessionRosterStore } from '@/session/rosterStore'
@@ -141,12 +144,16 @@ export async function completeEnrollment({
     throw new Error('No account was found for this passphrase.')
   }
   const pointer = found.pointer
-  if (!pointer) {
+  // The continuity pins are keyed by the account DID, and the ceremony core
+  // itself refuses a pointer that names none, so the promoted-account check
+  // is made here rather than left to fail deeper in.
+  if (!pointer || !isWebvhDid(pointer.did)) {
     throw new Error(
       'The account pointer names no did:webvh; only a promoted account can ' +
         'enroll additional clients.'
     )
   }
+  const accountDid = pointer.did
 
   const { userKey, latestEpochId } = await completeEnrollmentCore({
     clientSeed,
@@ -154,10 +161,10 @@ export async function completeEnrollment({
     pointer,
     // The enrolling browser's first contact with the account log establishes
     // its chain-head pin (trust-on-first-use); later logins verify against it.
-    accountLogPinStore: accountLogPinStore({ spaceId: pointer.spaceId, idb })
+    accountLogPinStore: accountLogPinStore({ accountDid, idb })
   })
   await saveUserKeyEpochPin({
-    spaceId: pointer.spaceId,
+    accountDid,
     epochId: latestEpochId,
     idb
   })

@@ -8,3 +8,5 @@ allowedDeprecatedVersions:
 minimumReleaseAgeExclude:
   - '@interop/*'
   - 'byoe-context*'
+overrides:
+  "@interop/wallet-core": "link:../wallet-core"
