@@ -154,7 +154,6 @@ async function storeRecordForCode({
     pointer: pointer ?? POINTER,
     delegation: DELEGATION,
     keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-    keyResolver: unlock.keyResolver,
     // Issuance signs with the code's own unlock key; the revocation
     // cascade's re-mint passes an enrolled client's account key instead.
     signer: signer ?? unlock.recordSigner,

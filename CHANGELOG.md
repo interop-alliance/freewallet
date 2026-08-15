@@ -87,6 +87,15 @@
   the byoe-ecosystem and isomorphic-lib-template repos, and the
   contributor-tier note (PRs need tests plus a summary only).
 
+### Fixed
+
+- The revocation cascade's recovery-delegation re-mint now actually
+  re-wraps the unlock records: the record wrap path seals through an
+  encrypt-only cipher built from the recipient's public half alone, where
+  it previously needed a key-agreement secret the re-mint does not hold
+  and silently skipped every entry. The wrap calls drop the now-dead key
+  resolver argument.
+
 ## 0.38.0 - 2026-08-14
 
 ### Changed

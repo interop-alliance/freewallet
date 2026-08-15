@@ -217,7 +217,6 @@ async function bindRecoveryRecord({
     pointer,
     delegation,
     keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-    keyResolver: unlock.keyResolver,
     // Issuance signs with the code's own unlock key -- the strong path, where
     // a typed code alone establishes what may have signed the record, so
     // recovery verifies the proof before decrypting anything.

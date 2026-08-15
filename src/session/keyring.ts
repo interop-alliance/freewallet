@@ -372,7 +372,6 @@ function accountPointerPersister({
       email: found.email,
       pointer,
       keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-      keyResolver: unlock.keyResolver,
       signer: unlock.recordSigner,
       createdAt
     })
@@ -959,7 +958,6 @@ export async function bindUnlockSecret({
     email,
     pointer,
     keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-    keyResolver: unlock.keyResolver,
     signer: unlock.recordSigner,
     createdAt
   })
