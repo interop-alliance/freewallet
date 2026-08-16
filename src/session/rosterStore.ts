@@ -21,11 +21,12 @@
  * the shared orchestrator from the document edit's own post-edit log) reaches
  * the store as-is.
  *
- * The chain-head pin is durable either way (`userKeyLogPinStore`, keyed by
- * the account DID in the session database), so log continuity spans logins,
- * not just one session. The bare-parts builder's own `verifyAccountLog` read
- * carries the account-log chain-head pin (`accountLogPinStore`) the same way;
- * the session builder's read gets it inside the verified-log memo.
+ * The chain-head pin is durable either way (`sessionLogPinStore`, the keyed
+ * pin store in the session database; wallet-core derives the roster log's
+ * slot key from the Space id), so log continuity spans logins, not just one
+ * session. The bare-parts builder's own `verifyAccountLog` read carries the
+ * same store for the account-log chain-head pin; the session builder's read
+ * gets it inside the verified-log memo.
  */
 import type { ZcapClient } from '@interop/ezcap'
 import {
@@ -41,7 +42,7 @@ import {
 } from '@interop/wallet-core/webvh'
 import type { AccountLogPointer } from '@interop/wallet-core/clients'
 import type { ControllerProfile } from '@/types/auth'
-import { accountLogPinStore, userKeyLogPinStore } from '@/lib/sessionKey'
+import { sessionLogPinStore } from '@/lib/sessionKey'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 
 /**
@@ -83,7 +84,7 @@ export function accountRosterStore({
         did: pointer.did,
         spaceId: pointer.spaceId,
         host: pointer.host,
-        pinStore: accountLogPinStore({ accountDid: pointer.did, idb })
+        pinStore: sessionLogPinStore({ idb })
       }).then(
         ({ log }) => webvhResourceLogController({ did: pointer.did, log }),
         err => {
@@ -93,7 +94,7 @@ export function accountRosterStore({
       )
       return await pending
     },
-    pinStore: userKeyLogPinStore({ accountDid: pointer.did, idb }),
+    pinStore: sessionLogPinStore({ idb }),
     signer: userKeyRosterLogSigner({ keyAgent })
   })
 }
@@ -135,7 +136,7 @@ export function sessionRosterStore({
       const { log } = await verifiedAccountLog({ profile })
       return webvhResourceLogController({ did: pointer.did!, log })
     },
-    pinStore: userKeyLogPinStore({ accountDid: pointer.did, idb }),
+    pinStore: sessionLogPinStore({ idb }),
     signer: userKeyRosterLogSigner({ keyAgent })
   })
 }

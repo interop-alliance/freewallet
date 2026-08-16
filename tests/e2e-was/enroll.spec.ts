@@ -7,20 +7,20 @@ import {
 import { fillSettled, signupViaWizard } from './helpers'
 
 /**
- * The client enrollment ceremony e2e (WAS mode): connecting a second browser
- * profile to an existing account. The cold profile's passphrase login is
- * refused (not enrolled), the "Connect this browser" flow mints its key set
- * locally and shows a connect code, the first client approves the code from
- * Settings (the user key roster wrap, then the two-entry did:webvh ceremony), and
- * the cold profile completes: its first roster read -- signed with its
- * freshly published `<did:webvh>#<multibase>` key -- delivers the user key, and
- * the session decrypts the encrypted collections INCLUDING pre-enrollment
- * writes (the escrow-every-epoch semantics; the welcome credential was
- * sealed before the second client existed). The enrollment itself is two
- * verifiable entries on the world-readable log.
+ * The self-enrolling login e2e (WAS mode): connecting a second browser
+ * profile to an existing account with nothing but the standing passphrase.
+ * The cold profile's login runs the whole continuation in place -- the
+ * reveal-and-commit and add entries through the record's bridge delegation,
+ * then the first roster read signed with the freshly published
+ * `<did:webvh>#<multibase>` key -- and the session decrypts the encrypted
+ * collections INCLUDING pre-enrollment writes (the escrow-every-epoch
+ * semantics; the welcome credential was sealed before the second client
+ * existed). The self-enrollment is two verifiable entries on the
+ * world-readable log, and the credential's own posture stands untouched for
+ * the next fresh browser.
  *
- * PBKDF2 unlock derivations run several times across the ceremony, on top of
- * a full signup -- hence `test.slow()` and the generous timeouts.
+ * PBKDF2 unlock derivations run several times across the flow, on top of a
+ * full signup -- hence `test.slow()` and the generous timeouts.
  */
 
 // Matches `playwright.was.config.ts` (APP_PORT). Manually created contexts do
@@ -55,8 +55,8 @@ async function readLogUrl(page: Page): Promise<string> {
   return (await logLink.getAttribute('href'))!
 }
 
-test.describe('Client enrollment ceremony', () => {
-  test('a second browser enrolls end to end and decrypts pre-enrollment data', async ({
+test.describe('Self-enrolling login', () => {
+  test('a second browser self-enrolls end to end and decrypts pre-enrollment data', async ({
     page,
     browser
   }, testInfo) => {
@@ -77,8 +77,9 @@ test.describe('Client enrollment ceremony', () => {
       await (await page.request.get(logUrl)).text()
     ).length
 
-    // Client 2 (cold profile): the passphrase locates the account but the
-    // login is refused as not enrolled, surfacing the connect flow.
+    // Client 2 (cold profile): the standing passphrase self-enrolls this
+    // browser at login -- no second party involved -- and lands on the
+    // dashboard as an ordinary enrolled client.
     const secondClient = await coldClientPage(browser)
     try {
       await secondClient.goto('/#/login')
@@ -88,43 +89,6 @@ test.describe('Client enrollment ceremony', () => {
       )
       await secondClient
         .getByRole('button', { name: 'Log in', exact: true })
-        .click()
-      await expect(
-        secondClient.getByText('this browser does not hold its keys yet', {
-          exact: false
-        })
-      ).toBeVisible({ timeout: 30_000 })
-
-      // Start the connect flow: the key set is minted locally and only the
-      // public halves surface as the connect code.
-      await secondClient
-        .getByRole('button', { name: 'Connect this browser' })
-        .click()
-      const codeField = secondClient.getByTestId('enroll-connect-code')
-      await expect(codeField).toBeVisible({ timeout: 20_000 })
-      const code = await codeField.inputValue()
-      expect(code.startsWith('freewallet-connect:')).toBe(true)
-      // The fingerprint to compare on both screens.
-      await expect(
-        secondClient.getByText(/Key fingerprint: did:key:z6Mk/)
-      ).toBeVisible()
-
-      // Client 1 approves the code from Settings: the enrolling half of the
-      // ceremony (roster wrap first, then the two log entries).
-      await page.goto('/#/settings')
-      await page.getByRole('button', { name: 'Connect another wallet' }).click()
-      await fillSettled(page.getByTestId('enroll-code-input'), code)
-      await expect(page.getByText(/New client key: did:key:z6Mk/)).toBeVisible()
-      await page.getByRole('button', { name: 'Approve', exact: true }).click()
-      await expect(
-        page.getByText('The new browser was enrolled', { exact: false })
-      ).toBeVisible({ timeout: 60_000 })
-
-      // Client 2 completes: verifies the published log, performs its first
-      // roster read with its did:webvh keyId, persists the key set, and logs
-      // in as an ordinary enrolled client.
-      await secondClient
-        .getByRole('button', { name: 'I approved it -- finish connecting' })
         .click()
       await expect(secondClient).toHaveURL(/#\/dashboard/, {
         timeout: 60_000
@@ -138,7 +102,7 @@ test.describe('Client enrollment ceremony', () => {
       ).toBeVisible({ timeout: 30_000 })
 
       // A reload-then-login exercises the persisted client-key record (the
-      // ordinary enrolled-login path, not ceremony state).
+      // ordinary enrolled-login path, not the self-enrollment).
       await secondClient.goto('/#/login')
       await fillSettled(
         secondClient.locator('input[type="password"]'),
@@ -154,8 +118,10 @@ test.describe('Client enrollment ceremony', () => {
       await secondClient.context().close()
     }
 
-    // The enrollment is exactly two verifiable entries on the public log:
-    // the commit and the add, and the extended log still fully verifies
+    // The self-enrollment is exactly two verifiable entries on the public
+    // log: the reveal-and-commit (ladder rung revealed, new client's hashes
+    // committed) and the add (new client in, spent rung retired, the next
+    // rung's hash standing), and the extended log still fully verifies
     // (SCID, hash chain, prerotation, proofs).
     const logText = await (await page.request.get(logUrl)).text()
     const log = readLogFromString(logText)
@@ -164,11 +130,14 @@ test.describe('Client enrollment ceremony', () => {
       verifier: defaultWebvhLogVerifier
     })
     expect(resolved.meta.error).toBeUndefined()
-    // Quorum-of-one left both clients authorized: two client update keys.
+    // Both clients hold update authority; the revealed rung was retired by
+    // the add entry, so exactly two client update keys stand.
     expect(resolved.meta.updateKeys).toHaveLength(2)
     // The document roster now carries the second client's keys: two more
-    // verification methods than the three a single-client account publishes.
-    expect(resolved.doc?.verificationMethod).toHaveLength(5)
-    expect(resolved.doc?.keyAgreement).toHaveLength(2)
+    // verification methods than the four a single-client account publishes
+    // (three Multikey entries plus the passphrase's commitment).
+    expect(resolved.doc?.verificationMethod).toHaveLength(6)
+    // Two client KAKs plus the passphrase's commitment entry.
+    expect(resolved.doc?.keyAgreement).toHaveLength(3)
   })
 })

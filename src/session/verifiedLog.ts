@@ -36,7 +36,7 @@ import type {
   VerifiedAccountLog
 } from '@interop/wallet-core/clients'
 import type { ControllerProfile } from '@/types/auth'
-import { accountLogPinStore } from '@/lib/sessionKey'
+import { sessionLogPinStore } from '@/lib/sessionKey'
 
 /**
  * One memoized verification, keyed on the pointer it was verified against.
@@ -81,7 +81,7 @@ export function createVerifiedLogCache(): VerifiedLogCache {
         // The durable account-log chain-head pin: a served log that forks,
         // rolls back, or switches identity against it is refused here, before
         // anything downstream reads the memo.
-        pinStore: accountLogPinStore({ accountDid: pointer.did })
+        pinStore: sessionLogPinStore()
       }).catch(err => {
         // A failed verification is never the cached answer: drop it so the
         // next caller re-reads (an unreachable host is transient; a genuinely

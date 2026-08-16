@@ -189,6 +189,10 @@ async function appZcapClient(seedBase64url: string) {
  * visit dropped the in-memory session).
  */
 async function loginViaForm(page: Page, passphrase: string) {
+  // If the caller came through /#/logout, its page navigates to the landing
+  // page asynchronously; opening the login form before that lands would get
+  // clobbered mid-fill. Settle on a non-logout URL first.
+  await expect(page).not.toHaveURL(/#\/logout/, { timeout: 30_000 })
   await page.goto('/#/login')
   await fillSettled(page.locator('input[type="password"]'), passphrase)
   await page.getByRole('button', { name: 'Log in', exact: true }).click()
@@ -321,7 +325,8 @@ test.describe('The Applications revocation surface', () => {
     // Client 1: a fresh signup.
     const { passphrase } = await signupViaWizard(page, testInfo)
 
-    // Client 2 (cold profile): enroll through the connect-code ceremony.
+    // Client 2 (cold profile): the standing passphrase self-enrolls this
+    // browser at login as an ordinary enrolled client.
     const secondClient = await coldClientPage(browser)
     try {
       await secondClient.goto('/#/login')
@@ -332,31 +337,40 @@ test.describe('The Applications revocation surface', () => {
       await secondClient
         .getByRole('button', { name: 'Log in', exact: true })
         .click()
-      await secondClient
-        .getByRole('button', { name: 'Connect this browser' })
-        .click({ timeout: 30_000 })
-      const codeField = secondClient.getByTestId('enroll-connect-code')
-      await expect(codeField).toBeVisible({ timeout: 20_000 })
-      const code = await codeField.inputValue()
+      await expect(secondClient).toHaveURL(/#\/dashboard/, {
+        timeout: 60_000
+      })
 
+      // Client 1 re-logs in (its in-memory verified-log memo predates the
+      // self-enrollment); the panel then shows the self-enrolled wallet
+      // (unlabeled) -- name it inline so the disconnect below can address
+      // it -- and the sibling-panel cross-pointer back to the Applications
+      // surface renders.
+      await page.goto('/#/logout')
+      await loginViaForm(page, passphrase)
       await page.goto('/#/settings')
-      // The sibling-panel cross-pointer back to the Applications surface.
       await expect(
         page.getByRole('link', { name: 'Applications page' })
       ).toBeVisible({ timeout: 30_000 })
-      await page.getByRole('button', { name: 'Connect another wallet' }).click()
-      await fillSettled(page.getByTestId('enroll-code-input'), code)
-      await fillSettled(page.getByTestId('enroll-label-input'), 'Office laptop')
-      await page.getByRole('button', { name: 'Approve', exact: true }).click()
-      await expect(
-        page.getByText('The new browser was enrolled', { exact: false })
-      ).toBeVisible({ timeout: 60_000 })
-
-      await secondClient
-        .getByRole('button', { name: 'I approved it -- finish connecting' })
+      // Address the self-enrolled card as the one that is NOT this browser:
+      // that filter stays stable while edit mode swaps the "Unnamed wallet"
+      // text for the name field.
+      const unnamedCard = page
+        .getByTestId('enrolled-clients-list')
+        .locator('.MuiCard-root')
+        .filter({ hasNotText: 'This browser' })
+      await expect(unnamedCard).toHaveCount(1, { timeout: 30_000 })
+      await expect(unnamedCard.getByText('Unnamed wallet')).toBeVisible()
+      await unnamedCard.getByRole('button', { name: 'Edit' }).click()
+      await fillSettled(
+        unnamedCard.getByLabel('Wallet name', { exact: true }),
+        'Office laptop'
+      )
+      await unnamedCard
+        .getByRole('button', { name: 'Save', exact: true })
         .click()
-      await expect(secondClient).toHaveURL(/#\/dashboard/, {
-        timeout: 60_000
+      await expect(page.getByText('Office laptop')).toBeVisible({
+        timeout: 30_000
       })
 
       // Client 2 connects the app: the grant is delegated under client 2's

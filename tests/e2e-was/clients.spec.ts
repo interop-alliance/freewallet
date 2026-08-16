@@ -6,10 +6,11 @@ import { fillSettled, signupViaWizard } from './helpers'
  * wallet clients listed from the locally verified did:webvh log. A fresh
  * account shows exactly one wallet (marked as this browser) and the honest
  * last-client copy; an issued recovery code NEVER appears in the list (its
- * key is keyAgreement-only, structurally excluded); enrolling a second
- * browser -- with a label chosen at approval -- lists two wallets;
- * disconnecting the second one drives the full revocation cascade, the list
- * updates, and the disconnected browser's next login is refused.
+ * key is keyAgreement-only, structurally excluded); a second browser
+ * self-enrolls with the standing passphrase and lists as a second wallet,
+ * named inline from the panel; disconnecting it drives the full revocation
+ * cascade, the list updates, and the disconnected browser's next login is
+ * refused.
  *
  * PBKDF2 unlock derivations run several times across the ceremonies, on top
  * of a full signup -- hence `test.slow()` and the generous timeouts.
@@ -74,8 +75,8 @@ test.describe('The Settings connected-wallets surface', () => {
     await page.goto('/#/settings')
     await expect(walletCards(page)).toHaveCount(1, { timeout: 30_000 })
 
-    // Client 2 (cold profile): the not-enrolled login surfaces the connect
-    // flow; the key set is minted locally and the code carries public halves.
+    // Client 2 (cold profile): the standing passphrase self-enrolls this
+    // browser at login -- no approval, no code -- and lands enrolled.
     const secondClient = await coldClientPage(browser)
     try {
       await secondClient.goto('/#/login')
@@ -86,34 +87,37 @@ test.describe('The Settings connected-wallets surface', () => {
       await secondClient
         .getByRole('button', { name: 'Log in', exact: true })
         .click()
-      await secondClient
-        .getByRole('button', { name: 'Connect this browser' })
-        .click({ timeout: 30_000 })
-      const codeField = secondClient.getByTestId('enroll-connect-code')
-      await expect(codeField).toBeVisible({ timeout: 20_000 })
-      const code = await codeField.inputValue()
-
-      // Client 1 approves from the connected-wallets panel, naming the new
-      // wallet at approval time.
-      await page.getByRole('button', { name: 'Connect another wallet' }).click()
-      await fillSettled(page.getByTestId('enroll-code-input'), code)
-      await expect(page.getByText(/New client key: did:key:z6Mk/)).toBeVisible()
-      await fillSettled(page.getByTestId('enroll-label-input'), 'Office laptop')
-      await page.getByRole('button', { name: 'Approve', exact: true }).click()
-      await expect(
-        page.getByText('The new browser was enrolled', { exact: false })
-      ).toBeVisible({ timeout: 60_000 })
-
-      // The list refreshes to two wallets, the new one under its label.
-      await expect(walletCards(page)).toHaveCount(2, { timeout: 30_000 })
-      await expect(page.getByText('Office laptop')).toBeVisible()
-
-      // Client 2 completes the ceremony and lands enrolled.
-      await secondClient
-        .getByRole('button', { name: 'I approved it -- finish connecting' })
-        .click()
       await expect(secondClient).toHaveURL(/#\/dashboard/, {
         timeout: 60_000
+      })
+
+      // Client 1 re-logs in (its in-memory verified-log memo predates the
+      // self-enrollment) and the listing shows two wallets; the
+      // self-enrolled one arrives unlabeled and is named inline from the
+      // panel (labels live beside the keys, editable any time -- there is
+      // no approval dialog to name it at).
+      await page.getByRole('button', { name: 'Log out' }).click()
+      await expect(page).toHaveURL(/\/#?\/?$/)
+      await page.goto('/#/login')
+      await fillSettled(page.locator('input[type="password"]'), passphrase)
+      await page.getByRole('button', { name: 'Log in', exact: true }).click()
+      await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
+      await page.goto('/#/settings')
+      await expect(walletCards(page)).toHaveCount(2, { timeout: 30_000 })
+      // Address the self-enrolled card as the one that is NOT this browser:
+      // that filter stays stable while edit mode swaps the "Unnamed wallet"
+      // text for the name field.
+      const newCard = walletCards(page).filter({ hasNotText: 'This browser' })
+      await expect(newCard).toHaveCount(1)
+      await expect(newCard.getByText('Unnamed wallet')).toBeVisible()
+      await newCard.getByRole('button', { name: 'Edit' }).click()
+      await fillSettled(
+        newCard.getByLabel('Wallet name', { exact: true }),
+        'Office laptop'
+      )
+      await newCard.getByRole('button', { name: 'Save', exact: true }).click()
+      await expect(page.getByText('Office laptop')).toBeVisible({
+        timeout: 30_000
       })
 
       // Client 1 disconnects the new wallet: the full revocation cascade,

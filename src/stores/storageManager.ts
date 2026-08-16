@@ -78,12 +78,10 @@ import {
   type EncryptionDescriptorCache
 } from '@interop/wallet-core/descriptors'
 import {
-  accountLogPinStore,
-  adoptBridgingAccountLogPin,
-  bridgingAccountLogPinStore,
   loadAccountDidForSpace,
   saveAccountDidForSpace,
-  savePinFromDescriptor
+  savePinFromDescriptor,
+  sessionLogPinStore
 } from '@/lib/sessionKey'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import {
@@ -1898,8 +1896,8 @@ export class StorageManager {
         // A signup torn between the log publication and the pointer backfill
         // heals here at a later login whose pointer still names no did:webvh
         // -- but the log WAS published in this browser, so the DID is known
-        // locally and both the pin and the expectation can still be keyed by
-        // it (see `saveAccountDidForSpace`).
+        // locally and the read can still state an `expectedDid` (see
+        // `saveAccountDidForSpace`).
         const knownDid = isWebvhDid(pointerDid)
           ? pointerDid
           : ((await loadAccountDidForSpace({
@@ -1920,42 +1918,29 @@ export class StorageManager {
             ...(knownDid ? { expectedDid: knownDid } : {}),
             // The provisioning read runs under the same chain-head pin the
             // login-time account-log reads use, so a truncated or substituted
-            // log is refused before any entry is built on it. Every run
-            // carries one, keyed three ways: by the pointer's DID when the
-            // account is promoted, by the DID this browser saw the log
-            // publish as when the pointer backfill never landed, and -- at
-            // true first contact, where no DID exists anywhere yet -- by the
-            // data Space id, a bridging slot the publication then adopts into
-            // the DID-keyed one.
-            accountLogPinStore: knownDid
-              ? accountLogPinStore({ accountDid: knownDid, idb })
-              : bridgingAccountLogPinStore({
-                  spaceId: remoteStore.spaceId,
-                  idb
-                }),
+            // log is refused before any entry is built on it. The pin slot is
+            // keyed by the data Space id (wallet-core derives it), so one
+            // slot serves every run -- true first contact, a pre-promotion
+            // heal, and a promoted login alike.
+            accountLogPinStore: sessionLogPinStore({ idb }),
             onDidPublished: async ({ did }) => {
               profile.didWebvh = { did }
               // Provisioning publishes (or extends) the log, so any memo of
               // an earlier verification is dropped.
               invalidateVerifiedLog({ profile })
               // The DID is known from here on: record it against the Space so
-              // a later pre-promotion heal keys the DID-keyed pin, and move
-              // the bridging pin into that slot. Best-effort -- local
-              // continuity bookkeeping must not fail provisioning.
+              // a later pre-promotion heal can state an `expectedDid`.
+              // Best-effort -- local continuity bookkeeping must not fail
+              // provisioning.
               try {
                 await saveAccountDidForSpace({
                   spaceId: remoteStore.spaceId,
                   accountDid: did,
                   idb
                 })
-                await adoptBridgingAccountLogPin({
-                  spaceId: remoteStore.spaceId,
-                  accountDid: did,
-                  idb
-                })
               } catch (err) {
                 console.warn(
-                  'Could not adopt the bridging account-log pin:',
+                  'Could not record the published account DID locally:',
                   err
                 )
               }

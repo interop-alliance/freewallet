@@ -18,15 +18,16 @@
  * copy of this client's key set, never reconstructible from a server or a
  * passphrase, deleted only by the explicit unlock-method lifecycle flows.
  *
- * The three continuity pins over the account's own state -- the account-log
- * and roster-log chain-head pins and the roster-epoch pin -- are keyed by the
- * ACCOUNT DID rather than by the data Space id, so a host that mirrors an
- * account into a fresh Space id inherits the standing pins instead of a blank
- * trust-on-first-use slot, and so the pins travel with the account across a
- * legitimate host or Space migration. The unlock-layer entries (keyring
- * cache, client-key record, keyring-freshness pin) stay keyed by the unlock
- * Space id, and the unlock-methods cache and passkey-safety notice by the
- * data controller.
+ * The continuity pins over the account's own state come in two shapes. The
+ * chain-head pins (account log, roster log) live in one keyed store
+ * (`sessionLogPinStore`), under per-log slot keys wallet-core derives from
+ * the Space id -- host-free by design, so a log served from a claimed new
+ * host lands in the same slot and is checked against the pin already held.
+ * The roster-epoch pin is keyed by the ACCOUNT DID: it guards a chainless
+ * value, and the DID is the one identity a substituted pointer cannot
+ * change. The unlock-layer entries (keyring cache, client-key record,
+ * keyring-freshness pin) stay keyed by the unlock Space id, and the
+ * unlock-methods cache and passkey-safety notice by the data controller.
  */
 import type {
   ResourceLogHeadPin,
@@ -429,13 +430,15 @@ export async function deleteKeyringFreshnessPin({
 
 /**
  * The object-store key under which an account's user key roster-epoch pin
- * lives -- keyed by the ACCOUNT DID, not by the data Space id. A malicious
- * host that mints a fresh Space id, mirrors the world-readable log and the
- * ciphertext there, and redirects the account pointer at the copy would
- * otherwise inherit a blank continuity slot and reset every pin to
- * trust-on-first-use; keyed by the DID the mirror inherits the standing pins
- * instead. The pins therefore also travel with the account across a
- * legitimate host or Space migration under one DID.
+ * lives -- keyed by the ACCOUNT DID, not by the data Space id. The epoch pin
+ * guards a chainless value, so the DID is the one identity a substituted
+ * pointer cannot change: a malicious host that mints a fresh Space id,
+ * mirrors the account there, and redirects the pointer at the copy inherits
+ * the standing pin instead of a blank trust-on-first-use slot. The pin
+ * therefore also travels with the account across a legitimate host or Space
+ * migration under one DID. (The chain-head pins beside it take the other
+ * shape: Space-derived slot keys, with the mirror fork closed by the DID
+ * embedding the Space id and every ceremony read's `expectedDid` check.)
  *
  * @param accountDid {string}   the account's did:webvh
  * @returns {string}
@@ -621,66 +624,51 @@ export async function deleteUserKeyEpochPin({
 }
 
 /**
- * The object-store key under which an account's roster-log chain-head pin
- * lives -- keyed by the account DID, like the roster-epoch pin, since both
- * guard the same `key-map/user-key.jsonl` roster of that account (see
- * `userKeyEpochPinKey` for why the DID rather than the Space id).
+ * The object-store key under which one log's chain-head pin lives. The slot
+ * identity is wallet-core's host-free pin-slot key (`resourceLogPinId`:
+ * `space/<spaceId>/<collectionId>/<resourceId>`, built by `accountLogPinId` /
+ * `userKeyRosterPinId` for the two account logs), namespaced under its own
+ * prefix in the shared session database.
  *
- * @param accountDid {string}   the account's did:webvh
+ * @param logId {string}   the pin-slot key, from wallet-core's builders
  * @returns {string}
  */
-function userKeyLogPinKey(accountDid: string): string {
-  return `user-key-log-head/${accountDid}`
+function logPinSlotKey(logId: string): string {
+  return `log-head/${logId}`
 }
 
 /**
- * Builds the durable chain-head pin store for an account's user key roster
- * log, backed by the session database. The pin records the log's verified
- * identity (method, SCID) and latest verified head, and is what turns one-shot
- * log verification into continuity: a served log that forks, rolls back, or
- * switches identity against the pin is refused rather than adopted (see
- * `@interop/wallet-core/resourceLog`). Plaintext local state, like the epoch
- * pin beside it. The wallet-core verifier owns the write discipline (advance
- * after full verification only), so this store is a plain read/write seam.
+ * The durable chain-head pin store for every resource log this wallet
+ * verifies -- the account did:webvh log and the user key roster log alike --
+ * backed by the session database. The store is keyed: `read` and `write` take
+ * the pin-slot key wallet-core derives from the Space id (`accountLogPinId` /
+ * `userKeyRosterPinId`), so one store instance serves every log and two logs
+ * can never clobber each other's pin.
+ *
+ * A pin records a log's verified identity (method, SCID) and latest verified
+ * head, and is what turns one-shot log verification into continuity: a served
+ * log that forks, rolls back, or switches identity against the pin is refused
+ * rather than adopted (see `@interop/wallet-core/resourceLog`). Plaintext
+ * local state, like the epoch pin beside it. The wallet-core verifiers own
+ * the write discipline (trust-on-first-use, advance after full verification
+ * only), so this store is a plain read/write seam.
  *
  * @param options {object}
- * @param options.accountDid {string}   the account's did:webvh
  * @param [options.idb] {IDBFactory}
  * @returns {ResourceLogPinStore}
  */
-export function userKeyLogPinStore({
-  accountDid,
+export function sessionLogPinStore({
   idb
-}: {
-  accountDid: string
-  idb?: IDBFactory
-}): ResourceLogPinStore {
-  return logPinStoreAt({ key: userKeyLogPinKey(accountDid), idb })
-}
-
-/**
- * A durable chain-head pin store over one session-database key. Each pinned
- * log gets its OWN store key: `ResourceLogPinStore` holds exactly one pin, so
- * sharing a key across logs would have each verification clobber the other's
- * pin.
- *
- * @param options {object}
- * @param options.key {string}   the object-store key the pin lives under
- * @param [options.idb] {IDBFactory}
- * @returns {ResourceLogPinStore}
- */
-function logPinStoreAt({
-  key,
-  idb
-}: {
-  key: string
-  idb?: IDBFactory
-}): ResourceLogPinStore {
+}: { idb?: IDBFactory } = {}): ResourceLogPinStore {
   return {
-    async read(): Promise<ResourceLogHeadPin | null> {
+    async read({
+      logId
+    }: {
+      logId: string
+    }): Promise<ResourceLogHeadPin | null> {
       const stored = await withSessionStore(
         'readonly',
-        store => store.get(key),
+        store => store.get(logPinSlotKey(logId)),
         idb
       )
       if (stored === null || stored === undefined) {
@@ -696,10 +684,17 @@ function logPinStoreAt({
       }
       return { method, scid, head }
     },
-    async write(pin: ResourceLogHeadPin): Promise<void> {
+    async write({
+      logId,
+      pin
+    }: {
+      logId: string
+      pin: ResourceLogHeadPin
+    }): Promise<void> {
       await withSessionStore(
         'readwrite',
-        store => store.put({ ...pin, pinnedAt: Date.now() }, key),
+        store =>
+          store.put({ ...pin, pinnedAt: Date.now() }, logPinSlotKey(logId)),
         idb
       )
     }
@@ -707,147 +702,25 @@ function logPinStoreAt({
 }
 
 /**
- * Deletes the roster-log chain-head pin for an account -- account deletion and
- * Space wipes, beside `deleteUserKeyEpochPin`.
+ * Deletes one log's chain-head pin -- account deletion and Space wipes, where
+ * the continuity prior is deliberately reset, beside `deleteUserKeyEpochPin`.
  *
  * @param options {object}
- * @param options.accountDid {string}   the account's did:webvh
+ * @param options.logId {string}   the pin-slot key, from wallet-core's
+ *   `accountLogPinId` / `userKeyRosterPinId` builders
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function deleteUserKeyLogPin({
-  accountDid,
+export async function deleteLogPin({
+  logId,
   idb
 }: {
-  accountDid: string
+  logId: string
   idb?: IDBFactory
 }): Promise<void> {
   await withSessionStore(
     'readwrite',
-    store => store.delete(userKeyLogPinKey(accountDid)),
-    idb
-  )
-}
-
-/**
- * The object-store key under which an account's did:webvh account-log
- * chain-head pin lives -- keyed by the account DID like the roster-log pin,
- * but under its OWN key, since a pin store holds exactly one pin and the two
- * logs must never clobber each other's.
- *
- * @param accountDid {string}   the account's did:webvh
- * @returns {string}
- */
-function accountLogPinKey(accountDid: string): string {
-  return `account-log-head/${accountDid}`
-}
-
-/**
- * Builds the durable chain-head pin store for the account's did:webvh log
- * (`id/did.jsonl`), backed by the session database. Same seam and refusal
- * class as the roster-log pin beside it: a served account log that forks,
- * rolls back, or switches SCID/method against the pinned head is refused
- * rather than adopted (see `verifyAccountLog` in
- * `@interop/wallet-core/webvh`). The wallet-core verifier owns the write
- * discipline (trust-on-first-use, advance after full verification only), so
- * this store is a plain read/write seam.
- *
- * @param options {object}
- * @param options.accountDid {string}   the account's did:webvh
- * @param [options.idb] {IDBFactory}
- * @returns {ResourceLogPinStore}
- */
-export function accountLogPinStore({
-  accountDid,
-  idb
-}: {
-  accountDid: string
-  idb?: IDBFactory
-}): ResourceLogPinStore {
-  return logPinStoreAt({ key: accountLogPinKey(accountDid), idb })
-}
-
-/**
- * Deletes the account-log chain-head pin for an account -- account deletion
- * and Space wipes, beside `deleteUserKeyLogPin`.
- *
- * @param options {object}
- * @param options.accountDid {string}   the account's did:webvh
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
- */
-export async function deleteAccountLogPin({
-  accountDid,
-  idb
-}: {
-  accountDid: string
-  idb?: IDBFactory
-}): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store => store.delete(accountLogPinKey(accountDid)),
-    idb
-  )
-}
-
-/**
- * The object-store key under which the PRE-PROMOTION account-log chain-head
- * pin lives -- keyed by the data Space id, since the account DID this pin will
- * belong to does not exist yet.
- *
- * @param spaceId {string}   the data Space id
- * @returns {string}
- */
-function bridgingAccountLogPinKey(spaceId: string): string {
-  return `account-log-head/space/${spaceId}`
-}
-
-/**
- * Builds the bridging (pre-promotion) chain-head pin store for the account's
- * did:webvh log, keyed by the data Space id. The DID-keyed slot cannot be
- * keyed before the DID exists, and a log read carrying NO pin skips the
- * continuity check entirely -- so a signup, or a signup torn between the log
- * publication and the account-pointer backfill, would build on whatever log
- * the host serves. This slot gives that window a pin, so a truncated or
- * substituted log is refused there too.
- *
- * The slot is a bridge, not a home: once the log publishes, the DID is known
- * and `adoptBridgingAccountLogPin` moves the pin into the DID-keyed slot.
- *
- * @param options {object}
- * @param options.spaceId {string}   the data Space id
- * @param [options.idb] {IDBFactory}
- * @returns {ResourceLogPinStore}
- */
-export function bridgingAccountLogPinStore({
-  spaceId,
-  idb
-}: {
-  spaceId: string
-  idb?: IDBFactory
-}): ResourceLogPinStore {
-  return logPinStoreAt({ key: bridgingAccountLogPinKey(spaceId), idb })
-}
-
-/**
- * Deletes the bridging account-log chain-head pin -- account deletion and
- * Space wipes, beside the DID-keyed pins.
- *
- * @param options {object}
- * @param options.spaceId {string}   the data Space id
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
- */
-export async function deleteBridgingAccountLogPin({
-  spaceId,
-  idb
-}: {
-  spaceId: string
-  idb?: IDBFactory
-}): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store => store.delete(bridgingAccountLogPinKey(spaceId)),
+    store => store.delete(logPinSlotKey(logId)),
     idb
   )
 }
@@ -867,8 +740,10 @@ function accountDidForSpaceKey(spaceId: string): string {
  * Records, locally, the account DID the data Space's log published as. A
  * signup torn between the log publication and the account-pointer backfill
  * heals at a later login whose pointer still names no did:webvh; this mapping
- * is what lets that heal key the DID-keyed chain-head pin and state an
- * `expectedDid` anyway, since the log was published in this browser.
+ * is what lets that heal state an `expectedDid` anyway, since the log was
+ * published in this browser. (The chain-head pin slot needs no such bridge:
+ * it is keyed by the Space id, so the same slot serves the account log from
+ * true first contact on.)
  *
  * @param options {object}
  * @param options.spaceId {string}   the data Space id
@@ -945,40 +820,6 @@ export async function deleteAccountDidForSpace({
     store => store.delete(accountDidForSpaceKey(spaceId)),
     idb
   )
-}
-
-/**
- * Moves a bridging (Space-keyed) account-log pin into the DID-keyed slot once
- * the DID is known, then drops the bridging row.
- *
- * A non-empty DID-keyed slot is left exactly as it is: that pin was advanced
- * by reads that verified against the DID-keyed continuity prior, so a slot
- * that never consulted it must not clobber it (the bridging slot only ever
- * covered the window before the DID existed).
- *
- * @param options {object}
- * @param options.spaceId {string}   the data Space id
- * @param options.accountDid {string}   the published account did:webvh
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
- */
-export async function adoptBridgingAccountLogPin({
-  spaceId,
-  accountDid,
-  idb
-}: {
-  spaceId: string
-  accountDid: string
-  idb?: IDBFactory
-}): Promise<void> {
-  const bridging = await bridgingAccountLogPinStore({ spaceId, idb }).read()
-  if (bridging) {
-    const pinned = await accountLogPinStore({ accountDid, idb }).read()
-    if (!pinned) {
-      await accountLogPinStore({ accountDid, idb }).write(bridging)
-    }
-  }
-  await deleteBridgingAccountLogPin({ spaceId, idb })
 }
 
 /**

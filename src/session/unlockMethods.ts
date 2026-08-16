@@ -52,8 +52,12 @@ import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
 import {
   didKeyZcapClient,
+  keyAgreementCommitment,
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
+import { removeUnlockKey } from '@interop/wallet-core/unlock'
+import { requireEnrolledClientContext } from '@/session/enrolledContext'
+import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import type { UserKey } from '@interop/wallet-core/keys'
 import {
   unwrapRecordEnvelope,
@@ -75,12 +79,40 @@ import {
 } from '@/stores/wasRemoteStore'
 
 /**
+ * The standing-posture members a passphrase or passkey entry records once the
+ * credential holds standing authority (FW-154's one-codepath model): the
+ * credential's user-key roster kid (`rosterKid` -- the neutral twin of the
+ * recovery entry's `recoveryKid`), its published or commitment-published
+ * `keyAgreement` multibase, the update-key ladder's rung-0 multibase (whose
+ * hash stood in `nextKeyHashes` at bind time; the CURRENT rung is always
+ * recovered from the log itself, never from here), and the bridge-delegation
+ * and unlock-KAK members the revocation cascade's re-mint machinery shares
+ * with the recovery entries -- `unlockClientDid` being the neutral twin of
+ * `recoveryClientDid` (the credential-derived signing DID a fresh delegation
+ * is made to). Public halves only; the secret is never stored anywhere.
+ */
+export interface StandingUnlockFields {
+  rosterKid?: string
+  keyAgreementKeyMultibase?: string
+  updateKeyMultibase?: string
+  delegationKeyId?: string
+  delegationExpires?: string
+  unlockClientDid?: string
+  unlockKeyAgreementKeyId?: string
+  unlockKeyAgreementKeyMultibase?: string
+}
+
+/**
  * The passphrase unlock method. `manageCapability` -- the management zcap the
  * unlock identity delegated to the data identity -- is present once a full
  * passphrase login or a passphrase change has backfilled it (see
- * `backfillPassphraseUnlockMethod`).
+ * `backfillPassphraseUnlockMethod`). The standing fields are recorded by the
+ * bind-time posture ceremony; a passphrase's `keyAgreement` key is published
+ * as a hash commitment (never the key verbatim -- a low-entropy-derived
+ * public key in the world-readable document would be an offline grind
+ * oracle).
  */
-export interface PassphraseUnlockMethod {
+export interface PassphraseUnlockMethod extends StandingUnlockFields {
   type: 'passphrase'
   createdAt: string
   unlockSpaceId: string
@@ -95,9 +127,11 @@ export interface PassphraseUnlockMethod {
  * present -- is the management zcap that allows tap-free revocation of this
  * passkey (deletion of its unlock Space) with the session's root key; it
  * lives one year, refreshed near expiry by a login with this passkey (the
- * backfill's passkey branch).
+ * backfill's passkey branch). The standing fields are recorded by the
+ * bind-time posture ceremony; a passkey's PRF-derived `keyAgreement` key is
+ * high-entropy, so it publishes verbatim.
  */
-export interface PasskeyUnlockMethod {
+export interface PasskeyUnlockMethod extends StandingUnlockFields {
   type: 'passkey'
   label: string
   createdAt: string
@@ -588,6 +622,63 @@ export function managementZcapClient({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
+/**
+ * Removes a standing passphrase/passkey credential's document entry -- its
+ * `keyAgreement` publication (the commitment for a passphrase, the verbatim
+ * key for a passkey) and its committed ladder-rung hash -- when the entry
+ * records one. Best-effort: the method's unlock Space is already being
+ * retired, so a failed (or stale-rung) removal leaves only inert document
+ * residue, and the credential's roster wrap is rotated away by the
+ * login-time sweep once the document no longer answers for it. The full
+ * rotation ceremony is FW-155's.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.method {PassphraseUnlockMethod | PasskeyUnlockMethod}
+ * @returns {Promise<void>}
+ */
+async function removeStandingPosture({
+  session,
+  method
+}: {
+  session: Session
+  method: PassphraseUnlockMethod | PasskeyUnlockMethod
+}): Promise<void> {
+  if (!method.keyAgreementKeyMultibase || !method.updateKeyMultibase) {
+    return
+  }
+  try {
+    const { remoteStore, pointer, clientWebvhKeys } =
+      requireEnrolledClientContext({
+        session,
+        action: 'Retiring a standing unlock credential'
+      })
+    const keyAgreement =
+      method.type === 'passphrase'
+        ? {
+            commitment: await keyAgreementCommitment({
+              keyAgreementKeyMultibase: method.keyAgreementKeyMultibase
+            })
+          }
+        : { publicKeyMultibase: method.keyAgreementKeyMultibase }
+    await removeUnlockKey({
+      idStore: remoteStore.webvhIdStore(),
+      updateKeys: clientWebvhKeys,
+      unlockKeys: {
+        keyAgreement,
+        updateKeyMultibase: method.updateKeyMultibase
+      },
+      expectedDid: pointer.did
+    })
+    invalidateVerifiedLog({ profile: session.profile })
+  } catch (err) {
+    console.warn(
+      "Could not remove the retired credential's document entry:",
+      err
+    )
+  }
+}
+
 export async function revokeUnlockMethod({
   session,
   entry,
@@ -597,6 +688,9 @@ export async function revokeUnlockMethod({
   entry: UnlockMethod
   idb?: IDBFactory
 }): Promise<void> {
+  if (entry.type === 'passphrase' || entry.type === 'passkey') {
+    await removeStandingPosture({ session, method: entry })
+  }
   if (WAS_SERVER_URL) {
     if (!entry.manageCapability) {
       throw new Error(
@@ -653,6 +747,7 @@ export async function revokeUnlockMethodByCeremony({
     credentialIds: [base64urlnopad.decode(entry.credentialId)],
     signal
   })
+  await removeStandingPosture({ session, method: entry })
   await deleteUnlockMethod({ secret: prfOutput, kdf: PASSKEY_KDF, idb })
   await dropRegistryEntry({ session, entry, idb })
 }
@@ -674,29 +769,55 @@ export async function revokeUnlockMethodByCeremony({
  * @param [options.manageCapability] {IZcap}
  * @param [options.keepAbsentManageCapability] {boolean}   write the
  *   `manageCapability` key even when there is none; default false
+ * @param [options.standing] {StandingUnlockFields}   the standing-posture
+ *   fields recorded by the establishment ceremony; when absent, an existing
+ *   entry's standing fields are carried forward (a backfill must not erase
+ *   them)
  * @returns {UnlockMethodsRecord}   the updated registry
  */
 export function upsertPassphraseUnlockMethod({
   record,
   unlockSpaceId,
   manageCapability,
-  keepAbsentManageCapability = false
+  keepAbsentManageCapability = false,
+  standing
 }: {
   record: UnlockMethodsRecord
   unlockSpaceId: string
   manageCapability?: IZcap
   keepAbsentManageCapability?: boolean
+  standing?: StandingUnlockFields
 }): UnlockMethodsRecord {
   const existing = record.methods.find(
     (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
   )
+  // Carry an existing entry's standing fields forward unless the caller
+  // supplies fresh ones -- but only while the entry still names the same
+  // unlock Space (a passphrase change retires the old credential's posture
+  // wholesale).
+  const carried =
+    standing ??
+    (existing && existing.unlockSpaceId === unlockSpaceId
+      ? {
+          rosterKid: existing.rosterKid,
+          keyAgreementKeyMultibase: existing.keyAgreementKeyMultibase,
+          updateKeyMultibase: existing.updateKeyMultibase,
+          delegationKeyId: existing.delegationKeyId,
+          delegationExpires: existing.delegationExpires,
+          unlockClientDid: existing.unlockClientDid,
+          unlockKeyAgreementKeyId: existing.unlockKeyAgreementKeyId,
+          unlockKeyAgreementKeyMultibase:
+            existing.unlockKeyAgreementKeyMultibase
+        }
+      : undefined)
   const entry: PassphraseUnlockMethod = {
     type: 'passphrase',
     createdAt: existing?.createdAt ?? new Date().toISOString(),
     unlockSpaceId,
     ...(manageCapability || keepAbsentManageCapability
       ? { manageCapability }
-      : {})
+      : {}),
+    ...(carried ?? {})
   }
   const methods = existing
     ? record.methods.map(method =>
@@ -826,6 +947,68 @@ export async function backfillPassphraseUnlockMethod({
   })
   await putUnlockMethods({ session, record: nextRecord, idb })
   return nextRecord
+}
+
+/**
+ * Records freshly re-minted bridge-delegation members (key id, expiry) --
+ * and, after a self-enrollment climbed the update-key ladder, the current
+ * rung's multibase -- on the passphrase or passkey entry matching an unlock
+ * Space. The registry half of the login-time bridge-expiry self-refresh and
+ * the post-self-enroll rung refresh. Best-effort semantics are the caller's
+ * (both refreshes are fire-and-forget behind provisioning); writes only when
+ * an entry matches.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.unlockSpaceId {string}   the credential's unlock Space
+ * @param [options.delegationKeyId] {string}
+ * @param [options.delegationExpires] {string}
+ * @param [options.updateKeyMultibase] {string}   the ladder's current
+ *   committed rung
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function refreshStandingDelegationFields({
+  session,
+  unlockSpaceId,
+  delegationKeyId,
+  delegationExpires,
+  updateKeyMultibase,
+  idb
+}: {
+  session: Session
+  unlockSpaceId: string
+  delegationKeyId?: string
+  delegationExpires?: string
+  updateKeyMultibase?: string
+  idb?: IDBFactory
+}): Promise<void> {
+  const record = await getUnlockMethods({ session, idb })
+  if (!record) {
+    return
+  }
+  const stored = record.methods.find(
+    method =>
+      (method.type === 'passphrase' || method.type === 'passkey') &&
+      method.unlockSpaceId === unlockSpaceId
+  )
+  if (!stored) {
+    return
+  }
+  const nextRecord = {
+    ...record,
+    methods: record.methods.map(method =>
+      method === stored
+        ? {
+            ...stored,
+            ...(delegationKeyId ? { delegationKeyId } : {}),
+            ...(delegationExpires ? { delegationExpires } : {}),
+            ...(updateKeyMultibase ? { updateKeyMultibase } : {})
+          }
+        : method
+    )
+  }
+  await putUnlockMethods({ session, record: nextRecord, idb })
 }
 
 /**

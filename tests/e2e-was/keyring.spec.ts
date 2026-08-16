@@ -13,15 +13,17 @@ import { fillSettled, signupViaWizard } from './helpers'
  * routes through it. Covers:
  *
  * 1. Enrolled vs cold client: the enrolled client logs back in and reaches
- *    the same spaceId, while a cold profile (fresh browser context, empty
+ *    the same spaceId, and a cold profile (fresh browser context, empty
  *    IndexedDB including `freewallet-session`) sharing only the passphrase
- *    locates the account but is refused with the not-enrolled guidance --
- *    unlocking is not sufficient to BE the account.
+ *    SELF-ENROLLS at login -- the passphrase is a standing credential, so
+ *    its record's bridge delegation and ladder seed turn the fresh browser
+ *    into an ordinary enrolled client, decrypting the account's data.
  * 2. Passphrase change: the Settings action rebinds the client key set under
  *    a new passphrase and deletes the old unlock Space, so the old
  *    passphrase no longer resolves to an account anywhere, the new one logs
  *    into the same wallet on this client, and a cold profile with the new
- *    passphrase is refused as not enrolled.
+ *    passphrase self-enrolls into the same wallet (the change established
+ *    the new credential's standing posture).
  * 3. Passphrase surface: a fresh signup shows the Settings Passphrase section
  *    with its change form.
  * 4. Guests are untouched: guest login works and shows no Passphrase section.
@@ -85,7 +87,7 @@ async function coldDevicePage(browser: Browser): Promise<Page> {
 }
 
 test.describe('Keyring v2', () => {
-  test('the enrolled client logs back in; a cold client with the same passphrase is refused', async ({
+  test('the enrolled client logs back in; a cold client with the same passphrase self-enrolls', async ({
     page,
     browser
   }, testInfo) => {
@@ -113,9 +115,10 @@ test.describe('Keyring v2', () => {
     ).toBeVisible({ timeout: 30_000 })
 
     // Client 2: a cold profile with empty storage shares nothing but the
-    // passphrase. It locates the account (the keyring record) but holds no
-    // client keys, so login is refused with the not-enrolled guidance --
-    // unlocking is no longer sufficient to BE the account.
+    // passphrase. The standing credential self-enrolls it as an ordinary
+    // client -- two loud log entries through the record's bridge, then the
+    // first roster read through the credential's standing wrap -- and the
+    // login lands on the same wallet, decrypting pre-existing data.
     const secondDevice = await coldDevicePage(browser)
     try {
       await secondDevice.goto('/#/login')
@@ -126,12 +129,13 @@ test.describe('Keyring v2', () => {
       await secondDevice
         .getByRole('button', { name: 'Log in', exact: true })
         .click()
+      await expect(secondDevice).toHaveURL(/#\/dashboard/, {
+        timeout: 45_000
+      })
+      expect(await readSpaceId(secondDevice)).toBe(originalSpaceId)
       await expect(
-        secondDevice.getByText('this browser does not hold its keys yet', {
-          exact: false
-        })
+        secondDevice.getByRole('link', { name: 'Your First Credential' })
       ).toBeVisible({ timeout: 30_000 })
-      await expect(secondDevice).toHaveURL(/#\/login/)
     } finally {
       await secondDevice.context().close()
     }
@@ -201,8 +205,8 @@ test.describe('Keyring v2', () => {
       page.getByRole('link', { name: 'Your First Credential' })
     ).toBeVisible({ timeout: 30_000 })
 
-    // Cold profile: the NEW passphrase locates the account but holds no
-    // client keys -- refused with the not-enrolled guidance.
+    // Cold profile: the NEW passphrase self-enrolls (the change established
+    // its standing posture) and lands on the same wallet.
     const newDevice = await coldDevicePage(browser)
     try {
       await newDevice.goto('/#/login')
@@ -213,11 +217,8 @@ test.describe('Keyring v2', () => {
       await newDevice
         .getByRole('button', { name: 'Log in', exact: true })
         .click()
-      await expect(
-        newDevice.getByText('this browser does not hold its keys yet', {
-          exact: false
-        })
-      ).toBeVisible({ timeout: 30_000 })
+      await expect(newDevice).toHaveURL(/#\/dashboard/, { timeout: 45_000 })
+      expect(await readSpaceId(newDevice)).toBe(originalSpaceId)
     } finally {
       await newDevice.context().close()
     }

@@ -41,6 +41,8 @@ vi.mock('@/session/keyring', () => ({
     }
   }),
   bindPassphrase: vi.fn(async () => ({ unlockSpaceId: 'space-bound' })),
+  bindUnlockSecret: vi.fn(async () => ({ unlockSpaceId: 'space-bound' })),
+  deriveUnlockCredential: vi.fn(async () => ({ unlock: {}, standing: {} })),
   unlockManagementGrantee: vi.fn(() => 'did:key:grantee')
 }))
 
@@ -50,11 +52,18 @@ vi.mock('@/session/unlockMethods', () => ({
   }),
   backfillPassphraseUnlockMethod: vi.fn(async () => null),
   canRevokeWithoutCeremony: vi.fn(() => true),
-  enrollPasskey: vi.fn(async () => ({ entry: {} })),
+  emptyUnlockMethodsRegistry: vi.fn(() => ({
+    version: 1,
+    userHandle: 'handle',
+    methods: []
+  })),
+  enrollPasskey: vi.fn(async () => ({ entry: {}, registration: {} })),
   getUnlockMethods: vi.fn(async () => null),
   putUnlockMethods: vi.fn(async () => {}),
+  refreshStandingDelegationFields: vi.fn(async () => {}),
   revokeUnlockMethod: vi.fn(async () => {}),
-  revokeUnlockMethodByCeremony: vi.fn(async () => {})
+  revokeUnlockMethodByCeremony: vi.fn(async () => {}),
+  upsertPassphraseUnlockMethod: vi.fn(({ record }) => record)
 }))
 
 vi.mock('@/lib/sessionKey', () => ({
@@ -64,15 +73,21 @@ vi.mock('@/lib/sessionKey', () => ({
   deleteUserKeyEpochPin: vi.fn(async () => {
     state.calls.push('deleteUserKeyEpochPin')
   }),
-  deleteBridgingAccountLogPin: vi.fn(async () => {
-    state.calls.push('deleteBridgingAccountLogPin')
+  deleteLogPin: vi.fn(async ({ logId }: { logId: string }) => {
+    state.calls.push(`deleteLogPin:${logId}`)
   }),
   deleteAccountDidForSpace: vi.fn(async () => {
     state.calls.push('deleteAccountDidForSpace')
-  })
+  }),
+  saveUserKeyEpochPin: vi.fn(async () => {}),
+  sessionLogPinStore: vi.fn(() => ({
+    read: async () => null,
+    write: async () => undefined
+  }))
 }))
 
-vi.mock('@interop/wallet-core/webvh', () => ({
+vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
   rotateWebvhUpdateKey: vi.fn(async () => {})
 }))
 
@@ -83,6 +98,8 @@ vi.mock('@/lib/loginCredential', () => ({
 
 const { changeAccountPassphrase, deleteAccount } =
   await import('@/session/accountSettings')
+const { accountLogPinId } = await import('@interop/wallet-core/webvh')
+const { userKeyRosterPinId } = await import('@interop/wallet-core/keys')
 
 function makeSession() {
   return {
@@ -124,7 +141,7 @@ describe('deleteAccount', () => {
     expect(result).toBe('deleted')
     // The local continuity pins go with the account: the keyring retirement
     // drops the pointer pin, and the key-roster epoch pin plus the Space-keyed
-    // bookkeeping (the bridging account-log pin and the Space-to-DID mapping)
+    // bookkeeping (the two chain-head pin slots and the Space-to-DID mapping)
     // are cleared beside it.
     expect(state.calls).toEqual([
       'verifyPassphrase',
@@ -132,7 +149,8 @@ describe('deleteAccount', () => {
       'deleteKeyring',
       'deletePasskeySafetyNotice',
       'deleteUserKeyEpochPin',
-      'deleteBridgingAccountLogPin',
+      `deleteLogPin:${accountLogPinId({ spaceId: 'space-123' })}`,
+      `deleteLogPin:${userKeyRosterPinId({ spaceId: 'space-123' })}`,
       'deleteAccountDidForSpace'
     ])
   })

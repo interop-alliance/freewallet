@@ -24,7 +24,7 @@ import type { Session } from '@/types/auth'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { savePinFromDescriptor, loadUserKeyEpochPin } from '@/lib/sessionKey'
 import { getUnlockMethods } from '@/session/unlockMethods'
-import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
+import type { UnlockMethodsRecord } from '@/session/unlockMethods'
 import { requireEnrolledClientContext } from '@/session/enrolledContext'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
 import {
@@ -62,23 +62,21 @@ export interface RevocationOutcome {
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<RecoveryCodeUnlockMethod[]>}
  */
-async function recoveryEntries({
+async function unlockRegistry({
   session,
   idb
 }: {
   session: Session
   idb?: IDBFactory
-}): Promise<RecoveryCodeUnlockMethod[]> {
+}): Promise<UnlockMethodsRecord | null> {
   try {
-    return recoveryEntriesOf({
-      record: await getUnlockMethods({ session, idb })
-    })
+    return await getUnlockMethods({ session, idb })
   } catch (err) {
     console.warn(
-      'Could not read the recovery registry for the revocation edit:',
+      'Could not read the unlock-methods registry for the revocation edit:',
       err
     )
-    return []
+    return null
   }
 }
 
@@ -120,10 +118,26 @@ export async function revokeEnrolledClient({
   // One registry read for the whole cascade: the latent commitment hashes the
   // document edit needs, and the entries the delegation re-mint walks. It is
   // independent of the epoch pin read, so the two round trips run together.
-  const [entries, pinnedEpochId] = await Promise.all([
-    recoveryEntries({ session, idb }),
+  const [registryRecord, pinnedEpochId] = await Promise.all([
+    unlockRegistry({ session, idb }),
     loadUserKeyEpochPin({ accountDid: pointer.did, idb })
   ])
+  const entries = recoveryEntriesOf({ record: registryRecord })
+  // The standing passphrase/passkey credentials commit a ladder rung the
+  // same way a recovery code commits its update key; both sets are latent
+  // hashes the document edit must tell apart from the revoked client's
+  // staged commitment. The recorded rung may lag the ladder (self-enrolled
+  // logins refresh it best-effort), in which case the edit's attribution
+  // fails closed rather than guessing.
+  const latentMultibases = [
+    ...entries.map(entry => entry.updateKeyMultibase),
+    ...(registryRecord?.methods ?? []).flatMap(method =>
+      (method.type === 'passphrase' || method.type === 'passkey') &&
+      method.updateKeyMultibase
+        ? [method.updateKeyMultibase]
+        : []
+    )
+  ]
 
   // The cascade opens with a document edit, so nothing may keep reading a
   // memo taken before it. Dropped up front (the edit lands early in the call)
@@ -141,7 +155,7 @@ export async function revokeEnrolledClient({
     // tell the revoked client's staged commitment apart from a latent recovery
     // commitment (the one ambiguous log shape).
     knownLatentHashes: await Promise.all(
-      entries.map(entry => deriveNextKeyHash(entry.updateKeyMultibase))
+      latentMultibases.map(multibase => deriveNextKeyHash(multibase))
     ),
     ownSigningKeyMultibase: clientSigningKeyMultibase({ keyAgent }),
     // The log-governed roster store, handed over unwrapped: the orchestrator
@@ -171,7 +185,7 @@ export async function revokeEnrolledClient({
       await remintRecoveryDelegations({
         session,
         doc: document as Parameters<typeof remintRecoveryDelegations>[0]['doc'],
-        entries,
+        registryRecord,
         idb
       }),
     onRotationAdopted: async ({ userKey }) =>

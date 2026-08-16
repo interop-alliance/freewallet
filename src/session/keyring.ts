@@ -22,18 +22,21 @@
  *
  * The unlock layer protects two records per unlock method:
  *
- * - The **keyring record** lives in the unlock identity's own Space
+ * - The **unlock record** lives in the unlock identity's own Space
  *   (`keyring/keyring.json`) -- the only placement that is locatable before
- *   the account is known. Its payload is the **account pointer**
- *   `{ did, spaceId, host }` (plus the controller and the account email),
- *   wrapped (JWE, ECDH-ES to the unlock KAK) via the same EDV cipher the
- *   wallet already ships -- discovery for a portable credential, never key
- *   material -- and SIGNED by the unlock identity's own Ed25519 key. The
- *   retired wrapped data seed is gone: a passphrase on a fresh
- *   browser locates the account but cannot act until that client is enrolled.
- *   The remote copy is the source of truth and is consulted first on every
- *   login; a **local cache** in the `freewallet-session` IndexedDB serves
- *   no-WAS deployments and, within `KEYRING_CACHE_TTL_MS`, offline logins.
+ *   the account is known. In the STANDING layout (every credential bound on
+ *   a promoted account) it is wallet-core's unlock record: the account core
+ *   (controller, email, pointer) sealed to the unlock KAK and authenticated
+ *   by a MAC under a credential-derived key the host never holds, beside
+ *   the sealed bridge delegation (a pre-minted PUT-on-`did.jsonl` zcap) and
+ *   the sealed update-key ladder seed -- which is what lets a fresh browser
+ *   holding nothing but the credential self-enroll as an ordinary client.
+ *   The reduced (pre-promotion or no-WAS) layout stays the plain keyring
+ *   record: the pointer, never key material or authority. Both layouts are
+ *   SIGNED by the unlock identity's own Ed25519 key. The remote copy is the
+ *   source of truth and is consulted first on every login; a **local
+ *   cache** in the `freewallet-session` IndexedDB serves no-WAS deployments
+ *   and, within `KEYRING_CACHE_TTL_MS`, offline logins.
  * - The **client-key record** lives only in the `freewallet-session`
  *   IndexedDB: this client's key set (the client seed) and its cached copy of
  *   the user key, wrapped to the same unlock KAK. It is primary state, not a cache
@@ -86,10 +89,13 @@ import {
 import {
   deleteUnlockSpace,
   deriveUnlockIdentity,
+  deriveUnlockSeed,
   ensureUnlockSpace,
   getUnlockKeyring,
   putUnlockKeyring,
+  unlockIdentityFromSeed,
   unwrapKeyringRecord,
+  verifyRecordProof,
   wrapKeyringRecord,
   KEYRING_KDF,
   type AccountPointer,
@@ -97,6 +103,15 @@ import {
   type UnlockIdentity,
   type UnlockKdf
 } from '@interop/wallet-core/keyring'
+import {
+  standingClientFromUnlockSeed,
+  unwrapUnlockRecord,
+  wrapUnlockRecord,
+  type StandingUnlockClient,
+  type UnlockRecordProofState
+} from '@interop/wallet-core/unlock'
+import { currentAccountSigningKeys } from '@interop/wallet-core/clients'
+import { isStorageUnreachable } from '@/lib/storageErrors'
 import {
   unwrapRecordEnvelope,
   wrapRecordEnvelope
@@ -110,7 +125,8 @@ import {
   loadKeyringFreshnessPin,
   saveClientKeyRecord,
   saveKeyringCache,
-  saveKeyringFreshnessPin
+  saveKeyringFreshnessPin,
+  sessionLogPinStore
 } from '@/lib/sessionKey'
 
 /**
@@ -172,6 +188,68 @@ export interface KeyringFetchResult extends KeyringRecordContents {
   // ran (a KMS hiccup): once a later login's provisioning publishes the log,
   // the pointer can durably adopt the did. In-memory only.
   persistAccountPointer?: (pointer: AccountPointer) => Promise<void>
+  // The standing-credential members recovered from an unlock record in the
+  // standing layout (absent on a plain keyring record -- the pre-promotion or
+  // no-WAS reduced path): the pre-minted PUT-on-`did.jsonl` bridge delegation
+  // and the update-key ladder seed, both credential-authenticated by the
+  // record's binding MAC. What a fresh browser self-enrolls with. In-memory
+  // only.
+  standing?: { delegation: IZcap; ladderSeed?: Uint8Array }
+  // The credential's own client identity, derived beside the unlock identity
+  // from the same unlock seed: the roster wrap target a self-enrollment
+  // unwraps the user key with. Set on every real fetch (cheap HKDF
+  // expansions); optional only so test doubles need not fabricate one.
+  standingClient?: StandingUnlockClient
+  // Present when `clientKeys` is absent: persists a freshly self-enrolled
+  // client's key set under this unlock identity and returns the
+  // `persistClientKeys` closure for the new record. In-memory only.
+  enrollClientKeys?: (keys: {
+    clientSeed: Uint8Array
+    userKey?: UserKey
+    webvhUpdateKeys?: ClientWebvhUpdateKeys
+    controller: string
+  }) => Promise<(changes: PersistableClientKeys) => Promise<void>>
+  // Present beside `standing`: re-wraps and re-PUTs this unlock record with a
+  // freshly minted bridge delegation, restating everything else verbatim
+  // (the ladder seed included) -- the login-time expiry refresh of the
+  // credential's own bridge, run when the standing delegation is expired or
+  // inside the renewal window. In-memory only.
+  rebindStandingRecord?: (options: { delegation: IZcap }) => Promise<void>
+}
+
+/**
+ * An unlock credential's full derived state: the unlock identity (Space
+ * addressing, unlock KAK, record signer) and the standing client identity
+ * (client seed expansion, roster wrap target, binding MAC key), both expanded
+ * from ONE run of the method's KDF over the typed secret. Every unlock-layer
+ * entry point derives or accepts this bundle, so the expensive passphrase
+ * stretch runs once per typed secret.
+ */
+export interface UnlockCredential {
+  unlock: UnlockIdentity
+  standing: StandingUnlockClient
+}
+
+/**
+ * Derives the full unlock credential for a secret under its method's KDF:
+ * one stretch (`deriveUnlockSeed`), two expansions.
+ *
+ * @param options {object}
+ * @param options.secret {string | Uint8Array}   the unlock secret
+ * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
+ * @returns {Promise<UnlockCredential>}
+ */
+export async function deriveUnlockCredential({
+  secret,
+  kdf
+}: {
+  secret: string | Uint8Array
+  kdf: UnlockKdf
+}): Promise<UnlockCredential> {
+  const unlockSeed = await deriveUnlockSeed({ secret, kdf })
+  const unlock = await unlockIdentityFromSeed({ seed: unlockSeed })
+  const standing = await standingClientFromUnlockSeed({ unlockSeed })
+  return { unlock, standing }
 }
 
 /**
@@ -530,16 +608,158 @@ function isRecordProofError(err: unknown): boolean {
 }
 
 /**
- * Maps an unwrap failure onto its typed refusal: a proof failure is the
- * host-forgery refusal, anything else is a corrupt/unreadable record.
+ * Maps an unwrap failure onto its typed refusal: a proof failure or a failed
+ * credential-authenticated account binding is the host-forgery refusal,
+ * anything else is a corrupt/unreadable record. Both matched on `name`
+ * rather than `instanceof` (wallet-core may be linked, duplicating class
+ * identity).
  *
  * @param err {unknown}
  * @returns {Error}
  */
 function keyringUnwrapError(err: unknown): Error {
-  return isRecordProofError(err)
+  return isRecordProofError(err) ||
+    (err as Error | null)?.name === 'UnlockBindingError'
     ? new KeyringRecordForgedError({ cause: err })
     : new KeyringRecordUnusableError({ cause: err })
+}
+
+/**
+ * What a stored record unwraps to, whichever layout it is stored in: the
+ * shared pointer-record contents, the standing-credential members when the
+ * record is an unlock record in the standing layout, and the record's proof
+ * state (`'verified'`, or the pending marker of a cascade-re-minted record
+ * whose signer must still be settled against the account document).
+ */
+interface UnwrappedStoredRecord {
+  found: KeyringRecordContents
+  standing?: { delegation: IZcap; ladderSeed?: Uint8Array }
+  proofState: UnlockRecordProofState
+}
+
+/**
+ * Unwraps a stored record under an unlock credential, branching on the
+ * record's layout: a frame carrying a `bridge` member is an unlock record in
+ * the standing layout (the account core verified under the credential's
+ * binding MAC before the pointer is trusted), anything else is a plain
+ * keyring record (the pre-promotion or no-WAS reduced path -- a pure
+ * pointer, no standing authority). Throws raw codec errors; callers map them
+ * through `keyringUnwrapError`.
+ *
+ * @param options {object}
+ * @param options.record {unknown}   the stored record envelope
+ * @param options.credential {UnlockCredential}
+ * @returns {Promise<UnwrappedStoredRecord>}
+ */
+async function unwrapStoredKeyringRecord({
+  record,
+  credential
+}: {
+  record: unknown
+  credential: UnlockCredential
+}): Promise<UnwrappedStoredRecord> {
+  const { unlock, standing } = credential
+  if ((record as { bridge?: unknown } | null)?.bridge !== undefined) {
+    const { contents, proofState } = await unwrapUnlockRecord({
+      record,
+      keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+      keyResolver: unlock.keyResolver,
+      expectedKeyMultibase: unlock.recordSigner.keyMultibase,
+      // The account binding is verified inside the unwrap, under the
+      // credential-derived MAC key -- the pointer that comes back is
+      // credential-authenticated, not merely what the (host-re-encryptable)
+      // record claims.
+      bindingMacKey: standing.bindingMacKey
+    })
+    return {
+      found: {
+        controller: contents.controller,
+        email: contents.email,
+        pointer: contents.pointer,
+        createdAt: contents.createdAt
+      },
+      standing: {
+        delegation: contents.delegation,
+        ...(contents.ladderSeed ? { ladderSeed: contents.ladderSeed } : {})
+      },
+      proofState
+    }
+  }
+  const found = await unwrapKeyringRecord({
+    record,
+    keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+    keyResolver: unlock.keyResolver,
+    expectedKeyMultibase: unlock.recordSigner.keyMultibase
+  })
+  return { found, proofState: 'verified' }
+}
+
+/**
+ * Settles a pending record proof: a record the credential's own unlock key
+ * did not sign is only acceptable when a currently enrolled client of the
+ * account the credential-authenticated pointer names signed it -- the
+ * revocation cascade's bridge re-mint. The binding was verified in the
+ * unwrap, so the document fetched here belongs to the account the credential
+ * was bound for, never to one a forging host substituted.
+ *
+ * Failure classification mirrors the recovery flow's: an unreachable storage
+ * server rethrows unchanged (could-not-check must not read as forged), and so
+ * does an account-log continuity refusal (its own surface; a `rollback` may
+ * be replication lag). Everything else refuses as
+ * `KeyringRecordForgedError`.
+ *
+ * @param options {object}
+ * @param options.record {unknown}   the stored record, proof included
+ * @param options.proofState {UnlockRecordProofState}
+ * @param options.found {KeyringRecordContents}   the unwrapped contents (the
+ *   credential-authenticated pointer names the account to check against)
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+async function settlePendingRecordProof({
+  record,
+  proofState,
+  found,
+  idb
+}: {
+  record: unknown
+  proofState: UnlockRecordProofState
+  found: KeyringRecordContents
+  idb?: IDBFactory
+}): Promise<void> {
+  if (proofState === 'verified') {
+    return
+  }
+  try {
+    const pointer = found.pointer
+    if (!pointer || !isWebvhDid(pointer.did)) {
+      throw new Error(
+        'The record names no did:webvh account, so no document can account ' +
+          'for its signer.'
+      )
+    }
+    const signingKeys = await currentAccountSigningKeys({
+      pointer: {
+        did: pointer.did!,
+        spaceId: pointer.spaceId,
+        host: pointer.host
+      },
+      accountLogPinStore: sessionLogPinStore({ idb })
+    })
+    await verifyRecordProof({
+      record,
+      allowedKeyMultibases: [...signingKeys],
+      label: 'unlock'
+    })
+  } catch (err) {
+    if (isStorageUnreachable(err)) {
+      throw err
+    }
+    if ((err as Error | null)?.name === 'ResourceLogContinuityError') {
+      throw err
+    }
+    throw new KeyringRecordForgedError({ cause: err })
+  }
 }
 
 /**
@@ -627,35 +847,43 @@ async function enforceRecordFreshness({
  *
  * @param options {object}
  * @param options.cached {{ record: unknown }}   the loaded cache entry
- * @param options.unlock {UnlockIdentity}
+ * @param options.credential {UnlockCredential}
  * @param options.mintManageCapability {boolean}
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<KeyringFetchResult | null>}
  */
 async function readCachedRecord({
   cached,
-  unlock,
+  credential,
   mintManageCapability,
   idb
 }: {
   cached: { record: unknown }
-  unlock: UnlockIdentity
+  credential: UnlockCredential
   mintManageCapability: boolean
   idb?: IDBFactory
 }): Promise<KeyringFetchResult | null> {
+  const { unlock } = credential
   try {
     // A cached record is still a signed record and this client holds the
     // verification key, so it is verified exactly as a remote one is -- the
     // cache is local state a page script could reach, not a trusted origin.
-    const unwrapped = await unwrapKeyringRecord({
+    // A pending proof (a cascade-re-minted record) is settled against the
+    // account document like a remote one; offline that settlement fails, so
+    // the entry reads as unusable and the caller reports could-not-check.
+    const unwrapped = await unwrapStoredKeyringRecord({
       record: cached.record,
-      keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-      keyResolver: unlock.keyResolver,
-      expectedKeyMultibase: unlock.recordSigner.keyMultibase
+      credential
+    })
+    await settlePendingRecordProof({
+      record: cached.record,
+      proofState: unwrapped.proofState,
+      found: unwrapped.found,
+      idb
     })
     return await buildFetchResult({
-      found: unwrapped,
-      unlock,
+      unwrapped,
+      credential,
       mintManageCapability,
       idb
     })
@@ -707,8 +935,8 @@ async function readCachedRecord({
  * @param [options.kdf] {UnlockKdf}   the unlock method's KDF parameters
  * @param [options.mintManageCapability] {boolean}   also delegate the unlock
  *   Space management zcap to the recovered controller; default false
- * @param [options.unlock] {UnlockIdentity}   an already-derived unlock
- *   identity for the same secret, so a flow that unlocks more than once
+ * @param [options.credential] {UnlockCredential}   an already-derived unlock
+ *   credential for the same secret, so a flow that unlocks more than once
  *   (finishing an enrollment) runs the KDF a single time
  * @returns {Promise<KeyringFetchResult | null>}
  */
@@ -718,25 +946,26 @@ export async function fetchKeyring({
   idb,
   kdf = KEYRING_KDF,
   mintManageCapability = false,
-  unlock: derived
+  credential: derived
 }: {
   secret?: string | Uint8Array
   passphrase?: string
   idb?: IDBFactory
   kdf?: UnlockKdf
   mintManageCapability?: boolean
-  unlock?: UnlockIdentity
+  credential?: UnlockCredential
 }): Promise<KeyringFetchResult | null> {
   const unlockSecret = secret ?? passphrase
   if (!derived && unlockSecret === undefined) {
     throw new TypeError('An unlock secret is required.')
   }
-  const unlock =
+  const credential =
     derived ??
-    (await deriveUnlockIdentity({
+    (await deriveUnlockCredential({
       secret: unlockSecret as string | Uint8Array,
       kdf
     }))
+  const { unlock } = credential
 
   if (!WAS_SERVER_URL) {
     // No remote: the cache is the keyring's only copy -- authoritative, no TTL.
@@ -748,7 +977,7 @@ export async function fetchKeyring({
     // account" here, since the cache is the keyring's only copy.
     return await readCachedRecord({
       cached,
-      unlock,
+      credential,
       mintManageCapability,
       idb
     })
@@ -779,7 +1008,7 @@ export async function fetchKeyring({
     // misread it as "no account".
     const result = await readCachedRecord({
       cached,
-      unlock,
+      credential,
       mintManageCapability,
       idb
     })
@@ -801,27 +1030,38 @@ export async function fetchKeyring({
     return null
   }
 
-  let found: KeyringRecordContents
+  let unwrapped: UnwrappedStoredRecord
   try {
-    found = await unwrapKeyringRecord({
-      record,
-      keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-      keyResolver: unlock.keyResolver,
-      expectedKeyMultibase: unlock.recordSigner.keyMultibase
-    })
+    unwrapped = await unwrapStoredKeyringRecord({ record, credential })
   } catch (err) {
     // A record exists under the correct unlock Space but does not open: a
-    // forged one (its proof was not made by the key the typed secret derives)
-    // or a corrupt/malformed one. Neither is a wrong passphrase -- that
-    // resolves to a different Space and misses above -- so each surfaces as
-    // its own state, and neither ever refreshes the cache.
+    // forged one (its proof was not made by the key the typed secret derives,
+    // or its account binding fails the credential's MAC) or a
+    // corrupt/malformed one. Neither is a wrong passphrase -- that resolves
+    // to a different Space and misses above -- so each surfaces as its own
+    // state, and neither ever refreshes the cache.
     throw keyringUnwrapError(err)
   }
+  // A pending proof (the revocation cascade re-minted this record's bridge,
+  // signing with an enrolled client's account key) is settled against the
+  // verified document of the account the credential-authenticated pointer
+  // names, before anything trusts the shell.
+  await settlePendingRecordProof({
+    record,
+    proofState: unwrapped.proofState,
+    found: unwrapped.found,
+    idb
+  })
   // The freshness check runs before the cache refresh, so a replayed record
   // is neither followed nor allowed to become tomorrow's offline fallback.
-  await enforceRecordFreshness({ unlock, found, idb })
+  await enforceRecordFreshness({ unlock, found: unwrapped.found, idb })
   await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
-  return await buildFetchResult({ found, unlock, mintManageCapability, idb })
+  return await buildFetchResult({
+    unwrapped,
+    credential,
+    mintManageCapability,
+    idb
+  })
 }
 
 /**
@@ -831,34 +1071,82 @@ export async function fetchKeyring({
  * management zcap delegated to the recovered controller.
  *
  * @param options {object}
- * @param options.found {KeyringRecordContents}   the unwrapped record
- * @param options.unlock {UnlockIdentity}
+ * @param options.unwrapped {UnwrappedStoredRecord}   the unwrapped record
+ * @param options.credential {UnlockCredential}
  * @param options.mintManageCapability {boolean}
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<KeyringFetchResult>}
  */
 async function buildFetchResult({
-  found,
-  unlock,
+  unwrapped,
+  credential,
   mintManageCapability,
   idb
 }: {
-  found: KeyringRecordContents
-  unlock: UnlockIdentity
+  unwrapped: UnwrappedStoredRecord
+  credential: UnlockCredential
   mintManageCapability: boolean
   idb?: IDBFactory
 }): Promise<KeyringFetchResult> {
+  const { unlock, standing: standingClient } = credential
+  const { found, standing } = unwrapped
   const clientKeys = await loadClientKeys({ unlock, idb })
   const result: KeyringFetchResult = {
     ...found,
     unlockSpaceId: unlock.spaceId,
+    standingClient,
+    ...(standing
+      ? {
+          standing,
+          rebindStandingRecord: async ({ delegation }) => {
+            const createdAt = nextRecordCreatedAt({
+              floors: [
+                found.createdAt,
+                await loadKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
+              ]
+            })
+            const record = await wrapUnlockRecord({
+              controller: found.controller,
+              email: found.email,
+              pointer: found.pointer!,
+              delegation,
+              ...(standing.ladderSeed
+                ? { ladderSeed: standing.ladderSeed }
+                : {}),
+              keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+              signer: unlock.recordSigner,
+              bindingMacKey: standingClient.bindingMacKey,
+              createdAt
+            })
+            if (WAS_SERVER_URL) {
+              await putUnlockKeyring({
+                storageServerUrl: WAS_SERVER_URL,
+                zcapClient: unlock.zcapClient,
+                spaceId: unlock.spaceId,
+                record
+              })
+            }
+            await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
+            await saveKeyringFreshnessPin({
+              spaceId: unlock.spaceId,
+              createdAt,
+              idb
+            })
+          }
+        }
+      : {}),
     ...(clientKeys
       ? {
           clientKeys,
           persistClientKeys: clientKeysPersister({ unlock, idb }),
           persistAccountPointer: accountPointerPersister({ unlock, found, idb })
         }
-      : {})
+      : {
+          enrollClientKeys: async keys => {
+            await saveClientKeys({ unlock, ...keys, idb })
+            return clientKeysPersister({ unlock, idb })
+          }
+        })
   }
   if (mintManageCapability && WAS_SERVER_URL) {
     result.manageCapability = await delegateUnlockManagement({
@@ -909,9 +1197,17 @@ async function buildFetchResult({
  *   configured, the returned `manageCapability` is the revocation authority
  *   a later Settings flow uses to retire this method (a lost passkey)
  *   without tapping or re-deriving from the secret.
+ * @param [options.delegation] {IZcap}   the pre-minted PUT-on-`did.jsonl`
+ *   bridge delegation to the credential-derived signing DID. When present
+ *   (with `ladderSeed`), the record is written in the standing unlock-record
+ *   layout -- the credential can self-enroll a fresh browser -- instead of as
+ *   a plain pointer record. Requires `pointer` (unlock records exist only on
+ *   WAS deployments).
+ * @param [options.ladderSeed] {Uint8Array}   the credential's 32-byte
+ *   update-key ladder seed, sealed into the standing record beside the bridge
  * @param [options.idb] {IDBFactory}
- * @param [options.unlock] {UnlockIdentity}   an already-derived unlock
- *   identity for the same secret and KDF, so a flow that unlocks more than
+ * @param [options.credential] {UnlockCredential}   an already-derived unlock
+ *   credential for the same secret and KDF, so a flow that unlocks more than
  *   once runs the KDF a single time
  * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap }>}
  */
@@ -925,8 +1221,10 @@ export async function bindUnlockSecret({
   webvhUpdateKeys,
   pointer,
   delegateManagementTo,
+  delegation,
+  ladderSeed,
   idb,
-  unlock: derived
+  credential: derived
 }: {
   clientSeed: Uint8Array
   controller: string
@@ -937,14 +1235,22 @@ export async function bindUnlockSecret({
   webvhUpdateKeys?: ClientWebvhUpdateKeys
   pointer?: AccountPointer
   delegateManagementTo?: string
+  delegation?: IZcap
+  ladderSeed?: Uint8Array
   idb?: IDBFactory
-  unlock?: UnlockIdentity
+  credential?: UnlockCredential
 }): Promise<{
   unlockSpaceId: string
   manageCapability?: IZcap
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+  unlockKeyAgreementKeyId?: string
+  unlockKeyAgreementKeyMultibase?: string
 }> {
-  const unlock = derived ?? (await deriveUnlockIdentity({ secret, kdf }))
+  const credential = derived ?? (await deriveUnlockCredential({ secret, kdf }))
+  const { unlock, standing } = credential
+  if (delegation && !pointer) {
+    throw new TypeError('A standing unlock record requires an account pointer.')
+  }
   // The bind timestamp is stamped here rather than left to the codec, so this
   // client seeds its freshness pin with exactly what it signed. It is floored
   // over the local pin: every rebind site has already fetched (and pinned) the
@@ -953,14 +1259,27 @@ export async function bindUnlockSecret({
   const createdAt = nextRecordCreatedAt({
     floors: [await loadKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })]
   })
-  const record = await wrapKeyringRecord({
-    controller,
-    email,
-    pointer,
-    keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-    signer: unlock.recordSigner,
-    createdAt
-  })
+  const record =
+    delegation && pointer
+      ? await wrapUnlockRecord({
+          controller,
+          email,
+          pointer,
+          delegation,
+          ...(ladderSeed ? { ladderSeed } : {}),
+          keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+          signer: unlock.recordSigner,
+          bindingMacKey: standing.bindingMacKey,
+          createdAt
+        })
+      : await wrapKeyringRecord({
+          controller,
+          email,
+          pointer,
+          keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+          signer: unlock.recordSigner,
+          createdAt
+        })
 
   let manageCapability: IZcap | undefined
   if (WAS_SERVER_URL) {
@@ -979,11 +1298,16 @@ export async function bindUnlockSecret({
     if (delegateManagementTo) {
       // The unlock agent delegates GET/DELETE on its own Space to the account
       // identity, so a lost method stays revocable without re-deriving this
-      // unlock identity from the (possibly lost) secret. Pure signing.
+      // unlock identity from the (possibly lost) secret. Pure signing. A
+      // standing bind widens the actions to include PUT, exactly as a
+      // recovery code's does: that is what lets the revocation cascade
+      // re-PUT this record with a freshly minted bridge delegation when the
+      // original's signing client is revoked.
       manageCapability = await delegateUnlockManagement({
         zcapClient: unlock.zcapClient,
         spaceId: unlock.spaceId,
-        controller: delegateManagementTo
+        controller: delegateManagementTo,
+        ...(delegation ? { allowedActions: ['GET', 'PUT', 'DELETE'] } : {})
       })
     }
   }
@@ -999,10 +1323,19 @@ export async function bindUnlockSecret({
   })
   await saveKeyringFreshnessPin({ spaceId: unlock.spaceId, createdAt, idb })
 
+  const { id: unlockKeyAgreementKeyId, publicKeyMultibase } =
+    unlock.keyAgreementKey as unknown as {
+      id?: string
+      publicKeyMultibase?: string
+    }
   return {
     unlockSpaceId: unlock.spaceId,
     manageCapability,
-    persistClientKeys: clientKeysPersister({ unlock, idb })
+    persistClientKeys: clientKeysPersister({ unlock, idb }),
+    ...(unlockKeyAgreementKeyId ? { unlockKeyAgreementKeyId } : {}),
+    ...(publicKeyMultibase
+      ? { unlockKeyAgreementKeyMultibase: publicKeyMultibase }
+      : {})
   }
 }
 
@@ -1024,10 +1357,14 @@ export async function bindUnlockSecret({
  *   carries
  * @param [options.delegateManagementTo] {string}   an account DID to
  *   delegate the unlock Space management zcap to (see `bindUnlockSecret`)
+ * @param [options.delegation] {IZcap}   the bridge delegation for a standing
+ *   bind (see `bindUnlockSecret`)
+ * @param [options.ladderSeed] {Uint8Array}   the update-key ladder seed for a
+ *   standing bind
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
- * @param [options.unlock] {UnlockIdentity}   an already-derived unlock
- *   identity for the same passphrase (see `bindUnlockSecret`)
+ * @param [options.credential] {UnlockCredential}   an already-derived unlock
+ *   credential for the same passphrase (see `bindUnlockSecret`)
  * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap,
  *   persistClientKeys: Function }>}
  */
@@ -1040,9 +1377,11 @@ export async function bindPassphrase({
   webvhUpdateKeys,
   pointer,
   delegateManagementTo,
+  delegation,
+  ladderSeed,
   idb,
   kdf = KEYRING_KDF,
-  unlock
+  credential
 }: {
   clientSeed: Uint8Array
   controller: string
@@ -1052,13 +1391,17 @@ export async function bindPassphrase({
   webvhUpdateKeys?: ClientWebvhUpdateKeys
   pointer?: AccountPointer
   delegateManagementTo?: string
+  delegation?: IZcap
+  ladderSeed?: Uint8Array
   idb?: IDBFactory
   kdf?: UnlockKdf
-  unlock?: UnlockIdentity
+  credential?: UnlockCredential
 }): Promise<{
   unlockSpaceId: string
   manageCapability?: IZcap
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+  unlockKeyAgreementKeyId?: string
+  unlockKeyAgreementKeyMultibase?: string
 }> {
   return bindUnlockSecret({
     clientSeed,
@@ -1070,8 +1413,10 @@ export async function bindPassphrase({
     webvhUpdateKeys,
     pointer,
     delegateManagementTo,
+    delegation,
+    ladderSeed,
     idb,
-    ...(unlock ? { unlock } : {})
+    ...(credential ? { credential } : {})
   })
 }
 
@@ -1101,22 +1446,23 @@ export class WrongPassphraseError extends Error {
  * and `verifyPassphrase`.
  *
  * @param options {object}
- * @param options.unlock {UnlockIdentity}
- *   the unlock identity for the passphrase being verified
+ * @param options.credential {UnlockCredential}
+ *   the unlock credential for the passphrase being verified
  * @param options.controller {string}   the account did:key to match
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<KeyringRecordContents>}   the verified record's unwrapped
  *   contents (so a rebind can preserve fields such as the email and pointer)
  */
 async function verifyUnlockKeyring({
-  unlock,
+  credential,
   controller,
   idb
 }: {
-  unlock: UnlockIdentity
+  credential: UnlockCredential
   controller: string
   idb?: IDBFactory
 }): Promise<KeyringRecordContents> {
+  const { unlock } = credential
   let record: unknown
   if (WAS_SERVER_URL) {
     record = await getUnlockKeyring({
@@ -1132,21 +1478,21 @@ async function verifyUnlockKeyring({
   if (!record) {
     throw new WrongPassphraseError()
   }
-  let unwrapped: KeyringRecordContents | null = null
+  let unwrapped: UnwrappedStoredRecord | null = null
   try {
-    unwrapped = await unwrapKeyringRecord({
-      record,
-      keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-      keyResolver: unlock.keyResolver,
-      expectedKeyMultibase: unlock.recordSigner.keyMultibase
-    })
+    // A pending proof (a cascade-re-minted record) is acceptable here without
+    // settlement: verification asks whether the SECRET is right, and a
+    // successful decrypt under the credential's unlock KAK -- with the
+    // account binding verified inside the unwrap for a standing record --
+    // already answers that.
+    unwrapped = await unwrapStoredKeyringRecord({ record, credential })
   } catch {
     // A record that does not unwrap for this controller is a wrong passphrase.
   }
-  if (!unwrapped || unwrapped.controller !== controller) {
+  if (!unwrapped || unwrapped.found.controller !== controller) {
     throw new WrongPassphraseError()
   }
-  return unwrapped
+  return unwrapped.found
 }
 
 /**
@@ -1165,9 +1511,9 @@ async function verifyUnlockKeyring({
  * @param options.secret {string | Uint8Array}   the unlock secret
  * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
  * @param [options.idb] {IDBFactory}
- * @param [options.unlock] {UnlockIdentity}   an already-derived identity for
- *   this secret, so a caller running several unlock-layer steps pays the KDF
- *   once
+ * @param [options.credential] {UnlockCredential}   an already-derived
+ *   credential for this secret, so a caller running several unlock-layer
+ *   steps pays the KDF once
  * @returns {Promise<void>}
  */
 async function verifyUnlockSecret({
@@ -1175,16 +1521,16 @@ async function verifyUnlockSecret({
   secret,
   kdf,
   idb,
-  unlock
+  credential
 }: {
   controller: string
   secret: string | Uint8Array
   kdf: UnlockKdf
   idb?: IDBFactory
-  unlock?: UnlockIdentity
+  credential?: UnlockCredential
 }): Promise<void> {
   await verifyUnlockKeyring({
-    unlock: unlock ?? (await deriveUnlockIdentity({ secret, kdf })),
+    credential: credential ?? (await deriveUnlockCredential({ secret, kdf })),
     controller,
     idb
   })
@@ -1199,8 +1545,8 @@ async function verifyUnlockSecret({
  * @param options.passphrase {string}
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
- * @param [options.unlock] {UnlockIdentity}   an already-derived identity for
- *   this passphrase
+ * @param [options.credential] {UnlockCredential}   an already-derived
+ *   credential for this passphrase
  * @returns {Promise<void>}
  */
 export async function verifyPassphrase({
@@ -1208,20 +1554,20 @@ export async function verifyPassphrase({
   passphrase,
   idb,
   kdf = KEYRING_KDF,
-  unlock
+  credential
 }: {
   controller: string
   passphrase: string
   idb?: IDBFactory
   kdf?: UnlockKdf
-  unlock?: UnlockIdentity
+  credential?: UnlockCredential
 }): Promise<void> {
   return verifyUnlockSecret({
     controller,
     secret: passphrase,
     kdf,
     idb,
-    unlock
+    credential
   })
 }
 
@@ -1283,23 +1629,24 @@ async function retireUnlockIdentity({
  * @param options.secret {string | Uint8Array}   the unlock secret
  * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
  * @param [options.idb] {IDBFactory}
- * @param [options.unlock] {UnlockIdentity}   an already-derived identity for
- *   this secret (account deletion verifies then deletes on one derivation)
+ * @param [options.credential] {UnlockCredential}   an already-derived
+ *   credential for this secret (account deletion verifies then deletes on
+ *   one derivation)
  * @returns {Promise<{ unlockSpaceDeleted: boolean }>}
  */
 export async function deleteUnlockMethod({
   secret,
   kdf,
   idb,
-  unlock
+  credential
 }: {
   secret: string | Uint8Array
   kdf: UnlockKdf
   idb?: IDBFactory
-  unlock?: UnlockIdentity
+  credential?: UnlockCredential
 }): Promise<{ unlockSpaceDeleted: boolean }> {
   const unlockSpaceDeleted = await retireUnlockIdentity({
-    unlock: unlock ?? (await deriveUnlockIdentity({ secret, kdf })),
+    unlock: credential?.unlock ?? (await deriveUnlockIdentity({ secret, kdf })),
     warning: 'Could not delete the unlock Space:',
     idb
   })
@@ -1316,22 +1663,22 @@ export async function deleteUnlockMethod({
  * @param options.passphrase {string}
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
- * @param [options.unlock] {UnlockIdentity}   an already-derived identity for
- *   this passphrase
+ * @param [options.credential] {UnlockCredential}   an already-derived
+ *   credential for this passphrase
  * @returns {Promise<{ unlockSpaceDeleted: boolean }>}
  */
 export async function deleteKeyring({
   passphrase,
   idb,
   kdf = KEYRING_KDF,
-  unlock
+  credential
 }: {
   passphrase: string
   idb?: IDBFactory
   kdf?: UnlockKdf
-  unlock?: UnlockIdentity
+  credential?: UnlockCredential
 }): Promise<{ unlockSpaceDeleted: boolean }> {
-  return deleteUnlockMethod({ secret: passphrase, kdf, idb, unlock })
+  return deleteUnlockMethod({ secret: passphrase, kdf, idb, credential })
 }
 
 /**
@@ -1370,6 +1717,13 @@ export async function deleteKeyring({
  * @param [options.webvhUpdateKeys] {ClientWebvhUpdateKeys}   this client's
  *   did:webvh update-key seeds to carry into the new client-key record (the
  *   session's copy; falls back to the old record's)
+ * @param [options.newCredential] {UnlockCredential}   an already-derived
+ *   credential for the new passphrase (the standing-posture ceremony derives
+ *   it to mint the bridge delegation, so the rebind must not re-stretch)
+ * @param [options.delegation] {IZcap}   the new passphrase's bridge
+ *   delegation, for a standing rebind (see `bindUnlockSecret`)
+ * @param [options.ladderSeed] {Uint8Array}   the new passphrase's update-key
+ *   ladder seed, for a standing rebind
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
  * @returns {Promise<{ oldPassphraseRetired: boolean, unlockSpaceId: string,
@@ -1382,6 +1736,9 @@ export async function changePassphrase({
   newPassphrase,
   userKey,
   webvhUpdateKeys,
+  newCredential,
+  delegation,
+  ladderSeed,
   idb,
   kdf = KEYRING_KDF
 }: {
@@ -1391,6 +1748,9 @@ export async function changePassphrase({
   newPassphrase: string
   userKey?: UserKey
   webvhUpdateKeys?: ClientWebvhUpdateKeys
+  newCredential?: UnlockCredential
+  delegation?: IZcap
+  ladderSeed?: Uint8Array
   idb?: IDBFactory
   kdf?: UnlockKdf
 }): Promise<{
@@ -1398,11 +1758,14 @@ export async function changePassphrase({
   unlockSpaceId: string
   manageCapability?: IZcap
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+  unlockKeyAgreementKeyId?: string
+  unlockKeyAgreementKeyMultibase?: string
 }> {
-  const oldUnlock = await deriveUnlockIdentity({
+  const oldCredential = await deriveUnlockCredential({
     secret: oldPassphrase,
     kdf
   })
+  const oldUnlock = oldCredential.unlock
 
   // Verify the old passphrase via its keyring. With a WAS server configured
   // the remote copy is read -- the source of truth, so a locally cached record
@@ -1411,7 +1774,7 @@ export async function changePassphrase({
   // be misread as a wrong passphrase. With no WAS server the local cache is
   // the keyring's only copy.
   const verified = await verifyUnlockKeyring({
-    unlock: oldUnlock,
+    credential: oldCredential,
     controller,
     idb
   })
@@ -1421,27 +1784,35 @@ export async function changePassphrase({
   // them.
   const oldClientKeys = await loadClientKeys({ unlock: oldUnlock, idb })
 
-  const { unlockSpaceId, manageCapability, persistClientKeys } =
-    await bindPassphrase({
-      clientSeed,
-      controller,
-      passphrase: newPassphrase,
-      // Preserve the account email and pointer carried by the old record, and
-      // the user key and did:webvh update-key seeds, across the rebind.
-      email: verified.email,
+  const {
+    unlockSpaceId,
+    manageCapability,
+    persistClientKeys,
+    unlockKeyAgreementKeyId,
+    unlockKeyAgreementKeyMultibase
+  } = await bindPassphrase({
+    clientSeed,
+    controller,
+    passphrase: newPassphrase,
+    // Preserve the account email and pointer carried by the old record, and
+    // the user key and did:webvh update-key seeds, across the rebind.
+    email: verified.email,
+    pointer: verified.pointer,
+    userKey: userKey ?? oldClientKeys?.userKey,
+    webvhUpdateKeys: webvhUpdateKeys ?? oldClientKeys?.webvhUpdateKeys,
+    // Delegate the new unlock Space's management zcap to the account
+    // identity, so Settings can record it in the registry (and revoke this
+    // method later).
+    delegateManagementTo: unlockManagementGrantee({
       pointer: verified.pointer,
-      userKey: userKey ?? oldClientKeys?.userKey,
-      webvhUpdateKeys: webvhUpdateKeys ?? oldClientKeys?.webvhUpdateKeys,
-      // Delegate the new unlock Space's management zcap to the account
-      // identity, so Settings can record it in the registry (and revoke this
-      // method later).
-      delegateManagementTo: unlockManagementGrantee({
-        pointer: verified.pointer,
-        controller
-      }),
-      idb,
-      kdf
-    })
+      controller
+    }),
+    delegation,
+    ladderSeed,
+    idb,
+    kdf,
+    ...(newCredential ? { credential: newCredential } : {})
+  })
 
   // Retire the old unlock identity -- but only when it differs from the new
   // one (an old == new rebind must not delete the records just written). The
@@ -1462,6 +1833,10 @@ export async function changePassphrase({
     oldPassphraseRetired: oldSpaceDeleted,
     unlockSpaceId,
     manageCapability,
-    persistClientKeys
+    persistClientKeys,
+    ...(unlockKeyAgreementKeyId ? { unlockKeyAgreementKeyId } : {}),
+    ...(unlockKeyAgreementKeyMultibase
+      ? { unlockKeyAgreementKeyMultibase }
+      : {})
   }
 }

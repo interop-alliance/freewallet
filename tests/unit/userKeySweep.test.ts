@@ -53,11 +53,7 @@ vi.mock('@/lib/sessionKey', () => ({
   loadUserKeyEpochPin: vi.fn(async () => null),
   saveUserKeyEpochPin: vi.fn(async () => undefined),
   savePinFromDescriptor: vi.fn(async () => undefined),
-  userKeyLogPinStore: vi.fn(() => ({
-    read: async () => null,
-    write: async () => undefined
-  })),
-  accountLogPinStore: vi.fn(() => ({
+  sessionLogPinStore: vi.fn(() => ({
     read: async () => null,
     write: async () => undefined
   }))
@@ -75,7 +71,11 @@ import {
   checkUserKeyRosterAtLogin,
   convergeUserKeyRosterToAccount
 } from '@interop/wallet-core/clients'
-import { accountLogPinStore, loadUserKeyEpochPin } from '@/lib/sessionKey'
+import {
+  loadUserKeyEpochPin,
+  savePinFromDescriptor,
+  sessionLogPinStore
+} from '@/lib/sessionKey'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import { StorageManager } from '@/stores/storageManager'
 import { initSessionFromSeed } from '@/session/initSession'
@@ -427,6 +427,89 @@ describe('the login-time cascade-completion sweep', () => {
   })
 })
 
+describe('a failed user-key persist at login (browser not remembered)', () => {
+  /**
+   * Makes the mocked login read behave like the real one: the adoption
+   * callback runs after a successful read, and its throw is the app's to
+   * handle (wallet-core no longer swallows it into the offline null path).
+   */
+  function readInvokesAdoptionCallback({ rotated = false } = {}) {
+    vi.mocked(checkUserKeyRosterAtLogin).mockImplementation((async (opts: {
+      onRosterRead?: (adopted: unknown) => Promise<void>
+    }) => {
+      const read = rosterRead({ rotated })
+      await opts.onRosterRead?.({
+        userKey: read.userKey,
+        latestEpochId: read.latestEpochId,
+        descriptor: read.descriptor
+      })
+      return read
+    }) as never)
+  }
+
+  it('flags the session instead of failing the login when the pin persist throws', async () => {
+    const fake = makeFakeStorage()
+    vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
+      storage: fake.storage,
+      userExists: true
+    })
+    vi.mocked(savePinFromDescriptor).mockRejectedValueOnce(
+      new Error('IndexedDB write failed')
+    )
+    readInvokesAdoptionCallback()
+
+    const { session } = await initSessionFromSeed({
+      seed: randomSeed(),
+      userKey: OLD_USER_KEY,
+      accountPointer: POINTER
+    })
+    expect(session.userKeyPersistFailed).toBe(true)
+    expect(session.profile.userKey).toEqual(OLD_USER_KEY)
+  })
+
+  it('adopts a rotated key in memory even when the client-key record write fails', async () => {
+    const fake = makeFakeStorage()
+    vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
+      storage: fake.storage,
+      userExists: true
+    })
+    readInvokesAdoptionCallback({ rotated: true })
+    const persistClientKeys = vi.fn(async () => {
+      throw new Error('IndexedDB write failed')
+    })
+
+    const { session } = await initSessionFromSeed({
+      seed: randomSeed(),
+      userKey: OLD_USER_KEY,
+      accountPointer: POINTER,
+      persistClientKeys
+    })
+    expect(session.userKeyPersistFailed).toBe(true)
+    // The session still runs on the freshly adopted key; only this browser's
+    // durable copy stayed behind.
+    expect(session.profile.userKey).toEqual(FRESH_USER_KEY)
+  })
+
+  it('leaves the flag unset when both persists succeed', async () => {
+    const fake = makeFakeStorage()
+    vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
+      storage: fake.storage,
+      userExists: true
+    })
+    readInvokesAdoptionCallback({ rotated: true })
+    const persistClientKeys = vi.fn(async () => undefined)
+
+    const { session } = await initSessionFromSeed({
+      seed: randomSeed(),
+      userKey: OLD_USER_KEY,
+      accountPointer: POINTER,
+      persistClientKeys
+    })
+    expect(session.userKeyPersistFailed).toBeUndefined()
+    expect(session.profile.userKey).toEqual(FRESH_USER_KEY)
+  })
+})
+
 describe('the roster stage of the sweep', () => {
   it('finishes a torn disconnect and sweeps with the converged key', async () => {
     const fake = makeFakeStorage()
@@ -482,14 +565,13 @@ describe('the roster stage of the sweep', () => {
         userKey: OLD_USER_KEY
       })
     )
-    // The continuity pins are keyed by the account DID, never by the Space
-    // id a substituted pointer could change.
+    // The epoch pin is keyed by the account DID, never by the Space id a
+    // substituted pointer could change; the chain-head pins ride the keyed
+    // session store (wallet-core derives their slot keys).
     expect(vi.mocked(loadUserKeyEpochPin)).toHaveBeenCalledWith(
       expect.objectContaining({ accountDid: POINTER.did })
     )
-    expect(vi.mocked(accountLogPinStore)).toHaveBeenCalledWith(
-      expect.objectContaining({ accountDid: POINTER.did })
-    )
+    expect(vi.mocked(sessionLogPinStore)).toHaveBeenCalled()
     // The fresh key is adopted -- persisted for the next login, swapped into
     // the live session -- and the fan-out runs against it.
     expect(persistClientKeys).toHaveBeenCalledWith({ userKey: FRESH_USER_KEY })

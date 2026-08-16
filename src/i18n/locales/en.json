@@ -207,6 +207,7 @@
       "userKeyRosterIntegrity": "The storage server returned an account key list that failed its integrity check, so sign-in was stopped as a precaution. Nothing was changed. If you did not expect this, contact your storage provider.",
       "userKeyRosterUnwrap": "This browser is connected to your account, but its copy of your account key is missing -- a setup that was interrupted partway can leave it this way. Use \"Connect this browser\" below to connect it again from a browser where your wallet is already set up. If you logged in with a passkey, enter your passphrase first.",
       "storageUnreachable": "Could not reach the storage server. While we're fixing it, try <guest>guest mode</guest>.",
+      "ladderAttribution": "Your account was found, but this login method's standing on the account could not be confirmed -- it may have been removed, or the account's published history is in an unexpected state. Sign-in was stopped and nothing was changed. Log in from a browser where your wallet is already set up, or use a recovery code.",
       "passkeyNoAccount": "No wallet was found for this passkey. Log in with your passphrase, then add this passkey from Settings.",
       "passkeyPrfUnsupported": "This passkey or browser cannot unlock Freewallet. Try a different passkey or log in with your passphrase."
     },
@@ -219,7 +220,8 @@
       "signUpLink": "Sign up",
       "forgotPassphrase": "Forgot your passphrase?",
       "recoverLink": "Recover your wallet with a recovery code.",
-      "recoveryHealthWarning": "One of your recovery codes may no longer work. Open Settings > Recovery codes and generate a fresh one."
+      "recoveryHealthWarning": "One of your recovery codes may no longer work. Open Settings > Recovery codes and generate a fresh one.",
+      "rememberBrowserWarning": "You are logged in, but this browser could not be remembered: the refreshed account key was not saved locally, so the next login will fetch it again."
     },
     "enroll": {
       "connectButton": "Connect this browser",

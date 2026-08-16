@@ -2334,3 +2334,135 @@ describe('management zcap delegation', () => {
     })
   })
 })
+
+describe('standing unlock records (FW-154)', () => {
+  const DELEGATION = {
+    '@context': 'https://w3id.org/zcap/v1',
+    id: 'urn:uuid:standing-bridge-delegation',
+    controller: 'did:key:z6MkStandingClientForTests',
+    invocationTarget: 'https://was.example.test/space/space-123/id/did.jsonl',
+    allowedAction: ['PUT'],
+    expires: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+    parentCapability: 'urn:zcap:root:x',
+    proof: { verificationMethod: 'did:key:z6MkSignerForTests#z6MkSigner' }
+  } as unknown as IDelegatedZcap
+
+  function ladderSeed(): Uint8Array {
+    return crypto.getRandomValues(new Uint8Array(32))
+  }
+
+  it('round-trips the bridge delegation and ladder seed through bind + fetch', async () => {
+    const idb = createFakeIdb()
+    const seed = ladderSeed()
+
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'standing round trip',
+      pointer: POINTER,
+      delegation: DELEGATION,
+      ladderSeed: seed,
+      idb,
+      kdf: KDF
+    })
+
+    const found = await fetchKeyring({
+      passphrase: 'standing round trip',
+      idb,
+      kdf: KDF
+    })
+    expect(found).not.toBeNull()
+    expect(found!.controller).toBe(DATA_CONTROLLER)
+    expect(found!.pointer).toEqual(POINTER)
+    expect(found!.standing).toBeDefined()
+    expect(found!.standing!.delegation).toEqual(DELEGATION)
+    expect(found!.standing!.ladderSeed).toEqual(seed)
+    expect(found!.standingClient).toBeDefined()
+    expect(found!.clientKeys).toBeDefined()
+    expect(found!.enrollClientKeys).toBeUndefined()
+    expect(found!.rebindStandingRecord).toBeDefined()
+  })
+
+  it('exposes enrollClientKeys on a fresh browser, and persists through it', async () => {
+    const boundIdb = createFakeIdb()
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'standing fresh browser',
+      pointer: POINTER,
+      delegation: DELEGATION,
+      ladderSeed: ladderSeed(),
+      idb: boundIdb,
+      kdf: KDF
+    })
+
+    // A different browser profile: same remote record, empty local records.
+    const freshIdb = createFakeIdb()
+    const found = await fetchKeyring({
+      passphrase: 'standing fresh browser',
+      idb: freshIdb,
+      kdf: KDF
+    })
+    expect(found!.clientKeys).toBeUndefined()
+    expect(found!.standing).toBeDefined()
+    expect(found!.enrollClientKeys).toBeDefined()
+
+    const newSeed = randomSeed()
+    await found!.enrollClientKeys!({
+      clientSeed: newSeed,
+      controller: DATA_CONTROLLER
+    })
+    const after = await fetchKeyring({
+      passphrase: 'standing fresh browser',
+      idb: freshIdb,
+      kdf: KDF
+    })
+    expect(after!.clientKeys).toBeDefined()
+    expect(after!.clientKeys!.clientSeed).toEqual(newSeed)
+    expect(after!.clientKeys!.controller).toBe(DATA_CONTROLLER)
+  })
+
+  it('refuses a record whose account binding fails the credential MAC', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'standing tampered binding',
+      pointer: POINTER,
+      delegation: DELEGATION,
+      ladderSeed: ladderSeed(),
+      idb,
+      kdf: KDF
+    })
+
+    const { spaceId } = await unlockFor('standing tampered binding')
+    const record = wasState.spaces.get(spaceId) as { binding: string }
+    // A host swapping the credential-authenticated core cannot recompute the
+    // binding tag; simulate it by corrupting the stored tag.
+    wasState.spaces.set(spaceId, {
+      ...record,
+      binding: `${record.binding.slice(0, -2)}xx`
+    })
+
+    await expect(
+      fetchKeyring({ passphrase: 'standing tampered binding', idb, kdf: KDF })
+    ).rejects.toBeInstanceOf(KeyringRecordForgedError)
+  })
+
+  it('widens the management zcap to include PUT on a standing bind', async () => {
+    const idb = createFakeIdb()
+    const { manageCapability } = await bindUnlockSecret({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      secret: 'standing management actions',
+      kdf: KDF,
+      pointer: POINTER,
+      delegation: DELEGATION,
+      ladderSeed: ladderSeed(),
+      delegateManagementTo: DATA_CONTROLLER,
+      idb
+    })
+    const cap = manageCapability as unknown as { allowedAction: string[] }
+    expect(cap.allowedAction).toEqual(['GET', 'PUT', 'DELETE'])
+  })
+})

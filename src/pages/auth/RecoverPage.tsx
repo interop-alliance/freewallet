@@ -160,9 +160,11 @@ export function RecoverPage() {
       }
       await session.storageReady
       login(session)
-      // Fire-and-forget: the sequencing the two registry updates need lives in
-      // `updateRegistryAfterRecovery`, and both halves are best-effort.
-      void updateRegistryAfterRecovery({ session, outcome })
+      // Fire-and-forget: the sequencing the registry updates need lives in
+      // `updateRegistryAfterRecovery`, and every half is best-effort. The
+      // passphrase still in hand lets it promote the fresh credential to the
+      // standing posture (self-enrolling on the next fresh browser).
+      void updateRegistryAfterRecovery({ session, outcome, passphrase })
       navigate('/dashboard', { replace: true })
     } catch (err) {
       console.error('Recovery login failed:', err)

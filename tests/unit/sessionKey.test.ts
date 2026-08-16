@@ -6,12 +6,12 @@
  * a minimal in-memory fake.
  */
 import { describe, expect, it } from 'vitest'
+import { accountLogPinId } from '@interop/wallet-core/webvh'
+import { userKeyRosterPinId } from '@interop/wallet-core/keys'
 import {
-  accountLogPinStore,
-  adoptBridgingAccountLogPin,
-  bridgingAccountLogPinStore,
   deleteAccountDidForSpace,
   deleteKeyringCache,
+  deleteLogPin,
   loadAccountDidForSpace,
   loadKeyringFreshnessPin,
   saveAccountDidForSpace,
@@ -23,7 +23,7 @@ import {
   savePasskeySafetyNotice,
   saveKeyringCache,
   saveUserKeyEpochPin,
-  userKeyLogPinStore
+  sessionLogPinStore
 } from '@/lib/sessionKey'
 
 /**
@@ -252,7 +252,7 @@ describe('user key epoch pin helpers', () => {
   })
 })
 
-describe('continuity pins keyed by the account DID', () => {
+describe('continuity pin slots', () => {
   const OTHER_DID = 'did:webvh:QmScidB:example.com:space-z'
   const EPOCH_IDS = ['did:key:z6LSepoch1', 'did:key:z6LSepoch2']
   const HEAD = {
@@ -301,25 +301,43 @@ describe('continuity pins keyed by the account DID', () => {
     ).resolves.toBeNull()
   })
 
-  it('shares one chain-head slot across Space ids under one DID', async () => {
+  it('keeps separate chain-head slots for separate logIds', async () => {
+    // The keyed store: one instance serves every log, each under its own
+    // wallet-core-derived slot key.
     const idb = createFakeIdb()
-    const accountDid = 'did:webvh:QmScidA:example.com:space-a'
-    await accountLogPinStore({ accountDid, idb }).write(HEAD)
+    const store = sessionLogPinStore({ idb })
+    const logId = accountLogPinId({ spaceId: 'space-a' })
+    await store.write({ logId, pin: HEAD })
+    await expect(store.read({ logId })).resolves.toEqual(HEAD)
     await expect(
-      accountLogPinStore({ accountDid, idb }).read()
-    ).resolves.toEqual(HEAD)
-    await expect(
-      accountLogPinStore({ accountDid: OTHER_DID, idb }).read()
+      store.read({ logId: accountLogPinId({ spaceId: 'space-z' }) })
     ).resolves.toBeNull()
   })
 
   it('keeps the account-log and roster-log chain-head pins apart', async () => {
+    // The two account logs of ONE Space land in distinct slots, so one
+    // verification can never clobber the other's pin.
     const idb = createFakeIdb()
-    const accountDid = 'did:webvh:QmScidA:example.com:space-a'
-    await accountLogPinStore({ accountDid, idb }).write(HEAD)
+    const store = sessionLogPinStore({ idb })
+    await store.write({
+      logId: accountLogPinId({ spaceId: 'space-a' }),
+      pin: HEAD
+    })
     await expect(
-      userKeyLogPinStore({ accountDid, idb }).read()
+      store.read({ logId: userKeyRosterPinId({ spaceId: 'space-a' }) })
     ).resolves.toBeNull()
+  })
+
+  it('deletes only the named slot', async () => {
+    const idb = createFakeIdb()
+    const store = sessionLogPinStore({ idb })
+    const accountLogId = accountLogPinId({ spaceId: 'space-a' })
+    const rosterLogId = userKeyRosterPinId({ spaceId: 'space-a' })
+    await store.write({ logId: accountLogId, pin: HEAD })
+    await store.write({ logId: rosterLogId, pin: HEAD })
+    await deleteLogPin({ logId: accountLogId, idb })
+    await expect(store.read({ logId: accountLogId })).resolves.toBeNull()
+    await expect(store.read({ logId: rosterLogId })).resolves.toEqual(HEAD)
   })
 })
 
@@ -356,64 +374,9 @@ describe('keyring-freshness pin', () => {
   })
 })
 
-describe('the bridging (pre-promotion) account-log pin', () => {
+describe('the Space-to-account-DID mapping', () => {
   const SPACE_ID = 'space-a'
   const ACCOUNT_DID = 'did:webvh:QmScidA:example.com:space-a'
-  const HEAD = {
-    method: 'did:webvh:1.0',
-    scid: 'QmScidA',
-    head: 'entry-hash-1'
-  }
-  const LATER_HEAD = {
-    method: 'did:webvh:1.0',
-    scid: 'QmScidA',
-    head: 'entry-hash-9'
-  }
-
-  it('round-trips a pin under the Space id', async () => {
-    const idb = createFakeIdb()
-    await bridgingAccountLogPinStore({ spaceId: SPACE_ID, idb }).write(HEAD)
-    await expect(
-      bridgingAccountLogPinStore({ spaceId: SPACE_ID, idb }).read()
-    ).resolves.toEqual(HEAD)
-    // Distinct from the DID-keyed slot the publication adopts it into.
-    await expect(
-      accountLogPinStore({ accountDid: ACCOUNT_DID, idb }).read()
-    ).resolves.toBeNull()
-  })
-
-  it('adopts into an empty DID-keyed slot and drops the bridging row', async () => {
-    const idb = createFakeIdb()
-    await bridgingAccountLogPinStore({ spaceId: SPACE_ID, idb }).write(HEAD)
-    await adoptBridgingAccountLogPin({
-      spaceId: SPACE_ID,
-      accountDid: ACCOUNT_DID,
-      idb
-    })
-    await expect(
-      accountLogPinStore({ accountDid: ACCOUNT_DID, idb }).read()
-    ).resolves.toEqual(HEAD)
-    await expect(
-      bridgingAccountLogPinStore({ spaceId: SPACE_ID, idb }).read()
-    ).resolves.toBeNull()
-  })
-
-  it('leaves a non-empty DID-keyed slot untouched, still dropping the row', async () => {
-    const idb = createFakeIdb()
-    await accountLogPinStore({ accountDid: ACCOUNT_DID, idb }).write(LATER_HEAD)
-    await bridgingAccountLogPinStore({ spaceId: SPACE_ID, idb }).write(HEAD)
-    await adoptBridgingAccountLogPin({
-      spaceId: SPACE_ID,
-      accountDid: ACCOUNT_DID,
-      idb
-    })
-    await expect(
-      accountLogPinStore({ accountDid: ACCOUNT_DID, idb }).read()
-    ).resolves.toEqual(LATER_HEAD)
-    await expect(
-      bridgingAccountLogPinStore({ spaceId: SPACE_ID, idb }).read()
-    ).resolves.toBeNull()
-  })
 
   it('round-trips the Space-to-account-DID mapping', async () => {
     const idb = createFakeIdb()

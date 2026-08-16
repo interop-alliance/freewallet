@@ -2,6 +2,29 @@
 
 ## 0.39.0 - TBD
 
+### Added
+
+- Standing unlock credentials with self-enrolling login. Every passphrase and
+  passkey bound on a promoted account now holds the recovery-code posture
+  minus spend-on-use: a user-key roster wrap escrowed into every epoch, a
+  document `keyAgreement` entry (a hash commitment for a passphrase, the key
+  verbatim for a passkey PRF output), a committed update-key ladder, and an
+  unlock record carrying a bridge delegation and the ladder seed under a
+  credential-authenticated binding MAC. A fresh browser holding the
+  credential self-enrolls at login as an ordinary full client (two loud
+  entries on the world-readable account log, then the first roster read
+  through the credential's standing wrap) -- the not-enrolled dead end
+  remains only for records without standing authority, where the
+  connect-another-wallet ceremony still applies. The revocation cascade
+  re-mints standing bridge delegations beside the recovery ones, a standing
+  credential's own login refreshes its bridge inside the renewal window, and
+  a self-enrolled login refreshes the registry's recorded ladder rung.
+  Passphrase/passkey registry entries record the standing posture
+  (`rosterKid`, key multibases, delegation key id and expiry,
+  `unlockClientDid`, unlock-KAK members). Existing accounts are not
+  migrated in place: re-provision to adopt the standing posture (the plain
+  record keeps logging in via the connect ceremony).
+
 ### Changed
 
 - Enrollment now refuses a connect code whose key-agreement key is not the
@@ -74,11 +97,13 @@
   the post-recovery keyring record starts without an email. The signup
   email hint now describes the email as a settings label rather than a
   recovery aid.
-- The three continuity pins (account-log chain head, roster-log chain head,
-  user-key epoch) are keyed by the account DID instead of the data Space
-  id, so a mirrored Space at a fresh spaceId inherits the standing pins
-  instead of a clean trust-on-first-use slate, and pins survive a
-  legitimate host or Space migration under one DID.
+- The two chain-head pins (account log, roster log) now live in one keyed
+  pin store (`sessionLogPinStore`), with per-log slot keys derived by
+  wallet-core from the Space id (`accountLogPinId` / `userKeyRosterPinId`,
+  host-free so a claimed host move hits the held slot instead of a fresh
+  trust-on-first-use slate). The user-key epoch pin stays keyed by the
+  account DID. Standing pins under the old per-DID keys are not migrated;
+  they re-establish at the next login.
 - New login error states for a forged or tampered keyring record and for a
   rolled-back record, in both locales.
 - Keyring-freshness pin writes are transactional and forward-only, and every
@@ -86,17 +111,30 @@
   replaces and the local pin. A client whose clock lags another's can no
   longer write a record every other client then refuses as a rollback.
 - The account-genesis log read now carries a chain-head pin on every login,
-  including the pre-promotion window: a spaceId-keyed bridging pin at first
-  contact (adopted into the DID-keyed pin when the log publishes), and the
-  locally recorded published DID (with `expectedDid`) on later heal logins
-  whose pointer backfill never landed. A signup torn between log
-  publication and the pointer backfill no longer heals against an unpinned
-  log.
+  including the pre-promotion window: the Space-keyed slot serves the log
+  from true first contact on (no bridging pin needed), and the locally
+  recorded published DID supplies `expectedDid` on later heal logins whose
+  pointer backfill never landed. A signup torn between log publication and
+  the pointer backfill no longer heals against an unpinned log.
 - The recovery locate step no longer reports an unreachable storage server
   or an account-log continuity refusal as a forged record: a network
   failure surfaces as "could not check", a continuity rollback (possibly
   replication lag) does too, and a fork or identity switch gets its own
   error message in both locales.
+- `@interop/wallet-core` bumped to `^0.43.0` (with `@interop/was-client`
+  `^0.39.1`). The recovery record codec is the shared unlock record codec
+  now (`wrapUnlockRecord` / `unwrapUnlockRecord`; the delegation rides a
+  sealed `bridge` member the re-mint replaces on its own), and already
+  issued recovery codes are re-issued rather than migrated.
+- A login no longer hard-fails when the served roster log sits behind this
+  browser's chain-head pin (`rollback` -- possibly nothing worse than a
+  lagging replica): the session degrades to the cached user key, nothing
+  rolled back is adopted, and the pin never regresses. Forks and
+  SCID/method switches still refuse the session.
+- A roster read whose local persist fails (the client-key record write or
+  the epoch-pin advance) no longer masquerades as an offline start: the
+  session proceeds on the adopted key and the login page shows a "this
+  browser could not be remembered" warning, in both locales.
 - AGENTS.md and CONTRIBUTING.md gain pointers to the ecosystem-wide
   conventions: the shared learnings file and decision-record convention in
   the byoe-ecosystem and isomorphic-lib-template repos, and the

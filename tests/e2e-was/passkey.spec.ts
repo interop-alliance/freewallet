@@ -239,7 +239,7 @@ async function clearAllIndexedDb(page: Page): Promise<void> {
 }
 
 test.describe('Passkey unlock', () => {
-  test('passkey signup, one-tap login, and a wiped client is refused (not enrolled)', async ({
+  test('passkey signup, one-tap login, and a wiped client self-enrolls', async ({
     page
   }, testInfo) => {
     test.slow()
@@ -274,20 +274,19 @@ test.describe('Passkey unlock', () => {
     // Wiped client: clear the wallet and session IndexedDB (the passkey
     // survives in the authenticator -- a stand-in for a platform-synced
     // passkey on a new machine), reload, and log in with the passkey. The
-    // keyring record locates the account, but this client's key set is gone
-    // with the wipe, so login is refused with the not-enrolled guidance --
-    // the passkey alone can no longer reconstruct the account.
+    // passkey is a standing credential, so its record's bridge delegation
+    // and ladder seed self-enroll this browser as a fresh ordinary client,
+    // and the login lands back in the same wallet.
     await logout(page)
     await clearAllIndexedDb(page)
     await page.goto('/#/login')
     await page.reload()
     await page.getByRole('button', { name: 'Log in with a Passkey' }).click()
+    await expect(page).toHaveURL(/#\/dashboard/, { timeout: 45_000 })
+    expect(await readSpaceId(page)).toBe(originalSpaceId)
     await expect(
-      page.getByText('this browser does not hold its keys yet', {
-        exact: false
-      })
+      page.getByRole('link', { name: 'Your First Credential' })
     ).toBeVisible({ timeout: 30_000 })
-    await expect(page).toHaveURL(/#\/login/)
   })
 
   test('Settings adds a second passkey, guards the last one, and revokes one', async ({

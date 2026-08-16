@@ -37,14 +37,14 @@
  *   entries that predate the re-mint fields and for expiry between
  *   revocations.
  */
-import { WasClient } from '@interop/was-client'
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import { WAS_SERVER_URL } from '@/app.config'
+import { DID_DOCUMENT_RESOURCE } from '@interop/wallet-core/space'
 import {
-  ID_COLLECTION,
-  DID_DOCUMENT_RESOURCE
-} from '@interop/wallet-core/space'
+  establishPassphrasePosture,
+  unlockLogStore
+} from '@/session/standingUnlock'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import {
   deriveUnlockIdentity,
@@ -88,12 +88,12 @@ import {
   RECOVERY_KDF,
   remintRecoveryDelegations as remintDelegationsCore,
   removeRecoveryKey,
-  unwrapRecoveryRecord,
-  wrapRecoveryRecord,
+  unwrapUnlockRecord,
+  wrapUnlockRecord,
   zcapExpiring,
   type RecoveryClient,
   type RecoveryLogStore,
-  type RecoveryRecordProofState
+  type UnlockRecordProofState
 } from '@interop/wallet-core/recovery'
 import type { Session } from '@/types/auth'
 import {
@@ -107,8 +107,12 @@ import {
   getUnlockMethods,
   managementZcapClient,
   putUnlockMethods,
+  refreshStandingDelegationFields,
   revokeUnlockMethod,
+  type PassphraseUnlockMethod,
+  type PasskeyUnlockMethod,
   type RecoveryCodeUnlockMethod,
+  type UnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
 import {
@@ -124,12 +128,12 @@ import {
   rewrapUnlockRegistryToUserKey
 } from '@/session/userKeyAdoption'
 import {
-  accountLogPinStore,
   deleteClientKeyRecord,
   deleteKeyringFreshnessPin,
   deleteKeyringCache,
   loadUserKeyEpochPin,
-  savePinFromDescriptor
+  savePinFromDescriptor,
+  sessionLogPinStore
 } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { WASRemoteStore } from '@/stores/wasRemoteStore'
@@ -215,7 +219,7 @@ async function bindRecoveryRecord({
     spaceId: unlock.spaceId,
     controller: unlock.agent.id
   })
-  const record = await wrapRecoveryRecord({
+  const record = await wrapUnlockRecord({
     controller,
     pointer,
     delegation,
@@ -503,67 +507,13 @@ function delegatedLogStore({
   delegation: IZcap
   client: RecoveryClient
 }): RecoveryLogStore {
-  const was = new WasClient({
-    serverUrl: pointer.host,
+  // The shared delegated store (public log GET + bridge-delegated PUT),
+  // invoked with the code-derived did:key client.
+  return unlockLogStore({
+    pointer,
+    delegation,
     zcapClient: client.agents.zcapClient
   })
-  return {
-    async getIdResourceRaw({ resourceId }: { resourceId: string }) {
-      const response = await fetch(
-        new URL(
-          `/space/${pointer.spaceId}/${ID_COLLECTION.id}/${resourceId}`,
-          pointer.host
-        )
-      )
-      if (response.status === 404) {
-        return undefined
-      }
-      if (!response.ok) {
-        throw new Error(
-          `Fetching "${resourceId}" failed (HTTP ${response.status}).`
-        )
-      }
-      return {
-        text: await response.text(),
-        etag: response.headers.get('etag') ?? undefined
-      }
-    },
-    async putIdResource({
-      resourceId,
-      content,
-      contentType,
-      ifMatch,
-      ifNoneMatch
-    }: {
-      resourceId: string
-      content: object | string
-      contentType?: string
-      ifMatch?: string
-      ifNoneMatch?: boolean
-    }) {
-      const serialized =
-        typeof content === 'string' ? content : JSON.stringify(content)
-      const headers: Record<string, string> = {
-        'content-type': contentType ?? 'application/json'
-      }
-      if (ifMatch !== undefined) {
-        headers['if-match'] = ifMatch
-      }
-      if (ifNoneMatch) {
-        headers['if-none-match'] = '*'
-      }
-      // A failed precondition (HTTP 412) surfaces from `was.request` as
-      // was-client's `PreconditionFailedError` -- the exact name the
-      // `WebvhIdStore` seam contract requires for the ceremony's rebase.
-      await was.request({
-        path: `/space/${pointer.spaceId}/${ID_COLLECTION.id}/${resourceId}`,
-        method: 'PUT',
-        headers,
-        body: new TextEncoder().encode(serialized),
-        capability: delegation
-      })
-    }
-  }
 }
 
 /**
@@ -616,7 +566,7 @@ async function readRecoveryRecord({ code }: { code: string }) {
   if (record === null) {
     throw new RecoveryCodeNotFoundError()
   }
-  const { contents, proofState } = await unwrapRecoveryRecord({
+  const { contents, proofState } = await unwrapUnlockRecord({
     record,
     keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
     keyResolver: unlock.keyResolver,
@@ -662,10 +612,10 @@ function isResourceLogContinuityError(err: unknown): boolean {
  *
  * @param options {object}
  * @param options.record {unknown}   the stored recovery record, proof included
- * @param options.proofState {RecoveryRecordProofState}   as `readRecoveryRecord`
+ * @param options.proofState {UnlockRecordProofState}   as `readRecoveryRecord`
  *   returned it
  * @param options.pointer {AccountPointer}   the code-authenticated account
- *   pointer (as `unwrapRecoveryRecord` returned it, its binding verified)
+ *   pointer (as `unwrapUnlockRecord` returned it, its binding verified)
  * @param [options.verifiedLog] {VerifiedAccountLog}   an already-verified
  *   account log; fetched and verified here when absent
  * @param [options.idb] {IDBFactory}
@@ -679,7 +629,7 @@ async function completeRecoveryRecordProof({
   idb
 }: {
   record: unknown
-  proofState: RecoveryRecordProofState
+  proofState: UnlockRecordProofState
   pointer: AccountPointer
   verifiedLog?: VerifiedAccountLog
   idb?: IDBFactory
@@ -703,12 +653,7 @@ async function completeRecoveryRecordProof({
       pointer: logPointer,
       ...(verifiedLog
         ? { verifiedLog }
-        : {
-            accountLogPinStore: accountLogPinStore({
-              accountDid: logPointer.did,
-              idb
-            })
-          })
+        : { accountLogPinStore: sessionLogPinStore({ idb }) })
     })
     await verifyRecordProof({
       record,
@@ -831,7 +776,7 @@ export async function recoverAccountWithCode({
     did: pointer.did,
     spaceId: pointer.spaceId,
     host: pointer.host,
-    pinStore: accountLogPinStore({ accountDid: pointer.did, idb })
+    pinStore: sessionLogPinStore({ idb })
   })
 
   // Settle the record's proof before acting on anything it carries. An
@@ -964,7 +909,7 @@ export async function recoverAccountWithCode({
     did: pointer.did,
     spaceId: pointer.spaceId,
     host: pointer.host,
-    pinStore: accountLogPinStore({ accountDid: pointer.did, idb })
+    pinStore: sessionLogPinStore({ idb })
   })
   const preRotation = await readUserKeyRoster({
     store: rosterStore,
@@ -1141,14 +1086,23 @@ export async function listRecoveryCodeEntries({
  * @param options {object}
  * @param options.session {Session}
  * @param options.outcome {RecoveryOutcome}
+ * @param [options.passphrase] {string}   the freshly chosen passphrase, still
+ *   in hand on the recovery page: when given, it is promoted to a standing
+ *   credential (roster wrap, commitment document entry, bridge delegation,
+ *   standing-layout record) after the registry writes
+ * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 export async function updateRegistryAfterRecovery({
   session,
-  outcome
+  outcome,
+  passphrase,
+  idb
 }: {
   session: Session
   outcome: RecoveryOutcome
+  passphrase?: string
+  idb?: IDBFactory
 }): Promise<void> {
   try {
     // The replacement recorded and the spent code dropped in one write.
@@ -1164,6 +1118,11 @@ export async function updateRegistryAfterRecovery({
     await backfillPassphraseUnlockMethod({ session })
   } catch (err) {
     console.warn('Could not backfill the unlock-methods registry:', err)
+  }
+  if (passphrase) {
+    // Best-effort inside (a plain-layout record still logs in); runs after
+    // the registry writes so its upsert reads their result.
+    await establishPassphrasePosture({ session, passphrase, idb })
   }
 }
 
@@ -1282,9 +1241,11 @@ export async function revokeRecoveryCode({
 }
 
 /**
- * Re-mints the recovery delegations the current document no longer backs --
- * the recovery-code delta riding the revocation cascade. The mechanism, the
- * skip policy, and the binding-carried-forward re-wrap all live in
+ * Re-mints the unlock-record bridge delegations the current document no
+ * longer backs -- the delta riding the revocation cascade, for the recovery
+ * codes AND the standing passphrase/passkey credentials alike (one bridge
+ * machinery, per FW-154's one-codepath model). The mechanism, the skip
+ * policy, and the binding-carried-forward re-wrap all live in
  * `@interop/wallet-core/recovery`; this binding supplies the app seams: the
  * storage server URL, the session's delegating signer and account record
  * signer, the management-zcap client factory, and the unlock-methods registry
@@ -1294,21 +1255,21 @@ export async function revokeRecoveryCode({
  * @param options.session {Session}
  * @param options.doc {PublishedKeyDocument}   the locally verified
  *   did:webvh document, AFTER the revocation edit
- * @param [options.entries] {RecoveryCodeUnlockMethod[]}   the registry's
- *   recovery entries, when the caller already read them (the revocation
- *   cascade reads the registry once for its document edit and this stage)
+ * @param [options.registryRecord] {UnlockMethodsRecord | null}   the
+ *   unlock-methods registry, when the caller already read it (the revocation
+ *   cascade reads it once for its document edit and this stage)
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<{ reminted: number; skipped: number }>}
  */
 export async function remintRecoveryDelegations({
   session,
   doc,
-  entries: prefetched,
+  registryRecord: prefetched,
   idb
 }: {
   session: Session
   doc: Parameters<typeof remintDelegationsCore>[0]['doc']
-  entries?: RecoveryCodeUnlockMethod[]
+  registryRecord?: UnlockMethodsRecord | null
   idb?: IDBFactory
 }): Promise<{ reminted: number; skipped: number }> {
   const pointer = session.profile.accountPointer
@@ -1316,28 +1277,79 @@ export async function remintRecoveryDelegations({
   if (!WAS_SERVER_URL || !pointer || !keyAgent) {
     return { reminted: 0, skipped: 0 }
   }
-  const entries =
-    prefetched ??
-    recoveryEntriesOf({ record: await getUnlockMethods({ session, idb }) })
-  if (entries.length === 0) {
+  const record =
+    prefetched !== undefined
+      ? prefetched
+      : await getUnlockMethods({ session, idb })
+  const entries = recoveryEntriesOf({ record })
+  // The standing passphrase/passkey entries ride the same re-mint: their
+  // bridge delegations rot on the same document edit and refresh through
+  // the same record machinery, with `unlockClientDid` filling the
+  // delegation-grantee slot the recovery entries call `recoveryClientDid`.
+  const standingSources = (record?.methods ?? []).filter(
+    (method): method is PassphraseUnlockMethod | PasskeyUnlockMethod =>
+      (method.type === 'passphrase' || method.type === 'passkey') &&
+      !!method.unlockClientDid
+  )
+  const remintEntries = [
+    ...entries.map(entry => ({
+      ...entry,
+      label: entry.label,
+      source: entry as UnlockMethod
+    })),
+    ...standingSources.map(method => ({
+      label: method.type,
+      unlockSpaceId: method.unlockSpaceId,
+      manageCapability: method.manageCapability,
+      delegationKeyId: method.delegationKeyId,
+      delegationExpires: method.delegationExpires,
+      recoveryClientDid: method.unlockClientDid,
+      unlockKeyAgreementKeyId: method.unlockKeyAgreementKeyId,
+      unlockKeyAgreementKeyMultibase: method.unlockKeyAgreementKeyMultibase,
+      source: method as UnlockMethod
+    }))
+  ]
+  if (remintEntries.length === 0) {
     return { reminted: 0, skipped: 0 }
   }
   return remintDelegationsCore({
     doc,
-    entries,
+    entries: remintEntries,
     pointer,
-    controller: session.profile.accountController ?? session.user.id,
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: session.profile.zcapClient,
-    // The re-mint holds the code's KAK public half but not its signing key,
-    // so every record it re-PUTs is signed with this client's own account
-    // key -- the mixed-signer case a reader settles against the verified
-    // document.
+    // The re-mint holds the credential's KAK public half but not its signing
+    // key, so every record it re-PUTs is signed with this client's own
+    // account key -- the mixed-signer case a reader settles against the
+    // verified document.
     recordSigner: recordSignerFromAgent({ keyAgent }),
     managementZcapClient: ({ capability }) =>
       managementZcapClient({ session, capability }),
-    recordEntry: async ({ entry }) =>
-      await recordRecoveryMethod({ session, entry, idb })
+    recordEntry: async ({ entry }) => {
+      if (entry.source.type === 'recovery-code') {
+        await recordRecoveryMethod({
+          session,
+          entry: {
+            ...(entry.source as RecoveryCodeUnlockMethod),
+            ...(entry.delegationKeyId
+              ? { delegationKeyId: entry.delegationKeyId }
+              : {}),
+            ...(entry.delegationExpires
+              ? { delegationExpires: entry.delegationExpires }
+              : {})
+          },
+          idb
+        })
+        return
+      }
+      await refreshStandingDelegationFields({
+        session,
+        unlockSpaceId: entry.unlockSpaceId,
+        delegationKeyId: entry.delegationKeyId,
+        delegationExpires: entry.delegationExpires,
+        idb
+      })
+    }
   })
 }
 

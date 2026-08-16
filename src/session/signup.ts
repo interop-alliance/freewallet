@@ -7,11 +7,7 @@
  * keeps the wizard state and the error copy; the orderings live here.
  */
 import { base64urlnopad } from '@scure/base'
-import {
-  deriveUnlockIdentity,
-  KEYRING_KDF,
-  type AccountPointer
-} from '@interop/wallet-core/keyring'
+import { KEYRING_KDF, type AccountPointer } from '@interop/wallet-core/keyring'
 import { mintAccountKeySet as mintSharedAccountKeySet } from '@interop/wallet-core/genesis'
 import { PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { savePasskeySafetyNotice } from '@/lib/sessionKey'
@@ -19,9 +15,14 @@ import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
 import {
   bindPassphrase,
   bindUnlockSecret,
+  deriveUnlockCredential,
   unlockManagementGrantee
 } from '@/session/keyring'
 import { provisionNewWallet } from '@/session/provisionNewWallet'
+import {
+  establishPassphrasePosture,
+  establishStandingUnlock
+} from '@/session/standingUnlock'
 import {
   enrollPasskey,
   putUnlockMethods,
@@ -145,7 +146,7 @@ export async function signUpWithPassphrase({
   // discarded after reading `userExists`, so it must not provision.
   // One 600k-iteration derivation for the whole signup: the probe login, the
   // bind, and the pointer-backfill re-bind all run on this identity.
-  const unlock = await deriveUnlockIdentity({
+  const credential = await deriveUnlockCredential({
     secret: passphrase,
     kdf: KEYRING_KDF
   })
@@ -153,7 +154,7 @@ export async function signUpWithPassphrase({
     passphrase,
     email,
     provisionStorage: false,
-    unlock
+    credential
   })
   if (probe.userExists) {
     return { userExists: true }
@@ -181,7 +182,7 @@ export async function signUpWithPassphrase({
     userKey,
     webvhUpdateKeys,
     pointer,
-    unlock
+    credential
   })
   session.profile.persistClientKeys = persistClientKeys
 
@@ -201,10 +202,18 @@ export async function signUpWithPassphrase({
         userKey,
         webvhUpdateKeys,
         pointer: fullPointer,
-        unlock
+        credential
       })
     }
   })
+
+  // Make the passphrase a STANDING credential (roster wrap, document entry,
+  // bridge delegation, standing-layout record) and record its posture in the
+  // registry. Best-effort like the backfill above: a failure leaves the
+  // record in the plain layout, which logs in normally and falls back to the
+  // connect-another-wallet ceremony on a fresh browser.
+  await establishPassphrasePosture({ session, passphrase, email, credential })
+
   return { session, userExists: false }
 }
 
@@ -309,6 +318,33 @@ export async function signUpWithPasskey({
       }
     }
   })
+
+  // Make the passkey a STANDING credential (roster wrap, verbatim document
+  // entry -- the PRF output is high-entropy -- bridge delegation,
+  // standing-layout record), with the PRF output still in hand. Best-effort:
+  // a failure leaves the plain-layout record from the rebind above, which
+  // logs in normally and falls back to the connect ceremony on a fresh
+  // browser.
+  try {
+    const established = await establishStandingUnlock({
+      session,
+      secret: registration.prfOutput,
+      kdf: PASSKEY_KDF,
+      lowEntropy: false,
+      email
+    })
+    session.profile.persistClientKeys = established.persistClientKeys
+    if (established.manageCapability) {
+      entry.manageCapability = established.manageCapability
+    }
+    Object.assign(entry, established.standingFields)
+  } catch (err) {
+    console.warn(
+      'Could not establish the passkey as a standing credential; a fresh ' +
+        'browser will need the connect-another-wallet ceremony:',
+      err
+    )
+  }
 
   // Write the initial unlock-methods registry only now: it lives in the
   // data Space, which `provisionNewWallet` just created, so this must run

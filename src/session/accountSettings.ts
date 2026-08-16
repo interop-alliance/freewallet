@@ -8,12 +8,24 @@
  */
 import { base64urlnopad } from '@scure/base'
 import type { IZcap } from '@interop/data-integrity-core'
-import { isWebvhDid, rotateWebvhUpdateKey } from '@interop/wallet-core/webvh'
-import { deriveUnlockIdentity, KEYRING_KDF } from '@interop/wallet-core/keyring'
+import {
+  accountLogPinId,
+  isWebvhDid,
+  rotateWebvhUpdateKey
+} from '@interop/wallet-core/webvh'
+import { userKeyRosterPinId } from '@interop/wallet-core/keys'
+import { KEYRING_KDF } from '@interop/wallet-core/keyring'
+import { PASSKEY_KDF } from '@/app.config'
+import {
+  establishPassphrasePosture,
+  establishStandingUnlock
+} from '@/session/standingUnlock'
+import type { StandingUnlockFields } from '@/session/unlockMethods'
 import {
   bindPassphrase,
   changePassphrase,
   deleteKeyring,
+  deriveUnlockCredential,
   unlockManagementGrantee,
   verifyPassphrase,
   WrongPassphraseError
@@ -34,11 +46,11 @@ import {
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
 import {
-  accountLogPinStore,
   deleteAccountDidForSpace,
-  deleteBridgingAccountLogPin,
+  deleteLogPin,
   deletePasskeySafetyNotice,
-  deleteUserKeyEpochPin
+  deleteUserKeyEpochPin,
+  sessionLogPinStore
 } from '@/lib/sessionKey'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import { findLoginCredential, loginHandleOf } from '@/lib/loginCredential'
@@ -129,6 +141,12 @@ export async function changeAccountPassphrase({
   // The keyring record is bound under the ACCOUNT controller (the first
   // client's did:key) -- on an enrolled second client it differs from this
   // client's `user.id`, so verification must match against it.
+  // One derivation for the new passphrase, shared by the rebind and the
+  // standing-posture establishment below.
+  const newCredential = await deriveUnlockCredential({
+    secret: newPassphrase,
+    kdf: KEYRING_KDF
+  })
   const {
     oldPassphraseRetired,
     unlockSpaceId,
@@ -140,7 +158,8 @@ export async function changeAccountPassphrase({
     oldPassphrase,
     newPassphrase,
     userKey: profile.userKey,
-    webvhUpdateKeys: profile.clientWebvhKeys
+    webvhUpdateKeys: profile.clientWebvhKeys,
+    newCredential
   })
   // The rebind retired the unlock identity this session logged in under:
   // swap the live profile onto the new one, so later re-wraps (rolled
@@ -151,6 +170,19 @@ export async function changeAccountPassphrase({
     unlockSpaceId,
     manageCapability,
     persistClientKeys
+  })
+  // Give the NEW passphrase the standing posture (roster wrap, commitment
+  // document entry, bridge delegation, standing-layout record). Best-effort:
+  // a failure leaves the plain rebind above, which logs in normally. The old
+  // passphrase's document entry and roster wrap are retired by the FW-155
+  // credential-rotation ceremony; until then the old posture is inert -- its
+  // unlock Space (record, bridge, ladder seed) is already gone, so it can
+  // neither locate the account nor self-enroll.
+  await establishPassphrasePosture({
+    session,
+    passphrase: newPassphrase,
+    email: session.user.email,
+    credential: newCredential
   })
   return { oldPassphraseRetired, unlockSpaceId, manageCapability }
 }
@@ -256,7 +288,7 @@ export async function addAccountPasskey({
   // FIRST client's did:key) -- on an enrolled second client it differs
   // from this client's `user.id`.
   const accountController = profile.accountController ?? session.user.id
-  const { entry } = await enrollPasskey({
+  const { registration, entry } = await enrollPasskey({
     clientSeed,
     userKey: profile.userKey,
     webvhUpdateKeys: profile.clientWebvhKeys,
@@ -273,6 +305,31 @@ export async function addAccountPasskey({
     }),
     promptForPrfRetry
   })
+
+  // Make the passkey a STANDING credential with the PRF output still in hand
+  // (roster wrap, verbatim document entry -- the PRF output is high-entropy
+  // -- bridge delegation, standing-layout record). Best-effort: a failure
+  // leaves the plain bind above, which logs in normally and falls back to
+  // the connect ceremony on a fresh browser.
+  try {
+    const established = await establishStandingUnlock({
+      session,
+      secret: registration.prfOutput,
+      kdf: PASSKEY_KDF,
+      lowEntropy: false,
+      email: session.user.email
+    })
+    if (established.manageCapability) {
+      entry.manageCapability = established.manageCapability
+    }
+    Object.assign(entry, established.standingFields)
+  } catch (err) {
+    console.warn(
+      'Could not establish the passkey as a standing credential; a fresh ' +
+        'browser will need the connect-another-wallet ceremony:',
+      err
+    )
+  }
 
   const record: UnlockMethodsRecord = {
     ...base,
@@ -388,26 +445,56 @@ export async function addAccountPassphrase({
   // client. Management is delegated to the account identity (the
   // did:webvh on a promoted account), so any enrolled client can later
   // revoke this method.
+  //
+  // On a promoted account the bind runs as the full standing-posture
+  // ceremony (roster wrap, commitment document entry, bridge delegation,
+  // standing-layout record), so a fresh browser can later self-enroll with
+  // the passphrase alone. An unpromoted (or no-WAS) account falls back to
+  // the plain pointer bind.
   const accountController = session.profile.accountController ?? session.user.id
-  const { unlockSpaceId, manageCapability } = await bindPassphrase({
-    clientSeed,
-    controller: accountController,
-    passphrase,
-    email: session.user.email,
-    userKey: session.profile.userKey,
-    webvhUpdateKeys: session.profile.clientWebvhKeys,
-    pointer: session.profile.accountPointer,
-    delegateManagementTo: unlockManagementGrantee({
-      pointer: session.profile.accountPointer,
-      controller: accountController
+  let unlockSpaceId: string
+  let manageCapability: IZcap | undefined
+  let standingFields: StandingUnlockFields | undefined
+  try {
+    const established = await establishStandingUnlock({
+      session,
+      secret: passphrase,
+      kdf: KEYRING_KDF,
+      lowEntropy: true,
+      email: session.user.email
     })
-  })
+    unlockSpaceId = established.unlockSpaceId
+    manageCapability = established.manageCapability
+    standingFields = established.standingFields
+  } catch (err) {
+    console.warn(
+      'Could not establish the passphrase as a standing credential; binding ' +
+        'it as a plain pointer record:',
+      err
+    )
+    const bound = await bindPassphrase({
+      clientSeed,
+      controller: accountController,
+      passphrase,
+      email: session.user.email,
+      userKey: session.profile.userKey,
+      webvhUpdateKeys: session.profile.clientWebvhKeys,
+      pointer: session.profile.accountPointer,
+      delegateManagementTo: unlockManagementGrantee({
+        pointer: session.profile.accountPointer,
+        controller: accountController
+      })
+    })
+    unlockSpaceId = bound.unlockSpaceId
+    manageCapability = bound.manageCapability
+  }
   const base = registry ?? emptyUnlockMethodsRegistry()
   const entry: PassphraseUnlockMethod = {
     type: 'passphrase',
     createdAt: new Date().toISOString(),
     unlockSpaceId,
-    manageCapability
+    manageCapability,
+    ...(standingFields ?? {})
   }
   const record: UnlockMethodsRecord = {
     ...base,
@@ -463,13 +550,11 @@ export async function rotateAccountUpdateKey({
         session.profile.clientWebvhKeys = next
       },
       expectedDid,
-      // The pin is keyed by the account DID, so an account whose pointer has
-      // not been promoted yet has no pin to read: it also has no published
-      // log to be rolled back, and its first login-time provisioning
-      // establishes the pin.
-      ...(expectedDid
-        ? { pinStore: accountLogPinStore({ accountDid: expectedDid }) }
-        : {})
+      // The pin slot is keyed by the data Space id, so the same slot serves
+      // the account log from first contact on; the read the rotation builds
+      // on runs under it.
+      pinStore: sessionLogPinStore(),
+      logId: accountLogPinId({ spaceId: remoteStore.spaceId })
     })
   } finally {
     // The rotation publishes a log entry (and a torn rotation may have
@@ -516,9 +601,9 @@ export async function deleteAccount({
   const isGuest = !!session.isGuest
   // One derivation for both unlock-layer steps below (the confirmation and
   // the retirement), rather than running the 600k-iteration KDF twice.
-  const unlock = isGuest
+  const credential = isGuest
     ? undefined
-    : await deriveUnlockIdentity({ secret: passphrase, kdf: KEYRING_KDF })
+    : await deriveUnlockCredential({ secret: passphrase, kdf: KEYRING_KDF })
   // (a) Confirm the passphrase before wiping anything -- a wrong passphrase
   // must not delete data. Guests have no keyring, so this is skipped.
   if (!isGuest) {
@@ -528,7 +613,7 @@ export async function deleteAccount({
       await verifyPassphrase({
         controller: session.profile.accountController ?? session.user.id,
         passphrase,
-        unlock
+        credential
       })
     } catch (err) {
       if (err instanceof WrongPassphraseError) {
@@ -557,7 +642,7 @@ export async function deleteAccount({
     try {
       const { unlockSpaceDeleted } = await deleteKeyring({
         passphrase,
-        unlock
+        credential
       })
       if (!unlockSpaceDeleted) {
         console.warn(
@@ -585,14 +670,15 @@ export async function deleteAccount({
         console.warn('Could not delete the key-roster epoch pin:', err)
       }
     }
-    // The Space-keyed continuity bookkeeping of the same account: the bridging
-    // (pre-promotion) account-log pin and the local Space-to-DID mapping. Dead
-    // rows once the Space is wiped, and the mapping must not answer for a
-    // Space id a later account could reuse.
+    // The Space-keyed continuity bookkeeping of the same account: the two
+    // chain-head pin slots (the account log's and the roster log's) and the
+    // local Space-to-DID mapping. Dead rows once the Space is wiped, and the
+    // mapping must not answer for a Space id a later account could reuse.
     const spaceId = session.profile.accountPointer?.spaceId
     if (spaceId) {
       try {
-        await deleteBridgingAccountLogPin({ spaceId })
+        await deleteLogPin({ logId: accountLogPinId({ spaceId }) })
+        await deleteLogPin({ logId: userKeyRosterPinId({ spaceId }) })
         await deleteAccountDidForSpace({ spaceId })
       } catch (err) {
         console.warn('Could not delete the Space-keyed continuity state:', err)

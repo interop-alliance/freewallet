@@ -109,15 +109,19 @@ test('signup publishes a verifying did:webvh log and a Multikey did:web projecti
   const logRes = await page.request.get(logUrl)
   expect(logRes.status()).toBe(200)
   const log = readLogFromString(await logRes.text())
-  expect(log).toHaveLength(1)
+  // Two entries: the genesis, then the passphrase's standing-posture entry
+  // (its commitment-published keyAgreement key and committed ladder rung).
+  expect(log).toHaveLength(2)
 
   const resolved = await resolveDIDFromLog(log)
   // SCID + hash chain + entry proof all verify: no resolution error.
   expect(resolved.meta.error).toBeUndefined()
   expect(resolved.did).toMatch(/^did:webvh:.+:space:.+:id$/)
   expect(resolved.meta.scid.length).toBeGreaterThan(0)
-  // Version 1, with prerotation committed (a non-empty next-key hash).
-  expect(resolved.meta.versionId.startsWith('1-')).toBe(true)
+  // Version 2 (genesis + posture), with prerotation committed (non-empty
+  // next-key hashes: the client's carry-over + staged hashes and the
+  // passphrase's ladder-rung commitment).
+  expect(resolved.meta.versionId.startsWith('2-')).toBe(true)
   expect(resolved.meta.updateKeys.length).toBeGreaterThan(0)
   expect(resolved.meta.nextKeyHashes.length).toBeGreaterThan(0)
 
@@ -134,20 +138,27 @@ test('signup publishes a verifying did:webvh log and a Multikey did:web projecti
   // The two ids cross-link: did.json advertises the did:webvh id it projects.
   expect(doc.alsoKnownAs).toContain(resolved.did)
   // Adopting the webvh projection flips the Phase 1 2020-suite VM types to
-  // Multikey (same key material, new type + context). Three VMs now: the
+  // Multikey (same key material, new type + context). Four VMs now: the
   // KMS-held authentication convenience plus this client's Ed25519 signing
   // key and its X25519 key-agreement twin -- the KMS keyAgreement key is
   // deliberately absent (no server-held key may be a wrap target), and no
   // KMS assertion key is minted (`assertionMethod` membership confers
-  // resource-log-append authority, so it lists client keys only).
-  expect(doc.verificationMethod).toHaveLength(3)
-  for (const vm of doc.verificationMethod) {
-    expect(vm.type).toBe('Multikey')
-  }
+  // resource-log-append authority, so it lists client keys only) -- plus the
+  // passphrase's standing `keyAgreement` entry, published as a hash
+  // commitment (`MultikeyCommitment`), never the key itself.
+  expect(doc.verificationMethod).toHaveLength(4)
+  const types = doc.verificationMethod.map(vm => vm.type).sort()
+  expect(types).toEqual([
+    'Multikey',
+    'Multikey',
+    'Multikey',
+    'MultikeyCommitment'
+  ])
   const multibases = doc.verificationMethod.map(
     vm => (vm as { publicKeyMultibase?: string }).publicKeyMultibase ?? ''
   )
-  // Exactly one X25519 key (z6LS...): the client's identity KAK.
+  // Exactly one X25519 key (z6LS...): the client's identity KAK. The
+  // passphrase's key never appears verbatim.
   expect(multibases.filter(pkm => pkm.startsWith('z6LS'))).toHaveLength(1)
 })
 
@@ -180,14 +191,15 @@ test('rotating the update key appends a verifying entry and rolls the staged key
     timeout: 30_000
   })
 
-  // --- The published log now has a verifying entry 2. ---
+  // --- The published log gained a verifying rotation entry (entry 3, after
+  //     the genesis and the passphrase's standing-posture entry). ---
   const after = readLogFromString(await (await page.request.get(logUrl)).text())
-  expect(after).toHaveLength(2)
+  expect(after).toHaveLength(3)
   const resolvedAfter = await resolveDIDFromLog(after)
   expect(resolvedAfter.meta.error).toBeUndefined()
-  // Same DID, advanced to version 2.
+  // Same DID, advanced to version 3.
   expect(resolvedAfter.did).toBe(resolvedBefore.did)
-  expect(resolvedAfter.meta.versionId.startsWith('2-')).toBe(true)
+  expect(resolvedAfter.meta.versionId.startsWith('3-')).toBe(true)
   // The active update key rolled to the previously staged key, and a fresh
   // next-key hash was committed.
   expect(resolvedAfter.meta.updateKeys).not.toEqual(

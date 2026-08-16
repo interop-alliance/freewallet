@@ -29,9 +29,13 @@ import {
 import { setClientLabel } from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
 import { sessionRosterStore } from '@/session/rosterStore'
-import { accountLogPinStore, saveUserKeyEpochPin } from '@/lib/sessionKey'
-import { deriveUnlockIdentity, KEYRING_KDF } from '@interop/wallet-core/keyring'
-import { bindPassphrase, fetchKeyring } from '@/session/keyring'
+import { saveUserKeyEpochPin, sessionLogPinStore } from '@/lib/sessionKey'
+import { KEYRING_KDF } from '@interop/wallet-core/keyring'
+import {
+  bindPassphrase,
+  deriveUnlockCredential,
+  fetchKeyring
+} from '@/session/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import { requireEnrolledClientContext } from '@/session/enrolledContext'
@@ -135,11 +139,11 @@ export async function completeEnrollment({
   if (!WAS_SERVER_URL) {
     throw new Error('Enrollment requires a configured WAS server.')
   }
-  const unlock = await deriveUnlockIdentity({
+  const credential = await deriveUnlockCredential({
     secret: passphrase,
     kdf: KEYRING_KDF
   })
-  const found = await fetchKeyring({ passphrase, unlock, idb })
+  const found = await fetchKeyring({ passphrase, credential, idb })
   if (!found) {
     throw new Error('No account was found for this passphrase.')
   }
@@ -161,7 +165,7 @@ export async function completeEnrollment({
     pointer,
     // The enrolling browser's first contact with the account log establishes
     // its chain-head pin (trust-on-first-use); later logins verify against it.
-    accountLogPinStore: accountLogPinStore({ accountDid, idb })
+    accountLogPinStore: sessionLogPinStore({ idb })
   })
   await saveUserKeyEpochPin({
     accountDid,
@@ -171,7 +175,9 @@ export async function completeEnrollment({
 
   // Persist the key set under the unlock layer (this also pins the account
   // pointer and refreshes the keyring cache); the next passphrase login
-  // finds an enrolled client.
+  // finds an enrolled client. A standing record's bridge delegation and
+  // ladder seed are re-stated verbatim, so the rebind can never downgrade
+  // the credential's standing authority to a plain pointer record.
   await bindPassphrase({
     clientSeed,
     controller: found.controller,
@@ -180,13 +186,19 @@ export async function completeEnrollment({
     userKey,
     webvhUpdateKeys,
     pointer,
-    unlock,
+    ...(found.standing
+      ? {
+          delegation: found.standing.delegation,
+          ladderSeed: found.standing.ladderSeed
+        }
+      : {}),
+    credential,
     idb
   })
 
   // The ordinary login the ceremony ends in, on the identity already derived:
   // the caller gets the same session shape every other login path returns.
-  const { session } = await loginWithPassphrase({ passphrase, unlock, idb })
+  const { session } = await loginWithPassphrase({ passphrase, credential, idb })
   if (!session) {
     throw new Error(
       'The enrolled key set did not produce a session; connecting this ' +

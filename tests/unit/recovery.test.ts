@@ -95,10 +95,10 @@ import {
 } from '@interop/wallet-core/keyring'
 import {
   generateRecoveryCode,
-  RecoveryBindingError,
   recoveryClientFromCode,
   RECOVERY_KDF,
-  wrapRecoveryRecord
+  UnlockBindingError,
+  wrapUnlockRecord
 } from '@interop/wallet-core/recovery'
 import type { RecordSigner } from '@interop/wallet-core/keyring'
 import {
@@ -149,7 +149,7 @@ async function storeRecordForCode({
     secret: client.codeBytes,
     kdf: RECOVERY_KDF
   })
-  const record = await wrapRecoveryRecord({
+  const record = await wrapUnlockRecord({
     controller: 'did:key:z6MkAccountController',
     pointer: pointer ?? POINTER,
     delegation: DELEGATION,
@@ -303,7 +303,7 @@ describe('recovery record proof (the mixed-signer policy)', () => {
       bindingMacKey: attackerCode.bindingMacKey
     })
     await expect(locateRecoveryAccount({ code })).rejects.toBeInstanceOf(
-      RecoveryBindingError
+      UnlockBindingError
     )
   })
 

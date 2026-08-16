@@ -65,18 +65,24 @@ random 32-byte **client seed** locally on first run -- the Ed25519 pair
 behind its did:key plus the X25519 twin -- and the private halves never leave
 the client. The passphrase (or a passkey PRF output) derives only an **unlock
 identity** (the keyring v2 seam in `src/session/keyring.ts`), which does two
-jobs at login: it fetches the **keyring record** from its own minimal unlock
+jobs at login: it fetches the **unlock record** from its own minimal unlock
 Space -- carrying the encrypted account pointer `{ did, spaceId, host }`, the
-controller, and the email, never key material -- and it unwraps the local
-**client-key record** in the `freewallet-session` IndexedDB, which holds this
-client's seed, a cached copy of the user key, and this client's did:webvh
-update-key seeds:
+controller, and the email, plus (in the standing layout below) the sealed
+bridge delegation and update-key ladder seed, never the account's content
+keys -- and it unwraps the local **client-key record** in the
+`freewallet-session` IndexedDB, which holds this client's seed, a cached
+copy of the user key, and this client's did:webvh update-key seeds:
 
 ```
 unlock secret (passphrase | passkey PRF output)
-  → deriveUnlockIdentity(KDF)      → unlock Space → keyring record
-                                      { controller, email, pointer }
+  → deriveUnlockSeed(KDF), expanded twice:
+      unlock identity              → unlock Space → unlock record
+                                      { controller, email, pointer,
+                                        bridge delegation, ladder seed }
+      standing client identity     → { client seed, binding MAC key }
   → unwrap local client-key record → { clientSeed, userKey, webvhUpdateKeys }
+    (or, on a fresh browser: self-enroll through the record's bridge, then
+     persist the freshly minted key set as this record)
   → agentsFromSeed(clientSeed)     → keyAgent  (keyAgent.id === a did:key DID)
   → ZcapClient(invocationSigner)   → zcapClient (signs HTTP requests with ZCap)
   → { user: { id: did:key }, profile: { keyAgent, zcapClient, userKey } }
@@ -93,14 +99,35 @@ rule, only a keyId the resolved document lists can authorize anything.
 `user.id` stays the client did:key (it is also the App Connect response VP's
 holder, which must remain resolvable by app-side loaders).
 
-Unlocking is therefore not sufficient to BE the account: a passphrase on a
-fresh browser (or in a storage-partitioned CHAPI popup iframe) locates the
-account but holds no client keys, and login surfaces a distinct
-"not enrolled" state instead of a session -- from which the login page offers
-the enrollment ceremony (see "The client enrollment ceremony" below; the
-partitioned CHAPI popup stays a degraded state).
+Every unlock method is a **standing credential** (the recovery-code posture
+minus spend-on-use): beside locating the account, it holds a wrap in the
+user-key roster (escrowed into every epoch, kept alive by rotation fan-out)
+and latent self-enrollment authority -- its record carries a pre-minted
+PUT-on-`did.jsonl` bridge delegation and a random update-key ladder seed
+(`@interop/wallet-core/unlock`; the bind-time establishment is
+`src/session/standingUnlock.ts`, run at signup and at every
+add/change-method ceremony). A fresh browser holding nothing but the
+credential therefore **self-enrolls** at login as an ordinary full client,
+with no second browser involved: two loud entries extend the
+world-readable hash-chained log through the bridge (a reveal-and-commit
+entry signed by the ladder's current rung, then an add entry publishing the
+freshly minted client), and only then is the user key unwrapped from the
+credential's standing wrap. Detection replaces the old enrollment gate:
+takeover with a phished credential is visible in the log and remediable,
+not prevented by requiring another browser. The document carries a
+passphrase-derived `keyAgreement` key only as a hash commitment
+(`MultikeyCommitment`; the roster's recipient resolver verifies the
+roster-carried key against it) -- publishing the key verbatim would turn
+the server-gated guessing oracle into a world-readable offline one -- while
+a passkey's PRF-derived key, being high-entropy, publishes verbatim. The
+connect-another-wallet ceremony (see "The client enrollment ceremony"
+below) survives as the path for records without standing authority (a
+pre-promotion or no-WAS bind) and as the future opt-in step-up approval
+policy; the storage-partitioned CHAPI popup deliberately never
+self-enrolls (a durable client per popup visit would litter the log) and
+stays a degraded state.
 
-The keyring record is **signed** by the unlock identity's own Ed25519 key,
+The unlock record is **signed** by the unlock identity's own Ed25519 key,
 and its proof is verified before the record is decrypted. That is what closes
 host forgery: the record's JWE is sealed to the unlock KAK, whose public half
 is derivable from the unlock did:key the server stores as the unlock Space's
@@ -108,7 +135,20 @@ controller, so a malicious host can seal a record of its own that decrypts
 perfectly. The signing key derives from the typed secret, so it never reaches
 the host, and a client that has only ever typed the secret already holds the
 verification prior -- there is no bootstrap window. A record whose proof does
-not verify is refused (`KeyringRecordForgedError`).
+not verify is refused (`KeyringRecordForgedError`). A standing record's
+account core (controller, pointer, ladder seed) is additionally
+authenticated by a MAC under a credential-derived key the host never holds
+-- the same construction as the recovery record's, verified before the
+pointer is trusted -- which is what closes the redirect a re-mint-signed
+record would otherwise reopen (a cascade re-mint signs with an enrolled
+client's account key, settled against the account document at login). The
+unlock Space's
+request paths (the unlock record fetch and rewrite, and the management
+delegation's `invocationTarget`) are built by was-client's paths helpers on
+both the delegation and the invocation side, so the bytes the server's
+`allowedTarget` check compares cannot drift -- load-bearing on a sub-path
+deployment, and doubly so since the unlock record carries the recovery
+bridge (a broken target would break login itself, not just a bind).
 
 A signature cannot catch a REPLAY, though: a record the account has since
 moved off stays authentic forever. So each client keeps a **freshness pin**
@@ -127,12 +167,19 @@ points, as long as it is validly signed and not stale -- a rebind, a host
 migration, and a fresh account bound under a reused passphrase are all
 legitimate, and all produce a newer signed record.
 
-What the whole construction is bounded by, standing: a record the unlock
-credential alone decrypts is only as strong as that credential's entropy, so
-the custodian of the unlock credential must not be the storage host. Logging
-in from a public terminal is a core supported case -- nothing need persist
-locally to reach the account -- which is exactly why the record must stay
-server-held and self-authenticating rather than depending on local state.
+What the whole construction is bounded by, standing: server-held material
+the unlock credential alone decrypts -- the record, and the credential's
+standing wrap of the user key in the roster -- is only as strong as that
+credential's entropy. Against a malicious storage host running an offline
+KDF grind, zcap scoping, TTLs, and revocation are worth nothing; the
+credential's entropy is the entire bound, so the custodian of the unlock
+credential must not be the storage host, and a wallet's security is tiered
+on and limited by its weakest standing unlock method. Logging in from a
+public terminal is a core supported case -- nothing need persist locally to
+reach the account -- which is exactly why the record must stay server-held
+and self-authenticating rather than depending on local state. Client
+revocation does not bound an attacker who holds the credential itself (they
+re-derive and self-enroll again); credential rotation is that remedy.
 
 The `Session` object is stored in the Zustand
 `authStore`; it is **in-memory only** (the passphrase is never persisted), so
@@ -210,8 +257,9 @@ one-shot verification: a valid PREFIX of the real log carries the same
 genesis, so the same SCID and DID, and a ceremony built on it would
 republish erased enrollments and undone revocations as durable state. So
 every `verifyAccountLog` read carries a durable chain-head pin
-(`accountLogPinStore` in the session database, keyed by the account DID
-under its own key, beside the keyring-freshness pin and the two roster pins):
+(`sessionLogPinStore` in the session database -- the keyed pin store shared
+with the roster log, beside the keyring-freshness pin and the roster-epoch
+pin):
 a served log that is a rollback, a fork, or an SCID/method switch against
 the pinned head is refused (wallet-core's `ResourceLogContinuityError` --
 the same seam and refusal class as the roster log's pin), established at
@@ -235,26 +283,31 @@ fail login), but a non-`rollback` continuity refusal is logged as an error
 -- the later account-log reads in the same login hit the same pin and
 surface it to the user.
 
-All three continuity pins -- this one, the roster-log chain-head pin, and
-the roster-epoch pin -- are keyed by the account DID rather than by the data
-Space id. Keying by the Space would leave a fork open: a host could mint a
-fresh Space id, mirror the world-readable log and the ciphertext into it,
-and redirect the account pointer at the copy, which would then meet a blank
-continuity slot and reset every pin to trust-on-first-use. Keyed by the DID
-the mirror inherits the standing pins instead, so a served log that is a
-rollback or a fork against the pinned head is refused there too. The pins
-therefore travel with the account across a legitimate host or Space
-migration under one DID, where the migrated log must still extend the
-pinned head; a pointer naming a DIFFERENT DID stays the loud refusal it
-already is, and a new account (a new DID) gets a fresh slot. The
-pre-promotion window -- a signup torn between log publication and the
-pointer backfill, healing on a later login whose pointer names no did:webvh
-yet -- is not left unpinned: the genesis ceremony's log read always carries
-a pin store. On true first contact it is a spaceId-keyed **bridging pin**,
-adopted into the DID-keyed slot (only when that slot is empty) the moment
-the log publishes; the published DID is also persisted locally keyed by the
-data Space id, so every later pre-promotion heal login runs under the
-DID-keyed pin with `expectedDid` even though the pointer has not caught up.
+**The pin inventory.** The session database holds four durable continuity
+priors, in three shapes. The two chain-head pins -- the account log's and
+the roster log's -- live in ONE keyed store (`sessionLogPinStore` in
+`src/lib/sessionKey.ts`, implementing wallet-core's keyed
+`ResourceLogPinStore`): `read` and `write` take a per-log slot key that
+wallet-core itself derives (`accountLogPinId` / `userKeyRosterPinId`, both
+`space/<spaceId>/<collection>/<resource>` under the hood), so one store
+serves every log and two logs can never clobber each other's pin. The slot
+key is deliberately host-free: a log served from a claimed new host lands in
+the SAME slot and is checked against the pin already held, rather than
+opening a fresh trust-on-first-use slate. A mirror under a freshly minted
+Space id does get a fresh slot, but the did:webvh id embeds the Space id, so
+the mirror necessarily resolves to a DIFFERENT DID than the account pointer
+names -- the loud refusal every ceremony-path read already makes
+(`expectedDid`, and `verifyAccountLog`'s own resolved-DID check). The
+roster-epoch pin and the keyring-freshness pin keep their own shapes: the
+epoch pin is keyed by the account DID (it guards a chainless value, so the
+DID is the one identity a substituted pointer cannot change), the freshness
+pin by the unlock Space. Because the chain-head slot is Space-keyed, the
+pre-promotion window needs no special handling: the genesis ceremony's log
+read runs under the same slot from true first contact on, and the published
+DID is persisted locally keyed by the data Space id only so a later
+pre-promotion heal login can state an `expectedDid` even though the pointer
+has not caught up. Account deletion clears all of it (the two slots by
+their builders, the epoch pin, the mapping) beside the keyring retirement.
 
 **Controller promotion by ordering.** The Space id is an independent random
 identifier minted at signup (`mintSpaceId`) and carried in the account
@@ -350,9 +403,10 @@ callers with no session profile -- the login-time read and the recovery
 continuation -- and `sessionRosterStore` for a live session, which resolves the
 controller view through the profile's verified-log memo so a ceremony that just
 extended the account log anchors its appends at the post-edit head. The
-chain-head pin is durable either way (`userKeyLogPinStore` in the session
-database, keyed by the account DID like the account-log pin), so log
-continuity spans logins.
+chain-head pin is durable either way (`sessionLogPinStore` in the session
+database, the keyed store shared with the account-log pin; wallet-core
+derives the roster log's slot key from the Space id), so log continuity
+spans logins.
 
 Provisioning initializes the roster idempotently with the account's existing
 user key as the first epoch, as the account-genesis ceremony's roster stage
@@ -363,6 +417,15 @@ storage clients are built), gated on a promoted (did:webvh) account pointer,
 that either confirms the cached user key current or -- on an epoch mismatch, a
 rotation by another client -- unwraps the fresh user key with this client's own
 key, adopts it for the session, and persists it into the client-key record.
+A failed persist (the client-key record write or the epoch-pin advance) is
+not a login failure: the adopted key authenticated against the verified
+roster, so the session proceeds on it and the login page surfaces the
+failure as "this browser could not be remembered"
+(`session.userKeyPersistFailed`; the next login re-fetches the key). What a
+failed persist is NOT allowed to do is masquerade as an offline start --
+wallet-core propagates the adoption callback's throw instead of swallowing
+it into the warn-and-null path, and the login wrapper catches it where its
+meaning is known.
 
 Three client-side guards are load-bearing against a tampering host. First the
 resource log itself: roster state is adopted only from a verified head, whose
@@ -371,12 +434,19 @@ document lists under `assertionMethod` at the anchored version
 (`ResourceLogIntegrityError`), and whose chain-head pin refuses rollbacks,
 forks, and SCID or method switches (`ResourceLogContinuityError`) -- log
 verification subsumes both the retired detached epoch-configuration signature
-and the retired `epochsMac`. Second, the locally pinned latest-seen roster
+and the retired `epochsMac`. At login the chain-head `rollback` reason is
+the carve-out, matching the account-log pin's: a head behind the pin may be
+nothing worse than a lagging replica, so wallet-core's login policy degrades
+it to the transport class -- the session keeps the cached user key, nothing
+rolled back is adopted, and the pin never regresses -- instead of locking
+the user out of a healthy account. `fork` and the SCID/method switches stay
+session-refusing. Second, the locally pinned latest-seen roster
 epoch (`src/lib/sessionKey.ts`, beside the keyring-freshness pin): a served
 roster that rolls back behind the pin is refused
-(`UserKeyRosterContinuityError`), and it is kept beside the chain-head pin
-because it still guards a client whose chain-head pin was lost with a
-reinstall. Third, at rotation time, a recipient resolver backed by the locally
+(`UserKeyRosterContinuityError`, with no rollback carve-out -- the epoch pin
+is chainless, so it cannot tell a rollback from a fork), and it is kept
+beside the chain-head pin because it still guards a client whose chain-head
+pin was lost with a reinstall. Third, at rotation time, a recipient resolver backed by the locally
 verified did:webvh document -- a roster entry with no `keyAgreement`
 verification method marked for that client is dropped and never receives a
 wrap, so a server-injected
@@ -386,7 +456,12 @@ log-verified keys).
 ## The client enrollment ceremony (`@interop/wallet-core/enrollment`)
 
 Connecting a second wallet client (a fresh browser profile) to an existing
-account, without any secret ever leaving either side. The new client mints
+account, without any secret ever leaving either side. Since standing unlock
+credentials landed, an ordinary fresh browser self-enrolls at login with
+the credential alone (see "Session & auth flow"); this two-party ceremony
+remains the path for records without standing authority, for onboarding
+another wallet app over the rendezvous transport, and as the future opt-in
+step-up approval policy. The new client mints
 its whole key set locally -- client seed, did:webvh update-key seeds -- and
 only PUBLIC halves travel, as a compact **connect code**
 (`freewallet-connect:<base64url(JSON)>`) carried point-to-point: pasted
@@ -512,7 +587,10 @@ re-encrypt a record of its own pointing at an attacker-controlled account
 and sign it with that account's genuinely enrolled key -- every
 signature-side check passes by construction, and only the binding, which no
 one without the code bytes can compute, refuses it. The shell is the
-delegation and the frame proof, whose signer is mixed: issuance signs with
+record's plaintext frame (controller, pointer, timestamp) plus its sealed
+`bridge` member -- the pre-minted delegation, wrapped on its own so a
+re-mint can replace it -- under the frame proof, whose signer is mixed:
+issuance signs with
 the code-derived unlock key (verified before decrypt); the revocation
 cascade's delegation re-mint signs with the re-minting client's account
 verification method, verified after decrypt against the did:webvh document
@@ -579,13 +657,23 @@ re-wrap) and the delegation builder live in
 `@interop/wallet-core/recovery`; `src/session/recovery.ts` binds them to
 the session's signers, the storage URL, and the unlock-methods registry.
 
-Two standing boundary rules: **the passphrase must never become a recovery
-entry** -- a standing document VM for the primary low-entropy credential
-would resurrect "unlock is the account", the exact property the per-client
-key model removed -- while a passkey (high-entropy, hardware-bound) would
-make a good future one; and the unlock-methods registry's additive `method`
-enum is the explicit seam for a later quorum recovery method (rejected for
-v1 as presupposing a contact roster most accounts lack).
+Two standing boundary rules. First, the hash-commitment rule (which
+replaced the retired "the passphrase must never become a recovery entry"
+rule when every unlock method became a standing credential): **a
+low-entropy-derived public key is never published in the world-readable
+document**. The document carries a hash commitment of the key
+(`MultikeyCommitment`); the real key rides in the capability-gated roster
+entry, and the recipient resolver verifies it against the commitment.
+Publishing the key verbatim would turn the server-gated guessing oracle
+into a world-readable offline one, available to anyone who downloads
+`did.jsonl`. A high-entropy credential's key (a passkey PRF output, a
+recovery code) may publish verbatim. Second, the unlock-methods registry's
+additive `method` enum is the explicit seam for a later quorum recovery
+method (rejected for v1 as presupposing a contact roster most accounts
+lack). The re-mint machinery above also covers the standing
+passphrase/passkey credentials' bridge delegations (the cascade walks
+every registry entry recording one, and a standing credential's own login
+refreshes its bridge when it is inside the renewal window).
 
 ## Client revocation and the epoch cascade
 
@@ -813,6 +901,16 @@ Retraction of a live public copy is blocking -- a public copy that cannot be
 retracted refuses the delete (`PublicCopyRetractionError`) rather than deleting
 anyway -- while the delete dialog's deliberate "keep public copy" choice skips
 it, and a credential with no public copy deletes normally offline.
+
+The world-readable share link a public copy gets
+(`WASRemoteStore.publicCredentialUrl`, over wallet-core's
+`publicCredentialUrl`) is built with was-client's paths helpers
+(`spacePath` / `resourcePath` / `toUrl`), which join onto the storage
+server's base path. On a sub-path deployment (a server URL like
+`https://host/was`) the emitted link therefore addresses exactly the
+resource replication wrote, with per-segment encoding guaranteed by the
+same helpers; the earlier root-anchored form was drift, corrected in
+wallet-core 0.39.1.
 
 A user's remote Space is identified by an independent random `spaceId`
 minted at signup and carried in the account pointer (unlock Spaces keep

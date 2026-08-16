@@ -255,13 +255,22 @@ test.describe('Recovery codes', () => {
       await secondClient.context().close()
     }
 
-    // The ceremony is verifiable entries on the public log: issuance (1) plus
+    // The ceremony is verifiable entries on the public log: issuance (1),
     // the reveal-and-commit and add-and-retire continuation (2), and the
+    // recovered passphrase's standing-posture entry (1, published
+    // best-effort after the recovered login -- hence the poll), and the
     // extended log still fully verifies (SCID, hash chain, prerotation,
     // proofs).
+    await expect
+      .poll(
+        async () =>
+          readLogFromString(await (await page.request.get(logUrl)).text())
+            .length,
+        { timeout: 30_000 }
+      )
+      .toBe(entriesBefore + 4)
     const logText = await (await page.request.get(logUrl)).text()
     const log = readLogFromString(logText)
-    expect(log).toHaveLength(entriesBefore + 3)
     const resolved = await resolveDIDFromLog(log, {
       verifier: defaultWebvhLogVerifier
     })
@@ -270,15 +279,17 @@ test.describe('Recovery codes', () => {
     // spent code's update key does not stand.
     expect(resolved.meta.updateKeys).toHaveLength(2)
     // The document carries: the original client's two VMs, the KMS
-    // authentication VM, the recovered client's two VMs, and the replacement
-    // code's keyAgreement VM (deliberately unmarked) -- the spent code's VM is
-    // gone, so exactly three keyAgreement entries stand (two clients + one
-    // code) against two capabilityInvocation entries (recovery keys never
-    // appear there).
+    // authentication VM, the recovered client's two VMs, the replacement
+    // code's keyAgreement VM (deliberately unmarked), and the two standing
+    // passphrase commitments (the original signup's and the recovered
+    // passphrase's) -- the spent code's VM is gone, so five keyAgreement
+    // entries stand (two clients, one code, two commitments) against two
+    // capabilityInvocation entries (recovery and unlock keys never appear
+    // there).
     const keyAgreement = (resolved.doc?.keyAgreement ?? []) as string[]
-    expect(keyAgreement).toHaveLength(3)
+    expect(keyAgreement).toHaveLength(5)
     expect(resolved.doc?.capabilityInvocation).toHaveLength(2)
-    expect(resolved.doc?.verificationMethod).toHaveLength(6)
+    expect(resolved.doc?.verificationMethod).toHaveLength(8)
   })
 
   test('login and signup pages link to the recover flow', async ({ page }) => {

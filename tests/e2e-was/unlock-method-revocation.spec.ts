@@ -238,8 +238,8 @@ test.describe('Unlock-method revocation from another client', () => {
     // Client 1 issues the recovery code.
     const code = await issueRecoveryCode(page)
 
-    // Client 2 (cold profile): the passphrase locates the account, the login
-    // is refused as not enrolled, and the connect flow mints its key set.
+    // Client 2 (cold profile): the standing passphrase self-enrolls this
+    // browser at login as an ordinary enrolled client.
     const secondClient = await coldClientPage(browser)
     try {
       await secondClient.goto('/#/login')
@@ -249,32 +249,6 @@ test.describe('Unlock-method revocation from another client', () => {
       )
       await secondClient
         .getByRole('button', { name: 'Log in', exact: true })
-        .click()
-      await expect(
-        secondClient.getByText('this browser does not hold its keys yet', {
-          exact: false
-        })
-      ).toBeVisible({ timeout: 30_000 })
-      await secondClient
-        .getByRole('button', { name: 'Connect this browser' })
-        .click()
-      const codeField = secondClient.getByTestId('enroll-connect-code')
-      await expect(codeField).toBeVisible({ timeout: 20_000 })
-      const connectCode = await codeField.inputValue()
-
-      // Client 1 approves the enrollment from Settings.
-      await page.goto('/#/settings')
-      await page.getByRole('button', { name: 'Connect another wallet' }).click()
-      await fillSettled(page.getByTestId('enroll-code-input'), connectCode)
-      await expect(page.getByText(/New client key: did:key:z6Mk/)).toBeVisible()
-      await page.getByRole('button', { name: 'Approve', exact: true }).click()
-      await expect(
-        page.getByText('The new browser was enrolled', { exact: false })
-      ).toBeVisible({ timeout: 60_000 })
-
-      // Client 2 finishes and logs in as an ordinary enrolled client.
-      await secondClient
-        .getByRole('button', { name: 'I approved it -- finish connecting' })
         .click()
       await expect(secondClient).toHaveURL(/#\/dashboard/, { timeout: 60_000 })
 

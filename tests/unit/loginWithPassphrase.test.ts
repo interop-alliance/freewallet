@@ -22,8 +22,16 @@ vi.mock('@/lib/kms', () => ({ ensureKeystore: vi.fn() }))
 vi.mock('@/stores/storageManager', () => ({
   StorageManager: { initStorageClients: vi.fn() }
 }))
+vi.mock('@/session/standingUnlock', () => ({
+  canSelfEnroll: vi.fn(() => false),
+  selfEnrollStandingClient: vi.fn()
+}))
 
 import { StorageManager } from '@/stores/storageManager'
+import {
+  canSelfEnroll,
+  selfEnrollStandingClient
+} from '@/session/standingUnlock'
 import { fetchKeyring, KeyringRecordUnusableError } from '@/session/keyring'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
@@ -76,6 +84,9 @@ beforeEach(() => {
   })
   vi.mocked(ensureKeystore).mockResolvedValue(undefined as never)
   vi.mocked(fetchKeyring).mockReset()
+  vi.mocked(canSelfEnroll).mockReset()
+  vi.mocked(canSelfEnroll).mockReturnValue(false)
+  vi.mocked(selfEnrollStandingClient).mockReset()
 })
 
 afterEach(() => {
@@ -253,6 +264,82 @@ describe('loginWithPassphrase -- located but not enrolled', () => {
     expect(session).toBeNull()
     expect(userExists).toBe(true)
     expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
+  })
+})
+
+describe('loginWithPassphrase -- self-enrolling standing credential', () => {
+  it('self-enrolls a fresh browser and proceeds as an enrolled login', async () => {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    const found = {
+      controller,
+      pointer: POINTER,
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString(),
+      standing: { delegation: {}, ladderSeed: randomSeed() }
+    }
+    vi.mocked(fetchKeyring).mockResolvedValue(found as never)
+    vi.mocked(canSelfEnroll).mockReturnValue(true)
+    const persist = vi.fn(async () => {})
+    vi.mocked(selfEnrollStandingClient).mockResolvedValue({
+      clientKeys: { clientSeed, controller },
+      persistClientKeys: persist
+    } as never)
+    vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
+      storage: fakeStorage,
+      userExists: true
+    })
+
+    const { session, userExists } = await loginWithPassphrase({
+      passphrase: PASSPHRASE
+    })
+
+    expect(selfEnrollStandingClient).toHaveBeenCalledWith(
+      expect.objectContaining({ found })
+    )
+    expect(session).not.toBeNull()
+    expect(session!.user.id).toBe(controller)
+    expect(session!.profile.persistClientKeys).toBe(persist)
+    expect(userExists).toBe(true)
+  })
+
+  it('propagates a self-enrollment refusal instead of building a session', async () => {
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller: 'did:key:z6MkDataControllerForTests',
+      pointer: POINTER,
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString(),
+      standing: { delegation: {}, ladderSeed: randomSeed() }
+    } as never)
+    vi.mocked(canSelfEnroll).mockReturnValue(true)
+    const refusal = new Error('no rung committed')
+    refusal.name = 'LadderAttributionError'
+    vi.mocked(selfEnrollStandingClient).mockRejectedValue(refusal)
+
+    await expect(
+      loginWithPassphrase({ passphrase: PASSPHRASE })
+    ).rejects.toMatchObject({ name: 'LadderAttributionError' })
+    expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
+  })
+
+  it('stays in the not-enrolled state for a remote-direct (popup) session', async () => {
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller: 'did:key:z6MkDataControllerForTests',
+      pointer: POINTER,
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString(),
+      standing: { delegation: {}, ladderSeed: randomSeed() }
+    } as never)
+    vi.mocked(canSelfEnroll).mockReturnValue(true)
+
+    const { session, userExists } = await loginWithPassphrase({
+      passphrase: PASSPHRASE,
+      remoteDirectStorage: true
+    })
+
+    expect(session).toBeNull()
+    expect(userExists).toBe(true)
+    expect(selfEnrollStandingClient).not.toHaveBeenCalled()
   })
 })
 

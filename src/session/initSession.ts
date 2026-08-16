@@ -5,9 +5,13 @@
  * remote depending on env vars). The resulting Session object is stored in
  * authStore. A passphrase (or passkey) login resolves through the keyring:
  * the unlock identity locates the account (the encrypted account pointer) and
- * unwraps this client's local key set -- it never reconstructs the account
- * from the secret, so a client with no local key set can locate the account
- * but not act (not enrolled).
+ * unwraps this client's local key set. On a fresh browser holding no key set,
+ * a STANDING credential -- one whose unlock record carries the bridge
+ * delegation and update-key ladder seed -- self-enrolls an ordinary client
+ * in place (loud log entries first, then the first roster read through the
+ * credential's standing wrap) and the login proceeds enrolled; a plain
+ * pointer record still surfaces the not-enrolled state and the
+ * connect-another-wallet ceremony.
  */
 import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
@@ -39,19 +43,29 @@ import { swapSessionVaultKeys } from '@/session/userKeyAdoption'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import { sweepStrandedAppKeys } from '@/session/appKeySweep'
 import {
-  accountLogPinStore,
   loadUserKeyEpochPin,
-  savePinFromDescriptor
+  savePinFromDescriptor,
+  sessionLogPinStore
 } from '@/lib/sessionKey'
 import { StorageManager } from '@/stores/storageManager'
 import { fetchKeyring, KeyringRecordUnusableError } from '@/session/keyring'
-import type {
-  AccountPointer,
-  UnlockIdentity
-} from '@interop/wallet-core/keyring'
+import {
+  canSelfEnroll,
+  selfEnrollStandingClient
+} from '@/session/standingUnlock'
+import {
+  delegateLogWrite,
+  delegationProofKeyId,
+  zcapExpiring
+} from '@interop/wallet-core/recovery'
+import { attributeLadderRung } from '@interop/wallet-core/unlock'
+import { refreshStandingDelegationFields } from '@/session/unlockMethods'
+import { verifiedAccountLog } from '@/session/verifiedLog'
+import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type {
   KeyringFetchResult,
-  PersistableClientKeys
+  PersistableClientKeys,
+  UnlockCredential
 } from '@/session/keyring'
 
 /**
@@ -216,6 +230,7 @@ export async function initSessionFromSeed({
   // to read.
   let activeUserKey = userKey
   let rosterRead: UserKeyRosterReadResult | null = null
+  let userKeyPersistFailed = false
   if (
     userKey &&
     !isGuest &&
@@ -223,7 +238,7 @@ export async function initSessionFromSeed({
     accountPointer &&
     isWebvhDid(accountPointer.did)
   ) {
-    rosterRead = await checkUserKeyRosterAtLogin({
+    const rosterCheck = await checkUserKeyRosterAtLogin({
       zcapClient: sessionZcapClient,
       keyAgent,
       pointer: { ...accountPointer, did: accountPointer.did },
@@ -231,9 +246,20 @@ export async function initSessionFromSeed({
       clientKeyAgreementKey: keyAgreementKey,
       idb
     })
+    rosterRead = rosterCheck.read
+    userKeyPersistFailed = rosterCheck.persistFailed
     if (rosterRead?.rotated) {
       activeUserKey = rosterRead.userKey
-      await persistClientKeys?.({ userKey: rosterRead.userKey })
+      // A failed client-key-record write is the same non-fatal state as a
+      // failed pin persist: the session runs on the freshly adopted key, and
+      // only this browser's durable copy stayed behind (the next login's
+      // roster read rotates it again).
+      try {
+        await persistClientKeys?.({ userKey: rosterRead.userKey })
+      } catch (err) {
+        userKeyPersistFailed = true
+        console.warn('Could not persist the rotated user key:', err)
+      }
     }
   }
 
@@ -286,6 +312,9 @@ export async function initSessionFromSeed({
   profile.keystoreAgent = keystoreAgent
 
   const session = { user, profile, storage, isGuest } as Session
+  if (userKeyPersistFailed) {
+    session.userKeyPersistFailed = true
+  }
 
   // Fold collection provisioning into the session-creation seam: fire (do not
   // await) `ensureUserCollections` and expose it as `session.storageReady`, so
@@ -444,7 +473,7 @@ async function convergeRosterToDocument({
       descriptor,
       clientKeyAgreementKey,
       pinnedEpochId: await loadUserKeyEpochPin({ accountDid, idb }),
-      accountLogPinStore: accountLogPinStore({ accountDid, idb }),
+      accountLogPinStore: sessionLogPinStore({ idb }),
       // Adoption is app-side: persisted for the next login, pinned, and
       // swapped into the live session -- all before the collection fan-out
       // runs against it.
@@ -483,9 +512,17 @@ async function convergeRosterToDocument({
  * Failure semantics: the roster refusals -- a fabricated or discontinuous
  * roster log, a rolled-back/replayed roster, and a current epoch
  * this client cannot unwrap -- rethrow and refuse the login (the same
- * continuity class as a substituted account pointer). Anything else (an
- * unreachable server, offline) warns and returns `null`, so offline logins
- * keep working from the cached user key.
+ * continuity class as a substituted account pointer). A chain-head rollback
+ * is the carve-out (possibly nothing worse than replication lag): wallet-core
+ * degrades it to the transport class, so the session keeps the cached user
+ * key and nothing rolled back is adopted. Anything else (an unreachable
+ * server, offline) warns and returns `null`, so offline logins keep working
+ * from the cached user key.
+ *
+ * A failed PIN persist is reported, not thrown: the adopted key
+ * authenticated against the verified roster, so the session is fine -- only
+ * this browser's durable state did not advance, which the caller surfaces as
+ * "this browser could not be remembered" rather than a login failure.
  *
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the session's root signing client
@@ -497,7 +534,8 @@ async function convergeRosterToDocument({
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) KAK -- its roster entry
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<UserKeyRosterReadResult | null>}   the roster read, or null
+ * @returns {Promise<object>}   the roster read (or null), and whether the
+ *   epoch-pin persist failed
  */
 async function checkUserKeyRosterAtLogin({
   zcapClient,
@@ -513,9 +551,10 @@ async function checkUserKeyRosterAtLogin({
   userKey: UserKey
   clientKeyAgreementKey: IKeyAgreementKey
   idb?: IDBFactory
-}): Promise<UserKeyRosterReadResult | null> {
+}): Promise<{ read: UserKeyRosterReadResult | null; persistFailed: boolean }> {
   const accountDid = pointer.did
-  return await sharedCheckUserKeyRosterAtLogin({
+  let persistFailed = false
+  const read = await sharedCheckUserKeyRosterAtLogin({
     store: accountRosterStore({
       zcapClient,
       keyAgent,
@@ -529,17 +568,25 @@ async function checkUserKeyRosterAtLogin({
     userKey,
     clientKeyAgreementKey,
     pinnedEpochId: await loadUserKeyEpochPin({ accountDid, idb }),
-    // The pin advances to the epoch just authenticated, atomically with the
-    // key that authenticated it.
+    // The pin advances to the epoch just authenticated. A throw from here
+    // propagates out of the shared check (it is no longer swallowed into the
+    // offline null path), so the failure is caught HERE, where its meaning
+    // is known: the read itself succeeded, only the local persist did not.
     onRosterRead: async ({ latestEpochId, descriptor }) => {
-      await savePinFromDescriptor({
-        accountDid,
-        epochId: latestEpochId,
-        descriptor,
-        idb
-      })
+      try {
+        await savePinFromDescriptor({
+          accountDid,
+          epochId: latestEpochId,
+          descriptor,
+          idb
+        })
+      } catch (err) {
+        persistFailed = true
+        console.warn('Could not persist the user key epoch pin:', err)
+      }
     }
   })
+  return { read, persistFailed }
 }
 
 /**
@@ -559,11 +606,11 @@ async function checkUserKeyRosterAtLogin({
  *   is missing legitimately reports `userExists: false` (a half-finished
  *   signup), and the caller sends it to signup, which rebinds.
  * - **Located, not enrolled**: the keyring record was found (the account
- *   exists) but this client holds no key set -- a fresh browser. Unlocking is
- *   no longer sufficient to BE the account: nothing about the account is
- *   derivable from the passphrase, so until this client is enrolled it cannot
- *   act. Returns `{ session: null, userExists: true }` and the caller
- *   surfaces the not-enrolled guidance.
+ *   exists) but this client holds no key set -- a fresh browser. A standing
+ *   record self-enrolls this browser right here and the login proceeds as an
+ *   enrolled hit; only a plain pointer record (pre-promotion, no-WAS, or a
+ *   remote-direct popup session) returns `{ session: null, userExists:
+ *   true }`, and the caller surfaces the not-enrolled guidance.
  * - **Miss**: no keyring anywhere, so there is no account. Returns
  *   `{ session: null, userExists: false }` and the caller routes to signup.
  *
@@ -585,8 +632,8 @@ async function checkUserKeyRosterAtLogin({
  *   from session creation and expose it as `session.storageReady`; default
  *   true. Signup's existence probe passes false (it discards the session after
  *   reading `userExists`, so nothing should provision on its behalf).
- * @param [options.unlock] {UnlockIdentity}   an already-derived unlock
- *   identity for this passphrase, so a caller that has just unlocked (the
+ * @param [options.credential] {UnlockCredential}   an already-derived unlock
+ *   credential for this passphrase, so a caller that has just unlocked (the
  *   enrollment ceremony) does not run the KDF again
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
@@ -596,20 +643,20 @@ export async function loginWithPassphrase({
   idb,
   remoteDirectStorage = false,
   provisionStorage = true,
-  unlock
+  credential
 }: {
   passphrase: string
   email?: string
   idb?: IDBFactory
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
-  unlock?: UnlockIdentity
+  credential?: UnlockCredential
 }): Promise<{ session: Session | null; userExists: boolean }> {
   const found = await fetchKeyring({
     passphrase,
     idb,
     mintManageCapability: true,
-    ...(unlock ? { unlock } : {})
+    ...(credential ? { credential } : {})
   })
 
   if (!found) {
@@ -669,15 +716,32 @@ async function sessionFromKeyringHit({
 }): Promise<{ session: Session | null; userExists: boolean }> {
   if (!found.clientKeys) {
     // The account was located (the keyring record exists) but this client
-    // holds no key set for it: the passphrase can no longer reconstruct the
-    // account. The caller surfaces the not-enrolled state.
-    return { session: null, userExists: true }
+    // holds no key set for it -- a fresh browser. When the record carries
+    // standing authority (the bridge delegation and ladder seed, both
+    // credential-authenticated), the credential self-enrolls this browser as
+    // an ordinary client right here -- loud log entries first, then the
+    // first roster read through the credential's standing wrap -- and the
+    // login proceeds enrolled. A remote-direct session (the partitioned
+    // CHAPI popup) deliberately does not: its storage bucket is ephemeral,
+    // and a durable client minted per popup visit would litter the account
+    // log. Without standing authority (a plain pointer record -- the
+    // pre-promotion or no-WAS reduced path) the caller surfaces the
+    // not-enrolled state and offers the connect-another-wallet ceremony.
+    if (remoteDirectStorage || !canSelfEnroll({ found })) {
+      return { session: null, userExists: true }
+    }
   }
+  const enrolled = found.clientKeys
+    ? undefined
+    : await selfEnrollStandingClient({ found, idb })
+  const clientKeys = found.clientKeys ?? enrolled!.clientKeys
+  const persistClientKeys =
+    enrolled?.persistClientKeys ?? found.persistClientKeys
   const { session, userExists } = await initSessionFromSeed({
-    seed: found.clientKeys.clientSeed,
-    userKey: found.clientKeys.userKey,
-    webvhUpdateKeys: found.clientKeys.webvhUpdateKeys,
-    persistClientKeys: found.persistClientKeys,
+    seed: clientKeys.clientSeed,
+    userKey: clientKeys.userKey,
+    webvhUpdateKeys: clientKeys.webvhUpdateKeys,
+    persistClientKeys,
     accountPointer: found.pointer,
     email: email ?? found.email,
     remoteDirectStorage,
@@ -690,7 +754,7 @@ async function sessionFromKeyringHit({
   // whose own did:key is the controller. Either way a mismatch means the
   // keyring record was swapped for another account's (or the key set is
   // foreign) -- refuse rather than proceed under the wrong identity.
-  const boundController = found.clientKeys.controller ?? session.user.id
+  const boundController = clientKeys.controller ?? session.user.id
   if (boundController !== found.controller) {
     // A corrupt record under the correct unlock Space: the session is
     // discarded, so settle its fired provisioning promise rather than leave it
@@ -711,6 +775,93 @@ async function sessionFromKeyringHit({
     type,
     unlockSpaceId: found.unlockSpaceId,
     manageCapability: found.manageCapability
+  }
+
+  // The bridge-expiry self-refresh: a standing credential's own login
+  // re-mints its bridge delegation when it is expired or inside the renewal
+  // window (the same annual clock and shared predicate as the recovery
+  // delegations), so the bridge never lapses silently between revocations.
+  // Best-effort, behind provisioning.
+  const rebindStandingRecord = found.rebindStandingRecord
+  const standingDelegation = found.standing?.delegation
+  const standingClientDid = found.standingClient?.clientDid
+  if (
+    session.storageReady &&
+    rebindStandingRecord &&
+    standingDelegation &&
+    standingClientDid &&
+    zcapExpiring({
+      expires: (standingDelegation as { expires?: string }).expires
+    })
+  ) {
+    const unlockSpaceId = found.unlockSpaceId
+    session.storageReady = session.storageReady.then(async () => {
+      try {
+        const pointer = session.profile.accountPointer
+        if (!pointer || !isWebvhDid(pointer.did)) {
+          return
+        }
+        const delegation = await delegateLogWrite({
+          zcapClient: session.profile.zcapClient,
+          pointer,
+          recoveryClientDid: standingClientDid
+        })
+        await rebindStandingRecord({ delegation })
+        await refreshStandingDelegationFields({
+          session,
+          unlockSpaceId,
+          delegationKeyId: delegationProofKeyId(delegation),
+          delegationExpires: (delegation as { expires?: string }).expires,
+          idb
+        })
+      } catch (err) {
+        console.warn(
+          'Could not refresh the expiring standing bridge delegation; the ' +
+            'next login retries:',
+          err
+        )
+      }
+    })
+  }
+
+  // After a self-enrollment climbed the update-key ladder, refresh the
+  // registry entry's recorded rung to the freshly committed one, so the
+  // revocation edit's latent-hash attribution stays answerable. Best-effort:
+  // a stale rung only makes that attribution fail closed later, never
+  // silently misattribute.
+  const enrolledLadderSeed = enrolled ? found.standing?.ladderSeed : undefined
+  if (session.storageReady && enrolledLadderSeed) {
+    const unlockSpaceId = found.unlockSpaceId
+    session.storageReady = session.storageReady.then(async () => {
+      try {
+        const pointer = session.profile.accountPointer
+        if (!pointer || !isWebvhDid(pointer.did)) {
+          return
+        }
+        const published = await verifiedAccountLog({
+          profile: session.profile,
+          pointer
+        })
+        const { rung, state } = await attributeLadderRung({
+          ladderSeed: enrolledLadderSeed,
+          published
+        })
+        if (state === 'committed') {
+          await refreshStandingDelegationFields({
+            session,
+            unlockSpaceId,
+            updateKeyMultibase: rung.keyMultibase,
+            idb
+          })
+        }
+      } catch (err) {
+        console.warn(
+          'Could not refresh the recorded ladder rung after self-enrolling; ' +
+            'a later disconnect attribution fails closed instead:',
+          err
+        )
+      }
+    })
   }
 
   // The did:webvh heal path: an account whose signup-time backfill never ran
@@ -759,8 +910,10 @@ async function sessionFromKeyringHit({
  * picker scopes to this RP's discoverable credentials), derives the unlock
  * identity from the PRF output under the passkey KDF, and resolves it through
  * the keyring exactly like the passphrase path -- the two differ only in the
- * secret and its KDF, including the "located, not enrolled" state
- * (`{ session: null, userExists: true }`) on a client holding no key set.
+ * secret and its KDF, including the self-enrolling continuation on a fresh
+ * browser (a standing record enrolls this client in place) and the
+ * "located, not enrolled" state (`{ session: null, userExists: true }`) on a
+ * plain pointer record.
  * The email (absent from any login form here) is recovered from the keyring
  * record when one was bound.
  *

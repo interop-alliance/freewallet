@@ -207,6 +207,7 @@
       "userKeyRosterIntegrity": "El servidor de almacenamiento devolvió una lista de claves de su cuenta que no superó su comprobación de integridad, por lo que el inicio de sesión se detuvo por precaución. No se cambió nada. Si no esperaba esto, contacte a su proveedor de almacenamiento.",
       "userKeyRosterUnwrap": "Este navegador está conectado a su cuenta, pero le falta su copia de la clave de la cuenta; una configuración interrumpida a medias puede dejarlo así. Use \"Conectar este navegador\" abajo para conectarlo de nuevo desde un navegador donde su billetera ya esté configurada. Si inició sesión con una llave de acceso, primero introduzca su frase de contraseña.",
       "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Mientras lo solucionamos, pruebe el <guest>modo invitado</guest>.",
+      "ladderAttribution": "Se encontró su cuenta, pero no se pudo confirmar la vigencia de este método de inicio de sesión en la cuenta: puede haber sido eliminado, o el historial publicado de la cuenta está en un estado inesperado. El inicio de sesión se detuvo y no se cambió nada. Inicie sesión desde un navegador donde su billetera ya esté configurada, o use un código de recuperación.",
       "passkeyNoAccount": "No se encontró ninguna billetera para esta llave de acceso. Inicie sesión con su frase de contraseña y luego agregue esta llave de acceso desde Configuración.",
       "passkeyPrfUnsupported": "Esta llave de acceso o este navegador no puede desbloquear Freewallet. Pruebe con otra llave de acceso o inicie sesión con su frase de contraseña."
     },
@@ -219,7 +220,8 @@
       "signUpLink": "Registrarse",
       "forgotPassphrase": "¿Olvidaste tu frase de contraseña?",
       "recoverLink": "Recupera tu cartera con un código de recuperación.",
-      "recoveryHealthWarning": "Es posible que uno de tus códigos de recuperación ya no funcione. Abre Configuración > Códigos de recuperación y genera uno nuevo."
+      "recoveryHealthWarning": "Es posible que uno de tus códigos de recuperación ya no funcione. Abre Configuración > Códigos de recuperación y genera uno nuevo.",
+      "rememberBrowserWarning": "Has iniciado sesión, pero este navegador no pudo recordarse: la clave de cuenta actualizada no se guardó localmente, así que el próximo inicio de sesión la obtendrá de nuevo."
     },
     "enroll": {
       "connectButton": "Conectar este navegador",

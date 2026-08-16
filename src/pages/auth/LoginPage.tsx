@@ -117,6 +117,14 @@ function loginErrorKey({
     console.error(`${label} failed:`, err)
     return 'auth.errors.userKeyRosterUnwrap'
   }
+  // The self-enrolling login's fail-closed attribution refusal: the
+  // published log commits no rung of this credential's update-key ladder (a
+  // revoked or retired credential), or more than one (an ambiguous state
+  // self-enrollment must not guess through).
+  if (errorName(err) === 'LadderAttributionError') {
+    console.error(`${label} refused:`, err)
+    return 'auth.errors.ladderAttribution'
+  }
   // A keyring record was found but is corrupt -- not a server outage and not
   // a wrong passphrase; surface it with recovery guidance.
   if (err instanceof KeyringRecordUnusableError) {
@@ -190,8 +198,10 @@ export function LoginPage() {
       })
       if (!session && userExists) {
         // The passphrase located the account, but this browser holds no
-        // client key set for it -- unlocking is no longer sufficient to BE
-        // the account. Offer the connect-this-browser (enrollment) flow.
+        // client key set for it AND the record carries no standing authority
+        // to self-enroll with (a plain pointer record -- pre-promotion or
+        // no-WAS; a standing credential self-enrolls inside the login call
+        // and never lands here). Offer the connect-this-browser flow.
         setErrorKey('auth.errors.clientNotEnrolled')
         setNotEnrolledPassphrase(passphrase)
         setEnrollment(null)
@@ -207,6 +217,15 @@ export function LoginPage() {
       // wait for the collections to be provisioned/opened before proceeding.
       await session.storageReady
       login(session)
+      // The roster read adopted a rotated user key but could not write this
+      // browser's durable copy (client-key record or epoch pin): the session
+      // is fine, so warn rather than fail the login.
+      if (session.userKeyPersistFailed) {
+        showToast({
+          message: t('auth.login.rememberBrowserWarning'),
+          severity: 'warning'
+        })
+      }
       // Backfill the passphrase entry in the unlock-methods registry (its
       // unlock Space + management zcap) from this full session, without a
       // second passphrase prompt. Fire-and-forget: it never blocks login, and
@@ -319,7 +338,10 @@ export function LoginPage() {
       const { session, userExists } = await loginWithPasskey()
       if (!session && userExists) {
         // The passkey located the account, but this browser holds no client
-        // key set for it (e.g. a platform-synced passkey on a fresh machine).
+        // key set for it and its record carries no standing authority (a
+        // pre-FW-154 bind). A standing passkey self-enrolls inside the login
+        // call -- a platform-synced passkey on a fresh machine logs straight
+        // in -- so this fallback only fires for a plain pointer record.
         setErrorKey('auth.errors.clientNotEnrolled')
         return
       }
