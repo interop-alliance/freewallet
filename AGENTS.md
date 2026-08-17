@@ -71,6 +71,18 @@ that file's header; the rules that apply when working an item:
   the archive.
 - Work discovered mid-implementation gets its own FW-N item immediately,
   noting `discovered-from: FW-N` in its prose.
+- A cross-cutting item (session persistence, key custody, a ceremony's
+  stage order, login/logout, or any invariant ARCHITECTURE.md documents)
+  is behind the **design gate**: it carries `design:` and
+  `design-approved:` fields, and no implementation starts until the
+  named design doc exists and is approved by core contributors. The
+  convention and doc template are canonical in
+  [isomorphic-lib-template's `designs/`](https://github.com/interop-alliance/isomorphic-lib-template/tree/main/designs);
+  the freewallet specifics live in the roadmap file's header and the
+  `designs/` directory beside it. Approval extracts the design's
+  durable decisions -- contract-binding ones, and do-not-reopen rejections
+  of an approach -- into tracked `decisions/` records (see "Ecosystem
+  conventions" below); the design doc itself stays a working artifact.
 
 For a cross-repo change (a spec, a wire contract, or a shared `@interop/*`
 API), four standing measures apply: the item carries a `touches:` field
