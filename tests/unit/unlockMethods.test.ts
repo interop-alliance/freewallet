@@ -33,7 +33,8 @@ import {
 const wasState = vi.hoisted(() => ({
   url: 'https://was.example.test' as string | undefined,
   records: new Map<string, unknown>(),
-  getError: undefined as unknown
+  getError: undefined as unknown,
+  calls: [] as string[]
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
@@ -60,7 +61,31 @@ vi.mock('@/stores/wasRemoteStore', () => ({
 
 vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keyring')>()),
-  deleteUnlockSpaceWithCapability: vi.fn(async () => {})
+  deleteUnlockSpaceWithCapability: vi.fn(async () => {
+    wasState.calls.push('deleteUnlockSpace')
+  })
+}))
+
+vi.mock('@/session/credentialRotation', () => ({
+  rotateOffUnlockCredential: vi.fn(async () => {
+    wasState.calls.push('rotateOffUnlockCredential')
+    return { rotated: true, collections: { outcomes: {}, failed: [] } }
+  })
+}))
+
+vi.mock('@/lib/passkey', () => ({
+  assertPasskeyPrf: vi.fn(async () => {
+    wasState.calls.push('assertPasskeyPrf')
+    return { prfOutput: new Uint8Array(32) }
+  }),
+  registerPasskey: vi.fn()
+}))
+
+vi.mock('@/session/keyring', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/keyring')>()),
+  deleteUnlockMethod: vi.fn(async () => {
+    wasState.calls.push('deleteUnlockMethod')
+  })
 }))
 
 import {
@@ -70,12 +95,14 @@ import {
   managementZcapClient,
   putUnlockMethods,
   revokeUnlockMethod,
+  revokeUnlockMethodByCeremony,
   rewrapUnlockMethodsRecord,
   type PasskeyUnlockMethod,
   type PassphraseUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
 import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
+import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import {
   ensureUnlockMethodsCollection,
   getUnlockMethodsRecord,
@@ -293,6 +320,7 @@ beforeEach(() => {
   wasState.url = 'https://was.example.test'
   wasState.records.clear()
   wasState.getError = undefined
+  wasState.calls = []
   vi.clearAllMocks()
 })
 
@@ -487,6 +515,114 @@ describe('revokeUnlockMethod', () => {
     await expect(
       loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
     ).resolves.toBeNull()
+    const after = await getUnlockMethods({ session, idb })
+    expect(after!.methods).toHaveLength(0)
+  })
+})
+
+describe('the credential rotation inside a revocation', () => {
+  /**
+   * A passkey entry carrying a standing posture, so the rotation ceremony has
+   * something to retire.
+   *
+   * @returns {PasskeyUnlockMethod}
+   */
+  function standingEntry(): PasskeyUnlockMethod {
+    return {
+      ...passkeyEntry({ manageCapability: FAKE_CAP }),
+      keyAgreementKeyMultibase: 'z6LSStandingPasskeyKak',
+      updateKeyMultibase: 'z6MkStandingPasskeyRung'
+    }
+  }
+
+  it('rotates before the Space delete and hands the outcome back', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession()
+    const entry = standingEntry()
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [entry]
+      },
+      idb
+    })
+    wasState.calls = []
+
+    const outcome = await revokeUnlockMethod({
+      session,
+      entry,
+      idb,
+      verb: 'removing a passkey'
+    })
+
+    // The rotation runs while the registry is still sealed to the old vault
+    // keys, so the teardown below can still read and write it.
+    expect(wasState.calls).toEqual([
+      'rotateOffUnlockCredential',
+      'deleteUnlockSpace'
+    ])
+    expect(vi.mocked(rotateOffUnlockCredential)).toHaveBeenCalledWith(
+      expect.objectContaining({ method: entry, verb: 'removing a passkey' })
+    )
+    expect(outcome).toEqual({
+      rotated: true,
+      collections: { outcomes: {}, failed: [] }
+    })
+  })
+
+  it('leaves a recovery-code entry alone (it rotated in its own ceremony)', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession()
+    const entry = {
+      type: 'recovery-code',
+      label: 'Recovery code',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      unlockSpaceId: 'unlock-space-code',
+      manageCapability: FAKE_CAP,
+      recoveryKid: 'did:key:z6LSCode#kak',
+      keyAgreementKeyMultibase: 'z6LSCodeKak',
+      updateKeyMultibase: 'z6MkCodeUpdate'
+    } as const
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [entry]
+      },
+      idb
+    })
+
+    const outcome = await revokeUnlockMethod({ session, entry, idb })
+    expect(outcome).toBeNull()
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+  })
+
+  it('taps the passkey before rotating, on the ceremony path', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession()
+    const entry = standingEntry()
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [entry]
+      },
+      idb
+    })
+    wasState.calls = []
+
+    const outcome = await revokeUnlockMethodByCeremony({ session, entry, idb })
+
+    expect(wasState.calls).toEqual([
+      'assertPasskeyPrf',
+      'rotateOffUnlockCredential',
+      'deleteUnlockMethod'
+    ])
+    expect(outcome?.rotated).toBe(true)
     const after = await getUnlockMethods({ session, idb })
     expect(after!.methods).toHaveLength(0)
   })

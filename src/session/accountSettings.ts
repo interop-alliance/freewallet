@@ -52,6 +52,8 @@ import {
   deleteUserKeyEpochPin,
   sessionLogPinStore
 } from '@/lib/sessionKey'
+import { rotateOffUnlockCredential } from '@/session/credentialRotation'
+import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import { findLoginCredential, loginHandleOf } from '@/lib/loginCredential'
 import type { Session } from '@/types/auth'
@@ -112,12 +114,20 @@ export async function loadUnlockRegistry({
  * separate, best-effort follow-up (`repointPassphraseUnlockMethod`), because
  * the change itself has already succeeded by then.
  *
+ * The old passphrase is then RETIRED for real (`rotateOffUnlockCredential`):
+ * its document posture leaves, the user key rotates off its roster wrap, and
+ * every encrypted collection re-epochs onto the fresh key -- which is what
+ * makes changing the passphrase the remedy for a leaked one. The retirement
+ * runs last and its failure is reported rather than thrown (`rotation:
+ * 'failed'`): the change itself cannot be rolled back, and a torn retirement
+ * converges at the next login's completion sweep.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @param options.oldPassphrase {string}
  * @param options.newPassphrase {string}
  * @returns {Promise<{ oldPassphraseRetired: boolean, unlockSpaceId: string,
- *   manageCapability?: IZcap }>}
+ *   manageCapability?: IZcap, rotation: 'rotated' | 'skipped' | 'failed' }>}
  * @throws {WrongPassphraseError}   the current passphrase did not verify
  */
 export async function changeAccountPassphrase({
@@ -132,12 +142,18 @@ export async function changeAccountPassphrase({
   oldPassphraseRetired: boolean
   unlockSpaceId: string
   manageCapability?: IZcap
+  rotation: 'rotated' | 'skipped' | 'failed'
 }> {
   const profile = session.profile
   const clientSeed = profile.clientSeed
   if (!clientSeed) {
     throw new Error('Changing the passphrase needs this client key set.')
   }
+  // The OLD credential's standing posture, captured before the rebind
+  // replaces the registry entry with the new passphrase's. Best-effort: an
+  // unreadable registry (or an entry that never held a posture) simply means
+  // there is nothing to retire.
+  const oldStanding = await standingPosture({ session })
   // The keyring record is bound under the ACCOUNT controller (the first
   // client's did:key) -- on an enrolled second client it differs from this
   // client's `user.id`, so verification must match against it.
@@ -173,18 +189,84 @@ export async function changeAccountPassphrase({
   })
   // Give the NEW passphrase the standing posture (roster wrap, commitment
   // document entry, bridge delegation, standing-layout record). Best-effort:
-  // a failure leaves the plain rebind above, which logs in normally. The old
-  // passphrase's document entry and roster wrap are retired by the FW-155
-  // credential-rotation ceremony; until then the old posture is inert -- its
-  // unlock Space (record, bridge, ladder seed) is already gone, so it can
-  // neither locate the account nor self-enroll.
+  // a failure leaves the plain rebind above, which logs in normally.
   await establishPassphrasePosture({
     session,
     passphrase: newPassphrase,
     email: session.user.email,
     credential: newCredential
   })
-  return { oldPassphraseRetired, unlockSpaceId, manageCapability }
+  // Retire the OLD credential: document posture out, user key rotated off its
+  // roster wrap, every encrypted collection re-epoch'd, then the live session
+  // adopts the fresh key. Reported, never thrown -- the passphrase change has
+  // already landed and cannot roll back, and a torn retirement is finished by
+  // the login-time completion sweep.
+  let rotation: 'rotated' | 'skipped' | 'failed' = 'skipped'
+  try {
+    const outcome = await rotateOffUnlockCredential({
+      session,
+      method: { type: 'passphrase', ...oldStanding },
+      verb: 'changing the passphrase'
+    })
+    if (outcome?.rotated && outcome.userKey) {
+      rotation = 'rotated'
+      await adoptRotatedUserKey({
+        session,
+        spaceId: rotationSpaceId({ session }),
+        userKey: outcome.userKey
+      })
+    }
+  } catch (err) {
+    console.error('Could not retire the old passphrase credential:', err)
+    rotation = 'failed'
+  }
+  return { oldPassphraseRetired, unlockSpaceId, manageCapability, rotation }
+}
+
+/**
+ * The standing-posture members the registry records for the account's current
+ * passphrase entry, read before a change replaces it. Best-effort: an
+ * unreadable registry, or no passphrase entry at all, resolves to an empty
+ * posture, which makes the retirement a skip.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {Promise<{ keyAgreementKeyMultibase?: string,
+ *   updateKeyMultibase?: string }>}
+ */
+async function standingPosture({ session }: { session: Session }): Promise<{
+  keyAgreementKeyMultibase?: string
+  updateKeyMultibase?: string
+}> {
+  try {
+    const record = await getUnlockMethods({ session })
+    const entry = record?.methods.find(
+      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+    )
+    return {
+      keyAgreementKeyMultibase: entry?.keyAgreementKeyMultibase,
+      updateKeyMultibase: entry?.updateKeyMultibase
+    }
+  } catch (err) {
+    console.warn(
+      'Could not read the passphrase posture to retire; skipping the ' +
+        'credential rotation:',
+      err
+    )
+    return {}
+  }
+}
+
+/**
+ * The data Space id a rotated user key is adopted against -- the account
+ * pointer's, falling back to the session storage's.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {string}
+ */
+function rotationSpaceId({ session }: { session: Session }): string {
+  return session.profile.accountPointer?.spaceId ?? session.storage.spaceId!
 }
 
 /**
@@ -391,7 +473,12 @@ export async function renameAccountPasskey({
 /**
  * Removes a passkey: tap-free via its management zcap when present, else a
  * WebAuthn ceremony against that passkey (legacy entries). Both paths also
- * drop the registry entry itself.
+ * retire the passkey as a standing credential (document posture out, user key
+ * rotated off its roster wrap, every encrypted collection re-epoch'd) and drop
+ * the registry entry itself.
+ *
+ * A failed rotation throws: it runs before the registry drop, so nothing
+ * irreversible has happened and a retry converges from durable state.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -405,10 +492,19 @@ export async function removeAccountPasskey({
   session: Session
   entry: PasskeyUnlockMethod
 }): Promise<void> {
-  if (canRevokeWithoutCeremony(entry)) {
-    await revokeUnlockMethod({ session, entry })
-  } else {
-    await revokeUnlockMethodByCeremony({ session, entry })
+  const verb = 'removing a passkey'
+  const outcome = canRevokeWithoutCeremony(entry)
+    ? await revokeUnlockMethod({ session, entry, verb })
+    : await revokeUnlockMethodByCeremony({ session, entry, verb })
+  // The registry teardown above ran under the pre-rotation vault keys, so the
+  // live session adopts the fresh key only now (the adoption re-seals the
+  // registry to it). Internally best-effort.
+  if (outcome?.rotated && outcome.userKey) {
+    await adoptRotatedUserKey({
+      session,
+      spaceId: rotationSpaceId({ session }),
+      userKey: outcome.userKey
+    })
   }
 }
 

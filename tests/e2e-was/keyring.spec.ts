@@ -171,11 +171,12 @@ test.describe('Keyring v2', () => {
     await expect(changeButton).toBeEnabled({ timeout: 30_000 })
     await changeButton.click()
 
-    // The random-seed account's old unlock Space is deleted, so the success
-    // copy is the fully-retired variant.
+    // The old credential is retired for real -- document posture out, user
+    // key rotated, collections re-epoch'd -- so the success copy is the
+    // rotated variant.
     await expect(
-      page.getByText('The old passphrase no longer unlocks this wallet.')
-    ).toBeVisible({ timeout: 30_000 })
+      page.getByText('Your content keys were rotated', { exact: false })
+    ).toBeVisible({ timeout: 60_000 })
 
     // Cold profile: the OLD passphrase no longer resolves to an account (its
     // unlock Space is gone and the data seed was never legacy-derivable), so

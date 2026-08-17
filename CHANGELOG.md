@@ -25,6 +25,18 @@
   migrated in place: re-provision to adopt the standing posture (the plain
   record keeps logging in via the connect ceremony).
 
+- Unlock-credential rotation ceremony. Changing the passphrase and removing
+  a passkey now retire the old credential for real instead of only
+  rebinding the unlock record: its document posture (keyAgreement entry and
+  committed ladder-rung hash) leaves the account log, the user key rotates
+  off its roster wrap, every encrypted collection re-epochs onto the fresh
+  key, the unlock-methods registry is re-sealed, and the live session
+  adopts the rotated key in place. The shared ceremony is wallet-core's
+  `retireUnlockCredential`, wrapped by `src/session/credentialRotation.ts`;
+  a torn run converges at the login-time completion sweep. Settings
+  documents the ceremony as the remedy for a suspected passphrase leak,
+  with honest copy about already-fetched ciphertext.
+
 ### Changed
 
 - Enrollment now refuses a connect code whose key-agreement key is not the

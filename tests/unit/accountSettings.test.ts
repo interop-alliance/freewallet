@@ -11,7 +11,44 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const state = vi.hoisted(() => ({
   calls: [] as string[],
   verifyFails: null as 'wrong' | 'other' | null,
-  wipeFails: false
+  wipeFails: false,
+  // What the credential-rotation ceremony reports back: a rotation with a
+  // fresh key, a skip (nothing standing to retire), or a failure.
+  rotation: 'skipped' as 'rotated' | 'skipped' | 'failed'
+}))
+
+const FRESH_USER_KEY = { id: 'did:key:z6LSFreshUserKey' }
+
+vi.mock('@/session/credentialRotation', () => ({
+  rotateOffUnlockCredential: vi.fn(async () => {
+    state.calls.push('rotateOffUnlockCredential')
+    if (state.rotation === 'failed') {
+      throw new Error('log conflict')
+    }
+    return state.rotation === 'rotated'
+      ? {
+          rotated: true,
+          collections: { outcomes: {}, failed: [] },
+          userKey: FRESH_USER_KEY
+        }
+      : { rotated: false, collections: { outcomes: {}, failed: [] } }
+  })
+}))
+
+vi.mock('@/session/userKeyAdoption', () => ({
+  adoptRotatedUserKey: vi.fn(async () => {
+    state.calls.push('adoptRotatedUserKey')
+  })
+}))
+
+vi.mock('@/session/standingUnlock', () => ({
+  establishPassphrasePosture: vi.fn(async () => {
+    state.calls.push('establishPassphrasePosture')
+  }),
+  establishStandingUnlock: vi.fn(async () => ({
+    unlockSpaceId: 'space-bound',
+    standingFields: {}
+  }))
 }))
 
 class FakeWrongPassphraseError extends Error {}
@@ -61,8 +98,26 @@ vi.mock('@/session/unlockMethods', () => ({
   getUnlockMethods: vi.fn(async () => null),
   putUnlockMethods: vi.fn(async () => {}),
   refreshStandingDelegationFields: vi.fn(async () => {}),
-  revokeUnlockMethod: vi.fn(async () => {}),
-  revokeUnlockMethodByCeremony: vi.fn(async () => {}),
+  revokeUnlockMethod: vi.fn(async () => {
+    state.calls.push('revokeUnlockMethod')
+    return state.rotation === 'rotated'
+      ? {
+          rotated: true,
+          collections: { outcomes: {}, failed: [] },
+          userKey: FRESH_USER_KEY
+        }
+      : null
+  }),
+  revokeUnlockMethodByCeremony: vi.fn(async () => {
+    state.calls.push('revokeUnlockMethodByCeremony')
+    return state.rotation === 'rotated'
+      ? {
+          rotated: true,
+          collections: { outcomes: {}, failed: [] },
+          userKey: FRESH_USER_KEY
+        }
+      : null
+  }),
   upsertPassphraseUnlockMethod: vi.fn(({ record }) => record)
 }))
 
@@ -96,8 +151,16 @@ vi.mock('@/lib/loginCredential', () => ({
   loginHandleOf: vi.fn(() => '')
 }))
 
-const { changeAccountPassphrase, deleteAccount } =
+const { changeAccountPassphrase, deleteAccount, removeAccountPasskey } =
   await import('@/session/accountSettings')
+const { rotateOffUnlockCredential } =
+  await import('@/session/credentialRotation')
+const { adoptRotatedUserKey } = await import('@/session/userKeyAdoption')
+const {
+  revokeUnlockMethod,
+  revokeUnlockMethodByCeremony,
+  canRevokeWithoutCeremony
+} = await import('@/session/unlockMethods')
 const { accountLogPinId } = await import('@interop/wallet-core/webvh')
 const { userKeyRosterPinId } = await import('@interop/wallet-core/keys')
 
@@ -130,6 +193,8 @@ beforeEach(() => {
   state.calls = []
   state.verifyFails = null
   state.wipeFails = false
+  state.rotation = 'skipped'
+  vi.clearAllMocks()
 })
 
 describe('deleteAccount', () => {
@@ -187,8 +252,8 @@ describe('deleteAccount', () => {
 })
 
 describe('changeAccountPassphrase', () => {
-  it('adopts the rebind into the live session right after the change', async () => {
-    const { oldPassphraseRetired, unlockSpaceId } =
+  it('adopts the rebind, then retires the old credential', async () => {
+    const { oldPassphraseRetired, unlockSpaceId, rotation } =
       await changeAccountPassphrase({
         session: makeSession(),
         oldPassphrase: 'old',
@@ -196,6 +261,103 @@ describe('changeAccountPassphrase', () => {
       })
     expect(oldPassphraseRetired).toBe(true)
     expect(unlockSpaceId).toBe('space-new')
-    expect(state.calls).toEqual(['changePassphrase', 'adoptPassphraseRebind'])
+    expect(rotation).toBe('skipped')
+    // The new passphrase gets its standing posture before the old one is
+    // retired, so the account is never left with no standing credential.
+    expect(state.calls).toEqual([
+      'changePassphrase',
+      'adoptPassphraseRebind',
+      'establishPassphrasePosture',
+      'rotateOffUnlockCredential'
+    ])
+    expect(vi.mocked(rotateOffUnlockCredential)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: expect.objectContaining({ type: 'passphrase' }),
+        verb: 'changing the passphrase'
+      })
+    )
+    expect(vi.mocked(adoptRotatedUserKey)).not.toHaveBeenCalled()
+  })
+
+  it('adopts the rotated user key when the retirement rotated', async () => {
+    state.rotation = 'rotated'
+    const { rotation } = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    expect(rotation).toBe('rotated')
+    expect(state.calls).toEqual([
+      'changePassphrase',
+      'adoptPassphraseRebind',
+      'establishPassphrasePosture',
+      'rotateOffUnlockCredential',
+      'adoptRotatedUserKey'
+    ])
+    expect(vi.mocked(adoptRotatedUserKey)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spaceId: 'space-123',
+        userKey: FRESH_USER_KEY
+      })
+    )
+  })
+
+  it('reports a failed retirement without failing the change', async () => {
+    state.rotation = 'failed'
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { oldPassphraseRetired, rotation } = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    // The passphrase change itself has landed and cannot roll back.
+    expect(oldPassphraseRetired).toBe(true)
+    expect(rotation).toBe('failed')
+    expect(vi.mocked(adoptRotatedUserKey)).not.toHaveBeenCalled()
+    error.mockRestore()
+  })
+})
+
+describe('removeAccountPasskey', () => {
+  const ENTRY = {
+    type: 'passkey',
+    label: 'Passkey',
+    createdAt: '2026-08-01T00:00:00.000Z',
+    credentialId: 'Y3JlZC1pZA',
+    transports: ['internal'],
+    backupEligibility: true,
+    backupState: true,
+    unlockSpaceId: 'unlock-space-abc'
+  } as Parameters<typeof removeAccountPasskey>[0]['entry']
+
+  it('revokes tap-free and adopts the rotated user key', async () => {
+    state.rotation = 'rotated'
+    await removeAccountPasskey({ session: makeSession(), entry: ENTRY })
+    expect(state.calls).toEqual(['revokeUnlockMethod', 'adoptRotatedUserKey'])
+    expect(vi.mocked(revokeUnlockMethod)).toHaveBeenCalledWith(
+      expect.objectContaining({ entry: ENTRY, verb: 'removing a passkey' })
+    )
+    expect(vi.mocked(adoptRotatedUserKey)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spaceId: 'space-123',
+        userKey: FRESH_USER_KEY
+      })
+    )
+  })
+
+  it('falls back to the ceremony path and skips adoption with no rotation', async () => {
+    vi.mocked(canRevokeWithoutCeremony).mockReturnValueOnce(false)
+    await removeAccountPasskey({ session: makeSession(), entry: ENTRY })
+    expect(state.calls).toEqual(['revokeUnlockMethodByCeremony'])
+    expect(vi.mocked(revokeUnlockMethodByCeremony)).toHaveBeenCalledOnce()
+    expect(vi.mocked(adoptRotatedUserKey)).not.toHaveBeenCalled()
+  })
+
+  it('propagates a failed revocation, so a retry can converge', async () => {
+    vi.mocked(revokeUnlockMethod).mockRejectedValueOnce(new Error('down'))
+    await expect(
+      removeAccountPasskey({ session: makeSession(), entry: ENTRY })
+    ).rejects.toThrow('down')
+    expect(vi.mocked(adoptRotatedUserKey)).not.toHaveBeenCalled()
   })
 })

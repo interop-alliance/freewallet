@@ -167,6 +167,12 @@ export function SettingsPage() {
   const [passphraseChangeSuccess, setPassphraseChangeSuccess] = useState<
     boolean | null
   >(null)
+  // How the old credential's retirement went, for the success copy: the
+  // content keys rotated, there was nothing standing to retire, or the
+  // rotation did not finish (the login-time sweep resumes it).
+  const [passphraseRotation, setPassphraseRotation] = useState<
+    'rotated' | 'skipped' | 'failed'
+  >('skipped')
   const [passphraseChangeError, setPassphraseChangeError] = useState<
     'incorrect' | 'failed' | null
   >(null)
@@ -185,14 +191,19 @@ export function SettingsPage() {
     setPassphraseChangeSuccess(null)
     setPassphraseChangeError(null)
     try {
-      const { oldPassphraseRetired, unlockSpaceId, manageCapability } =
-        await changeAccountPassphrase({
-          session,
-          oldPassphrase,
-          newPassphrase
-        })
+      const {
+        oldPassphraseRetired,
+        unlockSpaceId,
+        manageCapability,
+        rotation
+      } = await changeAccountPassphrase({
+        session,
+        oldPassphrase,
+        newPassphrase
+      })
       setOldPassphrase('')
       setNewPassphrase('')
+      setPassphraseRotation(rotation)
       setPassphraseChangeSuccess(oldPassphraseRetired)
       // The passphrase now lives in a new unlock Space; point the registry's
       // passphrase entry at it (fire-and-forget -- the change itself succeeded).
@@ -763,13 +774,20 @@ export function SettingsPage() {
                       ? t('settings.changingPassphrase')
                       : t('settings.changePassphrase')}
                   </Button>
-                  {passphraseChangeSuccess !== null && (
-                    <Typography variant="body2" color="success.main">
-                      {passphraseChangeSuccess
-                        ? t('settings.passphraseChanged')
-                        : t('settings.passphraseChangedNotRetired')}
-                    </Typography>
-                  )}
+                  {passphraseChangeSuccess !== null &&
+                    (passphraseRotation === 'failed' ? (
+                      <Alert severity="warning">
+                        {t('settings.passphraseChangedRotationPending')}
+                      </Alert>
+                    ) : (
+                      <Typography variant="body2" color="success.main">
+                        {!passphraseChangeSuccess
+                          ? t('settings.passphraseChangedNotRetired')
+                          : passphraseRotation === 'rotated'
+                            ? t('settings.passphraseChangedRotated')
+                            : t('settings.passphraseChanged')}
+                      </Typography>
+                    ))}
                   {passphraseChangeError && (
                     <Alert severity="error">
                       {passphraseChangeError === 'incorrect'
@@ -777,6 +795,9 @@ export function SettingsPage() {
                         : t('settings.passphraseChangeFailed')}
                     </Alert>
                   )}
+                  <Typography variant="body2" color="text.secondary">
+                    {t('settings.passphraseLeakHint')}
+                  </Typography>
                 </Stack>
               ) : (
                 <Typography variant="body2" color="text.secondary">
@@ -1196,6 +1217,9 @@ export function SettingsPage() {
               {removeNeedsCeremony
                 ? ` ${t('settings.passkeyRemoveCeremonyNote')}`
                 : ''}
+            </DialogContentText>
+            <DialogContentText sx={{ mt: 2 }}>
+              {t('settings.passkeyRemoveRotationNote')}
             </DialogContentText>
             {removeError && (
               <Alert severity="error" sx={{ mt: 2 }}>

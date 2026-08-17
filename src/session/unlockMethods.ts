@@ -52,12 +52,12 @@ import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
 import {
   didKeyZcapClient,
-  keyAgreementCommitment,
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
-import { removeUnlockKey } from '@interop/wallet-core/unlock'
-import { requireEnrolledClientContext } from '@/session/enrolledContext'
-import { invalidateVerifiedLog } from '@/session/verifiedLog'
+import {
+  rotateOffUnlockCredential,
+  type CredentialRotationOutcome
+} from '@/session/credentialRotation'
 import type { UserKey } from '@interop/wallet-core/keys'
 import {
   unwrapRecordEnvelope,
@@ -616,81 +616,39 @@ export function managementZcapClient({
  * delete is tolerated (already gone). With no WAS server there is no Space to
  * delete, so only the cache and the registry entry are cleaned up.
  *
+ * A standing passphrase or passkey entry is first retired for real by the
+ * credential-rotation ceremony, whose outcome is handed back so the caller
+ * can adopt the rotated user key in the live session.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @param options.entry {UnlockMethod}   the method to retire
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
+ * @param [options.verb] {string}   what the caller is doing, for the
+ *   rotation's pending-rotation refusal message
+ * @returns {Promise<CredentialRotationOutcome | null>}   the rotation
+ *   outcome, or null when nothing standing was retired
  */
-/**
- * Removes a standing passphrase/passkey credential's document entry -- its
- * `keyAgreement` publication (the commitment for a passphrase, the verbatim
- * key for a passkey) and its committed ladder-rung hash -- when the entry
- * records one. Best-effort: the method's unlock Space is already being
- * retired, so a failed (or stale-rung) removal leaves only inert document
- * residue, and the credential's roster wrap is rotated away by the
- * login-time sweep once the document no longer answers for it. The full
- * rotation ceremony is FW-155's.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.method {PassphraseUnlockMethod | PasskeyUnlockMethod}
- * @returns {Promise<void>}
- */
-async function removeStandingPosture({
-  session,
-  method
-}: {
-  session: Session
-  method: PassphraseUnlockMethod | PasskeyUnlockMethod
-}): Promise<void> {
-  if (!method.keyAgreementKeyMultibase || !method.updateKeyMultibase) {
-    return
-  }
-  try {
-    const { remoteStore, pointer, clientWebvhKeys } =
-      requireEnrolledClientContext({
-        session,
-        action: 'Retiring a standing unlock credential'
-      })
-    const keyAgreement =
-      method.type === 'passphrase'
-        ? {
-            commitment: await keyAgreementCommitment({
-              keyAgreementKeyMultibase: method.keyAgreementKeyMultibase
-            })
-          }
-        : { publicKeyMultibase: method.keyAgreementKeyMultibase }
-    await removeUnlockKey({
-      idStore: remoteStore.webvhIdStore(),
-      updateKeys: clientWebvhKeys,
-      unlockKeys: {
-        keyAgreement,
-        updateKeyMultibase: method.updateKeyMultibase
-      },
-      expectedDid: pointer.did
-    })
-    invalidateVerifiedLog({ profile: session.profile })
-  } catch (err) {
-    console.warn(
-      "Could not remove the retired credential's document entry:",
-      err
-    )
-  }
-}
-
 export async function revokeUnlockMethod({
   session,
   entry,
-  idb
+  idb,
+  verb = 'removing an unlock method'
 }: {
   session: Session
   entry: UnlockMethod
   idb?: IDBFactory
-}): Promise<void> {
-  if (entry.type === 'passphrase' || entry.type === 'passkey') {
-    await removeStandingPosture({ session, method: entry })
-  }
+  verb?: string
+}): Promise<CredentialRotationOutcome | null> {
+  // A standing passphrase or passkey is retired for real: its document
+  // posture out, the user key rotated off its roster wrap, every encrypted
+  // collection re-epoch'd. Run BEFORE the Space delete and the registry drop
+  // below, which still go out under the pre-rotation vault keys. A
+  // recovery-code entry has already rotated in its own ceremony.
+  const rotation =
+    entry.type === 'passphrase' || entry.type === 'passkey'
+      ? await rotateOffUnlockCredential({ session, method: entry, verb, idb })
+      : null
   if (WAS_SERVER_URL) {
     if (!entry.manageCapability) {
       throw new Error(
@@ -715,6 +673,7 @@ export async function revokeUnlockMethod({
   await deleteClientKeyRecord({ spaceId: entry.unlockSpaceId, idb })
   await deleteKeyringFreshnessPin({ spaceId: entry.unlockSpaceId, idb })
   await dropRegistryEntry({ session, entry, idb })
+  return rotation
 }
 
 /**
@@ -725,31 +684,45 @@ export async function revokeUnlockMethod({
  * entry. Requires the authenticator, so it is unusable for a genuinely lost
  * passkey -- `revokeUnlockMethod` covers that case.
  *
+ * The tap comes first: it is the consent and authentication gate for the
+ * whole ceremony, including the credential rotation that follows it.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @param options.entry {PasskeyUnlockMethod}   the passkey to retire
  * @param [options.idb] {IDBFactory}
  * @param [options.signal] {AbortSignal}   aborts the WebAuthn ceremony
- * @returns {Promise<void>}
+ * @param [options.verb] {string}   what the caller is doing, for the
+ *   rotation's pending-rotation refusal message
+ * @returns {Promise<CredentialRotationOutcome | null>}   the rotation
+ *   outcome, or null when nothing standing was retired
  */
 export async function revokeUnlockMethodByCeremony({
   session,
   entry,
   idb,
-  signal
+  signal,
+  verb = 'removing a passkey'
 }: {
   session: Session
   entry: PasskeyUnlockMethod
   idb?: IDBFactory
   signal?: AbortSignal
-}): Promise<void> {
+  verb?: string
+}): Promise<CredentialRotationOutcome | null> {
   const { prfOutput } = await assertPasskeyPrf({
     credentialIds: [base64urlnopad.decode(entry.credentialId)],
     signal
   })
-  await removeStandingPosture({ session, method: entry })
+  const rotation = await rotateOffUnlockCredential({
+    session,
+    method: entry,
+    verb,
+    idb
+  })
   await deleteUnlockMethod({ secret: prfOutput, kdf: PASSKEY_KDF, idb })
   await dropRegistryEntry({ session, entry, idb })
+  return rotation
 }
 
 /**

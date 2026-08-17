@@ -181,6 +181,28 @@ and self-authenticating rather than depending on local state. Client
 revocation does not bound an attacker who holds the credential itself (they
 re-derive and self-enroll again); credential rotation is that remedy.
 
+**The unlock-credential rotation ceremony** is that remedy made real:
+changing a passphrase and removing a passkey both retire the old
+credential's standing rather than merely rebinding the unlock record. The
+shared sequence is wallet-core's `retireUnlockCredential`
+(`@interop/wallet-core/unlock`), wrapped session-side by
+`rotateOffUnlockCredential` (`src/session/credentialRotation.ts`): the
+credential's document posture leaves first (its `keyAgreement` entry --
+commitment or verbatim -- and its committed ladder-rung hash, one log
+entry), then the same roster-and-cascade tail the client revocation runs --
+the user key rotates off the credential's wrap (pairing-free convergence
+onto the post-edit document) and every encrypted collection re-epochs onto
+the fresh key. The callers then tear down the registry entry and the old
+unlock Space under the pre-rotation vault keys and adopt the rotated key in
+place (`adoptRotatedUserKey`: registry re-seal, profile vault keys, storage
+ciphers), the `revokeRecoveryCode` ordering. The document-removal-first
+order is load-bearing: a run torn anywhere after it leaves the roster
+keying a recipient the document no longer backs, exactly what the
+login-time sweep detects and finishes. The honest limitation is the
+cascade's: ciphertext the credential's holder already fetched stays
+readable, and Settings says so -- the ceremony is the documented "I think
+my passphrase leaked" remedy there.
+
 The `Session` object is stored in the Zustand
 `authStore`; it is **in-memory only** (the passphrase is never persisted), so
 reloading the browser logs the user out and they must log in again. Guest
