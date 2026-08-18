@@ -1460,6 +1460,73 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   Collection.
 - **Controller** — the `did:key` DID that owns a Space. Its Ed25519 key signs
   all ZCap-authorized requests.
+- **Current-key-set rule** — the server's authorization policy for a Space
+  whose controller is a did:webvh: an invocation or delegation verifies iff
+  its verification method is listed in the account document as resolved NOW
+  (the server reads and fully verifies `did.jsonl` out of its own storage).
+  Revoking a client is therefore one document edit: the moment its
+  verification method leaves the document, its requests and every delegation
+  it ever signed stop verifying. The deliberate asymmetry: log-entry and
+  roster proofs instead anchor at a version, so a signature made while the
+  key was listed verifies forever and history never rots. See "The
+  did:webvh identity".
+- **Standing unlock credential** — an unlock method (passphrase or passkey)
+  in the standing posture: beside locating the account through its unlock
+  record, it holds a wrap of the user key in the roster (kept alive by
+  rotation fan-out) and latent self-enrollment authority — a bridge
+  delegation and a ladder seed carried in its unlock record — so a fresh
+  browser holding nothing but the credential self-enrolls at login. The
+  credential's entropy bounds everything server-held that it alone decrypts;
+  the rotation ceremony is the remedy when it leaks. See "Session & auth
+  flow".
+- **Bridge delegation** — the pre-minted, narrowly scoped zcap carried
+  inside an unlock or recovery record beside the account pointer: a
+  PUT-on-`did.jsonl` capability (plus companion-log access where that
+  applies) that is a credential's only bridge into the zcap profile. The
+  narrow scope is what keeps credential use loud: the only thing the bridge
+  can do is extend the world-readable log. Re-minted by the revocation
+  cascade and refreshed near expiry by the credential's own login.
+- **Ladder (update-key ladder)** — the chain of did:webvh update keys
+  derived from a standing credential's random ladder seed. Each rung is
+  committed ahead of use as a hash in `nextKeyHashes` (the method's
+  prerotation), and a rung reveals itself exactly when the credential
+  self-enrolls — a reveal-and-commit log entry signed by the current rung.
+  It is how a credential extends the log with no durable client key in
+  hand. The **ladder VM** (design stage, not yet implemented) is a
+  document-visible verification method derived from the ladder that anchors
+  an account while it has zero enrolled clients; its authority breadth is
+  an open design question.
+- **Roster** — three related uses. The **enrolled-client roster** is the
+  did:webvh document itself (each client's verification methods). The
+  **user key wrap-set roster** (`key-map/user-key.jsonl`) is the
+  log-governed record whose current epoch IS the current user key, wrapped
+  once per enrolled client's key-agreement key. A **key-epoch roster** is
+  the per-collection recipient set on an encrypted collection's
+  `encryption` descriptor. All three deliver key material or membership;
+  none is a source of authority on its own (the document is verified
+  independently, and wraps are minted only against log-verified keys).
+- **Loudness** — the design property that any exercise of
+  credential-derived authority must first extend a hash-chained, auditable
+  log (the account log, or the companion log) before it can read or grant
+  anything. The security stance it enables is detect-and-remediate rather
+  than prevent: takeover with a phished credential is visible in the log
+  and remediable by rotation, not prevented by a second-device gate. A
+  mechanism "fails loudness" when it would let a credential exercise
+  authority with no world-visible record.
+- **Companion** (design stage, not yet implemented) — the transient-session
+  counterpart of an enrolled client for the public-computer posture: a
+  did:webvh whose log lives in a capability-gated sibling collection of the
+  account Space, recording per-visit transient verification methods in
+  GC'd **generations** instead of permanent account-log entries. Transient
+  keys invoke as `<companionDid>#<vm>`; the companion never appears in the
+  account document.
+- **Generation delegation** (design stage, not yet implemented) — the one
+  Space-scoped zcap per companion generation, delegated to the companion
+  DID by the durable client that mints the generation (or by the ladder VM
+  while the account has no durable client). Transient keys invoke under it,
+  and an App Connect grant from a transient session chains one deeper
+  (root, generation delegation, app). Its TTL is matched to the
+  generation's GC cycle.
 - **CapabilityAgent** — from `@interop/webkms-client`. Wraps the Ed25519
   key pair derived from the passphrase and exposes `getSigner()`.
 - **ZcapClient** — from `@interop/ezcap`. Wraps the session's root-key signer
@@ -1472,9 +1539,8 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   `@interop/webkms-client`; provisioned at login by `src/lib/kms.ts`.
 - **Vault KAK** — the X25519 key-agreement key that encrypts/decrypts the
   EDV envelopes: the user key's (formerly PUK's) key-agreement key, recovered
-  at login from the local client-key record with the unlock-derived key
-  (legacy accounts minted before the user key fall back to the seed-derived
-  twin), then checked against the user key wrap-set roster
+  at login from the local client-key record with the unlock-derived key,
+  then checked against the user key wrap-set roster
   (`key-map/user-key.jsonl`), which confirms the cached copy current or
   delivers a rotated one. Never replicated in unwrapped form
   and never held by the KMS; it is present for the life of every session.
