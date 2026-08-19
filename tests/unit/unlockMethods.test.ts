@@ -94,9 +94,11 @@ import {
   getUnlockMethods,
   managementZcapClient,
   putUnlockMethods,
+  refreshStandingDelegationFields,
   revokeUnlockMethod,
   revokeUnlockMethodByCeremony,
   rewrapUnlockMethodsRecord,
+  upsertPassphraseUnlockMethod,
   type PasskeyUnlockMethod,
   type PassphraseUnlockMethod,
   type UnlockMethodsRecord
@@ -517,6 +519,72 @@ describe('revokeUnlockMethod', () => {
     ).resolves.toBeNull()
     const after = await getUnlockMethods({ session, idb })
     expect(after!.methods).toHaveLength(0)
+  })
+})
+
+describe('the standing delegation scalar pairs (FW-194)', () => {
+  it('carries the delegatedClients pair forward through a backfill upsert', async () => {
+    const base: UnlockMethodsRecord = {
+      version: 1,
+      userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+      methods: [
+        {
+          type: 'passphrase',
+          createdAt: '2026-08-19T00:00:00.000Z',
+          unlockSpaceId: 'unlock-space-1',
+          delegationKeyId: 'did:key:zBridge#zBridge',
+          delegationExpires: '2027-08-19T00:00:00.000Z',
+          delegatedClientsKeyId: 'did:key:zSibling#zSibling',
+          delegatedClientsExpires: '2027-08-19T00:00:00.000Z'
+        } as PassphraseUnlockMethod
+      ]
+    }
+    // A backfill (no fresh standing fields) must not erase the sibling pair.
+    const updated = upsertPassphraseUnlockMethod({
+      record: base,
+      unlockSpaceId: 'unlock-space-1'
+    })
+    const entry = updated.methods[0] as PassphraseUnlockMethod
+    expect(entry.delegatedClientsKeyId).toBe('did:key:zSibling#zSibling')
+    expect(entry.delegatedClientsExpires).toBe('2027-08-19T00:00:00.000Z')
+  })
+
+  it('refreshStandingDelegationFields records both fresh pairs', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession()
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-08-19T00:00:00.000Z',
+            unlockSpaceId: 'unlock-space-1',
+            delegationKeyId: 'did:key:zOld#zOld',
+            delegatedClientsKeyId: 'did:key:zOldSibling#zOldSibling'
+          } as PassphraseUnlockMethod
+        ]
+      },
+      idb
+    })
+    await refreshStandingDelegationFields({
+      session,
+      unlockSpaceId: 'unlock-space-1',
+      delegationKeyId: 'did:key:zFresh#zFresh',
+      delegationExpires: '2027-08-19T00:00:00.000Z',
+      delegatedClientsKeyId: 'did:key:zFreshSibling#zFreshSibling',
+      delegatedClientsExpires: '2027-08-19T01:00:00.000Z',
+      idb
+    })
+    const record = await getUnlockMethods({ session, idb })
+    const entry = record!.methods[0] as PassphraseUnlockMethod
+    expect(entry.delegationKeyId).toBe('did:key:zFresh#zFresh')
+    expect(entry.delegatedClientsKeyId).toBe(
+      'did:key:zFreshSibling#zFreshSibling'
+    )
+    expect(entry.delegatedClientsExpires).toBe('2027-08-19T01:00:00.000Z')
   })
 })
 

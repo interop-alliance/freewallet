@@ -25,6 +25,19 @@
   migrated in place: re-provision to adopt the standing posture (the plain
   record keeps logging in via the connect ceremony).
 
+- The unlock record's `delegatedClients` member and registry pair. A standing
+  credential's unlock record can now carry a second sealed member beside the
+  bridge: a pre-minted GET+PUT delegation over the auxiliary companion
+  Space's items subtree, additive within record version 2 and absent on
+  recovery codes. The bind ceremony mints it when the account document
+  points at a companion generation (the auxiliary Space id is read off the
+  delegated-clients service entry); the unlock-methods registry tracks its
+  staleness as a second scalar pair (`delegatedClientsKeyId` /
+  `delegatedClientsExpires`); and the delegation refreshes atomically beside
+  the bridge -- in the revocation cascade's re-mint pass and in the standing
+  credential's own login-time expiry refresh, each resealing both members
+  with one registry rewrite.
+
 - Unlock-credential rotation ceremony. Changing the passphrase and removing
   a passkey now retire the old credential for real instead of only
   rebinding the unlock record: its document posture (keyAgreement entry and
@@ -154,6 +167,13 @@
 
 ### Fixed
 
+- The self-enrollment log store's delegated `did.jsonl` PUT now maps a
+  failed precondition (HTTP 412) to the conditional-publish conflict the
+  ceremonies rebase on: the raw signed request applies no error mapping, so
+  a lost compare-and-swap race previously surfaced as a bare HTTP error
+  instead of re-running on the new head. Its log fetch is also built with
+  the was-client paths helpers, so a sub-path deployment fetches the
+  resource the bridge delegation's target names.
 - The revocation cascade's recovery-delegation re-mint now actually
   re-wraps the unlock records: the record wrap path seals through an
   encrypt-only cipher built from the recipient's public half alone, where

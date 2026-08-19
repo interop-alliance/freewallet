@@ -192,9 +192,14 @@ export interface KeyringFetchResult extends KeyringRecordContents {
   // standing layout (absent on a plain keyring record -- the pre-promotion or
   // no-WAS reduced path): the pre-minted PUT-on-`did.jsonl` bridge delegation
   // and the update-key ladder seed, both credential-authenticated by the
-  // record's binding MAC. What a fresh browser self-enrolls with. In-memory
-  // only.
-  standing?: { delegation: IZcap; ladderSeed?: Uint8Array }
+  // record's binding MAC, plus the optional companion-Space sibling
+  // delegation (`delegatedClients`, outside the MAC). What a fresh browser
+  // self-enrolls with. In-memory only.
+  standing?: {
+    delegation: IZcap
+    delegatedClients?: IZcap
+    ladderSeed?: Uint8Array
+  }
   // The credential's own client identity, derived beside the unlock identity
   // from the same unlock seed: the roster wrap target a self-enrollment
   // unwraps the user key with. Set on every real fetch (cheap HKDF
@@ -210,11 +215,16 @@ export interface KeyringFetchResult extends KeyringRecordContents {
     controller: string
   }) => Promise<(changes: PersistableClientKeys) => Promise<void>>
   // Present beside `standing`: re-wraps and re-PUTs this unlock record with a
-  // freshly minted bridge delegation, restating everything else verbatim
+  // freshly minted bridge delegation (and, when supplied, a fresh
+  // companion-Space sibling; an existing sibling is restated verbatim
+  // otherwise), restating everything else verbatim
   // (the ladder seed included) -- the login-time expiry refresh of the
-  // credential's own bridge, run when the standing delegation is expired or
+  // credential's own delegations, run when one is expired or
   // inside the renewal window. In-memory only.
-  rebindStandingRecord?: (options: { delegation: IZcap }) => Promise<void>
+  rebindStandingRecord?: (options: {
+    delegation: IZcap
+    delegatedClients?: IZcap
+  }) => Promise<void>
 }
 
 /**
@@ -633,7 +643,11 @@ function keyringUnwrapError(err: unknown): Error {
  */
 interface UnwrappedStoredRecord {
   found: KeyringRecordContents
-  standing?: { delegation: IZcap; ladderSeed?: Uint8Array }
+  standing?: {
+    delegation: IZcap
+    delegatedClients?: IZcap
+    ladderSeed?: Uint8Array
+  }
   proofState: UnlockRecordProofState
 }
 
@@ -680,6 +694,9 @@ async function unwrapStoredKeyringRecord({
       },
       standing: {
         delegation: contents.delegation,
+        ...(contents.delegatedClients
+          ? { delegatedClients: contents.delegatedClients }
+          : {}),
         ...(contents.ladderSeed ? { ladderSeed: contents.ladderSeed } : {})
       },
       proofState
@@ -1098,18 +1115,25 @@ async function buildFetchResult({
     ...(standing
       ? {
           standing,
-          rebindStandingRecord: async ({ delegation }) => {
+          rebindStandingRecord: async ({ delegation, delegatedClients }) => {
             const createdAt = nextRecordCreatedAt({
               floors: [
                 found.createdAt,
                 await loadKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
               ]
             })
+            // A fresh sibling replaces the stored one; absent a fresh one,
+            // the record's own sibling is restated verbatim.
+            const carriedDelegatedClients =
+              delegatedClients ?? standing.delegatedClients
             const record = await wrapUnlockRecord({
               controller: found.controller,
               email: found.email,
               pointer: found.pointer!,
               delegation,
+              ...(carriedDelegatedClients
+                ? { delegatedClients: carriedDelegatedClients }
+                : {}),
               ...(standing.ladderSeed
                 ? { ladderSeed: standing.ladderSeed }
                 : {}),
@@ -1203,6 +1227,9 @@ async function buildFetchResult({
  *   layout -- the credential can self-enroll a fresh browser -- instead of as
  *   a plain pointer record. Requires `pointer` (unlock records exist only on
  *   WAS deployments).
+ * @param [options.delegatedClients] {IZcap}   the pre-minted companion-Space
+ *   sibling delegation (GET+PUT over the auxiliary Space's items subtree),
+ *   sealed into the standing record beside the bridge
  * @param [options.ladderSeed] {Uint8Array}   the credential's 32-byte
  *   update-key ladder seed, sealed into the standing record beside the bridge
  * @param [options.idb] {IDBFactory}
@@ -1222,6 +1249,7 @@ export async function bindUnlockSecret({
   pointer,
   delegateManagementTo,
   delegation,
+  delegatedClients,
   ladderSeed,
   idb,
   credential: derived
@@ -1236,6 +1264,7 @@ export async function bindUnlockSecret({
   pointer?: AccountPointer
   delegateManagementTo?: string
   delegation?: IZcap
+  delegatedClients?: IZcap
   ladderSeed?: Uint8Array
   idb?: IDBFactory
   credential?: UnlockCredential
@@ -1266,6 +1295,7 @@ export async function bindUnlockSecret({
           email,
           pointer,
           delegation,
+          ...(delegatedClients ? { delegatedClients } : {}),
           ...(ladderSeed ? { ladderSeed } : {}),
           keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
           signer: unlock.recordSigner,
@@ -1359,6 +1389,8 @@ export async function bindUnlockSecret({
  *   delegate the unlock Space management zcap to (see `bindUnlockSecret`)
  * @param [options.delegation] {IZcap}   the bridge delegation for a standing
  *   bind (see `bindUnlockSecret`)
+ * @param [options.delegatedClients] {IZcap}   the companion-Space sibling
+ *   delegation for a standing bind
  * @param [options.ladderSeed] {Uint8Array}   the update-key ladder seed for a
  *   standing bind
  * @param [options.idb] {IDBFactory}
@@ -1378,6 +1410,7 @@ export async function bindPassphrase({
   pointer,
   delegateManagementTo,
   delegation,
+  delegatedClients,
   ladderSeed,
   idb,
   kdf = KEYRING_KDF,
@@ -1392,6 +1425,7 @@ export async function bindPassphrase({
   pointer?: AccountPointer
   delegateManagementTo?: string
   delegation?: IZcap
+  delegatedClients?: IZcap
   ladderSeed?: Uint8Array
   idb?: IDBFactory
   kdf?: UnlockKdf
@@ -1414,6 +1448,7 @@ export async function bindPassphrase({
     pointer,
     delegateManagementTo,
     delegation,
+    delegatedClients,
     ladderSeed,
     idb,
     ...(credential ? { credential } : {})
@@ -1722,6 +1757,8 @@ export async function deleteKeyring({
  *   it to mint the bridge delegation, so the rebind must not re-stretch)
  * @param [options.delegation] {IZcap}   the new passphrase's bridge
  *   delegation, for a standing rebind (see `bindUnlockSecret`)
+ * @param [options.delegatedClients] {IZcap}   the new passphrase's
+ *   companion-Space sibling delegation, for a standing rebind
  * @param [options.ladderSeed] {Uint8Array}   the new passphrase's update-key
  *   ladder seed, for a standing rebind
  * @param [options.idb] {IDBFactory}
@@ -1738,6 +1775,7 @@ export async function changePassphrase({
   webvhUpdateKeys,
   newCredential,
   delegation,
+  delegatedClients,
   ladderSeed,
   idb,
   kdf = KEYRING_KDF
@@ -1750,6 +1788,7 @@ export async function changePassphrase({
   webvhUpdateKeys?: ClientWebvhUpdateKeys
   newCredential?: UnlockCredential
   delegation?: IZcap
+  delegatedClients?: IZcap
   ladderSeed?: Uint8Array
   idb?: IDBFactory
   kdf?: UnlockKdf
@@ -1808,6 +1847,7 @@ export async function changePassphrase({
       controller
     }),
     delegation,
+    delegatedClients,
     ladderSeed,
     idb,
     kdf,

@@ -16,20 +16,27 @@
  *    offline one) -- and the hash of ladder rung 0 in `nextKeyHashes`.
  * 3. The authorization bridge: a pre-minted PUT-on-`did.jsonl` delegation to
  *    the credential-derived signing DID, sealed into the unlock record beside
- *    the freshly minted update-key ladder seed.
+ *    the freshly minted update-key ladder seed -- and, when the account
+ *    document already points at a companion generation, the companion-Space
+ *    sibling delegation (GET+PUT over the auxiliary Space's items subtree,
+ *    to the same signing DID). An account with no pointed generation has no
+ *    auxiliary Space id to target yet; the record then binds without a
+ *    sibling and a later re-mint adds one once the pointer exists.
  * 4. The re-bind: the unlock record is rewritten in the standing layout
- *    (`wrapUnlockRecord` -- shell, bridge, ladder, binding MAC), superseding
- *    the plain pointer record of the pre-promotion bind.
+ *    (`wrapUnlockRecord` -- shell, bridge, sibling, ladder, binding MAC),
+ *    superseding the plain pointer record of the pre-promotion bind.
  *
  * The caller records the returned standing fields in the unlock-methods
  * registry entry, which is what lets the revocation cascade re-mint the
- * bridge without the credential and the login health check watch its expiry.
+ * delegations without the credential and the login health check watch their
+ * expiry.
  *
  * The delegated log store a self-enrolling browser writes through
  * (`unlockLogStore`) lives here too, shared with the recovery continuation's.
  */
 import type { IZcap } from '@interop/data-integrity-core'
-import { WasClient } from '@interop/was-client'
+import { PreconditionFailedError, WasClient } from '@interop/was-client'
+import { resourcePath, toUrl } from '@interop/was-client/paths'
 import {
   generateLadderSeed,
   ladderRung,
@@ -38,7 +45,12 @@ import {
   type UnlockLogStore
 } from '@interop/wallet-core/unlock'
 import type { ClientKeyRecord } from '@interop/wallet-core/keys'
-import { isWebvhDid } from '@interop/wallet-core/webvh'
+import {
+  companionDidParts,
+  delegatedClientsPointer,
+  isWebvhDid,
+  mintDelegatedClientsDelegation
+} from '@interop/wallet-core/webvh'
 import {
   delegateLogWrite,
   delegationProofKeyId
@@ -64,7 +76,10 @@ import {
   requireEnrolledClientContext
 } from '@/session/enrolledContext'
 import { sessionRosterStore } from '@/session/rosterStore'
-import { invalidateVerifiedLog } from '@/session/verifiedLog'
+import {
+  invalidateVerifiedLog,
+  verifiedAccountLog
+} from '@/session/verifiedLog'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
   emptyUnlockMethodsRegistry,
@@ -105,11 +120,14 @@ export function unlockLogStore({
   })
   return {
     async getIdResourceRaw({ resourceId }: { resourceId: string }) {
+      // Built with the paths helpers so a sub-path deployment fetches the
+      // resource the bridge delegation's target names (the root-anchored
+      // form was drift).
       const response = await fetch(
-        new URL(
-          `/space/${pointer.spaceId}/${ID_COLLECTION.id}/${resourceId}`,
-          pointer.host
-        )
+        toUrl({
+          serverUrl: pointer.host,
+          path: resourcePath(pointer.spaceId, ID_COLLECTION.id, resourceId)
+        })
       )
       if (response.status === 404) {
         return undefined
@@ -148,16 +166,28 @@ export function unlockLogStore({
       if (ifNoneMatch) {
         headers['if-none-match'] = '*'
       }
-      // A failed precondition (HTTP 412) surfaces from `was.request` as
-      // was-client's `PreconditionFailedError` -- the exact name the
-      // `WebvhIdStore` seam contract requires for the ceremony's rebase.
-      await was.request({
-        path: `/space/${pointer.spaceId}/${ID_COLLECTION.id}/${resourceId}`,
-        method: 'PUT',
-        headers,
-        body: new TextEncoder().encode(serialized),
-        capability: delegation
-      })
+      try {
+        await was.request({
+          path: resourcePath(pointer.spaceId, ID_COLLECTION.id, resourceId),
+          method: 'PUT',
+          headers,
+          body: new TextEncoder().encode(serialized),
+          capability: delegation
+        })
+      } catch (err) {
+        // `was.request` is the raw signed request and applies no error
+        // mapping, so a failed precondition surfaces as a bare HTTP 412;
+        // rethrow it under the `PreconditionFailedError` name the
+        // `WebvhIdStore` seam contract requires for the ceremony's rebase.
+        const status = (err as { status?: unknown })?.status
+        if (status === 412) {
+          throw new PreconditionFailedError(
+            `"${resourceId}" has moved on (stale precondition).`,
+            { status: 412, cause: err }
+          )
+        }
+        throw err
+      }
     }
   }
 }
@@ -263,12 +293,41 @@ export async function establishStandingUnlock({
   })
   invalidateVerifiedLog({ profile: session.profile })
 
-  // 3. The authorization bridge to the credential-derived signing DID.
+  // 3. The authorization bridge to the credential-derived signing DID --
+  // and, when the account document points at a companion generation, the
+  // companion-Space sibling delegation to the same DID. The auxiliary Space
+  // id is read off the document's delegated-clients service entry (the
+  // sibling delegation's target is the id's one carrier, so an account with
+  // no pointed generation binds without a sibling; a later re-mint adds one
+  // once the pointer exists). Best-effort: a sibling-less standing record
+  // still self-enrolls, it just cannot reach the companion log.
   const delegation = await delegateLogWrite({
     zcapClient,
     pointer,
     recoveryClientDid: standing.clientDid
   })
+  let delegatedClients: IZcap | undefined
+  try {
+    const { doc } = await verifiedAccountLog({
+      profile: session.profile,
+      pointer
+    })
+    const companionDid = delegatedClientsPointer({ doc })
+    if (companionDid) {
+      delegatedClients = await mintDelegatedClientsDelegation({
+        zcapClient,
+        wasServerUrl: pointer.host,
+        companionSpaceId: companionDidParts({ did: companionDid }).spaceId,
+        controller: standing.clientDid
+      })
+    }
+  } catch (err) {
+    console.warn(
+      'Could not mint the companion-Space sibling delegation; the record ' +
+        'binds without one:',
+      err
+    )
+  }
 
   // 4. The re-bind: the unlock record in the standing layout.
   const bound = await bindUnlockSecret({
@@ -282,6 +341,7 @@ export async function establishStandingUnlock({
     pointer,
     delegateManagementTo: unlockManagementGrantee({ pointer, controller }),
     delegation,
+    ...(delegatedClients ? { delegatedClients } : {}),
     ladderSeed,
     credential,
     idb
@@ -289,6 +349,12 @@ export async function establishStandingUnlock({
 
   const delegationKeyId = delegationProofKeyId(delegation)
   const delegationExpires = (delegation as { expires?: string }).expires
+  const delegatedClientsKeyId = delegatedClients
+    ? delegationProofKeyId(delegatedClients)
+    : undefined
+  const delegatedClientsExpires = delegatedClients
+    ? (delegatedClients as { expires?: string }).expires
+    : undefined
   return {
     unlockSpaceId: bound.unlockSpaceId,
     manageCapability: bound.manageCapability,
@@ -300,6 +366,8 @@ export async function establishStandingUnlock({
       unlockClientDid: standing.clientDid,
       ...(delegationKeyId ? { delegationKeyId } : {}),
       ...(delegationExpires ? { delegationExpires } : {}),
+      ...(delegatedClientsKeyId ? { delegatedClientsKeyId } : {}),
+      ...(delegatedClientsExpires ? { delegatedClientsExpires } : {}),
       ...(bound.unlockKeyAgreementKeyId
         ? { unlockKeyAgreementKeyId: bound.unlockKeyAgreementKeyId }
         : {}),

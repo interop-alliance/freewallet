@@ -2347,6 +2347,17 @@ describe('standing unlock records (FW-154)', () => {
     proof: { verificationMethod: 'did:key:z6MkSignerForTests#z6MkSigner' }
   } as unknown as IDelegatedZcap
 
+  const DELEGATED_CLIENTS = {
+    '@context': 'https://w3id.org/zcap/v1',
+    id: 'urn:uuid:standing-companion-delegation',
+    controller: 'did:key:z6MkStandingClientForTests',
+    invocationTarget: 'https://was.example.test/space/companion-123/',
+    allowedAction: ['GET', 'PUT'],
+    expires: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+    parentCapability: 'urn:zcap:root:y',
+    proof: { verificationMethod: 'did:key:z6MkSignerForTests#z6MkSigner' }
+  } as unknown as IDelegatedZcap
+
   function ladderSeed(): Uint8Array {
     return crypto.getRandomValues(new Uint8Array(32))
   }
@@ -2376,11 +2387,35 @@ describe('standing unlock records (FW-154)', () => {
     expect(found!.pointer).toEqual(POINTER)
     expect(found!.standing).toBeDefined()
     expect(found!.standing!.delegation).toEqual(DELEGATION)
+    // A sibling-less bind stays sibling-less (tolerant absence).
+    expect(found!.standing!.delegatedClients).toBeUndefined()
     expect(found!.standing!.ladderSeed).toEqual(seed)
     expect(found!.standingClient).toBeDefined()
     expect(found!.clientKeys).toBeDefined()
     expect(found!.enrollClientKeys).toBeUndefined()
     expect(found!.rebindStandingRecord).toBeDefined()
+  })
+
+  it('round-trips the companion-Space sibling delegation (FW-194)', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'standing sibling round trip',
+      pointer: POINTER,
+      delegation: DELEGATION,
+      delegatedClients: DELEGATED_CLIENTS,
+      ladderSeed: ladderSeed(),
+      idb,
+      kdf: KDF
+    })
+    const found = await fetchKeyring({
+      passphrase: 'standing sibling round trip',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.standing!.delegation).toEqual(DELEGATION)
+    expect(found!.standing!.delegatedClients).toEqual(DELEGATED_CLIENTS)
   })
 
   it('exposes enrollClientKeys on a fresh browser, and persists through it', async () => {

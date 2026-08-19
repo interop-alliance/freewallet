@@ -1303,6 +1303,8 @@ export async function remintRecoveryDelegations({
       manageCapability: method.manageCapability,
       delegationKeyId: method.delegationKeyId,
       delegationExpires: method.delegationExpires,
+      delegatedClientsKeyId: method.delegatedClientsKeyId,
+      delegatedClientsExpires: method.delegatedClientsExpires,
       recoveryClientDid: method.unlockClientDid,
       unlockKeyAgreementKeyId: method.unlockKeyAgreementKeyId,
       unlockKeyAgreementKeyMultibase: method.unlockKeyAgreementKeyMultibase,
@@ -1347,6 +1349,8 @@ export async function remintRecoveryDelegations({
         unlockSpaceId: entry.unlockSpaceId,
         delegationKeyId: entry.delegationKeyId,
         delegationExpires: entry.delegationExpires,
+        delegatedClientsKeyId: entry.delegatedClientsKeyId,
+        delegatedClientsExpires: entry.delegatedClientsExpires,
         idb
       })
     }

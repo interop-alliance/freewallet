@@ -22,7 +22,9 @@ import { KMS_SERVER_URL, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
 import { assertPasskeyPrf } from '@/lib/passkey'
 import {
+  delegatedClientsDelegationSpaceId,
   isWebvhDid,
+  mintDelegatedClientsDelegation,
   webvhCapabilityAgent,
   webvhZcapClient,
   type ClientWebvhUpdateKeys,
@@ -777,22 +779,28 @@ async function sessionFromKeyringHit({
     manageCapability: found.manageCapability
   }
 
-  // The bridge-expiry self-refresh: a standing credential's own login
-  // re-mints its bridge delegation when it is expired or inside the renewal
+  // The delegation-expiry self-refresh: a standing credential's own login
+  // re-mints its bridge delegation -- and the companion-Space sibling, where
+  // the record carries one -- when either is expired or inside the renewal
   // window (the same annual clock and shared predicate as the recovery
-  // delegations), so the bridge never lapses silently between revocations.
-  // Best-effort, behind provisioning.
+  // delegations), so neither lapses silently between revocations. One pass
+  // reseals both. Best-effort, behind provisioning.
   const rebindStandingRecord = found.rebindStandingRecord
   const standingDelegation = found.standing?.delegation
+  const standingDelegatedClients = found.standing?.delegatedClients
   const standingClientDid = found.standingClient?.clientDid
   if (
     session.storageReady &&
     rebindStandingRecord &&
     standingDelegation &&
     standingClientDid &&
-    zcapExpiring({
+    (zcapExpiring({
       expires: (standingDelegation as { expires?: string }).expires
-    })
+    }) ||
+      (!!standingDelegatedClients &&
+        zcapExpiring({
+          expires: (standingDelegatedClients as { expires?: string }).expires
+        })))
   ) {
     const unlockSpaceId = found.unlockSpaceId
     session.storageReady = session.storageReady.then(async () => {
@@ -806,17 +814,44 @@ async function sessionFromKeyringHit({
           pointer,
           recoveryClientDid: standingClientDid
         })
-        await rebindStandingRecord({ delegation })
+        // The sibling reseals in the same pass; its target auxiliary Space
+        // id rides in the old delegation (the id's one carrier).
+        let delegatedClients
+        if (standingDelegatedClients) {
+          const companionSpaceId = delegatedClientsDelegationSpaceId({
+            delegation: standingDelegatedClients
+          })
+          if (companionSpaceId) {
+            delegatedClients = await mintDelegatedClientsDelegation({
+              zcapClient: session.profile.zcapClient,
+              wasServerUrl: pointer.host,
+              companionSpaceId,
+              controller: standingClientDid
+            })
+          }
+        }
+        await rebindStandingRecord({
+          delegation,
+          ...(delegatedClients ? { delegatedClients } : {})
+        })
         await refreshStandingDelegationFields({
           session,
           unlockSpaceId,
           delegationKeyId: delegationProofKeyId(delegation),
           delegationExpires: (delegation as { expires?: string }).expires,
+          ...(delegatedClients
+            ? {
+                delegatedClientsKeyId: delegationProofKeyId(delegatedClients),
+                delegatedClientsExpires: (
+                  delegatedClients as { expires?: string }
+                ).expires
+              }
+            : {}),
           idb
         })
       } catch (err) {
         console.warn(
-          'Could not refresh the expiring standing bridge delegation; the ' +
+          'Could not refresh the expiring standing delegations; the ' +
             'next login retries:',
           err
         )

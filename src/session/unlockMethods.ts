@@ -89,7 +89,10 @@ import {
  * and unlock-KAK members the revocation cascade's re-mint machinery shares
  * with the recovery entries -- `unlockClientDid` being the neutral twin of
  * `recoveryClientDid` (the credential-derived signing DID a fresh delegation
- * is made to). Public halves only; the secret is never stored anywhere.
+ * is made to). The companion-Space sibling delegation's staleness rides as a
+ * second scalar pair (`delegatedClientsKeyId` / `delegatedClientsExpires`),
+ * absent while the record carries no sibling and always absent on recovery
+ * codes. Public halves only; the secret is never stored anywhere.
  */
 export interface StandingUnlockFields {
   rosterKid?: string
@@ -97,6 +100,8 @@ export interface StandingUnlockFields {
   updateKeyMultibase?: string
   delegationKeyId?: string
   delegationExpires?: string
+  delegatedClientsKeyId?: string
+  delegatedClientsExpires?: string
   unlockClientDid?: string
   unlockKeyAgreementKeyId?: string
   unlockKeyAgreementKeyMultibase?: string
@@ -777,6 +782,8 @@ export function upsertPassphraseUnlockMethod({
           updateKeyMultibase: existing.updateKeyMultibase,
           delegationKeyId: existing.delegationKeyId,
           delegationExpires: existing.delegationExpires,
+          delegatedClientsKeyId: existing.delegatedClientsKeyId,
+          delegatedClientsExpires: existing.delegatedClientsExpires,
           unlockClientDid: existing.unlockClientDid,
           unlockKeyAgreementKeyId: existing.unlockKeyAgreementKeyId,
           unlockKeyAgreementKeyMultibase:
@@ -923,8 +930,9 @@ export async function backfillPassphraseUnlockMethod({
 }
 
 /**
- * Records freshly re-minted bridge-delegation members (key id, expiry) --
- * and, after a self-enrollment climbed the update-key ladder, the current
+ * Records freshly re-minted delegation members -- the bridge pair, the
+ * companion-Space sibling pair where one was resealed -- and, after a
+ * self-enrollment climbed the update-key ladder, the current
  * rung's multibase -- on the passphrase or passkey entry matching an unlock
  * Space. The registry half of the login-time bridge-expiry self-refresh and
  * the post-self-enroll rung refresh. Best-effort semantics are the caller's
@@ -936,6 +944,9 @@ export async function backfillPassphraseUnlockMethod({
  * @param options.unlockSpaceId {string}   the credential's unlock Space
  * @param [options.delegationKeyId] {string}
  * @param [options.delegationExpires] {string}
+ * @param [options.delegatedClientsKeyId] {string}   the companion-Space
+ *   sibling delegation's fresh signer
+ * @param [options.delegatedClientsExpires] {string}
  * @param [options.updateKeyMultibase] {string}   the ladder's current
  *   committed rung
  * @param [options.idb] {IDBFactory}
@@ -946,6 +957,8 @@ export async function refreshStandingDelegationFields({
   unlockSpaceId,
   delegationKeyId,
   delegationExpires,
+  delegatedClientsKeyId,
+  delegatedClientsExpires,
   updateKeyMultibase,
   idb
 }: {
@@ -953,6 +966,8 @@ export async function refreshStandingDelegationFields({
   unlockSpaceId: string
   delegationKeyId?: string
   delegationExpires?: string
+  delegatedClientsKeyId?: string
+  delegatedClientsExpires?: string
   updateKeyMultibase?: string
   idb?: IDBFactory
 }): Promise<void> {
@@ -976,6 +991,8 @@ export async function refreshStandingDelegationFields({
             ...stored,
             ...(delegationKeyId ? { delegationKeyId } : {}),
             ...(delegationExpires ? { delegationExpires } : {}),
+            ...(delegatedClientsKeyId ? { delegatedClientsKeyId } : {}),
+            ...(delegatedClientsExpires ? { delegatedClientsExpires } : {}),
             ...(updateKeyMultibase ? { updateKeyMultibase } : {})
           }
         : method
