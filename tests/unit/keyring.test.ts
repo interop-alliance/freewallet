@@ -58,6 +58,22 @@ vi.mock('@/app.config', async importOriginal => ({
   }
 }))
 
+/**
+ * The enrolled-client signing keys the mocked `currentAccountSigningKeys`
+ * answers with, for the pending-proof settlement paths (a cascade-re-minted
+ * record signed by an account key rather than the unlock key).
+ */
+const clientsState = vi.hoisted(() => ({
+  signingKeys: [] as string[]
+}))
+
+vi.mock('@interop/wallet-core/clients', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/wallet-core/clients')>()),
+  currentAccountSigningKeys: vi.fn(
+    async () => new Set(clientsState.signingKeys)
+  )
+}))
+
 vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keyring')>()),
   ensureUnlockSpace: vi.fn(async () => {}),
@@ -83,6 +99,7 @@ import {
   changePassphrase,
   deleteKeyring,
   fetchKeyring,
+  fetchTransientKeyring,
   KeyringRecordForgedError,
   KeyringRecordRolledBackError,
   KeyringRecordUnusableError,
@@ -102,6 +119,12 @@ import {
   type AccountPointer
 } from '@interop/wallet-core/keyring'
 import { mintUserKey } from '@interop/wallet-core/keys'
+import {
+  standingClientFromUnlockSeed,
+  wrapUnlockRecord
+} from '@interop/wallet-core/unlock'
+import { currentAccountSigningKeys } from '@interop/wallet-core/clients'
+import { memoryResourceLogPinStore } from '@interop/wallet-core/resourceLog'
 
 const KDF = {
   version: 1,
@@ -258,7 +281,13 @@ async function unlockFor(passphrase: string) {
     publicKeyMultibase: keyAgreementKey.publicKeyMultibase
   })
   const spaceId = deriveSpaceId(agent.id)
-  return { agent, keyAgreementKey, keyResolver, spaceId }
+  return {
+    agent,
+    keyAgreementKey,
+    keyResolver,
+    spaceId,
+    seed: new Uint8Array(bits)
+  }
 }
 
 /**
@@ -375,11 +404,13 @@ beforeEach(() => {
   wasState.url = 'https://was.example.test'
   wasState.spaces.clear()
   wasState.getError = undefined
+  clientsState.signingKeys = []
   vi.clearAllMocks()
 })
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.unstubAllGlobals()
   vi.clearAllMocks()
 })
 
@@ -2499,5 +2530,209 @@ describe('standing unlock records (FW-154)', () => {
     })
     const cap = manageCapability as unknown as { allowedAction: string[] }
     expect(cap.allowedAction).toEqual(['GET', 'PUT', 'DELETE'])
+  })
+})
+
+describe('fetchTransientKeyring (FW-215)', () => {
+  const DELEGATION = {
+    '@context': 'https://w3id.org/zcap/v1',
+    id: 'urn:uuid:transient-bridge-delegation',
+    controller: 'did:key:z6MkStandingClientForTests',
+    invocationTarget: 'https://was.example.test/space/space-123/id/did.jsonl',
+    allowedAction: ['PUT'],
+    expires: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+    parentCapability: 'urn:zcap:root:x',
+    proof: { verificationMethod: 'did:key:z6MkSignerForTests#z6MkSigner' }
+  } as unknown as IDelegatedZcap
+
+  /**
+   * A global `indexedDB` stand-in that records every database name opened, so
+   * a test can assert (via `databases()`, before and after) that the
+   * transient fetch never creates the `freewallet-session` database. Backed
+   * by the ordinary fake factory, so a slipped durable read would succeed --
+   * and be caught by the assertion -- rather than crash.
+   */
+  function trackingIdb(): IDBFactory & {
+    databases(): Promise<Array<{ name?: string; version?: number }>>
+  } {
+    const inner = createFakeIdb()
+    const names = new Set<string>()
+    return {
+      open(name: string, version?: number) {
+        names.add(name)
+        return inner.open(name, version)
+      },
+      async databases() {
+        return Array.from(names).map(name => ({ name, version: 1 }))
+      }
+    } as unknown as IDBFactory & {
+      databases(): Promise<Array<{ name?: string; version?: number }>>
+    }
+  }
+
+  it('resolves a standing record without creating the session database', async () => {
+    // Bind through another browser profile, so this one starts with nothing
+    // local -- the public-terminal posture.
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'transient standing fetch',
+      pointer: POINTER,
+      delegation: DELEGATION,
+      ladderSeed: crypto.getRandomValues(new Uint8Array(32)),
+      idb: createFakeIdb(),
+      kdf: KDF
+    })
+
+    const idb = trackingIdb()
+    vi.stubGlobal('indexedDB', idb)
+    expect(await idb.databases()).toEqual([])
+
+    const found = await fetchTransientKeyring({
+      secret: 'transient standing fetch',
+      kdf: KDF,
+      accountLogPinStore: memoryResourceLogPinStore()
+    })
+
+    expect(found).not.toBeNull()
+    expect(found!.controller).toBe(DATA_CONTROLLER)
+    expect(found!.pointer).toEqual(POINTER)
+    expect(found!.standing).toBeDefined()
+    expect(found!.standing!.delegation).toEqual(DELEGATION)
+    expect(found!.standingClient).toBeDefined()
+    // Nothing durable rides the result: no client keys, no persist or enroll
+    // closures, no management zcap.
+    expect(found).not.toHaveProperty('clientKeys')
+    expect(found).not.toHaveProperty('persistClientKeys')
+    expect(found).not.toHaveProperty('enrollClientKeys')
+    expect(found).not.toHaveProperty('rebindStandingRecord')
+    expect(found).not.toHaveProperty('manageCapability')
+    // And no IndexedDB database was created at any point.
+    expect(await idb.databases()).toEqual([])
+  })
+
+  it('returns null on a remote miss, still touching no database', async () => {
+    const idb = trackingIdb()
+    vi.stubGlobal('indexedDB', idb)
+
+    const found = await fetchTransientKeyring({
+      secret: 'transient unknown account',
+      kdf: KDF,
+      accountLogPinStore: memoryResourceLogPinStore()
+    })
+
+    expect(found).toBeNull()
+    expect(await idb.databases()).toEqual([])
+  })
+
+  it('requires a configured WAS server (remote-only, no cache to serve)', async () => {
+    wasState.url = undefined
+    await expect(
+      fetchTransientKeyring({
+        secret: 'transient no was',
+        kdf: KDF,
+        accountLogPinStore: memoryResourceLogPinStore()
+      })
+    ).rejects.toThrow(TypeError)
+  })
+
+  it('rethrows a network error unchanged (no offline cache fallback)', async () => {
+    const networkError = new WasError('NetworkError when attempting to fetch', {
+      cause: new TypeError('NetworkError when attempting to fetch')
+    })
+    wasState.getError = networkError
+    await expect(
+      fetchTransientKeyring({
+        secret: 'transient offline',
+        kdf: KDF,
+        accountLogPinStore: memoryResourceLogPinStore()
+      })
+    ).rejects.toBe(networkError)
+  })
+
+  it('refuses a host-crafted record signed by a key the secret does not derive', async () => {
+    const { record, spaceId } = await craftRecord({
+      passphrase: 'transient forged record',
+      signAs: 'stranger',
+      plaintext: {
+        controller: DATA_CONTROLLER,
+        pointer: { ...POINTER, spaceId: 'attacker-space' },
+        createdAt: new Date().toISOString()
+      }
+    })
+    wasState.spaces.set(spaceId, record)
+
+    await expect(
+      fetchTransientKeyring({
+        secret: 'transient forged record',
+        kdf: KDF,
+        accountLogPinStore: memoryResourceLogPinStore()
+      })
+    ).rejects.toThrow(KeyringRecordForgedError)
+  })
+
+  it('settles a cascade-re-minted record under the caller-supplied pin store', async () => {
+    // A record signed by an enrolled client's account key rather than the
+    // unlock key (the revocation cascade's bridge re-mint): the pending proof
+    // must settle against the account document, with the account-log read
+    // riding exactly the pin store the caller supplied.
+    const passphrase = 'transient pending proof'
+    const { keyAgreementKey, spaceId, seed } = await unlockFor(passphrase)
+    const standing = await standingClientFromUnlockSeed({ unlockSeed: seed })
+    const strangerSigner = recordSignerFromAgent({
+      keyAgent: (await unlockFor(STRANGER_PASSPHRASE)).agent
+    })
+    const record = await wrapUnlockRecord({
+      controller: DATA_CONTROLLER,
+      pointer: POINTER,
+      delegation: DELEGATION,
+      keyAgreementKey: keyAgreementKey as unknown as IKeyAgreementKey,
+      signer: strangerSigner,
+      bindingMacKey: standing.bindingMacKey
+    })
+    wasState.spaces.set(spaceId, record)
+    clientsState.signingKeys = [strangerSigner.keyMultibase]
+
+    const accountLogPinStore = memoryResourceLogPinStore()
+    const found = await fetchTransientKeyring({
+      secret: passphrase,
+      kdf: KDF,
+      accountLogPinStore
+    })
+
+    expect(found!.pointer).toEqual(POINTER)
+    const settleArgs = vi.mocked(currentAccountSigningKeys).mock
+      .calls[0][0] as unknown as {
+      pointer: { did: string }
+      accountLogPinStore: unknown
+    }
+    expect(settleArgs.accountLogPinStore).toBe(accountLogPinStore)
+    expect(settleArgs.pointer.did).toBe(POINTER.did)
+  })
+
+  it('refuses a re-minted record no enrolled client accounts for', async () => {
+    const passphrase = 'transient unsettled proof'
+    const { keyAgreementKey, spaceId, seed } = await unlockFor(passphrase)
+    const standing = await standingClientFromUnlockSeed({ unlockSeed: seed })
+    const record = await wrapUnlockRecord({
+      controller: DATA_CONTROLLER,
+      pointer: POINTER,
+      delegation: DELEGATION,
+      keyAgreementKey: keyAgreementKey as unknown as IKeyAgreementKey,
+      signer: recordSignerFromAgent({
+        keyAgent: (await unlockFor(STRANGER_PASSPHRASE)).agent
+      }),
+      bindingMacKey: standing.bindingMacKey
+    })
+    wasState.spaces.set(spaceId, record)
+    clientsState.signingKeys = []
+
+    await expect(
+      fetchTransientKeyring({
+        secret: passphrase,
+        kdf: KDF,
+        accountLogPinStore: memoryResourceLogPinStore()
+      })
+    ).rejects.toThrow(KeyringRecordForgedError)
   })
 })

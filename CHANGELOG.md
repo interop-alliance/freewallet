@@ -4,6 +4,15 @@
 
 ### Added
 
+- A transient unlock-record fetch (`fetchTransientKeyring`) beside
+  `fetchKeyring`. Remote-only, it fetches the record, verifies the proof and
+  the account-binding MAC, and settles a pending proof against the account
+  log under a caller-supplied (in-memory) chain-head pin store, performing no
+  durable operation: no keyring cache, no freshness pin, no client-key
+  record, no management zcap. `settlePendingRecordProof` now takes its pin
+  store as a parameter, with the durable session-database store staying the
+  default for existing callers.
+
 - The session-persistence posture seam. Every posture-sensitive local write
   (the chain-head and roster-epoch pins, the unlock-methods registry cache,
   the passkey-safety notice, the descriptor/meta cache pair, the `writerId`

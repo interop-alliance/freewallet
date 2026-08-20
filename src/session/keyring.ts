@@ -111,6 +111,7 @@ import {
   type UnlockRecordProofState
 } from '@interop/wallet-core/unlock'
 import { currentAccountSigningKeys } from '@interop/wallet-core/clients'
+import type { ResourceLogPinStore } from '@interop/wallet-core/resourceLog'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import {
   unwrapRecordEnvelope,
@@ -731,18 +732,24 @@ async function unwrapStoredKeyringRecord({
  * @param options.found {KeyringRecordContents}   the unwrapped contents (the
  *   credential-authenticated pointer names the account to check against)
  * @param [options.idb] {IDBFactory}
+ * @param [options.accountLogPinStore] {ResourceLogPinStore}   the chain-head
+ *   pin store the account-log read rides; defaults to the durable
+ *   session-database store. The transient fetch supplies an in-memory one,
+ *   so the settlement stays free of durable state.
  * @returns {Promise<void>}
  */
 async function settlePendingRecordProof({
   record,
   proofState,
   found,
-  idb
+  idb,
+  accountLogPinStore = sessionLogPinStore({ idb })
 }: {
   record: unknown
   proofState: UnlockRecordProofState
   found: KeyringRecordContents
   idb?: IDBFactory
+  accountLogPinStore?: ResourceLogPinStore
 }): Promise<void> {
   if (proofState === 'verified') {
     return
@@ -761,7 +768,7 @@ async function settlePendingRecordProof({
         spaceId: pointer.spaceId,
         host: pointer.host
       },
-      accountLogPinStore: sessionLogPinStore({ idb })
+      accountLogPinStore
     })
     await verifyRecordProof({
       record,
@@ -1079,6 +1086,112 @@ export async function fetchKeyring({
     mintManageCapability,
     idb
   })
+}
+
+/**
+ * What `fetchTransientKeyring` returns on a hit: the record contents plus the
+ * derived unlock Space id, the standing-credential members when the record is
+ * in the standing layout, and the credential's own client identity. Nothing
+ * durable rides along -- no local client keys, no persist or enroll closures,
+ * no management zcap: a transient session holds none of them.
+ */
+export interface TransientKeyringFetchResult extends KeyringRecordContents {
+  unlockSpaceId: string
+  standing?: {
+    delegation: IZcap
+    delegatedClients?: IZcap
+    ladderSeed?: Uint8Array
+  }
+  standingClient: StandingUnlockClient
+}
+
+/**
+ * The transient unlock-record fetch: `fetchKeyring`'s public-terminal
+ * sibling, which performs no durable operation at all. Remote-only (the
+ * transient posture presupposes a WAS server -- with none configured it
+ * throws), it fetches the record, verifies its proof and, for a standing
+ * record, the credential-authenticated account binding, and settles a
+ * pending proof (a cascade-re-minted record) against the account log under
+ * the CALLER-SUPPLIED chain-head pin store -- an in-memory one for a
+ * transient login, so the account-log read leaves no trace either.
+ *
+ * What it deliberately does not do, per the durable `fetchKeyring` contract
+ * it parallels: no keyring cache read or write (so no offline fallback -- a
+ * network error rethrows unchanged, could-not-check), no freshness pin read,
+ * write, or delete (per-visit trust-on-first-use is the posture's stated
+ * bound: replay protection is what durable state buys, and a transient visit
+ * holds none), no client-key record read (a transient session never holds
+ * one), and no management zcap mint. The refusal classes are otherwise
+ * `fetchKeyring`'s: a miss is `null`, a forged or tampered record is
+ * `KeyringRecordForgedError`, a corrupt one `KeyringRecordUnusableError`.
+ *
+ * @param options {object}
+ * @param [options.secret] {string | Uint8Array}   the unlock secret
+ * @param [options.kdf] {UnlockKdf}   the unlock method's KDF parameters
+ * @param options.accountLogPinStore {ResourceLogPinStore}   the chain-head
+ *   pin store a pending-proof settlement's account-log read rides --
+ *   caller-supplied, in-memory for a transient login
+ * @param [options.credential] {UnlockCredential}   an already-derived unlock
+ *   credential for the same secret, so a flow that unlocks more than once
+ *   runs the KDF a single time
+ * @returns {Promise<TransientKeyringFetchResult | null>}
+ */
+export async function fetchTransientKeyring({
+  secret,
+  kdf = KEYRING_KDF,
+  accountLogPinStore,
+  credential: derived
+}: {
+  secret?: string | Uint8Array
+  kdf?: UnlockKdf
+  accountLogPinStore: ResourceLogPinStore
+  credential?: UnlockCredential
+}): Promise<TransientKeyringFetchResult | null> {
+  if (!WAS_SERVER_URL) {
+    throw new TypeError(
+      'The transient unlock fetch requires a configured WAS server.'
+    )
+  }
+  if (!derived && secret === undefined) {
+    throw new TypeError('An unlock secret is required.')
+  }
+  const credential =
+    derived ??
+    (await deriveUnlockCredential({
+      secret: secret as string | Uint8Array,
+      kdf
+    }))
+  const { unlock, standing: standingClient } = credential
+
+  // No cache fallback on a network error, and no cache or pin cleanup on a
+  // miss: a transient visit holds no durable state to fall back on or clear.
+  const record = await getUnlockKeyring({
+    storageServerUrl: WAS_SERVER_URL,
+    zcapClient: unlock.zcapClient,
+    spaceId: unlock.spaceId
+  })
+  if (!record) {
+    return null
+  }
+
+  let unwrapped: UnwrappedStoredRecord
+  try {
+    unwrapped = await unwrapStoredKeyringRecord({ record, credential })
+  } catch (err) {
+    throw keyringUnwrapError(err)
+  }
+  await settlePendingRecordProof({
+    record,
+    proofState: unwrapped.proofState,
+    found: unwrapped.found,
+    accountLogPinStore
+  })
+  return {
+    ...unwrapped.found,
+    unlockSpaceId: unlock.spaceId,
+    standingClient,
+    ...(unwrapped.standing ? { standing: unwrapped.standing } : {})
+  }
 }
 
 /**
