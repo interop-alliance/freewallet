@@ -355,12 +355,12 @@ export async function transientSessionFromKeyringHit({
   }
   const { companionDid, doc: companionDoc } = await enrollTransientClient({
     readAccountDocument,
-    storeForSegment: segment =>
+    storeForGenerationId: generationId =>
       refuseMissingGeneration(
         delegatedWebvhLogStore({
           host: pointer.host,
           spaceId: companionSpaceId,
-          collectionId: segment,
+          collectionId: generationId,
           delegation: delegatedClients,
           zcapClient: found.standingClient.agents.zcapClient
         })

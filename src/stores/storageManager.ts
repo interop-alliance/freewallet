@@ -121,6 +121,7 @@ import {
   addHistoryLogin as buildHistoryLogin,
   addHistoryAppRevoke as buildHistoryAppRevoke,
   addHistoryClientRevoked as buildHistoryClientRevoked,
+  addHistoryGenerationCollected as buildHistoryGenerationCollected,
   type WalletActivity
 } from '@interop/wallet-core/space'
 
@@ -2070,6 +2071,49 @@ export class StorageManager {
     await this.#store.addHistoryItem({
       resourceId,
       activity: build(resourceId)
+    })
+  }
+
+  /**
+   * Records the GenerationCollect activity -- companion GC's owner-side
+   * digest, written before the collected generation's delete. Unlike every
+   * other `addHistory*` method, the activity id is the generation id
+   * VERBATIM rather than a minted `uuidv7`: the deterministic payload id is
+   * what lets a torn re-run's second row collapse at read time, and readers
+   * must not assume activity ids are UUIDs.
+   *
+   * @param options {object}
+   * @param options.user {User}
+   * @param options.generationId {string}
+   * @param [options.firstEntry] {string}   the collected log's first entry
+   *   `versionTime`, verbatim
+   * @param [options.lastEntry] {string}   the collected log's last entry
+   *   `versionTime`, verbatim
+   * @param [options.entryCount] {number}   total log entries, genesis
+   *   included
+   */
+  async addHistoryGenerationCollected({
+    user,
+    generationId,
+    firstEntry,
+    lastEntry,
+    entryCount
+  }: {
+    user: User
+    generationId: string
+    firstEntry?: string
+    lastEntry?: string
+    entryCount?: number
+  }) {
+    await this.#store.addHistoryItem({
+      resourceId: generationId,
+      activity: buildHistoryGenerationCollected({
+        user,
+        generationId,
+        firstEntry,
+        lastEntry,
+        entryCount
+      })
     })
   }
 

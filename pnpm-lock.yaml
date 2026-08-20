@@ -63,8 +63,8 @@ importers:
         specifier: ^3.5.5
         version: 3.5.5
       '@interop/wallet-core':
-        specifier: ^0.48.0
-        version: 0.48.0(@interop/jsonld-signatures@11.8.5)
+        specifier: link:../wallet-core
+        version: link:../wallet-core
       '@interop/was-client':
         specifier: ^0.40.2
         version: 0.40.2(@interop/jsonld-signatures@11.8.5)
@@ -656,10 +656,6 @@ packages:
 
   '@interop/verifier-core@3.5.5':
     resolution: {integrity: sha512-PH84wCBCaIdB9yF2q4mDqsYyMckHcS97hPNK3D7CHT8IAcH2e4pogpFyJWOFA5FmwTEC4hQB+N2m7mEorQ+7Hw==}
-    engines: {node: '>=24.0'}
-
-  '@interop/wallet-core@0.48.0':
-    resolution: {integrity: sha512-mTRxWO9ldtt8WYyfkNHQ8DlD1/ZkN7ovXmEm+mGPi+tsZ6gGhAA2mmX9SJ/1Bna4W9UNqMD7kn9mZ7cJreyFRA==}
     engines: {node: '>=24.0'}
 
   '@interop/was-client@0.40.2':
@@ -1332,10 +1328,6 @@ packages:
 
   byoe-context@0.3.0:
     resolution: {integrity: sha512-rkC7G1C/kfO1KQ/B2j2vA9jTei56mZxO6aBdgKiiFTj+eEFAs+HRXFFyiwGA4V9klsItOijQOaCW+nc+j9oTSA==}
-    engines: {node: '>=24.0'}
-
-  byoe-context@0.5.0:
-    resolution: {integrity: sha512-x+yywG2WX53aRYd+wIQoP2snApn+zidMRQNJMdKj2PHBk2AaYHlAMi1Y+0xj4jvkRBtvABP283VM/KlivRGPIA==}
     engines: {node: '>=24.0'}
 
   bytes@3.0.0:
@@ -4032,29 +4024,6 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/wallet-core@0.48.0(@interop/jsonld-signatures@11.8.5)':
-    dependencies:
-      '@interop/data-integrity-core': 8.7.1
-      '@interop/data-integrity-proof': 3.4.5
-      '@interop/did-method-webvh': 5.5.0
-      '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.5)
-      '@interop/ed25519-verification-key': 8.0.4
-      '@interop/ezcap': 7.4.3
-      '@interop/security-document-loader': 10.0.4
-      '@interop/social-core': 0.8.1
-      '@interop/vc': 11.0.7
-      '@interop/was-client': 0.40.2(@interop/jsonld-signatures@11.8.5)
-      '@interop/webkms-client': 14.7.3
-      '@interop/x25519-key-agreement-key': 5.2.2
-      '@noble/ciphers': 2.3.0
-      '@noble/hashes': 2.3.0
-      '@scure/base': 2.3.0
-      byoe-context: 0.5.0
-    transitivePeerDependencies:
-      - '@interop/jsonld-signatures'
-      - expo-crypto
-      - react-native-get-random-values
-
   '@interop/was-client@0.40.2(@interop/jsonld-signatures@11.8.5)':
     dependencies:
       '@interop/data-integrity-core': 8.7.1
@@ -4742,8 +4711,6 @@ snapshots:
       ieee754: 1.2.1
 
   byoe-context@0.3.0: {}
-
-  byoe-context@0.5.0: {}
 
   bytes@3.0.0: {}
 

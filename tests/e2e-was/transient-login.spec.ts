@@ -27,9 +27,7 @@ const APP_URL = 'http://localhost:5274'
 /**
  * The public-terminal browser: a fresh context holding nothing.
  */
-async function coldTerminal(
-  browser: Browser
-): Promise<{
+async function coldTerminal(browser: Browser): Promise<{
   context: Awaited<ReturnType<Browser['newContext']>>
   page: Page
 }> {

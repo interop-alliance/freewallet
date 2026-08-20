@@ -47,6 +47,7 @@ import {
 import { swapSessionVaultKeys } from '@/session/userKeyAdoption'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import { sweepStrandedAppKeys } from '@/session/appKeySweep'
+import { sweepCompanionGenerations } from '@/session/companionGc'
 import {
   durableSessionPersistence,
   isDurableSession,
@@ -1031,6 +1032,32 @@ async function sessionFromKeyringHit({
         )
       }
     })
+  }
+
+  // The companion GC sweep: the quarterly generation swap (when due and the
+  // pointed generation is GC-quiet) plus the collect fan-out over every
+  // non-pointed `gen-` collection -- revoke, digest, delete. Chained behind
+  // the storageReady tail (so a sibling re-mint above lands first),
+  // durable-only for free (`storageReady` only exists then), and strictly
+  // best-effort like the sweeps beside it: a failed pass never fails the
+  // login, and the next durable login resumes from durable state alone. The
+  // remote-direct popup deliberately does not run it: a popup visit is a
+  // constrained, latency-sensitive context, and the next top-level durable
+  // login sweeps the same durable state.
+  const gcLadderSeed = found.standing?.ladderSeed
+  if (session.storageReady && !remoteDirectStorage) {
+    session.companionGcSweep = session.storageReady
+      .catch(() => {})
+      .then(() =>
+        sweepCompanionGenerations({
+          session,
+          ...(gcLadderSeed !== undefined ? { ladderSeed: gcLadderSeed } : {})
+        })
+      )
+      .catch((err): null => {
+        console.warn('The companion GC sweep failed:', err)
+        return null
+      })
   }
   return { session, userExists }
 }

@@ -399,8 +399,9 @@ export async function establishStandingUnlock({
  * then mint the companion-Space sibling delegation and re-seal it into the
  * credential's unlock record beside the existing bridge. The re-bind
  * preserves the record's ladder seed verbatim (`rebindStandingRecord`) --
- * load-bearing, since the genesis just committed that seed's segment-bound
- * rung 0 -- and the registry entry records the sibling's signer and expiry.
+ * load-bearing, since the genesis just committed that seed's
+ * generation-bound rung 0 -- and the registry entry records the sibling's
+ * signer and expiry.
  *
  * This is what makes the credential's DEFAULT transient login possible on a
  * fresh browser. No shipped login ceremony triggers it yet; today's one
@@ -497,10 +498,10 @@ export async function establishCompanionGeneration({
     store: companionLogStore({
       was,
       spaceId: companion.spaceId,
-      segment: companion.segment
+      generationId: companion.generationId
     }),
     ladderSeed,
-    segment: companion.segment,
+    generationId: companion.generationId,
     mintGenerationDelegation: async ({ companionDid: generationDid }) =>
       mintGenerationDelegation({
         zcapClient,

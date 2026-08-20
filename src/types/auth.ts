@@ -21,6 +21,7 @@ import type {
 import type { UserKey } from '@interop/wallet-core/keys'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
+import type { CompanionGcReport } from '@interop/wallet-core/webvh'
 import type { UserKeyCascadeResult } from '@/session/userKeyCascade'
 import type { VerifiedLogCache } from '@/session/verifiedLog'
 import type { SessionPersistence } from '@/session/persistence'
@@ -196,6 +197,13 @@ export interface Session {
   // sweep itself failed (it never rejects) -- and absent on the flows that
   // own their own provisioning.
   appKeySweep?: Promise<number | null>
+  // The companion GC sweep fired by the keyring logins: the quarterly
+  // generation swap (when due and the pointed generation is GC-quiet) plus
+  // the collect fan-out over every non-pointed `gen-` collection. Chained
+  // behind `storageReady` (durable sessions only), strictly best-effort --
+  // resolves wallet-core's per-pass report, or `null` when the session
+  // cannot run it or the pass itself failed (it never rejects).
+  companionGcSweep?: Promise<CompanionGcReport | null>
   // Set when the login's roster read adopted a rotated user key (or advanced
   // the epoch pin) but the durable local copy -- the client-key record or the
   // epoch pin -- could not be written. The session itself is fine (it runs on

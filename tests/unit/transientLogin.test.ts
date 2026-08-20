@@ -309,8 +309,8 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
     } as never)
     // Drive the wrapper the way the enrollment's first read would.
     vi.mocked(enrollTransientClient).mockImplementation(
-      async ({ storeForSegment }) => {
-        await storeForSegment('gen-Ux3v0kQf9aPmB2hZ').getIdResourceRaw({
+      async ({ storeForGenerationId }) => {
+        await storeForGenerationId('gen-Ux3v0kQf9aPmB2hZ').getIdResourceRaw({
           resourceId: 'did.jsonl'
         })
         throw new Error('unreachable')
@@ -384,7 +384,7 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
     expect(enrollCall.ladderSeed).toBe(found.standing!.ladderSeed)
     expect(enrollCall.transientKeyMultibase).toMatch(/^z6Mk/)
     expect(enrollCall.pinStore).toBe(persistence.logPins)
-    enrollCall.storeForSegment('gen-Ux3v0kQf9aPmB2hZ')
+    enrollCall.storeForGenerationId('gen-Ux3v0kQf9aPmB2hZ')
     expect(delegatedWebvhLogStore).toHaveBeenCalledWith({
       host: POINTER.host,
       spaceId: 'companion-space-1',

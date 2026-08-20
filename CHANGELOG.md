@@ -4,6 +4,15 @@
 
 ### Added
 
+- Companion GC. Keyring logins fire a best-effort background sweep
+  (`session.companionGcSweep`, `src/session/companionGc.ts` over
+  wallet-core's `runCompanionGc`): the quarterly generation swap when the
+  pointed generation is quiet, and at every durable login the collection of
+  every non-pointed `gen-` collection -- delegation revoked, a
+  `GenerationCollect` digest written to `wallet-activity` before the delete,
+  the collection deleted, the local companion pin slot dropped. Durable
+  sessions only, resumable from durable state.
+
 - The residue-zero e2e. A WAS e2e spec
   (`tests/e2e-was/transient-login.spec.ts`) runs the full default transient
   login through the real login form in a fresh browser context, stores a
