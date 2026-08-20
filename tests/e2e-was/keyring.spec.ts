@@ -1,5 +1,5 @@
 import { test, expect, type Browser, type Page } from '@playwright/test'
-import { fillSettled, signupViaWizard } from './helpers'
+import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 
 /**
  * Keyring v2 e2e (WAS mode). A login derives an unlock identity from the
@@ -122,6 +122,9 @@ test.describe('Keyring v2', () => {
     const secondDevice = await coldDevicePage(browser)
     try {
       await secondDevice.goto('/#/login')
+      // The cold profile is non-remembered, so the default login would be
+      // transient; this spec exercises the durable standing self-enrollment.
+      await forceRememberBrowser(secondDevice)
       await fillSettled(
         secondDevice.locator('input[type="password"]'),
         passphrase
@@ -211,6 +214,9 @@ test.describe('Keyring v2', () => {
     const newDevice = await coldDevicePage(browser)
     try {
       await newDevice.goto('/#/login')
+      // Force the durable route: the spec exercises the new passphrase's
+      // standing self-enrollment on a non-remembered profile.
+      await forceRememberBrowser(newDevice)
       await fillSettled(
         newDevice.locator('input[type="password"]'),
         newPassphrase

@@ -1,5 +1,5 @@
 import { test, expect, type Browser, type Page } from '@playwright/test'
-import { fillSettled, signupViaWizard } from './helpers'
+import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 
 /**
  * The Settings "Connected wallets" surface e2e (WAS mode): the enrolled
@@ -80,6 +80,9 @@ test.describe('The Settings connected-wallets surface', () => {
     const secondClient = await coldClientPage(browser)
     try {
       await secondClient.goto('/#/login')
+      // The cold profile is non-remembered, so the default login would be
+      // transient; this spec exercises the durable standing self-enrollment.
+      await forceRememberBrowser(secondClient)
       await fillSettled(
         secondClient.locator('input[type="password"]'),
         passphrase

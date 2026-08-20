@@ -4,7 +4,7 @@ import {
   readLogFromString,
   resolveDIDFromLog
 } from '@interop/did-method-webvh'
-import { fillSettled, signupViaWizard } from './helpers'
+import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 
 /**
  * The self-enrolling login e2e (WAS mode): connecting a second browser
@@ -83,6 +83,9 @@ test.describe('Self-enrolling login', () => {
     const secondClient = await coldClientPage(browser)
     try {
       await secondClient.goto('/#/login')
+      // The cold profile is non-remembered, so the default login would be
+      // transient; this spec exercises the durable standing self-enrollment.
+      await forceRememberBrowser(secondClient)
       await fillSettled(
         secondClient.locator('input[type="password"]'),
         passphrase

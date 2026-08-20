@@ -107,8 +107,12 @@ PUT-on-`did.jsonl` bridge delegation and a random update-key ladder seed
 (`@interop/wallet-core/unlock`; the bind-time establishment is
 `src/session/standingUnlock.ts`, run at signup and at every
 add/change-method ceremony). A fresh browser holding nothing but the
-credential therefore **self-enrolls** at login as an ordinary full client,
-with no second browser involved: two loud entries extend the
+credential can therefore **self-enroll** at login as an ordinary full
+client, with no second browser involved -- reachable today through the
+programmatic `rememberBrowser: true` entry, since the DEFAULT login on a
+non-remembered browser is the transient posture (see "Session persistence"
+below); the login-form choice is a planned follow-up. The self-enrollment:
+two loud entries extend the
 world-readable hash-chained log through the bridge (a reveal-and-commit
 entry signed by the ladder's current rung, then an add entry publishing the
 freshly minted client), and only then is the user key unwrapped from the
@@ -433,6 +437,38 @@ only a delegated Space-subtree zcap (the transient posture's generation
 delegation) can use the store and read the roster. Absent the option, every
 request invokes the root capability, exactly as before.
 
+**The transient login (the default on a non-remembered browser).** Both
+keyring login entry points run a post-KDF posture decision
+(`routeUnlockLogin` in `src/session/transientLogin.ts`): with a WAS server
+configured, a browser holding this credential's client-key record proceeds
+durable exactly as before (the record probe is create-nothing --
+`hasClientKeyRecord` checks `indexedDB.databases()` before opening -- and
+the ratchet is silent for now), while a browser holding none defaults to
+the transient composition. An explicit `rememberBrowser` input forces
+either side: `true` is the programmatic durable entry (the standing
+self-enrollment; the signup probe and the recovery tail pass it, and e2e
+sets it through a non-production seam), and `false` on a remembered
+browser refuses (`AlreadyRememberedError`) rather than forking postures.
+The composition (`transientSessionFromKeyringHit`): the transient
+unlock-record fetch (`fetchTransientKeyring`, no durable operation), the
+account log verified under the visit's in-memory pins, a per-visit key
+minted in memory and enrolled into the companion generation through the
+record's `delegatedClients` sibling delegation (wallet-core's
+`enrollTransientClient` -- the loud entry before any authority, with the
+GC-race re-read built in), the generation delegation taken as embedded
+(never minted from here -- its mint takes a durable signer), the user key
+unwrapped from the credential's standing roster wrap (the read signs as
+`<companionDid>#<vm>` under the delegation; no escrow -- a transient
+client never joins the roster), and a session on the replica-less storage
+posture above. Transient sessions skip the KMS keystore, the login-time
+roster read, provisioning, and every login-time sweep. Every unavailable
+state -- a record without standing authority or the sibling, an
+unpromoted account, no live generation or embedded delegation, no roster
+-- refuses with a typed `TransientLoginUnavailableError` before any
+ceremony byte is written (the login page maps it onto the not-enrolled
+guidance for now), and network errors rethrow unchanged so a flap stays
+distinguishable from a generation lapse.
+
 The handle also carries the posture's refusals. Update-key rotation requires
 the durable posture outright (`DurableSessionRequiredError`): its subject is
 this browser's durable update key, and its persist-before-publish invariant
@@ -531,8 +567,9 @@ log-verified keys).
 
 Connecting a second wallet client (a fresh browser profile) to an existing
 account, without any secret ever leaving either side. Since standing unlock
-credentials landed, an ordinary fresh browser self-enrolls at login with
-the credential alone (see "Session & auth flow"); this two-party ceremony
+credentials landed, an ordinary fresh browser can self-enroll at login with
+the credential alone (the programmatic durable entry -- see "Session & auth
+flow"); this two-party ceremony
 remains the path for records without standing authority, for onboarding
 another wallet app over the rendezvous transport, and as the future opt-in
 step-up approval policy. The new client mints
@@ -1527,7 +1564,9 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   record, it holds a wrap of the user key in the roster (kept alive by
   rotation fan-out) and latent self-enrollment authority — a bridge
   delegation and a ladder seed carried in its unlock record — so a fresh
-  browser holding nothing but the credential self-enrolls at login. The
+  browser holding nothing but the credential can self-enroll at login (the
+  programmatic durable entry; the default non-remembered login is the
+  transient posture). The
   credential's entropy bounds everything server-held that it alone decrypts;
   the rotation ceremony is the remedy when it leaks. See "Session & auth
   flow".

@@ -6,15 +6,18 @@
  * authStore. A passphrase (or passkey) login resolves through the keyring:
  * the unlock identity locates the account (the encrypted account pointer) and
  * unwraps this client's local key set. On a fresh browser holding no key set,
- * a STANDING credential -- one whose unlock record carries the bridge
- * delegation and update-key ladder seed -- self-enrolls an ordinary client
- * in place (loud log entries first, then the first roster read through the
- * credential's standing wrap) and the login proceeds enrolled; a plain
- * pointer record still surfaces the not-enrolled state and the
+ * the default (with a WAS server) is the TRANSIENT login -- the
+ * public-terminal composition in `src/session/transientLogin.ts`, which
+ * persists nothing locally. A STANDING credential -- one whose unlock record
+ * carries the bridge delegation and update-key ladder seed -- self-enrolls
+ * an ordinary durable client in place on the programmatic
+ * `rememberBrowser: true` entry (loud log entries first, then the first
+ * roster read through the credential's standing wrap); a plain pointer
+ * record still surfaces the not-enrolled state and the
  * connect-another-wallet ceremony.
  */
 import type { CollectionEncryption } from '@interop/was-client'
-import type { IKeyAgreementKey } from '@interop/data-integrity-core'
+import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import type { ControllerProfile, Session, User } from '@/types/auth'
@@ -50,7 +53,16 @@ import {
   type SessionPersistence
 } from '@/session/persistence'
 import { StorageManager } from '@/stores/storageManager'
-import { fetchKeyring, KeyringRecordUnusableError } from '@/session/keyring'
+import {
+  fetchKeyring,
+  fetchTransientKeyring,
+  KeyringRecordUnusableError
+} from '@/session/keyring'
+import { KEYRING_KDF } from '@interop/wallet-core/keyring'
+import {
+  routeUnlockLogin,
+  transientSessionFromKeyringHit
+} from '@/session/transientLogin'
 import {
   canSelfEnroll,
   selfEnrollStandingClient
@@ -154,6 +166,14 @@ export async function initGuestSession() {
  *   (with cache persistence off for guests). A transient login supplies the
  *   in-memory handle here, which also skips provisioning, the login-time
  *   sweeps, and every durable pin write.
+ * @param [options.transient] {object}   the transient-session identity: the
+ *   companion DID whose generation holds this visit's verification method
+ *   (every WAS request signs as `<companionDid>#<vm>` in place of the
+ *   account-document spelling) and the generation delegation every request
+ *   rides (`profile.invocationCapability`). Supplied only by the transient
+ *   login composition, together with the in-memory `persistence`; its
+ *   presence also skips the KMS keystore and the login-time roster read (the
+ *   standing-wrap read already happened)
  * @returns {Promise<{ session: Session, userExists: boolean }>}
  */
 export async function initSessionFromSeed({
@@ -167,7 +187,8 @@ export async function initSessionFromSeed({
   remoteDirectStorage = false,
   provisionStorage = true,
   idb,
-  persistence: suppliedPersistence
+  persistence: suppliedPersistence,
+  transient
 }: {
   seed: Uint8Array
   userKey?: UserKey
@@ -180,6 +201,7 @@ export async function initSessionFromSeed({
   provisionStorage?: boolean
   idb?: IDBFactory
   persistence?: SessionPersistence
+  transient?: { companionDid: string; invocationCapability: IZcap }
 }) {
   const persistence =
     suppliedPersistence ??
@@ -191,10 +213,15 @@ export async function initSessionFromSeed({
   // been promoted: every data-Space request must be signed with this
   // client's verification method in the did:webvh document
   // (`<did:webvh>#<multibase>`), not its did:key. Same key, promoted keyId.
+  // A transient session's verification method lives in the companion
+  // generation's document instead, so its requests sign as
+  // `<companionDid>#<multibase>` and ride the generation delegation.
   const accountDid = accountPointer?.did
-  const sessionZcapClient = isWebvhDid(accountDid)
-    ? webvhZcapClient({ keyAgent, did: accountDid })
-    : zcapClient
+  const sessionZcapClient = transient
+    ? webvhZcapClient({ keyAgent, did: transient.companionDid })
+    : isWebvhDid(accountDid)
+      ? webvhZcapClient({ keyAgent, did: accountDid })
+      : zcapClient
 
   // Ensure a KMS keystore exists for this controller (list-by-controller,
   // create on first login) and bind a KeystoreAgent to it. Guests skip the
@@ -204,9 +231,10 @@ export async function initSessionFromSeed({
   // keystore, so the independent trips need not be serialized.
   // Failure is non-fatal for now: no wallet feature depends on
   // the keystore yet, so a KMS outage must not lock users out -- the settings
-  // page surfaces the unprovisioned state.
+  // page surfaces the unprovisioned state. Transient sessions skip the KMS
+  // whole: keystore provisioning is durable account bootstrap.
   const keystorePromise =
-    !isGuest && KMS_SERVER_URL
+    !isGuest && !transient && KMS_SERVER_URL
       ? ensureKeystore({
           kmsServerUrl: KMS_SERVER_URL,
           keyAgent,
@@ -239,13 +267,16 @@ export async function initSessionFromSeed({
   // descriptor feeds the cascade-completion sweep fired further down.
   // Gated on a promoted pointer: the log-governed roster anchors its entry
   // proofs in the did:webvh document, so an unpromoted account has no roster
-  // to read.
+  // to read. A transient session skips it too -- its user key just came out
+  // of the credential's standing wrap, so a second read would be the same
+  // read again.
   let activeUserKey = userKey
   let rosterRead: UserKeyRosterReadResult | null = null
   let userKeyPersistFailed = false
   if (
     userKey &&
     !isGuest &&
+    !transient &&
     WAS_SERVER_URL &&
     accountPointer &&
     isWebvhDid(accountPointer.did)
@@ -299,9 +330,16 @@ export async function initSessionFromSeed({
     ...(activeUserKey ? { userKey: activeUserKey } : {}),
     ...(webvhUpdateKeys ? { clientWebvhKeys: webvhUpdateKeys } : {}),
     ...(persistClientKeys ? { persistClientKeys } : {}),
-    ...(accountPointer ? { accountPointer } : {})
+    ...(accountPointer ? { accountPointer } : {}),
+    // Every remote request a transient session makes rides the generation
+    // delegation (WASRemoteStore invokes it in place of the root capability).
+    ...(transient
+      ? { invocationCapability: transient.invocationCapability }
+      : {})
   }
-  if (!isGuest) {
+  if (!isGuest && !transient) {
+    // The client seed backs the unlock-method re-bind ceremonies, all of
+    // them durable; a transient session's per-visit seed must never be one.
     profile.clientSeed = seed
   }
   if (isWebvhDid(accountDid)) {
@@ -610,7 +648,16 @@ async function checkUserKeyRosterAtLogin({
 /**
  * Passphrase login (keyring v2). The keyring is the only login path: the
  * passphrase derives an unlock identity that locates the account and unwraps
- * this client's local key set. Three branches:
+ * this client's local key set.
+ *
+ * The post-KDF posture routing runs first (`routeUnlockLogin`): with a WAS
+ * server configured and no client-key record held for this credential, the
+ * DEFAULT is the transient login -- the public-terminal composition in
+ * `src/session/transientLogin.ts`, which persists nothing locally -- and the
+ * durable branches below are reached on a remembered browser (the silent
+ * ratchet), with `rememberBrowser: true` (the programmatic standing
+ * self-enrollment entry), in a remote-direct popup, or with no WAS server.
+ * The durable branches:
  *
  * - **Enrolled hit**: the keyring record was found AND this client holds a
  *   key set under the passphrase's unlock method; the session is built from
@@ -653,6 +700,14 @@ async function checkUserKeyRosterAtLogin({
  * @param [options.credential] {UnlockCredential}   an already-derived unlock
  *   credential for this passphrase, so a caller that has just unlocked (the
  *   enrollment ceremony) does not run the KDF again
+ * @param [options.rememberBrowser] {boolean}   the explicit posture input:
+ *   `true` proceeds durable (running the standing self-enrollment on a fresh
+ *   browser -- the programmatic entry the signup probe, the recovery tail,
+ *   and tests use until the login form grows the choice); `false` demands
+ *   the transient posture (refused as `AlreadyRememberedError` on a browser
+ *   already holding this credential's client-key record). Absent, the
+ *   routing decides: record present -> durable (the silent ratchet), absent
+ *   -> transient, the default on a non-remembered browser
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 export async function loginWithPassphrase({
@@ -661,7 +716,8 @@ export async function loginWithPassphrase({
   idb,
   remoteDirectStorage = false,
   provisionStorage = true,
-  credential
+  credential,
+  rememberBrowser
 }: {
   passphrase: string
   email?: string
@@ -669,12 +725,37 @@ export async function loginWithPassphrase({
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
   credential?: UnlockCredential
+  rememberBrowser?: boolean
 }): Promise<{ session: Session | null; userExists: boolean }> {
+  const routed = await routeUnlockLogin({
+    secret: passphrase,
+    kdf: KEYRING_KDF,
+    credential,
+    idb,
+    remoteDirectStorage,
+    rememberBrowser
+  })
+  if (routed.posture === 'transient') {
+    const found = await fetchTransientKeyring({
+      credential: routed.credential,
+      accountLogPinStore: routed.persistence.logPins
+    })
+    if (!found) {
+      return { session: null, userExists: false }
+    }
+    return transientSessionFromKeyringHit({
+      found,
+      type: 'passphrase',
+      email,
+      persistence: routed.persistence
+    })
+  }
+
   const found = await fetchKeyring({
     passphrase,
     idb,
     mintManageCapability: true,
-    ...(credential ? { credential } : {})
+    ...(routed.credential ? { credential: routed.credential } : {})
   })
 
   if (!found) {
@@ -983,26 +1064,53 @@ async function sessionFromKeyringHit({
  *   from session creation and expose it as `session.storageReady`; default
  *   true
  * @param [options.signal] {AbortSignal}   aborts the WebAuthn ceremony
+ * @param [options.rememberBrowser] {boolean}   the explicit posture input,
+ *   exactly as on `loginWithPassphrase`
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 export async function loginWithPasskey({
   idb,
   remoteDirectStorage = false,
   provisionStorage = true,
-  signal
+  signal,
+  rememberBrowser
 }: {
   idb?: IDBFactory
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
   signal?: AbortSignal
+  rememberBrowser?: boolean
 } = {}): Promise<{ session: Session | null; userExists: boolean }> {
   const { prfOutput } = await assertPasskeyPrf({ signal })
+
+  const routed = await routeUnlockLogin({
+    secret: prfOutput,
+    kdf: PASSKEY_KDF,
+    idb,
+    remoteDirectStorage,
+    rememberBrowser
+  })
+  if (routed.posture === 'transient') {
+    const found = await fetchTransientKeyring({
+      credential: routed.credential,
+      accountLogPinStore: routed.persistence.logPins
+    })
+    if (!found) {
+      return { session: null, userExists: false }
+    }
+    return transientSessionFromKeyringHit({
+      found,
+      type: 'passkey',
+      persistence: routed.persistence
+    })
+  }
 
   const found = await fetchKeyring({
     secret: prfOutput,
     kdf: PASSKEY_KDF,
     idb,
-    mintManageCapability: true
+    mintManageCapability: true,
+    ...(routed.credential ? { credential: routed.credential } : {})
   })
   if (!found) {
     return { session: null, userExists: false }

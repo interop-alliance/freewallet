@@ -5,13 +5,15 @@
  * notice). Node has no IndexedDB, so the cache helpers are exercised against
  * a minimal in-memory fake.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { accountLogPinId } from '@interop/wallet-core/webvh'
 import { userKeyRosterPinId } from '@interop/wallet-core/keys'
 import {
   deleteAccountDidForSpace,
   deleteKeyringCache,
   deleteLogPin,
+  hasClientKeyRecord,
+  saveClientKeyRecord,
   loadAccountDidForSpace,
   loadKeyringFreshnessPin,
   saveAccountDidForSpace,
@@ -466,5 +468,56 @@ describe('passkey-safety notice helpers', () => {
     await expect(
       loadPasskeySafetyNotice({ controller: 'did:key:z6MkB', idb })
     ).resolves.toMatchObject({ backupEligibility: false, backupState: false })
+  })
+})
+
+describe('hasClientKeyRecord (the create-nothing probe)', () => {
+  /**
+   * Wraps the in-memory fake with a `databases()` enumeration so the probe's
+   * existence check can run against it, counting `open` calls.
+   */
+  function probeIdb() {
+    const base = createFakeIdb()
+    let created = false
+    const open = vi.fn((name: string, version?: number) => {
+      created = true
+      return (base.open as (name: string, version?: number) => IDBRequest)(
+        name,
+        version
+      )
+    })
+    return {
+      idb: {
+        open,
+        databases: async () =>
+          created ? [{ name: 'freewallet-session', version: 1 }] : []
+      } as unknown as IDBFactory,
+      open
+    }
+  }
+
+  it('reports false without ever opening when the database is absent', async () => {
+    const { idb, open } = probeIdb()
+    await expect(
+      hasClientKeyRecord({ spaceId: 'unlock-space-1', idb })
+    ).resolves.toBe(false)
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('opens an existing database and reports the record per unlock Space', async () => {
+    const { idb } = probeIdb()
+    await saveClientKeyRecord({
+      spaceId: 'unlock-space-1',
+      record: { wrapped: true },
+      idb
+    })
+    await expect(
+      hasClientKeyRecord({ spaceId: 'unlock-space-1', idb })
+    ).resolves.toBe(true)
+    // The database exists (another credential's record created it), but THIS
+    // credential holds no record: still false.
+    await expect(
+      hasClientKeyRecord({ spaceId: 'unlock-space-2', idb })
+    ).resolves.toBe(false)
   })
 })

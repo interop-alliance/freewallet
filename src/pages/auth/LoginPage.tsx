@@ -21,6 +21,7 @@ import {
   KeyringRecordRolledBackError,
   KeyringRecordUnusableError
 } from '@/session/keyring'
+import { TransientLoginUnavailableError } from '@/session/transientLogin'
 import { backfillPassphraseUnlockMethod } from '@/session/unlockMethods'
 import { checkRecoveryHealth } from '@/session/recovery'
 import { showToast } from '@/stores/toastStore'
@@ -55,6 +56,25 @@ import type { AuthLocationState } from '@/types/auth'
  */
 function errorName(err: unknown): unknown {
   return (err as { name?: unknown } | null)?.name
+}
+
+/**
+ * E2E test seam: force the durable login route (the programmatic
+ * remember-this-browser entry) when a test sets the flag. Read at submit
+ * time, so a spec can set it with `page.evaluate` after the page is up. The
+ * cold-device self-enrollment specs use it until the login form grows the
+ * remember-this-browser choice. No-op in production.
+ *
+ * @returns {boolean}
+ */
+function forcedRememberBrowser(): boolean {
+  if (import.meta.env.MODE === 'production') {
+    return false
+  }
+  return Boolean(
+    (window as unknown as { __E2E_REMEMBER_BROWSER__?: boolean })
+      .__E2E_REMEMBER_BROWSER__
+  )
 }
 
 /**
@@ -131,6 +151,15 @@ function loginErrorKey({
     console.error(`${label} failed:`, err)
     return 'auth.errors.keyringUnusable'
   }
+  // The transient login could not proceed here (a record without standing
+  // authority or a companion sibling, no live generation, an unpromoted
+  // account). Interim mapping onto the existing not-enrolled guidance --
+  // connecting this browser durably is the one remedy every reason shares;
+  // honest per-reason copy is a follow-up concern.
+  if (err instanceof TransientLoginUnavailableError) {
+    console.error(`${label} unavailable transiently:`, err)
+    return 'auth.errors.clientNotEnrolled'
+  }
   console.error(`${label} failed:`, err)
   return 'auth.errors.setupFailed'
 }
@@ -194,14 +223,16 @@ export function LoginPage() {
         return
       }
       const { session, userExists } = await loginWithPassphrase({
-        passphrase
+        passphrase,
+        ...(forcedRememberBrowser() ? { rememberBrowser: true } : {})
       })
       if (!session && userExists) {
         // The passphrase located the account, but this browser holds no
-        // client key set for it AND the record carries no standing authority
-        // to self-enroll with (a plain pointer record -- pre-promotion or
-        // no-WAS; a standing credential self-enrolls inside the login call
-        // and never lands here). Offer the connect-this-browser flow.
+        // client key set for it and the durable route had nothing to
+        // self-enroll with (a no-WAS plain pointer record; with a WAS server
+        // the non-remembered default is the transient route, whose refusals
+        // arrive as `TransientLoginUnavailableError` in the catch below).
+        // Offer the connect-this-browser flow.
         setErrorKey('auth.errors.clientNotEnrolled')
         setNotEnrolledPassphrase(passphrase)
         setEnrollment(null)
@@ -251,9 +282,14 @@ export function LoginPage() {
     } catch (err) {
       const key = loginErrorKey({ err, label: 'Login' })
       setErrorKey(key)
-      // A torn enrollment: connecting this browser again mints a fresh key set
-      // and redoes the wrap, so offer that flow.
-      if (key === 'auth.errors.userKeyRosterUnwrap' && passphrase) {
+      // A torn enrollment, or a transient login the account's posture cannot
+      // serve: connecting this browser mints a fresh key set and redoes the
+      // wrap, so offer that flow.
+      if (
+        (key === 'auth.errors.userKeyRosterUnwrap' ||
+          key === 'auth.errors.clientNotEnrolled') &&
+        passphrase
+      ) {
         setNotEnrolledPassphrase(passphrase)
         setEnrollment(null)
         setEnrollErrorKey(null)
@@ -335,7 +371,9 @@ export function LoginPage() {
     setIsPasskeySubmitting(true)
     setErrorKey(null)
     try {
-      const { session, userExists } = await loginWithPasskey()
+      const { session, userExists } = await loginWithPasskey(
+        forcedRememberBrowser() ? { rememberBrowser: true } : {}
+      )
       if (!session && userExists) {
         // The passkey located the account, but this browser holds no client
         // key set for it and its record carries no standing authority (a

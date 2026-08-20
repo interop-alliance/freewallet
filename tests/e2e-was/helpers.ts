@@ -146,3 +146,21 @@ export async function deleteCredential(page: Page) {
   await page.getByRole('button', { name: 'Delete' }).click()
   await expect(page).toHaveURL(/#\/dashboard/)
 }
+
+/**
+ * Forces the durable login route (the programmatic remember-this-browser
+ * entry) for login submits on this page. The transient posture is the
+ * default on a non-remembered browser, so specs exercising the standing
+ * self-enrollment set this non-production seam before submitting. The flag
+ * is read at submit time, so it can be set on an already-loaded page.
+ *
+ * @param page {Page}
+ * @returns {Promise<void>}
+ */
+export async function forceRememberBrowser(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    ;(
+      window as unknown as { __E2E_REMEMBER_BROWSER__?: boolean }
+    ).__E2E_REMEMBER_BROWSER__ = true
+  })
+}

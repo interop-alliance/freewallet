@@ -4,6 +4,29 @@
 
 ### Added
 
+- The transient login. On a browser holding no client-key record for the
+  typed credential (and with a WAS server configured), login now defaults to
+  a transient session that persists nothing locally: the unlock record is
+  fetched transiently, a per-visit key enrolls into the account's companion
+  generation through the record's sibling delegation, the session invokes as
+  `<companionDid>#<vm>` under the embedded generation delegation on the
+  replica-less remote-direct storage posture, and the user key comes from
+  the credential's standing roster wrap (never escrowed to the transient
+  client). A browser already holding the credential's client-key record
+  proceeds durable as before (checked without creating the session
+  database); `rememberBrowser: true` on the login functions is the
+  programmatic durable entry (the standing self-enrollment), used by the
+  signup probe, the recovery tail, and tests until the login form grows the
+  choice, and `rememberBrowser: false` on a remembered browser refuses with
+  `AlreadyRememberedError`. Transient sessions skip the KMS keystore, the
+  login-time roster read, provisioning, and every login-time sweep;
+  unavailable states (a record without standing authority or the
+  `delegatedClients` sibling, an unpromoted account, no live companion
+  generation or embedded delegation, no roster) refuse with a typed
+  `TransientLoginUnavailableError` before any ceremony byte is written, and
+  the login page maps the refusal onto the existing not-enrolled guidance
+  for now.
+
 - Capability-bound, replica-less remote storage. `WASRemoteStore` accepts an
   optional invocation capability (a delegated Space-subtree zcap) that every
   request it makes rides -- the navigational handles through one private

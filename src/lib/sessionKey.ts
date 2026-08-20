@@ -238,6 +238,34 @@ export async function saveClientKeyRecord({
 }
 
 /**
+ * Whether this browser holds a client-key record for an unlock method,
+ * WITHOUT durably creating the session database. Any read through
+ * `openSessionDb` creates `freewallet-session` on a miss (the versioned open
+ * runs `onupgradeneeded`), so the login posture routing -- which must decide
+ * "remembered here?" while remaining free to leave no trace -- first checks
+ * the database's existence via `indexedDB.databases()` and only opens one
+ * that already exists (an open of an EXISTING database creates nothing).
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<boolean>}
+ */
+export async function hasClientKeyRecord({
+  spaceId,
+  idb = indexedDB
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<boolean> {
+  const databases = await idb.databases()
+  if (!databases.some(db => db.name === SESSION_DB_NAME)) {
+    return false
+  }
+  return (await loadClientKeyRecord({ spaceId, idb })) !== null
+}
+
+/**
  * Loads a wrapped client-key record by its unlock Space id, or `null` when
  * this client holds no key set under that unlock method (a browser that has
  * never provisioned or enrolled for the account).

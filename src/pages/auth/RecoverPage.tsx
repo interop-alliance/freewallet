@@ -153,7 +153,13 @@ export function RecoverPage() {
     setBusy(true)
     setErrorKey(null)
     try {
-      const { session } = await loginWithPassphrase({ passphrase })
+      // Recovery's whole point is enrolling this browser: the ceremony just
+      // persisted a fresh client-key record, so the login is durable by
+      // construction -- stated explicitly rather than left to the routing.
+      const { session } = await loginWithPassphrase({
+        passphrase,
+        rememberBrowser: true
+      })
       if (!session) {
         setErrorKey('auth.recover.errors.loginFailed')
         return

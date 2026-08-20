@@ -16,7 +16,18 @@ import { CapabilityAgent } from '@interop/webkms-client'
 
 vi.mock('@/session/keyring', async importOriginal => ({
   ...(await importOriginal<typeof import('@/session/keyring')>()),
-  fetchKeyring: vi.fn()
+  fetchKeyring: vi.fn(),
+  fetchTransientKeyring: vi.fn()
+}))
+
+// Mocked with a full factory (no importOriginal): the module imports
+// `initSessionFromSeed` back from the module under test, and loading the
+// original inside the factory would hand that cycle the REAL composition.
+// The routing decision itself is covered in transientLogin.test.ts; here
+// only the entry-point glue over its result is exercised.
+vi.mock('@/session/transientLogin', () => ({
+  routeUnlockLogin: vi.fn(),
+  transientSessionFromKeyringHit: vi.fn()
 }))
 vi.mock('@/lib/kms', () => ({ ensureKeystore: vi.fn() }))
 vi.mock('@/stores/storageManager', () => ({
@@ -32,7 +43,16 @@ import {
   canSelfEnroll,
   selfEnrollStandingClient
 } from '@/session/standingUnlock'
-import { fetchKeyring, KeyringRecordUnusableError } from '@/session/keyring'
+import {
+  fetchKeyring,
+  fetchTransientKeyring,
+  KeyringRecordUnusableError
+} from '@/session/keyring'
+import {
+  routeUnlockLogin,
+  transientSessionFromKeyringHit
+} from '@/session/transientLogin'
+import { transientSessionPersistence } from '@/session/persistence'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
 import { ensureKeystore } from '@/lib/kms'
@@ -84,6 +104,15 @@ beforeEach(() => {
   })
   vi.mocked(ensureKeystore).mockResolvedValue(undefined as never)
   vi.mocked(fetchKeyring).mockReset()
+  vi.mocked(fetchTransientKeyring).mockReset()
+  vi.mocked(transientSessionFromKeyringHit).mockReset()
+  // The durable route by default, matching the pre-routing behavior the
+  // branch matrix below exercises.
+  vi.mocked(routeUnlockLogin).mockReset()
+  vi.mocked(routeUnlockLogin).mockImplementation(async ({ credential }) => ({
+    posture: 'durable',
+    ...(credential ? { credential } : {})
+  }))
   vi.mocked(canSelfEnroll).mockReset()
   vi.mocked(canSelfEnroll).mockReturnValue(false)
   vi.mocked(selfEnrollStandingClient).mockReset()
@@ -365,5 +394,105 @@ describe('loginWithPassphrase -- fetch failure', () => {
       loginWithPassphrase({ passphrase: PASSPHRASE })
     ).rejects.toThrow('storage unreachable')
     expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
+  })
+})
+
+describe('loginWithPassphrase -- posture routing glue', () => {
+  const CREDENTIAL = {
+    unlock: { spaceId: 'unlock-space-test' },
+    standing: {}
+  } as never
+
+  it('hands the routing the login inputs it decides on', async () => {
+    vi.mocked(fetchKeyring).mockResolvedValue(null)
+    await loginWithPassphrase({
+      passphrase: PASSPHRASE,
+      credential: CREDENTIAL,
+      remoteDirectStorage: true,
+      rememberBrowser: true
+    })
+    expect(routeUnlockLogin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        secret: PASSPHRASE,
+        credential: CREDENTIAL,
+        remoteDirectStorage: true,
+        rememberBrowser: true
+      })
+    )
+  })
+
+  it('runs the transient route over the shared in-memory handle', async () => {
+    const persistence = transientSessionPersistence()
+    vi.mocked(routeUnlockLogin).mockResolvedValue({
+      posture: 'transient',
+      credential: CREDENTIAL,
+      persistence
+    })
+    const found = { controller: 'did:key:z6MkC', unlockSpaceId: 'u' }
+    vi.mocked(fetchTransientKeyring).mockResolvedValue(found as never)
+    const transientResult = {
+      session: { isTransient: true },
+      userExists: true
+    }
+    vi.mocked(transientSessionFromKeyringHit).mockResolvedValue(
+      transientResult as never
+    )
+
+    const result = await loginWithPassphrase({
+      passphrase: PASSPHRASE,
+      credential: CREDENTIAL
+    })
+
+    expect(result).toBe(transientResult)
+    expect(fetchKeyring).not.toHaveBeenCalled()
+    // The record fetch and the composition share the visit's in-memory pins.
+    expect(fetchTransientKeyring).toHaveBeenCalledWith({
+      credential: CREDENTIAL,
+      accountLogPinStore: persistence.logPins
+    })
+    expect(transientSessionFromKeyringHit).toHaveBeenCalledWith({
+      found,
+      type: 'passphrase',
+      email: undefined,
+      persistence
+    })
+  })
+
+  it('reports no account on a transient keyring miss', async () => {
+    vi.mocked(routeUnlockLogin).mockResolvedValue({
+      posture: 'transient',
+      credential: CREDENTIAL,
+      persistence: transientSessionPersistence()
+    })
+    vi.mocked(fetchTransientKeyring).mockResolvedValue(null)
+    await expect(
+      loginWithPassphrase({ passphrase: PASSPHRASE, credential: CREDENTIAL })
+    ).resolves.toEqual({ session: null, userExists: false })
+    expect(transientSessionFromKeyringHit).not.toHaveBeenCalled()
+    expect(fetchKeyring).not.toHaveBeenCalled()
+  })
+
+  it('threads the routing-derived credential into the durable fetch', async () => {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller,
+      pointer: POINTER,
+      clientKeys: { clientSeed },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    } as never)
+
+    const { session } = await loginWithPassphrase({
+      passphrase: PASSPHRASE,
+      credential: CREDENTIAL
+    })
+
+    expect(session).not.toBeNull()
+    expect(fetchTransientKeyring).not.toHaveBeenCalled()
+    // The routing's derived credential is threaded on, so the KDF ran once.
+    expect(vi.mocked(fetchKeyring).mock.calls[0]![0].credential).toBe(
+      CREDENTIAL
+    )
   })
 })

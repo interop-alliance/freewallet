@@ -5,6 +5,7 @@ import {
   type Page,
   type TestInfo
 } from '@playwright/test'
+import { forceRememberBrowser } from './helpers'
 
 /**
  * Passkey (WebAuthn PRF) unlock e2e (WAS mode). A passkey is a Layer 1 unlock
@@ -281,6 +282,9 @@ test.describe('Passkey unlock', () => {
     await clearAllIndexedDb(page)
     await page.goto('/#/login')
     await page.reload()
+    // The wiped browser is non-remembered, so the default login would be
+    // transient; this spec exercises the durable standing self-enrollment.
+    await forceRememberBrowser(page)
     await page.getByRole('button', { name: 'Log in with a Passkey' }).click()
     await expect(page).toHaveURL(/#\/dashboard/, { timeout: 45_000 })
     expect(await readSpaceId(page)).toBe(originalSpaceId)

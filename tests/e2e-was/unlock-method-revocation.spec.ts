@@ -5,7 +5,7 @@ import {
   type CDPSession,
   type Page
 } from '@playwright/test'
-import { fillSettled, signupViaWizard } from './helpers'
+import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 
 /**
  * Revoking an unlock method from a client that did NOT create it (WAS mode).
@@ -243,6 +243,9 @@ test.describe('Unlock-method revocation from another client', () => {
     const secondClient = await coldClientPage(browser)
     try {
       await secondClient.goto('/#/login')
+      // The cold profile is non-remembered, so the default login would be
+      // transient; this spec exercises the durable standing self-enrollment.
+      await forceRememberBrowser(secondClient)
       await fillSettled(
         secondClient.locator('input[type="password"]'),
         passphrase

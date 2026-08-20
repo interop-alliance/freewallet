@@ -3,7 +3,7 @@ import { Buffer } from 'node:buffer'
 import type { IDelegatedZcap } from '@interop/data-integrity-core'
 import { CapabilityAgent } from '@interop/webkms-client'
 import { didKeyZcapClient } from '@interop/wallet-core/webvh'
-import { fillSettled, signupViaWizard } from './helpers'
+import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 
 /**
  * The Applications revocation surface e2e (WAS mode), modeled on
@@ -330,6 +330,9 @@ test.describe('The Applications revocation surface', () => {
     const secondClient = await coldClientPage(browser)
     try {
       await secondClient.goto('/#/login')
+      // The cold profile is non-remembered, so the default login would be
+      // transient; this spec exercises the durable standing self-enrollment.
+      await forceRememberBrowser(secondClient)
       await fillSettled(
         secondClient.locator('input[type="password"]'),
         passphrase

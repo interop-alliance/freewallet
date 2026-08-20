@@ -149,11 +149,15 @@ export async function signUpWithPassphrase({
     secret: passphrase,
     kdf: KEYRING_KDF
   })
+  // Signup stays durable: the probe forces the durable route so a cold
+  // browser re-signing-up with an existing standing passphrase behaves as
+  // before (locates the account, never starts a transient ceremony).
   const probe = await loginWithPassphrase({
     passphrase,
     email,
     provisionStorage: false,
-    credential
+    credential,
+    rememberBrowser: true
   })
   if (probe.userExists) {
     return { userExists: true }
