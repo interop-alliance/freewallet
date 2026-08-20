@@ -179,7 +179,7 @@ describe('WASRemoteStore.listCollectionResources', () => {
         collectionUrl: '/space/space-id/private-credentials'
       })
     ).resolves.toEqual(items)
-    expect(space).toHaveBeenCalledWith('space-id')
+    expect(space).toHaveBeenCalledWith('space-id', { capability: undefined })
     expect(collection).toHaveBeenCalledWith('private-credentials')
     expect(collectionIsPublic).toHaveBeenCalledOnce()
   })
@@ -374,7 +374,7 @@ describe('WASRemoteStore.listSyncedResources', () => {
       store.listSyncedResources({ logicalKey: 'privateCredentials' })
     ).resolves.toEqual(items)
     // No capability attached to the space handle: root invocation.
-    expect(space).toHaveBeenCalledWith('space-id')
+    expect(space).toHaveBeenCalledWith('space-id', { capability: undefined })
     expect(collection).toHaveBeenCalledWith('private-credentials')
   })
 })

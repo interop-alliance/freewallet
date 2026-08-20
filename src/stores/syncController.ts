@@ -139,9 +139,18 @@ class SyncController {
       return
     }
     // Guests never sync; a missing client/space means no remote replica.
+    // A replica-less session (the transient posture's remote-direct storage)
+    // has no local end for replication to drive: every synced-collection
+    // operation is already served remote-direct, so replication never starts.
     const was = session.storage.wasClient
     const spaceId = session.storage.spaceId
-    if (session.isGuest || !WAS_SERVER_URL || !was || !spaceId) {
+    if (
+      session.isGuest ||
+      !WAS_SERVER_URL ||
+      !was ||
+      !spaceId ||
+      !session.storage.hasLocalReplica
+    ) {
       return
     }
     this.#started = true

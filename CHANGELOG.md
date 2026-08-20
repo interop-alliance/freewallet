@@ -4,6 +4,17 @@
 
 ### Added
 
+- Capability-bound, replica-less remote storage. `WASRemoteStore` accepts an
+  optional invocation capability (a delegated Space-subtree zcap) that every
+  request it makes rides -- the navigational handles through one private
+  Space-handle helper, the raw request sites directly -- threaded from the
+  profile's `invocationCapability`; absent, behavior is unchanged (root
+  invocations). In the transient posture `StorageManager.initStorageClients`
+  constructs no local `BrowserStore` at all (opening one durably creates the
+  per-user database): the remote-direct backend serves every
+  synced-collection operation, and the sync controller never starts for a
+  session with no local replica.
+
 - A transient unlock-record fetch (`fetchTransientKeyring`) beside
   `fetchKeyring`. Remote-only, it fetches the record, verifies the proof and
   the account-binding MAC, and settles a pending proof against the account

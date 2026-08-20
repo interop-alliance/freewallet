@@ -416,6 +416,23 @@ so they ride a sibling seam (`src/lib/prefsStorage.ts`): while a transient
 session is live, pref writes land in an in-memory overlay that shadows
 reads; reads still fall through to localStorage, which writes nothing.
 
+**Replica-less, capability-bound storage.** A transient session constructs
+no `BrowserStore` at all -- the versioned RxDB open alone durably creates
+the per-user database -- so `StorageManager.initStorageClients` builds it
+only for the durable posture, and a replica-less session serves every
+synced-collection operation through the remote-direct backend (the CHAPI
+popup's, over the remote WAS collections). The sync controller never starts
+for a session with no local replica (there is no local end to replicate;
+`StorageManager.hasLocalReplica` is its gate). The remote stack also takes a
+delegated authority: `WASRemoteStore` accepts an optional invocation
+capability (threaded from `profile.invocationCapability`) that every request
+it makes rides -- the navigational handles through one private Space-handle
+helper, the raw request sites directly -- and wallet-core's
+`userKeyRosterDescriptorStore` takes the same option, so a session holding
+only a delegated Space-subtree zcap (the transient posture's generation
+delegation) can use the store and read the roster. Absent the option, every
+request invokes the root capability, exactly as before.
+
 The handle also carries the posture's refusals. Update-key rotation requires
 the durable posture outright (`DurableSessionRequiredError`): its subject is
 this browser's durable update key, and its persist-before-publish invariant

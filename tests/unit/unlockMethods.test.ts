@@ -371,9 +371,7 @@ describe('put / get round-trip', () => {
     const session = await makeSession()
     wasState.records.set(DATA_SPACE_ID, { version: 2, wrapped: {} })
 
-    await expect(
-      getUnlockMethods({ session })
-    ).rejects.toThrow(/version/)
+    await expect(getUnlockMethods({ session })).rejects.toThrow(/version/)
   })
 })
 
@@ -445,9 +443,7 @@ describe('remote-first read', () => {
     const networkError = new Error('NetworkError when attempting to fetch')
     wasState.getError = networkError
 
-    await expect(
-      getUnlockMethods({ session })
-    ).rejects.toBe(networkError)
+    await expect(getUnlockMethods({ session })).rejects.toBe(networkError)
   })
 })
 
@@ -782,7 +778,10 @@ describe('backfillPassphraseUnlockMethod', () => {
 
   it('does not create a registry without createIfMissing', async () => {
     const idb = createFakeIdb()
-    const session = await makePassphraseSession({ unlockSpaceId: 'ps-space', idb })
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'ps-space',
+      idb
+    })
 
     const result = await backfillPassphraseUnlockMethod({ session })
     expect(result).toBeNull()
@@ -815,7 +814,10 @@ describe('backfillPassphraseUnlockMethod', () => {
 
   it('appends the passphrase entry when the existing registry has none', async () => {
     const idb = createFakeIdb()
-    const session = await makePassphraseSession({ unlockSpaceId: 'ps-space', idb })
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'ps-space',
+      idb
+    })
     // An existing registry (one passkey entry, no passphrase).
     await putUnlockMethods({ session, record: sampleRecord() })
 
@@ -983,7 +985,10 @@ describe('backfillPassphraseUnlockMethod', () => {
 
   it('is idempotent: a second call writes nothing', async () => {
     const idb = createFakeIdb()
-    const session = await makePassphraseSession({ unlockSpaceId: 'ps-space', idb })
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'ps-space',
+      idb
+    })
     await backfillPassphraseUnlockMethod({
       session,
       createIfMissing: true

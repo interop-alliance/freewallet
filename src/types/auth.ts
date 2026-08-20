@@ -133,6 +133,12 @@ export interface ControllerProfile {
     unlockSpaceId: string
     manageCapability?: IZcap
   }
+  // The invocation capability the session's WAS requests ride, when the
+  // session's authority over the data Space is a delegated Space-subtree
+  // zcap rather than the root capability -- the transient posture's
+  // generation delegation. Absent for durable sessions, whose invocations
+  // root on the Space controller. In-memory only, never persisted.
+  invocationCapability?: IZcap
   // The session-lifetime memo of this account's locally verified did:webvh
   // log (`src/session/verifiedLog.ts`): one verification per session instead
   // of one per surface, keyed on the account pointer and invalidated by every

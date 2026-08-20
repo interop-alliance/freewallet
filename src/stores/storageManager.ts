@@ -350,7 +350,10 @@ export class PublicCopyRetractionError extends Error {
  * optional remote WAS backend for replication and remote-only features.
  */
 export class StorageManager {
-  #localStore: BrowserStore
+  // The local active replica -- absent in the replica-less (transient)
+  // posture, where constructing one would durably create the per-user RxDB
+  // database and every synced-collection operation is served remote-direct.
+  #localStore?: BrowserStore
   #remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
   // The backend every synced-collection read/write routes through, chosen once
   // at construction: the local active replica, or the remote-direct popup
@@ -427,7 +430,7 @@ export class StorageManager {
     metas,
     persistence
   }: {
-    localStore: BrowserStore
+    localStore?: BrowserStore
     remoteStore?: WASRemoteStore
     ciphers?: Record<string, DocCipher>
     remoteDirect?: boolean
@@ -457,14 +460,31 @@ export class StorageManager {
       ? persistence.metaCache({ scope: remoteStore.spaceId })
       : undefined
     // Remote-direct routing is only meaningful when a remote store is configured
-    // (a guest / no-WAS session always uses the local BrowserStore).
-    this.#remoteDirect = remoteDirect && !!remoteStore
+    // (a guest / no-WAS session always uses the local BrowserStore). A
+    // replica-less construction -- no local store at all, the transient
+    // posture -- is remote-direct outright, so it requires a remote store.
+    if (!localStore && !remoteStore) {
+      throw new Error('Replica-less storage requires a remote WAS store.')
+    }
+    this.#remoteDirect = (remoteDirect || !localStore) && !!remoteStore
     this.#store = this.#remoteDirect
       ? new RemoteDirectStore({
           remoteStore: remoteStore!,
           ciphers: ciphers ?? {}
         })
-      : localStore
+      : localStore!
+  }
+
+  /**
+   * Whether this session carries the local active replica. False exactly for
+   * the replica-less remote-direct posture (a transient session), whose
+   * synced-collection operations never touch a local database -- so the sync
+   * controller has no local end to replicate and must not start.
+   *
+   * @returns {boolean}
+   */
+  get hasLocalReplica(): boolean {
+    return this.#localStore !== undefined
   }
 
   /**
@@ -560,6 +580,12 @@ export class StorageManager {
    * @returns {RxCollection<SyncedDoc>}
    */
   localCollection(logicalKey: string): RxCollection<SyncedDoc> {
+    if (!this.#localStore) {
+      throw new Error(
+        'This session has no local replica (replica-less remote-direct ' +
+          'storage); nothing can replicate.'
+      )
+    }
     return this.#localStore.rxCollection(logicalKey)
   }
 
@@ -915,13 +941,20 @@ export class StorageManager {
       metas
     })
 
-    // The local store is always the active replica.
-    const { localStore } = await BrowserStore.initClient({
-      user,
-      storage: rxStorage,
-      ciphers
-    })
-    let userExists = await localStore.userExists()
+    // The local store is the active replica -- for a durable session. A
+    // transient session is replica-less: constructing a BrowserStore durably
+    // creates the per-user RxDB database (the versioned open alone is a
+    // durable write), so none is built and the remote-direct backend serves
+    // every synced-collection operation instead.
+    let localStore: BrowserStore | undefined
+    if (isDurableSession(persistence)) {
+      ;({ localStore } = await BrowserStore.initClient({
+        user,
+        storage: rxStorage,
+        ciphers
+      }))
+    }
+    let userExists = localStore ? await localStore.userExists() : false
     if (remoteStore) {
       // A returning user may be on a fresh browser (no local db yet) but have
       // an existing remote Space. A transient session skips the probe -- a
@@ -1192,7 +1225,7 @@ export class StorageManager {
     if (this.#remoteStore) {
       await this.#remoteStore.wipeStorage()
     }
-    await this.#localStore.wipeStorage()
+    await this.#localStore?.wipeStorage()
   }
 
   /**
@@ -1201,7 +1234,7 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async close() {
-    await this.#localStore.close()
+    await this.#localStore?.close()
   }
 
   async getSpaceQuotas(): Promise<SpaceQuotaReport | null> {
@@ -1740,17 +1773,26 @@ export class StorageManager {
     profile?: ControllerProfile
     idb?: IDBFactory
   }) {
-    await this.#localStore.ensureUserCollections({ user })
+    const localStore = this.#localStore
+    if (!localStore) {
+      // Unreachable by construction: session creation fires provisioning only
+      // for durable sessions, which always carry the local replica.
+      throw new Error(
+        'Storage provisioning requires the local replica; a replica-less ' +
+          'session must not provision.'
+      )
+    }
+    await localStore.ensureUserCollections({ user })
     // Re-key any plaintext rows a pre-encryption version of the app left in
     // the (now encrypted) local collections. Runs before login completes --
     // and so before background replication starts -- because the remote
     // collections reject plaintext pushes once their encryption descriptor is set.
-    await this.#localStore.migrateLocalPlaintextDocs()
+    await localStore.migrateLocalPlaintextDocs()
     // Re-key any `public-credentials` rows left under the pre-fix CID formula.
     // Runs regardless of vault state -- public rows are plaintext -- and before
     // replication so the tombstone and the re-keyed row reach the remote
     // collection.
-    await this.#localStore.migratePublicCredentialCids()
+    await localStore.migratePublicCredentialCids()
     if (this.#remoteStore) {
       // A pointer-promoted session signs with the did:webvh keyId from the
       // start; confirm the server agrees before any signed upsert runs, and

@@ -24,6 +24,7 @@ import {
   WasClient,
   type Collection,
   type CollectionEncryption,
+  type IZcap,
   type Resource,
   type Space
 } from '@interop/was-client'
@@ -100,17 +101,24 @@ export class WASRemoteStore {
 
   public spaceUrl: string
   public collections?: ICollectionsSet
+  // The invocation capability every request rides when one was supplied (a
+  // delegated Space-subtree zcap -- the transient posture's generation
+  // delegation). Absent, every request invokes the root capability, exactly
+  // as before the option existed.
+  #capability?: IZcap
 
   constructor({
     storageServerUrl,
     zcapClient,
     spaceId,
-    controller
+    controller,
+    capability
   }: {
     storageServerUrl: string
     zcapClient: ZcapClient
     spaceId: string
     controller: string
+    capability?: IZcap
   }) {
     this.storageServerUrl = storageServerUrl
     this.was = new WasClient({
@@ -123,7 +131,21 @@ export class WASRemoteStore {
     })
     this.spaceId = spaceId
     this.controller = controller
+    this.#capability = capability
     this.spaceUrl = new URL(`/space/${spaceId}`, storageServerUrl).toString()
+  }
+
+  /**
+   * The `Space` handle every navigational request in this store rides -- the
+   * one place `this.was.space(...)` is called, so no request path can miss
+   * the bound invocation capability. With no capability bound the handle
+   * invokes the root capability, byte-identical to the direct call.
+   *
+   * @param [spaceId] {string}   defaults to this store's Space
+   * @returns {Space}
+   */
+  #space(spaceId: string = this.spaceId): Space {
+    return this.was.space(spaceId, { capability: this.#capability })
   }
 
   /**
@@ -178,7 +200,7 @@ export class WASRemoteStore {
     if (!collectionId) {
       throw new Error(`Not a WAS collection URL: "${url}".`)
     }
-    return this.was.space(spaceId).collection(collectionId)
+    return this.#space(spaceId).collection(collectionId)
   }
 
   /**
@@ -202,8 +224,7 @@ export class WASRemoteStore {
     if (!collectionId || !resourceId) {
       throw new Error(`Not a WAS resource URL: "${url}".`)
     }
-    return this.was
-      .space(spaceId)
+    return this.#space(spaceId)
       .collection(collectionId)
       .resource(resourceId, { encryption: 'plaintext' })
   }
@@ -244,10 +265,7 @@ export class WASRemoteStore {
   }: {
     collectionId: string
   }): Promise<CollectionEncryption | undefined> {
-    const description = await this.was
-      .space(this.spaceId)
-      .collection(collectionId)
-      .describe()
+    const description = await this.#space().collection(collectionId).describe()
     return description?.encryption ?? undefined
   }
 
@@ -273,8 +291,7 @@ export class WASRemoteStore {
   }): Promise<{ custom?: unknown } | undefined> {
     let meta
     try {
-      meta = await this.was
-        .space(this.spaceId)
+      meta = await this.#space()
         .collection(collectionId, { encryption: 'plaintext' })
         .meta()
     } catch (err) {
@@ -309,7 +326,7 @@ export class WASRemoteStore {
    * @returns {Collection}
    */
   collectionHandle({ collectionId }: { collectionId: string }): Collection {
-    return this.was.space(this.spaceId).collection(collectionId)
+    return this.#space().collection(collectionId)
   }
 
   /**
@@ -319,12 +336,12 @@ export class WASRemoteStore {
    * @returns {Space}
    */
   spaceHandle(): Space {
-    return this.was.space(this.spaceId)
+    return this.#space()
   }
 
   async userExists() {
     // describe() returns null on a 404 (not-found or unauthorized).
-    return (await this.was.space(this.spaceId).describe()) !== null
+    return (await this.#space().describe()) !== null
   }
 
   async ensureUserCollections({ user: _user }: { user: User }) {
@@ -408,9 +425,7 @@ export class WASRemoteStore {
   }: {
     controller: string
   }): Promise<void> {
-    await this.was
-      .space(this.spaceId)
-      .configure({ name: 'Wallet Space', controller })
+    await this.#space().configure({ name: 'Wallet Space', controller })
     this.controller = controller
   }
 
@@ -448,8 +463,7 @@ export class WASRemoteStore {
    * @returns {Resource}
    */
   #keyMapResource(): Resource {
-    return this.was
-      .space(this.spaceId)
+    return this.#space()
       .collection(KEY_MAP_COLLECTION.id)
       .resource(DID_KEYS_RESOURCE)
   }
@@ -531,7 +545,7 @@ export class WASRemoteStore {
     isPublic?: boolean
   }): Promise<string> {
     try {
-      const collection = this.was.space(this.spaceId).collection(id)
+      const collection = this.#space().collection(id)
       // `force`: this provisioning upsert runs with the root capability, so
       // a 404 from the pre-merge describe means the collection is absent.
       await collection.configure({
@@ -576,7 +590,7 @@ export class WASRemoteStore {
     id: string
     name?: string
   }): Promise<CollectionEncryption | undefined> {
-    const collection = this.was.space(this.spaceId).collection(id)
+    const collection = this.#space().collection(id)
     let current
     try {
       current = await collection.describe()
@@ -622,7 +636,7 @@ export class WASRemoteStore {
    */
   async deleteCollection({ id }: { id: string }): Promise<void> {
     try {
-      await this.was.space(this.spaceId).collection(id).delete()
+      await this.#space().collection(id).delete()
     } catch (err) {
       console.error(`Error deleting collection "${id}":`, err)
       throw new Error(
@@ -669,7 +683,10 @@ export class WASRemoteStore {
       storageServerUrl,
       zcapClient: profile.zcapClient,
       spaceId,
-      controller
+      controller,
+      // A session holding only a delegated Space-subtree zcap (the transient
+      // posture's generation delegation) rides it on every request.
+      capability: profile.invocationCapability
     })
 
     return { remoteStore }
@@ -808,7 +825,7 @@ export class WASRemoteStore {
   async #collectionSummaries(): Promise<Array<StorageCollection>> {
     let listing
     try {
-      listing = await this.was.space(this.spaceId).collections()
+      listing = await this.#space().collections()
     } catch (err) {
       console.error('Error listing collections:', err)
       throw new Error('Failed to list remote storage collections.', {
@@ -854,10 +871,7 @@ export class WASRemoteStore {
     const collectionId = this.#collectionId(logicalKey)
     let listing
     try {
-      listing = await this.was
-        .space(this.spaceId)
-        .collection(collectionId)
-        .list()
+      listing = await this.#space().collection(collectionId).list()
     } catch (err) {
       console.error(
         `Error listing synced resources for "${collectionId}":`,
@@ -897,7 +911,8 @@ export class WASRemoteStore {
         path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
           resourceId
         )}`,
-        method: 'GET'
+        method: 'GET',
+        capability: this.#capability
       })
       return response.data as Json
     } catch (err) {
@@ -953,7 +968,8 @@ export class WASRemoteStore {
         )}`,
         method: 'PUT',
         json: body as object,
-        headers
+        headers,
+        capability: this.#capability
       })
       return { created: true }
     } catch (err) {
@@ -988,7 +1004,8 @@ export class WASRemoteStore {
         path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
           resourceId
         )}`,
-        method: 'DELETE'
+        method: 'DELETE',
+        capability: this.#capability
       })
     } catch (err) {
       if (errorStatus(err) === 404) {
@@ -1000,7 +1017,7 @@ export class WASRemoteStore {
 
   async wipeStorage() {
     try {
-      await this.was.space(this.spaceId).delete()
+      await this.#space().delete()
     } catch (err) {
       console.error('Error deleting space:', err)
       throw new Error('Failed to delete remote space.', { cause: err })
@@ -1012,7 +1029,8 @@ export class WASRemoteStore {
     try {
       const response = await this.was.request({
         path: `/space/${this.spaceId}/quotas?include=collections`,
-        method: 'GET'
+        method: 'GET',
+        capability: this.#capability
       })
 
       return response.data as SpaceQuotaReport
@@ -1037,7 +1055,8 @@ export class WASRemoteStore {
       response = await this.was.request({
         path: `/space/${this.spaceId}/export`,
         method: 'POST',
-        headers: { accept: 'application/x-tar' }
+        headers: { accept: 'application/x-tar' },
+        capability: this.#capability
       })
     } catch (err) {
       console.error('Error exporting space:', err)
@@ -1058,7 +1077,7 @@ export class WASRemoteStore {
   }): Promise<ImportSpaceSummary> {
     const bytes = new Uint8Array(await tarFile.arrayBuffer())
     try {
-      return await this.was.space(this.spaceId).import(bytes)
+      return await this.#space().import(bytes)
     } catch (err) {
       console.error('Error importing space:', err)
       throw new Error('Failed to import remote space.', { cause: err })

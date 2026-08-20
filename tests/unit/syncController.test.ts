@@ -71,6 +71,7 @@ function fakeSession({ spaceId }: { spaceId: string }): Session {
     storage: {
       wasClient: { fake: true },
       spaceId,
+      hasLocalReplica: true,
       localCollection: vi.fn(() => ({ fakeCollection: true }))
     }
   } as unknown as Session

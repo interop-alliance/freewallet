@@ -1278,9 +1278,7 @@ export async function remintRecoveryDelegations({
     return { reminted: 0, skipped: 0 }
   }
   const record =
-    prefetched !== undefined
-      ? prefetched
-      : await getUnlockMethods({ session })
+    prefetched !== undefined ? prefetched : await getUnlockMethods({ session })
   const entries = recoveryEntriesOf({ record })
   // The standing passphrase/passkey entries ride the same re-mint: their
   // bridge delegations rot on the same document edit and refresh through
