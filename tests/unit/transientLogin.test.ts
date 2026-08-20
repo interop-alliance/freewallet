@@ -41,11 +41,22 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
   userKeyRosterDescriptorStore: vi.fn(),
   readUserKeyRoster: vi.fn(),
-  userKeyRosterLogSigner: vi.fn(() => ({ isRosterSigner: true }))
+  userKeyRosterLogSigner: vi.fn(() => ({ isRosterSigner: true })),
+  ensureUserKeyRoster: vi.fn(),
+  ensureWalletSpaceEpochs: vi.fn(async () => ({ outcomes: {}, failed: [] }))
 }))
 
 vi.mock('@/session/initSession', () => ({
   initSessionFromSeed: vi.fn()
+}))
+
+vi.mock('@/session/clientlessGenesis', () => ({
+  establishClientlessAccount: vi.fn()
+}))
+
+vi.mock('@/session/keyring', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/keyring')>()),
+  fetchTransientKeyring: vi.fn()
 }))
 
 import {
@@ -58,10 +69,14 @@ import {
   webvhZcapClient
 } from '@interop/wallet-core/webvh'
 import {
+  ensureUserKeyRoster,
+  ensureWalletSpaceEpochs,
   readUserKeyRoster,
   userKeyRosterDescriptorStore
 } from '@interop/wallet-core/keys'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
+import { establishClientlessAccount } from '@/session/clientlessGenesis'
+import { fetchTransientKeyring } from '@/session/keyring'
 import { initSessionFromSeed } from '@/session/initSession'
 import type { TransientKeyringFetchResult } from '@/session/keyring'
 import { transientSessionPersistence } from '@/session/persistence'
@@ -346,13 +361,16 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
     expect(readUserKeyRoster).not.toHaveBeenCalled()
   })
 
-  it('refuses an account with no user key roster', async () => {
+  it('refuses when even the tear heal leaves no user key roster', async () => {
     primeHappyPath()
     vi.mocked(readUserKeyRoster).mockResolvedValue(null as never)
     const err = await refusalFor(makeFound())
     expect((err as TransientLoginUnavailableError).reason).toBe(
       'no-user-key-roster'
     )
+    // The heal ran before the refusal: it is the promoted-account-with-no-
+    // roster carve-out, and only its own empty re-read refuses.
+    expect(ensureUserKeyRoster).toHaveBeenCalled()
     expect(initSessionFromSeed).not.toHaveBeenCalled()
   })
 
@@ -457,5 +475,97 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
     expect(initSessionFromSeed).toHaveBeenCalledWith(
       expect.objectContaining({ email: 'record@example.test' })
     )
+  })
+})
+
+describe('transientSessionFromKeyringHit -- the client-less signup heals', () => {
+  it('heals a promoted account with no roster: ladder-signed epoch[0] under the delegation', async () => {
+    primeHappyPath()
+    const persistence = transientSessionPersistence()
+    const found = makeFound()
+    // The first read finds nothing (the signup died before epoch[0]); the
+    // re-read after the heal delivers the fresh key.
+    vi.mocked(readUserKeyRoster)
+      .mockResolvedValueOnce(null as never)
+      .mockResolvedValue({
+        descriptor: { epochs: [{ id: 'did:key:z6LSfresh' }] },
+        userKey: { id: 'did:key:z6LSfresh', secret: new Uint8Array(32) },
+        rotated: false,
+        latestEpochId: 'did:key:z6LSfresh'
+      } as never)
+
+    const { session } = await transientSessionFromKeyringHit({
+      found,
+      type: 'passphrase',
+      persistence
+    })
+
+    // The heal's roster store: the ladder-signed signer (not the visit
+    // key's), still invoked under the generation delegation.
+    const healStoreCall = vi
+      .mocked(userKeyRosterDescriptorStore)
+      .mock.calls.at(-1)![0]
+    expect(healStoreCall.capability).toBe(GENERATION_DELEGATION)
+    const ensureCall = vi.mocked(ensureUserKeyRoster).mock.calls[0]![0]
+    expect(ensureCall.clientKeyAgreementKey).toBe(
+      found.standingClient.agents.keyAgreementKey
+    )
+    expect(ensureCall.userKey.id).toMatch(/^did:key:/)
+    // The collection epochs complete under the same delegated authority.
+    expect(ensureWalletSpaceEpochs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spaceId: POINTER.spaceId,
+        capability: GENERATION_DELEGATION
+      })
+    )
+    expect(session).toBeTruthy()
+  })
+
+  it('re-runs the establishment for a ladder-seeded record with no did, then re-enters', async () => {
+    primeHappyPath()
+    const persistence = transientSessionPersistence()
+    const credential = CREDENTIAL
+    const torn = makeFound({
+      pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
+    })
+    const refreshed = makeFound()
+    vi.mocked(fetchTransientKeyring).mockResolvedValue(refreshed as never)
+
+    const { session } = await transientSessionFromKeyringHit({
+      found: torn,
+      type: 'passphrase',
+      persistence,
+      credential
+    })
+
+    expect(establishClientlessAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credential,
+        ladderSeed: torn.standing!.ladderSeed,
+        pointer: torn.pointer,
+        lowEntropy: true,
+        persistence
+      })
+    )
+    // The re-entry rode the refreshed record.
+    expect(fetchTransientKeyring).toHaveBeenCalledWith({
+      credential,
+      accountLogPinStore: persistence.logPins
+    })
+    expect(session).toBeTruthy()
+  })
+
+  it('still refuses an unpromoted account with no credential in hand', async () => {
+    const torn = makeFound({
+      pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
+    })
+    await expect(
+      transientSessionFromKeyringHit({
+        found: torn,
+        type: 'passphrase',
+        persistence: transientSessionPersistence()
+      })
+    ).rejects.toMatchObject({ reason: 'unpromoted-account' })
+    expect(establishClientlessAccount).not.toHaveBeenCalled()
   })
 })

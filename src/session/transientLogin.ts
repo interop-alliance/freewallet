@@ -42,13 +42,20 @@ import {
   type CompanionWriteStore
 } from '@interop/wallet-core/webvh'
 import {
+  ensureUserKeyRoster,
+  ensureWalletSpaceEpochs,
+  mintUserKey,
   readUserKeyRoster,
   userKeyRosterDescriptorStore,
   userKeyRosterLogSigner
 } from '@interop/wallet-core/keys'
+import { didKeyZcapClient, ladderVmAgent } from '@interop/wallet-core/webvh'
+import { ensurePromotedSpaceController } from '@interop/wallet-core/genesis'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
+import { WasClient } from '@interop/was-client'
 import { WAS_SERVER_URL } from '@/app.config'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
+import { establishClientlessAccount } from '@/session/clientlessGenesis'
 import {
   transientSessionPersistence,
   type TransientSessionPersistence
@@ -56,6 +63,7 @@ import {
 import { initSessionFromSeed } from '@/session/initSession'
 import {
   deriveUnlockCredential,
+  fetchTransientKeyring,
   type TransientKeyringFetchResult,
   type UnlockCredential
 } from '@/session/keyring'
@@ -268,30 +276,74 @@ function refuseMissingGeneration(
  * @param [options.email] {string}   caller-supplied email, when any
  * @param options.persistence {TransientSessionPersistence}   the visit's
  *   in-memory handle (the same one the record fetch's settle rode)
+ * @param [options.credential] {UnlockCredential}   the derived unlock
+ *   credential, when the caller holds one -- what arms the torn
+ *   companion-native-signup heal (the establishment re-run needs the unlock
+ *   identity, not just the record)
+ * @param [options.healAttempted] {boolean}   internal: the re-entry marker of
+ *   the unpromoted-account heal, so a heal that did not converge refuses
+ *   instead of looping
  * @returns {Promise<{ session: Session, userExists: boolean }>}
  */
 export async function transientSessionFromKeyringHit({
   found,
   type,
   email,
-  persistence
+  persistence,
+  credential,
+  healAttempted = false
 }: {
   found: TransientKeyringFetchResult
   type: 'passphrase' | 'passkey'
   email?: string
   persistence: TransientSessionPersistence
+  credential?: UnlockCredential
+  healAttempted?: boolean
 }): Promise<{ session: Session; userExists: boolean }> {
   const standing = found.standing
   if (!standing?.ladderSeed) {
     throw new TransientLoginUnavailableError({ reason: 'no-standing' })
   }
+  const pointer = found.pointer
+  if (!pointer || !isWebvhDid(pointer.did)) {
+    // The torn companion-native signup's heal: a standing record whose
+    // pointer names no did:webvh yet can only be a client-less establishment
+    // that died before its re-bind -- the durable flow's records carry no
+    // ladder seed until AFTER promotion. Re-running the establishment
+    // converges (every stage is an ensure; the published log, if any, is
+    // adopted by ladder attribution), and the login then re-enters through
+    // the refreshed record. Needs the credential in hand -- the ordinary
+    // login path supplies it.
+    if (!healAttempted && credential && pointer && standing.ladderSeed) {
+      await establishClientlessAccount({
+        credential,
+        ladderSeed: standing.ladderSeed,
+        pointer,
+        lowEntropy: type === 'passphrase',
+        email: email ?? found.email,
+        priorCreatedAt: found.createdAt,
+        persistence
+      })
+      const refreshed = await fetchTransientKeyring({
+        credential,
+        accountLogPinStore: persistence.logPins
+      })
+      if (refreshed) {
+        return transientSessionFromKeyringHit({
+          found: refreshed,
+          type,
+          email,
+          persistence,
+          credential,
+          healAttempted: true
+        })
+      }
+    }
+    throw new TransientLoginUnavailableError({ reason: 'unpromoted-account' })
+  }
   const delegatedClients = standing.delegatedClients
   if (!delegatedClients) {
     throw new TransientLoginUnavailableError({ reason: 'no-delegated-clients' })
-  }
-  const pointer = found.pointer
-  if (!pointer || !isWebvhDid(pointer.did)) {
-    throw new TransientLoginUnavailableError({ reason: 'unpromoted-account' })
   }
   const accountDid = pointer.did
   // Aliased for the hoisted `readAccountDocument` closure below, where the
@@ -402,12 +454,81 @@ export async function transientSessionFromKeyringHit({
     signer: userKeyRosterLogSigner({ keyAgent }),
     capability: generationDelegation
   })
-  const rosterRead = await readUserKeyRoster({
-    store: rosterStore,
-    clientKeyAgreementKey: found.standingClient.agents.keyAgreementKey
-  })
+  const readRoster = () =>
+    readUserKeyRoster({
+      store: rosterStore,
+      clientKeyAgreementKey: found.standingClient.agents.keyAgreementKey
+    })
+  let rosterRead
+  try {
+    rosterRead = await readRoster()
+  } catch (err) {
+    // A client-less establishment torn between its record re-bind and the
+    // controller promotion leaves the generation delegation unverifiable:
+    // the Space still answers to the bootstrap did:key, so the delegated
+    // read above fails. Completing the promotion is the one ladder-derived
+    // repair that fixes it; when the attempt itself fails (any other cause
+    // -- the account was never client-less, the network flapped), the
+    // original error stands unchanged.
+    try {
+      const bootstrapAgent = await ladderVmAgent({ ladderSeed })
+      const bootstrapWas = new WasClient({
+        serverUrl: pointer.host,
+        zcapClient: didKeyZcapClient({ keyAgent: bootstrapAgent })
+      })
+      await ensurePromotedSpaceController({
+        was: bootstrapWas,
+        wasAsClient: bootstrapWas,
+        spaceId: pointer.spaceId,
+        did: accountDid
+      })
+    } catch {
+      throw err
+    }
+    rosterRead = await readRoster()
+  }
   if (!rosterRead) {
-    throw new TransientLoginUnavailableError({ reason: 'no-user-key-roster' })
+    // The tear-3 heal (promoted account, no roster): the client-less
+    // establishment died between the genesis and the roster's epoch[0], so
+    // the user key died in memory and nothing anywhere delivers one. The
+    // explicit carve-out from the sweeps-skipped rule: mint a fresh user
+    // key, land epoch[0] with a ladder-signed entry proof (the ceremony-tail
+    // license's first-entry shape), wrapped to the credential's standing
+    // key-agreement key, and complete the collection epochs -- every write
+    // invoked as the companion VM under the generation delegation, since the
+    // promoted Space answers to nothing else this session holds. Nothing
+    // encrypted existed yet (the epoch gate in the ceremony guarantees it),
+    // so the fresh key orphans nothing.
+    const bootstrapAgent = await ladderVmAgent({ ladderSeed })
+    const healStore = userKeyRosterDescriptorStore({
+      storageServerUrl: pointer.host,
+      zcapClient: transientZcapClient,
+      spaceId: pointer.spaceId,
+      resolveController: async () =>
+        webvhResourceLogController({ did: accountDid, log: verified.log }),
+      pinStore: persistence.logPins,
+      signer: userKeyRosterLogSigner({ keyAgent: bootstrapAgent }),
+      capability: generationDelegation
+    })
+    const freshUserKey = await mintUserKey()
+    await ensureUserKeyRoster({
+      store: healStore,
+      userKey: freshUserKey,
+      clientKeyAgreementKey: found.standingClient.agents.keyAgreementKey
+    })
+    await ensureWalletSpaceEpochs({
+      was: new WasClient({
+        serverUrl: pointer.host,
+        zcapClient: transientZcapClient
+      }),
+      spaceId: pointer.spaceId,
+      userKey: freshUserKey,
+      capability: generationDelegation
+    })
+    rosterRead = await readRoster()
+    if (!rosterRead) {
+      throw new TransientLoginUnavailableError({ reason: 'no-user-key-roster' })
+    }
   }
   await persistence.epochPins.saveFromDescriptor({
     accountDid,

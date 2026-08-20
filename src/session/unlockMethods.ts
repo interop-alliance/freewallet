@@ -58,7 +58,7 @@ import {
   rotateOffUnlockCredential,
   type CredentialRotationOutcome
 } from '@/session/credentialRotation'
-import type { UserKey } from '@interop/wallet-core/keys'
+import { userKeyVaultKeys, type UserKey } from '@interop/wallet-core/keys'
 import {
   unwrapRecordEnvelope,
   wrapRecordEnvelope
@@ -428,6 +428,53 @@ export async function putUnlockMethods({
 
   await session.profile.persistence.unlockMethodsCache.save({
     controller,
+    record: wrapped
+  })
+}
+
+/**
+ * Writes the registry with a caller-supplied signing client and user key --
+ * no session involved. The companion-native signup's registry write: it runs
+ * inside the establishment ceremony's pre-promotion window (the bootstrap
+ * did:key still invokes the root capability there), before any session
+ * exists. No local cache is touched: the caller is a transient visit.
+ *
+ * @param options {object}
+ * @param options.zcapClient {ZcapClient}   the client the collection ensure
+ *   and the record PUT invoke with
+ * @param options.spaceId {string}   the data Space id
+ * @param options.userKey {UserKey}   the account's user key; its vault KAK
+ *   seals the record
+ * @param options.record {UnlockMethodsRecord}
+ * @returns {Promise<void>}
+ */
+export async function putUnlockMethodsWithClient({
+  zcapClient,
+  spaceId,
+  userKey,
+  record
+}: {
+  zcapClient: ZcapClient
+  spaceId: string
+  userKey: UserKey
+  record: UnlockMethodsRecord
+}): Promise<void> {
+  if (!WAS_SERVER_URL) {
+    throw new TypeError(
+      'The direct registry write requires a configured WAS server.'
+    )
+  }
+  const { keyAgreementKey, keyResolver } = userKeyVaultKeys({ userKey })
+  const wrapped = await wrapRecord({ record, keyAgreementKey, keyResolver })
+  await ensureUnlockMethodsCollection({
+    storageServerUrl: WAS_SERVER_URL,
+    zcapClient,
+    spaceId
+  })
+  await putUnlockMethodsRecord({
+    storageServerUrl: WAS_SERVER_URL,
+    zcapClient,
+    spaceId,
     record: wrapped
   })
 }

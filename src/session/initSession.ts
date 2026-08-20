@@ -748,7 +748,8 @@ export async function loginWithPassphrase({
       found,
       type: 'passphrase',
       email,
-      persistence: routed.persistence
+      persistence: routed.persistence,
+      credential: routed.credential
     })
   }
 
@@ -1128,7 +1129,8 @@ export async function loginWithPasskey({
     return transientSessionFromKeyringHit({
       found,
       type: 'passkey',
-      persistence: routed.persistence
+      persistence: routed.persistence,
+      credential: routed.credential
     })
   }
 

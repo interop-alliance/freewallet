@@ -35,10 +35,25 @@ export function testUser(testInfo: TestInfo) {
   }
 }
 
-export async function signupViaWizard(page: Page, testInfo: TestInfo) {
+export async function signupViaWizard(
+  page: Page,
+  testInfo: TestInfo,
+  {
+    rememberBrowser = true
+  }: {
+    // Companion-native (client-less, transient-session) signup is the
+    // DEFAULT on a non-remembered browser, so the durable fixtures every
+    // other suite builds on force the remember seam; the client-less signup
+    // spec is the one caller passing false.
+    rememberBrowser?: boolean
+  } = {}
+) {
   const { passphrase, email } = testUser(testInfo)
 
   await page.goto('/#/signup')
+  if (rememberBrowser) {
+    await forceRememberBrowser(page)
+  }
   await fillSettled(page.locator('input[type="password"]'), passphrase)
   // The strength meter enables Next only after it scores the passphrase;
   // under a parallel-worker CPU squeeze that can outlast the default 5s.

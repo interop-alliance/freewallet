@@ -5,7 +5,7 @@ import {
   type Page,
   type TestInfo
 } from '@playwright/test'
-import { fillSettled } from './helpers'
+import { fillSettled, forceRememberBrowser } from './helpers'
 
 /**
  * Signup wizard walk with generous waits. Same steps as the shared
@@ -20,6 +20,10 @@ async function signup(page: Page, testInfo: TestInfo) {
   const email = `e2e-${token}@example.com`
 
   await page.goto('/#/signup')
+  // These suites pin the DURABLE signup's artifacts (the KMS keystore, the
+  // per-client update keys), so they force the remember seam: the default
+  // signup on a non-remembered browser is companion-native.
+  await forceRememberBrowser(page)
   await fillSettled(page.locator('input[type="password"]'), passphrase)
   const next = page.getByRole('button', { name: 'Next' })
   // The strength meter that gates "Next" lazy-loads its (large) zxcvbn

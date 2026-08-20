@@ -39,6 +39,7 @@ import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
 import { usePrfRetryPrompt } from '@/hooks/usePrfRetryPrompt'
 import { DATE_FMT, PASSWORD_RULES } from '@/app.config'
 import { registerWallet } from '@/lib/registerWallet'
+import { forcedRememberBrowser } from '@/lib/e2eSeams'
 import type { AuthLocationState } from '@/types/auth'
 
 /**
@@ -138,7 +139,11 @@ export function SignupPage() {
     try {
       const { session, userExists } = await signUpWithPassphrase({
         passphrase,
-        email: email || undefined
+        email: email || undefined,
+        // The e2e seam forces the durable flow; without it a WAS-configured
+        // signup on this (by definition non-remembered) browser runs
+        // companion-native and ends in a transient session.
+        ...(forcedRememberBrowser() ? { rememberBrowser: true } : {})
       })
       if (userExists || !session) {
         return navigate('/login', {

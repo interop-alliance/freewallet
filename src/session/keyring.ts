@@ -1569,6 +1569,148 @@ export async function bindPassphrase({
 }
 
 /**
+ * The CLIENT-LESS bind: writes a standing unlock record with NO local
+ * counterpart at all -- no client-key record (a companion-native signup mints
+ * no client seed to persist), no keyring cache, and no freshness pin (the
+ * caller is a transient visit whose replay bound is per-visit
+ * trust-on-first-use). Everything it writes is remote: the unlock Space, the
+ * standing-layout record (bridge, optional sibling, ladder seed, binding
+ * MAC), and the optional management delegation.
+ *
+ * The record's `controller` is the ladder VM's bare did:key -- the bootstrap
+ * identity, re-derivable from the credential alone -- and the freshness stamp
+ * floors over the caller-supplied prior stamp (the signup's first bind), so
+ * the post-genesis re-bind always supersedes it.
+ *
+ * @param options {object}
+ * @param options.controller {string}   the ladder VM's did:key
+ * @param [options.secret] {string | Uint8Array}   the unlock secret, when no
+ *   derived credential is supplied
+ * @param [options.kdf] {UnlockKdf}   the unlock method's KDF parameters,
+ *   required beside `secret`
+ * @param [options.email] {string}   carried inside the wrapped record
+ * @param options.pointer {AccountPointer}   the account pointer (DID-less on
+ *   the pre-genesis bind; the full pointer on the re-bind)
+ * @param options.delegation {IZcap}   the bridge delegation (the interim
+ *   ladder-did:key-signed one pre-genesis, the ladder-VM-signed one after)
+ * @param [options.delegatedClients] {IZcap}   the companion-Space sibling
+ * @param options.ladderSeed {Uint8Array}
+ * @param [options.delegateManagementTo] {string}   an account DID to delegate
+ *   the unlock Space management zcap to (widened with PUT, the standing
+ *   posture)
+ * @param [options.priorCreatedAt] {string}   the previous bind's stamp, the
+ *   freshness floor for this one
+ * @param [options.credential] {UnlockCredential}   an already-derived
+ *   credential for the same secret
+ * @returns {Promise<object>}   the unlock Space id, the management zcap when
+ *   one was delegated, this record's `createdAt` stamp, and the unlock KAK's
+ *   id and multibase for the registry entry
+ */
+export async function bindClientlessUnlockSecret({
+  controller,
+  secret,
+  kdf,
+  email,
+  pointer,
+  delegation,
+  delegatedClients,
+  ladderSeed,
+  delegateManagementTo,
+  priorCreatedAt,
+  credential: derived
+}: {
+  controller: string
+  secret?: string | Uint8Array
+  kdf?: UnlockKdf
+  email?: string
+  pointer: AccountPointer
+  delegation: IZcap
+  delegatedClients?: IZcap
+  ladderSeed: Uint8Array
+  delegateManagementTo?: string
+  priorCreatedAt?: string
+  credential?: UnlockCredential
+}): Promise<{
+  unlockSpaceId: string
+  manageCapability?: IZcap
+  createdAt: string
+  unlockKeyAgreementKeyId?: string
+  unlockKeyAgreementKeyMultibase?: string
+}> {
+  if (!WAS_SERVER_URL) {
+    throw new TypeError(
+      'The client-less bind requires a configured WAS server.'
+    )
+  }
+  if (!derived && (secret === undefined || kdf === undefined)) {
+    throw new TypeError(
+      'An unlock secret and its KDF are required when no derived credential ' +
+        'is supplied.'
+    )
+  }
+  const credential =
+    derived ??
+    (await deriveUnlockCredential({
+      secret: secret as string | Uint8Array,
+      kdf: kdf as UnlockKdf
+    }))
+  const { unlock, standing } = credential
+  const createdAt = nextRecordCreatedAt({ floors: [priorCreatedAt] })
+  const record = await wrapUnlockRecord({
+    controller,
+    email,
+    pointer,
+    delegation,
+    ...(delegatedClients ? { delegatedClients } : {}),
+    ladderSeed,
+    keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+    signer: unlock.recordSigner,
+    bindingMacKey: standing.bindingMacKey,
+    createdAt
+  })
+
+  await ensureUnlockSpace({
+    storageServerUrl: WAS_SERVER_URL,
+    zcapClient: unlock.zcapClient,
+    spaceId: unlock.spaceId,
+    controller: unlock.agent.id
+  })
+  await putUnlockKeyring({
+    storageServerUrl: WAS_SERVER_URL,
+    zcapClient: unlock.zcapClient,
+    spaceId: unlock.spaceId,
+    record
+  })
+  let manageCapability: IZcap | undefined
+  if (delegateManagementTo) {
+    // The standing widening (PUT beside GET/DELETE), exactly as the durable
+    // standing bind delegates it: the revocation cascade must be able to
+    // re-PUT this record with a re-minted bridge.
+    manageCapability = await delegateUnlockManagement({
+      zcapClient: unlock.zcapClient,
+      spaceId: unlock.spaceId,
+      controller: delegateManagementTo,
+      allowedActions: ['GET', 'PUT', 'DELETE']
+    })
+  }
+
+  const { id: unlockKeyAgreementKeyId, publicKeyMultibase } =
+    unlock.keyAgreementKey as unknown as {
+      id?: string
+      publicKeyMultibase?: string
+    }
+  return {
+    unlockSpaceId: unlock.spaceId,
+    manageCapability,
+    createdAt,
+    ...(unlockKeyAgreementKeyId ? { unlockKeyAgreementKeyId } : {}),
+    ...(publicKeyMultibase
+      ? { unlockKeyAgreementKeyMultibase: publicKeyMultibase }
+      : {})
+  }
+}
+
+/**
  * Thrown when a supplied unlock secret (the current passphrase, most
  * commonly) does not unlock a keyring for this account. Shared by every
  * unlock method's verification path.

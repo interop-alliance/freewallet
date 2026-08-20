@@ -386,6 +386,43 @@ after the DID is published, and the controller promotion after it -- so the
 ceremony is called with `promoteController: false` and
 `ensurePromotedController` keeps promoting (and healing) as before.
 
+**The client-less variant (companion-native signup).** On a non-remembered
+browser with a WAS server configured, the passphrase signup runs
+wallet-core's `ensureClientlessAccountGenesis` instead (through
+`establishClientlessAccount` in `src/session/clientlessGenesis.ts`): no
+durable client is minted anywhere. The Space is bootstrapped under the
+LADDER VM's bare did:key (`ladderVmAgent` -- re-derivable from the unlock
+record's ladder seed, so a tab death before promotion strands nothing a
+later login cannot finish); the one-entry client-less did:webvh genesis is
+signed by ladder rung 0 (`updateKeys` = [rung 0], `nextKeyHashes` =
+[hash(rung 0), hash(rung 1)], `portable` unchanged) with the ladder VM and
+the credential's `keyAgreement` commitment folded in; the roster's epoch[0]
+wraps the user key to the credential's standing KAK with a ladder-signed
+entry proof (the ceremony-tail license's first-entry shape); and the
+collection epochs are gated on the roster landing, since the user key
+exists only in the visit's memory. There is no KMS stage -- the keystore
+defers to the first durable enrollment. The ordering rule is the transposed
+persist-before-publish invariant: the unlock record carrying the ladder
+seed (with an interim bridge delegated by the ladder's bare did:key) is
+durably written BEFORE the Space is created and before rung 0 publishes.
+After the genesis, the establishment mints the companion generation under
+the same bootstrap identity, embeds the ladder-VM-signed generation
+delegation, flips the auxiliary Space's controller, appends the
+`#DelegatedClients` pointer as a second rung-0-signed account-log entry,
+re-binds the record (full pointer, ladder-VM-signed bridge and sibling,
+management zcap to the account DID), writes the unlock-methods registry in
+the last root-invocation window, and promotes the Space controller last.
+The visit then enters through the ordinary transient composition, so a
+companion-native signup ends in a transient session with zero local
+residue. The whole establishment is an ensure: a torn signup converges by
+re-running, with the published log adopted by ladder attribution
+(`createDID` timestamps the genesis entry, so a naive re-create would mint
+a different SCID and its create-if-absent PUT could never land). The
+`rememberBrowser: true` entry (the e2e seam today, the signup form's
+remember choice when it lands) and every no-WAS deployment keep the durable
+flow above; the passkey signup stays durable outright (registering a
+passkey is itself a durable ceremony).
+
 ## Session persistence
 
 Sessions are **in-memory only**. A fresh login builds the whole `Session` --
@@ -468,6 +505,28 @@ unpromoted account, no live generation or embedded delegation, no roster
 ceremony byte is written (the login page maps it onto the not-enrolled
 guidance for now), and network errors rethrow unchanged so a flap stays
 distinguishable from a generation lapse.
+
+Two of those refusals now carry a heal first, for the tears a torn
+companion-native signup can leave (see "Account genesis"). A standing
+record whose pointer names no did:webvh can only be a client-less
+establishment that died before its re-bind (durable-flow records gain
+their ladder seed only after promotion), so the composition re-runs
+`establishClientlessAccount` -- every stage an ensure, the published log
+adopted by ladder attribution -- and re-enters through the refreshed
+record; without the derived credential in hand (a test double), or when
+the re-run does not converge, the `unpromoted-account` refusal stands. And
+a promoted account whose roster read comes back empty is the tear between
+genesis and epoch[0] -- the user key died with the signup tab -- healed
+here as the explicit carve-out from the sweeps-skipped rule: a fresh user
+key is minted, epoch[0] lands with a ladder-signed entry proof wrapped to
+the credential's standing KAK, and the collection epochs complete, every
+write invoked as the companion VM under the generation delegation (the
+`capability` option on `ensureWalletSpaceEpochs` and the roster store).
+Nothing encrypted predates the heal (the ceremony installs collection
+epochs only behind a landed roster), so the fresh key orphans nothing. A
+roster read failing outright, rather than empty, additionally retries once
+behind a bootstrap-signed promotion completion -- the one-request-wide
+tear between the record re-bind and the promotion.
 
 The handle also carries the posture's refusals. Update-key rotation requires
 the durable posture outright (`DurableSessionRequiredError`): its subject is

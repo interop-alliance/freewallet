@@ -38,6 +38,7 @@ import {
   passkeySupported
 } from '@/lib/passkey'
 import { registerWallet } from '@/lib/registerWallet'
+import { forcedRememberBrowser } from '@/lib/e2eSeams'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import type { AuthLocationState } from '@/types/auth'
 
@@ -56,25 +57,6 @@ import type { AuthLocationState } from '@/types/auth'
  */
 function errorName(err: unknown): unknown {
   return (err as { name?: unknown } | null)?.name
-}
-
-/**
- * E2E test seam: force the durable login route (the programmatic
- * remember-this-browser entry) when a test sets the flag. Read at submit
- * time, so a spec can set it with `page.evaluate` after the page is up. The
- * cold-device self-enrollment specs use it until the login form grows the
- * remember-this-browser choice. No-op in production.
- *
- * @returns {boolean}
- */
-function forcedRememberBrowser(): boolean {
-  if (import.meta.env.MODE === 'production') {
-    return false
-  }
-  return Boolean(
-    (window as unknown as { __E2E_REMEMBER_BROWSER__?: boolean })
-      .__E2E_REMEMBER_BROWSER__
-  )
 }
 
 /**

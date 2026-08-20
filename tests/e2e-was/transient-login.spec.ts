@@ -8,10 +8,13 @@
  * (the shared assertions in `tests/shared/storageResidue.ts`).
  *
  * The transient login needs a companion generation the account document
- * points at and an unlock record carrying the delegated-clients sibling;
- * no shipped ceremony mints one yet, so the setup drives the non-production
- * `__E2E_MINT_COMPANION_GENERATION__` seam from the signed-in durable signup
- * session before the transient contexts run.
+ * points at and an unlock record carrying the delegated-clients sibling.
+ * This suite's fixture is deliberately the DURABLE signup plus the
+ * non-production `__E2E_MINT_COMPANION_GENERATION__` seam -- the remembered
+ * account whose credential later visits public terminals. The
+ * companion-native signup path (which mints the generation with no seam and
+ * no durable client) has its own residue suite in
+ * `clientless-signup.spec.ts`.
  */
 import { test, expect, type Browser, type Page } from '@playwright/test'
 import { addCredentialViaPaste, fillSettled, signupViaWizard } from './helpers'

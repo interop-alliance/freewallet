@@ -9,24 +9,33 @@
 import { base64urlnopad } from '@scure/base'
 import { KEYRING_KDF, type AccountPointer } from '@interop/wallet-core/keyring'
 import { mintAccountKeySet as mintSharedAccountKeySet } from '@interop/wallet-core/genesis'
+import { generateLadderSeed } from '@interop/wallet-core/unlock'
 import { PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
 import {
   bindPassphrase,
   bindUnlockSecret,
   deriveUnlockCredential,
+  fetchTransientKeyring,
   unlockManagementGrantee
 } from '@/session/keyring'
+import { establishClientlessAccount } from '@/session/clientlessGenesis'
+import { transientSessionPersistence } from '@/session/persistence'
+import { transientSessionFromKeyringHit } from '@/session/transientLogin'
 import { provisionNewWallet } from '@/session/provisionNewWallet'
 import {
   establishPassphrasePosture,
   establishStandingUnlock
 } from '@/session/standingUnlock'
 import {
+  emptyUnlockMethodsRegistry,
   enrollPasskey,
   putUnlockMethods,
+  putUnlockMethodsWithClient,
+  upsertPassphraseUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
+import { mintSpaceId } from '@/stores/wasRemoteStore'
 import type { Session } from '@/types/auth'
 
 /**
@@ -113,30 +122,131 @@ async function backfillPointerAndPromote({
 }
 
 /**
- * Creates a new wallet under a passphrase, or reports that this passphrase
- * already has one.
+ * The COMPANION-NATIVE signup: the default on a non-remembered browser with
+ * a WAS server configured. No durable client is minted anywhere -- the whole
+ * establishment (`establishClientlessAccount`) is anchored on the
+ * passphrase's ladder, and the visit then enters the account through the
+ * ordinary transient composition, leaving zero local residue.
  *
- * Ordering: the account is probed first -- resolving the passphrase through
- * the keyring and reading `userExists` is what prevents a re-signup with an
- * existing passphrase from overwriting that account's keyring and orphaning
- * the wallet (the probe session is discarded, so it must not provision). The
- * passphrase is then bound to this client's key set BEFORE the data Space is
- * created: an account whose keyring failed to publish must not be created, and
- * binding first means a failed signup leaves no orphaned data Space behind.
- * The pointer backfill and the controller promotion come last, in that order.
+ * Ordering matches the durable flavor's spirit: the account is probed first
+ * (a create-nothing transient record fetch -- the durable probe would
+ * self-enroll this browser), and the record carrying the ladder seed is
+ * durably written before anything else exists (inside the establishment).
+ * The registry entry rides the establishment's pre-promotion window.
  *
  * @param options {object}
  * @param options.passphrase {string}
  * @param [options.email] {string}
  * @returns {Promise<{ session?: Session, userExists: boolean }>}
  */
-export async function signUpWithPassphrase({
+async function signUpClientlessWithPassphrase({
   passphrase,
   email
 }: {
   passphrase: string
   email?: string
 }): Promise<{ session?: Session; userExists: boolean }> {
+  const persistence = transientSessionPersistence()
+  // One 600k-iteration derivation for the whole signup.
+  const credential = await deriveUnlockCredential({
+    secret: passphrase,
+    kdf: KEYRING_KDF
+  })
+  const probe = await fetchTransientKeyring({
+    credential,
+    accountLogPinStore: persistence.logPins
+  })
+  if (probe) {
+    return { userExists: true }
+  }
+
+  const spaceId = mintSpaceId()
+  const pointer: AccountPointer = { spaceId, host: WAS_SERVER_URL }
+  const ladderSeed = generateLadderSeed()
+  await establishClientlessAccount({
+    credential,
+    ladderSeed,
+    pointer,
+    lowEntropy: true,
+    email,
+    persistence,
+    beforePromotion: async ({ zcapClient, userKey, establishment }) => {
+      // The registry entry, in the last root-invocation window. Best-effort
+      // by the hook's contract: a miss is re-recordable later, never fatal.
+      await putUnlockMethodsWithClient({
+        zcapClient,
+        spaceId,
+        userKey,
+        record: upsertPassphraseUnlockMethod({
+          record: emptyUnlockMethodsRegistry(),
+          unlockSpaceId: establishment.unlockSpaceId,
+          manageCapability: establishment.manageCapability,
+          standing: establishment.standingFields
+        })
+      })
+    }
+  })
+
+  // Enter the account exactly as any later public-terminal login would: the
+  // ordinary transient composition over the record just established.
+  const found = await fetchTransientKeyring({
+    credential,
+    accountLogPinStore: persistence.logPins
+  })
+  if (!found) {
+    throw new Error(
+      'The freshly established unlock record could not be fetched back.'
+    )
+  }
+  const { session } = await transientSessionFromKeyringHit({
+    found,
+    type: 'passphrase',
+    email,
+    persistence
+  })
+  return { session, userExists: false }
+}
+
+/**
+ * Creates a new wallet under a passphrase, or reports that this passphrase
+ * already has one.
+ *
+ * Posture routing mirrors the login's: on a non-remembered browser with a
+ * WAS server configured the signup is COMPANION-NATIVE (client-less genesis,
+ * transient session, zero local residue); an explicit `rememberBrowser:
+ * true` -- the programmatic remember-this-browser entry (the e2e seam today,
+ * the signup form's checkbox when it lands) -- and every no-WAS deployment
+ * run the durable flow below.
+ *
+ * Durable ordering: the account is probed first -- resolving the passphrase
+ * through the keyring and reading `userExists` is what prevents a re-signup
+ * with an existing passphrase from overwriting that account's keyring and
+ * orphaning the wallet (the probe session is discarded, so it must not
+ * provision). The passphrase is then bound to this client's key set BEFORE
+ * the data Space is created: an account whose keyring failed to publish must
+ * not be created, and binding first means a failed signup leaves no orphaned
+ * data Space behind. The pointer backfill and the controller promotion come
+ * last, in that order.
+ *
+ * @param options {object}
+ * @param options.passphrase {string}
+ * @param [options.email] {string}
+ * @param [options.rememberBrowser] {boolean}   `true` forces the durable
+ *   flow; absent or `false`, a WAS-configured signup runs companion-native
+ * @returns {Promise<{ session?: Session, userExists: boolean }>}
+ */
+export async function signUpWithPassphrase({
+  passphrase,
+  email,
+  rememberBrowser
+}: {
+  passphrase: string
+  email?: string
+  rememberBrowser?: boolean
+}): Promise<{ session?: Session; userExists: boolean }> {
+  if (WAS_SERVER_URL && rememberBrowser !== true) {
+    return signUpClientlessWithPassphrase({ passphrase, email })
+  }
   // Probe for an existing account first. loginWithPassphrase resolves the
   // passphrase through the keyring and reports whether this identity already
   // has a wallet; probing (rather than binding a raw seed straight away) is
