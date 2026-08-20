@@ -4,6 +4,25 @@
 
 ### Added
 
+- The residue-zero e2e. A WAS e2e spec
+  (`tests/e2e-was/transient-login.spec.ts`) runs the full default transient
+  login through the real login form in a fresh browser context, stores a
+  credential, and asserts zero storage residue after both a logout and a
+  simulated crash (the page closed with no logout): no IndexedDB database
+  (checked via CDP), no localStorage key gained over a before/after delta,
+  and an empty sessionStorage. The assertions are a reusable helper
+  (`tests/shared/storageResidue.ts`) shared by later transient-posture
+  specs. The account fixture drives a new non-production
+  `window.__E2E_MINT_COMPANION_GENERATION__` seam over
+  `establishCompanionGeneration` (`src/session/standingUnlock.ts`), which
+  ensures a companion generation exists and is pointed at (created under
+  this client's did:key and promoted to the account DID, with the
+  credential-signed genesis from wallet-core's
+  `mintCredentialCompanionGeneration` and the embedded generation
+  delegation installed), then mints the companion-Space sibling delegation
+  and re-seals it into the credential's unlock record, preserving the
+  ladder seed.
+
 - The transient login. On a browser holding no client-key record for the
   typed credential (and with a WAS server configured), login now defaults to
   a transient session that persists nothing locally: the unlock record is

@@ -46,10 +46,17 @@ import {
 } from '@interop/wallet-core/unlock'
 import type { ClientKeyRecord } from '@interop/wallet-core/keys'
 import {
+  accountLogPinId,
   companionDidParts,
+  companionLogStore,
   delegatedClientsPointer,
+  didKeyZcapClient,
+  ensureGenerationDelegationCurrent,
   isWebvhDid,
-  mintDelegatedClientsDelegation
+  mintCredentialCompanionGeneration,
+  mintDelegatedClientsDelegation,
+  mintGenerationDelegation,
+  setDelegatedClientsPointer
 } from '@interop/wallet-core/webvh'
 import {
   delegateLogWrite,
@@ -64,6 +71,7 @@ import type { Session } from '@/types/auth'
 import {
   bindUnlockSecret,
   deriveUnlockCredential,
+  fetchKeyring,
   unlockManagementGrantee,
   type KeyringFetchResult,
   type PersistableClientKeys,
@@ -85,9 +93,11 @@ import {
   emptyUnlockMethodsRegistry,
   getUnlockMethods,
   putUnlockMethods,
+  refreshStandingDelegationFields,
   upsertPassphraseUnlockMethod,
   type StandingUnlockFields
 } from '@/session/unlockMethods'
+import { mintSpaceId } from '@/stores/wasRemoteStore'
 
 /**
  * The narrow store a credential's self-enrollment continuation writes
@@ -378,6 +388,154 @@ export async function establishStandingUnlock({
         : {})
     }
   }
+}
+
+/**
+ * Establishes the companion-generation posture for one standing unlock
+ * credential, from a live enrolled session holding its secret: ensure a
+ * generation exists and the account document points at it (minting the typed
+ * auxiliary Space, the credential-signed genesis, and the embedded generation
+ * delegation when none is pointed -- companion log first, pointer second),
+ * then mint the companion-Space sibling delegation and re-seal it into the
+ * credential's unlock record beside the existing bridge. The re-bind
+ * preserves the record's ladder seed verbatim (`rebindStandingRecord`) --
+ * load-bearing, since the genesis just committed that seed's segment-bound
+ * rung 0 -- and the registry entry records the sibling's signer and expiry.
+ *
+ * This is what makes the credential's DEFAULT transient login possible on a
+ * fresh browser. No shipped login ceremony triggers it yet; today's one
+ * driver is the non-production e2e seam.
+ *
+ * @param options {object}
+ * @param options.session {Session}   a live enrolled session
+ * @param options.secret {string | Uint8Array}   the credential's unlock
+ *   secret
+ * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function establishCompanionGeneration({
+  session,
+  secret,
+  kdf,
+  idb
+}: {
+  session: Session
+  secret: string | Uint8Array
+  kdf: UnlockKdf
+  idb?: IDBFactory
+}): Promise<void> {
+  const { remoteStore, pointer, clientWebvhKeys, keyAgent } =
+    requireEnrolledClientContext({
+      session,
+      action: 'Establishing the companion-generation posture'
+    })
+  const { zcapClient } = session.profile
+
+  const found = await fetchKeyring({ secret, kdf, idb })
+  const foundStanding = found?.standing
+  const ladderSeed = foundStanding?.ladderSeed
+  if (!found || !foundStanding || !ladderSeed || !found.standingClient) {
+    throw new Error(
+      'This credential holds no standing unlock record; establish the ' +
+        'standing posture before the companion generation.'
+    )
+  }
+  if (!found.rebindStandingRecord) {
+    throw new Error(
+      "This credential's unlock record cannot be re-sealed from here."
+    )
+  }
+
+  const was = new WasClient({ serverUrl: pointer.host, zcapClient })
+
+  // The generation: reuse the pointed one when the document already carries
+  // the delegated-clients pointer; mint and point otherwise, in the standing
+  // order (the companion log publishes first, the pointer follows).
+  const { doc } = await verifiedAccountLog({
+    profile: session.profile,
+    pointer
+  })
+  let companionDid = delegatedClientsPointer({ doc })
+  if (!companionDid) {
+    // Space creation accepts did:key controllers only, so the auxiliary
+    // Space follows the account Space's own order: created (and written)
+    // under this client's bare did:key, then its controller promoted to the
+    // account did:webvh -- before any delegation roots in its root zcap.
+    const companionSpaceId = mintSpaceId()
+    const bootstrapWas = new WasClient({
+      serverUrl: pointer.host,
+      zcapClient: didKeyZcapClient({ keyAgent })
+    })
+    const minted = await mintCredentialCompanionGeneration({
+      was: bootstrapWas,
+      wasServerUrl: pointer.host,
+      spaceId: companionSpaceId,
+      controller: keyAgent.id,
+      ladderSeed
+    })
+    await bootstrapWas
+      .space(companionSpaceId)
+      .configure({ controller: pointer.did, force: true })
+    await setDelegatedClientsPointer({
+      idStore: remoteStore.webvhIdStore(),
+      updateKeys: clientWebvhKeys,
+      companionDid: minted.did,
+      expectedDid: pointer.did,
+      pinStore: session.profile.persistence.logPins,
+      logId: accountLogPinId({ spaceId: pointer.spaceId })
+    })
+    invalidateVerifiedLog({ profile: session.profile })
+    companionDid = minted.did
+  }
+
+  // The embedded generation delegation, installed when the companion document
+  // carries none yet (the fresh-genesis case) and renewed near expiry
+  // otherwise -- signed by this enrolled client's promoted key either way.
+  const companion = companionDidParts({ did: companionDid })
+  await ensureGenerationDelegationCurrent({
+    store: companionLogStore({
+      was,
+      spaceId: companion.spaceId,
+      segment: companion.segment
+    }),
+    ladderSeed,
+    segment: companion.segment,
+    mintGenerationDelegation: async ({ companionDid: generationDid }) =>
+      mintGenerationDelegation({
+        zcapClient,
+        wasServerUrl: pointer.host,
+        spaceId: pointer.spaceId,
+        companionDid: generationDid
+      }),
+    expectedDid: companionDid
+  })
+
+  // The sibling delegation, re-sealed into the record beside the existing
+  // bridge; the registry entry records its signer and expiry for the health
+  // check and the revocation cascade's re-mint walk.
+  const delegatedClients = await mintDelegatedClientsDelegation({
+    zcapClient,
+    wasServerUrl: pointer.host,
+    companionSpaceId: companion.spaceId,
+    controller: found.standingClient.clientDid
+  })
+  await found.rebindStandingRecord({
+    delegation: foundStanding.delegation,
+    delegatedClients
+  })
+  const delegatedClientsKeyId = delegationProofKeyId(delegatedClients)
+  await refreshStandingDelegationFields({
+    session,
+    unlockSpaceId: found.unlockSpaceId,
+    ...(delegatedClientsKeyId ? { delegatedClientsKeyId } : {}),
+    ...((delegatedClients as { expires?: string }).expires
+      ? {
+          delegatedClientsExpires: (delegatedClients as { expires?: string })
+            .expires
+        }
+      : {})
+  })
 }
 
 /**
