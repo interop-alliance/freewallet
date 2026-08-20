@@ -1569,9 +1569,9 @@ export async function bindPassphrase({
 }
 
 /**
- * The CLIENT-LESS bind: writes a standing unlock record with NO local
- * counterpart at all -- no client-key record (a companion-native signup mints
- * no client seed to persist), no keyring cache, and no freshness pin (the
+ * The CREDENTIAL-ANCHORED bind: writes a standing unlock record with NO local
+ * counterpart at all -- no client-key record (such a signup mints no client
+ * seed to persist), no keyring cache, and no freshness pin (the
  * caller is a transient visit whose replay bound is per-visit
  * trust-on-first-use). Everything it writes is remote: the unlock Space, the
  * standing-layout record (bridge, optional sibling, ladder seed, binding
@@ -1606,7 +1606,7 @@ export async function bindPassphrase({
  *   one was delegated, this record's `createdAt` stamp, and the unlock KAK's
  *   id and multibase for the registry entry
  */
-export async function bindClientlessUnlockSecret({
+export async function bindCredentialAnchoredUnlockSecret({
   controller,
   secret,
   kdf,
@@ -1639,7 +1639,7 @@ export async function bindClientlessUnlockSecret({
 }> {
   if (!WAS_SERVER_URL) {
     throw new TypeError(
-      'The client-less bind requires a configured WAS server.'
+      'The credential-anchored bind requires a configured WAS server.'
     )
   }
   if (!derived && (secret === undefined || kdf === undefined)) {

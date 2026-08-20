@@ -1,8 +1,8 @@
 // @vitest-environment node
 /**
  * Unit tests for the signup posture routing (`src/session/signup.ts`): a
- * WAS-configured signup on a non-remembered browser runs COMPANION-NATIVE
- * (client-less establishment, transient entry, a create-nothing probe),
+ * WAS-configured signup on a non-remembered browser runs CREDENTIAL-ANCHORED
+ * (a ladder-anchored genesis, transient entry, a create-nothing probe),
  * while an explicit `rememberBrowser: true` runs the durable flow with its
  * self-enrolling probe. The heavy boundaries -- the establishment, the
  * transient composition, the keyring -- are mocked at the module seam; what
@@ -37,8 +37,8 @@ vi.mock('@/session/initSession', () => ({
   loginWithPassphrase: vi.fn()
 }))
 
-vi.mock('@/session/clientlessGenesis', () => ({
-  establishClientlessAccount: vi.fn(async () => ({
+vi.mock('@/session/credentialAnchoredGenesis', () => ({
+  establishCredentialAnchoredAccount: vi.fn(async () => ({
     did: 'did:webvh:QmScid:was.example.test:space:space-1:id',
     unlockSpaceId: 'unlock-space-1',
     standingFields: {}
@@ -78,7 +78,7 @@ import {
   fetchTransientKeyring
 } from '@/session/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
-import { establishClientlessAccount } from '@/session/clientlessGenesis'
+import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
 import { transientSessionFromKeyringHit } from '@/session/transientLogin'
 import { signUpWithPassphrase } from '@/session/signup'
 
@@ -88,7 +88,7 @@ afterEach(() => {
 })
 
 describe('signUpWithPassphrase -- posture routing', () => {
-  it('runs companion-native by default: probe, establish, transient entry', async () => {
+  it('runs credential-anchored by default: probe, establish, transient entry', async () => {
     // The probe misses; the post-establishment fetch hits.
     vi.mocked(fetchTransientKeyring)
       .mockResolvedValueOnce(null)
@@ -106,7 +106,7 @@ describe('signUpWithPassphrase -- posture routing', () => {
     expect(fetchTransientKeyring).toHaveBeenCalledTimes(2)
     // One KDF run threads the whole signup.
     expect(deriveUnlockCredential).toHaveBeenCalledTimes(1)
-    const establishCall = vi.mocked(establishClientlessAccount).mock
+    const establishCall = vi.mocked(establishCredentialAnchoredAccount).mock
       .calls[0]![0]
     expect(establishCall.lowEntropy).toBe(true)
     expect(establishCall.pointer.host).toBe('https://was.example.test')
@@ -124,7 +124,7 @@ describe('signUpWithPassphrase -- posture routing', () => {
     const result = await signUpWithPassphrase({ passphrase: 'correct horse' })
 
     expect(result).toEqual({ userExists: true })
-    expect(establishClientlessAccount).not.toHaveBeenCalled()
+    expect(establishCredentialAnchoredAccount).not.toHaveBeenCalled()
     expect(transientSessionFromKeyringHit).not.toHaveBeenCalled()
   })
 
@@ -143,7 +143,7 @@ describe('signUpWithPassphrase -- posture routing', () => {
     expect(loginWithPassphrase).toHaveBeenCalledWith(
       expect.objectContaining({ rememberBrowser: true })
     )
-    expect(establishClientlessAccount).not.toHaveBeenCalled()
+    expect(establishCredentialAnchoredAccount).not.toHaveBeenCalled()
   })
 
   it('runs the durable flow with no WAS server configured', async () => {
@@ -156,7 +156,7 @@ describe('signUpWithPassphrase -- posture routing', () => {
     await signUpWithPassphrase({ passphrase: 'correct horse' })
 
     expect(loginWithPassphrase).toHaveBeenCalled()
-    expect(establishClientlessAccount).not.toHaveBeenCalled()
+    expect(establishCredentialAnchoredAccount).not.toHaveBeenCalled()
     expect(fetchTransientKeyring).not.toHaveBeenCalled()
   })
 })

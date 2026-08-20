@@ -12,9 +12,9 @@
  * This suite's fixture is deliberately the DURABLE signup plus the
  * non-production `__E2E_MINT_COMPANION_GENERATION__` seam -- the remembered
  * account whose credential later visits public terminals. The
- * companion-native signup path (which mints the generation with no seam and
- * no durable client) has its own residue suite in
- * `clientless-signup.spec.ts`.
+ * credential-anchored signup path (which mints the generation with no seam
+ * and no durable client) has its own residue suite in
+ * `credential-anchored-signup.spec.ts`.
  */
 import { test, expect, type Browser, type Page } from '@playwright/test'
 import { addCredentialViaPaste, fillSettled, signupViaWizard } from './helpers'

@@ -41,10 +41,10 @@ export async function signupViaWizard(
   {
     rememberBrowser = true
   }: {
-    // Companion-native (client-less, transient-session) signup is the
-    // DEFAULT on a non-remembered browser, so the durable fixtures every
-    // other suite builds on force the remember seam; the client-less signup
-    // spec is the one caller passing false.
+    // The credential-anchored (transient-session) signup is the DEFAULT on a
+    // non-remembered browser, so the durable fixtures every other suite
+    // builds on force the remember seam; the credential-anchored signup spec
+    // is the one caller passing false.
     rememberBrowser?: boolean
   } = {}
 ) {

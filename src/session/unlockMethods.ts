@@ -434,8 +434,8 @@ export async function putUnlockMethods({
 
 /**
  * Writes the registry with a caller-supplied signing client and user key --
- * no session involved. The companion-native signup's registry write: it runs
- * inside the establishment ceremony's pre-promotion window (the bootstrap
+ * no session involved. The credential-anchored signup's registry write: it
+ * runs inside the establishment ceremony's pre-promotion window (the bootstrap
  * did:key still invokes the root capability there), before any session
  * exists. No local cache is touched: the caller is a transient visit.
  *

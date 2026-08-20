@@ -19,7 +19,7 @@ import {
   fetchTransientKeyring,
   unlockManagementGrantee
 } from '@/session/keyring'
-import { establishClientlessAccount } from '@/session/clientlessGenesis'
+import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
 import { transientSessionPersistence } from '@/session/persistence'
 import { transientSessionFromKeyringHit } from '@/session/transientLogin'
 import { provisionNewWallet } from '@/session/provisionNewWallet'
@@ -122,9 +122,9 @@ async function backfillPointerAndPromote({
 }
 
 /**
- * The COMPANION-NATIVE signup: the default on a non-remembered browser with
+ * The CREDENTIAL-ANCHORED signup: the default on a non-remembered browser with
  * a WAS server configured. No durable client is minted anywhere -- the whole
- * establishment (`establishClientlessAccount`) is anchored on the
+ * establishment (`establishCredentialAnchoredAccount`) is anchored on the
  * passphrase's ladder, and the visit then enters the account through the
  * ordinary transient composition, leaving zero local residue.
  *
@@ -139,7 +139,7 @@ async function backfillPointerAndPromote({
  * @param [options.email] {string}
  * @returns {Promise<{ session?: Session, userExists: boolean }>}
  */
-async function signUpClientlessWithPassphrase({
+async function signUpCredentialAnchoredWithPassphrase({
   passphrase,
   email
 }: {
@@ -163,7 +163,7 @@ async function signUpClientlessWithPassphrase({
   const spaceId = mintSpaceId()
   const pointer: AccountPointer = { spaceId, host: WAS_SERVER_URL }
   const ladderSeed = generateLadderSeed()
-  await establishClientlessAccount({
+  await establishCredentialAnchoredAccount({
     credential,
     ladderSeed,
     pointer,
@@ -212,11 +212,11 @@ async function signUpClientlessWithPassphrase({
  * already has one.
  *
  * Posture routing mirrors the login's: on a non-remembered browser with a
- * WAS server configured the signup is COMPANION-NATIVE (client-less genesis,
- * transient session, zero local residue); an explicit `rememberBrowser:
- * true` -- the programmatic remember-this-browser entry (the e2e seam today,
- * the signup form's checkbox when it lands) -- and every no-WAS deployment
- * run the durable flow below.
+ * WAS server configured the signup is CREDENTIAL-ANCHORED (ladder-anchored
+ * genesis, transient session, zero local residue); an explicit
+ * `rememberBrowser: true` -- the programmatic remember-this-browser entry
+ * (the e2e seam today, the signup form's checkbox when it lands) -- and every
+ * no-WAS deployment run the durable flow below.
  *
  * Durable ordering: the account is probed first -- resolving the passphrase
  * through the keyring and reading `userExists` is what prevents a re-signup
@@ -232,7 +232,7 @@ async function signUpClientlessWithPassphrase({
  * @param options.passphrase {string}
  * @param [options.email] {string}
  * @param [options.rememberBrowser] {boolean}   `true` forces the durable
- *   flow; absent or `false`, a WAS-configured signup runs companion-native
+ *   flow; absent or `false`, a WAS-configured signup runs credential-anchored
  * @returns {Promise<{ session?: Session, userExists: boolean }>}
  */
 export async function signUpWithPassphrase({
@@ -245,7 +245,7 @@ export async function signUpWithPassphrase({
   rememberBrowser?: boolean
 }): Promise<{ session?: Session; userExists: boolean }> {
   if (WAS_SERVER_URL && rememberBrowser !== true) {
-    return signUpClientlessWithPassphrase({ passphrase, email })
+    return signUpCredentialAnchoredWithPassphrase({ passphrase, email })
   }
   // Probe for an existing account first. loginWithPassphrase resolves the
   // passphrase through the keyring and reports whether this identity already

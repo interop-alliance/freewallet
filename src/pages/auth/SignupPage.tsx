@@ -142,7 +142,7 @@ export function SignupPage() {
         email: email || undefined,
         // The e2e seam forces the durable flow; without it a WAS-configured
         // signup on this (by definition non-remembered) browser runs
-        // companion-native and ends in a transient session.
+        // credential-anchored and ends in a transient session.
         ...(forcedRememberBrowser() ? { rememberBrowser: true } : {})
       })
       if (userExists || !session) {

@@ -1,12 +1,12 @@
 /**
- * The companion-native signup's establishment ceremony: everything between a
- * derived unlock credential and an account a transient login can enter, with
+ * The credential-anchored signup's establishment ceremony: everything between
+ * a derived unlock credential and an account a transient login can enter, with
  * no durable client minted anywhere. One function
- * (`establishClientlessAccount`) serves the fresh signup and the login-time
- * re-run alike -- every stage is an ensure, so a signup torn at any point
- * converges by running the whole thing again (the account log is adopted by
- * ladder attribution, never re-created: `createDID` timestamps the genesis
- * entry, so a naive re-create would mint a different SCID).
+ * (`establishCredentialAnchoredAccount`) serves the fresh signup and the
+ * login-time re-run alike -- every stage is an ensure, so a signup torn at
+ * any point converges by running the whole thing again (the account log is
+ * adopted by ladder attribution, never re-created: `createDID` timestamps the
+ * genesis entry, so a naive re-create would mint a different SCID).
  *
  * The stage order, with the two load-bearing ordering rules folded in:
  *
@@ -17,12 +17,12 @@
  *    created and before the genesis entry publishes rung 0 (the transposed
  *    persist-before-publish rule: a published rung nobody can re-derive is
  *    the orphan brick).
- * 2. Wallet-core's `ensureClientlessAccountGenesis` under the ladder VM's
- *    bare did:key as bootstrap controller: Space + collections, the
- *    one-entry client-less did:webvh genesis (ladder VM and the credential's
- *    `keyAgreement` posture folded in), the roster's epoch[0] wrapped to the
- *    credential's standing KAK with a ladder-signed entry proof, and the
- *    collection epochs. Promotion deferred (`promoteController: false`).
+ * 2. Wallet-core's `ensureCredentialAnchoredAccountGenesis` under the ladder
+ *    VM's bare did:key as bootstrap controller: Space + collections, the
+ *    one-entry ladder-anchored did:webvh genesis (ladder VM and the
+ *    credential's `keyAgreement` posture folded in), the roster's epoch[0]
+ *    wrapped to the credential's standing KAK with a ladder-signed entry
+ *    proof, and the collection epochs. Promotion deferred (`promoteController: false`).
  * 3. The companion generation: minted under the bootstrap did:key, the
  *    generation delegation embedded (ladder-VM-signed) while the auxiliary
  *    Space is still bootstrap-controlled, the Space's controller flipped to
@@ -42,7 +42,7 @@
 import { WasClient } from '@interop/was-client'
 import type { IZcap } from '@interop/data-integrity-core'
 import {
-  ensureClientlessAccountGenesis,
+  ensureCredentialAnchoredAccountGenesis,
   ensurePromotedSpaceController
 } from '@interop/wallet-core/genesis'
 import {
@@ -84,7 +84,7 @@ import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { ZcapClient } from '@interop/ezcap'
 import { WAS_SERVER_URL } from '@/app.config'
 import {
-  bindClientlessUnlockSecret,
+  bindCredentialAnchoredUnlockSecret,
   type UnlockCredential
 } from '@/session/keyring'
 import type { TransientSessionPersistence } from '@/session/persistence'
@@ -96,7 +96,7 @@ import { mintSpaceId } from '@/stores/wasRemoteStore'
  * DID, the record's unlock Space id and management zcap, and the standing
  * fields a registry entry records.
  */
-export interface ClientlessEstablishment {
+export interface CredentialAnchoredEstablishment {
   did: string
   unlockSpaceId: string
   manageCapability?: IZcap
@@ -104,8 +104,8 @@ export interface ClientlessEstablishment {
 }
 
 /**
- * Runs the whole client-less establishment for one unlock credential (see
- * the module doc). Idempotent under re-run from durable state alone.
+ * Runs the whole credential-anchored establishment for one unlock credential
+ * (see the module doc). Idempotent under re-run from durable state alone.
  *
  * @param options {object}
  * @param options.credential {UnlockCredential}   the derived unlock
@@ -126,9 +126,9 @@ export interface ClientlessEstablishment {
  *   BEFORE the controller promotion -- the last window where a root
  *   invocation under the bootstrap did:key works (the signup's registry
  *   write). Best-effort: a throw is warned, never fatal
- * @returns {Promise<ClientlessEstablishment>}
+ * @returns {Promise<CredentialAnchoredEstablishment>}
  */
-export async function establishClientlessAccount({
+export async function establishCredentialAnchoredAccount({
   credential,
   ladderSeed,
   pointer,
@@ -150,12 +150,12 @@ export async function establishClientlessAccount({
     zcapClient: ZcapClient
     did: string
     userKey: UserKey
-    establishment: ClientlessEstablishment
+    establishment: CredentialAnchoredEstablishment
   }) => Promise<void>
-}): Promise<ClientlessEstablishment> {
+}): Promise<CredentialAnchoredEstablishment> {
   if (!WAS_SERVER_URL) {
     throw new TypeError(
-      'The client-less establishment requires a configured WAS server.'
+      'The credential-anchored establishment requires a configured WAS server.'
     )
   }
   const host = pointer.host
@@ -184,7 +184,7 @@ export async function establishClientlessAccount({
     pointer,
     recoveryClientDid: standing.clientDid
   })
-  const firstBind = await bindClientlessUnlockSecret({
+  const firstBind = await bindCredentialAnchoredUnlockSecret({
     controller: bootstrapAgent.id,
     email,
     pointer: { spaceId, host },
@@ -222,7 +222,7 @@ export async function establishClientlessAccount({
   // 2. The genesis ceremony under the bootstrap did:key. The candidate user
   // key seeds a fresh roster; an adopted (heal) roster keeps its own.
   const candidateUserKey = await mintUserKey()
-  const genesis = await ensureClientlessAccountGenesis({
+  const genesis = await ensureCredentialAnchoredAccountGenesis({
     was: bootstrapWas,
     wasServerUrl: host,
     spaceId,
@@ -338,7 +338,7 @@ export async function establishClientlessAccount({
     companionSpaceId: companion.spaceId,
     controller: standing.clientDid
   })
-  const rebind = await bindClientlessUnlockSecret({
+  const rebind = await bindCredentialAnchoredUnlockSecret({
     controller: bootstrapAgent.id,
     email,
     pointer: fullPointer,
@@ -352,7 +352,7 @@ export async function establishClientlessAccount({
 
   const delegationKeyId = delegationProofKeyId(bridge)
   const delegatedClientsKeyId = delegationProofKeyId(sibling)
-  const establishment: ClientlessEstablishment = {
+  const establishment: CredentialAnchoredEstablishment = {
     did,
     unlockSpaceId: rebind.unlockSpaceId,
     ...(rebind.manageCapability

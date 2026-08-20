@@ -50,8 +50,8 @@ vi.mock('@/session/initSession', () => ({
   initSessionFromSeed: vi.fn()
 }))
 
-vi.mock('@/session/clientlessGenesis', () => ({
-  establishClientlessAccount: vi.fn()
+vi.mock('@/session/credentialAnchoredGenesis', () => ({
+  establishCredentialAnchoredAccount: vi.fn()
 }))
 
 vi.mock('@/session/keyring', async importOriginal => ({
@@ -75,7 +75,7 @@ import {
   userKeyRosterDescriptorStore
 } from '@interop/wallet-core/keys'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
-import { establishClientlessAccount } from '@/session/clientlessGenesis'
+import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
 import { fetchTransientKeyring } from '@/session/keyring'
 import { initSessionFromSeed } from '@/session/initSession'
 import type { TransientKeyringFetchResult } from '@/session/keyring'
@@ -478,7 +478,7 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
   })
 })
 
-describe('transientSessionFromKeyringHit -- the client-less signup heals', () => {
+describe('transientSessionFromKeyringHit -- the credential-anchored signup heals', () => {
   it('heals a promoted account with no roster: ladder-signed epoch[0] under the delegation', async () => {
     primeHappyPath()
     const persistence = transientSessionPersistence()
@@ -538,7 +538,7 @@ describe('transientSessionFromKeyringHit -- the client-less signup heals', () =>
       credential
     })
 
-    expect(establishClientlessAccount).toHaveBeenCalledWith(
+    expect(establishCredentialAnchoredAccount).toHaveBeenCalledWith(
       expect.objectContaining({
         credential,
         ladderSeed: torn.standing!.ladderSeed,
@@ -566,6 +566,6 @@ describe('transientSessionFromKeyringHit -- the client-less signup heals', () =>
         persistence: transientSessionPersistence()
       })
     ).rejects.toMatchObject({ reason: 'unpromoted-account' })
-    expect(establishClientlessAccount).not.toHaveBeenCalled()
+    expect(establishCredentialAnchoredAccount).not.toHaveBeenCalled()
   })
 })

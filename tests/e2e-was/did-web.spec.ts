@@ -22,7 +22,7 @@ async function signup(page: Page, testInfo: TestInfo) {
   await page.goto('/#/signup')
   // These suites pin the DURABLE signup's artifacts (the KMS keystore, the
   // per-client update keys), so they force the remember seam: the default
-  // signup on a non-remembered browser is companion-native.
+  // signup on a non-remembered browser is credential-anchored.
   await forceRememberBrowser(page)
   await fillSettled(page.locator('input[type="password"]'), passphrase)
   const next = page.getByRole('button', { name: 'Next' })

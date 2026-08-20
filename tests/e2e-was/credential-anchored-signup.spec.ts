@@ -1,5 +1,5 @@
 /**
- * The companion-native signup's posture cell, pinned end to end: a fresh
+ * The credential-anchored signup's posture cell, pinned end to end: a fresh
  * browser context runs the DEFAULT signup through the real wizard (no
  * remember seam), which mints no durable client anywhere -- the account's
  * genesis is anchored on the passphrase's ladder, the visit lands on the
@@ -36,7 +36,7 @@ async function coldTerminal(browser: Browser): Promise<{
   return { context, page }
 }
 
-test.describe.serial('companion-native signup', () => {
+test.describe.serial('credential-anchored signup', () => {
   let passphrase: string
 
   test('the default signup mints no durable client and leaves zero residue', async ({

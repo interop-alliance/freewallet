@@ -4,19 +4,19 @@
 
 ### Added
 
-- Companion-native signup. On a non-remembered browser with a WAS server
+- Credential-anchored signup. On a non-remembered browser with a WAS server
   configured, the passphrase signup mints no durable client: the account's
   genesis is anchored on the passphrase's ladder (wallet-core's
-  `ensureClientlessAccountGenesis`), the Space is bootstrapped and promoted
-  under the ladder VM's did:key, the roster's epoch[0] wraps the user key to
-  the credential's standing key-agreement key with a ladder-signed entry
-  proof, the companion generation is minted and pointed at inside the same
-  establishment (`establishClientlessAccount` in
-  `src/session/clientlessGenesis.ts`), and the visit ends in an ordinary
-  transient session with zero local residue. The unlock record carrying the
-  ladder seed is durably written before the Space exists and before rung 0
-  publishes; a torn signup converges on re-run by adopting the published log
-  (rung-attributed as this credential's ladder). An explicit
+  `ensureCredentialAnchoredAccountGenesis`), the Space is bootstrapped and
+  promoted under the ladder VM's did:key, the roster's epoch[0] wraps the
+  user key to the credential's standing key-agreement key with a
+  ladder-signed entry proof, the companion generation is minted and pointed
+  at inside the same establishment (`establishCredentialAnchoredAccount` in
+  `src/session/credentialAnchoredGenesis.ts`), and the visit ends in an
+  ordinary transient session with zero local residue. The unlock record
+  carrying the ladder seed is durably written before the Space exists and
+  before rung 0 publishes; a torn signup converges on re-run by adopting the
+  published log (rung-attributed as this credential's ladder). An explicit
   `rememberBrowser: true` (the e2e seam) and no-WAS deployments keep the
   durable signup; passkey signup stays durable. The transient login gains
   the matching heals: a ladder-seeded record with no did:webvh pointer
@@ -24,8 +24,8 @@
   genesis-to-epoch[0] tear -- mints a fresh user key and lands epoch[0]
   under the generation delegation (the carve-out from the sweeps-skipped
   rule). The signup posture cell is pinned by
-  `tests/e2e-was/clientless-signup.spec.ts` (residue-zero signup plus a
-  cold-terminal re-entry on the passphrase alone).
+  `tests/e2e-was/credential-anchored-signup.spec.ts` (residue-zero signup
+  plus a cold-terminal re-entry on the passphrase alone).
 
 - Companion GC. Keyring logins fire a best-effort background sweep
   (`session.companionGcSweep`, `src/session/companionGc.ts` over

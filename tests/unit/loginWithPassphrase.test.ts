@@ -456,7 +456,7 @@ describe('loginWithPassphrase -- posture routing glue', () => {
       email: undefined,
       persistence,
       // The credential rides along so the composition can arm the torn
-      // client-less-signup heal (the establishment re-run needs it).
+      // credential-anchored-signup heal (the establishment re-run needs it).
       credential: CREDENTIAL
     })
   })

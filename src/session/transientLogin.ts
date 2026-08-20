@@ -55,7 +55,7 @@ import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import { WasClient } from '@interop/was-client'
 import { WAS_SERVER_URL } from '@/app.config'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
-import { establishClientlessAccount } from '@/session/clientlessGenesis'
+import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
 import {
   transientSessionPersistence,
   type TransientSessionPersistence
@@ -278,7 +278,7 @@ function refuseMissingGeneration(
  *   in-memory handle (the same one the record fetch's settle rode)
  * @param [options.credential] {UnlockCredential}   the derived unlock
  *   credential, when the caller holds one -- what arms the torn
- *   companion-native-signup heal (the establishment re-run needs the unlock
+ *   credential-anchored-signup heal (the establishment re-run needs the unlock
  *   identity, not just the record)
  * @param [options.healAttempted] {boolean}   internal: the re-entry marker of
  *   the unpromoted-account heal, so a heal that did not converge refuses
@@ -306,16 +306,16 @@ export async function transientSessionFromKeyringHit({
   }
   const pointer = found.pointer
   if (!pointer || !isWebvhDid(pointer.did)) {
-    // The torn companion-native signup's heal: a standing record whose
-    // pointer names no did:webvh yet can only be a client-less establishment
-    // that died before its re-bind -- the durable flow's records carry no
-    // ladder seed until AFTER promotion. Re-running the establishment
-    // converges (every stage is an ensure; the published log, if any, is
-    // adopted by ladder attribution), and the login then re-enters through
-    // the refreshed record. Needs the credential in hand -- the ordinary
-    // login path supplies it.
+    // The torn credential-anchored signup's heal: a standing record whose
+    // pointer names no did:webvh yet can only be a credential-anchored
+    // establishment that died before its re-bind -- the durable flow's
+    // records carry no ladder seed until AFTER promotion. Re-running the
+    // establishment converges (every stage is an ensure; the published log,
+    // if any, is adopted by ladder attribution), and the login then re-enters
+    // through the refreshed record. Needs the credential in hand -- the
+    // ordinary login path supplies it.
     if (!healAttempted && credential && pointer && standing.ladderSeed) {
-      await establishClientlessAccount({
+      await establishCredentialAnchoredAccount({
         credential,
         ladderSeed: standing.ladderSeed,
         pointer,
@@ -421,8 +421,9 @@ export async function transientSessionFromKeyringHit({
     transientKeyMultibase,
     // The delegation is taken as embedded, never minted from here: its mint
     // needs a durable client's signature (or the ladder VM's, on a
-    // client-less account). A generation about to receive its first VM with
-    // no delegation entry refuses -- crucially BEFORE the entry publishes.
+    // ladder-anchored account). A generation about to receive its first VM
+    // with no delegation entry refuses -- crucially BEFORE the entry
+    // publishes.
     mintGenerationDelegation: async () => {
       throw new TransientLoginUnavailableError({
         reason: 'no-generation-delegation'
@@ -463,13 +464,13 @@ export async function transientSessionFromKeyringHit({
   try {
     rosterRead = await readRoster()
   } catch (err) {
-    // A client-less establishment torn between its record re-bind and the
-    // controller promotion leaves the generation delegation unverifiable:
-    // the Space still answers to the bootstrap did:key, so the delegated
-    // read above fails. Completing the promotion is the one ladder-derived
-    // repair that fixes it; when the attempt itself fails (any other cause
-    // -- the account was never client-less, the network flapped), the
-    // original error stands unchanged.
+    // A credential-anchored establishment torn between its record re-bind and
+    // the controller promotion leaves the generation delegation
+    // unverifiable: the Space still answers to the bootstrap did:key, so the
+    // delegated read above fails. Completing the promotion is the one
+    // ladder-derived repair that fixes it; when the attempt itself fails
+    // (any other cause -- the account was never ladder-anchored, the network
+    // flapped), the original error stands unchanged.
     try {
       const bootstrapAgent = await ladderVmAgent({ ladderSeed })
       const bootstrapWas = new WasClient({
@@ -488,7 +489,7 @@ export async function transientSessionFromKeyringHit({
     rosterRead = await readRoster()
   }
   if (!rosterRead) {
-    // The tear-3 heal (promoted account, no roster): the client-less
+    // The tear-3 heal (promoted account, no roster): the credential-anchored
     // establishment died between the genesis and the roster's epoch[0], so
     // the user key died in memory and nothing anywhere delivers one. The
     // explicit carve-out from the sweeps-skipped rule: mint a fresh user
