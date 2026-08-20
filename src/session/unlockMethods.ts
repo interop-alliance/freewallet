@@ -66,10 +66,7 @@ import {
 import {
   deleteClientKeyRecord,
   deleteKeyringCache,
-  deleteKeyringFreshnessPin,
-  deleteUnlockMethodsCache,
-  loadUnlockMethodsCache,
-  saveUnlockMethodsCache
+  deleteKeyringFreshnessPin
 } from '@/lib/sessionKey'
 import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
 import {
@@ -349,21 +346,19 @@ export function emptyUnlockMethodsRegistry(): UnlockMethodsRecord {
  *
  * @param options {object}
  * @param options.session {Session}
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<UnlockMethodsRecord | null>}
  */
 export async function getUnlockMethods({
-  session,
-  idb
+  session
 }: {
   session: Session
-  idb?: IDBFactory
 }): Promise<UnlockMethodsRecord | null> {
   const controller = session.user.id
+  const { unlockMethodsCache } = session.profile.persistence
   const { keyAgreementKey, keyResolver } = requireVaultKeys(session)
 
   if (!WAS_SERVER_URL) {
-    const cached = await loadUnlockMethodsCache({ controller, idb })
+    const cached = await unlockMethodsCache.load({ controller })
     if (!cached) {
       return null
     }
@@ -375,7 +370,7 @@ export async function getUnlockMethods({
       })
     } catch (err) {
       console.warn('Discarding an unusable cached unlock-methods record:', err)
-      await deleteUnlockMethodsCache({ controller, idb })
+      await unlockMethodsCache.delete({ controller })
       return null
     }
   }
@@ -386,11 +381,11 @@ export async function getUnlockMethods({
     spaceId: requireSpaceId(session)
   })
   if (!record) {
-    await deleteUnlockMethodsCache({ controller, idb })
+    await unlockMethodsCache.delete({ controller })
     return null
   }
   const parsed = await unwrapRecord({ record, keyAgreementKey, keyResolver })
-  await saveUnlockMethodsCache({ controller, record, idb })
+  await unlockMethodsCache.save({ controller, record })
   return parsed
 }
 
@@ -403,17 +398,14 @@ export async function getUnlockMethods({
  * @param options {object}
  * @param options.session {Session}
  * @param options.record {UnlockMethodsRecord}
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 export async function putUnlockMethods({
   session,
-  record,
-  idb
+  record
 }: {
   session: Session
   record: UnlockMethodsRecord
-  idb?: IDBFactory
 }): Promise<void> {
   const controller = session.user.id
   const { keyAgreementKey, keyResolver } = requireVaultKeys(session)
@@ -434,7 +426,10 @@ export async function putUnlockMethods({
     })
   }
 
-  await saveUnlockMethodsCache({ controller, record: wrapped, idb })
+  await session.profile.persistence.unlockMethodsCache.save({
+    controller,
+    record: wrapped
+  })
 }
 
 /**
@@ -550,24 +545,21 @@ function isSameMethod(candidate: UnlockMethod, target: UnlockMethod): boolean {
  * @param options {object}
  * @param options.session {Session}
  * @param options.entry {UnlockMethod}   the entry to remove
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 async function dropRegistryEntry({
   session,
-  entry,
-  idb
+  entry
 }: {
   session: Session
   entry: UnlockMethod
-  idb?: IDBFactory
 }): Promise<void> {
-  const record = await getUnlockMethods({ session, idb })
+  const record = await getUnlockMethods({ session })
   if (!record) {
     return
   }
   const methods = record.methods.filter(method => !isSameMethod(method, entry))
-  await putUnlockMethods({ session, record: { ...record, methods }, idb })
+  await putUnlockMethods({ session, record: { ...record, methods } })
 }
 
 /**
@@ -652,7 +644,7 @@ export async function revokeUnlockMethod({
   // recovery-code entry has already rotated in its own ceremony.
   const rotation =
     entry.type === 'passphrase' || entry.type === 'passkey'
-      ? await rotateOffUnlockCredential({ session, method: entry, verb, idb })
+      ? await rotateOffUnlockCredential({ session, method: entry, verb })
       : null
   if (WAS_SERVER_URL) {
     if (!entry.manageCapability) {
@@ -671,13 +663,16 @@ export async function revokeUnlockMethod({
       capability: entry.manageCapability
     })
   }
-  await deleteKeyringCache({ spaceId: entry.unlockSpaceId, idb })
   // Retiring the method also retires this client's local records under it:
-  // the client-key wrap (other methods keep their own wraps of the same key
-  // set) and the freshness pin.
+  // the keyring cache, the client-key wrap (other methods keep their own
+  // wraps of the same key set) and the freshness pin. These three are the
+  // unlock layer's durable retirement and go straight to the session
+  // database: they exist only on a remembered browser, and this path is
+  // reached only from durable ceremonies.
+  await deleteKeyringCache({ spaceId: entry.unlockSpaceId, idb })
   await deleteClientKeyRecord({ spaceId: entry.unlockSpaceId, idb })
   await deleteKeyringFreshnessPin({ spaceId: entry.unlockSpaceId, idb })
-  await dropRegistryEntry({ session, entry, idb })
+  await dropRegistryEntry({ session, entry })
   return rotation
 }
 
@@ -722,11 +717,10 @@ export async function revokeUnlockMethodByCeremony({
   const rotation = await rotateOffUnlockCredential({
     session,
     method: entry,
-    verb,
-    idb
+    verb
   })
   await deleteUnlockMethod({ secret: prfOutput, kdf: PASSKEY_KDF, idb })
-  await dropRegistryEntry({ session, entry, idb })
+  await dropRegistryEntry({ session, entry })
   return rotation
 }
 
@@ -831,18 +825,15 @@ export function upsertPassphraseUnlockMethod({
  *
  * @param options {object}
  * @param options.session {Session}
- * @param [options.idb] {IDBFactory}
  * @param [options.createIfMissing] {boolean}   mint the registry when absent;
  *   default false
  * @returns {Promise<UnlockMethodsRecord | null>}
  */
 export async function backfillPassphraseUnlockMethod({
   session,
-  idb,
   createIfMissing = false
 }: {
   session: Session
-  idb?: IDBFactory
   createIfMissing?: boolean
 }): Promise<UnlockMethodsRecord | null> {
   const { unlockMethod, keyAgreementKey, keyResolver } = session.profile
@@ -851,7 +842,7 @@ export async function backfillPassphraseUnlockMethod({
     return null
   }
 
-  let record = await getUnlockMethods({ session, idb })
+  let record = await getUnlockMethods({ session })
   // A passkey full session refreshes only its own entry's management zcap
   // (matched on unlock Space): the login minted a fresh delegation, and the
   // stored copy goes stale at the one-year TTL. It never creates entries.
@@ -881,7 +872,7 @@ export async function backfillPassphraseUnlockMethod({
           : method
       )
     }
-    await putUnlockMethods({ session, record: nextRecord, idb })
+    await putUnlockMethods({ session, record: nextRecord })
     return nextRecord
   }
   // Only a passphrase full session can backfill; any other session just
@@ -925,7 +916,7 @@ export async function backfillPassphraseUnlockMethod({
     unlockSpaceId,
     manageCapability
   })
-  await putUnlockMethods({ session, record: nextRecord, idb })
+  await putUnlockMethods({ session, record: nextRecord })
   return nextRecord
 }
 
@@ -949,7 +940,6 @@ export async function backfillPassphraseUnlockMethod({
  * @param [options.delegatedClientsExpires] {string}
  * @param [options.updateKeyMultibase] {string}   the ladder's current
  *   committed rung
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 export async function refreshStandingDelegationFields({
@@ -959,8 +949,7 @@ export async function refreshStandingDelegationFields({
   delegationExpires,
   delegatedClientsKeyId,
   delegatedClientsExpires,
-  updateKeyMultibase,
-  idb
+  updateKeyMultibase
 }: {
   session: Session
   unlockSpaceId: string
@@ -969,9 +958,8 @@ export async function refreshStandingDelegationFields({
   delegatedClientsKeyId?: string
   delegatedClientsExpires?: string
   updateKeyMultibase?: string
-  idb?: IDBFactory
 }): Promise<void> {
-  const record = await getUnlockMethods({ session, idb })
+  const record = await getUnlockMethods({ session })
   if (!record) {
     return
   }
@@ -998,7 +986,7 @@ export async function refreshStandingDelegationFields({
         : method
     )
   }
-  await putUnlockMethods({ session, record: nextRecord, idb })
+  await putUnlockMethods({ session, record: nextRecord })
 }
 
 /**

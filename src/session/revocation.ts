@@ -22,7 +22,6 @@ import {
 import { revokeAccountClient } from '@interop/wallet-core/clients'
 import type { Session } from '@/types/auth'
 import { sessionRosterStore } from '@/session/rosterStore'
-import { savePinFromDescriptor, loadUserKeyEpochPin } from '@/lib/sessionKey'
 import { getUnlockMethods } from '@/session/unlockMethods'
 import type { UnlockMethodsRecord } from '@/session/unlockMethods'
 import { requireEnrolledClientContext } from '@/session/enrolledContext'
@@ -36,6 +35,7 @@ import {
   type UserKeyCascadeResult
 } from '@/session/userKeyCascade'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
+import { assertAccountCeremonyAllowed } from '@/session/persistence'
 
 export type { RevokedClientKeys } from '@interop/wallet-core/webvh'
 
@@ -59,18 +59,15 @@ export interface RevocationOutcome {
  *
  * @param options {object}
  * @param options.session {Session}
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<RecoveryCodeUnlockMethod[]>}
  */
 async function unlockRegistry({
-  session,
-  idb
+  session
 }: {
   session: Session
-  idb?: IDBFactory
 }): Promise<UnlockMethodsRecord | null> {
   try {
-    return await getUnlockMethods({ session, idb })
+    return await getUnlockMethods({ session })
   } catch (err) {
     console.warn(
       'Could not read the unlock-methods registry for the revocation edit:',
@@ -94,20 +91,21 @@ async function unlockRegistry({
  * @param options.client {RevokedClientKeys}   the revoked client's public
  *   halves (its two verification-method multibases and its active update key)
  * @param [options.label] {string}   a display label for the history record
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<RevocationOutcome>}
  */
 export async function revokeEnrolledClient({
   session,
   client,
-  label,
-  idb
+  label
 }: {
   session: Session
   client: RevokedClientKeys
   label?: string
-  idb?: IDBFactory
 }): Promise<RevocationOutcome> {
+  assertAccountCeremonyAllowed({
+    persistence: session.profile.persistence,
+    ceremony: 'Disconnecting a wallet client'
+  })
   const {
     remoteStore,
     pointer,
@@ -118,9 +116,10 @@ export async function revokeEnrolledClient({
   // One registry read for the whole cascade: the latent commitment hashes the
   // document edit needs, and the entries the delegation re-mint walks. It is
   // independent of the epoch pin read, so the two round trips run together.
+  const { epochPins } = session.profile.persistence
   const [registryRecord, pinnedEpochId] = await Promise.all([
-    unlockRegistry({ session, idb }),
-    loadUserKeyEpochPin({ accountDid: pointer.did, idb })
+    unlockRegistry({ session }),
+    epochPins.load({ accountDid: pointer.did })
   ])
   const entries = recoveryEntriesOf({ record: registryRecord })
   // The standing passphrase/passkey credentials commit a ladder rung the
@@ -165,18 +164,17 @@ export async function revokeEnrolledClient({
     // The memo invalidation above (and in the `.finally`) is for the other
     // session surfaces, which must not read the revoked client as still
     // listed.
-    rosterStore: sessionRosterStore({ profile: session.profile, idb }),
+    rosterStore: sessionRosterStore({ profile: session.profile }),
     ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
     clientKeyAgreementKey,
     pinnedEpochId,
     onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) => {
       // The user key and the epoch pin persist together: the pin must never advance
       // without the key that authenticated the roster it advanced to.
-      await savePinFromDescriptor({
+      await epochPins.saveFromDescriptor({
         accountDid: pointer.did,
         epochId: latestEpochId,
-        descriptor,
-        idb
+        descriptor
       })
       await session.profile.persistClientKeys?.({ userKey })
     },
@@ -185,8 +183,7 @@ export async function revokeEnrolledClient({
       await remintRecoveryDelegations({
         session,
         doc: document as Parameters<typeof remintRecoveryDelegations>[0]['doc'],
-        registryRecord,
-        idb
+        registryRecord
       }),
     onRotationAdopted: async ({ userKey }) =>
       await adoptRotatedUserKey({ session, spaceId: pointer.spaceId, userKey })

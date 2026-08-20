@@ -17,7 +17,6 @@ import type { FuseOptionKey } from 'fuse.js'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
-import { loadPasskeySafetyNotice } from '@/lib/sessionKey'
 import { syncController } from '@/stores/syncController'
 import { flattenSearchValues } from '@/lib/searchValues'
 import { useSearch } from '@/hooks/useSearch'
@@ -134,7 +133,7 @@ export function DashboardPage() {
         return
       }
       try {
-        const notice = await loadPasskeySafetyNotice({
+        const notice = await session.profile.persistence.passkeyNotices.load({
           controller: session.user.id
         })
         if (!cancelled) {

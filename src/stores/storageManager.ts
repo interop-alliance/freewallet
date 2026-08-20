@@ -57,7 +57,6 @@ import {
   assertMintedAppKey,
   assertStorableAppKey
 } from '@interop/wallet-core/request'
-import { getOrCreateWriterId } from '@/lib/writerId'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
 import {
@@ -79,10 +78,15 @@ import {
 } from '@interop/wallet-core/descriptors'
 import {
   loadAccountDidForSpace,
-  saveAccountDidForSpace,
-  savePinFromDescriptor,
-  sessionLogPinStore
+  saveAccountDidForSpace
 } from '@/lib/sessionKey'
+import {
+  assertAccountCeremonyAllowed,
+  assertDurableSession,
+  isDurableSession,
+  type CollectionMetaCache,
+  type SessionPersistence
+} from '@/session/persistence'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import {
   createEdvDocCipher,
@@ -210,88 +214,39 @@ const ENCRYPTED_COLLECTION_IDS = ENCRYPTED_STANDARD_COLLECTIONS.map(
 )
 
 /**
- * The localStorage-backed `EncryptionDescriptorCache` for one account's Space: a collection's
- * last-seen encryption descriptor under
- * `freewallet:collection-encryption:<spaceId>:<collectionId>`, scoped by Space
- * so two accounts on one browser never collide. The cache is the offline
- * fallback: when a descriptor fetch fails, a previously-shared collection must
- * keep encrypting under its current epoch. Reads treat a corrupt entry (or a
- * non-browser environment) as absent; writes no-op without localStorage.
- *
- * @param options {object}
- * @param options.spaceId {string}
- * @returns {EncryptionDescriptorCache}
- */
-function localStorageDescriptorCache({
-  spaceId
-}: {
-  spaceId: string
-}): EncryptionDescriptorCache {
-  const cacheKey = (collectionId: string): string =>
-    `freewallet:collection-encryption:${spaceId}:${collectionId}`
-  return {
-    async readDescriptor({ collectionId }) {
-      if (typeof localStorage === 'undefined') {
-        return undefined
-      }
-      const raw = localStorage.getItem(cacheKey(collectionId))
-      if (!raw) {
-        return undefined
-      }
-      try {
-        return JSON.parse(raw) as CollectionEncryption
-      } catch {
-        return undefined
-      }
-    },
-    async writeDescriptor({ collectionId, descriptor }) {
-      if (typeof localStorage === 'undefined') {
-        return
-      }
-      localStorage.setItem(cacheKey(collectionId), JSON.stringify(descriptor))
-    }
-  }
-}
-
-/**
  * Descriptors for a session with no remote store (a guest, or no WAS server
  * configured). Every encrypted collection still carries a key-epoch roster
  * from birth, so each collection gets a local one-epoch descriptor wrapped to
  * the session's vault KAK alone -- minted on first use and persisted in the
- * same localStorage cache a remote Space's descriptors use, scoped by the
- * user's DID in place of a Space id, so a returning local login rebuilds the
- * same epoch and keeps decrypting its own rows. A guest's identity is random
- * per session and its data dies with it, so a guest's descriptors are minted
- * fresh and never persisted.
+ * session's descriptor cache, scoped by the user's DID in place of a Space
+ * id, so a returning local login rebuilds the same epoch and keeps
+ * decrypting its own rows. A guest's identity is random per session and its
+ * data dies with it, so a guest's persistence handle supplies an in-memory
+ * cache and its descriptors die with the session.
  *
  * @param options {object}
- * @param options.userId {string}   the session user's DID (the cache scope)
+ * @param options.cache {EncryptionDescriptorCache}   the session's cache
+ *   for the `local:<clientDid>` scope (in-memory for a guest)
  * @param options.keyAgreementKey {IKeyAgreementKey}   the vault KAK epoch[0]
  *   wraps to
- * @param options.persist {boolean}   false for a guest (mint-only)
  * @returns {Promise<Record<string, CollectionEncryption>>}   keyed by
  *   collection id
  */
 async function localOnlyDescriptors({
-  userId,
-  keyAgreementKey,
-  persist
+  cache,
+  keyAgreementKey
 }: {
-  userId: string
+  cache: EncryptionDescriptorCache
   keyAgreementKey: IKeyAgreementKey
-  persist: boolean
 }): Promise<Record<string, CollectionEncryption>> {
-  const cache = persist
-    ? localStorageDescriptorCache({ spaceId: `local:${userId}` })
-    : undefined
   const entries = await Promise.all(
     ENCRYPTED_COLLECTION_IDS.map(async collectionId => {
-      const cached = await cache?.readDescriptor({ collectionId })
+      const cached = await cache.readDescriptor({ collectionId })
       if (cached?.epochs?.length) {
         return [collectionId, cached] as const
       }
       const minted = await mintRecordEncryption({ keyAgreementKey })
-      await cache?.writeDescriptor({ collectionId, descriptor: minted })
+      await cache.writeDescriptor({ collectionId, descriptor: minted })
       return [collectionId, minted] as const
     })
   )
@@ -315,55 +270,6 @@ function warnDescriptorFetchError(
       'falling back to the cached copy.',
     err
   )
-}
-
-/**
- * The localStorage cache for a collection's stored `/meta` value, under
- * `freewallet:collection-meta:<spaceId>:<collectionId>`. On an encrypted
- * collection its `custom` is the opaque encrypted metadata envelope carrying
- * the persisted blinded-index schema, which the ciphers install so wallet
- * writes emit the same blinded `indexed` entries a Collection-handle write
- * does. Same posture as the descriptor cache: the offline fallback, with a
- * corrupt entry (or a non-browser environment) read as absent and writes
- * no-oping without localStorage.
- *
- * @param options {object}
- * @param options.spaceId {string}
- * @returns {object}   `readMeta` / `writeMeta` over the cache
- */
-function localStorageMetaCache({ spaceId }: { spaceId: string }): {
-  readMeta(options: {
-    collectionId: string
-  }): Promise<{ custom?: unknown } | undefined>
-  writeMeta(options: {
-    collectionId: string
-    meta: { custom?: unknown }
-  }): Promise<void>
-} {
-  const cacheKey = (collectionId: string): string =>
-    `freewallet:collection-meta:${spaceId}:${collectionId}`
-  return {
-    async readMeta({ collectionId }) {
-      if (typeof localStorage === 'undefined') {
-        return undefined
-      }
-      const raw = localStorage.getItem(cacheKey(collectionId))
-      if (!raw) {
-        return undefined
-      }
-      try {
-        return JSON.parse(raw) as { custom?: unknown }
-      } catch {
-        return undefined
-      }
-    },
-    async writeMeta({ collectionId, meta }) {
-      if (typeof localStorage === 'undefined') {
-        return
-      }
-      localStorage.setItem(cacheKey(collectionId), JSON.stringify(meta))
-    }
-  }
 }
 
 /**
@@ -391,7 +297,7 @@ async function acquireCollectionMetas({
       collectionId: string
     }): Promise<{ custom?: unknown } | undefined>
   }
-  cache?: ReturnType<typeof localStorageMetaCache>
+  cache?: CollectionMetaCache
   collectionIds: string[]
 }): Promise<Record<string, { custom?: unknown }>> {
   const entries = await Promise.all(
@@ -480,7 +386,7 @@ export class StorageManager {
   #descriptorCache?: EncryptionDescriptorCache
   // The durable (localStorage) collection-metadata cache, beside the
   // descriptor cache and under the same posture.
-  #metaCache?: ReturnType<typeof localStorageMetaCache>
+  #metaCache?: CollectionMetaCache
   // The once-per-collection-per-session unknown-epoch refresh guard, shared by
   // the standard and the app-provisioned encrypted collections, so a genuinely
   // foreign envelope cannot drive a refresh loop. Its `reset` re-arms a
@@ -507,6 +413,9 @@ export class StorageManager {
   // The descriptors the `#appCiphers` entries were built from, keyed by WAS
   // collection id -- the offline/lazy source for an app collection's cipher.
   #appDescriptors: Record<string, CollectionEncryption> = {}
+  // The session's typed persistence handle: the writer id and the cache pair
+  // come from it, so their durability is the handle's, never a flag here.
+  #persistence: SessionPersistence
 
   constructor({
     localStore,
@@ -515,7 +424,8 @@ export class StorageManager {
     remoteDirect = false,
     vaultKeys,
     descriptors,
-    metas
+    metas,
+    persistence
   }: {
     localStore: BrowserStore
     remoteStore?: WASRemoteStore
@@ -527,6 +437,7 @@ export class StorageManager {
     }
     descriptors?: Record<string, CollectionEncryption>
     metas?: Record<string, { custom?: unknown }>
+    persistence: SessionPersistence
   }) {
     this.#localStore = localStore
     this.#remoteStore = remoteStore
@@ -534,11 +445,16 @@ export class StorageManager {
     this.#vaultKeys = vaultKeys
     this.#descriptors = descriptors ?? {}
     this.#metas = metas ?? {}
+    this.#persistence = persistence
+    // The cache pair rides the persistence handle: one instance per scope per
+    // session (the handle memoizes), durable-localStorage or in-memory by the
+    // handle's posture, and absent only when there is no remote Space to
+    // cache for.
     this.#descriptorCache = remoteStore
-      ? localStorageDescriptorCache({ spaceId: remoteStore.spaceId })
+      ? persistence.descriptorCache({ scope: remoteStore.spaceId })
       : undefined
     this.#metaCache = remoteStore
-      ? localStorageMetaCache({ spaceId: remoteStore.spaceId })
+      ? persistence.metaCache({ scope: remoteStore.spaceId })
       : undefined
     // Remote-direct routing is only meaningful when a remote store is configured
     // (a guest / no-WAS session always uses the local BrowserStore).
@@ -935,7 +851,7 @@ export class StorageManager {
     const storageServerUrl = isGuest ? undefined : WAS_SERVER_URL
     console.log('Initializing storage clients:', { storageServerUrl })
 
-    const { keyAgreementKey, keyResolver } = profile
+    const { keyAgreementKey, keyResolver, persistence } = profile
     if (!keyAgreementKey || !keyResolver) {
       throw new Error('A full session profile requires the key material.')
     }
@@ -965,23 +881,23 @@ export class StorageManager {
       ? await Promise.all([
           acquireDescriptors({
             source: remoteStore,
-            cache: localStorageDescriptorCache({
-              spaceId: remoteStore.spaceId
-            }),
+            // The same handle-memoized instance the constructor binds below
+            // (one cache pair per session in both postures), seeding the
+            // in-memory pair at login in the transient posture.
+            cache: persistence.descriptorCache({ scope: remoteStore.spaceId }),
             collectionIds: ENCRYPTED_COLLECTION_IDS,
             onFetchError: warnDescriptorFetchError
           }),
           acquireCollectionMetas({
             source: remoteStore,
-            cache: localStorageMetaCache({ spaceId: remoteStore.spaceId }),
+            cache: persistence.metaCache({ scope: remoteStore.spaceId }),
             collectionIds: ENCRYPTED_COLLECTION_IDS
           })
         ])
       : [
           await localOnlyDescriptors({
-            userId: user.id,
-            keyAgreementKey,
-            persist: !isGuest
+            cache: persistence.descriptorCache({ scope: `local:${user.id}` }),
+            keyAgreementKey
           }),
           {}
         ]
@@ -1008,8 +924,14 @@ export class StorageManager {
     let userExists = await localStore.userExists()
     if (remoteStore) {
       // A returning user may be on a fresh browser (no local db yet) but have
-      // an existing remote Space.
-      userExists = userExists || (await remoteStore.userExists())
+      // an existing remote Space. A transient session skips the probe -- a
+      // bare-Space-URL describe the posture must not make -- and trusts the
+      // account resolution that produced it (a transient login only ever
+      // proceeds from a keyring hit naming the account).
+      userExists =
+        userExists ||
+        !isDurableSession(persistence) ||
+        (await remoteStore.userExists())
     }
     const storage = new StorageManager({
       localStore,
@@ -1018,7 +940,8 @@ export class StorageManager {
       remoteDirect,
       vaultKeys: { keyAgreementKey, keyResolver },
       descriptors,
-      metas
+      metas,
+      persistence
     })
     return { storage, userExists }
   }
@@ -1289,6 +1212,14 @@ export class StorageManager {
   }
 
   async exportSpace(): Promise<ReadableStream<Uint8Array>> {
+    // Export needs no authority a transient session lacks; the gate is
+    // loudness and deliberateness -- a bulk read of the whole account is
+    // exactly what a session-stealer wants on untrusted hardware, so from a
+    // transient session it runs only inside a step-up.
+    assertAccountCeremonyAllowed({
+      persistence: this.#persistence,
+      ceremony: 'Exporting the Space'
+    })
     return await this.#requireRemote('Exporting a Space').exportSpace()
   }
 
@@ -1297,6 +1228,11 @@ export class StorageManager {
   }: {
     tarFile: File
   }): Promise<ImportSpaceSummary> {
+    // The write-side twin of the export gate above.
+    assertAccountCeremonyAllowed({
+      persistence: this.#persistence,
+      ceremony: 'Importing a Space'
+    })
     return await this.#requireRemote('Importing a Space').importSpace({
       tarFile
     })
@@ -1640,6 +1576,14 @@ export class StorageManager {
     profile?: ControllerProfile
     idb?: IDBFactory
   }): Promise<void> {
+    // Provisioning is the durable bootstrap: it creates the local replica
+    // durably and makes the bare-Space-URL reads and promotion PUTs a
+    // transient session must not make. The transient login path never calls
+    // this; the assert keeps that structural rather than convention.
+    assertDurableSession({
+      persistence: this.#persistence,
+      ceremony: 'Provisioning storage'
+    })
     this.#provisioning = this.#provisionUserCollections({ user, profile, idb })
     return this.#provisioning
   }
@@ -1922,7 +1866,7 @@ export class StorageManager {
             // keyed by the data Space id (wallet-core derives it), so one
             // slot serves every run -- true first contact, a pre-promotion
             // heal, and a promoted login alike.
-            accountLogPinStore: sessionLogPinStore({ idb }),
+            accountLogPinStore: this.#persistence.logPins,
             onDidPublished: async ({ did }) => {
               profile.didWebvh = { did }
               // Provisioning publishes (or extends) the log, so any memo of
@@ -1954,7 +1898,7 @@ export class StorageManager {
                   spaceId: remoteStore.spaceId,
                   host: remoteStore.storageServerUrl
                 },
-                idb
+                pinStore: this.#persistence.logPins
               }),
             promoteController: false
           })
@@ -1988,11 +1932,10 @@ export class StorageManager {
             publishedDid &&
             descriptor.currentEpoch === userKey.id
           ) {
-            await savePinFromDescriptor({
+            await this.#persistence.epochPins.saveFromDescriptor({
               accountDid: publishedDid,
               epochId: descriptor.currentEpoch,
-              descriptor,
-              idb
+              descriptor
             })
           }
           if (result.epochs) {
@@ -3131,7 +3074,7 @@ export class StorageManager {
   }: {
     contact: ContactData
   }): Promise<StoredContact> {
-    const writerId = getOrCreateWriterId()
+    const writerId = this.#persistence.getWriterId()
     const stored = await this.#store.addContact({ contact, writerId })
     await this.#recordContactRevision({
       contactId: stored.contactId,
@@ -3164,7 +3107,7 @@ export class StorageManager {
     contact: ContactData
     action?: 'update' | 'restore'
   }): Promise<StoredContact> {
-    const writerId = getOrCreateWriterId()
+    const writerId = this.#persistence.getWriterId()
     const stored = await this.#store.updateContact({
       id,
       contact,
@@ -3195,7 +3138,7 @@ export class StorageManager {
         contactId: existing.contactId,
         action: 'delete',
         snapshot: existing.contact,
-        writerId: getOrCreateWriterId()
+        writerId: this.#persistence.getWriterId()
       })
     }
   }

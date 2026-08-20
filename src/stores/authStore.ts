@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import type { Session } from '@/types/auth'
+import { isDurableSession } from '@/session/persistence'
+import { setTransientPrefs } from '@/lib/prefsStorage'
 import { syncController } from '@/stores/syncController'
 
 /**
@@ -34,6 +36,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     const previous = get().session
     set({ session })
     publishStorageSeam(session)
+    // The UI-prefs half of the posture seam: while a transient session is
+    // live, theme/language toggles land in an in-memory overlay instead of
+    // localStorage (`src/lib/prefsStorage.ts`).
+    setTransientPrefs({
+      active: !isDurableSession(session.profile.persistence)
+    })
     // Kick off background replication (no-op for guests / no remote replica).
     // `restart` (not `start`) so a controller left running by a previous
     // session -- a switch to a second account without an intervening logout --
@@ -66,6 +74,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     // stays in IndexedDB; only the passphrase-derived session is discarded).
     await get().session?.storage.close()
     publishStorageSeam(null)
+    setTransientPrefs({ active: false })
     set({ session: null })
   }
 }))

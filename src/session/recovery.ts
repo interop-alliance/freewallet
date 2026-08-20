@@ -135,6 +135,7 @@ import {
   savePinFromDescriptor,
   sessionLogPinStore
 } from '@/lib/sessionKey'
+import { assertAccountCeremonyAllowed } from '@/session/persistence'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { WASRemoteStore } from '@/stores/wasRemoteStore'
 
@@ -346,21 +347,18 @@ export function recoveryEntriesOf({
  * @param options.session {Session}
  * @param options.entry {RecoveryCodeUnlockMethod}
  * @param [options.dropKids] {string[]}   recovery kids to remove
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 export async function recordRecoveryMethod({
   session,
   entry,
-  dropKids = [],
-  idb
+  dropKids = []
 }: {
   session: Session
   entry: RecoveryCodeUnlockMethod
   dropKids?: string[]
-  idb?: IDBFactory
 }): Promise<void> {
-  const existing = await getUnlockMethods({ session, idb })
+  const existing = await getUnlockMethods({ session })
   const record = existing ?? emptyUnlockMethodsRegistry()
   const dropped = new Set([entry.recoveryKid, ...dropKids])
   const methods = [
@@ -370,7 +368,7 @@ export async function recordRecoveryMethod({
     ),
     entry
   ]
-  await putUnlockMethods({ session, record: { ...record, methods }, idb })
+  await putUnlockMethods({ session, record: { ...record, methods } })
 }
 
 /**
@@ -408,20 +406,21 @@ export function canIssueRecoveryCode({
  *   (`generateRecoveryCode`) so the confirm-once dialog can display it before
  *   anything becomes durable
  * @param options.label {string}   the display label for the registry entry
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<{ entry: RecoveryCodeUnlockMethod }>}
  */
 export async function issueRecoveryCode({
   session,
   code,
-  label,
-  idb
+  label
 }: {
   session: Session
   code: string
   label: string
-  idb?: IDBFactory
 }): Promise<{ entry: RecoveryCodeUnlockMethod }> {
+  assertAccountCeremonyAllowed({
+    persistence: session.profile.persistence,
+    ceremony: 'Issuing a recovery code'
+  })
   const {
     remoteStore,
     pointer,
@@ -437,7 +436,7 @@ export async function issueRecoveryCode({
 
   // 1. Decryption material first: the code's wrap into every roster epoch.
   await addUserKeyRosterRecipient({
-    store: sessionRosterStore({ profile: session.profile, idb }),
+    store: sessionRosterStore({ profile: session.profile }),
     recipient: {
       id: client.recipientKid,
       publicKeyMultibase: client.keyAgreementKeyMultibase
@@ -480,7 +479,7 @@ export async function issueRecoveryCode({
     unlockKeyAgreementKeyId: bound.unlockKeyAgreementKeyId,
     unlockKeyAgreementKeyMultibase: bound.unlockKeyAgreementKeyMultibase
   })
-  await recordRecoveryMethod({ session, entry, idb })
+  await recordRecoveryMethod({ session, entry })
 
   return { entry }
 }
@@ -1158,6 +1157,11 @@ export async function revokeRecoveryCode({
   entry: RecoveryCodeUnlockMethod
   idb?: IDBFactory
 }): Promise<void> {
+  assertAccountCeremonyAllowed({
+    persistence: session.profile.persistence,
+    ceremony: 'Revoking a recovery code'
+  })
+  const { epochPins } = session.profile.persistence
   const { remoteStore, pointer, clientWebvhKeys, clientKeyAgreementKey } =
     requireEnrolledClientContext({
       session,
@@ -1184,7 +1188,7 @@ export async function revokeRecoveryCode({
     profile: session.profile,
     pointer
   })
-  const rosterStore = sessionRosterStore({ profile: session.profile, idb })
+  const rosterStore = sessionRosterStore({ profile: session.profile })
   await rotateUserKeyRoster({
     store: rosterStore,
     document: doc,
@@ -1194,15 +1198,14 @@ export async function revokeRecoveryCode({
     store: rosterStore,
     userKey: session.profile.userKey,
     clientKeyAgreementKey,
-    pinnedEpochId: await loadUserKeyEpochPin({ accountDid: pointer.did, idb })
+    pinnedEpochId: await epochPins.load({ accountDid: pointer.did })
   })
   let rotatedUserKey: UserKey | undefined
   if (read) {
-    await savePinFromDescriptor({
+    await epochPins.saveFromDescriptor({
       accountDid: pointer.did,
       epochId: read.latestEpochId,
-      descriptor: read.descriptor,
-      idb
+      descriptor: read.descriptor
     })
     if (read.rotated) {
       // Persist the rotated user key for the next login, then re-epoch every
@@ -1258,19 +1261,16 @@ export async function revokeRecoveryCode({
  * @param [options.registryRecord] {UnlockMethodsRecord | null}   the
  *   unlock-methods registry, when the caller already read it (the revocation
  *   cascade reads it once for its document edit and this stage)
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<{ reminted: number; skipped: number }>}
  */
 export async function remintRecoveryDelegations({
   session,
   doc,
-  registryRecord: prefetched,
-  idb
+  registryRecord: prefetched
 }: {
   session: Session
   doc: Parameters<typeof remintDelegationsCore>[0]['doc']
   registryRecord?: UnlockMethodsRecord | null
-  idb?: IDBFactory
 }): Promise<{ reminted: number; skipped: number }> {
   const pointer = session.profile.accountPointer
   const keyAgent = session.profile.keyAgent
@@ -1280,7 +1280,7 @@ export async function remintRecoveryDelegations({
   const record =
     prefetched !== undefined
       ? prefetched
-      : await getUnlockMethods({ session, idb })
+      : await getUnlockMethods({ session })
   const entries = recoveryEntriesOf({ record })
   // The standing passphrase/passkey entries ride the same re-mint: their
   // bridge delegations rot on the same document edit and refresh through
@@ -1291,10 +1291,14 @@ export async function remintRecoveryDelegations({
       (method.type === 'passphrase' || method.type === 'passkey') &&
       !!method.unlockClientDid
   )
+  // The sibling pair is absent on recovery codes by construction; stating it
+  // keeps the entry union uniform for the recordEntry callback below.
   const remintEntries = [
     ...entries.map(entry => ({
       ...entry,
       label: entry.label,
+      delegatedClientsKeyId: undefined,
+      delegatedClientsExpires: undefined,
       source: entry as UnlockMethod
     })),
     ...standingSources.map(method => ({
@@ -1339,8 +1343,7 @@ export async function remintRecoveryDelegations({
             ...(entry.delegationExpires
               ? { delegationExpires: entry.delegationExpires }
               : {})
-          },
-          idb
+          }
         })
         return
       }
@@ -1350,8 +1353,7 @@ export async function remintRecoveryDelegations({
         delegationKeyId: entry.delegationKeyId,
         delegationExpires: entry.delegationExpires,
         delegatedClientsKeyId: entry.delegatedClientsKeyId,
-        delegatedClientsExpires: entry.delegatedClientsExpires,
-        idb
+        delegatedClientsExpires: entry.delegatedClientsExpires
       })
     }
   })
@@ -1393,17 +1395,14 @@ export interface RecoveryHealthFlag {
  * @param [options.entries] {RecoveryCodeUnlockMethod[]}   the registry's
  *   recovery entries, when the caller already read them (the Settings panel
  *   lists them immediately before checking their health)
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<RecoveryHealthFlag[]>}
  */
 export async function checkRecoveryHealth({
   session,
-  entries: prefetched,
-  idb
+  entries: prefetched
 }: {
   session: Session
   entries?: RecoveryCodeUnlockMethod[]
-  idb?: IDBFactory
 }): Promise<RecoveryHealthFlag[]> {
   const remoteStore = session.storage.remoteStore
   const pointer = session.profile.accountPointer
@@ -1412,7 +1411,7 @@ export async function checkRecoveryHealth({
   }
   const entries =
     prefetched ??
-    recoveryEntriesOf({ record: await getUnlockMethods({ session, idb }) })
+    recoveryEntriesOf({ record: await getUnlockMethods({ session }) })
   if (entries.length === 0) {
     return []
   }

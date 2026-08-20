@@ -33,7 +33,6 @@ import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import type { Session } from '@/types/auth'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import { sessionRosterStore } from '@/session/rosterStore'
-import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
 import {
   cascadeCollections,
   type UserKeyCascadeResult
@@ -72,14 +71,12 @@ export interface CredentialRotationOutcome {
  * @param [options.method.updateKeyMultibase] {string}
  * @param options.verb {string}   what the caller is doing, for the
  *   pending-rotation refusal message (e.g. `'changing the passphrase'`)
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<CredentialRotationOutcome | null>}
  */
 export async function rotateOffUnlockCredential({
   session,
   method,
-  verb,
-  idb
+  verb
 }: {
   session: Session
   method: {
@@ -88,7 +85,6 @@ export async function rotateOffUnlockCredential({
     updateKeyMultibase?: string
   }
   verb: string
-  idb?: IDBFactory
 }): Promise<CredentialRotationOutcome | null> {
   const { keyAgreementKeyMultibase, updateKeyMultibase } = method
   if (!keyAgreementKeyMultibase || !updateKeyMultibase) {
@@ -111,10 +107,8 @@ export async function rotateOffUnlockCredential({
         }
       : { publicKeyMultibase: keyAgreementKeyMultibase }
 
-  const pinnedEpochId = await loadUserKeyEpochPin({
-    accountDid: pointer.did,
-    idb
-  })
+  const { epochPins } = session.profile.persistence
+  const pinnedEpochId = await epochPins.load({ accountDid: pointer.did })
 
   // The ceremony opens with a document edit, so nothing may keep reading a
   // memo taken before it. Dropped up front and again after, so neither a
@@ -127,18 +121,17 @@ export async function rotateOffUnlockCredential({
     unlockKeys: { keyAgreement, updateKeyMultibase },
     expectedDid: pointer.did,
     verb,
-    rosterStore: sessionRosterStore({ profile: session.profile, idb }),
+    rosterStore: sessionRosterStore({ profile: session.profile }),
     ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
     clientKeyAgreementKey,
     pinnedEpochId,
     onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) => {
       // The user key and the epoch pin persist together: the pin must never
       // advance without the key that authenticated the roster it advanced to.
-      await savePinFromDescriptor({
+      await epochPins.saveFromDescriptor({
         accountDid: pointer.did,
         epochId: latestEpochId,
-        descriptor,
-        idb
+        descriptor
       })
       await session.profile.persistClientKeys?.({ userKey })
     },

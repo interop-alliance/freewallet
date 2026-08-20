@@ -30,6 +30,7 @@ import { setClientLabel } from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { saveUserKeyEpochPin, sessionLogPinStore } from '@/lib/sessionKey'
+import { assertAccountCeremonyAllowed } from '@/session/persistence'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
   bindPassphrase,
@@ -69,6 +70,10 @@ export async function approveEnrollment({
   session: Session
   label?: string
 }): Promise<{ did: string; clientDid: string; signingKeyMultibase: string }> {
+  assertAccountCeremonyAllowed({
+    persistence: session.profile.persistence,
+    ceremony: 'Approving a wallet enrollment'
+  })
   const { remoteStore, clientWebvhKeys, clientKeyAgreementKey } =
     requireEnrolledClientContext({ session, action: 'Enrollment' })
   const { profile } = session

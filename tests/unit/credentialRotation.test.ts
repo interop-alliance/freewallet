@@ -35,7 +35,12 @@ vi.mock('@/lib/sessionKey', () => ({
   loadUserKeyEpochPin: vi.fn(async () => {
     state.calls.push('loadUserKeyEpochPin')
     return 'did:key:z6LSOldUserKey'
-  })
+  }),
+  // Built eagerly by the durable persistence handle the fixture carries.
+  sessionLogPinStore: vi.fn(() => ({
+    read: async () => null,
+    write: async () => undefined
+  }))
 }))
 
 vi.mock('@/session/rosterStore', () => ({
@@ -59,6 +64,7 @@ vi.mock('@/session/verifiedLog', () => ({
 import { retireUnlockCredential } from '@interop/wallet-core/unlock'
 import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
+import { durableSessionPersistence } from '@/session/persistence'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { cascadeCollections } from '@/session/userKeyCascade'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
@@ -163,6 +169,7 @@ function sessionWith(
           ? overrides.clientKeyAgreementKey
           : { id: 'did:key:z6MkRetiringClient#z6LSRetiringClient' },
       userKey: OLD_USER_KEY,
+      persistence: durableSessionPersistence(),
       persistClientKeys: vi.fn(async () => {
         state.calls.push('persistClientKeys')
       })

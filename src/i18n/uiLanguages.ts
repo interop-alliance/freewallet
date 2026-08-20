@@ -1,3 +1,5 @@
+import { readPref, writePref } from '@/lib/prefsStorage'
+
 /**
  * Locales in the language selector. `name` is the spelled-out language name.
  * When adding a locale: append here and register resources in `i18n/index.ts`.
@@ -56,10 +58,10 @@ export function normalizeToUiLanguageCode(lng: string): UiLanguageCode {
  * -- in which case the caller should fall back to browser-locale detection.
  */
 export function readStoredUiLanguage(): UiLanguageCode | null {
-  const stored = localStorage.getItem(UI_LANGUAGE_STORAGE_KEY)
+  const stored = readPref(UI_LANGUAGE_STORAGE_KEY)
   return isUiLanguageCode(stored) ? stored : null
 }
 
 export function persistUiLanguage(code: UiLanguageCode): void {
-  localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, code)
+  writePref({ key: UI_LANGUAGE_STORAGE_KEY, value: code })
 }

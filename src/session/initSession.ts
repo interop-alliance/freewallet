@@ -45,10 +45,10 @@ import { swapSessionVaultKeys } from '@/session/userKeyAdoption'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import { sweepStrandedAppKeys } from '@/session/appKeySweep'
 import {
-  loadUserKeyEpochPin,
-  savePinFromDescriptor,
-  sessionLogPinStore
-} from '@/lib/sessionKey'
+  durableSessionPersistence,
+  isDurableSession,
+  type SessionPersistence
+} from '@/session/persistence'
 import { StorageManager } from '@/stores/storageManager'
 import { fetchKeyring, KeyringRecordUnusableError } from '@/session/keyring'
 import {
@@ -149,6 +149,11 @@ export async function initGuestSession() {
  *   true. Set false for the new-wallet flows that provision explicitly.
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the user key
  *   roster-epoch pin (CHAPI popups thread the Storage Access API handle here)
+ * @param [options.persistence] {SessionPersistence}   the typed persistence
+ *   handle for this session; defaults to the durable one built over `idb`
+ *   (with cache persistence off for guests). A transient login supplies the
+ *   in-memory handle here, which also skips provisioning, the login-time
+ *   sweeps, and every durable pin write.
  * @returns {Promise<{ session: Session, userExists: boolean }>}
  */
 export async function initSessionFromSeed({
@@ -161,7 +166,8 @@ export async function initSessionFromSeed({
   isGuest = false,
   remoteDirectStorage = false,
   provisionStorage = true,
-  idb
+  idb,
+  persistence: suppliedPersistence
 }: {
   seed: Uint8Array
   userKey?: UserKey
@@ -173,7 +179,11 @@ export async function initSessionFromSeed({
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
   idb?: IDBFactory
+  persistence?: SessionPersistence
 }) {
+  const persistence =
+    suppliedPersistence ??
+    durableSessionPersistence({ idb, persistCaches: !isGuest })
   const { keyAgent, zcapClient, keyAgreementKey, keyResolver } =
     await agentsFromSeed({ seed })
 
@@ -246,7 +256,7 @@ export async function initSessionFromSeed({
       pointer: { ...accountPointer, did: accountPointer.did },
       userKey,
       clientKeyAgreementKey: keyAgreementKey,
-      idb
+      persistence
     })
     rosterRead = rosterCheck.read
     userKeyPersistFailed = rosterCheck.persistFailed
@@ -280,6 +290,7 @@ export async function initSessionFromSeed({
   const profile: ControllerProfile = {
     keyAgent,
     zcapClient: sessionZcapClient,
+    persistence,
     keyAgreementKey: vaultKeys.keyAgreementKey,
     keyResolver: vaultKeys.keyResolver,
     // This client's own (identity) KAK, distinct from the user-key-backed vault
@@ -326,7 +337,11 @@ export async function initSessionFromSeed({
   // configured, provisions the remote Space / did:web -- so it is correct for
   // guests (local only) and returning logins alike. The new-wallet flows opt
   // out (`provisionStorage: false`) and provision explicitly.
-  if (provisionStorage) {
+  // The transient posture skips provisioning and every login-time sweep: the
+  // sweeps perform governed writes (roster convergence, epoch rotation, the
+  // app-key deletes) a transient session must not run, and provisioning's
+  // bare-Space-URL reads and promotion PUTs are the durable bootstrap's.
+  if (provisionStorage && isDurableSession(persistence)) {
     const storageReady = storage.ensureUserCollections({ user, profile, idb })
     session.storageReady = storageReady
 
@@ -375,7 +390,7 @@ export async function initSessionFromSeed({
               userKey: loginUserKey,
               descriptor: loginDescriptor,
               clientKeyAgreementKey: keyAgreementKey,
-              idb,
+              persistence,
               persistClientKeys
             })
           const result = await cascadeCollectionsToUserKey({
@@ -432,7 +447,8 @@ export async function initSessionFromSeed({
  * @param options.descriptor {CollectionEncryption}   the login's roster read
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) KAK -- its roster entry
- * @param [options.idb] {IDBFactory}
+ * @param options.persistence {SessionPersistence}   the session's persistence
+ *   handle (the pins ride it)
  * @param [options.persistClientKeys] {function}   re-wraps this client's
  *   client-key record with the adopted user key
  * @returns {Promise<{ userKey: UserKey, rosterDescriptor: CollectionEncryption }>}
@@ -444,7 +460,7 @@ async function convergeRosterToDocument({
   userKey,
   descriptor,
   clientKeyAgreementKey,
-  idb,
+  persistence,
   persistClientKeys
 }: {
   session: Session
@@ -452,7 +468,7 @@ async function convergeRosterToDocument({
   userKey: UserKey
   descriptor: CollectionEncryption
   clientKeyAgreementKey: IKeyAgreementKey
-  idb?: IDBFactory
+  persistence: SessionPersistence
   persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
 }): Promise<{ userKey: UserKey; rosterDescriptor: CollectionEncryption }> {
   const { keyAgent } = session.profile
@@ -470,12 +486,12 @@ async function convergeRosterToDocument({
         spaceId: pointer.spaceId,
         host: pointer.host
       },
-      store: sessionRosterStore({ profile: session.profile, idb }),
+      store: sessionRosterStore({ profile: session.profile }),
       userKey,
       descriptor,
       clientKeyAgreementKey,
-      pinnedEpochId: await loadUserKeyEpochPin({ accountDid, idb }),
-      accountLogPinStore: sessionLogPinStore({ idb }),
+      pinnedEpochId: await persistence.epochPins.load({ accountDid }),
+      accountLogPinStore: persistence.logPins,
       // Adoption is app-side: persisted for the next login, pinned, and
       // swapped into the live session -- all before the collection fan-out
       // runs against it.
@@ -484,11 +500,10 @@ async function convergeRosterToDocument({
         latestEpochId,
         descriptor: read
       }) => {
-        await savePinFromDescriptor({
+        await persistence.epochPins.saveFromDescriptor({
           accountDid,
           epochId: latestEpochId,
-          descriptor: read,
-          idb
+          descriptor: read
         })
         await persistClientKeys?.({ userKey: adopted })
         await swapSessionVaultKeys({ session, userKey: adopted })
@@ -535,7 +550,9 @@ async function convergeRosterToDocument({
  * @param options.userKey {UserKey}   the cached per-user key
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) KAK -- its roster entry
- * @param [options.idb] {IDBFactory}
+ * @param options.persistence {SessionPersistence}   the session's persistence
+ *   handle: both continuity pins (the chain-head pin and the epoch pin) ride
+ *   it, so a transient session pins in memory for the visit
  * @returns {Promise<object>}   the roster read (or null), and whether the
  *   epoch-pin persist failed
  */
@@ -545,14 +562,14 @@ async function checkUserKeyRosterAtLogin({
   pointer,
   userKey,
   clientKeyAgreementKey,
-  idb
+  persistence
 }: {
   zcapClient: ZcapClient
   keyAgent: ICapabilityAgent
   pointer: AccountPointer & { did: string }
   userKey: UserKey
   clientKeyAgreementKey: IKeyAgreementKey
-  idb?: IDBFactory
+  persistence: SessionPersistence
 }): Promise<{ read: UserKeyRosterReadResult | null; persistFailed: boolean }> {
   const accountDid = pointer.did
   let persistFailed = false
@@ -565,22 +582,21 @@ async function checkUserKeyRosterAtLogin({
         spaceId: pointer.spaceId,
         host: pointer.host
       },
-      idb
+      pinStore: persistence.logPins
     }),
     userKey,
     clientKeyAgreementKey,
-    pinnedEpochId: await loadUserKeyEpochPin({ accountDid, idb }),
+    pinnedEpochId: await persistence.epochPins.load({ accountDid }),
     // The pin advances to the epoch just authenticated. A throw from here
     // propagates out of the shared check (it is no longer swallowed into the
     // offline null path), so the failure is caught HERE, where its meaning
     // is known: the read itself succeeded, only the local persist did not.
     onRosterRead: async ({ latestEpochId, descriptor }) => {
       try {
-        await savePinFromDescriptor({
+        await persistence.epochPins.saveFromDescriptor({
           accountDid,
           epochId: latestEpochId,
-          descriptor,
-          idb
+          descriptor
         })
       } catch (err) {
         persistFailed = true
@@ -846,8 +862,7 @@ async function sessionFromKeyringHit({
                   delegatedClients as { expires?: string }
                 ).expires
               }
-            : {}),
-          idb
+            : {})
         })
       } catch (err) {
         console.warn(
@@ -885,8 +900,7 @@ async function sessionFromKeyringHit({
           await refreshStandingDelegationFields({
             session,
             unlockSpaceId,
-            updateKeyMultibase: rung.keyMultibase,
-            idb
+            updateKeyMultibase: rung.keyMultibase
           })
         }
       } catch (err) {

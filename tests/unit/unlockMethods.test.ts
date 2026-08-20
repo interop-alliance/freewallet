@@ -105,6 +105,7 @@ import {
 } from '@/session/unlockMethods'
 import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
+import { durableSessionPersistence } from '@/session/persistence'
 import {
   ensureUnlockMethodsCollection,
   getUnlockMethodsRecord,
@@ -198,7 +199,7 @@ function createFakeIdb(): IDBFactory {
  *
  * @returns {Promise<Session>}
  */
-async function makeSession(): Promise<Session> {
+async function makeSession(idb?: IDBFactory): Promise<Session> {
   const seed = new Uint8Array(32)
   seed.fill(7)
   const agent = await CapabilityAgent.fromSeed({
@@ -217,7 +218,12 @@ async function makeSession(): Promise<Session> {
   })
   return {
     user: { id: DATA_CONTROLLER },
-    profile: { keyAgreementKey, keyResolver, zcapClient: {} },
+    profile: {
+      keyAgreementKey,
+      keyResolver,
+      zcapClient: {},
+      persistence: durableSessionPersistence({ idb })
+    },
     storage: { spaceId: DATA_SPACE_ID },
     isGuest: false
   } as unknown as Session
@@ -304,12 +310,14 @@ function passkeyEntry({
  */
 async function makePassphraseSession({
   unlockSpaceId,
-  manageCapability
+  manageCapability,
+  idb
 }: {
   unlockSpaceId: string
   manageCapability?: IZcap
+  idb?: IDBFactory
 }): Promise<Session> {
-  const session = await makeSession()
+  const session = await makeSession(idb)
   session.profile.unlockMethod = {
     type: 'passphrase',
     unlockSpaceId,
@@ -333,10 +341,10 @@ afterEach(() => {
 describe('put / get round-trip', () => {
   it('survives wrap/unwrap and stores an encrypted (versioned) envelope remotely', async () => {
     const idb = createFakeIdb()
-    const session = await makeSession()
+    const session = await makeSession(idb)
     const record = sampleRecord()
 
-    await putUnlockMethods({ session, record, idb })
+    await putUnlockMethods({ session, record })
     expect(ensureUnlockMethodsCollection).toHaveBeenCalledOnce()
 
     // The remote body is the JWE-wrapped envelope, not the plaintext record.
@@ -348,14 +356,14 @@ describe('put / get round-trip', () => {
     expect(stored.wrapped.jwe).toBeDefined()
     expect(JSON.stringify(stored)).not.toContain('unlock-space-abc')
 
-    const found = await getUnlockMethods({ session, idb })
+    const found = await getUnlockMethods({ session })
     expect(found).toEqual(record)
     expect(getUnlockMethodsRecord).toHaveBeenCalledOnce()
   })
 
   it('returns null when no registry exists anywhere', async () => {
-    const session = await makeSession()
-    const found = await getUnlockMethods({ session, idb: createFakeIdb() })
+    const session = await makeSession(createFakeIdb())
+    const found = await getUnlockMethods({ session })
     expect(found).toBeNull()
   })
 
@@ -364,7 +372,7 @@ describe('put / get round-trip', () => {
     wasState.records.set(DATA_SPACE_ID, { version: 2, wrapped: {} })
 
     await expect(
-      getUnlockMethods({ session, idb: createFakeIdb() })
+      getUnlockMethods({ session })
     ).rejects.toThrow(/version/)
   })
 })
@@ -373,14 +381,14 @@ describe('no-WAS cache-only path', () => {
   it('writes and reads the registry from the cache with no remote call', async () => {
     wasState.url = undefined
     const idb = createFakeIdb()
-    const session = await makeSession()
+    const session = await makeSession(idb)
     const record = sampleRecord()
 
-    await putUnlockMethods({ session, record, idb })
+    await putUnlockMethods({ session, record })
     expect(ensureUnlockMethodsCollection).not.toHaveBeenCalled()
     expect(wasState.records.size).toBe(0)
 
-    const found = await getUnlockMethods({ session, idb })
+    const found = await getUnlockMethods({ session })
     expect(found).toEqual(record)
     expect(getUnlockMethodsRecord).not.toHaveBeenCalled()
   })
@@ -388,14 +396,15 @@ describe('no-WAS cache-only path', () => {
 
 describe('remote-first read', () => {
   it('reads remote on a cache miss and refreshes the local cache', async () => {
-    const session = await makeSession()
+    const session = await makeSession(createFakeIdb())
     const record = sampleRecord()
     // Populate the remote (and a throwaway profile's cache) via one idb, then
     // read on a fresh idb whose cache starts empty.
-    await putUnlockMethods({ session, record, idb: createFakeIdb() })
+    await putUnlockMethods({ session, record })
     vi.clearAllMocks()
 
     const freshIdb = createFakeIdb()
+    const freshSession = await makeSession(freshIdb)
     expect(
       await loadUnlockMethodsCache({
         controller: DATA_CONTROLLER,
@@ -403,7 +412,7 @@ describe('remote-first read', () => {
       })
     ).toBeNull()
 
-    const found = await getUnlockMethods({ session, idb: freshIdb })
+    const found = await getUnlockMethods({ session: freshSession })
     expect(found).toEqual(record)
     expect(getUnlockMethodsRecord).toHaveBeenCalledOnce()
 
@@ -418,13 +427,13 @@ describe('remote-first read', () => {
 
   it('drops the cache and returns null when the remote registry is gone', async () => {
     const idb = createFakeIdb()
-    const session = await makeSession()
-    await putUnlockMethods({ session, record: sampleRecord(), idb })
+    const session = await makeSession(idb)
+    await putUnlockMethods({ session, record: sampleRecord() })
     // The registry was deleted remotely while this profile's cache still holds
     // a copy.
     wasState.records.clear()
 
-    const found = await getUnlockMethods({ session, idb })
+    const found = await getUnlockMethods({ session })
     expect(found).toBeNull()
     expect(
       await loadUnlockMethodsCache({ controller: DATA_CONTROLLER, idb })
@@ -437,7 +446,7 @@ describe('remote-first read', () => {
     wasState.getError = networkError
 
     await expect(
-      getUnlockMethods({ session, idb: createFakeIdb() })
+      getUnlockMethods({ session })
     ).rejects.toBe(networkError)
   })
 })
@@ -445,7 +454,7 @@ describe('remote-first read', () => {
 describe('revokeUnlockMethod', () => {
   it('deletes the unlock Space, drops the keyring cache, and removes the registry entry', async () => {
     const idb = createFakeIdb()
-    const session = await makeSession()
+    const session = await makeSession(idb)
     const entry = passkeyEntry({ manageCapability: FAKE_CAP })
     await putUnlockMethods({
       session,
@@ -453,8 +462,7 @@ describe('revokeUnlockMethod', () => {
         version: 1,
         userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [entry]
-      },
-      idb
+      }
     })
     // Seed a keyring cache for the unlock Space so its removal is observable.
     await saveKeyringCache({
@@ -478,13 +486,13 @@ describe('revokeUnlockMethod', () => {
     ).resolves.toBeNull()
 
     // The registry no longer lists the entry.
-    const after = await getUnlockMethods({ session, idb })
+    const after = await getUnlockMethods({ session })
     expect(after!.methods).toHaveLength(0)
   })
 
   it('throws when a WAS server is configured and the entry has no capability', async () => {
     const idb = createFakeIdb()
-    const session = await makeSession()
+    const session = await makeSession(idb)
     const entry = passkeyEntry()
 
     await expect(revokeUnlockMethod({ session, entry, idb })).rejects.toThrow()
@@ -494,7 +502,7 @@ describe('revokeUnlockMethod', () => {
   it('skips the Space delete but still cleans up with no WAS server', async () => {
     wasState.url = undefined
     const idb = createFakeIdb()
-    const session = await makeSession()
+    const session = await makeSession(idb)
     const entry = passkeyEntry()
     await putUnlockMethods({
       session,
@@ -502,8 +510,7 @@ describe('revokeUnlockMethod', () => {
         version: 1,
         userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [entry]
-      },
-      idb
+      }
     })
     await saveKeyringCache({
       spaceId: entry.unlockSpaceId,
@@ -517,7 +524,7 @@ describe('revokeUnlockMethod', () => {
     await expect(
       loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
     ).resolves.toBeNull()
-    const after = await getUnlockMethods({ session, idb })
+    const after = await getUnlockMethods({ session })
     expect(after!.methods).toHaveLength(0)
   })
 })
@@ -551,7 +558,7 @@ describe('the standing delegation scalar pairs (FW-194)', () => {
 
   it('refreshStandingDelegationFields records both fresh pairs', async () => {
     const idb = createFakeIdb()
-    const session = await makeSession()
+    const session = await makeSession(idb)
     await putUnlockMethods({
       session,
       record: {
@@ -566,8 +573,7 @@ describe('the standing delegation scalar pairs (FW-194)', () => {
             delegatedClientsKeyId: 'did:key:zOldSibling#zOldSibling'
           } as PassphraseUnlockMethod
         ]
-      },
-      idb
+      }
     })
     await refreshStandingDelegationFields({
       session,
@@ -575,10 +581,9 @@ describe('the standing delegation scalar pairs (FW-194)', () => {
       delegationKeyId: 'did:key:zFresh#zFresh',
       delegationExpires: '2027-08-19T00:00:00.000Z',
       delegatedClientsKeyId: 'did:key:zFreshSibling#zFreshSibling',
-      delegatedClientsExpires: '2027-08-19T01:00:00.000Z',
-      idb
+      delegatedClientsExpires: '2027-08-19T01:00:00.000Z'
     })
-    const record = await getUnlockMethods({ session, idb })
+    const record = await getUnlockMethods({ session })
     const entry = record!.methods[0] as PassphraseUnlockMethod
     expect(entry.delegationKeyId).toBe('did:key:zFresh#zFresh')
     expect(entry.delegatedClientsKeyId).toBe(
@@ -605,7 +610,7 @@ describe('the credential rotation inside a revocation', () => {
 
   it('rotates before the Space delete and hands the outcome back', async () => {
     const idb = createFakeIdb()
-    const session = await makeSession()
+    const session = await makeSession(idb)
     const entry = standingEntry()
     await putUnlockMethods({
       session,
@@ -613,8 +618,7 @@ describe('the credential rotation inside a revocation', () => {
         version: 1,
         userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [entry]
-      },
-      idb
+      }
     })
     wasState.calls = []
 
@@ -642,7 +646,7 @@ describe('the credential rotation inside a revocation', () => {
 
   it('leaves a recovery-code entry alone (it rotated in its own ceremony)', async () => {
     const idb = createFakeIdb()
-    const session = await makeSession()
+    const session = await makeSession(idb)
     const entry = {
       type: 'recovery-code',
       label: 'Recovery code',
@@ -659,8 +663,7 @@ describe('the credential rotation inside a revocation', () => {
         version: 1,
         userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [entry]
-      },
-      idb
+      }
     })
 
     const outcome = await revokeUnlockMethod({ session, entry, idb })
@@ -670,7 +673,7 @@ describe('the credential rotation inside a revocation', () => {
 
   it('taps the passkey before rotating, on the ceremony path', async () => {
     const idb = createFakeIdb()
-    const session = await makeSession()
+    const session = await makeSession(idb)
     const entry = standingEntry()
     await putUnlockMethods({
       session,
@@ -678,8 +681,7 @@ describe('the credential rotation inside a revocation', () => {
         version: 1,
         userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [entry]
-      },
-      idb
+      }
     })
     wasState.calls = []
 
@@ -691,7 +693,7 @@ describe('the credential rotation inside a revocation', () => {
       'deleteUnlockMethod'
     ])
     expect(outcome?.rotated).toBe(true)
-    const after = await getUnlockMethods({ session, idb })
+    const after = await getUnlockMethods({ session })
     expect(after!.methods).toHaveLength(0)
   })
 })
@@ -754,17 +756,17 @@ describe('managementZcapClient', () => {
 describe('backfillPassphraseUnlockMethod', () => {
   it('is a no-op without a passphrase unlockMethod in the profile', async () => {
     const idb = createFakeIdb()
-    const session = await makeSession() // no profile.unlockMethod
+    const session = await makeSession(idb) // no profile.unlockMethod
 
-    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const result = await backfillPassphraseUnlockMethod({ session })
     expect(result).toBeNull()
     expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
   })
 
   it('still returns an existing registry for a non-passphrase session', async () => {
     const idb = createFakeIdb()
-    const session = await makeSession() // e.g. a passkey login
-    await putUnlockMethods({ session, record: sampleRecord(), idb })
+    const session = await makeSession(idb) // e.g. a passkey login
+    await putUnlockMethods({ session, record: sampleRecord() })
     vi.mocked(putUnlockMethodsRecord).mockClear()
 
     // The Settings section loads through this function for every session; a
@@ -772,7 +774,6 @@ describe('backfillPassphraseUnlockMethod', () => {
     // would read as "no registry" and invite an overwriting re-creation).
     const result = await backfillPassphraseUnlockMethod({
       session,
-      idb,
       createIfMissing: true
     })
     expect(result).toEqual(sampleRecord())
@@ -781,9 +782,9 @@ describe('backfillPassphraseUnlockMethod', () => {
 
   it('does not create a registry without createIfMissing', async () => {
     const idb = createFakeIdb()
-    const session = await makePassphraseSession({ unlockSpaceId: 'ps-space' })
+    const session = await makePassphraseSession({ unlockSpaceId: 'ps-space', idb })
 
-    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const result = await backfillPassphraseUnlockMethod({ session })
     expect(result).toBeNull()
     expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
   })
@@ -792,12 +793,12 @@ describe('backfillPassphraseUnlockMethod', () => {
     const idb = createFakeIdb()
     const session = await makePassphraseSession({
       unlockSpaceId: 'ps-space',
-      manageCapability: FAKE_CAP
+      manageCapability: FAKE_CAP,
+      idb
     })
 
     const result = await backfillPassphraseUnlockMethod({
       session,
-      idb,
       createIfMissing: true
     })
 
@@ -814,11 +815,11 @@ describe('backfillPassphraseUnlockMethod', () => {
 
   it('appends the passphrase entry when the existing registry has none', async () => {
     const idb = createFakeIdb()
-    const session = await makePassphraseSession({ unlockSpaceId: 'ps-space' })
+    const session = await makePassphraseSession({ unlockSpaceId: 'ps-space', idb })
     // An existing registry (one passkey entry, no passphrase).
-    await putUnlockMethods({ session, record: sampleRecord(), idb })
+    await putUnlockMethods({ session, record: sampleRecord() })
 
-    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const result = await backfillPassphraseUnlockMethod({ session })
     expect(result!.methods).toHaveLength(2)
     expect(
       result!.methods.some(
@@ -831,7 +832,8 @@ describe('backfillPassphraseUnlockMethod', () => {
   it('replaces the passphrase entry when its unlockSpaceId changed, preserving createdAt', async () => {
     const idb = createFakeIdb()
     const session = await makePassphraseSession({
-      unlockSpaceId: 'new-ps-space'
+      unlockSpaceId: 'new-ps-space',
+      idb
     })
     const existing: PassphraseUnlockMethod = {
       type: 'passphrase',
@@ -844,11 +846,10 @@ describe('backfillPassphraseUnlockMethod', () => {
         version: 1,
         userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [existing]
-      },
-      idb
+      }
     })
 
-    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const result = await backfillPassphraseUnlockMethod({ session })
     expect(result!.methods).toHaveLength(1)
     const entry = result!.methods.find(
       (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
@@ -862,7 +863,8 @@ describe('backfillPassphraseUnlockMethod', () => {
     const fresh = capExpiringIn({ msFromNow: ONE_YEAR_MS })
     const session = await makePassphraseSession({
       unlockSpaceId: 'ps-space',
-      manageCapability: fresh
+      manageCapability: fresh,
+      idb
     })
     const existing: PassphraseUnlockMethod = {
       type: 'passphrase',
@@ -876,12 +878,11 @@ describe('backfillPassphraseUnlockMethod', () => {
         version: 1,
         userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [existing]
-      },
-      idb
+      }
     })
     vi.mocked(putUnlockMethodsRecord).mockClear()
 
-    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const result = await backfillPassphraseUnlockMethod({ session })
     const entry = result!.methods.find(
       (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
     )
@@ -893,7 +894,8 @@ describe('backfillPassphraseUnlockMethod', () => {
     const idb = createFakeIdb()
     const session = await makePassphraseSession({
       unlockSpaceId: 'ps-space',
-      manageCapability: capExpiringIn({ msFromNow: ONE_YEAR_MS })
+      manageCapability: capExpiringIn({ msFromNow: ONE_YEAR_MS }),
+      idb
     })
     const stored = capExpiringIn({ msFromNow: ONE_YEAR_MS / 2 })
     await putUnlockMethods({
@@ -909,12 +911,11 @@ describe('backfillPassphraseUnlockMethod', () => {
             manageCapability: stored
           }
         ]
-      },
-      idb
+      }
     })
     vi.mocked(putUnlockMethodsRecord).mockClear()
 
-    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const result = await backfillPassphraseUnlockMethod({ session })
     const entry = result!.methods.find(
       (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
     )
@@ -925,7 +926,7 @@ describe('backfillPassphraseUnlockMethod', () => {
   it('a passkey session refreshes its own expiring management zcap', async () => {
     const idb = createFakeIdb()
     const fresh = capExpiringIn({ msFromNow: ONE_YEAR_MS })
-    const session = await makeSession()
+    const session = await makeSession(idb)
     session.profile.unlockMethod = {
       type: 'passkey',
       unlockSpaceId: 'unlock-space-abc',
@@ -941,12 +942,11 @@ describe('backfillPassphraseUnlockMethod', () => {
             manageCapability: capExpiringIn({ msFromNow: 1000 })
           })
         ]
-      },
-      idb
+      }
     })
     vi.mocked(putUnlockMethodsRecord).mockClear()
 
-    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const result = await backfillPassphraseUnlockMethod({ session })
     const entry = result!.methods.find(
       (method): method is PasskeyUnlockMethod => method.type === 'passkey'
     )
@@ -956,7 +956,7 @@ describe('backfillPassphraseUnlockMethod', () => {
 
   it('a passkey session with a fresh stored zcap writes nothing', async () => {
     const idb = createFakeIdb()
-    const session = await makeSession()
+    const session = await makeSession(idb)
     session.profile.unlockMethod = {
       type: 'passkey',
       unlockSpaceId: 'unlock-space-abc',
@@ -969,12 +969,11 @@ describe('backfillPassphraseUnlockMethod', () => {
         version: 1,
         userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [passkeyEntry({ manageCapability: stored })]
-      },
-      idb
+      }
     })
     vi.mocked(putUnlockMethodsRecord).mockClear()
 
-    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const result = await backfillPassphraseUnlockMethod({ session })
     const entry = result!.methods.find(
       (method): method is PasskeyUnlockMethod => method.type === 'passkey'
     )
@@ -984,15 +983,14 @@ describe('backfillPassphraseUnlockMethod', () => {
 
   it('is idempotent: a second call writes nothing', async () => {
     const idb = createFakeIdb()
-    const session = await makePassphraseSession({ unlockSpaceId: 'ps-space' })
+    const session = await makePassphraseSession({ unlockSpaceId: 'ps-space', idb })
     await backfillPassphraseUnlockMethod({
       session,
-      idb,
       createIfMissing: true
     })
     vi.clearAllMocks()
 
-    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const result = await backfillPassphraseUnlockMethod({ session })
     expect(result).not.toBeNull()
     expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
   })
@@ -1002,13 +1000,13 @@ describe('adoptPassphraseRebind', () => {
   it('repoints the session so the backfill follows the passphrase change', async () => {
     const idb = createFakeIdb()
     const session = await makePassphraseSession({
-      unlockSpaceId: 'old-ps-space'
+      unlockSpaceId: 'old-ps-space',
+      idb
     })
     // The registry as it stood before the change: the passphrase entry names
     // the (now deleted) old unlock Space.
     await backfillPassphraseUnlockMethod({
       session,
-      idb,
       createIfMissing: true
     })
 
@@ -1022,7 +1020,7 @@ describe('adoptPassphraseRebind', () => {
     // Later re-wraps run over the new client-key record, not the deleted one.
     expect(session.profile.persistClientKeys).toBe(persistClientKeys)
 
-    const result = await backfillPassphraseUnlockMethod({ session, idb })
+    const result = await backfillPassphraseUnlockMethod({ session })
     const entry = result!.methods.find(
       (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
     )
@@ -1031,7 +1029,7 @@ describe('adoptPassphraseRebind', () => {
 
     // A second run leaves it there: the entry is never rewritten back to the
     // deleted unlock Space.
-    const again = await backfillPassphraseUnlockMethod({ session, idb })
+    const again = await backfillPassphraseUnlockMethod({ session })
     const stillThere = again!.methods.find(
       (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
     )
@@ -1069,8 +1067,8 @@ describe('rewrapUnlockMethodsRecord', () => {
 
   it('re-seals the stored record so only the new keys decrypt it', async () => {
     const idb = createFakeIdb()
-    const session = await makeSession()
-    await putUnlockMethods({ session, record: sampleRecord(), idb })
+    const session = await makeSession(idb)
+    await putUnlockMethods({ session, record: sampleRecord() })
 
     const from = {
       keyAgreementKey: session.profile.keyAgreementKey! as IKeyAgreementKey,
@@ -1086,14 +1084,14 @@ describe('rewrapUnlockMethodsRecord', () => {
     })
 
     // A session holding the NEW vault keys reads the registry.
-    const rotatedSession = await makeSession()
+    const rotatedSession = await makeSession(idb)
     rotatedSession.profile.keyAgreementKey = to.keyAgreementKey as never
     rotatedSession.profile.keyResolver = to.keyResolver as never
-    const read = await getUnlockMethods({ session: rotatedSession, idb })
+    const read = await getUnlockMethods({ session: rotatedSession })
     expect(read).toEqual(sampleRecord())
 
     // The old keys no longer route the envelope.
-    await expect(getUnlockMethods({ session, idb })).rejects.toThrow()
+    await expect(getUnlockMethods({ session })).rejects.toThrow()
   })
 
   it('is a no-op when no registry exists', async () => {

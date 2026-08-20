@@ -35,8 +35,8 @@ import type {
   AccountLogPointer,
   VerifiedAccountLog
 } from '@interop/wallet-core/clients'
+import type { ResourceLogPinStore } from '@interop/wallet-core/resourceLog'
 import type { ControllerProfile } from '@/types/auth'
-import { sessionLogPinStore } from '@/lib/sessionKey'
 
 /**
  * One memoized verification, keyed on the pointer it was verified against.
@@ -62,9 +62,17 @@ function pointerKey({ pointer }: { pointer: AccountLogPointer }): string {
 /**
  * Creates an empty verified-log cache.
  *
+ * @param options {object}
+ * @param options.pinStore {ResourceLogPinStore}   the account-log chain-head
+ *   pin store -- the posture seam's log-pin member (durable on a remembered
+ *   browser, in-memory for a transient visit)
  * @returns {VerifiedLogCache}
  */
-export function createVerifiedLogCache(): VerifiedLogCache {
+export function createVerifiedLogCache({
+  pinStore
+}: {
+  pinStore: ResourceLogPinStore
+}): VerifiedLogCache {
   let key: string | undefined
   let pending: Promise<VerifiedAccountLog> | undefined
   return {
@@ -78,10 +86,10 @@ export function createVerifiedLogCache(): VerifiedLogCache {
         did: pointer.did,
         spaceId: pointer.spaceId,
         host: pointer.host,
-        // The durable account-log chain-head pin: a served log that forks,
-        // rolls back, or switches identity against it is refused here, before
+        // The account-log chain-head pin: a served log that forks, rolls
+        // back, or switches identity against it is refused here, before
         // anything downstream reads the memo.
-        pinStore: sessionLogPinStore()
+        pinStore
       }).catch(err => {
         // A failed verification is never the cached answer: drop it so the
         // next caller re-reads (an unreachable host is transient; a genuinely
@@ -131,7 +139,9 @@ export async function verifiedAccountLog({
         'this session holds none.'
     )
   }
-  profile.verifiedLog ??= createVerifiedLogCache()
+  profile.verifiedLog ??= createVerifiedLogCache({
+    pinStore: profile.persistence.logPins
+  })
   return await profile.verifiedLog.get({
     pointer: { did: target.did, spaceId: target.spaceId, host: target.host }
   })

@@ -46,7 +46,12 @@ vi.mock('@/lib/sessionKey', () => ({
     state.calls.push('loadUserKeyEpochPin')
     // OLD_USER_KEY.id, restated: the factory is hoisted above the consts.
     return 'did:key:z6LSOldUserKey'
-  })
+  }),
+  // Built eagerly by the durable persistence handle the fixture carries.
+  sessionLogPinStore: vi.fn(() => ({
+    read: async () => null,
+    write: async () => undefined
+  }))
 }))
 
 vi.mock('@/session/rosterStore', () => ({
@@ -80,6 +85,7 @@ import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
 import { userKeyVaultKeys } from '@interop/wallet-core/keys'
 import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
+import { durableSessionPersistence } from '@/session/persistence'
 import {
   getUnlockMethods,
   rewrapUnlockMethodsRecord
@@ -215,6 +221,7 @@ function sessionWith(
       userKey: OLD_USER_KEY,
       keyAgreementKey: { id: `${OLD_USER_KEY.id}#kak` },
       keyResolver: async () => ({}),
+      persistence: durableSessionPersistence(),
       persistClientKeys: vi.fn(async () => {
         state.calls.push('persistClientKeys')
       })

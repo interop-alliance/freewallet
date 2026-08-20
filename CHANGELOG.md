@@ -4,6 +4,21 @@
 
 ### Added
 
+- The session-persistence posture seam. Every posture-sensitive local write
+  (the chain-head and roster-epoch pins, the unlock-methods registry cache,
+  the passkey-safety notice, the descriptor/meta cache pair, the `writerId`
+  mint) now rides one typed `SessionPersistence` handle chosen at login and
+  carried on the profile: the durable variant keeps today's behavior, the
+  transient variant is in-memory throughout and never creates the session
+  database. A transient session skips storage provisioning, the login-time
+  sweeps, and the `userExists` probe; update-key rotation refuses there with
+  a typed durable-session error, and the account-management ceremonies
+  (passphrase and passkey changes, client revocation, enrollment approval,
+  recovery-code issuance and revocation, account deletion, Space export and
+  import) refuse with a typed step-up-required error. UI prefs (theme,
+  language) get a sibling seam: while a transient session is live, pref
+  writes land in an in-memory overlay instead of localStorage.
+
 - Standing unlock credentials with self-enrolling login. Every passphrase and
   passkey bound on a promoted account now holds the recovery-code posture
   minus spend-on-use: a user-key roster wrap escrowed into every epoch, a

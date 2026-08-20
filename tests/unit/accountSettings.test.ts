@@ -163,12 +163,14 @@ const {
 } = await import('@/session/unlockMethods')
 const { accountLogPinId } = await import('@interop/wallet-core/webvh')
 const { userKeyRosterPinId } = await import('@interop/wallet-core/keys')
+const { durableSessionPersistence } = await import('@/session/persistence')
 
 function makeSession() {
   return {
     user: { id: 'did:key:zClient' },
     isGuest: false,
     profile: {
+      persistence: durableSessionPersistence(),
       clientSeed: new Uint8Array(32),
       accountController: 'did:key:zAccount',
       accountPointer: {

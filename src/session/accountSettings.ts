@@ -48,10 +48,12 @@ import {
 import {
   deleteAccountDidForSpace,
   deleteLogPin,
-  deletePasskeySafetyNotice,
-  deleteUserKeyEpochPin,
-  sessionLogPinStore
+  deleteUserKeyEpochPin
 } from '@/lib/sessionKey'
+import {
+  assertAccountCeremonyAllowed,
+  assertDurableSession
+} from '@/session/persistence'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
@@ -144,6 +146,10 @@ export async function changeAccountPassphrase({
   manageCapability?: IZcap
   rotation: 'rotated' | 'skipped' | 'failed'
 }> {
+  assertAccountCeremonyAllowed({
+    persistence: session.profile.persistence,
+    ceremony: 'Changing the passphrase'
+  })
   const profile = session.profile
   const clientSeed = profile.clientSeed
   if (!clientSeed) {
@@ -345,6 +351,10 @@ export async function addAccountPasskey({
   userName: string
   promptForPrfRetry: () => Promise<boolean>
 }): Promise<{ record: UnlockMethodsRecord; recorded: boolean }> {
+  assertAccountCeremonyAllowed({
+    persistence: session.profile.persistence,
+    ceremony: 'Adding a passkey'
+  })
   const profile = session.profile
   const clientSeed = profile.clientSeed
   if (!clientSeed) {
@@ -429,7 +439,9 @@ export async function addAccountPasskey({
   // passkey-only safety prompt is resolved. Non-fatal.
   if (record.methods.length > 1) {
     try {
-      await deletePasskeySafetyNotice({ controller: session.user.id })
+      await session.profile.persistence.passkeyNotices.delete({
+        controller: session.user.id
+      })
     } catch (err) {
       console.warn('Could not clear the passkey-safety notice:', err)
     }
@@ -492,6 +504,10 @@ export async function removeAccountPasskey({
   session: Session
   entry: PasskeyUnlockMethod
 }): Promise<void> {
+  assertAccountCeremonyAllowed({
+    persistence: session.profile.persistence,
+    ceremony: 'Removing a passkey'
+  })
   const verb = 'removing a passkey'
   const outcome = canRevokeWithoutCeremony(entry)
     ? await revokeUnlockMethod({ session, entry, verb })
@@ -532,6 +548,10 @@ export async function addAccountPassphrase({
   registry: UnlockMethodsRecord | null
   passphrase: string
 }): Promise<UnlockMethodsRecord> {
+  assertAccountCeremonyAllowed({
+    persistence: session.profile.persistence,
+    ceremony: 'Adding a passphrase'
+  })
   const clientSeed = session.profile.clientSeed
   if (!clientSeed) {
     throw new Error('Adding a passphrase needs this client key set.')
@@ -600,7 +620,9 @@ export async function addAccountPassphrase({
   // The account now has a passphrase backup, so the passkey-only safety
   // prompt is resolved. Best-effort.
   try {
-    await deletePasskeySafetyNotice({ controller: session.user.id })
+    await session.profile.persistence.passkeyNotices.delete({
+      controller: session.user.id
+    })
   } catch (err) {
     console.warn('Could not clear the passkey-safety notice:', err)
   }
@@ -627,6 +649,16 @@ export async function rotateAccountUpdateKey({
 }: {
   session: Session
 }): Promise<void> {
+  // The subject of this ceremony is durable by nature: it rotates THIS
+  // browser's did:webvh update key, and its persist-before-publish ordering
+  // needs a durable client-key record to persist the rolled seeds into. So it
+  // asserts durability outright. The other account-management ceremonies here
+  // are reachable from a transient session, but only inside a step-up, so
+  // they carry the step-up gate instead.
+  assertDurableSession({
+    persistence: session.profile.persistence,
+    ceremony: 'Update-key rotation'
+  })
   const remoteStore = session.storage.remoteStore
   const updateKeys = session.profile.clientWebvhKeys
   const persistClientKeys = session.profile.persistClientKeys
@@ -649,7 +681,7 @@ export async function rotateAccountUpdateKey({
       // The pin slot is keyed by the data Space id, so the same slot serves
       // the account log from first contact on; the read the rotation builds
       // on runs under it.
-      pinStore: sessionLogPinStore(),
+      pinStore: session.profile.persistence.logPins,
       logId: accountLogPinId({ spaceId: remoteStore.spaceId })
     })
   } finally {
@@ -694,6 +726,10 @@ export async function deleteAccount({
   session: Session
   passphrase: string
 }): Promise<AccountDeletionResult> {
+  assertAccountCeremonyAllowed({
+    persistence: session.profile.persistence,
+    ceremony: 'Deleting the account'
+  })
   const isGuest = !!session.isGuest
   // One derivation for both unlock-layer steps below (the confirmation and
   // the retirement), rather than running the 600k-iteration KDF twice.
@@ -748,9 +784,14 @@ export async function deleteAccount({
     } catch (err) {
       console.warn('Could not retire the passphrase keyring:', err)
     }
+    // The local account wipe below is durable-only state by construction (the
+    // assert above admits durable sessions alone), so it enumerates the
+    // session database directly.
     // Best-effort cleanup of the local passkey-safety notice for hygiene.
     try {
-      await deletePasskeySafetyNotice({ controller: session.user.id })
+      await session.profile.persistence.passkeyNotices.delete({
+        controller: session.user.id
+      })
     } catch (err) {
       console.warn('Could not delete the passkey-safety notice:', err)
     }

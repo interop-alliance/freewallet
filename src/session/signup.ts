@@ -10,7 +10,6 @@ import { base64urlnopad } from '@scure/base'
 import { KEYRING_KDF, type AccountPointer } from '@interop/wallet-core/keyring'
 import { mintAccountKeySet as mintSharedAccountKeySet } from '@interop/wallet-core/genesis'
 import { PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
-import { savePasskeySafetyNotice } from '@/lib/sessionKey'
 import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
 import {
   bindPassphrase,
@@ -364,7 +363,7 @@ export async function signUpWithPasskey({
   // Mark this as a passkey-only account so the dashboard can prompt the
   // user to add a second unlock method. Non-fatal.
   try {
-    await savePasskeySafetyNotice({
+    await session.profile.persistence.passkeyNotices.save({
       controller: session.user.id,
       backupEligibility: registration.backupEligibility,
       backupState: registration.backupState

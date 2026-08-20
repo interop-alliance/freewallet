@@ -23,6 +23,7 @@ import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
 import type { UserKeyCascadeResult } from '@/session/userKeyCascade'
 import type { VerifiedLogCache } from '@/session/verifiedLog'
+import type { SessionPersistence } from '@/session/persistence'
 
 /**
  * Minimal interface over @interop/webkms-client's CapabilityAgent.
@@ -138,6 +139,14 @@ export interface ControllerProfile {
   // ceremony that extends the log. Created on first use; absent until then,
   // and on sessions that never read the log (guests, no-WAS).
   verifiedLog?: VerifiedLogCache
+  // The typed persistence handle chosen at login (`src/session/persistence.ts`):
+  // every posture-sensitive local write -- the continuity pins, the
+  // descriptor/meta caches, the writer id -- travels through it, so a write's
+  // durability is a property of the handle's type, never a flag a write site
+  // consults. The durable variant alone reaches the `freewallet-session`
+  // database (it carries the `idb` factory); the transient variant is
+  // in-memory throughout and dies with the tab.
+  persistence: SessionPersistence
 }
 
 /**

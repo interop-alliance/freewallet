@@ -395,6 +395,41 @@ the session and the user logs in again. The vault is
 therefore always unlocked while a session exists (the KAK is present) and
 simply gone once it ends; there is no "locked vault" state.
 
+**The posture seam** (`src/session/persistence.ts`): what a session may write
+to LOCAL durable storage is decided once, at login, by the typed
+`SessionPersistence` handle carried at `profile.persistence`. Durability is a
+property of the handle's type; a write site consults no flag and takes no
+branch (freewallet `decisions/0001-no-memory-overlay-storage-fork.md`). Every
+posture-sensitive local family rides the handle: the keyed chain-head pin
+store (the account log's and the roster log's), the roster-epoch pin, the
+unlock-methods registry cache, the passkey-safety notice, the
+descriptor/meta cache pair (one instance per scope per session), and the
+`writerId` mint. The durable variant is today's behavior -- the
+`freewallet-session` database (it alone carries the `idb` factory, so code
+needing that database must hold the durable variant), the localStorage
+caches, and the durable `writerId`. The transient variant -- a
+public-terminal visit -- is in-memory throughout and dies with the tab: it
+has no member reaching the session database, and the login that carries it
+skips storage provisioning, the login-time sweeps, and the bare-Space-URL
+`userExists` probe. Global UI prefs (theme, language) are not session state,
+so they ride a sibling seam (`src/lib/prefsStorage.ts`): while a transient
+session is live, pref writes land in an in-memory overlay that shadows
+reads; reads still fall through to localStorage, which writes nothing.
+
+The handle also carries the posture's refusals. Update-key rotation requires
+the durable posture outright (`DurableSessionRequiredError`): its subject is
+this browser's durable update key, and its persist-before-publish invariant
+needs a client-key record to persist into. The account-management ceremonies
+(passphrase change, passphrase/passkey add and remove, client revocation,
+enrollment approval, recovery-code issuance and revocation, account
+deletion, Space export and import) refuse from a transient session with
+`StepUpRequiredError`: they are reachable from a public terminal only inside
+the step-up ceremony (a loudly enrolled in-memory client, bracketed by
+ladder-signed enroll and retire entries), which is designed but not yet
+implemented. Contacts are not reachable in the transient posture either --
+the remote-direct backend rejects them today -- a stated reduction until
+remote-direct contacts land.
+
 ## The user key wrap-set roster (`key-map/user-key.jsonl`)
 
 The user key (formerly PUK) -- recipient zero of every encrypted collection --

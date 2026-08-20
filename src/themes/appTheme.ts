@@ -1,3 +1,5 @@
+import { readPref, writePref } from '@/lib/prefsStorage'
+
 const APP_THEME_STORAGE_KEY = 'fw-theme'
 const APP_THEME_MODE_STORAGE_KEY = 'fw-theme-mode'
 
@@ -15,7 +17,7 @@ function isAppThemeId(value: string | null | undefined): value is AppThemeId {
 }
 
 export function readStoredAppTheme(): AppThemeId {
-  const stored = localStorage.getItem(APP_THEME_STORAGE_KEY)
+  const stored = readPref(APP_THEME_STORAGE_KEY)
   if (isAppThemeId(stored)) {
     return stored
   }
@@ -27,7 +29,7 @@ export function readStoredAppTheme(): AppThemeId {
  *   null when the system preference should be followed.
  */
 export function readStoredThemeMode(): ThemeMode | null {
-  const stored = localStorage.getItem(APP_THEME_MODE_STORAGE_KEY)
+  const stored = readPref(APP_THEME_MODE_STORAGE_KEY)
   if (stored === 'light' || stored === 'dark') {
     return stored
   }
@@ -35,11 +37,11 @@ export function readStoredThemeMode(): ThemeMode | null {
 }
 
 export function persistThemeMode(mode: ThemeMode): void {
-  localStorage.setItem(APP_THEME_MODE_STORAGE_KEY, mode)
+  writePref({ key: APP_THEME_MODE_STORAGE_KEY, value: mode })
 }
 
 export function persistAppTheme(themeId: AppThemeId): void {
-  localStorage.setItem(APP_THEME_STORAGE_KEY, themeId)
+  writePref({ key: APP_THEME_STORAGE_KEY, value: themeId })
 }
 
 export function applyAppThemeToDocument(themeId: AppThemeId): void {

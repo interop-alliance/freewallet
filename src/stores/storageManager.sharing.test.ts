@@ -39,6 +39,10 @@ import {
   resolveHmacKey
 } from '@interop/was-client/edv'
 import { mintRecordEncryption } from '@/session/recordEnvelope'
+import {
+  durableSessionPersistence,
+  transientSessionPersistence
+} from '@/session/persistence'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
@@ -459,7 +463,8 @@ function makeProfile(
     keyAgreementKey: owner.keyAgreementKey,
     keyResolver: owner.keyResolver,
     zcapClient,
-    keyAgent: { id: 'did:key:z6MkOwnerAgent' }
+    keyAgent: { id: 'did:key:z6MkOwnerAgent' },
+    persistence: durableSessionPersistence()
   } as unknown as ControllerProfile
 }
 
@@ -522,6 +527,7 @@ describe('StorageManager.shareCollection', () => {
     const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient, calls } = makeFakeZcapClient()
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -577,6 +583,7 @@ describe('StorageManager.shareCollection', () => {
     const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -623,6 +630,7 @@ describe('StorageManager.unshareCollection', () => {
     const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -672,6 +680,7 @@ describe('StorageManager.unshareCollection', () => {
     const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -719,6 +728,7 @@ describe('StorageManager.unshareCollection', () => {
     const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -751,6 +761,7 @@ describe('StorageManager.unshareCollection', () => {
     const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -866,6 +877,7 @@ describe('StorageManager.revokeAppGrants', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -918,6 +930,7 @@ describe('StorageManager.revokeAppGrants', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -958,6 +971,7 @@ describe('StorageManager.revokeAppGrants', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -993,6 +1007,7 @@ describe('StorageManager.revokeAppGrants', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1021,6 +1036,7 @@ describe('StorageManager.revokeAppGrants', () => {
     const ciphers = await buildCiphers(owner, {})
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       ciphers,
       vaultKeys: owner,
@@ -1045,6 +1061,7 @@ describe('StorageManager.provisionAppCollection', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1071,6 +1088,7 @@ describe('StorageManager.provisionAppCollection', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1113,6 +1131,7 @@ describe('StorageManager.provisionAppCollection', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1145,6 +1164,7 @@ describe('StorageManager.provisionAppCollection', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1174,6 +1194,7 @@ describe('StorageManager.provisionAppCollection', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1208,6 +1229,7 @@ describe('StorageManager.provisionAppCollection', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1270,6 +1292,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1324,6 +1347,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1388,6 +1412,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1431,6 +1456,7 @@ describe('StorageManager.decryptCollectionResource (app collection)', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1470,6 +1496,7 @@ describe('StorageManager.decryptCollectionResource (app collection)', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1518,6 +1545,7 @@ describe('StorageManager unknown-epoch refresh', () => {
     })
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1564,6 +1592,87 @@ describe('StorageManager unknown-epoch refresh', () => {
     expect(listed).toEqual([{ cid, vc: credential }])
   })
 
+  it('transient posture: the refresh still runs, with zero localStorage residue', async () => {
+    const owner = await generateKey()
+    const extra = await generateKey()
+    const { remoteStore } = makeFakeRemote()
+
+    const collectionHandle = remoteStore.collectionHandle({
+      collectionId: 'private-credentials'
+    })
+    const descriptor1 = await initRecipients({
+      collection: collectionHandle,
+      recipients: [
+        ownerRecipient({ keyAgreementKey: owner.keyAgreementKey }),
+        ownerRecipient({ keyAgreementKey: extra.keyAgreementKey })
+      ]
+    })
+
+    const ciphers = await buildCiphers(owner, {
+      'private-credentials': descriptor1
+    })
+    const { localStore } = await initLocalStore(ciphers)
+    const persistence = transientSessionPersistence()
+    // The login-time acquisition seeds the handle's in-memory cache pair.
+    await persistence
+      .descriptorCache({ scope: remoteStore.spaceId })
+      .writeDescriptor({
+        collectionId: 'private-credentials',
+        descriptor: descriptor1
+      })
+    const storage = new StorageManager({
+      persistence,
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      descriptors: { 'private-credentials': descriptor1 }
+    })
+
+    const descriptor2 = await removeRecipient({
+      collection: collectionHandle,
+      space: remoteStore.spaceHandle(),
+      recipientId: extra.keyAgreementKey.id!,
+      revoke: []
+    })
+    const epoch2Cipher = await createEdvDocCipher({
+      keyAgreementKey: owner.keyAgreementKey,
+      keyResolver: owner.keyResolver,
+      collectionId: 'private-credentials',
+      encryption: descriptor2
+    })
+    const credential = makeCredential('Alice')
+    const cid = await cidFrom({ doc: credential })
+    const { id, envelope, epoch } = await epoch2Cipher.encrypt({
+      data: credential as unknown as Json
+    })
+    await localStore.rxCollection('privateCredentials').insert({
+      id,
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      epoch,
+      data: envelope
+    })
+
+    // The unknown-epoch read drives the same one-time refresh as the durable
+    // posture -- into the handle's in-memory cache, not localStorage.
+    const listed = await storage.listCredentials()
+    expect(listed).toEqual([{ cid, vc: credential }])
+    const cached = await persistence
+      .descriptorCache({ scope: remoteStore.spaceId })
+      .readDescriptor({ collectionId: 'private-credentials' })
+    expect(cached?.currentEpoch).toBe(descriptor2.currentEpoch)
+    // This file runs in the node environment; guard the residue check for a
+    // jsdom run, where a durable cache write would have landed here.
+    if (typeof localStorage !== 'undefined') {
+      expect(
+        localStorage.getItem(
+          `freewallet:collection-encryption:${remoteStore.spaceId}:private-credentials`
+        )
+      ).toBeNull()
+    }
+  })
+
   it('remote-direct: refreshes the descriptor and returns a fresh-epoch credential', async () => {
     const owner = await generateKey()
     const extra = await generateKey()
@@ -1586,6 +1695,7 @@ describe('StorageManager unknown-epoch refresh', () => {
     })
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1651,6 +1761,7 @@ describe('StorageManager unknown-epoch refresh', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1739,6 +1850,7 @@ describe('StorageManager blinded index writes', () => {
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,

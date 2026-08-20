@@ -14,6 +14,7 @@ import type { Json } from '@/lib/sync'
 import { BrowserStore } from './browserStore'
 import { UnknownEpochError, type DocCipher } from '@interop/was-client/edv'
 import { KeyUnwrapError } from '@interop/was-client'
+import { durableSessionPersistence } from '@/session/persistence'
 import { PublicCopyRetractionError, StorageManager } from './storageManager'
 import { RemoteDirectStore } from './remoteDirectStore'
 import type { WASRemoteStore } from './wasRemoteStore'
@@ -1105,7 +1106,14 @@ describe('StorageManager (local-first facade)', () => {
             `https://was.example/space/s/public-credentials/${cid}`
         } as unknown as WASRemoteStore)
       : undefined
-    return { storage: new StorageManager({ localStore, remoteStore }), user }
+    return {
+      storage: new StorageManager({
+        persistence: durableSessionPersistence(),
+        localStore,
+        remoteStore
+      }),
+      user
+    }
   }
 
   it('adds and lists credentials locally, keyed by content cid', async () => {
@@ -1184,7 +1192,11 @@ describe('StorageManager (local-first facade)', () => {
       publicCredentialUrl: (cid: string) =>
         `https://was.example/space/s/public-credentials/${cid}`
     } as unknown as WASRemoteStore
-    const storage = new StorageManager({ localStore, remoteStore })
+    const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
+      localStore,
+      remoteStore
+    })
     const credential = makeCredential('Alice')
     const cid = await cidFrom({ doc: credential })
     await storage.addCredential({ credential, user })
@@ -1216,7 +1228,11 @@ describe('StorageManager (local-first facade)', () => {
       publicCredentialUrl: (cid: string) =>
         `https://was.example/space/s/public-credentials/${cid}`
     } as unknown as WASRemoteStore
-    const storage = new StorageManager({ localStore, remoteStore })
+    const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
+      localStore,
+      remoteStore
+    })
     const credential = makeCredential('Alice')
     const cid = await cidFrom({ doc: credential })
     await storage.addCredential({ credential, user })
@@ -1239,7 +1255,11 @@ describe('StorageManager (local-first facade)', () => {
       publicCredentialUrl: (cid: string) =>
         `https://was.example/space/s/public-credentials/${cid}`
     } as unknown as WASRemoteStore
-    const storage = new StorageManager({ localStore, remoteStore })
+    const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
+      localStore,
+      remoteStore
+    })
     const credential = makeCredential('Alice')
     const cid = await cidFrom({ doc: credential })
     await storage.addCredential({ credential, user })
@@ -1267,7 +1287,11 @@ describe('StorageManager (local-first facade)', () => {
   it('surfaces and purges undecryptable credentials through the facade', async () => {
     const ciphers = encryptedCiphers()
     const { localStore, user } = await initLocalStore({ ciphers })
-    const storage = new StorageManager({ localStore, ciphers })
+    const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
+      localStore,
+      ciphers
+    })
     const credential = makeCredential('Alice')
     await storage.addCredential({ credential, user })
     await localStore.rxCollection('privateCredentials').insert({
@@ -1390,6 +1414,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { localStore, user } = await initLocalStore({ ciphers })
     const { remoteStore, collections } = makeFakeRemoteStore()
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1414,6 +1439,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { localStore, user } = await initLocalStore({ ciphers })
     const { remoteStore, collections } = makeFakeRemoteStore()
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1434,6 +1460,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { localStore, user } = await initLocalStore({ ciphers })
     // remoteDirect requested but no remote store: effective mode is off.
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       ciphers,
       remoteDirect: true
@@ -1456,6 +1483,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { localStore, user } = await initLocalStore({ ciphers })
     const { remoteStore, collections, epochs } = makeFakeRemoteStore()
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1476,6 +1504,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { localStore, user } = await initLocalStore({ ciphers })
     const { remoteStore, collections } = makeFakeRemoteStore()
     const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,

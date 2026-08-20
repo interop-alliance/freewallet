@@ -263,7 +263,7 @@ export async function establishStandingUnlock({
   // 1. Decryption material first: the credential's wrap into every roster
   // epoch. Idempotent -- a wrap already standing is returned as-is.
   await addUserKeyRosterRecipient({
-    store: sessionRosterStore({ profile: session.profile, idb }),
+    store: sessionRosterStore({ profile: session.profile }),
     recipient: {
       id: standing.recipientKid,
       publicKeyMultibase: standing.keyAgreementKeyMultibase
@@ -530,7 +530,7 @@ export async function establishPassphrasePosture({
       manageCapability: established.manageCapability
     }
     const record =
-      (await getUnlockMethods({ session, idb })) ?? emptyUnlockMethodsRegistry()
+      (await getUnlockMethods({ session })) ?? emptyUnlockMethodsRegistry()
     await putUnlockMethods({
       session,
       record: upsertPassphraseUnlockMethod({
@@ -538,8 +538,7 @@ export async function establishPassphrasePosture({
         unlockSpaceId: established.unlockSpaceId,
         manageCapability: established.manageCapability,
         standing: established.standingFields
-      }),
-      idb
+      })
     })
   } catch (err) {
     console.warn(

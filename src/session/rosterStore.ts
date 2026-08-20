@@ -21,12 +21,16 @@
  * the shared orchestrator from the document edit's own post-edit log) reaches
  * the store as-is.
  *
- * The chain-head pin is durable either way (`sessionLogPinStore`, the keyed
- * pin store in the session database; wallet-core derives the roster log's
- * slot key from the Space id), so log continuity spans logins, not just one
- * session. The bare-parts builder's own `verifyAccountLog` read carries the
- * same store for the account-log chain-head pin; the session builder's read
- * gets it inside the verified-log memo.
+ * The chain-head pin rides the posture seam: the session builder takes it
+ * from the profile's persistence handle, and the bare-parts builder defaults
+ * to the durable `sessionLogPinStore` (its callers are durable ceremonies)
+ * unless a `pinStore` is supplied. In the durable posture the pin is the
+ * keyed store in the session database (wallet-core derives the roster log's
+ * slot key from the Space id), so log continuity spans logins; a transient
+ * session pins in memory for the visit. The bare-parts builder's own
+ * `verifyAccountLog` read carries the same store for the account-log
+ * chain-head pin; the session builder's read gets it inside the verified-log
+ * memo.
  */
 import type { ZcapClient } from '@interop/ezcap'
 import {
@@ -35,7 +39,10 @@ import {
 } from '@interop/wallet-core/keys'
 import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
-import type { ResourceLogController } from '@interop/wallet-core/resourceLog'
+import type {
+  ResourceLogController,
+  ResourceLogPinStore
+} from '@interop/wallet-core/resourceLog'
 import {
   verifyAccountLog,
   type ICapabilityAgent
@@ -61,19 +68,25 @@ import { verifiedAccountLog } from '@/session/verifiedLog'
  *   must name the did:webvh the roster log's entry proofs anchor to
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the chain-head
  *   pin (CHAPI popups thread the Storage Access API handle here)
+ * @param [options.pinStore] {ResourceLogPinStore}   the chain-head pin store,
+ *   overriding the durable default -- the posture seam's log-pin member for a
+ *   caller holding a persistence handle
  * @returns {SealableEncryptionDescriptorStore}
  */
 export function accountRosterStore({
   zcapClient,
   keyAgent,
   pointer,
-  idb
+  idb,
+  pinStore
 }: {
   zcapClient: ZcapClient
   keyAgent: ICapabilityAgent
   pointer: AccountLogPointer
   idb?: IDBFactory
+  pinStore?: ResourceLogPinStore
 }): SealableEncryptionDescriptorStore {
+  const pins = pinStore ?? sessionLogPinStore({ idb })
   let pending: Promise<ResourceLogController> | undefined
   return userKeyRosterDescriptorStore({
     storageServerUrl: pointer.host,
@@ -84,7 +97,7 @@ export function accountRosterStore({
         did: pointer.did,
         spaceId: pointer.spaceId,
         host: pointer.host,
-        pinStore: sessionLogPinStore({ idb })
+        pinStore: pins
       }).then(
         ({ log }) => webvhResourceLogController({ did: pointer.did, log }),
         err => {
@@ -94,7 +107,7 @@ export function accountRosterStore({
       )
       return await pending
     },
-    pinStore: sessionLogPinStore({ idb }),
+    pinStore: pins,
     signer: userKeyRosterLogSigner({ keyAgent })
   })
 }
@@ -108,16 +121,14 @@ export function accountRosterStore({
  *
  * @param options {object}
  * @param options.profile {ControllerProfile}   the live session's profile; it
- *   must hold a key agent and an account pointer naming a did:webvh
- * @param [options.idb] {IDBFactory}
+ *   must hold a key agent and an account pointer naming a did:webvh. The
+ *   chain-head pin rides the profile's persistence handle.
  * @returns {SealableEncryptionDescriptorStore}
  */
 export function sessionRosterStore({
-  profile,
-  idb
+  profile
 }: {
   profile: ControllerProfile
-  idb?: IDBFactory
 }): SealableEncryptionDescriptorStore {
   const pointer = profile.accountPointer
   const { keyAgent } = profile
@@ -136,7 +147,7 @@ export function sessionRosterStore({
       const { log } = await verifiedAccountLog({ profile })
       return webvhResourceLogController({ did: pointer.did!, log })
     },
-    pinStore: sessionLogPinStore({ idb }),
+    pinStore: profile.persistence.logPins,
     signer: userKeyRosterLogSigner({ keyAgent })
   })
 }
