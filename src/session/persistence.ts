@@ -270,6 +270,32 @@ export function deleteLocalCacheFamilies({ scope }: { scope: string }): void {
 }
 
 /**
+ * Deletes every persisted descriptor-cache and meta-cache entry across ALL
+ * scopes: the whole-database forget grade's localStorage half, which cannot
+ * attribute scopes to accounts (attribution needs the unlock material that
+ * grade lacks) and deletes the families wholesale instead. Global UI prefs
+ * live under other keys and are untouched.
+ *
+ * @returns {void}
+ */
+export function deleteAllLocalCacheFamilies(): void {
+  if (typeof localStorage === 'undefined') {
+    return
+  }
+  const prefixes = [`${DESCRIPTOR_CACHE_PREFIX}:`, `${META_CACHE_PREFIX}:`]
+  const doomed: string[] = []
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index)
+    if (key && prefixes.some(prefix => key.startsWith(prefix))) {
+      doomed.push(key)
+    }
+  }
+  for (const key of doomed) {
+    localStorage.removeItem(key)
+  }
+}
+
+/**
  * An in-memory `EncryptionDescriptorCache`: the transient session's cache,
  * seeded by the login-time acquisition and retaining that snapshot when a
  * mid-session refresh fails (a failed fetch falls back to what login saw,

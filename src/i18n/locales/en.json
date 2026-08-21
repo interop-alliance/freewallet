@@ -167,6 +167,15 @@
       "applicationsCrossPointer": "Apps you connected to this wallet are not wallets themselves; review and revoke them on the",
       "applicationsCrossPointerLink": "Applications page"
     },
+    "forget": {
+      "button": "Forget this browser",
+      "confirmTitle": "Forget this browser?",
+      "confirmMessage": "This browser will be removed from your account and all wallet data stored on it will be deleted. The removal is recorded in your account's public log, and the account's encrypted data is re-keyed first, so nothing written from now on is readable from this browser's leftovers. Your account itself is untouched -- logging in again reconnects this browser as new.",
+      "confirmCeiling": "What cannot be taken back: data this browser already fetched may remain recoverable from the device by forensic means, and the browser profile itself keeps a trace that a wallet was used here. This may take a moment -- keep this tab open.",
+      "progress": "Forgetting this browser -- re-keying the account and writing the removal. Keep this tab open.",
+      "lastClient": "This is the only browser connected to this account, so it cannot be forgotten from here yet -- that transition is not available in this version. Connect another browser first, or delete the account instead.",
+      "failed": "Forgetting this browser did not finish. Nothing was lost -- try again; it picks up where it stopped."
+    },
     "recovery": {
       "section": "Recovery codes",
       "intro": "A recovery code can restore access to this wallet from any browser if you lose your passphrase and every connected browser. Each code works exactly once and can be revoked here at any time -- revoking really retires it, everywhere.",
@@ -213,7 +222,20 @@
       "storageUnreachable": "Could not reach the storage server. While we're fixing it, try <guest>guest mode</guest>.",
       "ladderAttribution": "Your account was found, but this login method's standing on the account could not be confirmed -- it may have been removed, or the account's published history is in an unexpected state. Sign-in was stopped and nothing was changed. Log in from a browser where your wallet is already set up, or use a recovery code.",
       "passkeyNoAccount": "No wallet was found for this passkey. Log in with your passphrase, then add this passkey from Settings.",
-      "passkeyPrfUnsupported": "This passkey or browser cannot unlock Freewallet. Try a different passkey or log in with your passphrase."
+      "passkeyPrfUnsupported": "This passkey or browser cannot unlock Freewallet. Try a different passkey or log in with your passphrase.",
+      "browserForgotten": "This browser's wallet access was removed from the account, and its leftover local wallet data has now been cleared. Log in again to reconnect this browser."
+    },
+    "forget": {
+      "button": "Forget wallet data on this browser",
+      "title": "Forget all wallet data on this browser?",
+      "body": "This deletes all locally stored wallet data on this browser, for every account that was ever remembered here. No account is lost: logging in again with a passphrase or passkey reconnects it.",
+      "blastRadius": "Because it covers the whole browser, other accounts remembered here are affected too -- their local safety checks reset, as if this browser were seeing them for the first time.",
+      "residue": "Each account will still list this browser as a connected wallet. To remove that entry, log in on another device and disconnect it under Settings > Connected wallets.",
+      "nothing": "This browser holds no wallet data to forget.",
+      "confirm": "Forget wallet data",
+      "done": "All wallet data on this browser has been forgotten.",
+      "incomplete": "Wallet data on this browser was forgotten, but some of it could not be deleted (another open tab may be holding it). Close other tabs and try again.",
+      "failed": "Could not forget the wallet data on this browser. Please try again."
     },
     "login": {
       "heading": "Log in",

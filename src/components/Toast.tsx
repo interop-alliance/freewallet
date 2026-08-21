@@ -2,7 +2,9 @@
  * Renders the app's transient feedback messages (credential deleted, saved,
  * ...) as a MUI Snackbar. Rendered once by `DashboardLayout`, so any page can
  * post feedback through `useToastStore` without owning snackbar state -- and a
- * message posted just before navigating still shows on the page landed on.
+ * message posted just before navigating still shows on the page landed on. The
+ * login page renders it too: it sits outside the dashboard layout, and its
+ * forget affordance reports its outcome without navigating anywhere.
  */
 import Alert from '@mui/material/Alert'
 import Snackbar from '@mui/material/Snackbar'

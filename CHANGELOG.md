@@ -17,6 +17,35 @@
 
 ### Added
 
+- The forget affordance, in two grades over the shared wipe enumeration.
+  From a live session, Settings > Connected wallets gains "Forget this
+  browser" on the current client's row: wallet-core's `forgetDurableClient`
+  ceremony (the user-key rotation off this client's wrap and the collection
+  fan-out under its still-standing authority, then one atomic ladder-signed
+  removal entry through the login credential's bridge), followed by the
+  local wipe with the writer id cleared; the wipe runs last, so a torn run
+  reads as "not forgotten" and a re-click resumes. The account's last
+  connected browser is refused with not-yet-available copy. From the login
+  page, the keyring authenticity/replay and continuity refusals now offer
+  "Forget wallet data on this browser" -- the no-unlock-material grade: a
+  whole-database, browser-scoped wipe (every replica database, the session
+  database, the per-account localStorage families), with the cross-account
+  blast radius and the standing-document-client residue stated in the
+  confirm dialog; nothing is signed or flagged. The affordance is reachable
+  from passkey refusals without a typed passphrase, resets between login
+  attempts, and says so when the browser holds nothing to delete.
+- The login-time forgotten-browser detector: a durable login whose keyring
+  hit still carries this browser's client keys, while the cleanly verified
+  account document no longer lists its verification method (a forget torn
+  before its wipe, or a disconnect run from another client), finishes the
+  wipe from what the hit alone derives and surfaces "this browser's access
+  was removed" instead of raw authorization errors. Nothing about the
+  detection is persisted; it recomputes from durable state each login.
+- The session profile carries the login credential's standing members
+  (`profile.standingUnlock`: the bridge delegation, the annex sibling, and
+  the credential-derived client identity) beside the existing ladder seed,
+  so the forget ceremony signs through the bridge without re-prompting for
+  the secret.
 - The transient recovery variant is the `/recover` default on a
   non-remembered browser (wallet-core's `recoverWebvhLadderAnchored`): the
   add-and-retire entry publishes the fresh credential's ladder VM in place

@@ -379,8 +379,8 @@ already destroyed, accepted since the user's intent was deletion.
 **The shared wipe enumeration** (`src/session/wipe.ts`) is the one list of
 durable local state an account leaves on a browser and the one executor
 that deletes it, consumed by the deletion-shaped ceremonies (account
-deletion and the guest wipe today; the forget affordance and the
-orphan-client heal are designed onto the same seam). It is snapshot-first:
+deletion, the guest wipe, and the forget ceremony; the orphan-client heal
+is designed onto the same seam). It is snapshot-first:
 every target derives from the live session before anything is deleted --
 the client-keyed families (the unlock-methods cache, the passkey-safety
 notice, the replica-database prefix, the local-mode cache scope) from this
@@ -401,6 +401,44 @@ included), the CHAPI popup's partitioned third-party buckets are
 unreachable from any top-level wipe, and the mediator-origin (authn.io)
 handler-registration bit records that a wallet was used on the terminal --
 only clearing the browser profile removes those.
+
+**The forget affordance** (`src/session/forget.ts`) removes this browser
+from an account, in two grades split by whether the unlock credential is in
+hand. From a live durable session (Settings > Connected wallets, the
+current client's row) it is the **forget ceremony** -- wallet-core's
+`forgetDurableClient`: the user key rotates off this client's roster wrap
+and every encrypted collection re-epochs, both under this client's
+still-standing authority (the self-forget inversion of the revocation's
+document-edit-first order, forced by the entry-proof and current-key-set
+rules; wallet-core decision 0008), then ONE atomic ladder-signed removal
+entry through the login credential's bridge takes the client's whole
+document footprint out, and only then does the local wipe run
+(`clearWriter: true` -- the forget grade is the wipe's one writerId
+consumer). The wipe-last order is the tear story: a run torn anywhere
+before the entry reads as "not forgotten" and a re-click resumes; the
+removal-published-but-wipe-torn direction is caught at the next login by
+the **forgotten-browser detector** (`assertClientStillEnrolled`) -- a
+client-key record still present while the cleanly verified account
+document no longer lists this client's verification method finishes the
+wipe from what the keyring hit alone derives and surfaces "this browser's
+access was removed", never raw authorization errors; nothing about the
+detection is persisted. The ceremony needs the standing members the login
+stamped on the profile (`profile.standingUnlock` beside
+`profile.ladderSeed`), deliberately writes no re-mint stages (a
+replacement signed by a key that dies at the removal entry would rot
+moments later -- the standing self-heals cover it), and refuses the
+account's last durable client with wallet-core's name-stable
+`LastDurableClientForgetError` (that transition is its own ceremony). From
+the login page's authenticity and continuity refusals -- reachable from
+passkey failures with no typed passphrase, reset between attempts -- it is
+the **no-unlock-material grade**: nothing can be derived or signed, so no
+ceremony runs and the wipe is whole-database and browser-scoped ("forget
+all wallet data on this browser": every replica database, the session
+database, the per-account localStorage families), with the cross-account
+blast radius stated in the confirm copy. Each account's standing document
+client remains -- deliberately unflagged anywhere, with the copy pointing
+at the Connected wallets disconnect from a logged-in client -- and a
+never-remembered browser is told it holds nothing to delete.
 
 **Controller promotion by ordering.** The Space id is an independent random
 identifier minted at signup (`mintSpaceId`) and carried in the account

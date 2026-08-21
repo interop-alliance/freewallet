@@ -80,6 +80,7 @@ import {
   canSelfEnroll,
   selfEnrollStandingClient
 } from '@/session/standingUnlock'
+import { assertClientStillEnrolled } from '@/session/forget'
 import {
   delegateLogWrite,
   delegationProofKeyId,
@@ -843,6 +844,15 @@ async function sessionFromKeyringHit({
       return { session: null, userExists: true }
     }
   }
+  // The finish-the-wipe detector: a client-key record whose verification
+  // method is gone from the cleanly verified account document means this
+  // browser was forgotten (or disconnected) with the local wipe torn or
+  // never run -- the residue is wiped here and the typed refusal surfaces
+  // the state, instead of the raw authorization errors the dead key would
+  // hit downstream. Skips itself on any verification failure.
+  if (found.clientKeys) {
+    await assertClientStillEnrolled({ found, idb })
+  }
   const enrolled = found.clientKeys
     ? undefined
     : await selfEnrollStandingClient({ found, idb })
@@ -893,6 +903,18 @@ async function sessionFromKeyringHit({
   // re-mint, the rotation's strike-or-swap).
   if (found.standing?.ladderSeed) {
     session.profile.ladderSeed = found.standing.ladderSeed
+  }
+  // The credential's other standing members, for the ceremonies that act
+  // through the bridge mid-session (the forget ceremony's ladder-signed
+  // removal entry) without re-prompting for the secret.
+  if (found.standing?.delegation && found.standingClient) {
+    session.profile.standingUnlock = {
+      delegation: found.standing.delegation,
+      ...(found.standing.delegatedClients
+        ? { delegatedClients: found.standing.delegatedClients }
+        : {}),
+      standingClient: found.standingClient
+    }
   }
 
   // The standing-delegation self-refresh: a standing credential's own login

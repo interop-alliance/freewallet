@@ -167,6 +167,15 @@
       "applicationsCrossPointer": "Las aplicaciones que conectaste a este monedero no son monederos; revísalas y revócalas en la",
       "applicationsCrossPointerLink": "página de Aplicaciones"
     },
+    "forget": {
+      "button": "Olvidar este navegador",
+      "confirmTitle": "¿Olvidar este navegador?",
+      "confirmMessage": "Este navegador se eliminará de su cuenta y todos los datos de billetera guardados en él se borrarán. La eliminación queda registrada en el historial público de su cuenta, y los datos cifrados de la cuenta se recifran primero, de modo que nada de lo que se escriba a partir de ahora será legible desde los restos de este navegador. Su cuenta no se ve afectada: iniciar sesión de nuevo reconecta este navegador como nuevo.",
+      "confirmCeiling": "Lo que no se puede deshacer: los datos que este navegador ya descargó pueden seguir siendo recuperables del dispositivo por medios forenses, y el perfil del navegador conserva un rastro de que aquí se usó una billetera. Esto puede tardar un momento; mantenga esta pestaña abierta.",
+      "progress": "Olvidando este navegador: recifrando la cuenta y registrando la eliminación. Mantenga esta pestaña abierta.",
+      "lastClient": "Este es el único navegador conectado a esta cuenta, así que todavía no se puede olvidar desde aquí: esa transición no está disponible en esta versión. Conecte otro navegador primero, o elimine la cuenta.",
+      "failed": "Olvidar este navegador no terminó. No se perdió nada: inténtelo de nuevo; continúa donde se detuvo."
+    },
     "recovery": {
       "section": "Códigos de recuperación",
       "intro": "Un código de recuperación puede restaurar el acceso a esta cartera desde cualquier navegador si pierdes tu frase de contraseña y todos los navegadores conectados. Cada código funciona exactamente una vez y puede revocarse aquí en cualquier momento: revocarlo lo retira de verdad, en todas partes.",
@@ -213,7 +222,20 @@
       "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Mientras lo solucionamos, pruebe el <guest>modo invitado</guest>.",
       "ladderAttribution": "Se encontró su cuenta, pero no se pudo confirmar la vigencia de este método de inicio de sesión en la cuenta: puede haber sido eliminado, o el historial publicado de la cuenta está en un estado inesperado. El inicio de sesión se detuvo y no se cambió nada. Inicie sesión desde un navegador donde su billetera ya esté configurada, o use un código de recuperación.",
       "passkeyNoAccount": "No se encontró ninguna billetera para esta llave de acceso. Inicie sesión con su frase de contraseña y luego agregue esta llave de acceso desde Configuración.",
-      "passkeyPrfUnsupported": "Esta llave de acceso o este navegador no puede desbloquear Freewallet. Pruebe con otra llave de acceso o inicie sesión con su frase de contraseña."
+      "passkeyPrfUnsupported": "Esta llave de acceso o este navegador no puede desbloquear Freewallet. Pruebe con otra llave de acceso o inicie sesión con su frase de contraseña.",
+      "browserForgotten": "El acceso de este navegador a la billetera fue eliminado de la cuenta, y sus datos locales restantes acaban de borrarse. Inicie sesión de nuevo para reconectar este navegador."
+    },
+    "forget": {
+      "button": "Olvidar los datos de billetera en este navegador",
+      "title": "¿Olvidar todos los datos de billetera en este navegador?",
+      "body": "Esto elimina todos los datos de billetera guardados localmente en este navegador, para todas las cuentas que se hayan recordado aquí. Ninguna cuenta se pierde: iniciar sesión de nuevo con una frase de contraseña o llave de acceso la reconecta.",
+      "blastRadius": "Como abarca todo el navegador, las demás cuentas recordadas aquí también se ven afectadas: sus comprobaciones de seguridad locales se restablecen, como si este navegador las viera por primera vez.",
+      "residue": "Cada cuenta seguirá mostrando este navegador como una billetera conectada. Para quitar esa entrada, inicie sesión en otro dispositivo y desconéctelo en Configuración > Billeteras conectadas.",
+      "nothing": "Este navegador no tiene datos de billetera que olvidar.",
+      "confirm": "Olvidar datos de billetera",
+      "done": "Se han olvidado todos los datos de billetera en este navegador.",
+      "incomplete": "Los datos de billetera en este navegador se olvidaron, pero parte de ellos no se pudo eliminar (otra pestaña abierta puede estar reteniéndolos). Cierre las demás pestañas e inténtelo de nuevo.",
+      "failed": "No se pudieron olvidar los datos de billetera en este navegador. Inténtelo de nuevo."
     },
     "login": {
       "heading": "Iniciar sesión",

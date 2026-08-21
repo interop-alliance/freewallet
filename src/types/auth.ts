@@ -19,6 +19,7 @@ import type {
   DidWebKeyMap
 } from '@interop/wallet-core/webvh'
 import type { UserKey } from '@interop/wallet-core/keys'
+import type { StandingUnlockClient } from '@interop/wallet-core/unlock'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
 import type { ClientAnnexGcReport } from '@interop/wallet-core/clientAnnex'
@@ -142,6 +143,19 @@ export interface ControllerProfile {
   // it from here. In-memory only, same trust class as `clientSeed`; absent
   // for guests and for records without standing authority.
   ladderSeed?: Uint8Array
+  // The login credential's other standing members, stamped from the keyring
+  // hit beside `ladderSeed`: the pre-minted PUT-on-`did.jsonl` bridge
+  // delegation (and the annex-Space sibling where the record carries one)
+  // plus the credential-derived client identity that invokes them. The
+  // forget ceremony signs its ladder-signed removal entry through these
+  // without re-prompting for the secret. In-memory only, same trust class as
+  // `clientSeed`; absent for guests and for records without standing
+  // authority.
+  standingUnlock?: {
+    delegation: IZcap
+    delegatedClients?: IZcap
+    standingClient: StandingUnlockClient
+  }
   // The invocation capability the session's WAS requests ride, when the
   // session's authority over the data Space is a delegated Space-subtree
   // zcap rather than the root capability -- the transient posture's

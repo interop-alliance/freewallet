@@ -3,6 +3,11 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
 import Link from '@mui/material/Link'
 import Stack from '@mui/material/Stack'
 import { FiKey } from 'react-icons/fi'
@@ -11,6 +16,7 @@ import Typography from '@mui/material/Typography'
 import { Trans, useTranslation } from 'react-i18next'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
 import { AuthPageHeader } from '@/components/AuthPageHeader'
+import { Toast } from '@/components/Toast'
 import { authStyles } from '@/styles/appStyles'
 import { useAuthStore } from '@/stores/authStore'
 import type { SubmitEvent } from 'react'
@@ -32,6 +38,10 @@ import {
 } from '@interop/wallet-core/enrollment'
 import { completeEnrollment } from '@/lib/enrollment'
 import { isStorageUnreachable } from '@/lib/storageErrors'
+import {
+  forgetBrowserWalletData,
+  hasForgettableBrowserData
+} from '@/session/forget'
 import {
   PasskeyCancelledError,
   PasskeyPrfUnsupportedError,
@@ -127,6 +137,13 @@ function loginErrorKey({
     console.error(`${label} refused:`, err)
     return 'auth.errors.ladderAttribution'
   }
+  // The finish-the-wipe detector's outcome: this browser's client entry was
+  // removed from the account (a forget torn before its wipe, or a disconnect
+  // from another client) and the local residue has just been cleared.
+  if (errorName(err) === 'BrowserForgottenError') {
+    console.warn(`${label}: this browser was forgotten:`, err)
+    return 'auth.errors.browserForgotten'
+  }
   // A keyring record was found but is corrupt -- not a server outage and not
   // a wrong passphrase; surface it with recovery guidance.
   if (err instanceof KeyringRecordUnusableError) {
@@ -145,6 +162,23 @@ function loginErrorKey({
   console.error(`${label} failed:`, err)
   return 'auth.errors.setupFailed'
 }
+
+/**
+ * The refusal states that offer the forget affordance: the keyring
+ * authenticity and replay refusals and the two continuity refusals -- the
+ * states where a stale local prior (or a genuinely hostile host) wedges the
+ * login with no in-app remedy. The affordance is the no-unlock-material
+ * grade: a whole-database, browser-scoped wipe, never a ceremony -- nothing
+ * derived from the typed secret is trusted in these states, so nothing is
+ * signed, and each account's standing document client remains (stated in the
+ * dialog copy).
+ */
+const FORGETTABLE_ERROR_KEYS = new Set([
+  'auth.errors.keyringForged',
+  'auth.errors.keyringRolledBack',
+  'auth.errors.accountLogContinuity',
+  'auth.errors.userKeyRosterContinuity'
+])
 
 export function LoginPage() {
   const { t } = useTranslation()
@@ -174,6 +208,15 @@ export function LoginPage() {
   } | null>(null)
   const [enrollBusy, setEnrollBusy] = useState(false)
   const [enrollErrorKey, setEnrollErrorKey] = useState<string | null>(null)
+  // The forget-this-browser dialog off a forgettable refusal: `null` closed,
+  // otherwise whether the browser holds anything to delete. Reset by every
+  // fresh login attempt, so the dialog can never sit beside an error it did
+  // not belong to (the FW-175 stale-state rule; the wipe itself is
+  // browser-scoped, so there is no per-account binding to get wrong).
+  const [forgetState, setForgetState] = useState<{
+    hasData: boolean
+  } | null>(null)
+  const [forgetBusy, setForgetBusy] = useState(false)
   const { copied: codeCopied, copy: copyCode } = useCopyToClipboard({
     onError: (err: unknown) => {
       console.error('Could not copy the connect code:', err)
@@ -194,6 +237,7 @@ export function LoginPage() {
     }
     setIsSubmitting(true)
     setErrorKey(null)
+    setForgetState(null)
     // Hoisted out of the try: the torn-enrollment catch arm below offers the
     // connect-this-browser flow, which needs the passphrase that located the
     // account.
@@ -343,6 +387,44 @@ export function LoginPage() {
   }
 
   /**
+   * Opens the forget-this-browser dialog off a forgettable refusal, probing
+   * first whether this browser holds any wallet data at all (a
+   * never-remembered browser gets the nothing-to-delete copy instead of a
+   * destructive confirm).
+   */
+  const handleOpenForget = async () => {
+    setForgetState({ hasData: await hasForgettableBrowserData() })
+  }
+
+  /**
+   * Runs the no-unlock-material forget grade: the whole-database,
+   * browser-scoped wipe. No ceremony and no signing -- the copy in the
+   * dialog has already stated the standing-document-client residue.
+   */
+  const handleConfirmForget = async () => {
+    if (forgetBusy) {
+      return
+    }
+    setForgetBusy(true)
+    try {
+      const { failed } = await forgetBrowserWalletData()
+      setForgetState(null)
+      setErrorKey(null)
+      showToast({
+        message: t(
+          failed.length > 0 ? 'auth.forget.incomplete' : 'auth.forget.done'
+        ),
+        severity: failed.length > 0 ? 'warning' : 'success'
+      })
+    } catch (err) {
+      console.error('Forgetting the wallet data on this browser failed:', err)
+      showToast({ message: t('auth.forget.failed'), severity: 'error' })
+    } finally {
+      setForgetBusy(false)
+    }
+  }
+
+  /**
    * Handles the "Log in with a Passkey" button. Runs the WebAuthn PRF
    * assertion via `loginWithPasskey`, then upgrades to a full session on a hit.
    */
@@ -352,6 +434,7 @@ export function LoginPage() {
     }
     setIsPasskeySubmitting(true)
     setErrorKey(null)
+    setForgetState(null)
     try {
       const { session, userExists } = await loginWithPasskey(
         forcedRememberBrowser() ? { rememberBrowser: true } : {}
@@ -425,6 +508,10 @@ export function LoginPage() {
                       }}
                     />
                   </Alert>
+                ) : errorKey === 'auth.errors.browserForgotten' ? (
+                  <Alert severity="info" sx={authStyles.userMessage}>
+                    {t(errorKey)}
+                  </Alert>
                 ) : errorKey ? (
                   <Alert severity="error" sx={authStyles.userMessage}>
                     {t(errorKey)}{' '}
@@ -442,6 +529,18 @@ export function LoginPage() {
                       {bannerText}
                     </Alert>
                   )
+                )}
+
+                {errorKey && FORGETTABLE_ERROR_KEYS.has(errorKey) && (
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    onClick={handleOpenForget}
+                    sx={authStyles.actionButton}
+                    data-testid="forget-browser-button"
+                  >
+                    {t('auth.forget.button')}
+                  </Button>
                 )}
 
                 {(errorKey === 'auth.errors.clientNotEnrolled' ||
@@ -595,6 +694,51 @@ export function LoginPage() {
           )}
         </Box>
       </Box>
+
+      {/* The forget-this-browser confirm (the no-unlock-material grade). */}
+      <Dialog
+        open={forgetState !== null}
+        onClose={() => setForgetState(null)}
+        aria-labelledby="forget-browser-title"
+      >
+        <DialogTitle id="forget-browser-title">
+          {t('auth.forget.title')}
+        </DialogTitle>
+        <DialogContent>
+          {forgetState?.hasData ? (
+            <Stack sx={{ gap: 1.5 }}>
+              <DialogContentText>{t('auth.forget.body')}</DialogContentText>
+              <DialogContentText>
+                {t('auth.forget.blastRadius')}
+              </DialogContentText>
+              <DialogContentText>{t('auth.forget.residue')}</DialogContentText>
+            </Stack>
+          ) : (
+            <DialogContentText>{t('auth.forget.nothing')}</DialogContentText>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setForgetState(null)}>
+            {t('common.cancel')}
+          </Button>
+          {forgetState?.hasData && (
+            <Button
+              color="error"
+              variant="contained"
+              loading={forgetBusy}
+              onClick={handleConfirmForget}
+              data-testid="forget-browser-confirm"
+            >
+              {t('auth.forget.confirm')}
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      {/* This page is outside the dashboard layout that renders the shared
+          snackbar, and the forget affordance reports its outcome here rather
+          than on a page it navigates to. */}
+      <Toast />
     </Box>
   )
 }

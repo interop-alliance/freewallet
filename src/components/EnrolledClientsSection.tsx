@@ -46,6 +46,7 @@ import {
   type AccountClientView
 } from '@/session/clients'
 import { approveEnrollment } from '@/lib/enrollment'
+import { forgetThisBrowser } from '@/session/forget'
 import { OnboardInviteCard } from '@/components/OnboardInviteCard'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { showToast } from '@/stores/toastStore'
@@ -80,6 +81,10 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
   const [disconnecting, setDisconnecting] = useState(false)
   const [disconnectError, setDisconnectError] = useState(false)
   const [cascadeWarning, setCascadeWarning] = useState(false)
+  // The forget-this-browser confirm dialog and its ceremony run.
+  const [forgetOpen, setForgetOpen] = useState(false)
+  const [forgetting, setForgetting] = useState(false)
+  const [forgetErrorKey, setForgetErrorKey] = useState<string | null>(null)
   // The paste-code half of the connect card (the enrolling side): the pasted
   // connect code, its parsed request when valid, the new client's label, and
   // the ceremony state. Independent of the QR invite the same card shows:
@@ -208,6 +213,46 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       setDisconnectError(true)
     } finally {
       setDisconnecting(false)
+    }
+  }
+
+  /**
+   * Runs the forget ceremony for THIS browser: the roster rotation and
+   * collection fan-out under this client's still-standing authority, one
+   * ladder-signed removal entry through the login credential's bridge, then
+   * the shared local wipe -- and ends at the logout page, since the session's
+   * local footing is gone. A torn run reads as "not forgotten" (the wipe
+   * runs last), so the dialog's retry copy is honest: a re-click resumes.
+   * The account's last durable client is refused by the ceremony itself and
+   * mapped to the not-yet-available copy (that transition is its own
+   * ceremony, not built yet).
+   */
+  const handleForget = async () => {
+    if (forgetting) {
+      return
+    }
+    setForgetting(true)
+    setForgetErrorKey(null)
+    try {
+      const outcome = await forgetThisBrowser({ session })
+      if (outcome.wipeFailed.length > 0) {
+        // Residue is self-healing: a surviving replica or trio is finished
+        // by the next login's forgotten-browser detector.
+        console.warn('The forget wipe left residue behind:', outcome.wipeFailed)
+      }
+      // A hard reload, not a router navigate: the wipe just deleted the
+      // storage this tab's in-memory handles point at (the guest-wipe logout
+      // takes the same exit).
+      window.location.href = '/login'
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'LastDurableClientForgetError') {
+        setForgetErrorKey('settings.forget.lastClient')
+      } else {
+        console.error('Could not forget this browser:', err)
+        setForgetErrorKey('settings.forget.failed')
+      }
+    } finally {
+      setForgetting(false)
     }
   }
 
@@ -406,6 +451,30 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
                       {t('settings.clients.disconnect')}
                     </Button>
                   )}
+                {eligibility.refusal === 'self' &&
+                  session.profile.standingUnlock !== undefined &&
+                  session.profile.ladderSeed !== undefined && (
+                    // The self row's exit is the forget ceremony, not a
+                    // disconnect: this browser removes ITSELF through the
+                    // login credential's bridge and wipes its local state.
+                    // Needs the standing members the login carried; a
+                    // session without them (an enrollment-completion login)
+                    // simply does not offer it.
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      color="error"
+                      sx={{ borderRadius: 2, alignSelf: 'flex-start' }}
+                      disabled={forgetting}
+                      onClick={() => {
+                        setForgetErrorKey(null)
+                        setForgetOpen(true)
+                      }}
+                      data-testid="forget-this-browser-button"
+                    >
+                      {t('settings.forget.button')}
+                    </Button>
+                  )}
               </Card>
             )
           })}
@@ -587,6 +656,61 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
             onClick={() => void handleDisconnect()}
           >
             {t('settings.clients.disconnectConfirmAction')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* The forget-this-browser confirm (the forget ceremony). */}
+      <Dialog
+        open={forgetOpen}
+        onClose={() => {
+          if (!forgetting) {
+            setForgetOpen(false)
+          }
+        }}
+        fullWidth
+      >
+        <DialogTitle>{t('settings.forget.confirmTitle')}</DialogTitle>
+        <DialogContent>
+          <Stack sx={{ gap: 1.5 }}>
+            <DialogContentText>
+              {t('settings.forget.confirmMessage')}
+            </DialogContentText>
+            <DialogContentText>
+              {t('settings.forget.confirmCeiling')}
+            </DialogContentText>
+          </Stack>
+          {forgetting && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              {t('settings.forget.progress')}
+            </Alert>
+          )}
+          {forgetErrorKey && (
+            <Alert
+              severity={
+                forgetErrorKey === 'settings.forget.lastClient'
+                  ? 'info'
+                  : 'error'
+              }
+              sx={{ mt: 2 }}
+            >
+              {t(forgetErrorKey)}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setForgetOpen(false)} disabled={forgetting}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            loading={forgetting}
+            disabled={forgetErrorKey === 'settings.forget.lastClient'}
+            onClick={() => void handleForget()}
+            data-testid="forget-this-browser-confirm"
+          >
+            {t('settings.forget.confirmAction')}
           </Button>
         </DialogActions>
       </Dialog>

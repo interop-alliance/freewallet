@@ -2,9 +2,10 @@
  * The shared wipe enumeration: the ONE list of durable local state a wallet
  * account leaves on a browser, and the one executor that deletes it. Its
  * consumers are the deletion-shaped ceremonies -- account deletion, the guest
- * wipe, and (when they land) the forget affordance and the orphan-client
- * heal -- so the incomplete-enumeration bug class is a single-point fix
- * rather than a per-caller audit.
+ * wipe, the forget ceremony and its login-time detector
+ * (`src/session/forget.ts`), and (when it lands) the orphan-client heal --
+ * so the incomplete-enumeration bug class is a single-point fix rather than
+ * a per-caller audit.
  *
  * The internal order is snapshot-first: every target is derived from the
  * live session's state (the client-key record's own identity, the account
