@@ -29,18 +29,18 @@
 import { WasClient } from '@interop/was-client'
 import { retireUnlockCredential } from '@interop/wallet-core/unlock'
 import type {
-  CompanionPostureRetirement,
+  ClientAnnexPostureRetirement,
   StandingUnlockKeys
 } from '@interop/wallet-core/unlock'
 import type { UserKey } from '@interop/wallet-core/keys'
 import {
-  companionDidParts,
-  companionLogPinId,
-  companionLogStore,
+  clientAnnexDidParts,
+  clientAnnexLogPinId,
+  clientAnnexLogStore,
   delegatedClientsPointer,
   keyAgreementCommitment,
-  retireCompanionRung,
-  swapCompanionGeneration,
+  retireClientAnnexRung,
+  swapClientAnnexGeneration,
   type PublishedKeyDocument
 } from '@interop/wallet-core/webvh'
 import type { Session } from '@/types/auth'
@@ -61,7 +61,7 @@ export interface CredentialRotationOutcome {
   rotated: boolean
   collections: UserKeyCascadeResult
   userKey?: UserKey
-  companion?: CompanionPostureRetirement
+  clientAnnex?: ClientAnnexPostureRetirement
 }
 
 /**
@@ -89,7 +89,7 @@ export interface CredentialRotationOutcome {
  *   attribution but is not required
  * @param [options.survivingLadderSeed] {Uint8Array}   a SURVIVING standing
  *   credential's ladder seed (a passphrase change passes the new
- *   credential's), preferred over the session's login seed for the companion
+ *   credential's), preferred over the session's login seed for the annex
  *   strike-or-swap stage below
  * @param options.verb {string}   what the caller is doing, for the
  *   pending-rotation refusal message (e.g. `'changing the passphrase'`)
@@ -162,8 +162,8 @@ export async function rotateOffUnlockCredential({
       await session.profile.persistClientKeys?.({ userKey })
     },
     collections: cascadeCollections({ remoteStore }),
-    retireCompanionPosture: async ({ document }) =>
-      retireCompanionPostureStage({
+    retireClientAnnexPosture: async ({ document }) =>
+      retireClientAnnexPostureStage({
         session,
         document,
         retiredLadderSeed: method.ladderSeed,
@@ -178,7 +178,7 @@ export async function rotateOffUnlockCredential({
     rotated: result.rotated,
     collections: result.collections,
     ...(result.userKey ? { userKey: result.userKey } : {}),
-    ...(result.companion ? { companion: result.companion } : {})
+    ...(result.clientAnnex ? { clientAnnex: result.clientAnnex } : {})
   }
 }
 
@@ -195,20 +195,20 @@ function sameSeed(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 /**
- * The companion reach of the retirement (the ceremony's stage 1b):
- * strike-or-swap. A standing credential's companion rung-0 key and hash live
+ * The client annex reach of the retirement (the ceremony's stage 1b):
+ * strike-or-swap. A standing credential's annex rung-0 key and hash live
  * in the pointed generation's log, out of the account document edit's reach,
- * so without this stage a retired credential keeps companion-write authority
+ * so without this stage a retired credential keeps annex-write authority
  * for the life of the generation.
  *
  * - STRIKE, when the ceremony holds the retired credential's ladder seed
  *   (to name what to drop) and a distinct surviving seed whose committed
- *   rung can sign: one atomic companion entry drops the retired rung's key
- *   and hash (`retireCompanionRung`); a generation the retired credential
+ *   rung can sign: one atomic annex entry drops the retired rung's key
+ *   and hash (`retireClientAnnexRung`); a generation the retired credential
  *   never wrote reports `clean` with no entry.
  * - SWAP, otherwise: a fresh generation minted from a surviving credential's
  *   seed is installed and re-pointed under this client's account-log update
- *   authority (`swapCompanionGeneration`), and the retired rung dies with
+ *   authority (`swapClientAnnexGeneration`), and the retired rung dies with
  *   the old generation, which falls to the login-time collect fan-out.
  *
  * Best-effort by the ceremony's contract: every failure is caught and
@@ -227,9 +227,9 @@ function sameSeed(a: Uint8Array, b: Uint8Array): boolean {
  * @param options.pointer {object}   the account pointer
  * @param options.clientWebvhKeys {object}   this client's update-key seeds
  * @param options.remoteStore {object}   the session's remote store
- * @returns {Promise<CompanionPostureRetirement>}
+ * @returns {Promise<ClientAnnexPostureRetirement>}
  */
-async function retireCompanionPostureStage({
+async function retireClientAnnexPostureStage({
   session,
   document,
   retiredLadderSeed,
@@ -249,7 +249,7 @@ async function retireCompanionPostureStage({
   remoteStore: NonNullable<
     ReturnType<typeof enrolledClientContext>
   >['remoteStore']
-}): Promise<CompanionPostureRetirement> {
+}): Promise<ClientAnnexPostureRetirement> {
   try {
     const doc = document as PublishedKeyDocument
     const pointedDid = delegatedClientsPointer({
@@ -258,7 +258,7 @@ async function retireCompanionPostureStage({
     if (pointedDid === undefined) {
       return { action: 'skipped', reason: 'no-pointer' }
     }
-    const { spaceId: companionSpaceId, generationId } = companionDidParts({
+    const { spaceId: clientAnnexSpaceId, generationId } = clientAnnexDidParts({
       did: pointedDid
     })
     const survivors = [survivingLadderSeed, session.profile.ladderSeed].filter(
@@ -274,10 +274,10 @@ async function retireCompanionPostureStage({
 
     if (retiredLadderSeed !== undefined && survivors.length > 0) {
       try {
-        const { struck } = await retireCompanionRung({
-          store: companionLogStore({
+        const { struck } = await retireClientAnnexRung({
+          store: clientAnnexLogStore({
             was,
-            spaceId: companionSpaceId,
+            spaceId: clientAnnexSpaceId,
             generationId
           }),
           retiredLadderSeed,
@@ -285,12 +285,15 @@ async function retireCompanionPostureStage({
           generationId,
           expectedDid: pointedDid,
           pinStore: logPins,
-          logId: companionLogPinId({ spaceId: companionSpaceId, generationId })
+          logId: clientAnnexLogPinId({
+            spaceId: clientAnnexSpaceId,
+            generationId
+          })
         })
         return { action: struck ? 'struck' : 'clean' }
       } catch (err) {
         if (
-          (err as { name?: string }).name !== 'CompanionRungUncommittedError'
+          (err as { name?: string }).name !== 'ClientAnnexRungUncommittedError'
         ) {
           throw err
         }
@@ -301,7 +304,7 @@ async function retireCompanionPostureStage({
     if (survivors.length === 0) {
       return { action: 'skipped', reason: 'no-ladder-seed' }
     }
-    await swapCompanionGeneration({
+    await swapClientAnnexGeneration({
       was,
       wasServerUrl: pointer.host,
       accountSpaceId: pointer.spaceId,
@@ -318,7 +321,7 @@ async function retireCompanionPostureStage({
     return { action: 'swapped' }
   } catch (err) {
     console.warn(
-      "Could not retire the credential's companion posture; the retired " +
+      "Could not retire the credential's annex posture; the retired " +
         'rung stands until the next generation swap:',
       err
     )

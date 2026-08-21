@@ -13,13 +13,13 @@
  * forces either side (true runs the durable standing self-enrollment; false
  * on a remembered browser refuses rather than forking postures, per
  * `decisions/0001`). `transientSessionFromKeyringHit` is the composition
- * itself: verify the account log, enroll a per-visit key into the companion
- * generation through the record's sibling delegation (the loud entry
+ * itself: verify the account log, enroll a per-visit key into the client
+ * annex generation through the record's sibling delegation (the loud entry
  * `decisions/0002` requires before any authority is exercised), take the
  * generation delegation as embedded, read the user key from the credential's
  * standing roster wrap (no escrow -- a transient client never joins the
  * roster), and assemble the session on the replica-less remote-direct
- * storage posture, invoking as `<companionDid>#<vm>` under the delegation.
+ * storage posture, invoking as `<clientAnnexDid>#<vm>` under the delegation.
  *
  * Failure states are typed, not designed (the honest login copy over them is
  * a separate concern): each precondition refuses with
@@ -39,7 +39,7 @@ import {
   isWebvhDid,
   verifyAccountLog,
   webvhZcapClient,
-  type CompanionWriteStore
+  type ClientAnnexWriteStore
 } from '@interop/wallet-core/webvh'
 import {
   ensureUserKeyRoster,
@@ -77,11 +77,11 @@ import type { Session } from '@/types/auth'
  * - `remote-direct`: the partitioned CHAPI popup keeps its own posture.
  * - `no-standing`: the unlock record carries no standing authority (a plain
  *   pointer record -- pre-promotion, or bound before standing credentials).
- * - `no-delegated-clients`: a standing record without the companion-Space
+ * - `no-delegated-clients`: a standing record without the annex-Space
  *   sibling delegation (a recovery-code record, or one minted before the
  *   sibling existed).
  * - `unpromoted-account`: the account pointer names no did:webvh.
- * - `no-companion-generation`: the account document carries no
+ * - `no-clientAnnex-generation`: the account document carries no
  *   delegated-clients pointer, or the pointed generation's log is gone (a
  *   GC'd generation nothing re-minted).
  * - `no-generation-delegation`: the generation would need its delegation
@@ -94,7 +94,7 @@ export type TransientLoginUnavailableReason =
   | 'no-standing'
   | 'no-delegated-clients'
   | 'unpromoted-account'
-  | 'no-companion-generation'
+  | 'no-clientAnnex-generation'
   | 'no-generation-delegation'
   | 'no-user-key-roster'
 
@@ -220,22 +220,22 @@ export async function routeUnlockLogin({
 }
 
 /**
- * Wraps a companion write store so a generation whose log is gone surfaces
+ * Wraps an annex write store so a generation whose log is gone surfaces
  * as the typed refusal instead of a plain "did.jsonl is missing" error --
  * and BEFORE anything is written: the enrollment's first act is this read.
  *
- * @param store {CompanionWriteStore}
- * @returns {CompanionWriteStore}
+ * @param store {ClientAnnexWriteStore}
+ * @returns {ClientAnnexWriteStore}
  */
 function refuseMissingGeneration(
-  store: CompanionWriteStore
-): CompanionWriteStore {
+  store: ClientAnnexWriteStore
+): ClientAnnexWriteStore {
   return {
     async getIdResourceRaw(options) {
       const result = await store.getIdResourceRaw(options)
       if (result === undefined) {
         throw new TransientLoginUnavailableError({
-          reason: 'no-companion-generation',
+          reason: 'no-clientAnnex-generation',
           message:
             'The delegated-clients generation this account points at is ' +
             'not published (collected, or never minted).'
@@ -254,18 +254,18 @@ function refuseMissingGeneration(
  *    fetch): standing authority, the `delegatedClients` sibling, a promoted
  *    pointer.
  * 2. Verify the account log under the visit's in-memory pins and require the
- *    delegated-clients pointer (the current companion generation).
+ *    delegated-clients pointer (the current annex generation).
  * 3. Mint a per-visit key set in memory and enroll it into the generation
  *    through the sibling delegation, signed by the credential's static rung
  *    0 (`enrollTransientClient`; the GC-race re-read is built in). The
  *    generation delegation is taken as embedded -- a generation that would
  *    need one minted refuses instead (its mint takes a durable signer).
  * 4. Read the user key from the credential's STANDING roster wrap: the
- *    roster request signs as `<companionDid>#<vm>` under the generation
+ *    roster request signs as `<clientAnnexDid>#<vm>` under the generation
  *    delegation, and the unwrap uses the credential's own key-agreement key.
  *    Deliberately no escrow -- a transient client never joins the roster.
  * 5. Assemble the session on the replica-less storage posture
- *    (`initSessionFromSeed` with the transient option: companion signing,
+ *    (`initSessionFromSeed` with the transient option: annex signing,
  *    the delegation as `profile.invocationCapability`, no KMS, no second
  *    roster read, no sweeps).
  *
@@ -350,14 +350,14 @@ export async function transientSessionFromKeyringHit({
   // guard's narrowing of `pointer` does not reach.
   const accountSpaceId = pointer.spaceId
   const accountHost = pointer.host
-  const companionSpaceId = delegatedClientsDelegationSpaceId({
+  const clientAnnexSpaceId = delegatedClientsDelegationSpaceId({
     delegation: delegatedClients
   })
-  if (!companionSpaceId) {
+  if (!clientAnnexSpaceId) {
     throw new TransientLoginUnavailableError({
       reason: 'no-delegated-clients',
       message:
-        "The sibling delegation's target does not address a companion Space."
+        "The sibling delegation's target does not address an annex Space."
     })
   }
   const ladderSeed = standing.ladderSeed
@@ -374,20 +374,20 @@ export async function transientSessionFromKeyringHit({
   })
   if (!delegatedClientsPointer({ doc: verified.doc })) {
     throw new TransientLoginUnavailableError({
-      reason: 'no-companion-generation'
+      reason: 'no-clientAnnex-generation'
     })
   }
 
   // The per-visit key set: 32 random bytes, held in memory only. Its did:key
   // is the session identity (and any presentation's holder); only WAS
-  // invocations take the companion spelling.
+  // invocations take the annex spelling.
   const seed = crypto.getRandomValues(new Uint8Array(32))
   const { keyAgent } = await agentsFromSeed({ seed })
   const transientKeyMultibase = clientSigningKeyMultibase({ keyAgent })
 
   // The loud entry before any authority: the enrollment reads the account
   // document (re-verified through the same closure on the GC-race re-read),
-  // writes one atomic companion-log entry through the sibling delegation, and
+  // writes one atomic annex-log entry through the sibling delegation, and
   // hands back the generation document. A first read was just made, so the
   // closure serves it once and re-verifies thereafter.
   let firstDoc: typeof verified.doc | undefined = verified.doc
@@ -405,13 +405,13 @@ export async function transientSessionFromKeyringHit({
     })
     return verified.doc
   }
-  const { companionDid, doc: companionDoc } = await enrollTransientClient({
+  const { clientAnnexDid, doc: clientAnnexDoc } = await enrollTransientClient({
     readAccountDocument,
     storeForGenerationId: generationId =>
       refuseMissingGeneration(
         delegatedWebvhLogStore({
           host: pointer.host,
-          spaceId: companionSpaceId,
+          spaceId: clientAnnexSpaceId,
           collectionId: generationId,
           delegation: delegatedClients,
           zcapClient: found.standingClient.agents.zcapClient
@@ -432,7 +432,7 @@ export async function transientSessionFromKeyringHit({
     pinStore: persistence.logPins
   })
   const generationDelegation = embeddedGenerationDelegation({
-    doc: companionDoc
+    doc: clientAnnexDoc
   })
   if (!generationDelegation) {
     throw new TransientLoginUnavailableError({
@@ -441,10 +441,10 @@ export async function transientSessionFromKeyringHit({
   }
 
   // The user key, from the credential's standing roster wrap: the request
-  // signs with the companion spelling under the generation delegation, the
+  // signs with the annex spelling under the generation delegation, the
   // unwrap uses the credential's own key-agreement key, and no escrow runs
   // (the roster keys enrolled clients and standing credentials only).
-  const transientZcapClient = webvhZcapClient({ keyAgent, did: companionDid })
+  const transientZcapClient = webvhZcapClient({ keyAgent, did: clientAnnexDid })
   const rosterStore = userKeyRosterDescriptorStore({
     storageServerUrl: pointer.host,
     zcapClient: transientZcapClient,
@@ -496,7 +496,7 @@ export async function transientSessionFromKeyringHit({
     // key, land epoch[0] with a ladder-signed entry proof (the ceremony-tail
     // license's first-entry shape), wrapped to the credential's standing
     // key-agreement key, and complete the collection epochs -- every write
-    // invoked as the companion VM under the generation delegation, since the
+    // invoked as the annex VM under the generation delegation, since the
     // promoted Space answers to nothing else this session holds. Nothing
     // encrypted existed yet (the epoch gate in the ceremony guarantees it),
     // so the fresh key orphans nothing.
@@ -544,7 +544,7 @@ export async function transientSessionFromKeyringHit({
     email: email ?? found.email,
     persistence,
     transient: {
-      companionDid,
+      clientAnnexDid,
       invocationCapability: generationDelegation
     }
   })

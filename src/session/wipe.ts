@@ -70,11 +70,11 @@ export interface WipeTargets {
    */
   accountSpaceId?: string
   /**
-   * The auxiliary companion Space id, when the consumer's discovery found
+   * The auxiliary annex Space id, when the consumer's discovery found
    * one; its pin slots are cleared by prefix (one per generation, with the
    * generation ids possibly no longer listable).
    */
-  companionSpaceId?: string
+  clientAnnexSpaceId?: string
   /**
    * Every unlock method's unlock Space id, across the whole registry -- each
    * keys a local trio (keyring cache, client-key record, freshness pin).
@@ -90,26 +90,26 @@ export interface WipeTargets {
 
 /**
  * Derives the wipe targets from a live session, before anything is deleted.
- * The unlock-methods registry and the companion Space id are supplied by the
+ * The unlock-methods registry and the annex Space id are supplied by the
  * caller's own discovery (the registry rides in the data Space and the
- * companion behind the account document's pointer, so reading either is the
+ * annex behind the account document's pointer, so reading either is the
  * consumer's ceremony-specific step); absent, the affected families are
  * simply not enumerated -- best-effort narrowing, never a failure.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param [options.registry] {UnlockMethodsRecord | null}
- * @param [options.companionSpaceId] {string}
+ * @param [options.clientAnnexSpaceId] {string}
  * @returns {WipeTargets}
  */
 export function snapshotWipeTargets({
   session,
   registry,
-  companionSpaceId
+  clientAnnexSpaceId
 }: {
   session: Session
   registry?: UnlockMethodsRecord | null
-  companionSpaceId?: string
+  clientAnnexSpaceId?: string
 }): WipeTargets {
   const clientDid = session.user.id
   const accountSpaceId = session.profile.accountPointer?.spaceId
@@ -118,7 +118,7 @@ export function snapshotWipeTargets({
     dbPrefix: deriveSpaceId(clientDid),
     accountDid: session.profile.accountPointer?.did,
     accountSpaceId,
-    companionSpaceId,
+    clientAnnexSpaceId,
     unlockSpaceIds: (registry?.methods ?? []).map(entry => entry.unlockSpaceId),
     cacheScopes: [
       ...(accountSpaceId ? [accountSpaceId] : []),
@@ -201,9 +201,9 @@ export async function executeLocalWipe({
         await deleteAccountDidForSpace({ spaceId, idb })
       })
     }
-    if (targets.companionSpaceId) {
-      const spaceId = targets.companionSpaceId
-      await stage('companion-log-pins', async () => {
+    if (targets.clientAnnexSpaceId) {
+      const spaceId = targets.clientAnnexSpaceId
+      await stage('clientAnnex-log-pins', async () => {
         await deleteLogPinsForSpace({ spaceId, idb })
       })
     }

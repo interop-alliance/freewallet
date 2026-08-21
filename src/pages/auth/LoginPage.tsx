@@ -134,7 +134,7 @@ function loginErrorKey({
     return 'auth.errors.keyringUnusable'
   }
   // The transient login could not proceed here (a record without standing
-  // authority or a companion sibling, no live generation, an unpromoted
+  // authority or an annex sibling, no live generation, an unpromoted
   // account). Interim mapping onto the existing not-enrolled guidance --
   // connecting this browser durably is the one remedy every reason shares;
   // honest per-reason copy is a follow-up concern.

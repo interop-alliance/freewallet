@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const state = vi.hoisted(() => ({
   wasUrl: 'https://was.example.test' as string | undefined,
   calls: [] as string[],
-  // The companion strike-or-swap stage's seams: what the strike reports, and
+  // The annex strike-or-swap stage's seams: what the strike reports, and
   // whether either half throws.
   struck: true,
   strikeError: null as Error | null,
@@ -35,16 +35,16 @@ vi.mock('@interop/wallet-core/unlock', () => ({
 
 vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
-  companionLogStore: vi.fn(() => ({ isCompanionLogStore: true })),
-  retireCompanionRung: vi.fn(async () => {
-    state.calls.push('retireCompanionRung')
+  clientAnnexLogStore: vi.fn(() => ({ isClientAnnexLogStore: true })),
+  retireClientAnnexRung: vi.fn(async () => {
+    state.calls.push('retireClientAnnexRung')
     if (state.strikeError) {
       throw state.strikeError
     }
     return { struck: state.struck }
   }),
-  swapCompanionGeneration: vi.fn(async () => {
-    state.calls.push('swapCompanionGeneration')
+  swapClientAnnexGeneration: vi.fn(async () => {
+    state.calls.push('swapClientAnnexGeneration')
     if (state.swapError) {
       throw state.swapError
     }
@@ -94,11 +94,11 @@ vi.mock('@/session/verifiedLog', () => ({
 
 import { retireUnlockCredential } from '@interop/wallet-core/unlock'
 import {
-  companionLogPinId,
-  companionLogStore,
+  clientAnnexLogPinId,
+  clientAnnexLogStore,
   keyAgreementCommitment,
-  retireCompanionRung,
-  swapCompanionGeneration
+  retireClientAnnexRung,
+  swapClientAnnexGeneration
 } from '@interop/wallet-core/webvh'
 import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
 import { durableSessionPersistence } from '@/session/persistence'
@@ -146,7 +146,7 @@ const PASSKEY_METHOD = {
  * @param [options] {object}
  * @param [options.rotated] {boolean}   whether the roster rotated on this run
  * @param [options.document] {object}   the post-edit account document handed
- *   to the companion strike-or-swap stage; when given, that stage is driven
+ *   to the annex strike-or-swap stage; when given, that stage is driven
  *   the way the real ceremony's stage 1b drives it
  * @returns {Function}
  */
@@ -164,8 +164,8 @@ function ceremonyDriving({
         descriptor: ROSTER_DESCRIPTOR as never
       })
     }
-    const companion = document
-      ? await options.retireCompanionPosture?.({ document } as never)
+    const clientAnnex = document
+      ? await options.retireClientAnnexPosture?.({ document } as never)
       : undefined
     return {
       rotated,
@@ -176,7 +176,7 @@ function ceremonyDriving({
       document: document ?? { id: POINTER.did },
       userKey,
       rosterDescriptor: ROSTER_DESCRIPTOR,
-      ...(companion ? { companion } : {})
+      ...(clientAnnex ? { clientAnnex } : {})
     } as never
   }
 }
@@ -393,13 +393,13 @@ describe('the ceremony hand-off', () => {
     expect(session.profile.persistClientKeys).not.toHaveBeenCalled()
   })
 
-  it('leaves the companion stage out of the outcome when it reports nothing', async () => {
+  it('leaves the annex stage out of the outcome when it reports nothing', async () => {
     const outcome = await rotateOffUnlockCredential({
       session: sessionWith(),
       method: PASSPHRASE_METHOD,
       verb: 'changing the passphrase'
     })
-    expect(outcome).not.toHaveProperty('companion')
+    expect(outcome).not.toHaveProperty('clientAnnex')
   })
 
   it('propagates a failed ceremony, memo dropped either way', async () => {
@@ -418,21 +418,21 @@ describe('the ceremony hand-off', () => {
   })
 })
 
-describe('the companion strike-or-swap stage', () => {
+describe('the annex strike-or-swap stage', () => {
   const RETIRED_SEED = new Uint8Array(32).fill(3)
   const SURVIVING_SEED = new Uint8Array(32).fill(4)
-  const COMPANION_SPACE_ID = 'companion-space-1'
+  const CLIENT_ANNEX_SPACE_ID = 'clientAnnex-space-1'
   const GENERATION_ID = 'gen-Ux3v0kQf9aPmB2hZ'
-  const COMPANION_DID =
-    'did:webvh:QmCompanionScid:was.example.test:space:' +
-    `${COMPANION_SPACE_ID}:${GENERATION_ID}`
+  const CLIENT_ANNEX_DID =
+    'did:webvh:QmClientAnnexScid:was.example.test:space:' +
+    `${CLIENT_ANNEX_SPACE_ID}:${GENERATION_ID}`
 
   /**
    * The post-edit account document the ceremony's stage 1b hands over: with a
    * `#DelegatedClients` service entry, or without one.
    *
    * @param [options] {object}
-   * @param [options.pointed] {boolean}   carry the companion pointer
+   * @param [options.pointed] {boolean}   carry the annex pointer
    * @returns {object}
    */
   function accountDocument({ pointed = true } = {}): object {
@@ -444,7 +444,7 @@ describe('the companion strike-or-swap stage', () => {
               {
                 id: `${POINTER.did}#delegated-clients`,
                 type: 'https://w3id.org/byoe#DelegatedClients',
-                serviceEndpoint: COMPANION_DID
+                serviceEndpoint: CLIENT_ANNEX_DID
               }
             ]
           }
@@ -453,7 +453,7 @@ describe('the companion strike-or-swap stage', () => {
   }
 
   /**
-   * Runs the retirement with the companion stage driven, over a session and a
+   * Runs the retirement with the annex stage driven, over a session and a
    * method carrying the given ladder seeds.
    *
    * @param [options] {object}
@@ -494,27 +494,27 @@ describe('the companion strike-or-swap stage', () => {
       survivingLadderSeed: SURVIVING_SEED
     })
 
-    expect(outcome?.companion).toEqual({ action: 'struck' })
-    expect(vi.mocked(retireCompanionRung)).toHaveBeenCalledWith(
+    expect(outcome?.clientAnnex).toEqual({ action: 'struck' })
+    expect(vi.mocked(retireClientAnnexRung)).toHaveBeenCalledWith(
       expect.objectContaining({
-        store: { isCompanionLogStore: true },
+        store: { isClientAnnexLogStore: true },
         retiredLadderSeed: RETIRED_SEED,
         actingLadderSeed: SURVIVING_SEED,
         generationId: GENERATION_ID,
-        expectedDid: COMPANION_DID,
-        logId: companionLogPinId({
-          spaceId: COMPANION_SPACE_ID,
+        expectedDid: CLIENT_ANNEX_DID,
+        logId: clientAnnexLogPinId({
+          spaceId: CLIENT_ANNEX_SPACE_ID,
           generationId: GENERATION_ID
         })
       })
     )
-    expect(vi.mocked(companionLogStore)).toHaveBeenCalledWith(
+    expect(vi.mocked(clientAnnexLogStore)).toHaveBeenCalledWith(
       expect.objectContaining({
-        spaceId: COMPANION_SPACE_ID,
+        spaceId: CLIENT_ANNEX_SPACE_ID,
         generationId: GENERATION_ID
       })
     )
-    expect(vi.mocked(swapCompanionGeneration)).not.toHaveBeenCalled()
+    expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
   })
 
   it('reports a generation the retired credential never wrote as clean', async () => {
@@ -523,12 +523,12 @@ describe('the companion strike-or-swap stage', () => {
       retiredLadderSeed: RETIRED_SEED,
       survivingLadderSeed: SURVIVING_SEED
     })
-    expect(outcome?.companion).toEqual({ action: 'clean' })
+    expect(outcome?.clientAnnex).toEqual({ action: 'clean' })
   })
 
   it('falls through to a generation swap when no rung can sign the strike', async () => {
     const uncommitted = new Error('rung 0 is not committed')
-    uncommitted.name = 'CompanionRungUncommittedError'
+    uncommitted.name = 'ClientAnnexRungUncommittedError'
     state.strikeError = uncommitted
 
     const outcome = await retire({
@@ -536,9 +536,9 @@ describe('the companion strike-or-swap stage', () => {
       survivingLadderSeed: SURVIVING_SEED
     })
 
-    expect(outcome?.companion).toEqual({ action: 'swapped' })
-    expect(state.calls).toContain('retireCompanionRung')
-    expect(vi.mocked(swapCompanionGeneration)).toHaveBeenCalledWith(
+    expect(outcome?.clientAnnex).toEqual({ action: 'swapped' })
+    expect(state.calls).toContain('retireClientAnnexRung')
+    expect(vi.mocked(swapClientAnnexGeneration)).toHaveBeenCalledWith(
       expect.objectContaining({
         accountSpaceId: POINTER.spaceId,
         wasServerUrl: POINTER.host,
@@ -553,28 +553,28 @@ describe('the companion strike-or-swap stage', () => {
       retiredLadderSeed: RETIRED_SEED,
       sessionLadderSeed: SURVIVING_SEED
     })
-    expect(vi.mocked(retireCompanionRung)).toHaveBeenCalledWith(
+    expect(vi.mocked(retireClientAnnexRung)).toHaveBeenCalledWith(
       expect.objectContaining({ actingLadderSeed: SURVIVING_SEED })
     )
   })
 
-  it('skips with no-pointer when the document names no companion', async () => {
+  it('skips with no-pointer when the document names no annex', async () => {
     const outcome = await retire({
       retiredLadderSeed: RETIRED_SEED,
       survivingLadderSeed: SURVIVING_SEED,
       pointed: false
     })
-    expect(outcome?.companion).toEqual({
+    expect(outcome?.clientAnnex).toEqual({
       action: 'skipped',
       reason: 'no-pointer'
     })
-    expect(vi.mocked(retireCompanionRung)).not.toHaveBeenCalled()
-    expect(vi.mocked(swapCompanionGeneration)).not.toHaveBeenCalled()
+    expect(vi.mocked(retireClientAnnexRung)).not.toHaveBeenCalled()
+    expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
   })
 
   it('skips with no-ladder-seed when no seed survives the retirement', async () => {
     const outcome = await retire({ retiredLadderSeed: RETIRED_SEED })
-    expect(outcome?.companion).toEqual({
+    expect(outcome?.clientAnnex).toEqual({
       action: 'skipped',
       reason: 'no-ladder-seed'
     })
@@ -586,23 +586,23 @@ describe('the companion strike-or-swap stage', () => {
       survivingLadderSeed: new Uint8Array(32).fill(3),
       sessionLadderSeed: new Uint8Array(32).fill(3)
     })
-    expect(sameBytes?.companion).toEqual({
+    expect(sameBytes?.clientAnnex).toEqual({
       action: 'skipped',
       reason: 'no-ladder-seed'
     })
-    expect(vi.mocked(retireCompanionRung)).not.toHaveBeenCalled()
-    expect(vi.mocked(swapCompanionGeneration)).not.toHaveBeenCalled()
+    expect(vi.mocked(retireClientAnnexRung)).not.toHaveBeenCalled()
+    expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
   })
 
   it('swaps outright when the retired credential has no seed in hand', async () => {
     const outcome = await retire({ survivingLadderSeed: SURVIVING_SEED })
-    expect(vi.mocked(retireCompanionRung)).not.toHaveBeenCalled()
-    expect(outcome?.companion).toEqual({ action: 'swapped' })
+    expect(vi.mocked(retireClientAnnexRung)).not.toHaveBeenCalled()
+    expect(outcome?.clientAnnex).toEqual({ action: 'swapped' })
   })
 
   it('reports a hard failure as skipped, the rotation still done', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    state.strikeError = new Error('companion log unreachable')
+    state.strikeError = new Error('annex log unreachable')
 
     const outcome = await retire({
       retiredLadderSeed: RETIRED_SEED,
@@ -612,11 +612,11 @@ describe('the companion strike-or-swap stage', () => {
     // Best-effort by the ceremony's contract: the roster rotation -- the
     // retirement's essential remedy -- still ran.
     expect(outcome?.rotated).toBe(true)
-    expect(outcome?.companion).toEqual({
+    expect(outcome?.clientAnnex).toEqual({
       action: 'skipped',
       reason: 'failed'
     })
-    expect(vi.mocked(swapCompanionGeneration)).not.toHaveBeenCalled()
+    expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
     warn.mockRestore()
   })
 
@@ -624,7 +624,7 @@ describe('the companion strike-or-swap stage', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     state.swapError = new Error('log conflict')
     const outcome = await retire({ survivingLadderSeed: SURVIVING_SEED })
-    expect(outcome?.companion).toEqual({
+    expect(outcome?.clientAnnex).toEqual({
       action: 'skipped',
       reason: 'failed'
     })

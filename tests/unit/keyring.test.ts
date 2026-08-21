@@ -2380,9 +2380,9 @@ describe('standing unlock records (FW-154)', () => {
 
   const DELEGATED_CLIENTS = {
     '@context': 'https://w3id.org/zcap/v1',
-    id: 'urn:uuid:standing-companion-delegation',
+    id: 'urn:uuid:standing-clientAnnex-delegation',
     controller: 'did:key:z6MkStandingClientForTests',
-    invocationTarget: 'https://was.example.test/space/companion-123/',
+    invocationTarget: 'https://was.example.test/space/clientAnnex-123/',
     allowedAction: ['GET', 'PUT'],
     expires: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
     parentCapability: 'urn:zcap:root:y',
@@ -2427,7 +2427,7 @@ describe('standing unlock records (FW-154)', () => {
     expect(found!.rebindStandingRecord).toBeDefined()
   })
 
-  it('round-trips the companion-Space sibling delegation (FW-194)', async () => {
+  it('round-trips the annex-Space sibling delegation (FW-194)', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
       clientSeed: randomSeed(),

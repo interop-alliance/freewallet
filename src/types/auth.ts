@@ -21,7 +21,7 @@ import type {
 import type { UserKey } from '@interop/wallet-core/keys'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
-import type { CompanionGcReport } from '@interop/wallet-core/webvh'
+import type { ClientAnnexGcReport } from '@interop/wallet-core/webvh'
 import type { UserKeyCascadeResult } from '@/session/userKeyCascade'
 import type { VerifiedLogCache } from '@/session/verifiedLog'
 import type { SessionPersistence } from '@/session/persistence'
@@ -135,9 +135,9 @@ export interface ControllerProfile {
     manageCapability?: IZcap
   }
   // The login credential's ladder seed, from its unlock record's standing
-  // members. Companion log entries are signed by the credential's static
+  // members. Client annex log entries are signed by the credential's static
   // rung 0 (derived from this seed and the generation id), so the ceremonies
-  // that write the companion mid-session -- the revocation cascade's
+  // that write the annex mid-session -- the revocation cascade's
   // generation-delegation re-mint and the rotation's strike-or-swap -- read
   // it from here. In-memory only, same trust class as `clientSeed`; absent
   // for guests and for records without standing authority.
@@ -205,13 +205,13 @@ export interface Session {
   // sweep itself failed (it never rejects) -- and absent on the flows that
   // own their own provisioning.
   appKeySweep?: Promise<number | null>
-  // The companion GC sweep fired by the keyring logins: the quarterly
+  // The annex GC sweep fired by the keyring logins: the quarterly
   // generation swap (when due and the pointed generation is GC-quiet) plus
   // the collect fan-out over every non-pointed `gen-` collection. Chained
   // behind `storageReady` (durable sessions only), strictly best-effort --
   // resolves wallet-core's per-pass report, or `null` when the session
   // cannot run it or the pass itself failed (it never rejects).
-  companionGcSweep?: Promise<CompanionGcReport | null>
+  clientAnnexGcSweep?: Promise<ClientAnnexGcReport | null>
   // Set when the login's roster read adopted a rotated user key (or advanced
   // the epoch pin) but the durable local copy -- the client-key record or the
   // epoch pin -- could not be written. The session itself is fine (it runs on

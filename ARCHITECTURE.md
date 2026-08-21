@@ -108,10 +108,10 @@ and latent self-enrollment authority -- its record carries a pre-minted
 PUT-on-`did.jsonl` bridge delegation and a random update-key ladder seed
 (`@interop/wallet-core/unlock`; the bind-time establishment is
 `src/session/standingUnlock.ts`, run at signup and at every
-add/change-method ceremony). When the account points at a companion
+add/change-method ceremony). When the account points at a client annex
 generation, the establishment also appends one atomic hash-restating
-companion commit entry adding the new credential's rung-0 hash, signed by
-the login credential's committed rung (`commitCompanionRung` -- the bind
+annex commit entry adding the new credential's rung-0 hash, signed by
+the login credential's committed rung (`commitClientAnnexRung` -- the bind
 half of the mid-generation lockout hybrid; without it the fresh credential
 could not enter the transient posture until the next generation swap).
 Best-effort: an acting rung the generation does not commit is the honest
@@ -215,16 +215,16 @@ shared sequence is wallet-core's `retireUnlockCredential`
 credential's document posture leaves first (its `keyAgreement` entry --
 commitment or verbatim -- and its ladder's whole standing footprint, resolved
 from the log itself rather than from the registry's recorded bind-time rung,
-in one log entry), then the credential's companion posture (between the
-document edit and the roster tail, wallet-core's `retireCompanionPosture`
-closure): a strike entry on the companion log drops the retired
+in one log entry), then the credential's annex posture (between the
+document edit and the roster tail, wallet-core's `retireClientAnnexPosture`
+closure): a strike entry on the annex log drops the retired
 credential's revealed rung and standing hash when a distinct surviving
 credential's committed rung can sign it, and otherwise -- a self-strike, or
 no committed survivor -- the whole generation is swapped onto a surviving
-credential's ladder (`swapCompanionGeneration`), the old generation left to
-orphan discovery. A passphrase change signs with the NEW credential's
+credential's ladder (`swapClientAnnexGeneration`), the old generation left
+to orphan discovery. A passphrase change signs with the NEW credential's
 ladder seed (`survivingLadderSeed`); the stage is best-effort and reports
-itself on the outcome's `companion` member. Then the same
+itself on the outcome's `clientAnnex` member. Then the same
 roster-and-cascade tail the client revocation runs --
 the user key rotates off the credential's wrap (pairing-free convergence
 onto the post-edit document) and every encrypted collection re-epochs onto
@@ -366,11 +366,11 @@ DID is persisted locally keyed by the data Space id only so a later
 pre-promotion heal login can state an `expectedDid` even though the pointer
 has not caught up. Account deletion clears all of it through the shared
 wipe enumeration (below) beside the keyring retirement. Deletion also
-reaches every unlock method and the companion before the account Space
+reaches every unlock method and the client annex before the account Space
 dies: it walks the unlock-methods registry and deletes each entry's unlock
 Space and local trio best-effort (`deleteUnlockMethodArtifacts` in
 `src/session/unlockMethods.ts` -- removing the dangling existence-oracle
-Spaces a probe could still find), then deletes the auxiliary companion
+Spaces a probe could still find), then deletes the auxiliary annex
 Space in one `space.delete()`. Both run BEFORE the fatal wipe, because
 resolving the auxiliary Space's controller reads the account log out of
 the account Space; a wipe failure after them leaves other methods' logins
@@ -388,7 +388,7 @@ browser's own client did:key, never the account controller; each unlock
 method's local trio (keyring cache, client-key record, freshness pin) from
 the registry walked across every method; the epoch pin from the account
 DID; the chain-head pin slots by Space-scoped prefix, which also clears
-every companion generation's slot without needing the generation ids; the
+every annex generation's slot without needing the generation ids; the
 Space-to-DID mapping; and the per-account localStorage families (the
 descriptor and meta caches under both scope schemes, and the migration
 markers). Cross-tab teardown precedes the replica delete (a broadcast asks
@@ -473,7 +473,7 @@ enrollment. The ordering rule is the transposed persist-before-publish
 invariant: the unlock record carrying the ladder seed (with an interim
 bridge delegated by the ladder's bare did:key) is durably written BEFORE the
 Space is created and before rung 0 publishes. After the genesis, the
-establishment mints the companion generation under the same bootstrap
+establishment mints the client annex generation under the same bootstrap
 identity, embeds the ladder-VM-signed generation delegation, flips the
 auxiliary Space's controller, appends the `#DelegatedClients` pointer as a
 second rung-0-signed account-log entry, re-binds the record (full pointer,
@@ -556,18 +556,19 @@ browser refuses (`AlreadyRememberedError`) rather than forking postures.
 The composition (`transientSessionFromKeyringHit`): the transient
 unlock-record fetch (`fetchTransientKeyring`, no durable operation), the
 account log verified under the visit's in-memory pins, a per-visit key
-minted in memory and enrolled into the companion generation through the
+minted in memory and enrolled into the client annex generation through the
 record's `delegatedClients` sibling delegation (wallet-core's
-`enrollTransientClient` -- the loud entry before any authority, with the
-GC-race re-read built in), the generation delegation taken as embedded
-(never minted from here -- its mint takes a durable signer), the user key
-unwrapped from the credential's standing roster wrap (the read signs as
-`<companionDid>#<vm>` under the delegation; no escrow -- a transient
-client never joins the roster), and a session on the replica-less storage
-posture above. Transient sessions skip the KMS keystore, the login-time
-roster read, provisioning, and every login-time sweep. Every unavailable
-state -- a record without standing authority or the sibling, an
-unpromoted account, no live generation or embedded delegation, no roster
+`enrollClientAnnexTransientClient` -- the loud entry before any authority,
+with the GC-race re-read built in), the generation delegation taken as
+embedded (never minted from here -- its mint takes a durable signer), the
+user key unwrapped from the credential's standing roster wrap (the read
+signs as `<clientAnnexDid>#<vm>` under the delegation; no escrow -- a
+transient client never joins the roster), and a session on the
+replica-less storage posture above. Transient sessions skip the KMS
+keystore, the login-time roster read, provisioning, and every login-time
+sweep. Every unavailable state -- a record without standing authority or
+the sibling, an unpromoted account, no live generation or embedded
+delegation, no roster
 -- refuses with a typed `TransientLoginUnavailableError` before any
 ceremony byte is written (the login page maps it onto the not-enrolled
 guidance for now), and network errors rethrow unchanged so a flap stays
@@ -587,7 +588,7 @@ genesis and epoch[0] -- the user key died with the signup tab -- healed
 here as the explicit carve-out from the sweeps-skipped rule: a fresh user
 key is minted, epoch[0] lands with a ladder-signed entry proof wrapped to
 the credential's standing KAK, and the collection epochs complete, every
-write invoked as the companion VM under the generation delegation (the
+write invoked as the annex VM under the generation delegation (the
 `capability` option on `ensureWalletSpaceEpochs` and the roster store).
 Nothing encrypted predates the heal (the ceremony installs collection
 epochs only behind a landed roster), so the fresh key orphans nothing. A
@@ -888,8 +889,8 @@ code's posture, retires every standing ladder VM (the stale-third-party
 retirement no other ceremony performs), and the account lands client-less
 and ladder-anchored. Inside the continuation's persist-before-publish seam
 (after the reveal entry validates the code, before the ladder VM publishes)
-the ceremony mints a fresh companion generation under the new ladder's
-bootstrap did:key (a recovery record carries no companion sibling, so the
+the ceremony mints a fresh annex generation under the new ladder's
+bootstrap did:key (a recovery record carries no annex sibling, so the
 old generation is unreachable and falls to orphan discovery) and durably
 writes the new passphrase's unlock record (ladder seed inside, bridge and
 sibling ladder-VM-signed) and the replacement code's record -- so a tab
@@ -1749,7 +1750,7 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   flow".
 - **Bridge delegation** — the pre-minted, narrowly scoped zcap carried
   inside an unlock or recovery record beside the account pointer: a
-  PUT-on-`did.jsonl` capability (plus companion-log access where that
+  PUT-on-`did.jsonl` capability (plus annex-log access where that
   applies) that is a credential's only bridge into the zcap profile. The
   narrow scope is what keeps credential use loud: the only thing the bridge
   can do is extend the world-readable log. Re-minted by the revocation
@@ -1775,21 +1776,24 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   independently, and wraps are minted only against log-verified keys).
 - **Loudness** — the design property that any exercise of
   credential-derived authority must first extend a hash-chained, auditable
-  log (the account log, or the companion log) before it can read or grant
+  log (the account log, or the annex log) before it can read or grant
   anything. The security stance it enables is detect-and-remediate rather
   than prevent: takeover with a phished credential is visible in the log
   and remediable by rotation, not prevented by a second-device gate. A
   mechanism "fails loudness" when it would let a credential exercise
   authority with no world-visible record.
-- **Companion** (design stage, not yet implemented) — the transient-session
-  counterpart of an enrolled client for the public-computer posture: a
-  did:webvh whose log lives in a capability-gated sibling collection of the
-  account Space, recording per-visit transient verification methods in
-  GC'd **generations** instead of permanent account-log entries. Transient
-  keys invoke as `<companionDid>#<vm>`; the companion never appears in the
-  account document.
-- **Generation delegation** (design stage, not yet implemented) — the one
-  Space-scoped zcap per companion generation, delegated to the companion
+- **Client annex** (`clientAnnex`) — the transient-session counterpart of
+  an enrolled client for the public-computer posture: a did:webvh whose log
+  lives in a capability-gated auxiliary Space beside the account Space,
+  recording per-visit transient verification methods in GC'd
+  **generations** instead of permanent account-log entries. "The annex" is
+  the short form in prose, the way "the document" is for the account
+  document. The split to keep in mind: enrolled clients live in the account
+  document; delegated and transient clients live in the client annex.
+  Transient keys invoke as `<clientAnnexDid>#<vm>`, and the annex itself
+  never appears in the account document.
+- **Generation delegation** — the one Space-scoped zcap per annex
+  generation, delegated to the annex
   DID by the durable client that mints the generation (or by the ladder VM
   while the account has no durable client). Transient keys invoke under it,
   and an App Connect grant from a transient session chains one deeper

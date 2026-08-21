@@ -1073,8 +1073,8 @@ export async function sessionDatabaseExists({
 /**
  * Deletes every session-store key that starts with `prefix`, in one
  * transaction. The scan-then-delete shape exists for the key families whose
- * member keys a wipe cannot enumerate exactly -- the companion generations'
- * chain-head pin slots (`log-head/space/<companionSpaceId>/...`, one slot
+ * member keys a wipe cannot enumerate exactly -- the annex generations'
+ * chain-head pin slots (`log-head/space/<clientAnnexSpaceId>/...`, one slot
  * per generation, with the generation ids gone once the auxiliary Space is)
  * -- and it is deliberately scoped by a caller-supplied prefix so a wipe
  * never crosses into another account's families.
@@ -1089,8 +1089,8 @@ export async function sessionDatabaseExists({
  * wallet-core derives every slot key as
  * `space/<spaceId>/<collectionId>/<resourceId>` (`resourceLogPinId`), so the
  * `log-head/space/<spaceId>/` prefix covers the account Space's two slots
- * (account log and roster log) and, applied to the auxiliary companion
- * Space's id, every companion generation's slot -- including ones whose
+ * (account log and roster log) and, applied to the auxiliary annex
+ * Space's id, every annex generation's slot -- including ones whose
  * generation ids are no longer listable because the Space is already gone.
  *
  * @param options {object}

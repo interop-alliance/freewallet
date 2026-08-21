@@ -11,7 +11,7 @@ import type { IZcap } from '@interop/data-integrity-core'
 import { WasClient } from '@interop/was-client'
 import {
   accountLogPinId,
-  companionDidParts,
+  clientAnnexDidParts,
   delegatedClientsPointer,
   isWebvhDid,
   rotateWebvhUpdateKey
@@ -206,8 +206,8 @@ export async function changeAccountPassphrase({
     email: session.user.email,
     credential: newCredential
   })
-  // The session's companion-writing seed follows the live credential: the
-  // old passphrase's seed is being retired, so mid-session companion writes
+  // The session's annex-writing seed follows the live credential: the
+  // old passphrase's seed is being retired, so mid-session annex writes
   // (the revocation cascade's re-mint, a later rotation's strike) must sign
   // as the new one.
   if (newLadderSeed) {
@@ -230,7 +230,7 @@ export async function changeAccountPassphrase({
         // holds every rung a priori rather than walking from the recorded one.
         ...(oldLadderSeed ? { ladderSeed: oldLadderSeed } : {})
       },
-      // The new credential's seed survives the retirement; the companion
+      // The new credential's seed survives the retirement; the annex
       // strike-or-swap stage signs (or re-mints the generation) with it,
       // never with the retired seed.
       ...(newLadderSeed ? { survivingLadderSeed: newLadderSeed } : {}),
@@ -728,7 +728,7 @@ export type AccountDeletionResult = 'wrong-passphrase' | 'failed' | 'deleted'
  * not delete data (guests have no keyring, so this is skipped);
  * (a2) snapshot what only the live account can still answer: the
  * unlock-methods registry (it lives in the data Space the wipe destroys) and
- * the auxiliary companion Space's id and `gen-` collection listing (found
+ * the auxiliary annex Space's id and `gen-` collection listing (found
  * through the account document's delegated-clients pointer);
  * (b0) walk the registry and delete EVERY unlock method's server-side
  * artifacts -- its unlock Space, and with it the sealed bridge and
@@ -736,10 +736,10 @@ export type AccountDeletionResult = 'wrong-passphrase' | 'failed' | 'deleted'
  * best-effort per entry: this is what removes the dangling existence-oracle
  * Spaces a probe could still find after the account is gone (an entry
  * recording no management capability keeps its Space, stated residue);
- * (b1) tear down the auxiliary companion Space beside the account Space --
+ * (b1) tear down the auxiliary annex Space beside the account Space --
  * one recursive Space delete, run BEFORE the data-Space wipe because the
  * server resolves the auxiliary Space's did:webvh controller by reading the
- * account log out of the account Space -- and drop the companion chain-head
+ * account log out of the account Space -- and drop the annex chain-head
  * pin slots for every generation the listing named; warn-only, and a failure
  * leaves an orphan the server can identify by its `DelegatedClientsSpace`
  * type;
@@ -750,7 +750,7 @@ export type AccountDeletionResult = 'wrong-passphrase' | 'failed' | 'deleted'
  * orphaned unrecoverably; non-fatal, since the data is already gone;
  * (w) run the shared wipe enumeration (`src/session/wipe.ts`) over the
  * targets snapshotted at (a2): every unlock method's local trio, the pins
- * (companion slots by prefix), the Space-keyed bookkeeping, the
+ * (annex slots by prefix), the Space-keyed bookkeeping, the
  * unlock-methods cache, the replica databases, and the per-account
  * localStorage families -- a surviving replica is the one fatal stage.
  *
@@ -806,7 +806,7 @@ export async function deleteAccount({
   // the account document's pointer. Both best-effort -- an unreadable
   // registry or log narrows the teardown, never blocks the deletion.
   let registry: UnlockMethodsRecord | null = null
-  let companion: { was: WasClient; spaceId: string } | undefined
+  let clientAnnex: { was: WasClient; spaceId: string } | undefined
   // The Storage Access seam: a session begun from the CHAPI popup carries the
   // unpartitioned factory here, so every session-database delete below lands
   // in the first-party bucket the records actually live in.
@@ -832,19 +832,19 @@ export async function deleteAccount({
         })
         const pointedDid = delegatedClientsPointer({ doc })
         if (pointedDid !== undefined) {
-          const companionSpaceId = companionDidParts({
+          const clientAnnexSpaceId = clientAnnexDidParts({
             did: pointedDid
           }).spaceId
           const was = new WasClient({
             serverUrl: pointer.host,
             zcapClient: session.profile.zcapClient
           })
-          companion = { was, spaceId: companionSpaceId }
+          clientAnnex = { was, spaceId: clientAnnexSpaceId }
         }
       }
     } catch (err) {
       console.warn(
-        'Could not locate the auxiliary companion Space for deletion:',
+        'Could not locate the auxiliary annex Space for deletion:',
         err
       )
     }
@@ -865,19 +865,19 @@ export async function deleteAccount({
       }
     }
 
-    // (b1) The auxiliary companion Space, before the account Space: its
+    // (b1) The auxiliary annex Space, before the account Space: its
     // controller is the account did:webvh, which the server resolves by
     // reading the account log out of the account Space -- once that is
     // wiped, no authority can reach the auxiliary Space again. One recursive
     // delete covers the generation collections and the embedded delegations;
-    // the companion chain-head pin slots are cleared by the shared wipe
+    // the annex chain-head pin slots are cleared by the shared wipe
     // enumeration below (by prefix, so they go even when this delete fails).
-    if (companion) {
+    if (clientAnnex) {
       try {
-        await companion.was.space(companion.spaceId).delete()
+        await clientAnnex.was.space(clientAnnex.spaceId).delete()
       } catch (err) {
         console.warn(
-          'Could not tear down the auxiliary companion Space; it survives ' +
+          'Could not tear down the auxiliary annex Space; it survives ' +
             'as a typed orphan:',
           err
         )
@@ -889,7 +889,7 @@ export async function deleteAccount({
   const targets = snapshotWipeTargets({
     session,
     registry,
-    companionSpaceId: companion?.spaceId
+    clientAnnexSpaceId: clientAnnex?.spaceId
   })
   // (b) Wipe the remote data Space. On failure keep the old semantics:
   // surface the error, do not log out (the data is still there).

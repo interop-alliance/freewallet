@@ -1,12 +1,12 @@
 /**
- * The companion GC sweep: the login-time driver of wallet-core's
- * `runCompanionGc` -- the quarterly generation swap plus the predicate-driven
+ * The client annex GC sweep: the login-time driver of wallet-core's
+ * `runClientAnnexGc` -- the quarterly generation swap plus the predicate-driven
  * collect fan-out over every non-pointed `gen-` collection (see the module
  * header there for the ceremony's stage order and constraints). This module
  * supplies what only a freewallet session knows: the enrolled-client
  * preconditions, the verified-log memo, the durable pin store, the
  * GenerationCollect digest write (through the storage facade, id = the
- * generation id verbatim), and the local companion pin-slot cleanup after a
+ * generation id verbatim), and the local annex pin-slot cleanup after a
  * generation's delete.
  *
  * Durable sessions only, best-effort, and resumable: the caller chains it
@@ -16,13 +16,13 @@
  */
 import { WasClient } from '@interop/was-client'
 import {
-  companionDidParts,
-  companionLogPinId,
+  clientAnnexDidParts,
+  clientAnnexLogPinId,
   delegatedClientsPointer,
   isWebvhDid,
-  runCompanionGc
+  runClientAnnexGc
 } from '@interop/wallet-core/webvh'
-import type { CompanionGcReport } from '@interop/wallet-core/webvh'
+import type { ClientAnnexGcReport } from '@interop/wallet-core/webvh'
 import { deleteLogPin } from '@/lib/sessionKey'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import { isDurableSession } from '@/session/persistence'
@@ -33,7 +33,7 @@ import {
 import type { Session } from '@/types/auth'
 
 /**
- * One companion GC pass for a live durable session. Resolves null when the
+ * One annex GC pass for a live durable session. Resolves null when the
  * session cannot run it (not durable, not an enrolled did:webvh account) --
  * the same silent-skip posture as the other login-time sweeps -- and
  * otherwise returns wallet-core's per-pass report. A pass that swapped the
@@ -45,15 +45,15 @@ import type { Session } from '@/types/auth'
  * @param [options.ladderSeed] {Uint8Array}   the login credential's ladder
  *   seed, from its unlock record; absent, a due swap is skipped and only the
  *   collect fan-out runs
- * @returns {Promise<CompanionGcReport | null>}
+ * @returns {Promise<ClientAnnexGcReport | null>}
  */
-export async function sweepCompanionGenerations({
+export async function sweepClientAnnexGenerations({
   session,
   ladderSeed
 }: {
   session: Session
   ladderSeed?: Uint8Array
-}): Promise<CompanionGcReport | null> {
+}): Promise<ClientAnnexGcReport | null> {
   const persistence = session.profile.persistence
   if (!persistence || !isDurableSession(persistence)) {
     return null
@@ -73,18 +73,18 @@ export async function sweepCompanionGenerations({
   })
   const pointedDid = delegatedClientsPointer({ doc })
   if (pointedDid === undefined) {
-    // No companion posture on this account: nothing to swap, and no
+    // No annex posture on this account: nothing to swap, and no
     // auxiliary Space to list orphans in.
     return null
   }
-  const companionSpaceId = companionDidParts({ did: pointedDid }).spaceId
+  const clientAnnexSpaceId = clientAnnexDidParts({ did: pointedDid }).spaceId
 
   const idbFactory = persistence.idb
   const was = new WasClient({
     serverUrl: pointer.host,
     zcapClient: session.profile.zcapClient
   })
-  const report = await runCompanionGc({
+  const report = await runClientAnnexGc({
     was,
     wasServerUrl: pointer.host,
     accountSpaceId: pointer.spaceId,
@@ -104,7 +104,10 @@ export async function sweepCompanionGenerations({
       // the slot key is generation-scoped and generation ids are never
       // reused, so a leftover slot would only ever be dead weight.
       await deleteLogPin({
-        logId: companionLogPinId({ spaceId: companionSpaceId, generationId }),
+        logId: clientAnnexLogPinId({
+          spaceId: clientAnnexSpaceId,
+          generationId
+        }),
         ...(idbFactory !== undefined ? { idb: idbFactory } : {})
       })
     },

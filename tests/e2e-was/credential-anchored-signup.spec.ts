@@ -9,7 +9,7 @@
  *
  * The second test is the standing-credential proof: a SECOND cold terminal
  * reaches the same account with nothing but the passphrase -- the ordinary
- * default transient login, riding the companion generation and the roster
+ * default transient login, riding the annex generation and the roster
  * wrap the signup itself established -- and reads back the credential the
  * signup visit stored.
  */
@@ -74,7 +74,7 @@ test.describe.serial('credential-anchored signup', () => {
     const { context, page } = await coldTerminal(browser)
     try {
       // The ordinary default transient login -- deliberately no remember
-      // seam: the signup's establishment (standing record, companion
+      // seam: the signup's establishment (standing record, annex
       // generation, roster wrap) is exactly what makes this work.
       await page.goto('/#/login')
       const baseline = await captureLocalStorageKeys({ page })

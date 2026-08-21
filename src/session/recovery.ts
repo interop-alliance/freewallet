@@ -74,7 +74,7 @@ import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
   accountLogPinId,
   clientSigningKeyMultibase,
-  companionLogStore,
+  clientAnnexLogStore,
   delegatedWebvhLogStore,
   delegationKeyInDocument,
   didKeyZcapClient,
@@ -87,7 +87,7 @@ import {
   ladderVmAgent,
   ladderVmZcapClient,
   mintClientWebvhUpdateKeys,
-  mintCredentialCompanionGeneration,
+  mintCredentialClientAnnexGeneration,
   mintDelegatedClientsDelegation,
   mintGenerationDelegation,
   updateKeyMultibase,
@@ -1120,8 +1120,8 @@ export async function recoverAccountWithCode({
  *
  * 1. Inside the continuation's `onCommitted` seam (after the reveal entry
  *    validates the code, BEFORE the add entry publishes the ladder VM): a
- *    fresh companion generation is minted under the new ladder's bootstrap
- *    did:key (a recovery record carries no companion sibling, so the old
+ *    fresh annex generation is minted under the new ladder's bootstrap
+ *    did:key (a recovery record carries no annex sibling, so the old
  *    auxiliary Space is unreachable; the old generation falls to orphan
  *    discovery), its delegation embedded and its Space's controller flipped;
  *    then the new credential's bridge and sibling (ladder-VM-signed), the new
@@ -1138,7 +1138,7 @@ export async function recoverAccountWithCode({
  *    append anchored at the add-and-retire entry (the ceremony-tail license's
  *    one shot): the spent code retired, the fresh credential and the
  *    replacement code escrowed, the fresh epoch minted -- invoked as the
- *    companion VM under the generation delegation, the only authority this
+ *    annex VM under the generation delegation, the only authority this
  *    visit holds over the promoted Space.
  * 4. The epoch cascade and the registry update (spent entry out, replacement
  *    and new-passphrase entries in, re-sealed to the rotated user key) ride
@@ -1213,8 +1213,8 @@ async function recoverAccountTransient({
   })
 
   // Filled by the `onCommitted` seam, consumed by the tail below.
-  let companionSpaceId: string | undefined
-  let companionDid: string | undefined
+  let clientAnnexSpaceId: string | undefined
+  let clientAnnexDid: string | undefined
   let bridge: IZcap | undefined
   let sibling: IZcap | undefined
   let newRecordBind:
@@ -1246,41 +1246,41 @@ async function recoverAccountTransient({
     // the ladder VM the seed backs. Idempotent -- a conflict retry re-invokes
     // it, converging on the same generation and re-writing the records.
     onCommitted: async () => {
-      // The fresh companion generation, minted once per run (a retry reuses
+      // The fresh annex generation, minted once per run (a retry reuses
       // it): genesis under the bootstrap did:key self-commits the fresh
       // credential's per-generation rung 0, the delegation embeds while the
       // auxiliary Space still answers to the bootstrap key, the controller
       // flips after -- the credential-anchored genesis order.
-      if (!companionDid) {
-        companionSpaceId = mintSpaceId()
-        const minted = await mintCredentialCompanionGeneration({
+      if (!clientAnnexDid) {
+        clientAnnexSpaceId = mintSpaceId()
+        const minted = await mintCredentialClientAnnexGeneration({
           was: bootstrapWas,
           wasServerUrl: host,
-          spaceId: companionSpaceId,
+          spaceId: clientAnnexSpaceId,
           controller: bootstrapAgent.id,
           ladderSeed
         })
         await ensureGenerationDelegationCurrent({
-          store: companionLogStore({
+          store: clientAnnexLogStore({
             was: bootstrapWas,
-            spaceId: companionSpaceId,
+            spaceId: clientAnnexSpaceId,
             generationId: minted.generationId
           }),
           ladderSeed,
           generationId: minted.generationId,
-          mintGenerationDelegation: async ({ companionDid: generationDid }) =>
+          mintGenerationDelegation: async ({ clientAnnexDid: generationDid }) =>
             mintGenerationDelegation({
               zcapClient: ladderZcap,
               wasServerUrl: host,
               spaceId,
-              companionDid: generationDid
+              clientAnnexDid: generationDid
             }),
           expectedDid: minted.did
         })
         await bootstrapWas
-          .space(companionSpaceId)
+          .space(clientAnnexSpaceId)
           .configure({ controller: did, force: true })
-        companionDid = minted.did
+        clientAnnexDid = minted.did
       }
       // The new credential's bridge and sibling, ladder-VM-signed: they
       // verify once the add entry publishes the ladder VM.
@@ -1292,7 +1292,7 @@ async function recoverAccountTransient({
       sibling = await mintDelegatedClientsDelegation({
         zcapClient: ladderZcap,
         wasServerUrl: host,
-        companionSpaceId: companionSpaceId!,
+        clientAnnexSpaceId: clientAnnexSpaceId!,
         controller: standing.clientDid
       })
       // The new passphrase's unlock record, the fresh ladder seed inside --
@@ -1307,7 +1307,7 @@ async function recoverAccountTransient({
         credential
       })
       // The replacement code's record (no sibling -- a code needs no
-      // companion authority; its delegation is ladder-VM-signed).
+      // annex authority; its delegation is ladder-VM-signed).
       const replacementDelegation = await delegateLogWrite({
         zcapClient: ladderZcap,
         pointer,
@@ -1334,8 +1334,8 @@ async function recoverAccountTransient({
     }
   })
   if (
-    !companionSpaceId ||
-    !companionDid ||
+    !clientAnnexSpaceId ||
+    !clientAnnexDid ||
     !bridge ||
     !sibling ||
     !newRecordBind ||
@@ -1362,7 +1362,7 @@ async function recoverAccountTransient({
       zcapClient: standing.agents.zcapClient
     }) as unknown as WebvhIdStore,
     updateKeys: { updateSeed: rung0.seed, stagedSeed: rung1.seed },
-    companionDid,
+    clientAnnexDid,
     expectedDid: did,
     pinStore: logPins,
     logId: accountLogPinId({ spaceId }),
@@ -1376,7 +1376,7 @@ async function recoverAccountTransient({
   // the promoted Space.
   const visitSeed = crypto.getRandomValues(new Uint8Array(32))
   const visitAgents = await agentsFromSeed({ seed: visitSeed })
-  const { doc: companionDoc } = await enrollTransientClient({
+  const { doc: clientAnnexDoc } = await enrollTransientClient({
     readAccountDocument: async () =>
       (
         await verifyAccountLog({
@@ -1389,7 +1389,7 @@ async function recoverAccountTransient({
     storeForGenerationId: generationId =>
       delegatedWebvhLogStore({
         host,
-        spaceId: companionSpaceId!,
+        spaceId: clientAnnexSpaceId!,
         collectionId: generationId,
         delegation: sibling!,
         zcapClient: standing.agents.zcapClient
@@ -1402,22 +1402,22 @@ async function recoverAccountTransient({
     // one here is a torn establishment, not a mintable state.
     mintGenerationDelegation: async () => {
       throw new Error(
-        'The fresh companion generation carries no embedded delegation.'
+        'The fresh annex generation carries no embedded delegation.'
       )
     },
     pinStore: logPins
   })
   const generationDelegation = embeddedGenerationDelegation({
-    doc: companionDoc
+    doc: clientAnnexDoc
   })
   if (!generationDelegation) {
     throw new Error(
-      'The fresh companion generation carries no embedded delegation.'
+      'The fresh annex generation carries no embedded delegation.'
     )
   }
   const transientZcapClient = webvhZcapClient({
     keyAgent: visitAgents.keyAgent,
-    did: companionDid
+    did: clientAnnexDid
   })
 
   // The roster store the mandatory rotation drives: appends signed by the
@@ -1425,7 +1425,7 @@ async function recoverAccountTransient({
   // (the posture-changing version the ceremony-tail license admits -- the
   // pointer entry after it changes no posture, so the controller view
   // resolves from the continuation's returned log, not a fresh head), HTTP
-  // invoked as the companion VM under the generation delegation.
+  // invoked as the annex VM under the generation delegation.
   const rosterStore = userKeyRosterDescriptorStore({
     storageServerUrl: host,
     zcapClient: transientZcapClient,

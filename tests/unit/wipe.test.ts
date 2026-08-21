@@ -3,13 +3,16 @@
  * Unit tests for the shared wipe enumeration (`src/session/wipe.ts`) and its
  * sessionKey primitives: snapshot-first target derivation, deletion of every
  * unlock method's local trio across the registry, the pin families
- * (companion slots by prefix), the per-account localStorage families, and
+ * (annex slots by prefix), the per-account localStorage families, and
  * the guest consumer -- asserted by DIRECT enumeration of the backing
  * stores, never by the deleter's own report.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { deriveSpaceId } from '@interop/was-client/sync'
-import { accountLogPinId, companionLogPinId } from '@interop/wallet-core/webvh'
+import {
+  accountLogPinId,
+  clientAnnexLogPinId
+} from '@interop/wallet-core/webvh'
 import { userKeyRosterPinId } from '@interop/wallet-core/keys'
 import {
   deleteSessionKeysByPrefix,
@@ -35,7 +38,7 @@ const CLIENT_DID = 'did:key:z6MkClientClientClientClient'
 const DB_PREFIX = deriveSpaceId(CLIENT_DID)
 const ACCOUNT_DID = 'did:webvh:QmScid:example.com:space:acct-space'
 const ACCOUNT_SPACE_ID = 'acct-space'
-const COMPANION_SPACE_ID = 'comp-space'
+const CLIENT_ANNEX_SPACE_ID = 'comp-space'
 const PASSPHRASE_UNLOCK_SPACE = 'unlock-space-passphrase'
 const PASSKEY_UNLOCK_SPACE = 'unlock-space-passkey'
 
@@ -144,7 +147,10 @@ async function seedSessionDatabase(idb: IDBFactory): Promise<void> {
   })
   for (const generationId of ['gen-1', 'gen-2']) {
     await pins.write({
-      logId: companionLogPinId({ spaceId: COMPANION_SPACE_ID, generationId }),
+      logId: clientAnnexLogPinId({
+        spaceId: CLIENT_ANNEX_SPACE_ID,
+        generationId
+      }),
       pin
     })
   }
@@ -254,7 +260,7 @@ describe('the shared wipe enumeration', () => {
       const targets = snapshotWipeTargets({
         session,
         registry: orderedRegistry,
-        companionSpaceId: COMPANION_SPACE_ID
+        clientAnnexSpaceId: CLIENT_ANNEX_SPACE_ID
       })
       expect(targets.dbPrefix).toBe(DB_PREFIX)
       expect(targets.unlockSpaceIds).toContain(PASSPHRASE_UNLOCK_SPACE)

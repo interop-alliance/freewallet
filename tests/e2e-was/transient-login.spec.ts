@@ -7,10 +7,10 @@
  * no IndexedDB database, no new localStorage key, an empty sessionStorage
  * (the shared assertions in `tests/shared/storageResidue.ts`).
  *
- * The transient login needs a companion generation the account document
+ * The transient login needs an annex generation the account document
  * points at and an unlock record carrying the delegated-clients sibling.
  * This suite's fixture is deliberately the DURABLE signup plus the
- * non-production `__E2E_MINT_COMPANION_GENERATION__` seam -- the remembered
+ * non-production `__E2E_MINT_CLIENT_ANNEX_GENERATION__` seam -- the remembered
  * account whose credential later visits public terminals. The
  * credential-anchored signup path (which mints the generation with no seam
  * and no durable client) has its own residue suite in
@@ -61,7 +61,7 @@ test.describe.serial('transient login residue', () => {
   let passphrase: string
 
   test.beforeAll(async ({ browser }, testInfo) => {
-    // The account fixture: a durable signup, then the companion generation
+    // The account fixture: a durable signup, then the annex generation
     // and the sibling-carrying unlock record minted through the seam. The
     // setup context is durable on purpose and simply discarded.
     const context = await browser.newContext({ baseURL: APP_URL })
@@ -73,14 +73,14 @@ test.describe.serial('transient login residue', () => {
         async fixture => {
           const seam = (
             window as unknown as {
-              __E2E_MINT_COMPANION_GENERATION__?: (options: {
+              __E2E_MINT_CLIENT_ANNEX_GENERATION__?: (options: {
                 passphrase: string
               }) => Promise<void>
             }
-          ).__E2E_MINT_COMPANION_GENERATION__
+          ).__E2E_MINT_CLIENT_ANNEX_GENERATION__
           if (!seam) {
             throw new Error(
-              'The companion-generation fixture seam is not installed.'
+              'The annex-generation fixture seam is not installed.'
             )
           }
           await seam(fixture)

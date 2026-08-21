@@ -2,7 +2,7 @@
  * The TRANSIENT recovery posture cell, pinned end to end: recovering on a
  * cold terminal WITHOUT the remember seam runs the default (transient)
  * variant -- the add-and-retire entry publishes the fresh credential's
- * ladder VM in place of a durable client, a fresh companion generation is
+ * ladder VM in place of a durable client, a fresh annex generation is
  * minted and pointed, the mandatory rotation seals the spent code out, and
  * the visit continues as an ordinary transient session that leaves zero
  * local residue. A later cold visit then logs in transient with nothing but
@@ -209,7 +209,7 @@ test.describe.serial('transient recovery (the recovery posture cell)', () => {
       // commitment, the replacement code's key, and the recovered
       // passphrase's commitment -- the spent code's key is gone.
       expect(resolved.doc?.keyAgreement).toHaveLength(4)
-      // The fresh companion generation is pointed. Dispatch on the type IRI,
+      // The fresh annex generation is pointed. Dispatch on the type IRI,
       // per the byoe service-entry convention (the fragment is non-semantic).
       const services = (resolved.doc?.service ?? []) as {
         id?: string

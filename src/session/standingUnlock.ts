@@ -17,7 +17,7 @@
  * 3. The authorization bridge: a pre-minted PUT-on-`did.jsonl` delegation to
  *    the credential-derived signing DID, sealed into the unlock record beside
  *    the freshly minted update-key ladder seed -- and, when the account
- *    document already points at a companion generation, the companion-Space
+ *    document already points at an annex generation, the annex-Space
  *    sibling delegation (GET+PUT over the auxiliary Space's items subtree,
  *    to the same signing DID). An account with no pointed generation has no
  *    auxiliary Space id to target yet; the record then binds without a
@@ -47,15 +47,15 @@ import {
 import type { ClientKeyRecord } from '@interop/wallet-core/keys'
 import {
   accountLogPinId,
-  commitCompanionRung,
-  companionDidParts,
-  companionLogPinId,
-  companionLogStore,
+  commitClientAnnexRung,
+  clientAnnexDidParts,
+  clientAnnexLogPinId,
+  clientAnnexLogStore,
   delegatedClientsPointer,
   didKeyZcapClient,
   ensureGenerationDelegationCurrent,
   isWebvhDid,
-  mintCredentialCompanionGeneration,
+  mintCredentialClientAnnexGeneration,
   mintDelegatedClientsDelegation,
   mintGenerationDelegation,
   setDelegatedClientsPointer
@@ -307,43 +307,44 @@ export async function establishStandingUnlock({
   invalidateVerifiedLog({ profile: session.profile })
 
   // 3. The authorization bridge to the credential-derived signing DID --
-  // and, when the account document points at a companion generation, the
-  // companion-Space sibling delegation to the same DID. The auxiliary Space
+  // and, when the account document points at an annex generation, the
+  // annex-Space sibling delegation to the same DID. The auxiliary Space
   // id is read off the document's delegated-clients service entry (the
   // sibling delegation's target is the id's one carrier, so an account with
   // no pointed generation binds without a sibling; a later re-mint adds one
   // once the pointer exists). Best-effort: a sibling-less standing record
-  // still self-enrolls, it just cannot reach the companion log.
+  // still self-enrolls, it just cannot reach the annex log.
   const delegation = await delegateLogWrite({
     zcapClient,
     pointer,
     recoveryClientDid: standing.clientDid
   })
   let delegatedClients: IZcap | undefined
-  let companionDid: string | undefined
+  let clientAnnexDid: string | undefined
   try {
     const { doc } = await verifiedAccountLog({
       profile: session.profile,
       pointer
     })
-    companionDid = delegatedClientsPointer({ doc })
-    if (companionDid) {
+    clientAnnexDid = delegatedClientsPointer({ doc })
+    if (clientAnnexDid) {
       delegatedClients = await mintDelegatedClientsDelegation({
         zcapClient,
         wasServerUrl: pointer.host,
-        companionSpaceId: companionDidParts({ did: companionDid }).spaceId,
+        clientAnnexSpaceId: clientAnnexDidParts({ did: clientAnnexDid })
+          .spaceId,
         controller: standing.clientDid
       })
     }
   } catch (err) {
     console.warn(
-      'Could not mint the companion-Space sibling delegation; the record ' +
+      'Could not mint the annex-Space sibling delegation; the record ' +
         'binds without one:',
       err
     )
   }
 
-  // 3b. The companion rung commit -- the bind ceremony's half of the
+  // 3b. The annex rung commit -- the bind ceremony's half of the
   // mid-generation lockout hybrid: the bound credential's rung-0 hash joins
   // the pointed generation's `nextKeyHashes` in one atomic hash-restating
   // entry signed by the LOGIN credential's committed rung 0
@@ -354,32 +355,32 @@ export async function establishStandingUnlock({
   // commit is the honest skip (nothing licenses a bind to mint a
   // generation), and the lockout consequence stands as documented.
   const actingLadderSeed = session.profile.ladderSeed
-  if (companionDid && actingLadderSeed) {
+  if (clientAnnexDid && actingLadderSeed) {
     try {
-      const companion = companionDidParts({ did: companionDid })
-      await commitCompanionRung({
-        store: companionLogStore({
+      const clientAnnex = clientAnnexDidParts({ did: clientAnnexDid })
+      await commitClientAnnexRung({
+        store: clientAnnexLogStore({
           was: new WasClient({ serverUrl: pointer.host, zcapClient }),
-          spaceId: companion.spaceId,
-          generationId: companion.generationId
+          spaceId: clientAnnex.spaceId,
+          generationId: clientAnnex.generationId
         }),
         boundLadderSeed: ladderSeed,
         actingLadderSeed,
-        generationId: companion.generationId,
-        expectedDid: companionDid,
+        generationId: clientAnnex.generationId,
+        expectedDid: clientAnnexDid,
         pinStore: session.profile.persistence.logPins,
-        logId: companionLogPinId({
-          spaceId: companion.spaceId,
-          generationId: companion.generationId
+        logId: clientAnnexLogPinId({
+          spaceId: clientAnnex.spaceId,
+          generationId: clientAnnex.generationId
         })
       })
     } catch (err) {
       console.warn(
-        (err as { name?: string }).name === 'CompanionRungUncommittedError'
+        (err as { name?: string }).name === 'ClientAnnexRungUncommittedError'
           ? "The login credential's rung is not committed in the pointed " +
               'generation, so the bound credential waits for the next ' +
               'generation swap:'
-          : "Could not commit the bound credential's companion rung:",
+          : "Could not commit the bound credential's annex rung:",
         err
       )
     }
@@ -438,12 +439,12 @@ export async function establishStandingUnlock({
 }
 
 /**
- * Establishes the companion-generation posture for one standing unlock
+ * Establishes the annex-generation posture for one standing unlock
  * credential, from a live enrolled session holding its secret: ensure a
  * generation exists and the account document points at it (minting the typed
  * auxiliary Space, the credential-signed genesis, and the embedded generation
- * delegation when none is pointed -- companion log first, pointer second),
- * then mint the companion-Space sibling delegation and re-seal it into the
+ * delegation when none is pointed -- annex log first, pointer second),
+ * then mint the annex-Space sibling delegation and re-seal it into the
  * credential's unlock record beside the existing bridge. The re-bind
  * preserves the record's ladder seed verbatim (`rebindStandingRecord`) --
  * load-bearing, since the genesis just committed that seed's
@@ -462,7 +463,7 @@ export async function establishStandingUnlock({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function establishCompanionGeneration({
+export async function establishClientAnnexGeneration({
   session,
   secret,
   kdf,
@@ -476,7 +477,7 @@ export async function establishCompanionGeneration({
   const { remoteStore, pointer, clientWebvhKeys, keyAgent } =
     requireEnrolledClientContext({
       session,
-      action: 'Establishing the companion-generation posture'
+      action: 'Establishing the annex-generation posture'
     })
   const { zcapClient } = session.profile
 
@@ -486,7 +487,7 @@ export async function establishCompanionGeneration({
   if (!found || !foundStanding || !ladderSeed || !found.standingClient) {
     throw new Error(
       'This credential holds no standing unlock record; establish the ' +
-        'standing posture before the companion generation.'
+        'standing posture before the annex generation.'
     )
   }
   if (!found.rebindStandingRecord) {
@@ -499,64 +500,64 @@ export async function establishCompanionGeneration({
 
   // The generation: reuse the pointed one when the document already carries
   // the delegated-clients pointer; mint and point otherwise, in the standing
-  // order (the companion log publishes first, the pointer follows).
+  // order (the annex log publishes first, the pointer follows).
   const { doc } = await verifiedAccountLog({
     profile: session.profile,
     pointer
   })
-  let companionDid = delegatedClientsPointer({ doc })
-  if (!companionDid) {
+  let clientAnnexDid = delegatedClientsPointer({ doc })
+  if (!clientAnnexDid) {
     // Space creation accepts did:key controllers only, so the auxiliary
     // Space follows the account Space's own order: created (and written)
     // under this client's bare did:key, then its controller promoted to the
     // account did:webvh -- before any delegation roots in its root zcap.
-    const companionSpaceId = mintSpaceId()
+    const clientAnnexSpaceId = mintSpaceId()
     const bootstrapWas = new WasClient({
       serverUrl: pointer.host,
       zcapClient: didKeyZcapClient({ keyAgent })
     })
-    const minted = await mintCredentialCompanionGeneration({
+    const minted = await mintCredentialClientAnnexGeneration({
       was: bootstrapWas,
       wasServerUrl: pointer.host,
-      spaceId: companionSpaceId,
+      spaceId: clientAnnexSpaceId,
       controller: keyAgent.id,
       ladderSeed
     })
     await bootstrapWas
-      .space(companionSpaceId)
+      .space(clientAnnexSpaceId)
       .configure({ controller: pointer.did, force: true })
     await setDelegatedClientsPointer({
       idStore: remoteStore.webvhIdStore(),
       updateKeys: clientWebvhKeys,
-      companionDid: minted.did,
+      clientAnnexDid: minted.did,
       expectedDid: pointer.did,
       pinStore: session.profile.persistence.logPins,
       logId: accountLogPinId({ spaceId: pointer.spaceId })
     })
     invalidateVerifiedLog({ profile: session.profile })
-    companionDid = minted.did
+    clientAnnexDid = minted.did
   }
 
-  // The embedded generation delegation, installed when the companion document
+  // The embedded generation delegation, installed when the annex document
   // carries none yet (the fresh-genesis case) and renewed near expiry
   // otherwise -- signed by this enrolled client's promoted key either way.
-  const companion = companionDidParts({ did: companionDid })
+  const clientAnnex = clientAnnexDidParts({ did: clientAnnexDid })
   await ensureGenerationDelegationCurrent({
-    store: companionLogStore({
+    store: clientAnnexLogStore({
       was,
-      spaceId: companion.spaceId,
-      generationId: companion.generationId
+      spaceId: clientAnnex.spaceId,
+      generationId: clientAnnex.generationId
     }),
     ladderSeed,
-    generationId: companion.generationId,
-    mintGenerationDelegation: async ({ companionDid: generationDid }) =>
+    generationId: clientAnnex.generationId,
+    mintGenerationDelegation: async ({ clientAnnexDid: generationDid }) =>
       mintGenerationDelegation({
         zcapClient,
         wasServerUrl: pointer.host,
         spaceId: pointer.spaceId,
-        companionDid: generationDid
+        clientAnnexDid: generationDid
       }),
-    expectedDid: companionDid
+    expectedDid: clientAnnexDid
   })
 
   // The sibling delegation, re-sealed into the record beside the existing
@@ -565,7 +566,7 @@ export async function establishCompanionGeneration({
   const delegatedClients = await mintDelegatedClientsDelegation({
     zcapClient,
     wasServerUrl: pointer.host,
-    companionSpaceId: companion.spaceId,
+    clientAnnexSpaceId: clientAnnex.spaceId,
     controller: found.standingClient.clientDid
   })
   await found.rebindStandingRecord({

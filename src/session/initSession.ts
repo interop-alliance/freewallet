@@ -26,9 +26,9 @@ import { KMS_SERVER_URL, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
 import { assertPasskeyPrf } from '@/lib/passkey'
 import {
-  companionDidParts,
-  companionLogPinId,
-  companionLogStore,
+  clientAnnexDidParts,
+  clientAnnexLogPinId,
+  clientAnnexLogStore,
   delegatedClientsDelegationSpaceId,
   delegatedClientsPointer,
   delegationKeyInDocument,
@@ -56,7 +56,7 @@ import {
 import { swapSessionVaultKeys } from '@/session/userKeyAdoption'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import { sweepStrandedAppKeys } from '@/session/appKeySweep'
-import { sweepCompanionGenerations } from '@/session/companionGc'
+import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
 import {
   durableSessionPersistence,
   isDurableSession,
@@ -177,8 +177,8 @@ export async function initGuestSession() {
  *   in-memory handle here, which also skips provisioning, the login-time
  *   sweeps, and every durable pin write.
  * @param [options.transient] {object}   the transient-session identity: the
- *   companion DID whose generation holds this visit's verification method
- *   (every WAS request signs as `<companionDid>#<vm>` in place of the
+ *   annex DID whose generation holds this visit's verification method
+ *   (every WAS request signs as `<clientAnnexDid>#<vm>` in place of the
  *   account-document spelling) and the generation delegation every request
  *   rides (`profile.invocationCapability`). Supplied only by the transient
  *   login composition, together with the in-memory `persistence`; its
@@ -211,7 +211,7 @@ export async function initSessionFromSeed({
   provisionStorage?: boolean
   idb?: IDBFactory
   persistence?: SessionPersistence
-  transient?: { companionDid: string; invocationCapability: IZcap }
+  transient?: { clientAnnexDid: string; invocationCapability: IZcap }
 }) {
   const persistence =
     suppliedPersistence ??
@@ -223,12 +223,12 @@ export async function initSessionFromSeed({
   // been promoted: every data-Space request must be signed with this
   // client's verification method in the did:webvh document
   // (`<did:webvh>#<multibase>`), not its did:key. Same key, promoted keyId.
-  // A transient session's verification method lives in the companion
+  // A transient session's verification method lives in the annex
   // generation's document instead, so its requests sign as
-  // `<companionDid>#<multibase>` and ride the generation delegation.
+  // `<clientAnnexDid>#<multibase>` and ride the generation delegation.
   const accountDid = accountPointer?.did
   const sessionZcapClient = transient
-    ? webvhZcapClient({ keyAgent, did: transient.companionDid })
+    ? webvhZcapClient({ keyAgent, did: transient.clientAnnexDid })
     : isWebvhDid(accountDid)
       ? webvhZcapClient({ keyAgent, did: accountDid })
       : zcapClient
@@ -887,14 +887,14 @@ async function sessionFromKeyringHit({
     manageCapability: found.manageCapability
   }
   // The login credential's ladder seed, for the mid-session ceremonies that
-  // write the companion (the revocation cascade's generation-delegation
+  // write the annex (the revocation cascade's generation-delegation
   // re-mint, the rotation's strike-or-swap).
   if (found.standing?.ladderSeed) {
     session.profile.ladderSeed = found.standing.ladderSeed
   }
 
   // The standing-delegation self-refresh: a standing credential's own login
-  // re-mints its bridge delegation -- and the companion-Space sibling, where
+  // re-mints its bridge delegation -- and the annex-Space sibling, where
   // the record carries one -- when either is stale on either axis: expired
   // or inside the renewal window (the same annual clock and shared predicate
   // as the recovery delegations), or its signer no longer in the verified
@@ -955,14 +955,14 @@ async function sessionFromKeyringHit({
         // id rides in the old delegation (the id's one carrier).
         let delegatedClients
         if (standingDelegatedClients) {
-          const companionSpaceId = delegatedClientsDelegationSpaceId({
+          const clientAnnexSpaceId = delegatedClientsDelegationSpaceId({
             delegation: standingDelegatedClients
           })
-          if (companionSpaceId) {
+          if (clientAnnexSpaceId) {
             delegatedClients = await mintDelegatedClientsDelegation({
               zcapClient: session.profile.zcapClient,
               wasServerUrl: pointer.host,
-              companionSpaceId,
+              clientAnnexSpaceId,
               controller: standingClientDid
             })
           }
@@ -1079,7 +1079,7 @@ async function sessionFromKeyringHit({
   // inflicts on a ladder-VM-signed delegation (the ceremony-tail half of
   // that reseal), and the standing backstop for a revocation cascade whose
   // own re-mint stage was skipped. Signed by the login credential's static
-  // companion rung 0; a healthy delegation is one no-op read. Best-effort: a
+  // annex rung 0; a healthy delegation is one no-op read. Best-effort: a
   // rung the generation does not commit (a credential bound mid-generation)
   // skips quietly, everything else warns and the next login retries.
   const healLadderSeed = found.standing?.ladderSeed
@@ -1098,35 +1098,36 @@ async function sessionFromKeyringHit({
         if (pointedDid === undefined) {
           return
         }
-        const { spaceId: companionSpaceId, generationId } = companionDidParts({
-          did: pointedDid
-        })
+        const { spaceId: clientAnnexSpaceId, generationId } =
+          clientAnnexDidParts({
+            did: pointedDid
+          })
         const was = new WasClient({
           serverUrl: pointer.host,
           zcapClient: session.profile.zcapClient
         })
         await ensureGenerationDelegationCurrent({
-          store: companionLogStore({
+          store: clientAnnexLogStore({
             was,
-            spaceId: companionSpaceId,
+            spaceId: clientAnnexSpaceId,
             generationId
           }),
           ladderSeed: healLadderSeed,
           generationId,
-          mintGenerationDelegation: async ({ companionDid }) =>
+          mintGenerationDelegation: async ({ clientAnnexDid }) =>
             mintGenerationDelegation({
               zcapClient: session.profile.zcapClient,
               wasServerUrl: pointer.host,
               spaceId: pointer.spaceId,
-              companionDid
+              clientAnnexDid
             }),
           expectedDid: pointedDid,
           accountDoc: doc as PublishedKeyDocument,
           ...(session.profile.persistence?.logPins
             ? {
                 pinStore: session.profile.persistence.logPins,
-                logId: companionLogPinId({
-                  spaceId: companionSpaceId,
+                logId: clientAnnexLogPinId({
+                  spaceId: clientAnnexSpaceId,
                   generationId
                 })
               }
@@ -1134,7 +1135,7 @@ async function sessionFromKeyringHit({
         })
       } catch (err) {
         if (
-          (err as { name?: string }).name === 'CompanionRungUncommittedError'
+          (err as { name?: string }).name === 'ClientAnnexRungUncommittedError'
         ) {
           return
         }
@@ -1146,7 +1147,7 @@ async function sessionFromKeyringHit({
     })
   }
 
-  // The companion GC sweep: the quarterly generation swap (when due and the
+  // The annex GC sweep: the quarterly generation swap (when due and the
   // pointed generation is GC-quiet) plus the collect fan-out over every
   // non-pointed `gen-` collection -- revoke, digest, delete. Chained behind
   // the storageReady tail (so a sibling re-mint above lands first),
@@ -1158,16 +1159,16 @@ async function sessionFromKeyringHit({
   // login sweeps the same durable state.
   const gcLadderSeed = found.standing?.ladderSeed
   if (session.storageReady && !remoteDirectStorage) {
-    session.companionGcSweep = session.storageReady
+    session.clientAnnexGcSweep = session.storageReady
       .catch(() => {})
       .then(() =>
-        sweepCompanionGenerations({
+        sweepClientAnnexGenerations({
           session,
           ...(gcLadderSeed !== undefined ? { ladderSeed: gcLadderSeed } : {})
         })
       )
       .catch((err): null => {
-        console.warn('The companion GC sweep failed:', err)
+        console.warn('The annex GC sweep failed:', err)
         return null
       })
   }

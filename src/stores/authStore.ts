@@ -23,32 +23,32 @@ function publishStorageSeam(session: Session | null): void {
 }
 
 /**
- * E2E test seam. The companion-generation establishment
- * (`establishCompanionGeneration` in `src/session/standingUnlock.ts`) runs
+ * E2E test seam. The annex-generation establishment
+ * (`establishClientAnnexGeneration` in `src/session/standingUnlock.ts`) runs
  * from a live enrolled session holding the credential's secret; no shipped
  * login ceremony triggers it yet, and the transient-login e2e needs an
  * account in that posture. In non-production builds only, publish a driver on
- * `window.__E2E_MINT_COMPANION_GENERATION__` so a Playwright spec can run it
+ * `window.__E2E_MINT_CLIENT_ANNEX_GENERATION__` so a Playwright spec can run it
  * from the signed-in durable context. Cleared on logout. No-op in production.
  */
-function publishCompanionFixtureSeam(session: Session | null): void {
+function publishClientAnnexFixtureSeam(session: Session | null): void {
   if (import.meta.env.MODE === 'production') {
     return
   }
   ;(
     window as unknown as {
-      __E2E_MINT_COMPANION_GENERATION__?: (options: {
+      __E2E_MINT_CLIENT_ANNEX_GENERATION__?: (options: {
         passphrase: string
       }) => Promise<void>
     }
-  ).__E2E_MINT_COMPANION_GENERATION__ = session
+  ).__E2E_MINT_CLIENT_ANNEX_GENERATION__ = session
     ? async ({ passphrase }: { passphrase: string }) => {
-        const [{ establishCompanionGeneration }, { KEYRING_KDF }] =
+        const [{ establishClientAnnexGeneration }, { KEYRING_KDF }] =
           await Promise.all([
             import('@/session/standingUnlock'),
             import('@interop/wallet-core/keyring')
           ])
-        await establishCompanionGeneration({
+        await establishClientAnnexGeneration({
           session,
           secret: passphrase,
           kdf: KEYRING_KDF
@@ -71,7 +71,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     const previous = get().session
     set({ session })
     publishStorageSeam(session)
-    publishCompanionFixtureSeam(session)
+    publishClientAnnexFixtureSeam(session)
     // The UI-prefs half of the posture seam: while a transient session is
     // live, theme/language toggles land in an in-memory overlay instead of
     // localStorage (`src/lib/prefsStorage.ts`).
@@ -110,7 +110,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     // stays in IndexedDB; only the passphrase-derived session is discarded).
     await get().session?.storage.close()
     publishStorageSeam(null)
-    publishCompanionFixtureSeam(null)
+    publishClientAnnexFixtureSeam(null)
     setTransientPrefs({ active: false })
     set({ session: null })
   }

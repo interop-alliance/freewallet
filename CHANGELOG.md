@@ -22,8 +22,8 @@
   add-and-retire entry publishes the fresh credential's ladder VM in place
   of a durable client, so the account lands client-less and ladder-anchored,
   with zero local residue. Inside the continuation's persist-before-publish
-  seam, a fresh companion generation is minted under the new ladder (a
-  recovery record carries no companion sibling, so the old generation falls
+  seam, a fresh client-annex generation is minted under the new ladder (a
+  recovery record carries no annex sibling, so the old generation falls
   to orphan discovery) and the new passphrase's and replacement code's
   records are durably written before the ladder VM publishes; after the
   entry, the `#DelegatedClients` pointer is re-pointed through the new
@@ -31,20 +31,20 @@
   the one ladder-signed roster append the ceremony-tail license admits
   (`replaceUserKeyRosterRecipients`: retire, escrow, and fresh epoch in a
   single write), and the epoch cascade and unlock-methods registry update
-  ride the generation delegation as the enrolled per-visit companion VM.
+  ride the generation delegation as the enrolled per-visit annex VM.
   The durable continuation stays reachable through the remember entry, and
   the recover page's locate step now pins the account log in memory unless
   the browser is being remembered. Both posture cells are pinned by e2e
   (`recovery.spec.ts` durable, `recovery-transient.spec.ts` transient).
-- The bind ceremonies close the mid-generation companion lockout: making a
+- The bind ceremonies close the mid-generation annex lockout: making a
   credential standing (passkey add, passphrase add or change, the signup
-  tail) appends one atomic hash-restating companion commit entry adding the
+  tail) appends one atomic hash-restating annex commit entry adding the
   new credential's rung-0 hash, signed by the login credential's committed
-  rung (wallet-core's `commitCompanionRung`). Without it a freshly bound
+  rung (wallet-core's `commitClientAnnexRung`). Without it a freshly bound
   credential could not enter the transient posture until the next
   generation swap. Best-effort: an acting rung the generation does not
   commit is the honest skip.
-- The existing account ceremonies reach the companion artifacts. Client
+- The existing account ceremonies reach the client-annex artifacts. Client
   revocation gains a generation-delegation re-mint stage (wallet-core's
   `remintGenerationDelegation` closure): revoking the durable client that
   signed the current generation delegation replaces the delegation in place
@@ -52,11 +52,11 @@
   disconnect; the login credential's ladder seed rides the session in memory
   (`profile.ladderSeed`) to sign it, and the stage skips with a report when
   it is absent. The credential-rotation ceremony retires the retired
-  credential's companion posture beside its account-side one
+  credential's annex posture beside its account-side one
   (`src/session/credentialRotation.ts`): a strike entry drops its revealed
-  companion rung and standing hash when a distinct surviving credential's
+  annex rung and standing hash when a distinct surviving credential's
   rung can sign it, and otherwise the generation is swapped onto a surviving
-  credential's ladder (`swapCompanionGeneration`), the old one left to
+  credential's ladder (`swapClientAnnexGeneration`), the old one left to
   orphan discovery; a passphrase change signs with the new credential's
   seed. Login's bridge-refresh predicate widens from expiry-only to expiry
   or signer rot (the delegation's proof key gone from the account document),
@@ -67,7 +67,7 @@
   (`ensureGenerationDelegationCurrent` with the account-document axis).
 
 - Account deletion tears down every unlock method's server-side artifacts
-  and the auxiliary companion Space. `deleteAccount` walks the
+  and the auxiliary annex Space. `deleteAccount` walks the
   unlock-methods registry before the account Space dies and deletes each
   entry's unlock Space and local trio best-effort
   (`deleteUnlockMethodArtifacts` in `src/session/unlockMethods.ts`), then
@@ -81,7 +81,7 @@
   (the forget affordance and the orphan-client heal land on the same seam).
   It covers every unlock method's local trio across the registry, the
   roster-epoch pin, the chain-head pin slots by Space-scoped prefix
-  (companion generation slots included, via the new
+  (annex generation slots included, via the new
   `deleteSessionKeysByPrefix` / `deleteLogPinsForSpace` primitives), the
   Space-to-DID mapping, the unlock-methods registry cache and the
   passkey-safety notice (keyed by this browser's client did:key), the
@@ -109,7 +109,7 @@
   `ensureCredentialAnchoredAccountGenesis`), the Space is bootstrapped and
   promoted under the ladder VM's did:key, the roster's epoch[0] wraps the
   user key to the credential's standing key-agreement key with a
-  ladder-signed entry proof, the companion generation is minted and pointed
+  ladder-signed entry proof, the annex generation is minted and pointed
   at inside the same establishment (`establishCredentialAnchoredAccount` in
   `src/session/credentialAnchoredGenesis.ts`), and the visit ends in an
   ordinary transient session with zero local residue. The unlock record
@@ -126,13 +126,13 @@
   `tests/e2e-was/credential-anchored-signup.spec.ts` (residue-zero signup
   plus a cold-terminal re-entry on the passphrase alone).
 
-- Companion GC. Keyring logins fire a best-effort background sweep
-  (`session.companionGcSweep`, `src/session/companionGc.ts` over
-  wallet-core's `runCompanionGc`): the quarterly generation swap when the
+- Client-annex GC. Keyring logins fire a best-effort background sweep
+  (`session.clientAnnexGcSweep`, `src/session/clientAnnexGc.ts` over
+  wallet-core's `runClientAnnexGc`): the quarterly generation swap when the
   pointed generation is quiet, and at every durable login the collection of
   every non-pointed `gen-` collection -- delegation revoked, a
   `GenerationCollect` digest written to `wallet-activity` before the delete,
-  the collection deleted, the local companion pin slot dropped. Durable
+  the collection deleted, the local annex pin slot dropped. Durable
   sessions only, resumable from durable state.
 
 - The residue-zero e2e. A WAS e2e spec
@@ -144,22 +144,22 @@
   and an empty sessionStorage. The assertions are a reusable helper
   (`tests/shared/storageResidue.ts`) shared by later transient-posture
   specs. The account fixture drives a new non-production
-  `window.__E2E_MINT_COMPANION_GENERATION__` seam over
-  `establishCompanionGeneration` (`src/session/standingUnlock.ts`), which
-  ensures a companion generation exists and is pointed at (created under
+  `window.__E2E_MINT_CLIENT_ANNEX_GENERATION__` seam over
+  `establishClientAnnexGeneration` (`src/session/standingUnlock.ts`), which
+  ensures a annex generation exists and is pointed at (created under
   this client's did:key and promoted to the account DID, with the
   credential-signed genesis from wallet-core's
-  `mintCredentialCompanionGeneration` and the embedded generation
-  delegation installed), then mints the companion-Space sibling delegation
+  `mintCredentialClientAnnexGeneration` and the embedded generation
+  delegation installed), then mints the annex-Space sibling delegation
   and re-seals it into the credential's unlock record, preserving the
   ladder seed.
 
 - The transient login. On a browser holding no client-key record for the
   typed credential (and with a WAS server configured), login now defaults to
   a transient session that persists nothing locally: the unlock record is
-  fetched transiently, a per-visit key enrolls into the account's companion
+  fetched transiently, a per-visit key enrolls into the account's annex
   generation through the record's sibling delegation, the session invokes as
-  `<companionDid>#<vm>` under the embedded generation delegation on the
+  `<clientAnnexDid>#<vm>` under the embedded generation delegation on the
   replica-less remote-direct storage posture, and the user key comes from
   the credential's standing roster wrap (never escrowed to the transient
   client). A browser already holding the credential's client-key record
@@ -171,7 +171,7 @@
   `AlreadyRememberedError`. Transient sessions skip the KMS keystore, the
   login-time roster read, provisioning, and every login-time sweep;
   unavailable states (a record without standing authority or the
-  `delegatedClients` sibling, an unpromoted account, no live companion
+  `delegatedClients` sibling, an unpromoted account, no live annex
   generation or embedded delegation, no roster) refuse with a typed
   `TransientLoginUnavailableError` before any ceremony byte is written, and
   the login page maps the refusal onto the existing not-enrolled guidance
@@ -235,10 +235,10 @@
 
 - The unlock record's `delegatedClients` member and registry pair. A standing
   credential's unlock record can now carry a second sealed member beside the
-  bridge: a pre-minted GET+PUT delegation over the auxiliary companion
+  bridge: a pre-minted GET+PUT delegation over the auxiliary annex
   Space's items subtree, additive within record version 2 and absent on
   recovery codes. The bind ceremony mints it when the account document
-  points at a companion generation (the auxiliary Space id is read off the
+  points at a annex generation (the auxiliary Space id is read off the
   delegated-clients service entry); the unlock-methods registry tracks its
   staleness as a second scalar pair (`delegatedClientsKeyId` /
   `delegatedClientsExpires`); and the delegation refreshes atomically beside
@@ -260,6 +260,8 @@
 
 ### Changed
 
+- The transient-client subsystem formerly called the companion is renamed
+  the client annex (`clientAnnex` symbols), across code and docs.
 - Enrollment now refuses a connect code whose key-agreement key is not the
   canonical X25519 twin of its signing key, before anything is published.
   The refusal is surfaced on both approval surfaces: its own copy under the

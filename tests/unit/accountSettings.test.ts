@@ -16,14 +16,14 @@ const state = vi.hoisted(() => ({
   // fresh key, a skip (nothing standing to retire), or a failure.
   rotation: 'skipped' as 'rotated' | 'skipped' | 'failed',
   // The deletion's (a2)/(b0)/(b1) seams: the registry snapshot, the account
-  // document the companion is discovered through, and the auxiliary Space's
+  // document the annex is discovered through, and the auxiliary Space's
   // collection listing.
   registry: null as unknown,
   registryFails: false,
   accountDoc: { id: 'did:webvh:account' } as unknown,
   accountLogFails: false,
-  companionCollections: [] as string[],
-  companionDeleteFails: false,
+  clientAnnexCollections: [] as string[],
+  clientAnnexDeleteFails: false,
   artifactFailures: [] as string[],
   // What the shared wipe enumeration reports back to `deleteAccount`.
   localWipeFailed: [] as string[]
@@ -185,19 +185,19 @@ vi.mock('@/session/verifiedLog', () => ({
 
 vi.mock('@interop/was-client', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/was-client')>()),
-  // The auxiliary companion Space handle: its `gen-` collection listing (the
+  // The auxiliary annex Space handle: its `gen-` collection listing (the
   // pin slots to drop) and the one recursive delete.
   WasClient: class {
     space(spaceId: string) {
       return {
         collectionsPages: async function* () {
           yield {
-            items: state.companionCollections.map(id => ({ id }))
+            items: state.clientAnnexCollections.map(id => ({ id }))
           }
         },
         delete: async () => {
-          state.calls.push(`companionSpaceDelete:${spaceId}`)
-          if (state.companionDeleteFails) {
+          state.calls.push(`clientAnnexSpaceDelete:${spaceId}`)
+          if (state.clientAnnexDeleteFails) {
             throw new Error('auxiliary Space delete failed')
           }
         }
@@ -216,17 +216,17 @@ vi.mock('@/session/wipe', () => ({
     ({
       session,
       registry,
-      companionSpaceId
+      clientAnnexSpaceId
     }: {
       session: { user: { id: string } }
       registry?: { methods?: { unlockSpaceId: string }[] } | null
-      companionSpaceId?: string
+      clientAnnexSpaceId?: string
     }) => {
       state.calls.push('snapshotWipeTargets')
       return {
         clientDid: session.user.id,
         dbPrefix: 'db-prefix',
-        companionSpaceId,
+        clientAnnexSpaceId,
         unlockSpaceIds: (registry?.methods ?? []).map(
           entry => entry.unlockSpaceId
         ),
@@ -255,26 +255,26 @@ const { executeLocalWipe, snapshotWipeTargets } = await import('@/session/wipe')
 const { durableSessionPersistence } = await import('@/session/persistence')
 
 const ACCOUNT_DID = 'did:webvh:QmScid:was.example.test:space:space-123:id'
-const COMPANION_SPACE_ID = 'companion-space-1'
+const CLIENT_ANNEX_SPACE_ID = 'clientAnnex-space-1'
 const GENERATION_ID = 'gen-Ux3v0kQf9aPmB2hZ'
-const COMPANION_DID =
-  'did:webvh:QmCompanionScid:was.example.test:space:' +
-  `${COMPANION_SPACE_ID}:${GENERATION_ID}`
+const CLIENT_ANNEX_DID =
+  'did:webvh:QmClientAnnexScid:was.example.test:space:' +
+  `${CLIENT_ANNEX_SPACE_ID}:${GENERATION_ID}`
 
 /**
  * An account document whose `#DelegatedClients` service entry points at the
- * companion above -- what the deletion's discovery step reads.
+ * annex above -- what the deletion's discovery step reads.
  *
  * @returns {object}
  */
-function docWithCompanionPointer(): object {
+function docWithClientAnnexPointer(): object {
   return {
     id: ACCOUNT_DID,
     service: [
       {
         id: `${ACCOUNT_DID}#delegated-clients`,
         type: 'https://w3id.org/byoe#DelegatedClients',
-        serviceEndpoint: COMPANION_DID
+        serviceEndpoint: CLIENT_ANNEX_DID
       }
     ]
   }
@@ -344,8 +344,8 @@ beforeEach(() => {
   state.registryFails = false
   state.accountDoc = { id: ACCOUNT_DID }
   state.accountLogFails = false
-  state.companionCollections = []
-  state.companionDeleteFails = false
+  state.clientAnnexCollections = []
+  state.clientAnnexDeleteFails = false
   state.artifactFailures = []
   state.localWipeFailed = []
   vi.clearAllMocks()
@@ -454,7 +454,7 @@ describe('deleteAccount', () => {
   })
 
   it('tears the auxiliary Space down before the wipe and hands its id to the enumeration', async () => {
-    state.accountDoc = docWithCompanionPointer()
+    state.accountDoc = docWithClientAnnexPointer()
     const result = await deleteAccount({
       session: makeSession(),
       passphrase: 'correct horse battery staple'
@@ -462,18 +462,18 @@ describe('deleteAccount', () => {
     expect(result).toBe('deleted')
     // Before the wipe: once the account Space is gone the server can no
     // longer resolve the auxiliary Space's did:webvh controller. The
-    // companion pin slots are the enumeration's (cleared by prefix under
-    // the snapshotted companion Space id).
+    // annex pin slots are the enumeration's (cleared by prefix under
+    // the snapshotted annex Space id).
     expect(state.calls).toEqual([
       'verifyPassphrase',
-      `companionSpaceDelete:${COMPANION_SPACE_ID}`,
+      `clientAnnexSpaceDelete:${CLIENT_ANNEX_SPACE_ID}`,
       'snapshotWipeTargets',
       'wipeRemoteStorage',
       'deleteKeyring',
       'executeLocalWipe'
     ])
     expect(vi.mocked(snapshotWipeTargets)).toHaveBeenCalledWith(
-      expect.objectContaining({ companionSpaceId: COMPANION_SPACE_ID })
+      expect.objectContaining({ clientAnnexSpaceId: CLIENT_ANNEX_SPACE_ID })
     )
   })
 
@@ -493,8 +493,8 @@ describe('deleteAccount', () => {
   })
 
   it('survives a failing auxiliary-Space delete, leaving a typed orphan', async () => {
-    state.accountDoc = docWithCompanionPointer()
-    state.companionDeleteFails = true
+    state.accountDoc = docWithClientAnnexPointer()
+    state.clientAnnexDeleteFails = true
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const result = await deleteAccount({
       session: makeSession(),
@@ -502,11 +502,11 @@ describe('deleteAccount', () => {
     })
     expect(result).toBe('deleted')
     expect(state.calls).toContain('wipeRemoteStorage')
-    // The companion pin slots no longer ride behind the Space delete: the
+    // The annex pin slots no longer ride behind the Space delete: the
     // enumeration still receives the snapshotted id and clears them by
     // prefix.
     expect(vi.mocked(snapshotWipeTargets)).toHaveBeenCalledWith(
-      expect.objectContaining({ companionSpaceId: COMPANION_SPACE_ID })
+      expect.objectContaining({ clientAnnexSpaceId: CLIENT_ANNEX_SPACE_ID })
     )
     expect(state.calls).toContain('executeLocalWipe')
     warn.mockRestore()

@@ -2,7 +2,7 @@
 /**
  * Unit tests for the transient login (`src/session/transientLogin.ts`): the
  * post-KDF posture routing (`routeUnlockLogin`) and the public-terminal
- * composition (`transientSessionFromKeyringHit`). The wallet-core companion
+ * composition (`transientSessionFromKeyringHit`). The wallet-core annex
  * and roster boundaries are mocked at the module seam so the composition's
  * wiring -- what enrolls with which key, what reads under which capability,
  * what refuses with which typed reason before anything is written -- runs
@@ -98,8 +98,8 @@ const POINTER = {
   spaceId: 'space-123',
   host: 'https://was.example.test'
 }
-const COMPANION_DID =
-  'did:webvh:QmCompanionScid:was.example.test:space:companion-space-1:gen-Ux3v0kQf9aPmB2hZ'
+const CLIENT_ANNEX_DID =
+  'did:webvh:QmClientAnnexScid:was.example.test:space:clientAnnex-space-1:gen-Ux3v0kQf9aPmB2hZ'
 const GENERATION_DELEGATION = { id: 'urn:zcap:generation' }
 const SIBLING_DELEGATION = { id: 'urn:zcap:sibling' }
 
@@ -133,7 +133,7 @@ function makeFound(
 
 /**
  * Installs the happy-path mocks: a verified account log whose document
- * points at a companion generation, an enrollment handing back the
+ * points at an annex generation, an enrollment handing back the
  * generation document, an embedded delegation, and a roster read that
  * unwraps the user key.
  */
@@ -144,24 +144,24 @@ function primeHappyPath() {
     updateKeys: [],
     nextKeyHashes: []
   } as never)
-  vi.mocked(delegatedClientsPointer).mockReturnValue(COMPANION_DID)
+  vi.mocked(delegatedClientsPointer).mockReturnValue(CLIENT_ANNEX_DID)
   vi.mocked(delegatedClientsDelegationSpaceId).mockReturnValue(
-    'companion-space-1'
+    'clientAnnex-space-1'
   )
   vi.mocked(delegatedWebvhLogStore).mockReturnValue({
     getIdResourceRaw: vi.fn(async () => ({ text: 'log', etag: '"1"' })),
     putIdResource: vi.fn(async () => undefined)
   } as never)
   vi.mocked(enrollTransientClient).mockResolvedValue({
-    companionDid: COMPANION_DID,
-    doc: { id: COMPANION_DID },
+    clientAnnexDid: CLIENT_ANNEX_DID,
+    doc: { id: CLIENT_ANNEX_DID },
     log: [{ entry: 1 }]
   } as never)
   vi.mocked(embeddedGenerationDelegation).mockReturnValue(
     GENERATION_DELEGATION as never
   )
   vi.mocked(webvhZcapClient).mockReturnValue({
-    isCompanionZcapClient: true
+    isClientAnnexZcapClient: true
   } as never)
   vi.mocked(userKeyRosterDescriptorStore).mockReturnValue({
     isRosterStore: true
@@ -306,12 +306,12 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
     )
   })
 
-  it('refuses when the account document carries no companion pointer', async () => {
+  it('refuses when the account document carries no annex pointer', async () => {
     primeHappyPath()
     vi.mocked(delegatedClientsPointer).mockReturnValue(undefined)
     const err = await refusalFor(makeFound())
     expect((err as TransientLoginUnavailableError).reason).toBe(
-      'no-companion-generation'
+      'no-clientAnnex-generation'
     )
     expect(enrollTransientClient).not.toHaveBeenCalled()
   })
@@ -333,7 +333,7 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
     )
     const err = await refusalFor(makeFound())
     expect((err as TransientLoginUnavailableError).reason).toBe(
-      'no-companion-generation'
+      'no-clientAnnex-generation'
     )
   })
 
@@ -341,7 +341,7 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
     primeHappyPath()
     vi.mocked(enrollTransientClient).mockImplementation(
       async ({ mintGenerationDelegation }) => {
-        await mintGenerationDelegation!({ companionDid: COMPANION_DID })
+        await mintGenerationDelegation!({ clientAnnexDid: CLIENT_ANNEX_DID })
         throw new Error('unreachable')
       }
     )
@@ -405,7 +405,7 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
     enrollCall.storeForGenerationId('gen-Ux3v0kQf9aPmB2hZ')
     expect(delegatedWebvhLogStore).toHaveBeenCalledWith({
       host: POINTER.host,
-      spaceId: 'companion-space-1',
+      spaceId: 'clientAnnex-space-1',
       collectionId: 'gen-Ux3v0kQf9aPmB2hZ',
       delegation: SIBLING_DELEGATION,
       zcapClient: found.standingClient.agents.zcapClient
@@ -419,12 +419,12 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
       pinStore: persistence.logPins
     })
 
-    // The roster read: companion spelling under the generation delegation,
+    // The roster read: annex spelling under the generation delegation,
     // unwrapped with the credential's own key-agreement key. No escrow: the
     // roster store is read-only here.
     expect(webvhZcapClient).toHaveBeenCalledWith({
       keyAgent: expect.anything(),
-      did: COMPANION_DID
+      did: CLIENT_ANNEX_DID
     })
     expect(userKeyRosterDescriptorStore).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -447,7 +447,7 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
         email: 'typed@example.test',
         persistence,
         transient: {
-          companionDid: COMPANION_DID,
+          clientAnnexDid: CLIENT_ANNEX_DID,
           invocationCapability: GENERATION_DELEGATION
         }
       })

@@ -43,7 +43,7 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
 
 vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
-  companionLogStore: vi.fn(() => ({ isCompanionLogStore: true })),
+  clientAnnexLogStore: vi.fn(() => ({ isClientAnnexLogStore: true })),
   mintGenerationDelegation: vi.fn(async () => ({ id: 'urn:zcap:fresh' })),
   ensureGenerationDelegationCurrent: vi.fn(async () => {
     state.calls.push('ensureGenerationDelegationCurrent')
@@ -108,8 +108,8 @@ import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
 import { userKeyVaultKeys } from '@interop/wallet-core/keys'
 import {
-  companionLogPinId,
-  companionLogStore,
+  clientAnnexLogPinId,
+  clientAnnexLogStore,
   ensureGenerationDelegationCurrent
 } from '@interop/wallet-core/webvh'
 import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
@@ -148,11 +148,11 @@ const FRESH_USER_KEY = {
 const ROSTER_DESCRIPTOR = { epochs: [{ id: FRESH_USER_KEY.id }] }
 const DOCUMENT = { id: 'did:webvh:doc', verificationMethod: [] }
 
-const COMPANION_SPACE_ID = 'companion-space-1'
+const CLIENT_ANNEX_SPACE_ID = 'clientAnnex-space-1'
 const GENERATION_ID = 'gen-Ux3v0kQf9aPmB2hZ'
-const COMPANION_DID =
-  'did:webvh:QmCompanionScid:was.example.test:space:' +
-  `${COMPANION_SPACE_ID}:${GENERATION_ID}`
+const CLIENT_ANNEX_DID =
+  'did:webvh:QmClientAnnexScid:was.example.test:space:' +
+  `${CLIENT_ANNEX_SPACE_ID}:${GENERATION_ID}`
 
 /**
  * The post-edit account document with a `#DelegatedClients` service entry --
@@ -164,7 +164,7 @@ const POINTED_DOCUMENT = {
     {
       id: `${DOCUMENT.id}#delegated-clients`,
       type: 'https://w3id.org/byoe#DelegatedClients',
-      serviceEndpoint: COMPANION_DID
+      serviceEndpoint: CLIENT_ANNEX_DID
     }
   ]
 }
@@ -609,22 +609,22 @@ describe('the generation-delegation re-mint stage', () => {
     expect(outcome.generation).toEqual({ renewed: true })
     expect(vi.mocked(ensureGenerationDelegationCurrent)).toHaveBeenCalledWith(
       expect.objectContaining({
-        store: { isCompanionLogStore: true },
+        store: { isClientAnnexLogStore: true },
         ladderSeed: LADDER_SEED,
         generationId: GENERATION_ID,
-        expectedDid: COMPANION_DID,
+        expectedDid: CLIENT_ANNEX_DID,
         // The signer-death axis: the document the revocation edit just
         // produced, never a cached view.
         accountDoc: POINTED_DOCUMENT,
-        logId: companionLogPinId({
-          spaceId: COMPANION_SPACE_ID,
+        logId: clientAnnexLogPinId({
+          spaceId: CLIENT_ANNEX_SPACE_ID,
           generationId: GENERATION_ID
         })
       })
     )
-    expect(vi.mocked(companionLogStore)).toHaveBeenCalledWith(
+    expect(vi.mocked(clientAnnexLogStore)).toHaveBeenCalledWith(
       expect.objectContaining({
-        spaceId: COMPANION_SPACE_ID,
+        spaceId: CLIENT_ANNEX_SPACE_ID,
         generationId: GENERATION_ID
       })
     )
@@ -636,7 +636,7 @@ describe('the generation-delegation re-mint stage', () => {
     expect(outcome.generation).toEqual({ renewed: false })
   })
 
-  it('skips with no-pointer when the document names no companion', async () => {
+  it('skips with no-pointer when the document names no annex', async () => {
     const outcome = await revokeWith({
       document: DOCUMENT,
       ladderSeed: LADDER_SEED
@@ -659,7 +659,7 @@ describe('the generation-delegation re-mint stage', () => {
 
   it('reports a failure as skipped, the rest of the cascade intact', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    state.renewError = new Error('companion log unreachable')
+    state.renewError = new Error('annex log unreachable')
 
     const outcome = await revokeWith({ ladderSeed: LADDER_SEED })
 

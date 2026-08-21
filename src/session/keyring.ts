@@ -193,7 +193,7 @@ export interface KeyringFetchResult extends KeyringRecordContents {
   // standing layout (absent on a plain keyring record -- the pre-promotion or
   // no-WAS reduced path): the pre-minted PUT-on-`did.jsonl` bridge delegation
   // and the update-key ladder seed, both credential-authenticated by the
-  // record's binding MAC, plus the optional companion-Space sibling
+  // record's binding MAC, plus the optional annex-Space sibling
   // delegation (`delegatedClients`, outside the MAC). What a fresh browser
   // self-enrolls with. In-memory only.
   standing?: {
@@ -217,7 +217,7 @@ export interface KeyringFetchResult extends KeyringRecordContents {
   }) => Promise<(changes: PersistableClientKeys) => Promise<void>>
   // Present beside `standing`: re-wraps and re-PUTs this unlock record with a
   // freshly minted bridge delegation (and, when supplied, a fresh
-  // companion-Space sibling; an existing sibling is restated verbatim
+  // annex-Space sibling; an existing sibling is restated verbatim
   // otherwise), restating everything else verbatim
   // (the ladder seed included) -- the login-time expiry refresh of the
   // credential's own delegations, run when one is expired or
@@ -1340,7 +1340,7 @@ async function buildFetchResult({
  *   layout -- the credential can self-enroll a fresh browser -- instead of as
  *   a plain pointer record. Requires `pointer` (unlock records exist only on
  *   WAS deployments).
- * @param [options.delegatedClients] {IZcap}   the pre-minted companion-Space
+ * @param [options.delegatedClients] {IZcap}   the pre-minted annex-Space
  *   sibling delegation (GET+PUT over the auxiliary Space's items subtree),
  *   sealed into the standing record beside the bridge
  * @param [options.ladderSeed] {Uint8Array}   the credential's 32-byte
@@ -1502,7 +1502,7 @@ export async function bindUnlockSecret({
  *   delegate the unlock Space management zcap to (see `bindUnlockSecret`)
  * @param [options.delegation] {IZcap}   the bridge delegation for a standing
  *   bind (see `bindUnlockSecret`)
- * @param [options.delegatedClients] {IZcap}   the companion-Space sibling
+ * @param [options.delegatedClients] {IZcap}   the annex-Space sibling
  *   delegation for a standing bind
  * @param [options.ladderSeed] {Uint8Array}   the update-key ladder seed for a
  *   standing bind
@@ -1593,7 +1593,7 @@ export async function bindPassphrase({
  *   the pre-genesis bind; the full pointer on the re-bind)
  * @param options.delegation {IZcap}   the bridge delegation (the interim
  *   ladder-did:key-signed one pre-genesis, the ladder-VM-signed one after)
- * @param [options.delegatedClients] {IZcap}   the companion-Space sibling
+ * @param [options.delegatedClients] {IZcap}   the annex-Space sibling
  * @param options.ladderSeed {Uint8Array}
  * @param [options.delegateManagementTo] {string}   an account DID to delegate
  *   the unlock Space management zcap to (widened with PUT, the standing
@@ -2057,7 +2057,7 @@ export async function deleteKeyring({
  * @param [options.delegation] {IZcap}   the new passphrase's bridge
  *   delegation, for a standing rebind (see `bindUnlockSecret`)
  * @param [options.delegatedClients] {IZcap}   the new passphrase's
- *   companion-Space sibling delegation, for a standing rebind
+ *   annex-Space sibling delegation, for a standing rebind
  * @param [options.ladderSeed] {Uint8Array}   the new passphrase's update-key
  *   ladder seed, for a standing rebind
  * @param [options.idb] {IDBFactory}

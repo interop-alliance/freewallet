@@ -8,7 +8,7 @@
  * preconditions, the recovery registry's latent commitment hashes, the
  * collections source (the standard encrypted set plus the remotely listed
  * app-provisioned ones), the recovery-delegation re-mint, the
- * generation-delegation re-mint (a companion entry replacing the embedded
+ * generation-delegation re-mint (an annex entry replacing the embedded
  * delegation when the revoked client's key signed it), the adoption side
  * effects (epoch pin, client-key record, unlock-methods re-wrap, live vault
  * keys and storage ciphers), and the audit record.
@@ -21,9 +21,9 @@ import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import { WasClient } from '@interop/was-client'
 import {
   clientSigningKeyMultibase,
-  companionDidParts,
-  companionLogPinId,
-  companionLogStore,
+  clientAnnexDidParts,
+  clientAnnexLogPinId,
+  clientAnnexLogStore,
   delegatedClientsPointer,
   ensureGenerationDelegationCurrent,
   mintGenerationDelegation,
@@ -235,9 +235,9 @@ export async function revokeEnrolledClient({
  * current-key-set rule -- silently, mid-generation, with no registry entry
  * tracking it. This closure runs `ensureGenerationDelegationCurrent` with
  * the post-edit document as its signer-death axis: a rotted (or expiring)
- * delegation is replaced by one companion entry, the fresh delegation signed
+ * delegation is replaced by one annex entry, the fresh delegation signed
  * by this session's promoted account key and the entry by the login
- * credential's static companion rung 0. A healthy delegation is one no-op
+ * credential's static annex rung 0. A healthy delegation is one no-op
  * read.
  *
  * Best-effort by the cascade's contract: failures are reported, never
@@ -272,7 +272,7 @@ async function remintGenerationDelegation({
     if (ladderSeed === undefined) {
       return { renewed: false, skipped: 'no-ladder-seed' }
     }
-    const { spaceId: companionSpaceId, generationId } = companionDidParts({
+    const { spaceId: clientAnnexSpaceId, generationId } = clientAnnexDidParts({
       did: pointedDid
     })
     const was = new WasClient({
@@ -280,24 +280,24 @@ async function remintGenerationDelegation({
       zcapClient: session.profile.zcapClient
     })
     const { renewed } = await ensureGenerationDelegationCurrent({
-      store: companionLogStore({
+      store: clientAnnexLogStore({
         was,
-        spaceId: companionSpaceId,
+        spaceId: clientAnnexSpaceId,
         generationId
       }),
       ladderSeed,
       generationId,
-      mintGenerationDelegation: async ({ companionDid }) =>
+      mintGenerationDelegation: async ({ clientAnnexDid }) =>
         mintGenerationDelegation({
           zcapClient: session.profile.zcapClient,
           wasServerUrl: pointer.host,
           spaceId: pointer.spaceId,
-          companionDid
+          clientAnnexDid
         }),
       expectedDid: pointedDid,
       accountDoc: document,
       pinStore: session.profile.persistence.logPins,
-      logId: companionLogPinId({ spaceId: companionSpaceId, generationId })
+      logId: clientAnnexLogPinId({ spaceId: clientAnnexSpaceId, generationId })
     })
     return { renewed }
   } catch (err) {

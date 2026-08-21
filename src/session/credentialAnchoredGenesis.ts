@@ -23,13 +23,13 @@
  *    credential's `keyAgreement` posture folded in), the roster's epoch[0]
  *    wrapped to the credential's standing KAK with a ladder-signed entry
  *    proof, and the collection epochs. Promotion deferred (`promoteController: false`).
- * 3. The companion generation: minted under the bootstrap did:key, the
+ * 3. The annex generation: minted under the bootstrap did:key, the
  *    generation delegation embedded (ladder-VM-signed) while the auxiliary
  *    Space is still bootstrap-controlled, the Space's controller flipped to
  *    the account DID, and the account document's `#DelegatedClients` pointer
  *    appended as a second rung-0-signed entry.
  * 4. The re-bind: the full pointer (DID in), the ladder-VM-signed bridge and
- *    companion-Space sibling, and the management delegation to the account
+ *    annex-Space sibling, and the management delegation to the account
  *    DID -- durably written BEFORE promotion, so the next login signs under
  *    the promoted controller only once the record says to.
  * 5. The unlock-methods registry entry, written under the bootstrap did:key
@@ -47,15 +47,15 @@ import {
 } from '@interop/wallet-core/genesis'
 import {
   accountLogPinId,
-  companionDidParts,
-  companionLogStore,
+  clientAnnexDidParts,
+  clientAnnexLogStore,
   delegatedClientsPointer,
   didKeyZcapClient,
   ensureGenerationDelegationCurrent,
   keyAgreementCommitment,
   ladderVmAgent,
   ladderVmZcapClient,
-  mintCredentialCompanionGeneration,
+  mintCredentialClientAnnexGeneration,
   mintDelegatedClientsDelegation,
   mintGenerationDelegation,
   setDelegatedClientsPointer,
@@ -264,7 +264,7 @@ export async function establishCredentialAnchoredAccount({
     await ensureWalletSpaceEpochs({ was: bootstrapWas, spaceId, userKey })
   }
 
-  // 3. The companion generation, so the very next login can enroll a
+  // 3. The annex generation, so the very next login can enroll a
   // transient client: reuse the pointed one; mint, embed the delegation,
   // flip the auxiliary Space's controller, and point otherwise.
   const verified = await verifyAccountLog({
@@ -274,39 +274,39 @@ export async function establishCredentialAnchoredAccount({
     pinStore: persistence.logPins
   })
   const ladderZcap = await ladderVmZcapClient({ accountDid: did, ladderSeed })
-  let companionDid = delegatedClientsPointer({ doc: verified.doc })
+  let clientAnnexDid = delegatedClientsPointer({ doc: verified.doc })
   const rung0 = await ladderRung({ ladderSeed, index: 0 })
   const rung1 = await ladderRung({ ladderSeed, index: 1 })
-  if (!companionDid) {
-    const companionSpaceId = mintSpaceId()
-    const minted = await mintCredentialCompanionGeneration({
+  if (!clientAnnexDid) {
+    const clientAnnexSpaceId = mintSpaceId()
+    const minted = await mintCredentialClientAnnexGeneration({
       was: bootstrapWas,
       wasServerUrl: host,
-      spaceId: companionSpaceId,
+      spaceId: clientAnnexSpaceId,
       controller: bootstrapAgent.id,
       ladderSeed
     })
     // The delegation embeds while the auxiliary Space still answers to the
     // bootstrap did:key; the controller flip follows, then the pointer.
     await ensureGenerationDelegationCurrent({
-      store: companionLogStore({
+      store: clientAnnexLogStore({
         was: bootstrapWas,
-        spaceId: companionSpaceId,
+        spaceId: clientAnnexSpaceId,
         generationId: minted.generationId
       }),
       ladderSeed,
       generationId: minted.generationId,
-      mintGenerationDelegation: async ({ companionDid: generationDid }) =>
+      mintGenerationDelegation: async ({ clientAnnexDid: generationDid }) =>
         mintGenerationDelegation({
           zcapClient: ladderZcap,
           wasServerUrl: host,
           spaceId,
-          companionDid: generationDid
+          clientAnnexDid: generationDid
         }),
       expectedDid: minted.did
     })
     await bootstrapWas
-      .space(companionSpaceId)
+      .space(clientAnnexSpaceId)
       .configure({ controller: did, force: true })
     // The second rung-0-signed account-log entry: the ratified
     // `#DelegatedClients` service pointer, under the ladder's own update
@@ -314,14 +314,14 @@ export async function establishCredentialAnchoredAccount({
     await setDelegatedClientsPointer({
       idStore,
       updateKeys: { updateSeed: rung0.seed, stagedSeed: rung1.seed },
-      companionDid: minted.did,
+      clientAnnexDid: minted.did,
       expectedDid: did,
       pinStore: persistence.logPins,
       logId: accountLogPinId({ spaceId })
     })
-    companionDid = minted.did
+    clientAnnexDid = minted.did
   }
-  const companion = companionDidParts({ did: companionDid })
+  const clientAnnex = clientAnnexDidParts({ did: clientAnnexDid })
 
   // 4. The final bridge and sibling, ladder-VM-signed (they must survive
   // promotion, which the interim did:key-signed bridge cannot), and the
@@ -335,7 +335,7 @@ export async function establishCredentialAnchoredAccount({
   const sibling = await mintDelegatedClientsDelegation({
     zcapClient: ladderZcap,
     wasServerUrl: host,
-    companionSpaceId: companion.spaceId,
+    clientAnnexSpaceId: clientAnnex.spaceId,
     controller: standing.clientDid
   })
   const rebind = await bindCredentialAnchoredUnlockSecret({

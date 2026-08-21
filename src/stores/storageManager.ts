@@ -2098,7 +2098,7 @@ export class StorageManager {
   }
 
   /**
-   * Records the GenerationCollect activity -- companion GC's owner-side
+   * Records the GenerationCollect activity -- annex GC's owner-side
    * digest, written before the collected generation's delete. Unlike every
    * other `addHistory*` method, the activity id is the generation id
    * VERBATIM rather than a minted `uuidv7`: the deterministic payload id is

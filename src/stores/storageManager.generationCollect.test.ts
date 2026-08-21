@@ -1,5 +1,5 @@
 /**
- * Unit test for `StorageManager.addHistoryGenerationCollected`: companion
+ * Unit test for `StorageManager.addHistoryGenerationCollected`: annex
  * GC's owner-side digest write. Unlike every other `addHistory*` method it
  * does not mint a `uuidv7` -- the generation id IS the activity id and the
  * record's resource id, which is what collapses a torn re-run's second row at
@@ -62,7 +62,7 @@ describe('StorageManager.addHistoryGenerationCollected', () => {
     expect(activity.id).toBe(generationId)
     expect(activity.type).toEqual(['GenerationCollect'])
     expect(activity.summary).toBe(
-      `Collected companion generation "${generationId}".`
+      `Collected client-annex generation "${generationId}".`
     )
     expect(activity.object).toEqual({
       generationId,

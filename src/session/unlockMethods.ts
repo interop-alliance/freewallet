@@ -91,7 +91,7 @@ import {
  * and unlock-KAK members the revocation cascade's re-mint machinery shares
  * with the recovery entries -- `unlockClientDid` being the neutral twin of
  * `recoveryClientDid` (the credential-derived signing DID a fresh delegation
- * is made to). The companion-Space sibling delegation's staleness rides as a
+ * is made to). The annex-Space sibling delegation's staleness rides as a
  * second scalar pair (`delegatedClientsKeyId` / `delegatedClientsExpires`),
  * absent while the record carries no sibling and always absent on recovery
  * codes. Public halves only; the secret is never stored anywhere.
@@ -1088,7 +1088,7 @@ export async function backfillPassphraseUnlockMethod({
 
 /**
  * Records freshly re-minted delegation members -- the bridge pair, the
- * companion-Space sibling pair where one was resealed -- and, after a
+ * annex-Space sibling pair where one was resealed -- and, after a
  * self-enrollment climbed the update-key ladder, the current
  * rung's multibase -- on the passphrase or passkey entry matching an unlock
  * Space. The registry half of the login-time bridge-expiry self-refresh and
@@ -1101,7 +1101,7 @@ export async function backfillPassphraseUnlockMethod({
  * @param options.unlockSpaceId {string}   the credential's unlock Space
  * @param [options.delegationKeyId] {string}
  * @param [options.delegationExpires] {string}
- * @param [options.delegatedClientsKeyId] {string}   the companion-Space
+ * @param [options.delegatedClientsKeyId] {string}   the annex-Space
  *   sibling delegation's fresh signer
  * @param [options.delegatedClientsExpires] {string}
  * @param [options.updateKeyMultibase] {string}   the ladder's current

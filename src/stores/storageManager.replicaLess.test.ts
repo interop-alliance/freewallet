@@ -86,7 +86,7 @@ async function generateKey(): Promise<{
 const DELEGATED_ZCAP = {
   id: 'urn:uuid:generation-delegation',
   '@context': 'https://w3id.org/zcap/v1',
-  controller: 'did:key:z6MkCompanion',
+  controller: 'did:key:z6MkClientAnnex',
   invocationTarget: 'https://was.example/space/s-space',
   parentCapability: 'urn:zcap:root:...'
 } as unknown as IZcap
