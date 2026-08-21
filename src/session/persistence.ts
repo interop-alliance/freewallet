@@ -239,6 +239,37 @@ export function localStorageMetaCache({
 }
 
 /**
+ * Deletes every persisted descriptor-cache and meta-cache entry for one
+ * scope (an account's Space id, or `local:<clientDid>` in local mode).
+ * Consumed by the shared wipe enumeration -- outside it, no code path
+ * deletes these families, so they would otherwise outlive the account.
+ * Scoped deletion only: another account's entries are never touched.
+ *
+ * @param options {object}
+ * @param options.scope {string}
+ * @returns {void}
+ */
+export function deleteLocalCacheFamilies({ scope }: { scope: string }): void {
+  if (typeof localStorage === 'undefined') {
+    return
+  }
+  const prefixes = [
+    `${DESCRIPTOR_CACHE_PREFIX}:${scope}:`,
+    `${META_CACHE_PREFIX}:${scope}:`
+  ]
+  const doomed: string[] = []
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index)
+    if (key && prefixes.some(prefix => key.startsWith(prefix))) {
+      doomed.push(key)
+    }
+  }
+  for (const key of doomed) {
+    localStorage.removeItem(key)
+  }
+}
+
+/**
  * An in-memory `EncryptionDescriptorCache`: the transient session's cache,
  * seeded by the login-time acquisition and retaining that snapshot when a
  * mid-session refresh fails (a failed fetch falls back to what login saw,

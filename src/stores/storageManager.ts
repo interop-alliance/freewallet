@@ -1220,13 +1220,36 @@ export class StorageManager {
     return await this.#store.purgeUndecryptableCredentials()
   }
 
-  async wipeStorage() {
-    // Remote first: if the remote wipe fails, the error surfaces while the
-    // local data (and session) are still intact.
+  /**
+   * Wipes the remote data Space only (a no-op without a remote store).
+   * Account deletion runs this first, so a remote failure surfaces while
+   * the local data (and session) are still intact, and hands the local half
+   * to the shared wipe enumeration.
+   *
+   * @returns {Promise<void>}
+   */
+  async wipeRemoteStorage() {
     if (this.#remoteStore) {
       await this.#remoteStore.wipeStorage()
     }
+  }
+
+  /**
+   * Wipes the local replica databases only (this client's prefix, with the
+   * cross-tab teardown and verified completion the local store provides).
+   * The shared wipe enumeration's replica stage.
+   *
+   * @returns {Promise<void>}
+   */
+  async wipeLocalStorage() {
     await this.#localStore?.wipeStorage()
+  }
+
+  async wipeStorage() {
+    // Remote first: if the remote wipe fails, the error surfaces while the
+    // local data (and session) are still intact.
+    await this.wipeRemoteStorage()
+    await this.wipeLocalStorage()
   }
 
   /**

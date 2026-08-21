@@ -280,7 +280,11 @@ async function remintGenerationDelegation({
       zcapClient: session.profile.zcapClient
     })
     const { renewed } = await ensureGenerationDelegationCurrent({
-      store: companionLogStore({ was, spaceId: companionSpaceId, generationId }),
+      store: companionLogStore({
+        was,
+        spaceId: companionSpaceId,
+        generationId
+      }),
       ladderSeed,
       generationId,
       mintGenerationDelegation: async ({ companionDid }) =>

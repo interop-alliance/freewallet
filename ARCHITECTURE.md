@@ -51,6 +51,8 @@ src/session/        Session bootstrap (initSession.ts) and the account
   recovery.ts       Recovery-code issuance, spend, revocation
   shares.ts         Shared-collection listing + removal
   applications.ts   Connected-app listing + revocation
+  wipe.ts           The shared wipe enumeration (the one list of durable
+                    local account state and its snapshot-first executor)
 src/types/          Shared TypeScript interfaces
 src/i18n/           i18next config + locale JSON files
 src/styles/         MUI sx-object style constants (co-located by feature)
@@ -362,9 +364,8 @@ pre-promotion window needs no special handling: the genesis ceremony's log
 read runs under the same slot from true first contact on, and the published
 DID is persisted locally keyed by the data Space id only so a later
 pre-promotion heal login can state an `expectedDid` even though the pointer
-has not caught up. Account deletion clears all of it (the two slots by
-their builders, the epoch pin, the mapping, and each listed companion
-generation's pin slot) beside the keyring retirement. Deletion also
+has not caught up. Account deletion clears all of it through the shared
+wipe enumeration (below) beside the keyring retirement. Deletion also
 reaches every unlock method and the companion before the account Space
 dies: it walks the unlock-methods registry and deletes each entry's unlock
 Space and local trio best-effort (`deleteUnlockMethodArtifacts` in
@@ -374,6 +375,32 @@ Space in one `space.delete()`. Both run BEFORE the fatal wipe, because
 resolving the auxiliary Space's controller reads the account log out of
 the account Space; a wipe failure after them leaves other methods' logins
 already destroyed, accepted since the user's intent was deletion.
+
+**The shared wipe enumeration** (`src/session/wipe.ts`) is the one list of
+durable local state an account leaves on a browser and the one executor
+that deletes it, consumed by the deletion-shaped ceremonies (account
+deletion and the guest wipe today; the forget affordance and the
+orphan-client heal are designed onto the same seam). It is snapshot-first:
+every target derives from the live session before anything is deleted --
+the client-keyed families (the unlock-methods cache, the passkey-safety
+notice, the replica-database prefix, the local-mode cache scope) from this
+browser's own client did:key, never the account controller; each unlock
+method's local trio (keyring cache, client-key record, freshness pin) from
+the registry walked across every method; the epoch pin from the account
+DID; the chain-head pin slots by Space-scoped prefix, which also clears
+every companion generation's slot without needing the generation ids; the
+Space-to-DID mapping; and the per-account localStorage families (the
+descriptor and meta caches under both scope schemes, and the migration
+markers). Cross-tab teardown precedes the replica delete (a broadcast asks
+sibling tabs to drop their open handles) and completion is verified by
+re-probing rather than resolved while blocked. Global UI prefs stay out;
+the global `writerId` is cleared only by the forget grade. The honest
+limits, which no enumeration reaches: deleted IndexedDB data remains
+forensically recoverable (the plaintext `public-credentials` rows
+included), the CHAPI popup's partitioned third-party buckets are
+unreachable from any top-level wipe, and the mediator-origin (authn.io)
+handler-registration bit records that a wallet was used on the terminal --
+only clearing the browser profile removes those.
 
 **Controller promotion by ordering.** The Space id is an independent random
 identifier minted at signup (`mintSpaceId`) and carried in the account

@@ -55,6 +55,39 @@ import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'
 
 /**
+ * The per-`dbPrefix` localStorage marker keys of the one-time local
+ * migrations. Exported for the shared wipe enumeration, which is the only
+ * path that ever deletes them.
+ *
+ * @param dbPrefix {string}
+ * @returns {{ plaintext: string, publicCids: string }}
+ */
+export function migrationMarkerKeys(dbPrefix: string): {
+  plaintext: string
+  publicCids: string
+} {
+  return {
+    plaintext: `freewallet:plaintext-migrated:${dbPrefix}`,
+    publicCids: `freewallet:public-cids-migrated:${dbPrefix}`
+  }
+}
+
+/**
+ * The BroadcastChannel a wipe uses to ask sibling tabs to drop their open
+ * database handles before the deletion runs: an IndexedDB delete blocks
+ * (indefinitely) while any other connection stays open, so the wipe first
+ * broadcasts its `dbPrefix` and every listening tab closes its store.
+ */
+const REPLICA_TEARDOWN_CHANNEL = 'freewallet:replica-teardown'
+
+/**
+ * How long a single database deletion may stay blocked on another connection
+ * before the wipe stops waiting and lets the post-delete verification report
+ * the leftover honestly.
+ */
+const REPLICA_DELETE_TIMEOUT_MS = 10_000
+
+/**
  * The local-only projection index over the append-only `contacts-history`
  * collection: one row per history row, carrying just that row's id and the
  * `contactId` its (encrypted) revision belongs to. It exists so a single
@@ -206,6 +239,9 @@ export class BrowserStore {
   // holds one row per connected app, so it is scanned per call rather than
   // carrying a session-wide cid index.
   #appKeyCidByRow = new Map<string, string>()
+  // The replica-teardown listener (see #listenForTeardown); present while the
+  // database is open in this tab and a BroadcastChannel implementation exists.
+  #teardownChannel?: BroadcastChannel
 
   constructor({
     dbPrefix,
@@ -312,7 +348,44 @@ export class BrowserStore {
         contactId: string
       }>
     this.db = db
+    this.#listenForTeardown()
     console.log('Initialized local wallet collections for user:', user.id)
+  }
+
+  /**
+   * Subscribes this tab to the replica-teardown channel: when another tab
+   * wipes this prefix's databases, this tab must drop its open handles or the
+   * deletion stays blocked behind them. The channel is idempotently opened
+   * per store instance and closed again by `close()` / `wipeStorage()`.
+   *
+   * @returns {void}
+   */
+  #listenForTeardown(): void {
+    if (typeof BroadcastChannel === 'undefined' || this.#teardownChannel) {
+      return
+    }
+    this.#teardownChannel = new BroadcastChannel(REPLICA_TEARDOWN_CHANNEL)
+    this.#teardownChannel.onmessage = event => {
+      const dbPrefix = (event.data as { dbPrefix?: unknown } | null)?.dbPrefix
+      if (dbPrefix === this.dbPrefix) {
+        void this.close()
+      }
+    }
+  }
+
+  /**
+   * Asks every sibling tab holding this prefix's databases to close them, on
+   * a one-shot channel (messages queued by `postMessage` survive the close).
+   *
+   * @returns {void}
+   */
+  #broadcastTeardown(): void {
+    if (typeof BroadcastChannel === 'undefined') {
+      return
+    }
+    const channel = new BroadcastChannel(REPLICA_TEARDOWN_CHANNEL)
+    channel.postMessage({ dbPrefix: this.dbPrefix })
+    channel.close()
   }
 
   /**
@@ -1666,7 +1739,7 @@ export class BrowserStore {
    */
   async migrateLocalPlaintextDocs() {
     await this.#runOnce(
-      `freewallet:plaintext-migrated:${this.dbPrefix}`,
+      migrationMarkerKeys(this.dbPrefix).plaintext,
       async () => {
         for (const [logicalKey, cipher] of Object.entries(
           this.#ciphers ?? {}
@@ -1722,7 +1795,7 @@ export class BrowserStore {
    */
   async migratePublicCredentialCids() {
     await this.#runOnce(
-      `freewallet:public-cids-migrated:${this.dbPrefix}`,
+      migrationMarkerKeys(this.dbPrefix).publicCids,
       async () => {
         const collection = this.rxCollection('publicCredentials')
         const docs = await collection.find().exec()
@@ -1764,13 +1837,23 @@ export class BrowserStore {
 
   /**
    * Removes the wallet database and any legacy local databases carrying this
-   * user's prefix (e.g. the pre-flip `-credentials-db` / `-sync-db`).
+   * user's prefix (e.g. the pre-flip `-credentials-db` / `-sync-db`), with
+   * verified completion: sibling tabs are asked to drop their handles first
+   * (the teardown broadcast), and the wipe re-probes `indexedDB.databases()`
+   * at the end, throwing when any prefixed database survived -- it never
+   * reports success on a deletion that is merely queued behind another open
+   * connection.
    *
    * @see https://rxdb.info/rx-database.html#remove
    * @returns {Promise<void>}
    */
   async wipeStorage() {
     this.#clearCaches()
+    // Cross-tab teardown precedes the delete: a sibling tab's open
+    // connection would otherwise leave every deletion queued indefinitely.
+    this.#broadcastTeardown()
+    this.#teardownChannel?.close()
+    this.#teardownChannel = undefined
     if (this.db) {
       await this.db.remove()
       this.db = undefined
@@ -1785,22 +1868,33 @@ export class BrowserStore {
           .filter(db => db.name!.includes(this.dbPrefix))
           .map(db => this.#deleteDatabase(db.name!))
       )
+      // Verified completion: the per-database deletes above log-and-resolve
+      // on error and give up on a long block, so the probe below is the one
+      // honest answer about what is actually gone.
+      const remaining = (await indexedDB.databases()).filter(db =>
+        db.name!.includes(this.dbPrefix)
+      )
+      if (remaining.length > 0) {
+        throw new Error(
+          'Wiping local wallet storage left database(s) behind ' +
+            '(another tab may still hold them open): ' +
+            remaining.map(db => `"${db.name}"`).join(', ')
+        )
+      }
     }
   }
 
   /**
-   * Deletes a single IndexedDB database, resolving only once the request
-   * settles so `wipeStorage` cannot report success while the database still
-   * exists. `deleteDatabase` fires `onsuccess` on completion and `onerror` on
-   * failure; both resolve here (errors are logged, not thrown, so one stuck
-   * database does not abort the wipe of the others).
+   * Deletes a single IndexedDB database, resolving once the request settles.
+   * `onsuccess` and `onerror` both resolve (errors are logged, not thrown, so
+   * one stuck database does not abort the wipe of the others -- the caller's
+   * post-delete verification reports what actually remains).
    *
-   * `onblocked` fires when another tab still holds an open connection: the
-   * request then stays pending and may never complete while that tab lives.
-   * We deliberately do not wait for that -- blocking `wipeStorage` on a
-   * sibling tab could hang logout / account deletion indefinitely. Instead we
-   * log a warning and resolve; the deletion remains queued and completes once
-   * the other connection closes.
+   * `onblocked` fires when another tab still holds an open connection. The
+   * teardown broadcast has already asked that tab to close, so the request is
+   * given `REPLICA_DELETE_TIMEOUT_MS` to complete; past that the wait stops
+   * (blocking logout / account deletion on an unresponsive tab indefinitely
+   * would be worse) and the leftover surfaces through the verification.
    *
    * @param name {string}
    * @returns {Promise<void>}
@@ -1808,8 +1902,19 @@ export class BrowserStore {
   #deleteDatabase(name: string): Promise<void> {
     return new Promise<void>(resolve => {
       const request = indexedDB.deleteDatabase(name)
-      request.onsuccess = () => resolve()
+      const timeout = setTimeout(() => {
+        console.warn(
+          `Deletion of IndexedDB database "${name}" stayed blocked by ` +
+            'another open connection; giving up the wait.'
+        )
+        resolve()
+      }, REPLICA_DELETE_TIMEOUT_MS)
+      request.onsuccess = () => {
+        clearTimeout(timeout)
+        resolve()
+      }
       request.onerror = () => {
+        clearTimeout(timeout)
         console.error(
           `Failed to delete IndexedDB database "${name}":`,
           request.error
@@ -1819,21 +1924,22 @@ export class BrowserStore {
       request.onblocked = () => {
         console.warn(
           `Deletion of IndexedDB database "${name}" is blocked by another ` +
-            'open connection (e.g. a second tab); it will complete once that ' +
-            'connection closes.'
+            'open connection (e.g. a second tab); waiting for it to close.'
         )
-        resolve()
       }
     })
   }
 
   /**
-   * Closes the database (without removing data). Called on logout.
+   * Closes the database (without removing data). Called on logout, and by
+   * the teardown listener when another tab wipes this prefix's databases.
    *
    * @returns {Promise<void>}
    */
   async close() {
     this.#clearCaches()
+    this.#teardownChannel?.close()
+    this.#teardownChannel = undefined
     if (this.db) {
       await this.db.close()
       this.db = undefined

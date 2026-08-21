@@ -24,7 +24,9 @@ const state = vi.hoisted(() => ({
   accountLogFails: false,
   companionCollections: [] as string[],
   companionDeleteFails: false,
-  artifactFailures: [] as string[]
+  artifactFailures: [] as string[],
+  // What the shared wipe enumeration reports back to `deleteAccount`.
+  localWipeFailed: [] as string[]
 }))
 
 const FRESH_USER_KEY = { id: 'did:key:z6LSFreshUserKey' }
@@ -209,6 +211,35 @@ vi.mock('@/lib/loginCredential', () => ({
   loginHandleOf: vi.fn(() => '')
 }))
 
+vi.mock('@/session/wipe', () => ({
+  snapshotWipeTargets: vi.fn(
+    ({
+      session,
+      registry,
+      companionSpaceId
+    }: {
+      session: { user: { id: string } }
+      registry?: { methods?: { unlockSpaceId: string }[] } | null
+      companionSpaceId?: string
+    }) => {
+      state.calls.push('snapshotWipeTargets')
+      return {
+        clientDid: session.user.id,
+        dbPrefix: 'db-prefix',
+        companionSpaceId,
+        unlockSpaceIds: (registry?.methods ?? []).map(
+          entry => entry.unlockSpaceId
+        ),
+        cacheScopes: []
+      }
+    }
+  ),
+  executeLocalWipe: vi.fn(async () => {
+    state.calls.push('executeLocalWipe')
+    return { failed: state.localWipeFailed }
+  })
+}))
+
 const { changeAccountPassphrase, deleteAccount, removeAccountPasskey } =
   await import('@/session/accountSettings')
 const { rotateOffUnlockCredential } =
@@ -220,9 +251,7 @@ const {
   canRevokeWithoutCeremony
 } = await import('@/session/unlockMethods')
 const { deleteUnlockMethodArtifacts } = await import('@/session/unlockMethods')
-const { accountLogPinId, companionLogPinId } =
-  await import('@interop/wallet-core/webvh')
-const { userKeyRosterPinId } = await import('@interop/wallet-core/keys')
+const { executeLocalWipe, snapshotWipeTargets } = await import('@/session/wipe')
 const { durableSessionPersistence } = await import('@/session/persistence')
 
 const ACCOUNT_DID = 'did:webvh:QmScid:was.example.test:space:space-123:id'
@@ -295,8 +324,8 @@ function makeSession() {
       }
     },
     storage: {
-      wipeStorage: vi.fn(async () => {
-        state.calls.push('wipeStorage')
+      wipeRemoteStorage: vi.fn(async () => {
+        state.calls.push('wipeRemoteStorage')
         if (state.wipeFails) {
           throw new Error('wipe failed')
         }
@@ -318,6 +347,7 @@ beforeEach(() => {
   state.companionCollections = []
   state.companionDeleteFails = false
   state.artifactFailures = []
+  state.localWipeFailed = []
   vi.clearAllMocks()
 })
 
@@ -328,20 +358,21 @@ describe('deleteAccount', () => {
       passphrase: 'correct horse battery staple'
     })
     expect(result).toBe('deleted')
-    // The local continuity pins go with the account: the keyring retirement
-    // drops the pointer pin, and the key-roster epoch pin plus the Space-keyed
-    // bookkeeping (the two chain-head pin slots and the Space-to-DID mapping)
-    // are cleared beside it.
+    // The remote wipe is fatal-first; the local half (every pin, cache, trio,
+    // and replica) is one call into the shared wipe enumeration, over targets
+    // snapshotted before anything was deleted.
     expect(state.calls).toEqual([
       'verifyPassphrase',
-      'wipeStorage',
+      'snapshotWipeTargets',
+      'wipeRemoteStorage',
       'deleteKeyring',
-      'deletePasskeySafetyNotice',
-      'deleteUserKeyEpochPin',
-      `deleteLogPin:${accountLogPinId({ spaceId: 'space-123' })}`,
-      `deleteLogPin:${userKeyRosterPinId({ spaceId: 'space-123' })}`,
-      'deleteAccountDidForSpace'
+      'executeLocalWipe'
     ])
+    expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targets: expect.objectContaining({ clientDid: 'did:key:zClient' })
+      })
+    )
   })
 
   it('refuses a wrong passphrase without touching any data', async () => {
@@ -384,19 +415,26 @@ describe('deleteAccount', () => {
         entry: expect.objectContaining({ type: 'passkey' })
       })
     )
-    // The dangling existence-oracle Spaces go before the fatal wipe.
+    // The dangling existence-oracle Spaces go before the fatal wipe, and the
+    // registry snapshot reaches the enumeration (every method's local trio).
     expect(state.calls).toEqual([
       'verifyPassphrase',
       'deleteUnlockMethodArtifacts:passphrase',
       'deleteUnlockMethodArtifacts:passkey',
-      'wipeStorage',
+      'snapshotWipeTargets',
+      'wipeRemoteStorage',
       'deleteKeyring',
-      'deletePasskeySafetyNotice',
-      'deleteUserKeyEpochPin',
-      `deleteLogPin:${accountLogPinId({ spaceId: 'space-123' })}`,
-      `deleteLogPin:${userKeyRosterPinId({ spaceId: 'space-123' })}`,
-      'deleteAccountDidForSpace'
+      'executeLocalWipe'
     ])
+    expect(vi.mocked(snapshotWipeTargets)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registry: expect.objectContaining({
+          methods: expect.arrayContaining([
+            expect.objectContaining({ unlockSpaceId: 'unlock-space-passkey' })
+          ])
+        })
+      })
+    )
   })
 
   it('walks past an entry whose artifacts cannot be deleted', async () => {
@@ -411,35 +449,32 @@ describe('deleteAccount', () => {
     expect(result).toBe('deleted')
     expect(vi.mocked(deleteUnlockMethodArtifacts)).toHaveBeenCalledTimes(2)
     expect(state.calls).toContain('deleteUnlockMethodArtifacts:passkey')
-    expect(state.calls).toContain('wipeStorage')
+    expect(state.calls).toContain('wipeRemoteStorage')
     warn.mockRestore()
   })
 
-  it('tears the auxiliary Space down before the wipe and drops its pin slots', async () => {
+  it('tears the auxiliary Space down before the wipe and hands its id to the enumeration', async () => {
     state.accountDoc = docWithCompanionPointer()
-    state.companionCollections = [GENERATION_ID, 'not-a-generation']
     const result = await deleteAccount({
       session: makeSession(),
       passphrase: 'correct horse battery staple'
     })
     expect(result).toBe('deleted')
     // Before the wipe: once the account Space is gone the server can no
-    // longer resolve the auxiliary Space's did:webvh controller.
+    // longer resolve the auxiliary Space's did:webvh controller. The
+    // companion pin slots are the enumeration's (cleared by prefix under
+    // the snapshotted companion Space id).
     expect(state.calls).toEqual([
       'verifyPassphrase',
       `companionSpaceDelete:${COMPANION_SPACE_ID}`,
-      `deleteLogPin:${companionLogPinId({
-        spaceId: COMPANION_SPACE_ID,
-        generationId: GENERATION_ID
-      })}`,
-      'wipeStorage',
+      'snapshotWipeTargets',
+      'wipeRemoteStorage',
       'deleteKeyring',
-      'deletePasskeySafetyNotice',
-      'deleteUserKeyEpochPin',
-      `deleteLogPin:${accountLogPinId({ spaceId: 'space-123' })}`,
-      `deleteLogPin:${userKeyRosterPinId({ spaceId: 'space-123' })}`,
-      'deleteAccountDidForSpace'
+      'executeLocalWipe'
     ])
+    expect(vi.mocked(snapshotWipeTargets)).toHaveBeenCalledWith(
+      expect.objectContaining({ companionSpaceId: COMPANION_SPACE_ID })
+    )
   })
 
   it('deletes the account even when the discovery steps fail', async () => {
@@ -453,13 +488,12 @@ describe('deleteAccount', () => {
     // Warn-only: an unreadable registry or log narrows the teardown.
     expect(result).toBe('deleted')
     expect(vi.mocked(deleteUnlockMethodArtifacts)).not.toHaveBeenCalled()
-    expect(state.calls).toContain('wipeStorage')
+    expect(state.calls).toContain('wipeRemoteStorage')
     warn.mockRestore()
   })
 
   it('survives a failing auxiliary-Space delete, leaving a typed orphan', async () => {
     state.accountDoc = docWithCompanionPointer()
-    state.companionCollections = [GENERATION_ID]
     state.companionDeleteFails = true
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const result = await deleteAccount({
@@ -467,26 +501,72 @@ describe('deleteAccount', () => {
       passphrase: 'correct horse battery staple'
     })
     expect(result).toBe('deleted')
-    expect(state.calls).toContain('wipeStorage')
-    // The generation pin slot rides behind the Space delete, so a failure
-    // leaves it for the next login's own bookkeeping.
-    expect(state.calls).not.toContain(
-      `deleteLogPin:${companionLogPinId({
-        spaceId: COMPANION_SPACE_ID,
-        generationId: GENERATION_ID
-      })}`
+    expect(state.calls).toContain('wipeRemoteStorage')
+    // The companion pin slots no longer ride behind the Space delete: the
+    // enumeration still receives the snapshotted id and clears them by
+    // prefix.
+    expect(vi.mocked(snapshotWipeTargets)).toHaveBeenCalledWith(
+      expect.objectContaining({ companionSpaceId: COMPANION_SPACE_ID })
     )
+    expect(state.calls).toContain('executeLocalWipe')
     warn.mockRestore()
   })
 
-  it('keeps the keyring when the wipe fails, so the Space is never orphaned', async () => {
+  it('keeps the keyring when the remote wipe fails, so the Space is never orphaned', async () => {
     state.wipeFails = true
     const result = await deleteAccount({
       session: makeSession(),
       passphrase: 'correct horse battery staple'
     })
     expect(result).toBe('failed')
-    expect(state.calls).toEqual(['verifyPassphrase', 'wipeStorage'])
+    expect(state.calls).toEqual([
+      'verifyPassphrase',
+      'snapshotWipeTargets',
+      'wipeRemoteStorage'
+    ])
+  })
+
+  it('reports failure when the enumeration could not delete the replica', async () => {
+    state.localWipeFailed = ['replica']
+    const result = await deleteAccount({
+      session: makeSession(),
+      passphrase: 'correct horse battery staple'
+    })
+    // The local data is still there, so the caller must not log out; any
+    // other stage failure is hygiene residue and stays 'deleted'.
+    expect(result).toBe('failed')
+    expect(state.calls).toContain('executeLocalWipe')
+  })
+
+  it('treats a non-replica stage failure as hygiene residue', async () => {
+    state.localWipeFailed = ['unlock-methods-cache']
+    const result = await deleteAccount({
+      session: makeSession(),
+      passphrase: 'correct horse battery staple'
+    })
+    expect(result).toBe('deleted')
+  })
+
+  it('threads the Storage Access factory through every local delete', async () => {
+    // A session begun from the CHAPI popup carries the unpartitioned
+    // factory; the registry walk, the keyring retirement, and the
+    // enumeration must all land in that bucket, not the partitioned global.
+    const idb = { sentinel: true } as unknown as IDBFactory
+    state.registry = registryWithTwoMethods()
+    const session = makeSession()
+    ;(session.profile as unknown as { persistence: unknown }).persistence =
+      durableSessionPersistence({ idb })
+    const result = await deleteAccount({
+      session,
+      passphrase: 'correct horse battery staple'
+    })
+    expect(result).toBe('deleted')
+    expect(vi.mocked(deleteUnlockMethodArtifacts)).toHaveBeenCalledWith(
+      expect.objectContaining({ idb })
+    )
+    expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledWith(
+      expect.objectContaining({ idb })
+    )
   })
 })
 

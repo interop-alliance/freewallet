@@ -5,7 +5,7 @@
  *
  * @vitest-environment node
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { User } from '@/types/auth'
@@ -1648,5 +1648,126 @@ describe('RemoteDirectStore', () => {
       }
     })
     await expect(store.listContacts()).rejects.toThrow(/not available/)
+  })
+})
+
+describe('wipeStorage (cross-tab teardown and verified completion)', () => {
+  /**
+   * A fake IDBFactory-shaped global for the deletion paths: `databases()`
+   * serves the current name list, and `deleteDatabase` behaves per name --
+   * 'succeed' removes the name and fires onsuccess, 'block' fires onblocked
+   * and never completes.
+   */
+  function stubIndexedDb({
+    names,
+    behavior
+  }: {
+    names: string[]
+    behavior: 'succeed' | 'block'
+  }): { deleted: string[] } {
+    const current = new Set(names)
+    const deleted: string[] = []
+    vi.stubGlobal('indexedDB', {
+      databases: async () => [...current].map(name => ({ name, version: 1 })),
+      deleteDatabase(name: string) {
+        const request: {
+          onsuccess?: () => void
+          onerror?: () => void
+          onblocked?: () => void
+        } = {}
+        queueMicrotask(() => {
+          if (behavior === 'succeed') {
+            current.delete(name)
+            deleted.push(name)
+            request.onsuccess?.()
+          } else {
+            request.onblocked?.()
+          }
+        })
+        return request
+      }
+    })
+    return { deleted }
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('broadcasts the teardown and deletes every prefixed database', async () => {
+    const posted: unknown[] = []
+    class FakeChannel {
+      name: string
+      constructor(name: string) {
+        this.name = name
+      }
+      postMessage(message: unknown) {
+        posted.push(message)
+      }
+      close() {}
+    }
+    vi.stubGlobal('BroadcastChannel', FakeChannel)
+    const { deleted } = stubIndexedDb({
+      names: ['prefix-a-wallet-db', 'prefix-a-sync-db', 'other-wallet-db'],
+      behavior: 'succeed'
+    })
+    const store = new BrowserStore({
+      dbPrefix: 'prefix-a',
+      storage: getRxStorageMemory()
+    })
+    await store.wipeStorage()
+    expect(posted).toEqual([{ dbPrefix: 'prefix-a' }])
+    expect(deleted.sort()).toEqual(['prefix-a-sync-db', 'prefix-a-wallet-db'])
+  })
+
+  it('throws instead of reporting success while a deletion stays blocked', async () => {
+    vi.useFakeTimers()
+    stubIndexedDb({ names: ['prefix-b-wallet-db'], behavior: 'block' })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const store = new BrowserStore({
+      dbPrefix: 'prefix-b',
+      storage: getRxStorageMemory()
+    })
+    const pending = store.wipeStorage()
+    // Keep the rejection observed from the start, or the expectation below
+    // races an unhandled-rejection report.
+    const outcome = expect(pending).rejects.toThrow(/left database/)
+    await vi.advanceTimersByTimeAsync(10_000)
+    await outcome
+    warn.mockRestore()
+  })
+
+  it('closes a sibling store when its prefix is torn down from another tab', async () => {
+    // A registry-backed fake so one instance's postMessage reaches the
+    // other instances' listeners, like the real channel across tabs.
+    const channels: FakeRegistryChannel[] = []
+    class FakeRegistryChannel {
+      name: string
+      onmessage?: (event: { data: unknown }) => void
+      constructor(name: string) {
+        this.name = name
+        channels.push(this)
+      }
+      postMessage(message: unknown) {
+        for (const channel of channels) {
+          if (channel !== this) {
+            channel.onmessage?.({ data: message })
+          }
+        }
+      }
+      close() {}
+    }
+    vi.stubGlobal('BroadcastChannel', FakeRegistryChannel)
+    stubIndexedDb({ names: [], behavior: 'succeed' })
+    const { localStore: sibling } = await initLocalStore()
+    expect(sibling.db).toBeDefined()
+    const wiper = new BrowserStore({
+      dbPrefix: sibling.dbPrefix,
+      storage: getRxStorageMemory()
+    })
+    await wiper.wipeStorage()
+    // The sibling's close() runs off the message task, asynchronously.
+    await vi.waitFor(() => expect(sibling.db).toBeUndefined())
   })
 })

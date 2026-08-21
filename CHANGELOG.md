@@ -71,9 +71,37 @@
   unlock-methods registry before the account Space dies and deletes each
   entry's unlock Space and local trio best-effort
   (`deleteUnlockMethodArtifacts` in `src/session/unlockMethods.ts`), then
-  deletes the auxiliary Space and the companion pin slots -- all before the
-  fatal wipe, since resolving the auxiliary Space's controller reads the
-  account log out of the account Space.
+  deletes the auxiliary Space -- all before the fatal wipe, since resolving
+  the auxiliary Space's controller reads the account log out of the account
+  Space.
+
+- The shared wipe enumeration (`src/session/wipe.ts`): one snapshot-first
+  list of the durable local state an account leaves on a browser, with one
+  best-effort executor, consumed by account deletion and the guest wipe
+  (the forget affordance and the orphan-client heal land on the same seam).
+  It covers every unlock method's local trio across the registry, the
+  roster-epoch pin, the chain-head pin slots by Space-scoped prefix
+  (companion generation slots included, via the new
+  `deleteSessionKeysByPrefix` / `deleteLogPinsForSpace` primitives), the
+  Space-to-DID mapping, the unlock-methods registry cache and the
+  passkey-safety notice (keyed by this browser's client did:key), the
+  replica databases by this client's prefix, and the per-account
+  localStorage families (descriptor and meta caches under both scope
+  schemes, migration markers) -- the cache and marker families had no
+  deletion path at all before. Account deletion threads a popup-begun
+  session's Storage Access factory through every local delete, and the
+  global `writerId` is cleared only by the forget grade
+  (`clearWriterId`). The honest limits are documented in ARCHITECTURE.md:
+  forensic recoverability of deleted IndexedDB, the popup's partitioned
+  buckets, and the mediator-origin registration bit stay out of reach.
+
+- Replica wipes are cross-tab safe and verified. Wiping the local replica
+  first broadcasts a teardown on a `BroadcastChannel`, so a sibling tab
+  closes its open database handles instead of blocking the deletion
+  forever, and the wipe re-probes `indexedDB.databases()` at the end,
+  failing honestly when a prefixed database survived rather than reporting
+  success on a deletion that is merely queued (`BrowserStore.wipeStorage`;
+  `StorageManager` splits into `wipeRemoteStorage` / `wipeLocalStorage`).
 
 - Credential-anchored signup. On a non-remembered browser with a WAS server
   configured, the passphrase signup mints no durable client: the account's

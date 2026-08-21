@@ -25,3 +25,15 @@ export function getOrCreateWriterId(): string {
   localStorage.setItem(STORAGE_KEY, writerId)
   return writerId
 }
+
+/**
+ * Deletes the persisted writer id; the next durable use mints a fresh one.
+ * Consumed by the forget grade of the shared wipe enumeration: the id is
+ * account-agnostic and never an identity, but it is still a durable "this
+ * wallet wrote here" trace, so forgetting a browser clears it.
+ */
+export function clearWriterId(): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem(STORAGE_KEY)
+  }
+}

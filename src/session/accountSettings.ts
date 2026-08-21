@@ -12,13 +12,10 @@ import { WasClient } from '@interop/was-client'
 import {
   accountLogPinId,
   companionDidParts,
-  companionLogPinId,
   delegatedClientsPointer,
-  GENERATION_ID_PREFIX,
   isWebvhDid,
   rotateWebvhUpdateKey
 } from '@interop/wallet-core/webvh'
-import { userKeyRosterPinId } from '@interop/wallet-core/keys'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { PASSKEY_KDF } from '@/app.config'
 import {
@@ -52,14 +49,11 @@ import {
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
 import {
-  deleteAccountDidForSpace,
-  deleteLogPin,
-  deleteUserKeyEpochPin
-} from '@/lib/sessionKey'
-import {
   assertAccountCeremonyAllowed,
-  assertDurableSession
+  assertDurableSession,
+  isDurableSession
 } from '@/session/persistence'
+import { executeLocalWipe, snapshotWipeTargets } from '@/session/wipe'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
 import {
@@ -749,12 +743,16 @@ export type AccountDeletionResult = 'wrong-passphrase' | 'failed' | 'deleted'
  * pin slots for every generation the listing named; warn-only, and a failure
  * leaves an orphan the server can identify by its `DelegatedClientsSpace`
  * type;
- * (b) wipe the data Space and the local replica -- on failure the caller keeps
- * the old semantics: surface the error, do NOT log out, the data is still
- * there;
+ * (b) wipe the remote data Space -- on failure the caller keeps the old
+ * semantics: surface the error, do NOT log out, the data is still there;
  * (c) retire the passphrase keyring only after a successful wipe -- if the
  * keyring died first and the wipe then failed, the data Space would be
- * orphaned unrecoverably; non-fatal, since the data is already gone.
+ * orphaned unrecoverably; non-fatal, since the data is already gone;
+ * (w) run the shared wipe enumeration (`src/session/wipe.ts`) over the
+ * targets snapshotted at (a2): every unlock method's local trio, the pins
+ * (companion slots by prefix), the Space-keyed bookkeeping, the
+ * unlock-methods cache, the replica databases, and the per-account
+ * localStorage families -- a surviving replica is the one fatal stage.
  *
  * (d) clearing the session and (e) leaving for the landing page stay with the
  * caller, which owns the app shell.
@@ -808,9 +806,13 @@ export async function deleteAccount({
   // the account document's pointer. Both best-effort -- an unreadable
   // registry or log narrows the teardown, never blocks the deletion.
   let registry: UnlockMethodsRecord | null = null
-  let companion:
-    | { was: WasClient; spaceId: string; generationIds: string[] }
-    | undefined
+  let companion: { was: WasClient; spaceId: string } | undefined
+  // The Storage Access seam: a session begun from the CHAPI popup carries the
+  // unpartitioned factory here, so every session-database delete below lands
+  // in the first-party bucket the records actually live in.
+  const idb = isDurableSession(session.profile.persistence)
+    ? session.profile.persistence.idb
+    : undefined
   if (!isGuest) {
     try {
       registry = await getUnlockMethods({ session })
@@ -837,17 +839,7 @@ export async function deleteAccount({
             serverUrl: pointer.host,
             zcapClient: session.profile.zcapClient
           })
-          const generationIds: string[] = []
-          for await (const page of was
-            .space(companionSpaceId)
-            .collectionsPages()) {
-            for (const item of page.items) {
-              if (item.id.startsWith(GENERATION_ID_PREFIX)) {
-                generationIds.push(item.id)
-              }
-            }
-          }
-          companion = { was, spaceId: companionSpaceId, generationIds }
+          companion = { was, spaceId: companionSpaceId }
         }
       }
     } catch (err) {
@@ -864,7 +856,7 @@ export async function deleteAccount({
     // whose unlock Space is its own root.
     for (const entry of registry?.methods ?? []) {
       try {
-        await deleteUnlockMethodArtifacts({ session, entry })
+        await deleteUnlockMethodArtifacts({ session, entry, idb })
       } catch (err) {
         console.warn(
           `Could not delete the ${entry.type} unlock method's artifacts:`,
@@ -878,18 +870,11 @@ export async function deleteAccount({
     // reading the account log out of the account Space -- once that is
     // wiped, no authority can reach the auxiliary Space again. One recursive
     // delete covers the generation collections and the embedded delegations;
-    // the companion pin slots are dropped beside it.
+    // the companion chain-head pin slots are cleared by the shared wipe
+    // enumeration below (by prefix, so they go even when this delete fails).
     if (companion) {
       try {
         await companion.was.space(companion.spaceId).delete()
-        for (const generationId of companion.generationIds) {
-          await deleteLogPin({
-            logId: companionLogPinId({
-              spaceId: companion.spaceId,
-              generationId
-            })
-          })
-        }
       } catch (err) {
         console.warn(
           'Could not tear down the auxiliary companion Space; it survives ' +
@@ -899,11 +884,18 @@ export async function deleteAccount({
       }
     }
   }
-  // (b) Wipe the data Space and the local replica. On failure keep the old
-  // semantics: surface the error, do not log out (the data is still there).
+  // The wipe targets, snapshotted from the session and the discovery above
+  // before any local state is deleted.
+  const targets = snapshotWipeTargets({
+    session,
+    registry,
+    companionSpaceId: companion?.spaceId
+  })
+  // (b) Wipe the remote data Space. On failure keep the old semantics:
+  // surface the error, do not log out (the data is still there).
   try {
     console.log('Wiping user data...')
-    await session.storage?.wipeStorage()
+    await session.storage?.wipeRemoteStorage()
   } catch (err) {
     console.error('Error wiping user data:', err)
     return 'failed'
@@ -916,7 +908,8 @@ export async function deleteAccount({
     try {
       const { unlockSpaceDeleted } = await deleteKeyring({
         passphrase,
-        credential
+        credential,
+        idb
       })
       if (!unlockSpaceDeleted) {
         console.warn(
@@ -926,43 +919,20 @@ export async function deleteAccount({
     } catch (err) {
       console.warn('Could not retire the passphrase keyring:', err)
     }
-    // The local account wipe below is durable-only state by construction (the
-    // assert above admits durable sessions alone), so it enumerates the
-    // session database directly.
-    // Best-effort cleanup of the local passkey-safety notice for hygiene.
-    try {
-      await session.profile.persistence.passkeyNotices.delete({
-        controller: session.user.id
-      })
-    } catch (err) {
-      console.warn('Could not delete the passkey-safety notice:', err)
-    }
-    // The pinned key-roster epoch is continuity state about the account just
-    // wiped: clear it beside the freshness pin `deleteKeyring` drops. Keyed by
-    // the account DID, so a re-provisioned account (a fresh DID) would get a
-    // fresh slot anyway; the delete keeps the dead row from lingering.
-    const accountDid = session.profile.accountPointer?.did
-    if (accountDid) {
-      try {
-        await deleteUserKeyEpochPin({ accountDid })
-      } catch (err) {
-        console.warn('Could not delete the key-roster epoch pin:', err)
-      }
-    }
-    // The Space-keyed continuity bookkeeping of the same account: the two
-    // chain-head pin slots (the account log's and the roster log's) and the
-    // local Space-to-DID mapping. Dead rows once the Space is wiped, and the
-    // mapping must not answer for a Space id a later account could reuse.
-    const spaceId = session.profile.accountPointer?.spaceId
-    if (spaceId) {
-      try {
-        await deleteLogPin({ logId: accountLogPinId({ spaceId }) })
-        await deleteLogPin({ logId: userKeyRosterPinId({ spaceId }) })
-        await deleteAccountDidForSpace({ spaceId })
-      } catch (err) {
-        console.warn('Could not delete the Space-keyed continuity state:', err)
-      }
-    }
+  }
+  // The local half: the shared wipe enumeration, for guests and full
+  // accounts alike -- every unlock method's local trio, the pins, the
+  // Space-keyed continuity bookkeeping, the caches, the replica databases,
+  // and the per-account localStorage families. A surviving replica keeps the
+  // old fatal semantics (the local data is still there, so do not log out);
+  // every other stage failure is hygiene residue on an account already gone.
+  const { failed } = await executeLocalWipe({
+    targets,
+    storage: session.storage ?? undefined,
+    idb
+  })
+  if (failed.includes('replica')) {
+    return 'failed'
   }
   return 'deleted'
 }

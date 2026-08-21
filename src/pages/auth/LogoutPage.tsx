@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { Typography, Box } from '@mui/material'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import { wipeGuestState } from '@/session/wipe'
 
 export function LogoutPage() {
   const { t } = useTranslation()
@@ -24,7 +25,11 @@ export function LogoutPage() {
     async function performLogout() {
       if (session?.isGuest) {
         console.log('Wiping user data...')
-        await session.storage?.wipeStorage()
+        // The shared wipe enumeration's guest consumer: the replica
+        // databases plus the guest's localStorage families (migration
+        // markers, local-mode caches). Best-effort -- a blocked replica
+        // must not wedge the logout, and the failure is already logged.
+        await wipeGuestState({ session })
         console.log('User data cleared.')
         await logout()
         window.location.href = '/'

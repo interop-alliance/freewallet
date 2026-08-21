@@ -1133,7 +1133,9 @@ async function sessionFromKeyringHit({
             : {})
         })
       } catch (err) {
-        if ((err as { name?: string }).name === 'CompanionRungUncommittedError') {
+        if (
+          (err as { name?: string }).name === 'CompanionRungUncommittedError'
+        ) {
           return
         }
         console.warn(

@@ -1049,3 +1049,99 @@ export async function deletePasskeySafetyNotice({
     idb
   )
 }
+
+/**
+ * Whether the session database exists at all, WITHOUT durably creating it
+ * (the `hasClientKeyRecord` probe pattern: `indexedDB.databases()` first,
+ * since any versioned open creates the database on a miss). Used by the
+ * shared wipe enumeration so a wipe on a browser that never held session
+ * state does not create the very database it set out to remove.
+ *
+ * @param options {object}
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<boolean>}
+ */
+export async function sessionDatabaseExists({
+  idb = indexedDB
+}: {
+  idb?: IDBFactory
+} = {}): Promise<boolean> {
+  const databases = await idb.databases()
+  return databases.some(db => db.name === SESSION_DB_NAME)
+}
+
+/**
+ * Deletes every session-store key that starts with `prefix`, in one
+ * transaction. The scan-then-delete shape exists for the key families whose
+ * member keys a wipe cannot enumerate exactly -- the companion generations'
+ * chain-head pin slots (`log-head/space/<companionSpaceId>/...`, one slot
+ * per generation, with the generation ids gone once the auxiliary Space is)
+ * -- and it is deliberately scoped by a caller-supplied prefix so a wipe
+ * never crosses into another account's families.
+ *
+ * @param options {object}
+ * @param options.prefix {string}   a non-empty key prefix
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+/**
+ * Deletes every chain-head pin slot belonging to one Space, by prefix.
+ * wallet-core derives every slot key as
+ * `space/<spaceId>/<collectionId>/<resourceId>` (`resourceLogPinId`), so the
+ * `log-head/space/<spaceId>/` prefix covers the account Space's two slots
+ * (account log and roster log) and, applied to the auxiliary companion
+ * Space's id, every companion generation's slot -- including ones whose
+ * generation ids are no longer listable because the Space is already gone.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deleteLogPinsForSpace({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await deleteSessionKeysByPrefix({
+    prefix: logPinSlotKey(`space/${spaceId}/`),
+    idb
+  })
+}
+
+export async function deleteSessionKeysByPrefix({
+  prefix,
+  idb
+}: {
+  prefix: string
+  idb?: IDBFactory
+}): Promise<void> {
+  if (!prefix) {
+    throw new Error('deleteSessionKeysByPrefix requires a non-empty prefix.')
+  }
+  const db = await openSessionDb({ idb: idb ?? indexedDB })
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(SESSION_STORE, 'readwrite')
+      const store = transaction.objectStore(SESSION_STORE)
+      const request = store.getAllKeys()
+      // The deletes are issued inside the getAllKeys success handler so they
+      // join the same still-active transaction.
+      request.onsuccess = () => {
+        for (const key of request.result) {
+          if (typeof key === 'string' && key.startsWith(prefix)) {
+            store.delete(key)
+          }
+        }
+      }
+      request.onerror = () => reject(request.error)
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error)
+      transaction.onabort = () => reject(transaction.error)
+    })
+  } finally {
+    db.close()
+  }
+}
