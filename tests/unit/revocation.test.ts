@@ -16,7 +16,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
   wasUrl: 'https://was.example.test' as string | undefined,
-  calls: [] as string[]
+  calls: [] as string[],
+  // The generation-delegation re-mint stage's seams.
+  renewed: true,
+  renewError: null as Error | null
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
@@ -36,6 +39,26 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
     keyAgreementKey: { id: `${userKey.id}#kak` },
     keyResolver: async () => ({})
   }))
+}))
+
+vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
+  companionLogStore: vi.fn(() => ({ isCompanionLogStore: true })),
+  mintGenerationDelegation: vi.fn(async () => ({ id: 'urn:zcap:fresh' })),
+  ensureGenerationDelegationCurrent: vi.fn(async () => {
+    state.calls.push('ensureGenerationDelegationCurrent')
+    if (state.renewError) {
+      throw state.renewError
+    }
+    return { renewed: state.renewed }
+  })
+}))
+
+vi.mock('@interop/was-client', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/was-client')>()),
+  WasClient: class {
+    isWasClient = true
+  }
 }))
 
 vi.mock('@/lib/sessionKey', () => ({
@@ -84,6 +107,11 @@ vi.mock('@/session/userKeyCascade', () => ({
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
 import { userKeyVaultKeys } from '@interop/wallet-core/keys'
+import {
+  companionLogPinId,
+  companionLogStore,
+  ensureGenerationDelegationCurrent
+} from '@interop/wallet-core/webvh'
 import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
 import { durableSessionPersistence } from '@/session/persistence'
 import {
@@ -120,6 +148,27 @@ const FRESH_USER_KEY = {
 const ROSTER_DESCRIPTOR = { epochs: [{ id: FRESH_USER_KEY.id }] }
 const DOCUMENT = { id: 'did:webvh:doc', verificationMethod: [] }
 
+const COMPANION_SPACE_ID = 'companion-space-1'
+const GENERATION_ID = 'gen-Ux3v0kQf9aPmB2hZ'
+const COMPANION_DID =
+  'did:webvh:QmCompanionScid:was.example.test:space:' +
+  `${COMPANION_SPACE_ID}:${GENERATION_ID}`
+
+/**
+ * The post-edit account document with a `#DelegatedClients` service entry --
+ * what makes the generation-delegation stage reachable.
+ */
+const POINTED_DOCUMENT = {
+  ...DOCUMENT,
+  service: [
+    {
+      id: `${DOCUMENT.id}#delegated-clients`,
+      type: 'https://w3id.org/byoe#DelegatedClients',
+      serviceEndpoint: COMPANION_DID
+    }
+  ]
+}
+
 /**
  * A stand-in for the shared orchestrator that drives its callbacks in the
  * documented order, so the freewallet-side stages are exercised exactly where
@@ -128,9 +177,19 @@ const DOCUMENT = { id: 'did:webvh:doc', verificationMethod: [] }
  * @param options {object}
  * @param [options.rotated] {boolean}   whether the roster rotated on this run
  * @param [options.failedCollections] {number}
+ * @param [options.document] {object}   the post-edit account document the
+ *   re-mint stages are handed
  * @returns {Function}
  */
-function orchestratorDriving({ rotated = true, failedCollections = 0 } = {}) {
+function orchestratorDriving({
+  rotated = true,
+  failedCollections = 0,
+  document = DOCUMENT
+}: {
+  rotated?: boolean
+  failedCollections?: number
+  document?: object
+} = {}) {
   return async (options: Parameters<typeof revokeAccountClient>[0]) => {
     state.calls.push('revokeAccountClient')
     const userKey = rotated ? FRESH_USER_KEY : OLD_USER_KEY
@@ -143,7 +202,10 @@ function orchestratorDriving({ rotated = true, failedCollections = 0 } = {}) {
     }
     state.calls.push('cascadeCollections')
     const recovery = await options.remintRecoveryDelegations?.({
-      document: DOCUMENT
+      document: document as never
+    })
+    const generation = await options.remintGenerationDelegation?.({
+      document: document as never
     })
     if (rotated) {
       await options.onRotationAdopted?.({ userKey })
@@ -160,9 +222,10 @@ function orchestratorDriving({ rotated = true, failedCollections = 0 } = {}) {
           error: new Error('down')
         }))
       },
-      document: DOCUMENT,
+      document,
       userKey,
-      ...(recovery ? { recovery } : {})
+      ...(recovery ? { recovery } : {}),
+      ...(generation ? { generation } : {})
     } as never
   }
 }
@@ -180,6 +243,7 @@ function sessionWith(
     clientWebvhKeys: unknown
     clientKeyAgreementKey: unknown
     keyAgentId: string
+    ladderSeed: Uint8Array
   }> = {}
 ): Session {
   const remoteStore =
@@ -219,6 +283,7 @@ function sessionWith(
           ? overrides.clientKeyAgreementKey
           : { id: 'did:key:z6MkRevokingClient#z6LSRevokingClient' },
       userKey: OLD_USER_KEY,
+      ...(overrides.ladderSeed ? { ladderSeed: overrides.ladderSeed } : {}),
       keyAgreementKey: { id: `${OLD_USER_KEY.id}#kak` },
       keyResolver: async () => ({}),
       persistence: durableSessionPersistence(),
@@ -232,6 +297,8 @@ function sessionWith(
 beforeEach(() => {
   state.wasUrl = 'https://was.example.test'
   state.calls = []
+  state.renewed = true
+  state.renewError = null
   vi.clearAllMocks()
   vi.mocked(revokeAccountClient).mockImplementation(orchestratorDriving())
   vi.mocked(remintRecoveryDelegations).mockImplementation(async () => {
@@ -318,7 +385,8 @@ describe('the cascade, rotated path', () => {
         },
         failed: []
       },
-      recovery: { reminted: 2, skipped: 1 }
+      recovery: { reminted: 2, skipped: 1 },
+      generation: { renewed: false, skipped: 'no-pointer' }
     })
   })
 
@@ -422,7 +490,8 @@ describe('the cascade, rotated path', () => {
     expect(outcome).toEqual({
       rotated: false,
       collections: { outcomes: {}, failed: [] },
-      recovery: { reminted: 0, skipped: 0 }
+      recovery: { reminted: 0, skipped: 0 },
+      generation: { renewed: false, skipped: 'no-pointer' }
     })
     expect(session.storage.addHistoryClientRevoked).toHaveBeenCalledOnce()
   })
@@ -507,5 +576,96 @@ describe('re-run convergence and best-effort stages', () => {
     expect(session.storage.addHistoryClientRevoked).toHaveBeenCalledWith(
       expect.objectContaining({ rotated: 1, failed: 2 })
     )
+  })
+})
+
+describe('the generation-delegation re-mint stage', () => {
+  const LADDER_SEED = new Uint8Array(32).fill(5)
+
+  /**
+   * Runs the cascade with the re-mint stage driven over the given document.
+   *
+   * @param [options] {object}
+   * @param [options.document] {object}
+   * @param [options.ladderSeed] {Uint8Array}
+   * @returns {Promise<object>}
+   */
+  async function revokeWith({
+    document = POINTED_DOCUMENT,
+    ladderSeed
+  }: { document?: object; ladderSeed?: Uint8Array } = {}) {
+    vi.mocked(revokeAccountClient).mockImplementation(
+      orchestratorDriving({ document })
+    )
+    return await revokeEnrolledClient({
+      session: sessionWith(ladderSeed ? { ladderSeed } : {}),
+      client: REVOKED
+    })
+  }
+
+  it('re-mints the delegation against the post-edit document', async () => {
+    const outcome = await revokeWith({ ladderSeed: LADDER_SEED })
+
+    expect(outcome.generation).toEqual({ renewed: true })
+    expect(vi.mocked(ensureGenerationDelegationCurrent)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        store: { isCompanionLogStore: true },
+        ladderSeed: LADDER_SEED,
+        generationId: GENERATION_ID,
+        expectedDid: COMPANION_DID,
+        // The signer-death axis: the document the revocation edit just
+        // produced, never a cached view.
+        accountDoc: POINTED_DOCUMENT,
+        logId: companionLogPinId({
+          spaceId: COMPANION_SPACE_ID,
+          generationId: GENERATION_ID
+        })
+      })
+    )
+    expect(vi.mocked(companionLogStore)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spaceId: COMPANION_SPACE_ID,
+        generationId: GENERATION_ID
+      })
+    )
+  })
+
+  it('reports a healthy delegation as not renewed', async () => {
+    state.renewed = false
+    const outcome = await revokeWith({ ladderSeed: LADDER_SEED })
+    expect(outcome.generation).toEqual({ renewed: false })
+  })
+
+  it('skips with no-pointer when the document names no companion', async () => {
+    const outcome = await revokeWith({
+      document: DOCUMENT,
+      ladderSeed: LADDER_SEED
+    })
+    expect(outcome.generation).toEqual({
+      renewed: false,
+      skipped: 'no-pointer'
+    })
+    expect(vi.mocked(ensureGenerationDelegationCurrent)).not.toHaveBeenCalled()
+  })
+
+  it('skips with no-ladder-seed when the session carries no seed', async () => {
+    const outcome = await revokeWith()
+    expect(outcome.generation).toEqual({
+      renewed: false,
+      skipped: 'no-ladder-seed'
+    })
+    expect(vi.mocked(ensureGenerationDelegationCurrent)).not.toHaveBeenCalled()
+  })
+
+  it('reports a failure as skipped, the rest of the cascade intact', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    state.renewError = new Error('companion log unreachable')
+
+    const outcome = await revokeWith({ ladderSeed: LADDER_SEED })
+
+    // Best-effort by the cascade's contract: the login-time self-heal retries.
+    expect(outcome.generation).toEqual({ renewed: false, skipped: 'failed' })
+    expect(outcome.rotated).toBe(true)
+    warn.mockRestore()
   })
 })

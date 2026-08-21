@@ -1740,8 +1740,11 @@ export class WrongPassphraseError extends Error {
  *   the unlock credential for the passphrase being verified
  * @param options.controller {string}   the account did:key to match
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<KeyringRecordContents>}   the verified record's unwrapped
- *   contents (so a rebind can preserve fields such as the email and pointer)
+ * @returns {Promise<{ found: KeyringRecordContents, ladderSeed?: Uint8Array }>}
+ *   the verified record's unwrapped contents (so a rebind can preserve fields
+ *   such as the email and pointer), plus a standing record's ladder seed --
+ *   what a retirement passes on so the ladder attribution does not depend on
+ *   the registry's recorded rung alone
  */
 async function verifyUnlockKeyring({
   credential,
@@ -1751,7 +1754,7 @@ async function verifyUnlockKeyring({
   credential: UnlockCredential
   controller: string
   idb?: IDBFactory
-}): Promise<KeyringRecordContents> {
+}): Promise<{ found: KeyringRecordContents; ladderSeed?: Uint8Array }> {
   const { unlock } = credential
   let record: unknown
   if (WAS_SERVER_URL) {
@@ -1782,7 +1785,48 @@ async function verifyUnlockKeyring({
   if (!unwrapped || unwrapped.found.controller !== controller) {
     throw new WrongPassphraseError()
   }
-  return unwrapped.found
+  return {
+    found: unwrapped.found,
+    ...(unwrapped.standing?.ladderSeed
+      ? { ladderSeed: unwrapped.standing.ladderSeed }
+      : {})
+  }
+}
+
+/**
+ * A standing credential's ladder seed, read from its unlock record --
+ * best-effort, for a retirement that holds the credential's secret (the
+ * tapped-passkey removal): the seed lets the ladder attribution strike the
+ * credential's whole footprint independent of the registry's recorded rung.
+ * Any failure (no record, a non-standing layout, a controller mismatch)
+ * resolves to `undefined`, and the retirement's log-walk attribution carries
+ * on without it.
+ *
+ * @param options {object}
+ * @param options.credential {UnlockCredential}   the credential being retired
+ * @param options.controller {string}   the account did:key
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<Uint8Array | undefined>}
+ */
+export async function standingLadderSeed({
+  credential,
+  controller,
+  idb
+}: {
+  credential: UnlockCredential
+  controller: string
+  idb?: IDBFactory
+}): Promise<Uint8Array | undefined> {
+  try {
+    const { ladderSeed } = await verifyUnlockKeyring({
+      credential,
+      controller,
+      idb
+    })
+    return ladderSeed
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -2054,6 +2098,7 @@ export async function changePassphrase({
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
   unlockKeyAgreementKeyId?: string
   unlockKeyAgreementKeyMultibase?: string
+  oldLadderSeed?: Uint8Array
 }> {
   const oldCredential = await deriveUnlockCredential({
     secret: oldPassphrase,
@@ -2067,11 +2112,12 @@ export async function changePassphrase({
   // error while reading the remote rethrows -- an unreachable remote must not
   // be misread as a wrong passphrase. With no WAS server the local cache is
   // the keyring's only copy.
-  const verified = await verifyUnlockKeyring({
-    credential: oldCredential,
-    controller,
-    idb
-  })
+  const { found: verified, ladderSeed: oldLadderSeed } =
+    await verifyUnlockKeyring({
+      credential: oldCredential,
+      controller,
+      idb
+    })
 
   // Prefer the caller's live user key and update-key seeds; fall back to the ones
   // cached in the old client-key record, so a rebind can never silently drop
@@ -2132,6 +2178,7 @@ export async function changePassphrase({
     ...(unlockKeyAgreementKeyId ? { unlockKeyAgreementKeyId } : {}),
     ...(unlockKeyAgreementKeyMultibase
       ? { unlockKeyAgreementKeyMultibase }
-      : {})
+      : {}),
+    ...(oldLadderSeed ? { oldLadderSeed } : {})
   }
 }

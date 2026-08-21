@@ -16,6 +16,7 @@
  * record still surfaces the not-enrolled state and the
  * connect-another-wallet ceremony.
  */
+import { WasClient } from '@interop/was-client'
 import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
@@ -25,13 +26,21 @@ import { KMS_SERVER_URL, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
 import { assertPasskeyPrf } from '@/lib/passkey'
 import {
+  companionDidParts,
+  companionLogPinId,
+  companionLogStore,
   delegatedClientsDelegationSpaceId,
+  delegatedClientsPointer,
+  delegationKeyInDocument,
+  ensureGenerationDelegationCurrent,
   isWebvhDid,
   mintDelegatedClientsDelegation,
+  mintGenerationDelegation,
   webvhCapabilityAgent,
   webvhZcapClient,
   type ClientWebvhUpdateKeys,
-  type ICapabilityAgent
+  type ICapabilityAgent,
+  type PublishedKeyDocument
 } from '@interop/wallet-core/webvh'
 import {
   mintUserKey,
@@ -877,13 +886,23 @@ async function sessionFromKeyringHit({
     unlockSpaceId: found.unlockSpaceId,
     manageCapability: found.manageCapability
   }
+  // The login credential's ladder seed, for the mid-session ceremonies that
+  // write the companion (the revocation cascade's generation-delegation
+  // re-mint, the rotation's strike-or-swap).
+  if (found.standing?.ladderSeed) {
+    session.profile.ladderSeed = found.standing.ladderSeed
+  }
 
-  // The delegation-expiry self-refresh: a standing credential's own login
+  // The standing-delegation self-refresh: a standing credential's own login
   // re-mints its bridge delegation -- and the companion-Space sibling, where
-  // the record carries one -- when either is expired or inside the renewal
-  // window (the same annual clock and shared predicate as the recovery
-  // delegations), so neither lapses silently between revocations. One pass
-  // reseals both. Best-effort, behind provisioning.
+  // the record carries one -- when either is stale on either axis: expired
+  // or inside the renewal window (the same annual clock and shared predicate
+  // as the recovery delegations), or its signer no longer in the verified
+  // account document (the current-key-set rot a self-enrollment's window
+  // close inflicts on ladder-VM-signed members -- the ceremony tail below
+  // reseals them in the same login, and this predicate is what makes a torn
+  // tail heal at the next login). One pass reseals both. Best-effort, behind
+  // provisioning.
   const rebindStandingRecord = found.rebindStandingRecord
   const standingDelegation = found.standing?.delegation
   const standingDelegatedClients = found.standing?.delegatedClients
@@ -892,14 +911,7 @@ async function sessionFromKeyringHit({
     session.storageReady &&
     rebindStandingRecord &&
     standingDelegation &&
-    standingClientDid &&
-    (zcapExpiring({
-      expires: (standingDelegation as { expires?: string }).expires
-    }) ||
-      (!!standingDelegatedClients &&
-        zcapExpiring({
-          expires: (standingDelegatedClients as { expires?: string }).expires
-        })))
+    standingClientDid
   ) {
     const unlockSpaceId = found.unlockSpaceId
     session.storageReady = session.storageReady.then(async () => {
@@ -907,6 +919,32 @@ async function sessionFromKeyringHit({
         const pointer = session.profile.accountPointer
         if (!pointer || !isWebvhDid(pointer.did)) {
           return
+        }
+        const expiring =
+          zcapExpiring({
+            expires: (standingDelegation as { expires?: string }).expires
+          }) ||
+          (!!standingDelegatedClients &&
+            zcapExpiring({
+              expires: (standingDelegatedClients as { expires?: string })
+                .expires
+            }))
+        if (!expiring) {
+          const { doc } = await verifiedAccountLog({
+            profile: session.profile,
+            pointer
+          })
+          const rotted = (member: IZcap) =>
+            !delegationKeyInDocument({
+              doc: doc as PublishedKeyDocument,
+              delegationKeyId: delegationProofKeyId(member)
+            })
+          if (
+            !rotted(standingDelegation) &&
+            (!standingDelegatedClients || !rotted(standingDelegatedClients))
+          ) {
+            return
+          }
         }
         const delegation = await delegateLogWrite({
           zcapClient: session.profile.zcapClient,
@@ -1029,6 +1067,77 @@ async function sessionFromKeyringHit({
         console.warn(
           'Could not backfill the did:webvh pointer and promote the ' +
             'controller; the next login retries:',
+          err
+        )
+      }
+    })
+  }
+
+  // The generation-delegation self-heal: the pointed generation's embedded
+  // delegation is renewed when it is expiring OR its signer has left the
+  // verified account document -- the rot a self-enrollment's window close
+  // inflicts on a ladder-VM-signed delegation (the ceremony-tail half of
+  // that reseal), and the standing backstop for a revocation cascade whose
+  // own re-mint stage was skipped. Signed by the login credential's static
+  // companion rung 0; a healthy delegation is one no-op read. Best-effort: a
+  // rung the generation does not commit (a credential bound mid-generation)
+  // skips quietly, everything else warns and the next login retries.
+  const healLadderSeed = found.standing?.ladderSeed
+  if (session.storageReady && !remoteDirectStorage && healLadderSeed) {
+    session.storageReady = session.storageReady.then(async () => {
+      try {
+        const pointer = session.profile.accountPointer
+        if (!pointer || !isWebvhDid(pointer.did)) {
+          return
+        }
+        const { doc } = await verifiedAccountLog({
+          profile: session.profile,
+          pointer
+        })
+        const pointedDid = delegatedClientsPointer({ doc })
+        if (pointedDid === undefined) {
+          return
+        }
+        const { spaceId: companionSpaceId, generationId } = companionDidParts({
+          did: pointedDid
+        })
+        const was = new WasClient({
+          serverUrl: pointer.host,
+          zcapClient: session.profile.zcapClient
+        })
+        await ensureGenerationDelegationCurrent({
+          store: companionLogStore({
+            was,
+            spaceId: companionSpaceId,
+            generationId
+          }),
+          ladderSeed: healLadderSeed,
+          generationId,
+          mintGenerationDelegation: async ({ companionDid }) =>
+            mintGenerationDelegation({
+              zcapClient: session.profile.zcapClient,
+              wasServerUrl: pointer.host,
+              spaceId: pointer.spaceId,
+              companionDid
+            }),
+          expectedDid: pointedDid,
+          accountDoc: doc as PublishedKeyDocument,
+          ...(session.profile.persistence?.logPins
+            ? {
+                pinStore: session.profile.persistence.logPins,
+                logId: companionLogPinId({
+                  spaceId: companionSpaceId,
+                  generationId
+                })
+              }
+            : {})
+        })
+      } catch (err) {
+        if ((err as { name?: string }).name === 'CompanionRungUncommittedError') {
+          return
+        }
+        console.warn(
+          'Could not heal the generation delegation; the next login retries:',
           err
         )
       }

@@ -8,8 +8,13 @@
  */
 import { base64urlnopad } from '@scure/base'
 import type { IZcap } from '@interop/data-integrity-core'
+import { WasClient } from '@interop/was-client'
 import {
   accountLogPinId,
+  companionDidParts,
+  companionLogPinId,
+  delegatedClientsPointer,
+  GENERATION_ID_PREFIX,
   isWebvhDid,
   rotateWebvhUpdateKey
 } from '@interop/wallet-core/webvh'
@@ -35,6 +40,7 @@ import {
   emptyUnlockMethodsRegistry,
   backfillPassphraseUnlockMethod,
   canRevokeWithoutCeremony,
+  deleteUnlockMethodArtifacts,
   enrollPasskey,
   getUnlockMethods,
   putUnlockMethods,
@@ -56,7 +62,10 @@ import {
 } from '@/session/persistence'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
-import { invalidateVerifiedLog } from '@/session/verifiedLog'
+import {
+  invalidateVerifiedLog,
+  verifiedAccountLog
+} from '@/session/verifiedLog'
 import { findLoginCredential, loginHandleOf } from '@/lib/loginCredential'
 import type { Session } from '@/types/auth'
 
@@ -173,7 +182,8 @@ export async function changeAccountPassphrase({
     oldPassphraseRetired,
     unlockSpaceId,
     manageCapability,
-    persistClientKeys
+    persistClientKeys,
+    oldLadderSeed
   } = await changePassphrase({
     clientSeed,
     controller: profile.accountController ?? session.user.id,
@@ -196,12 +206,19 @@ export async function changeAccountPassphrase({
   // Give the NEW passphrase the standing posture (roster wrap, commitment
   // document entry, bridge delegation, standing-layout record). Best-effort:
   // a failure leaves the plain rebind above, which logs in normally.
-  await establishPassphrasePosture({
+  const { ladderSeed: newLadderSeed } = await establishPassphrasePosture({
     session,
     passphrase: newPassphrase,
     email: session.user.email,
     credential: newCredential
   })
+  // The session's companion-writing seed follows the live credential: the
+  // old passphrase's seed is being retired, so mid-session companion writes
+  // (the revocation cascade's re-mint, a later rotation's strike) must sign
+  // as the new one.
+  if (newLadderSeed) {
+    session.profile.ladderSeed = newLadderSeed
+  }
   // Retire the OLD credential: document posture out, user key rotated off its
   // roster wrap, every encrypted collection re-epoch'd, then the live session
   // adopts the fresh key. Reported, never thrown -- the passphrase change has
@@ -211,7 +228,18 @@ export async function changeAccountPassphrase({
   try {
     const outcome = await rotateOffUnlockCredential({
       session,
-      method: { type: 'passphrase', ...oldStanding },
+      method: {
+        type: 'passphrase',
+        ...oldStanding,
+        // The old record's ladder seed, captured by the rebind before the old
+        // unlock Space was deleted: the retirement's ladder attribution then
+        // holds every rung a priori rather than walking from the recorded one.
+        ...(oldLadderSeed ? { ladderSeed: oldLadderSeed } : {})
+      },
+      // The new credential's seed survives the retirement; the companion
+      // strike-or-swap stage signs (or re-mints the generation) with it,
+      // never with the retired seed.
+      ...(newLadderSeed ? { survivingLadderSeed: newLadderSeed } : {}),
       verb: 'changing the passphrase'
     })
     if (outcome?.rotated && outcome.userKey) {
@@ -704,6 +732,23 @@ export type AccountDeletionResult = 'wrong-passphrase' | 'failed' | 'deleted'
  *
  * (a) confirm the passphrase before wiping anything -- a wrong passphrase must
  * not delete data (guests have no keyring, so this is skipped);
+ * (a2) snapshot what only the live account can still answer: the
+ * unlock-methods registry (it lives in the data Space the wipe destroys) and
+ * the auxiliary companion Space's id and `gen-` collection listing (found
+ * through the account document's delegated-clients pointer);
+ * (b0) walk the registry and delete EVERY unlock method's server-side
+ * artifacts -- its unlock Space, and with it the sealed bridge and
+ * `delegatedClients` delegations -- plus each method's local trio,
+ * best-effort per entry: this is what removes the dangling existence-oracle
+ * Spaces a probe could still find after the account is gone (an entry
+ * recording no management capability keeps its Space, stated residue);
+ * (b1) tear down the auxiliary companion Space beside the account Space --
+ * one recursive Space delete, run BEFORE the data-Space wipe because the
+ * server resolves the auxiliary Space's did:webvh controller by reading the
+ * account log out of the account Space -- and drop the companion chain-head
+ * pin slots for every generation the listing named; warn-only, and a failure
+ * leaves an orphan the server can identify by its `DelegatedClientsSpace`
+ * type;
  * (b) wipe the data Space and the local replica -- on failure the caller keeps
  * the old semantics: surface the error, do NOT log out, the data is still
  * there;
@@ -755,6 +800,103 @@ export async function deleteAccount({
       // delete failure -- do not touch the user's data.
       console.error('Could not verify the passphrase for deletion:', err)
       return 'failed'
+    }
+  }
+  // (a2) Snapshot what only the live account can still answer, before
+  // anything is deleted: the registry rides in the data Space and unwraps
+  // with the session's vault keys, and the auxiliary Space is found through
+  // the account document's pointer. Both best-effort -- an unreadable
+  // registry or log narrows the teardown, never blocks the deletion.
+  let registry: UnlockMethodsRecord | null = null
+  let companion:
+    | { was: WasClient; spaceId: string; generationIds: string[] }
+    | undefined
+  if (!isGuest) {
+    try {
+      registry = await getUnlockMethods({ session })
+    } catch (err) {
+      console.warn(
+        'Could not read the unlock-methods registry for deletion; other ' +
+          "methods' unlock Spaces survive:",
+        err
+      )
+    }
+    try {
+      const pointer = session.profile.accountPointer
+      if (pointer && isWebvhDid(pointer.did)) {
+        const { doc } = await verifiedAccountLog({
+          profile: session.profile,
+          pointer
+        })
+        const pointedDid = delegatedClientsPointer({ doc })
+        if (pointedDid !== undefined) {
+          const companionSpaceId = companionDidParts({
+            did: pointedDid
+          }).spaceId
+          const was = new WasClient({
+            serverUrl: pointer.host,
+            zcapClient: session.profile.zcapClient
+          })
+          const generationIds: string[] = []
+          for await (const page of was
+            .space(companionSpaceId)
+            .collectionsPages()) {
+            for (const item of page.items) {
+              if (item.id.startsWith(GENERATION_ID_PREFIX)) {
+                generationIds.push(item.id)
+              }
+            }
+          }
+          companion = { was, spaceId: companionSpaceId, generationIds }
+        }
+      }
+    } catch (err) {
+      console.warn(
+        'Could not locate the auxiliary companion Space for deletion:',
+        err
+      )
+    }
+
+    // (b0) The registry walk: every unlock method's unlock Space (holding
+    // its record with the sealed bridge and sibling delegations) and local
+    // trio, best-effort per entry. Run before the data-Space wipe only for
+    // ordering hygiene -- each delete rides the entry's own management zcap,
+    // whose unlock Space is its own root.
+    for (const entry of registry?.methods ?? []) {
+      try {
+        await deleteUnlockMethodArtifacts({ session, entry })
+      } catch (err) {
+        console.warn(
+          `Could not delete the ${entry.type} unlock method's artifacts:`,
+          err
+        )
+      }
+    }
+
+    // (b1) The auxiliary companion Space, before the account Space: its
+    // controller is the account did:webvh, which the server resolves by
+    // reading the account log out of the account Space -- once that is
+    // wiped, no authority can reach the auxiliary Space again. One recursive
+    // delete covers the generation collections and the embedded delegations;
+    // the companion pin slots are dropped beside it.
+    if (companion) {
+      try {
+        await companion.was.space(companion.spaceId).delete()
+        for (const generationId of companion.generationIds) {
+          await deleteLogPin({
+            logId: companionLogPinId({
+              spaceId: companion.spaceId,
+              generationId
+            })
+          })
+        }
+      } catch (err) {
+        console.warn(
+          'Could not tear down the auxiliary companion Space; it survives ' +
+            'as a typed orphan:',
+          err
+        )
+      }
     }
   }
   // (b) Wipe the data Space and the local replica. On failure keep the old

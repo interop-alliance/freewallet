@@ -116,7 +116,19 @@ two loud entries extend the
 world-readable hash-chained log through the bridge (a reveal-and-commit
 entry signed by the ladder's current rung, then an add entry publishing the
 freshly minted client), and only then is the user key unwrapped from the
-credential's standing wrap. Detection replaces the old enrollment gate:
+credential's standing wrap. On a ladder-anchored account the enrollment's
+add entry removes the ladder VM, so a still-unexpired bridge delegation
+(and `delegatedClients` sibling) it signed stops verifying under the
+current-key-set rule; the same login's refresh block catches that -- its
+predicate covers signer rot beside expiry (the delegation's proof key gone
+from the memoized verified account document,
+`delegationKeyInDocument`) -- re-signs both members with the enrolled
+client's account key, and reseals the record, so no window is left where
+the fresh-terminal entry path is bricked. A durable login also self-heals
+a rotted embedded generation delegation the same way
+(`ensureGenerationDelegationCurrent` with the account-document axis,
+signed by the login credential's ladder seed carried in-memory on
+`profile.ladderSeed`). Detection replaces the old enrollment gate:
 takeover with a phished credential is visible in the log and remediable,
 not prevented by requiring another browser. The document carries a
 passphrase-derived `keyAgreement` key only as a hash commitment
@@ -192,8 +204,19 @@ shared sequence is wallet-core's `retireUnlockCredential`
 (`@interop/wallet-core/unlock`), wrapped session-side by
 `rotateOffUnlockCredential` (`src/session/credentialRotation.ts`): the
 credential's document posture leaves first (its `keyAgreement` entry --
-commitment or verbatim -- and its committed ladder-rung hash, one log
-entry), then the same roster-and-cascade tail the client revocation runs --
+commitment or verbatim -- and its ladder's whole standing footprint, resolved
+from the log itself rather than from the registry's recorded bind-time rung,
+in one log entry), then the credential's companion posture (between the
+document edit and the roster tail, wallet-core's `retireCompanionPosture`
+closure): a strike entry on the companion log drops the retired
+credential's revealed rung and standing hash when a distinct surviving
+credential's committed rung can sign it, and otherwise -- a self-strike, or
+no committed survivor -- the whole generation is swapped onto a surviving
+credential's ladder (`swapCompanionGeneration`), the old generation left to
+orphan discovery. A passphrase change signs with the NEW credential's
+ladder seed (`survivingLadderSeed`); the stage is best-effort and reports
+itself on the outcome's `companion` member. Then the same
+roster-and-cascade tail the client revocation runs --
 the user key rotates off the credential's wrap (pairing-free convergence
 onto the post-edit document) and every encrypted collection re-epochs onto
 the fresh key. The callers then tear down the registry entry and the old
@@ -333,7 +356,17 @@ read runs under the same slot from true first contact on, and the published
 DID is persisted locally keyed by the data Space id only so a later
 pre-promotion heal login can state an `expectedDid` even though the pointer
 has not caught up. Account deletion clears all of it (the two slots by
-their builders, the epoch pin, the mapping) beside the keyring retirement.
+their builders, the epoch pin, the mapping, and each listed companion
+generation's pin slot) beside the keyring retirement. Deletion also
+reaches every unlock method and the companion before the account Space
+dies: it walks the unlock-methods registry and deletes each entry's unlock
+Space and local trio best-effort (`deleteUnlockMethodArtifacts` in
+`src/session/unlockMethods.ts` -- removing the dangling existence-oracle
+Spaces a probe could still find), then deletes the auxiliary companion
+Space in one `space.delete()`. Both run BEFORE the fatal wipe, because
+resolving the auxiliary Space's controller reads the account log out of
+the account Space; a wipe failure after them leaves other methods' logins
+already destroyed, accepted since the user's intent was deletion.
 
 **Controller promotion by ordering.** The Space id is an independent random
 identifier minted at signup (`mintSpaceId`) and carried in the account
@@ -843,7 +876,9 @@ method (rejected for v1 as presupposing a contact roster most accounts
 lack). The re-mint machinery above also covers the standing
 passphrase/passkey credentials' bridge delegations (the cascade walks
 every registry entry recording one, and a standing credential's own login
-refreshes its bridge when it is inside the renewal window).
+refreshes its bridge when it is inside the renewal window or when its
+signing key has left the account document -- the signer-rot axis a
+self-enrollment's ladder-VM removal makes routine).
 
 ## Client revocation and the epoch cascade
 
@@ -903,6 +938,19 @@ client, synchronously, in dependency order:
 4. **The recovery re-PUTs** (`remintRecoveryDelegations`): recovery
    delegations the revoked client had signed stopped chaining at step 1;
    the revoking client re-mints them and re-PUTs the unlock records.
+5. **The generation-delegation re-mint** (the `remintGenerationDelegation`
+   closure, module-level in `src/session/revocation.ts`): the embedded
+   generation delegation stopped chaining at step 1 too when the revoked
+   client had signed it, so the closure runs
+   `ensureGenerationDelegationCurrent` against the post-edit document (the
+   stale-signer axis beside the expiry one) and replaces the delegation in
+   place -- same fragment, no revocation POST, since the rotted chain no
+   longer verifies anyway. It signs with the login credential's ladder
+   seed, carried in-memory on `profile.ladderSeed`, and skips with a
+   report (`outcome.generation`) when the seed or a promoted pointer is
+   absent -- the mid-generation grant death that remains is a stated
+   consequence of an ordinary disconnect. The closure runs in the
+   no-roster early return as well.
 
 The revoking session then adopts the fresh user key in place -- profile vault
 keys swapped, storage ciphers rebuilt (`adoptRotatedVaultKeys`), the

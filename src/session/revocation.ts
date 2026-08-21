@@ -1,25 +1,37 @@
 /**
  * Client revocation: disconnecting an enrolled wallet client from the
  * account. The cascade itself -- document edit, user key rotation, collection
- * fan-out, recovery re-mints, in that dependency order, with its convergence
- * story -- is `revokeAccountClient` in `@interop/wallet-core/clients`, run
- * once for every wallet. This module supplies the freewallet-shaped stages
- * around it: the session preconditions, the recovery registry's latent
- * commitment hashes, the collections source (the standard encrypted set plus
- * the remotely listed app-provisioned ones), the recovery-delegation re-mint,
- * the adoption side effects (epoch pin, client-key record, unlock-methods
- * re-wrap, live vault keys and storage ciphers), and the audit record.
+ * fan-out, recovery re-mints, the generation-delegation re-mint, in that
+ * dependency order, with its convergence story -- is `revokeAccountClient` in
+ * `@interop/wallet-core/clients`, run once for every wallet. This module
+ * supplies the freewallet-shaped stages around it: the session
+ * preconditions, the recovery registry's latent commitment hashes, the
+ * collections source (the standard encrypted set plus the remotely listed
+ * app-provisioned ones), the recovery-delegation re-mint, the
+ * generation-delegation re-mint (a companion entry replacing the embedded
+ * delegation when the revoked client's key signed it), the adoption side
+ * effects (epoch pin, client-key record, unlock-methods re-wrap, live vault
+ * keys and storage ciphers), and the audit record.
  *
  * The honest ceiling is unchanged: ciphertext the revoked client already
  * fetched stays readable to it, and old epochs open to the keys it already
  * held.
  */
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
+import { WasClient } from '@interop/was-client'
 import {
   clientSigningKeyMultibase,
+  companionDidParts,
+  companionLogPinId,
+  companionLogStore,
+  delegatedClientsPointer,
+  ensureGenerationDelegationCurrent,
+  mintGenerationDelegation,
+  type PublishedKeyDocument,
   type RevokedClientKeys
 } from '@interop/wallet-core/webvh'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
+import type { GenerationDelegationRemint } from '@interop/wallet-core/clients'
 import type { Session } from '@/types/auth'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { getUnlockMethods } from '@/session/unlockMethods'
@@ -49,6 +61,7 @@ export interface RevocationOutcome {
   rotated: boolean
   collections: UserKeyCascadeResult
   recovery: { reminted: number; skipped: number }
+  generation: GenerationDelegationRemint
 }
 
 /**
@@ -185,6 +198,8 @@ export async function revokeEnrolledClient({
         doc: document as Parameters<typeof remintRecoveryDelegations>[0]['doc'],
         registryRecord
       }),
+    remintGenerationDelegation: async ({ document }) =>
+      await remintGenerationDelegation({ session, document }),
     onRotationAdopted: async ({ userKey }) =>
       await adoptRotatedUserKey({ session, spaceId: pointer.spaceId, userKey })
   }).finally(() => invalidateVerifiedLog({ profile: session.profile }))
@@ -208,6 +223,85 @@ export async function revokeEnrolledClient({
   return {
     rotated: result.rotated,
     collections: result.collections,
-    recovery: result.recovery ?? { reminted: 0, skipped: 0 }
+    recovery: result.recovery ?? { reminted: 0, skipped: 0 },
+    generation: result.generation ?? { renewed: false, skipped: 'no-pointer' }
+  }
+}
+
+/**
+ * The cascade's generation-delegation re-mint stage: when the revoked
+ * durable client is the one whose key signed the current generation's
+ * embedded delegation, the document edit just rotted it under the
+ * current-key-set rule -- silently, mid-generation, with no registry entry
+ * tracking it. This closure runs `ensureGenerationDelegationCurrent` with
+ * the post-edit document as its signer-death axis: a rotted (or expiring)
+ * delegation is replaced by one companion entry, the fresh delegation signed
+ * by this session's promoted account key and the entry by the login
+ * credential's static companion rung 0. A healthy delegation is one no-op
+ * read.
+ *
+ * Best-effort by the cascade's contract: failures are reported, never
+ * thrown, and the login-time generation-delegation self-heal retries from
+ * durable state. What stays dead is stated elsewhere: App Connect grants a
+ * transient session minted under the old delegation -- mid-generation grant
+ * death is a consequence of ordinary disconnects, healed by the app
+ * reconnecting.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.document {PublishedKeyDocument}   the post-edit account
+ *   document, from the cascade's stage 1
+ * @returns {Promise<GenerationDelegationRemint>}
+ */
+async function remintGenerationDelegation({
+  session,
+  document
+}: {
+  session: Session
+  document: PublishedKeyDocument
+}): Promise<GenerationDelegationRemint> {
+  try {
+    const pointer = session.profile.accountPointer
+    const pointedDid = delegatedClientsPointer({
+      doc: document as Parameters<typeof delegatedClientsPointer>[0]['doc']
+    })
+    if (!pointer || pointedDid === undefined) {
+      return { renewed: false, skipped: 'no-pointer' }
+    }
+    const ladderSeed = session.profile.ladderSeed
+    if (ladderSeed === undefined) {
+      return { renewed: false, skipped: 'no-ladder-seed' }
+    }
+    const { spaceId: companionSpaceId, generationId } = companionDidParts({
+      did: pointedDid
+    })
+    const was = new WasClient({
+      serverUrl: pointer.host,
+      zcapClient: session.profile.zcapClient
+    })
+    const { renewed } = await ensureGenerationDelegationCurrent({
+      store: companionLogStore({ was, spaceId: companionSpaceId, generationId }),
+      ladderSeed,
+      generationId,
+      mintGenerationDelegation: async ({ companionDid }) =>
+        mintGenerationDelegation({
+          zcapClient: session.profile.zcapClient,
+          wasServerUrl: pointer.host,
+          spaceId: pointer.spaceId,
+          companionDid
+        }),
+      expectedDid: pointedDid,
+      accountDoc: document,
+      pinStore: session.profile.persistence.logPins,
+      logId: companionLogPinId({ spaceId: companionSpaceId, generationId })
+    })
+    return { renewed }
+  } catch (err) {
+    console.warn(
+      'Could not re-mint the generation delegation after the revocation; ' +
+        'the next login retries:',
+      err
+    )
+    return { renewed: false, skipped: 'failed' }
   }
 }

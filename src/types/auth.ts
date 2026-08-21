@@ -134,6 +134,14 @@ export interface ControllerProfile {
     unlockSpaceId: string
     manageCapability?: IZcap
   }
+  // The login credential's ladder seed, from its unlock record's standing
+  // members. Companion log entries are signed by the credential's static
+  // rung 0 (derived from this seed and the generation id), so the ceremonies
+  // that write the companion mid-session -- the revocation cascade's
+  // generation-delegation re-mint and the rotation's strike-or-swap -- read
+  // it from here. In-memory only, same trust class as `clientSeed`; absent
+  // for guests and for records without standing authority.
+  ladderSeed?: Uint8Array
   // The invocation capability the session's WAS requests ride, when the
   // session's authority over the data Space is a delegated Space-subtree
   // zcap rather than the root capability -- the transient posture's

@@ -91,6 +91,7 @@ vi.mock('@/session/keyring', async importOriginal => ({
 import {
   adoptPassphraseRebind,
   backfillPassphraseUnlockMethod,
+  deleteUnlockMethodArtifacts,
   getUnlockMethods,
   managementZcapClient,
   putUnlockMethods,
@@ -522,6 +523,81 @@ describe('revokeUnlockMethod', () => {
     ).resolves.toBeNull()
     const after = await getUnlockMethods({ session })
     expect(after!.methods).toHaveLength(0)
+  })
+})
+
+describe('deleteUnlockMethodArtifacts', () => {
+  it('deletes the unlock Space and the local trio, leaving the registry alone', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({ manageCapability: FAKE_CAP })
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [entry]
+      }
+    })
+    await saveKeyringCache({
+      spaceId: entry.unlockSpaceId,
+      record: { version: 1, wrapped: {} },
+      idb
+    })
+    vi.clearAllMocks()
+
+    await deleteUnlockMethodArtifacts({ session, entry, idb })
+
+    expect(deleteUnlockSpaceWithCapability).toHaveBeenCalledOnce()
+    const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
+    expect(args.spaceId).toBe(entry.unlockSpaceId)
+    expect(args.capability).toBe(FAKE_CAP)
+    await expect(
+      loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
+    ).resolves.toBeNull()
+    // No rotation, and no registry rewrite: both die with the account Space
+    // the caller is about to wipe.
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+    const after = await getUnlockMethods({ session })
+    expect(after!.methods).toHaveLength(1)
+  })
+
+  it('skips the server delete for an entry with no management zcap', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry()
+    await saveKeyringCache({
+      spaceId: entry.unlockSpaceId,
+      record: { version: 1, wrapped: {} },
+      idb
+    })
+
+    await deleteUnlockMethodArtifacts({ session, entry, idb })
+
+    // Stated residue: the unlock Space survives, the local trio does not.
+    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    await expect(
+      loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
+    ).resolves.toBeNull()
+  })
+
+  it('skips the server delete with no WAS server configured', async () => {
+    wasState.url = undefined
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({ manageCapability: FAKE_CAP })
+    await saveKeyringCache({
+      spaceId: entry.unlockSpaceId,
+      record: { version: 1, wrapped: {} },
+      idb
+    })
+
+    await deleteUnlockMethodArtifacts({ session, entry, idb })
+
+    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    await expect(
+      loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
+    ).resolves.toBeNull()
   })
 })
 

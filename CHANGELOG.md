@@ -2,7 +2,51 @@
 
 ## 0.39.0 - TBD
 
+### Fixed
+
+- Retiring an unlock credential that had self-enrolled a browser no longer
+  leaves its live ladder commitment standing in the account document (a
+  latent re-seizure credential). The ceremony resolves the ladder's current
+  footprint from the log (wallet-core's `attributeLadderPosture`) instead of
+  trusting the registry's recorded bind-time rung, and the ceremonies that
+  hold the credential's secret pass its ladder seed through to strengthen the
+  attribution: a passphrase change captures the old record's seed before the
+  old unlock Space is deleted, and the tapped-passkey removal reads it off
+  the tapped credential's record (`standingLadderSeed`). The tap-free
+  removal of a lost passkey relies on the seed-less log attribution.
+
 ### Added
+
+- The existing account ceremonies reach the companion artifacts. Client
+  revocation gains a generation-delegation re-mint stage (wallet-core's
+  `remintGenerationDelegation` closure): revoking the durable client that
+  signed the current generation delegation replaces the delegation in place
+  on the post-edit document, so the transient entry path survives the
+  disconnect; the login credential's ladder seed rides the session in memory
+  (`profile.ladderSeed`) to sign it, and the stage skips with a report when
+  it is absent. The credential-rotation ceremony retires the retired
+  credential's companion posture beside its account-side one
+  (`src/session/credentialRotation.ts`): a strike entry drops its revealed
+  companion rung and standing hash when a distinct surviving credential's
+  rung can sign it, and otherwise the generation is swapped onto a surviving
+  credential's ladder (`swapCompanionGeneration`), the old one left to
+  orphan discovery; a passphrase change signs with the new credential's
+  seed. Login's bridge-refresh predicate widens from expiry-only to expiry
+  or signer rot (the delegation's proof key gone from the account document),
+  which is also the first durable self-enrollment's window close: the add
+  entry removes the ladder VM, and the same login re-signs the bridge and
+  the `delegatedClients` sibling and reseals the record; a durable login
+  additionally self-heals a rotted embedded generation delegation
+  (`ensureGenerationDelegationCurrent` with the account-document axis).
+
+- Account deletion tears down every unlock method's server-side artifacts
+  and the auxiliary companion Space. `deleteAccount` walks the
+  unlock-methods registry before the account Space dies and deletes each
+  entry's unlock Space and local trio best-effort
+  (`deleteUnlockMethodArtifacts` in `src/session/unlockMethods.ts`), then
+  deletes the auxiliary Space and the companion pin slots -- all before the
+  fatal wipe, since resolving the auxiliary Space's controller reads the
+  account log out of the account Space.
 
 - Credential-anchored signup. On a non-remembered browser with a WAS server
   configured, the passphrase signup mints no durable client: the account's

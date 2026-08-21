@@ -46,7 +46,12 @@ import {
   registerPasskey,
   type PasskeyRegistration
 } from '@/lib/passkey'
-import { bindUnlockSecret, deleteUnlockMethod } from '@/session/keyring'
+import {
+  bindUnlockSecret,
+  deleteUnlockMethod,
+  deriveUnlockCredential,
+  standingLadderSeed
+} from '@/session/keyring'
 import { zcapExpiring } from '@interop/wallet-core/recovery'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
@@ -724,6 +729,48 @@ export async function revokeUnlockMethod({
 }
 
 /**
+ * Deletes one unlock method's durable artifacts, ceremony-free -- the
+ * account-deletion walk's per-entry unit. Server-side, the entry's unlock
+ * Space (holding its unlock record, and with it the sealed bridge and
+ * `delegatedClients` delegations) goes through the recorded management zcap;
+ * an entry recording none keeps its Space -- the walk is best-effort by
+ * design, and the account behind the record is dead either way. Client-side,
+ * the entry's local trio (keyring cache, client-key record, freshness pin)
+ * is dropped. Deliberately NO rotation and NO registry rewrite: the registry
+ * and the roster die with the account Space the caller is about to wipe.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.entry {UnlockMethod}
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deleteUnlockMethodArtifacts({
+  session,
+  entry,
+  idb
+}: {
+  session: Session
+  entry: UnlockMethod
+  idb?: IDBFactory
+}): Promise<void> {
+  if (WAS_SERVER_URL && entry.manageCapability) {
+    await deleteUnlockSpaceWithCapability({
+      storageServerUrl: WAS_SERVER_URL,
+      zcapClient: managementZcapClient({
+        session,
+        capability: entry.manageCapability
+      }),
+      spaceId: entry.unlockSpaceId,
+      capability: entry.manageCapability
+    })
+  }
+  await deleteKeyringCache({ spaceId: entry.unlockSpaceId, idb })
+  await deleteClientKeyRecord({ spaceId: entry.unlockSpaceId, idb })
+  await deleteKeyringFreshnessPin({ spaceId: entry.unlockSpaceId, idb })
+}
+
+/**
  * Revokes a passkey unlock method by ceremony -- the fallback for an entry that
  * carries no management zcap (bound before the capability existed). Asserts the
  * passkey being removed (its PRF output derives the unlock identity), deletes
@@ -761,12 +808,30 @@ export async function revokeUnlockMethodByCeremony({
     credentialIds: [base64urlnopad.decode(entry.credentialId)],
     signal
   })
+  // The tap put the credential's secret in hand: derive it once (shared with
+  // the Space deletion below) and read its record's ladder seed, so the
+  // retirement's ladder attribution holds every rung a priori. Best-effort --
+  // an unreadable record leaves the log-walk attribution.
+  const credential = await deriveUnlockCredential({
+    secret: prfOutput,
+    kdf: PASSKEY_KDF
+  })
+  const ladderSeed = await standingLadderSeed({
+    credential,
+    controller: session.profile.accountController ?? session.user.id,
+    idb
+  })
   const rotation = await rotateOffUnlockCredential({
     session,
-    method: entry,
+    method: { ...entry, ...(ladderSeed ? { ladderSeed } : {}) },
     verb
   })
-  await deleteUnlockMethod({ secret: prfOutput, kdf: PASSKEY_KDF, idb })
+  await deleteUnlockMethod({
+    secret: prfOutput,
+    kdf: PASSKEY_KDF,
+    idb,
+    credential
+  })
   await dropRegistryEntry({ session, entry })
   return rotation
 }

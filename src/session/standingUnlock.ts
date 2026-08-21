@@ -253,6 +253,7 @@ export async function establishStandingUnlock({
   manageCapability?: IZcap
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
   standingFields: StandingUnlockFields
+  ladderSeed: Uint8Array
 }> {
   const { remoteStore, pointer, clientWebvhKeys, clientKeyAgreementKey } =
     requireEnrolledClientContext({
@@ -369,6 +370,7 @@ export async function establishStandingUnlock({
     unlockSpaceId: bound.unlockSpaceId,
     manageCapability: bound.manageCapability,
     persistClientKeys: bound.persistClientKeys,
+    ladderSeed,
     standingFields: {
       rosterKid: standing.recipientKid,
       keyAgreementKeyMultibase: standing.keyAgreementKeyMultibase,
@@ -651,7 +653,10 @@ export async function selfEnrollStandingClient({
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for the passphrase
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
+ * @returns {Promise<{ ladderSeed?: Uint8Array }>}   the established
+ *   posture's ladder seed, absent when the establishment skipped or failed
+ *   (a passphrase change threads it into the old credential's retirement as
+ *   the surviving seed)
  */
 export async function establishPassphrasePosture({
   session,
@@ -665,12 +670,12 @@ export async function establishPassphrasePosture({
   email?: string
   credential?: UnlockCredential
   idb?: IDBFactory
-}): Promise<void> {
+}): Promise<{ ladderSeed?: Uint8Array }> {
   // A session that cannot act as an enrolled client on a promoted account
   // (a no-WAS deployment, a guest, an unpromoted account) has no posture to
   // establish; skip quietly rather than warn on every such signup.
   if (!enrolledClientContext({ session })) {
-    return
+    return {}
   }
   try {
     const established = await establishStandingUnlock({
@@ -699,11 +704,13 @@ export async function establishPassphrasePosture({
         standing: established.standingFields
       })
     })
+    return { ladderSeed: established.ladderSeed }
   } catch (err) {
     console.warn(
       'Could not establish the passphrase as a standing credential; a fresh ' +
         'browser will need the connect-another-wallet ceremony:',
       err
     )
+    return {}
   }
 }
