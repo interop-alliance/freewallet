@@ -319,6 +319,11 @@ test.describe('Unlock-method revocation from another client', () => {
     const recoveredClient = await coldClientPage(browser)
     try {
       await recoveredClient.goto('/#/recover')
+      // The spec's point is a DURABLE post-recovery client running the
+      // Settings revocation, so the remember seam routes the recovery (and
+      // the login) durable; the default transient variant's cell lives in
+      // `recovery-transient.spec.ts`.
+      await forceRememberBrowser(recoveredClient)
       await fillSettled(
         recoveredClient.locator('input[name="recovery-code"]'),
         code

@@ -451,18 +451,23 @@ export async function putUnlockMethods({
  * @param options.userKey {UserKey}   the account's user key; its vault KAK
  *   seals the record
  * @param options.record {UnlockMethodsRecord}
+ * @param [options.capability] {IZcap}   an invocation capability every request
+ *   rides (the transient recovery ceremony's generation delegation); the root
+ *   capability is invoked otherwise
  * @returns {Promise<void>}
  */
 export async function putUnlockMethodsWithClient({
   zcapClient,
   spaceId,
   userKey,
-  record
+  record,
+  capability
 }: {
   zcapClient: ZcapClient
   spaceId: string
   userKey: UserKey
   record: UnlockMethodsRecord
+  capability?: IZcap
 }): Promise<void> {
   if (!WAS_SERVER_URL) {
     throw new TypeError(
@@ -474,14 +479,63 @@ export async function putUnlockMethodsWithClient({
   await ensureUnlockMethodsCollection({
     storageServerUrl: WAS_SERVER_URL,
     zcapClient,
-    spaceId
+    spaceId,
+    ...(capability ? { capability } : {})
   })
   await putUnlockMethodsRecord({
     storageServerUrl: WAS_SERVER_URL,
     zcapClient,
     spaceId,
-    record: wrapped
+    record: wrapped,
+    ...(capability ? { capability } : {})
   })
+}
+
+/**
+ * Reads the registry with a caller-supplied signing client and user key -- no
+ * session involved, the read half of `putUnlockMethodsWithClient`. The
+ * transient recovery ceremony's registry update: it runs before any session
+ * exists, decrypting the stored record with the PRE-rotation user key still in
+ * hand. No local cache is consulted or touched: the caller is a transient
+ * visit.
+ *
+ * @param options {object}
+ * @param options.zcapClient {ZcapClient}   the client the record GET invokes
+ *   with
+ * @param options.spaceId {string}   the data Space id
+ * @param options.userKey {UserKey}   the user key whose vault KAK the stored
+ *   record is sealed to
+ * @param [options.capability] {IZcap}   an invocation capability the request
+ *   rides; the root capability is invoked otherwise
+ * @returns {Promise<UnlockMethodsRecord | null>}
+ */
+export async function getUnlockMethodsWithClient({
+  zcapClient,
+  spaceId,
+  userKey,
+  capability
+}: {
+  zcapClient: ZcapClient
+  spaceId: string
+  userKey: UserKey
+  capability?: IZcap
+}): Promise<UnlockMethodsRecord | null> {
+  if (!WAS_SERVER_URL) {
+    throw new TypeError(
+      'The direct registry read requires a configured WAS server.'
+    )
+  }
+  const record = await getUnlockMethodsRecord({
+    storageServerUrl: WAS_SERVER_URL,
+    zcapClient,
+    spaceId,
+    ...(capability ? { capability } : {})
+  })
+  if (!record) {
+    return null
+  }
+  const { keyAgreementKey, keyResolver } = userKeyVaultKeys({ userKey })
+  return await unwrapRecord({ record, keyAgreementKey, keyResolver })
 }
 
 /**

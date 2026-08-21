@@ -4,10 +4,11 @@ import {
   readLogFromString,
   resolveDIDFromLog
 } from '@interop/did-method-webvh'
-import { fillSettled, signupViaWizard } from './helpers'
+import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 
 /**
- * The recovery-code flow e2e (WAS mode), end to end: a code issued from
+ * The recovery-code flow e2e (WAS mode), end to end -- the DURABLE
+ * (remembered-browser) recovery cell: a code issued from
  * Settings (the split posture: roster wrap, the code's `keyAgreement`
  * VM, `nextKeyHashes` commitment, delegated unlock record), then recovery on
  * a COLD browser profile holding nothing but the code -- the delegated log
@@ -17,6 +18,10 @@ import { fillSettled, signupViaWizard } from './helpers'
  * welcome credential) across the rotation. The spent code then fails with
  * wording distinct from "wrong code", and the whole ceremony is verifiable
  * entries on the world-readable log.
+ *
+ * The durable continuation runs behind the remember seam: the DEFAULT on a
+ * non-remembered browser is the transient variant, whose posture cell is
+ * pinned in `recovery-transient.spec.ts`.
  *
  * Several PBKDF2 unlock derivations run across the flow on top of a full
  * signup -- hence `test.slow()` and the generous timeouts.
@@ -144,6 +149,9 @@ test.describe('Recovery codes', () => {
     const secondClient = await coldClientPage(browser)
     try {
       await secondClient.goto('/#/recover')
+      // This spec pins the DURABLE recovery cell: the remember seam routes
+      // the continuation (and the login after it) durable.
+      await forceRememberBrowser(secondClient)
 
       // A well-formed code for no wallet: the honest "no account" wording,
       // distinct from a malformed code.

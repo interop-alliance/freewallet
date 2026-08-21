@@ -28,6 +28,7 @@ import {
   type RecoveryOutcome
 } from '@/session/recovery'
 import { isStorageUnreachable } from '@/lib/storageErrors'
+import { forcedRememberBrowser } from '@/lib/e2eSeams'
 import { RecoveryCodeDisplay } from '@/components/RecoveryCodeDisplay'
 
 /**
@@ -38,8 +39,14 @@ import { RecoveryCodeDisplay } from '@/components/RecoveryCodeDisplay'
  * delegation writes the self-enrolling log continuation, the user key comes out
  * of the code's standing roster wrap and is rotated off the spent code, and
  * a replacement code is pushed hard -- the typed code is a spent credential.
- * The final step is an ordinary passphrase login as a freshly enrolled
- * client.
+ * The final step is an ordinary passphrase login.
+ *
+ * The continuation follows the browser's login posture: by default (a
+ * non-remembered browser) the TRANSIENT variant runs -- the fresh
+ * credential's ladder VM stands in for a durable client, nothing local
+ * persists, and the login lands a transient session -- while the
+ * remember-this-browser entry (today the programmatic e2e seam, the form
+ * choice when it lands) runs the durable continuation and a durable login.
  */
 export function RecoverPage() {
   const { t } = useTranslation()
@@ -103,7 +110,10 @@ export function RecoverPage() {
     try {
       const data = new FormData(event.currentTarget)
       const typed = (data.get('recovery-code') as string) ?? ''
-      await locateRecoveryAccount({ code: typed })
+      await locateRecoveryAccount({
+        code: typed,
+        rememberBrowser: forcedRememberBrowser()
+      })
       setCode(typed)
       setStep('passphrase')
     } catch (err) {
@@ -129,7 +139,8 @@ export function RecoverPage() {
     try {
       const recovered = await recoverAccountWithCode({
         code,
-        newPassphrase: passphrase
+        newPassphrase: passphrase,
+        rememberBrowser: forcedRememberBrowser()
       })
       setOutcome(recovered)
       setStep('done')
@@ -153,12 +164,14 @@ export function RecoverPage() {
     setBusy(true)
     setErrorKey(null)
     try {
-      // Recovery's whole point is enrolling this browser: the ceremony just
-      // persisted a fresh client-key record, so the login is durable by
-      // construction -- stated explicitly rather than left to the routing.
+      // The login follows the recovery variant that just ran: the durable
+      // continuation persisted a fresh client-key record, so a remembered
+      // recovery logs in durable; the transient variant persisted nothing,
+      // and the default routing lands the ordinary transient composition.
+      const remembered = forcedRememberBrowser()
       const { session } = await loginWithPassphrase({
         passphrase,
-        rememberBrowser: true
+        ...(remembered ? { rememberBrowser: true } : {})
       })
       if (!session) {
         setErrorKey('auth.recover.errors.loginFailed')
@@ -166,11 +179,15 @@ export function RecoverPage() {
       }
       await session.storageReady
       login(session)
-      // Fire-and-forget: the sequencing the registry updates need lives in
-      // `updateRegistryAfterRecovery`, and every half is best-effort. The
-      // passphrase still in hand lets it promote the fresh credential to the
-      // standing posture (self-enrolling on the next fresh browser).
-      void updateRegistryAfterRecovery({ session, outcome, passphrase })
+      if (remembered) {
+        // Fire-and-forget: the sequencing the registry updates need lives in
+        // `updateRegistryAfterRecovery`, and every half is best-effort. The
+        // passphrase still in hand lets it promote the fresh credential to
+        // the standing posture (self-enrolling on the next fresh browser).
+        // The transient variant already updated the registry inside the
+        // ceremony (a transient session cannot write it later).
+        void updateRegistryAfterRecovery({ session, outcome, passphrase })
+      }
       navigate('/dashboard', { replace: true })
     } catch (err) {
       console.error('Recovery login failed:', err)

@@ -47,7 +47,9 @@ import {
 import type { ClientKeyRecord } from '@interop/wallet-core/keys'
 import {
   accountLogPinId,
+  commitCompanionRung,
   companionDidParts,
+  companionLogPinId,
   companionLogStore,
   delegatedClientsPointer,
   didKeyZcapClient,
@@ -318,12 +320,13 @@ export async function establishStandingUnlock({
     recoveryClientDid: standing.clientDid
   })
   let delegatedClients: IZcap | undefined
+  let companionDid: string | undefined
   try {
     const { doc } = await verifiedAccountLog({
       profile: session.profile,
       pointer
     })
-    const companionDid = delegatedClientsPointer({ doc })
+    companionDid = delegatedClientsPointer({ doc })
     if (companionDid) {
       delegatedClients = await mintDelegatedClientsDelegation({
         zcapClient,
@@ -338,6 +341,48 @@ export async function establishStandingUnlock({
         'binds without one:',
       err
     )
+  }
+
+  // 3b. The companion rung commit -- the bind ceremony's half of the
+  // mid-generation lockout hybrid: the bound credential's rung-0 hash joins
+  // the pointed generation's `nextKeyHashes` in one atomic hash-restating
+  // entry signed by the LOGIN credential's committed rung 0
+  // (`profile.ladderSeed`; on a passphrase change still the OLD credential's
+  // seed here, by the caller's reassignment ordering). Without it a freshly
+  // bound credential is locked out of the transient posture until the next
+  // generation swap. Best-effort: an acting rung the generation does not
+  // commit is the honest skip (nothing licenses a bind to mint a
+  // generation), and the lockout consequence stands as documented.
+  const actingLadderSeed = session.profile.ladderSeed
+  if (companionDid && actingLadderSeed) {
+    try {
+      const companion = companionDidParts({ did: companionDid })
+      await commitCompanionRung({
+        store: companionLogStore({
+          was: new WasClient({ serverUrl: pointer.host, zcapClient }),
+          spaceId: companion.spaceId,
+          generationId: companion.generationId
+        }),
+        boundLadderSeed: ladderSeed,
+        actingLadderSeed,
+        generationId: companion.generationId,
+        expectedDid: companionDid,
+        pinStore: session.profile.persistence.logPins,
+        logId: companionLogPinId({
+          spaceId: companion.spaceId,
+          generationId: companion.generationId
+        })
+      })
+    } catch (err) {
+      console.warn(
+        (err as { name?: string }).name === 'CompanionRungUncommittedError'
+          ? "The login credential's rung is not committed in the pointed " +
+              'generation, so the bound credential waits for the next ' +
+              'generation swap:'
+          : "Could not commit the bound credential's companion rung:",
+        err
+      )
+    }
   }
 
   // 4. The re-bind: the unlock record in the standing layout.

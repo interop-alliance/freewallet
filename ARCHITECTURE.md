@@ -106,7 +106,14 @@ and latent self-enrollment authority -- its record carries a pre-minted
 PUT-on-`did.jsonl` bridge delegation and a random update-key ladder seed
 (`@interop/wallet-core/unlock`; the bind-time establishment is
 `src/session/standingUnlock.ts`, run at signup and at every
-add/change-method ceremony). A fresh browser holding nothing but the
+add/change-method ceremony). When the account points at a companion
+generation, the establishment also appends one atomic hash-restating
+companion commit entry adding the new credential's rung-0 hash, signed by
+the login credential's committed rung (`commitCompanionRung` -- the bind
+half of the mid-generation lockout hybrid; without it the fresh credential
+could not enter the transient posture until the next generation swap).
+Best-effort: an acting rung the generation does not commit is the honest
+skip. A fresh browser holding nothing but the
 credential can therefore **self-enroll** at login as an ordinary full
 client, with no second browser involved -- reachable today through the
 programmatic `rememberBrowser: true` entry, since the DEFAULT login on a
@@ -822,15 +829,19 @@ carrying public halves only. Nothing binds until the confirm-once dialog's
 
 Recovery (`/recover`, `recoverAccountWithCode`): the typed code decrypts its
 unlock record, the log is fetched and locally verified against the pointer,
-a brand-new ordinary client key set is minted, and the delegation writes the
-self-enrolling continuation -- a **reveal-and-commit** entry signed by the
+and the delegation writes the self-enrolling continuation -- a
+**reveal-and-commit** entry signed by the
 code's pre-committed update key (with prerotation active, an entry verifies
 against its own re-stated `updateKeys`, each hashing into the previous
 entry's `nextKeyHashes` -- which is exactly what lets a committed key reveal
-itself), then an **add-and-retire** entry signed by the new client's update
-key: new client in (both VMs, all four signing relations, update authority),
-the spent code's VM, update key, and hash out, and a replacement code's
-posture in. The user key is unwrapped from the code's standing wrap and
+itself), then an **add-and-retire** entry. The continuation enrolls what the
+browser's posture would enroll at login. With `rememberBrowser` (the
+programmatic remember entry) a brand-new ordinary client key set is minted
+and the add-and-retire entry, signed by the new client's update
+key, brings the new client in (both VMs, all four signing relations, update
+authority), the spent code's VM, update key, and hash out, and a replacement
+code's posture in. The user key is unwrapped from the code's standing wrap
+and
 **mandatorily rotated** off the spent code (recipients of the fresh epoch
 resolved from the just-updated verified document); a replacement code is
 pushed hard (shown once, must be confirmed saved before login unlocks); the
@@ -840,6 +851,38 @@ client binds under a freshly chosen passphrase, ending in an ordinary
 enrolled login. The fresh user key then fans out through the epoch cascade (see
 "Client revocation" below): every encrypted collection re-epochs onto it,
 so writes stop landing under epochs the spent code could read.
+
+The DEFAULT on a non-remembered browser is the **transient recovery
+variant** (wallet-core's `recoverWebvhLadderAnchored`): no durable client is
+minted anywhere, the add-and-retire entry publishes the fresh credential's
+ladder VM in its place (`assertionMethod` and `capabilityDelegation` only)
+beside the new passphrase's `keyAgreement` commitment and the replacement
+code's posture, retires every standing ladder VM (the stale-third-party
+retirement no other ceremony performs), and the account lands client-less
+and ladder-anchored. Inside the continuation's persist-before-publish seam
+(after the reveal entry validates the code, before the ladder VM publishes)
+the ceremony mints a fresh companion generation under the new ladder's
+bootstrap did:key (a recovery record carries no companion sibling, so the
+old generation is unreachable and falls to orphan discovery) and durably
+writes the new passphrase's unlock record (ladder seed inside, bridge and
+sibling ladder-VM-signed) and the replacement code's record -- so a tab
+death can never publish an anchor nobody can derive. After the entry, the
+`#DelegatedClients` pointer is re-pointed through the NEW credential's
+bridge (log-only; the typed code's bridge may have rotted with the removed
+ladder VMs), a per-visit transient client is loudly enrolled into the fresh
+generation, and the mandatory rotation runs as the ONE ladder-signed roster
+append the ceremony-tail license admits
+(`replaceUserKeyRosterRecipients`: the spent code retired, the fresh
+credential and the replacement code escrowed, the fresh epoch minted, in a
+single write anchored at the add-and-retire entry). The epoch cascade and
+the unlock-methods registry update (spent entry out, replacement and
+new-passphrase entries in, re-sealed to the rotated user key) ride the
+generation delegation, and the visit then enters through the ordinary
+transient composition with zero local residue -- the locate step's
+chain-head pin rides in memory too. A rotation torn mid-fan-out on a
+client-less account has no completer yet; a stranded collection stays
+keyed to the spent code until the next durable login or a spend re-run
+(the documented residue).
 
 Revoking a code from Settings is the issuance reversal and is REAL (the
 secret was only ever a pointer to the record): document entry out, user key

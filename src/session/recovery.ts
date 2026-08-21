@@ -17,13 +17,16 @@
  *   document entry, then the delegation + unlock record, then the registry
  *   entry. Idempotent stage by stage.
  * - `recoverAccountWithCode` -- the `/recover` flow end to end on a fresh
- *   browser: unlock record decrypted, log verified, a new ordinary client
- *   key set minted, the delegation invoked to write the self-enrolling
- *   continuation, the user key unwrapped from the code's standing wrap, the
- *   mandatory user key rotation in the roster (the spent code presumed
- *   compromised), the epoch cascade re-keying every encrypted collection off
- *   the spent code's reach, a replacement code issued hard, and the new
- *   client bound under a fresh passphrase.
+ *   browser: unlock record decrypted, log verified, the delegation invoked
+ *   to write the self-enrolling continuation, the user key unwrapped from
+ *   the code's standing wrap, the mandatory user key rotation in the roster
+ *   (the spent code presumed compromised), the epoch cascade re-keying every
+ *   encrypted collection off the spent code's reach, a replacement code
+ *   issued hard, and the fresh passphrase bound. The continuation enrolls
+ *   what the browser's posture would enroll at login: a new durable client
+ *   with `rememberBrowser`, and otherwise (the default) the fresh
+ *   credential's LADDER VM -- the transient variant, which lands the account
+ *   client-less and ladder-anchored with zero local residue.
  * - `revokeRecoveryCode` -- the Settings removal: document entry out, user key
  *   rotated off the code's wrap, the same collection cascade, unlock Space
  *   deleted, registry entry dropped, and the live session adopting the
@@ -58,6 +61,9 @@ import {
 } from '@interop/wallet-core/keyring'
 import {
   addUserKeyRosterRecipient,
+  replaceUserKeyRosterRecipients,
+  userKeyRosterDescriptorStore,
+  userKeyRosterLogSigner,
   userKeyVaultKeys,
   readUserKeyRoster,
   rotateUserKeyRoster,
@@ -66,14 +72,33 @@ import {
 import { accountRosterStore, sessionRosterStore } from '@/session/rosterStore'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
+  accountLogPinId,
+  clientSigningKeyMultibase,
+  companionLogStore,
+  delegatedWebvhLogStore,
   delegationKeyInDocument,
+  didKeyZcapClient,
   documentKeyMultibases,
+  embeddedGenerationDelegation,
+  enrollTransientClient,
+  ensureGenerationDelegationCurrent,
   isWebvhDid,
+  keyAgreementCommitment,
+  ladderVmAgent,
+  ladderVmZcapClient,
   mintClientWebvhUpdateKeys,
+  mintCredentialCompanionGeneration,
+  mintDelegatedClientsDelegation,
+  mintGenerationDelegation,
   updateKeyMultibase,
   verifyAccountLog,
-  webvhZcapClient
+  webvhZcapClient,
+  setDelegatedClientsPointer,
+  type WebvhIdStore
 } from '@interop/wallet-core/webvh'
+import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
+import { generateLadderSeed, ladderRung } from '@interop/wallet-core/unlock'
+import { WasClient } from '@interop/was-client'
 import {
   currentAccountSigningKeys,
   type VerifiedAccountLog
@@ -84,6 +109,7 @@ import {
   generateRecoveryCode,
   publishRecoveryKey,
   recoverWebvhClient,
+  recoverWebvhLadderAnchored,
   recoveryClientFromCode,
   RECOVERY_KDF,
   remintRecoveryDelegations as remintDelegationsCore,
@@ -97,18 +123,25 @@ import {
 } from '@interop/wallet-core/recovery'
 import type { Session } from '@/types/auth'
 import {
+  bindCredentialAnchoredUnlockSecret,
   bindPassphrase,
   delegateUnlockManagement,
+  deriveUnlockCredential,
   unlockManagementGrantee
 } from '@/session/keyring'
+import { KEYRING_KDF } from '@interop/wallet-core/keyring'
+import { transientSessionPersistence } from '@/session/persistence'
 import {
   backfillPassphraseUnlockMethod,
   emptyUnlockMethodsRegistry,
   getUnlockMethods,
+  getUnlockMethodsWithClient,
   managementZcapClient,
   putUnlockMethods,
+  putUnlockMethodsWithClient,
   refreshStandingDelegationFields,
   revokeUnlockMethod,
+  upsertPassphraseUnlockMethod,
   type PassphraseUnlockMethod,
   type PasskeyUnlockMethod,
   type RecoveryCodeUnlockMethod,
@@ -137,7 +170,7 @@ import {
 } from '@/lib/sessionKey'
 import { assertAccountCeremonyAllowed } from '@/session/persistence'
 import { isStorageUnreachable } from '@/lib/storageErrors'
-import { WASRemoteStore } from '@/stores/wasRemoteStore'
+import { mintSpaceId, WASRemoteStore } from '@/stores/wasRemoteStore'
 
 // Re-exported for the pages, so the UI layer keeps one recovery import.
 export {
@@ -617,6 +650,10 @@ function isResourceLogContinuityError(err: unknown): boolean {
  *   pointer (as `unwrapUnlockRecord` returned it, its binding verified)
  * @param [options.verifiedLog] {VerifiedAccountLog}   an already-verified
  *   account log; fetched and verified here when absent
+ * @param [options.accountLogPinStore] {object}   the chain-head pin store the
+ *   log fetch rides when no `verifiedLog` is supplied -- an in-memory store
+ *   for a non-remembered browser (nothing durable may be written there); the
+ *   durable session store is the default
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
@@ -625,12 +662,14 @@ async function completeRecoveryRecordProof({
   proofState,
   pointer,
   verifiedLog,
+  accountLogPinStore,
   idb
 }: {
   record: unknown
   proofState: UnlockRecordProofState
   pointer: AccountPointer
   verifiedLog?: VerifiedAccountLog
+  accountLogPinStore?: ReturnType<typeof sessionLogPinStore>
   idb?: IDBFactory
 }): Promise<void> {
   if (proofState === 'verified') {
@@ -652,7 +691,10 @@ async function completeRecoveryRecordProof({
       pointer: logPointer,
       ...(verifiedLog
         ? { verifiedLog }
-        : { accountLogPinStore: sessionLogPinStore({ idb }) })
+        : {
+            accountLogPinStore:
+              accountLogPinStore ?? sessionLogPinStore({ idb })
+          })
     })
     await verifyRecordProof({
       record,
@@ -687,14 +729,20 @@ async function completeRecoveryRecordProof({
  *
  * @param options {object}
  * @param options.code {string}
+ * @param [options.rememberBrowser] {boolean}   `true` establishes the
+ *   account-log chain-head pin durably (the browser is about to be
+ *   remembered); the default pins in memory only, so the locate step of a
+ *   public-terminal recovery leaves zero local residue
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 export async function locateRecoveryAccount({
   code,
+  rememberBrowser = false,
   idb
 }: {
   code: string
+  rememberBrowser?: boolean
   idb?: IDBFactory
 }): Promise<void> {
   const { record, contents, proofState } = await readRecoveryRecord({ code })
@@ -702,6 +750,9 @@ export async function locateRecoveryAccount({
     record,
     proofState,
     pointer: contents.pointer,
+    ...(rememberBrowser
+      ? {}
+      : { accountLogPinStore: transientSessionPersistence().logPins }),
     idb
   })
 }
@@ -718,11 +769,19 @@ export interface RecoveryOutcome {
 }
 
 /**
- * The whole recovery flow on a fresh browser, from a typed code to an
- * enrolled client bound under a new passphrase (the caller then performs an
- * ordinary passphrase login). See the module doc for the sequence; every
- * stage is idempotent or convergent, so re-running with the same code after
- * a tear makes progress rather than forking anything.
+ * The whole recovery flow on a fresh browser, from a typed code to a
+ * recovered account under a new passphrase (the caller then performs an
+ * ordinary passphrase login). The continuation enrolls what this browser's
+ * posture would enroll at login: with `rememberBrowser` a new DURABLE client
+ * (today's flow -- the client-key record persists and the login is durable),
+ * and otherwise -- the default, a public terminal -- the TRANSIENT variant:
+ * the fresh credential's ladder VM stands in for a durable client, the
+ * account lands client-less and ladder-anchored, and the visit continues as
+ * an ordinary transient session with zero local residue. See the module doc
+ * for the shared sequence; every stage is idempotent or convergent, so
+ * re-running with the same code after a tear makes progress rather than
+ * forking anything (past the add-and-retire entry the typed code correctly
+ * fails as spent, and the replacement code is the resume path).
  *
  * Error discipline: a malformed code throws `RecoveryCodeInvalidError`; a
  * code with no unlock record throws `RecoveryCodeNotFoundError`; a code
@@ -737,35 +796,36 @@ export interface RecoveryOutcome {
  * @param options.code {string}   the typed recovery code
  * @param options.newPassphrase {string}   the passphrase to bind the new
  *   client under
+ * @param [options.rememberBrowser] {boolean}   `true` runs the durable
+ *   continuation (a new enrolled client, persisted locally); the default is
+ *   the transient variant, which writes nothing local
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<RecoveryOutcome>}
  */
 export async function recoverAccountWithCode({
   code,
   newPassphrase,
+  rememberBrowser = false,
   idb
 }: {
   code: string
   newPassphrase: string
+  rememberBrowser?: boolean
   idb?: IDBFactory
 }): Promise<RecoveryOutcome> {
   // The code's client identity and unlock record. The method is passed
   // explicitly (`RECOVERY_KDF`) -- this page knows it holds a code.
-  const {
-    client: spent,
-    unlock,
-    record,
-    contents,
-    proofState
-  } = await readRecoveryRecord({
-    code
-  })
+  const recovered = await readRecoveryRecord({ code })
+  const { client: spent, unlock, record, contents, proofState } = recovered
   const pointer = contents.pointer
   if (!isWebvhDid(pointer.did)) {
     throw new Error(
       'The recovery record names no did:webvh account; it cannot be ' +
         'recovered on the roster model.'
     )
+  }
+  if (!rememberBrowser) {
+    return recoverAccountTransient({ recovered, newPassphrase })
   }
   // Verify the world-readable log locally before invoking anything. The
   // recovering browser normally holds no account-log chain-head pin yet
@@ -1042,6 +1102,482 @@ export async function recoverAccountWithCode({
     }),
     idb
   })
+
+  return {
+    replacementCode,
+    replacementEntry,
+    spentRecoveryKid: spent.recipientKid
+  }
+}
+
+/**
+ * The TRANSIENT recovery variant (the default on a non-remembered browser):
+ * `recoverWebvhLadderAnchored` publishes the fresh credential's ladder VM in
+ * place of a durable client, so the account lands client-less and
+ * ladder-anchored, and nothing touches local durable storage -- every log
+ * read pins in memory and dies with the tab. The freewallet wiring around the
+ * shared continuation:
+ *
+ * 1. Inside the continuation's `onCommitted` seam (after the reveal entry
+ *    validates the code, BEFORE the add entry publishes the ladder VM): a
+ *    fresh companion generation is minted under the new ladder's bootstrap
+ *    did:key (a recovery record carries no companion sibling, so the old
+ *    auxiliary Space is unreachable; the old generation falls to orphan
+ *    discovery), its delegation embedded and its Space's controller flipped;
+ *    then the new credential's bridge and sibling (ladder-VM-signed), the new
+ *    passphrase's unlock record (the ladder seed inside), and the replacement
+ *    code's record are durably written -- the pinned ordering: a tab death
+ *    must never leave a published anchor nobody can derive.
+ * 2. After the add-and-retire entry: the `#DelegatedClients` pointer is
+ *    re-pointed at the fresh generation through the NEW credential's bridge
+ *    (`logOnly`: the bridge covers nothing but `did.jsonl`; the typed code's
+ *    bridge may have rotted with the ladder VMs the entry removed), one more
+ *    rung-0-signed account-log entry.
+ * 3. A per-visit transient client is enrolled into the fresh generation (the
+ *    loud entry), and the mandatory rotation runs as ONE ladder-signed roster
+ *    append anchored at the add-and-retire entry (the ceremony-tail license's
+ *    one shot): the spent code retired, the fresh credential and the
+ *    replacement code escrowed, the fresh epoch minted -- invoked as the
+ *    companion VM under the generation delegation, the only authority this
+ *    visit holds over the promoted Space.
+ * 4. The epoch cascade and the registry update (spent entry out, replacement
+ *    and new-passphrase entries in, re-sealed to the rotated user key) ride
+ *    the same delegation; the spent code's unlock Space is deleted last.
+ *
+ * @param options {object}
+ * @param options.recovered {object}   the typed code's identities and record,
+ *   as `readRecoveryRecord` returned them
+ * @param options.newPassphrase {string}
+ * @returns {Promise<RecoveryOutcome>}
+ */
+async function recoverAccountTransient({
+  recovered,
+  newPassphrase
+}: {
+  recovered: Awaited<ReturnType<typeof readRecoveryRecord>>
+  newPassphrase: string
+}): Promise<RecoveryOutcome> {
+  const { client: spent, unlock, record, contents, proofState } = recovered
+  const pointer = contents.pointer
+  if (!isWebvhDid(pointer.did)) {
+    throw new Error(
+      'The recovery record names no did:webvh account; it cannot be ' +
+        'recovered on the roster model.'
+    )
+  }
+  const did = pointer.did
+  const spaceId = pointer.spaceId
+  const host = pointer.host
+
+  // The visit's in-memory persistence handle: trust-on-first-use chain-head
+  // pins for every log read here, gone with the tab.
+  const persistence = transientSessionPersistence()
+  const logPins = persistence.logPins
+
+  const verifiedLog = await verifyAccountLog({
+    did,
+    spaceId,
+    host,
+    pinStore: logPins
+  })
+  await completeRecoveryRecordProof({
+    record,
+    proofState,
+    pointer,
+    verifiedLog
+  })
+
+  // The fresh credential (one KDF run), its ladder, and the replacement code
+  // -- in memory only until the continuation lands.
+  const credential = await deriveUnlockCredential({
+    secret: newPassphrase,
+    kdf: KEYRING_KDF
+  })
+  const { standing } = credential
+  const ladderSeed = generateLadderSeed()
+  const rung0 = await ladderRung({ ladderSeed, index: 0 })
+  const rung1 = await ladderRung({ ladderSeed, index: 1 })
+  const bootstrapAgent = await ladderVmAgent({ ladderSeed })
+  const bootstrapWas = new WasClient({
+    serverUrl: host,
+    zcapClient: didKeyZcapClient({ keyAgent: bootstrapAgent })
+  })
+  const ladderZcap = await ladderVmZcapClient({ accountDid: did, ladderSeed })
+  const replacementCode = generateRecoveryCode()
+  const replacement = await recoveryClientFromCode({ code: replacementCode })
+
+  const logStore = delegatedLogStore({
+    pointer,
+    delegation: contents.delegation,
+    client: spent
+  })
+
+  // Filled by the `onCommitted` seam, consumed by the tail below.
+  let companionSpaceId: string | undefined
+  let companionDid: string | undefined
+  let bridge: IZcap | undefined
+  let sibling: IZcap | undefined
+  let newRecordBind:
+    Awaited<ReturnType<typeof bindCredentialAnchoredUnlockSecret>> | undefined
+  let replacementEntry: RecoveryCodeUnlockMethod | undefined
+
+  const continuation = await recoverWebvhLadderAnchored({
+    store: logStore,
+    expectedDid: did,
+    recovery: {
+      updateSeed: spent.updateSeed,
+      keyAgreementKeyMultibase: spent.keyAgreementKeyMultibase,
+      updateKeyMultibase: spent.updateKeyMultibase
+    },
+    ladderSeed,
+    // A passphrase-derived key publishes as a hash commitment, never
+    // verbatim (the hash-commitment rule).
+    credentialKeyAgreement: {
+      commitment: await keyAgreementCommitment({
+        keyAgreementKeyMultibase: standing.keyAgreementKeyMultibase
+      })
+    },
+    replacement: {
+      keyAgreementKeyMultibase: replacement.keyAgreementKeyMultibase,
+      updateKeyMultibase: replacement.updateKeyMultibase
+    },
+    // The persist-before-publish seam: runs after the reveal entry stands
+    // (a revoked code has been refused) and before the add entry publishes
+    // the ladder VM the seed backs. Idempotent -- a conflict retry re-invokes
+    // it, converging on the same generation and re-writing the records.
+    onCommitted: async () => {
+      // The fresh companion generation, minted once per run (a retry reuses
+      // it): genesis under the bootstrap did:key self-commits the fresh
+      // credential's per-generation rung 0, the delegation embeds while the
+      // auxiliary Space still answers to the bootstrap key, the controller
+      // flips after -- the credential-anchored genesis order.
+      if (!companionDid) {
+        companionSpaceId = mintSpaceId()
+        const minted = await mintCredentialCompanionGeneration({
+          was: bootstrapWas,
+          wasServerUrl: host,
+          spaceId: companionSpaceId,
+          controller: bootstrapAgent.id,
+          ladderSeed
+        })
+        await ensureGenerationDelegationCurrent({
+          store: companionLogStore({
+            was: bootstrapWas,
+            spaceId: companionSpaceId,
+            generationId: minted.generationId
+          }),
+          ladderSeed,
+          generationId: minted.generationId,
+          mintGenerationDelegation: async ({ companionDid: generationDid }) =>
+            mintGenerationDelegation({
+              zcapClient: ladderZcap,
+              wasServerUrl: host,
+              spaceId,
+              companionDid: generationDid
+            }),
+          expectedDid: minted.did
+        })
+        await bootstrapWas
+          .space(companionSpaceId)
+          .configure({ controller: did, force: true })
+        companionDid = minted.did
+      }
+      // The new credential's bridge and sibling, ladder-VM-signed: they
+      // verify once the add entry publishes the ladder VM.
+      bridge = await delegateLogWrite({
+        zcapClient: ladderZcap,
+        pointer,
+        recoveryClientDid: standing.clientDid
+      })
+      sibling = await mintDelegatedClientsDelegation({
+        zcapClient: ladderZcap,
+        wasServerUrl: host,
+        companionSpaceId: companionSpaceId!,
+        controller: standing.clientDid
+      })
+      // The new passphrase's unlock record, the fresh ladder seed inside --
+      // durably written before the VM that seed backs publishes.
+      newRecordBind = await bindCredentialAnchoredUnlockSecret({
+        controller: bootstrapAgent.id,
+        pointer,
+        delegation: bridge,
+        delegatedClients: sibling,
+        ladderSeed,
+        delegateManagementTo: did,
+        credential
+      })
+      // The replacement code's record (no sibling -- a code needs no
+      // companion authority; its delegation is ladder-VM-signed).
+      const replacementDelegation = await delegateLogWrite({
+        zcapClient: ladderZcap,
+        pointer,
+        recoveryClientDid: replacement.clientDid
+      })
+      const replacementBind = await bindRecoveryRecord({
+        client: replacement,
+        controller: contents.controller,
+        pointer,
+        delegation: replacementDelegation
+      })
+      replacementEntry = recoveryRegistryEntry({
+        client: replacement,
+        label: `Replacement code (recovery ${new Date()
+          .toISOString()
+          .slice(0, 10)})`,
+        unlockSpaceId: replacementBind.unlockSpaceId,
+        manageCapability: replacementBind.manageCapability,
+        delegation: replacementDelegation,
+        unlockKeyAgreementKeyId: replacementBind.unlockKeyAgreementKeyId,
+        unlockKeyAgreementKeyMultibase:
+          replacementBind.unlockKeyAgreementKeyMultibase
+      })
+    }
+  })
+  if (
+    !companionSpaceId ||
+    !companionDid ||
+    !bridge ||
+    !sibling ||
+    !newRecordBind ||
+    !replacementEntry
+  ) {
+    throw new Error(
+      'The recovery continuation completed without establishing the fresh ' +
+        "credential's records."
+    )
+  }
+
+  // Re-point the `#DelegatedClients` service entry at the fresh generation:
+  // one more rung-0-signed account-log entry, written through the NEW
+  // credential's bridge (the typed code's bridge may have rotted with the
+  // ladder VMs the add entry removed), log-only -- the bridge's narrow scope
+  // covers nothing but `did.jsonl`, and the projection heals at the next
+  // authorized write.
+  await setDelegatedClientsPointer({
+    // The narrow delegated store satisfies the `logOnly` contract (only the
+    // log read and the `did.jsonl` PUT are exercised).
+    idStore: unlockLogStore({
+      pointer,
+      delegation: bridge,
+      zcapClient: standing.agents.zcapClient
+    }) as unknown as WebvhIdStore,
+    updateKeys: { updateSeed: rung0.seed, stagedSeed: rung1.seed },
+    companionDid,
+    expectedDid: did,
+    pinStore: logPins,
+    logId: accountLogPinId({ spaceId }),
+    logOnly: true
+  })
+
+  // The per-visit transient client, enrolled into the fresh generation
+  // through the new record's sibling (the loud entry): the invocation
+  // identity the rotation, the cascade, and the registry update ride, since
+  // the generation delegation is the only authority this visit holds over
+  // the promoted Space.
+  const visitSeed = crypto.getRandomValues(new Uint8Array(32))
+  const visitAgents = await agentsFromSeed({ seed: visitSeed })
+  const { doc: companionDoc } = await enrollTransientClient({
+    readAccountDocument: async () =>
+      (
+        await verifyAccountLog({
+          did,
+          spaceId,
+          host,
+          pinStore: logPins
+        })
+      ).doc,
+    storeForGenerationId: generationId =>
+      delegatedWebvhLogStore({
+        host,
+        spaceId: companionSpaceId!,
+        collectionId: generationId,
+        delegation: sibling!,
+        zcapClient: standing.agents.zcapClient
+      }),
+    ladderSeed,
+    transientKeyMultibase: clientSigningKeyMultibase({
+      keyAgent: visitAgents.keyAgent
+    }),
+    // The fresh genesis embedded its delegation above; a generation without
+    // one here is a torn establishment, not a mintable state.
+    mintGenerationDelegation: async () => {
+      throw new Error(
+        'The fresh companion generation carries no embedded delegation.'
+      )
+    },
+    pinStore: logPins
+  })
+  const generationDelegation = embeddedGenerationDelegation({
+    doc: companionDoc
+  })
+  if (!generationDelegation) {
+    throw new Error(
+      'The fresh companion generation carries no embedded delegation.'
+    )
+  }
+  const transientZcapClient = webvhZcapClient({
+    keyAgent: visitAgents.keyAgent,
+    did: companionDid
+  })
+
+  // The roster store the mandatory rotation drives: appends signed by the
+  // fresh ladder VM, anchored at the continuation's own add-and-retire entry
+  // (the posture-changing version the ceremony-tail license admits -- the
+  // pointer entry after it changes no posture, so the controller view
+  // resolves from the continuation's returned log, not a fresh head), HTTP
+  // invoked as the companion VM under the generation delegation.
+  const rosterStore = userKeyRosterDescriptorStore({
+    storageServerUrl: host,
+    zcapClient: transientZcapClient,
+    spaceId,
+    resolveController: async () =>
+      webvhResourceLogController({ did, log: continuation.log }),
+    pinStore: logPins,
+    signer: userKeyRosterLogSigner({ keyAgent: bootstrapAgent }),
+    capability: generationDelegation
+  })
+  const preRotation = await readUserKeyRoster({
+    store: rosterStore,
+    clientKeyAgreementKey: spent.agents.keyAgreementKey
+  })
+  if (!preRotation) {
+    throw new Error(
+      'The account has no user key roster; it must finish provisioning before ' +
+        'it can be recovered.'
+    )
+  }
+  const oldUserKey = preRotation.userKey
+
+  // The mandatory rotation, in the ONE ladder-signed append the license
+  // admits: the spent code's wrap retired, the fresh credential's standing
+  // key and the replacement code escrowed into every epoch, and the fresh
+  // epoch minted -- all in a single descriptor write. Convergent: a re-run
+  // writes nothing.
+  await replaceUserKeyRosterRecipients({
+    store: rosterStore,
+    document: continuation.doc as Parameters<
+      typeof replaceUserKeyRosterRecipients
+    >[0]['document'],
+    retireRecipientIds: [spent.recipientKid],
+    recipients: [
+      {
+        id: standing.recipientKid,
+        publicKeyMultibase: standing.keyAgreementKeyMultibase
+      },
+      {
+        id: replacement.recipientKid,
+        publicKeyMultibase: replacement.keyAgreementKeyMultibase
+      }
+    ],
+    ownerKeyAgreementKey: spent.agents.keyAgreementKey
+  })
+  const postRotation = await readUserKeyRoster({
+    store: rosterStore,
+    clientKeyAgreementKey: standing.agents.keyAgreementKey
+  })
+  if (!postRotation) {
+    throw new Error('The user key roster vanished during recovery.')
+  }
+  const newUserKey = postRotation.userKey
+
+  // The epoch cascade under the generation delegation: every encrypted
+  // collection takes a fresh epoch naming the rotated user key. Best-effort
+  // per collection; a stranded collection stays keyed to the spent code
+  // until the next durable login or a spend re-run (the documented residue
+  // -- the transient completion is its own follow-up).
+  const remoteStore = new WASRemoteStore({
+    storageServerUrl: host,
+    zcapClient: transientZcapClient,
+    spaceId,
+    controller: did,
+    capability: generationDelegation
+  })
+  await cascadeCollectionsToUserKey({
+    remoteStore,
+    rosterDescriptor: postRotation.descriptor,
+    clientKeyAgreementKey: standing.agents.keyAgreementKey,
+    userKey: newUserKey
+  })
+
+  // The registry, one read-modify-write (the durable flow's re-seal and
+  // post-login updates folded into the ceremony, since a transient session
+  // cannot run them later): the spent code's entry out, the replacement's
+  // and the new passphrase's in, the record re-sealed to the rotated user
+  // key. Best-effort -- the account is recovered without it, and the next
+  // durable login surfaces a stale registry as a warning.
+  try {
+    const existing = await getUnlockMethodsWithClient({
+      zcapClient: transientZcapClient,
+      spaceId,
+      userKey: oldUserKey,
+      capability: generationDelegation
+    })
+    const base = existing ?? emptyUnlockMethodsRegistry()
+    const dropped = new Set([replacementEntry.recoveryKid, spent.recipientKid])
+    const methods = [
+      ...base.methods.filter(
+        method =>
+          method.type !== 'recovery-code' || !dropped.has(method.recoveryKid)
+      ),
+      replacementEntry
+    ]
+    const bridgeKeyId = delegationProofKeyId(bridge)
+    const siblingKeyId = delegationProofKeyId(sibling)
+    const updated = upsertPassphraseUnlockMethod({
+      record: { ...base, methods },
+      unlockSpaceId: newRecordBind.unlockSpaceId,
+      manageCapability: newRecordBind.manageCapability,
+      standing: {
+        rosterKid: standing.recipientKid,
+        keyAgreementKeyMultibase: standing.keyAgreementKeyMultibase,
+        updateKeyMultibase: rung0.keyMultibase,
+        unlockClientDid: standing.clientDid,
+        ...(bridgeKeyId ? { delegationKeyId: bridgeKeyId } : {}),
+        ...((bridge as { expires?: string }).expires
+          ? { delegationExpires: (bridge as { expires?: string }).expires }
+          : {}),
+        ...(siblingKeyId ? { delegatedClientsKeyId: siblingKeyId } : {}),
+        ...((sibling as { expires?: string }).expires
+          ? {
+              delegatedClientsExpires: (sibling as { expires?: string }).expires
+            }
+          : {}),
+        ...(newRecordBind.unlockKeyAgreementKeyId
+          ? { unlockKeyAgreementKeyId: newRecordBind.unlockKeyAgreementKeyId }
+          : {}),
+        ...(newRecordBind.unlockKeyAgreementKeyMultibase
+          ? {
+              unlockKeyAgreementKeyMultibase:
+                newRecordBind.unlockKeyAgreementKeyMultibase
+            }
+          : {})
+      }
+    })
+    await putUnlockMethodsWithClient({
+      zcapClient: transientZcapClient,
+      spaceId,
+      userKey: newUserKey,
+      record: updated,
+      capability: generationDelegation
+    })
+  } catch (err) {
+    console.warn(
+      'Could not update the unlock-methods registry during recovery:',
+      err
+    )
+  }
+
+  // Retire the spent code's unlock Space -- a typed code is a spent
+  // credential. Remote only: a transient visit touches no local storage.
+  try {
+    await deleteUnlockSpace({
+      storageServerUrl: WAS_SERVER_URL,
+      zcapClient: unlock.zcapClient,
+      spaceId: unlock.spaceId
+    })
+  } catch (err) {
+    console.warn("Could not delete the spent code's unlock Space:", err)
+  }
 
   return {
     replacementCode,

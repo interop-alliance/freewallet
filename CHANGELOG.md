@@ -17,6 +17,33 @@
 
 ### Added
 
+- The transient recovery variant is the `/recover` default on a
+  non-remembered browser (wallet-core's `recoverWebvhLadderAnchored`): the
+  add-and-retire entry publishes the fresh credential's ladder VM in place
+  of a durable client, so the account lands client-less and ladder-anchored,
+  with zero local residue. Inside the continuation's persist-before-publish
+  seam, a fresh companion generation is minted under the new ladder (a
+  recovery record carries no companion sibling, so the old generation falls
+  to orphan discovery) and the new passphrase's and replacement code's
+  records are durably written before the ladder VM publishes; after the
+  entry, the `#DelegatedClients` pointer is re-pointed through the new
+  credential's bridge (log-only), the mandatory user-key rotation runs as
+  the one ladder-signed roster append the ceremony-tail license admits
+  (`replaceUserKeyRosterRecipients`: retire, escrow, and fresh epoch in a
+  single write), and the epoch cascade and unlock-methods registry update
+  ride the generation delegation as the enrolled per-visit companion VM.
+  The durable continuation stays reachable through the remember entry, and
+  the recover page's locate step now pins the account log in memory unless
+  the browser is being remembered. Both posture cells are pinned by e2e
+  (`recovery.spec.ts` durable, `recovery-transient.spec.ts` transient).
+- The bind ceremonies close the mid-generation companion lockout: making a
+  credential standing (passkey add, passphrase add or change, the signup
+  tail) appends one atomic hash-restating companion commit entry adding the
+  new credential's rung-0 hash, signed by the login credential's committed
+  rung (wallet-core's `commitCompanionRung`). Without it a freshly bound
+  credential could not enter the transient posture until the next
+  generation swap. Best-effort: an acting rung the generation does not
+  commit is the honest skip.
 - The existing account ceremonies reach the companion artifacts. Client
   revocation gains a generation-delegation re-mint stage (wallet-core's
   `remintGenerationDelegation` closure): revoking the durable client that

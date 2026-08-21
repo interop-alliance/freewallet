@@ -1133,20 +1133,25 @@ function unlockSpaceClient({
  * @param options.storageServerUrl {string}
  * @param options.zcapClient {ZcapClient}   the data identity's root client
  * @param options.spaceId {string}   the data Space id
+ * @param [options.capability] {IZcap}   an invocation capability every request
+ *   rides (the transient recovery ceremony's generation delegation); the root
+ *   capability is invoked otherwise
  * @returns {Promise<void>}
  */
 export async function ensureUnlockMethodsCollection({
   storageServerUrl,
   zcapClient,
-  spaceId
+  spaceId,
+  capability
 }: {
   storageServerUrl: string
   zcapClient: ZcapClient
   spaceId: string
+  capability?: IZcap
 }): Promise<void> {
   const was = unlockSpaceClient({ storageServerUrl, zcapClient })
   await was
-    .space(spaceId)
+    .space(spaceId, capability !== undefined ? { capability } : {})
     .collection(UNLOCK_METHODS_COLLECTION.id)
     .configure({ name: UNLOCK_METHODS_COLLECTION.name, force: true })
 }
@@ -1159,20 +1164,24 @@ export async function ensureUnlockMethodsCollection({
  * @param options.storageServerUrl {string}
  * @param options.zcapClient {ZcapClient}   the data identity's root client
  * @param options.spaceId {string}   the data Space id
+ * @param [options.capability] {IZcap}   an invocation capability every request
+ *   rides; the root capability is invoked otherwise
  * @returns {Promise<unknown | null>}
  */
 export async function getUnlockMethodsRecord({
   storageServerUrl,
   zcapClient,
-  spaceId
+  spaceId,
+  capability
 }: {
   storageServerUrl: string
   zcapClient: ZcapClient
   spaceId: string
+  capability?: IZcap
 }): Promise<unknown | null> {
   const was = unlockSpaceClient({ storageServerUrl, zcapClient })
   return await was
-    .space(spaceId)
+    .space(spaceId, capability !== undefined ? { capability } : {})
     .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
     .resource(UNLOCK_METHODS_RESOURCE)
     .get()
@@ -1187,23 +1196,27 @@ export async function getUnlockMethodsRecord({
  * @param options.zcapClient {ZcapClient}   the data identity's root client
  * @param options.spaceId {string}   the data Space id
  * @param options.record {object}   the wrapped registry record
+ * @param [options.capability] {IZcap}   an invocation capability every request
+ *   rides; the root capability is invoked otherwise
  * @returns {Promise<void>}
  */
 export async function putUnlockMethodsRecord({
   storageServerUrl,
   zcapClient,
   spaceId,
-  record
+  record,
+  capability
 }: {
   storageServerUrl: string
   zcapClient: ZcapClient
   spaceId: string
   record: object
+  capability?: IZcap
 }): Promise<void> {
   const was = unlockSpaceClient({ storageServerUrl, zcapClient })
   const body = new TextEncoder().encode(JSON.stringify(record))
   await was
-    .space(spaceId)
+    .space(spaceId, capability !== undefined ? { capability } : {})
     .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
     .resource(UNLOCK_METHODS_RESOURCE)
     .put(body, { contentType: 'application/json' })
