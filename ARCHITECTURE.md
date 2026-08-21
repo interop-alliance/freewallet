@@ -1614,7 +1614,11 @@ cascades, and the permanent wire-level constants.
 - **`@interop/wallet-core`** -- the correctness-critical logic shared with the
   DCW mobile wallet, imported by subpath. The sections above name them where
   they surface; the full set used here: `/webvh` (the did:webvh log and the
-  document halves of the ceremonies), `/keys` (+ `/keys/clientKeyRecord`; the
+  document halves of the ceremonies), `/clientAnnex` (the client annex: the
+  ladder, the annex log and its GC, and the ladder-anchored ceremonies --
+  credential-anchored genesis, self-enrollment, transient recovery; the
+  verify-side halves stay in the base subpaths), `/keys`
+  (+ `/keys/clientKeyRecord`; the
   user key, its wrap-set roster, the client-key record codec, client labels),
   `/keyring` (the unlock layer), `/genesis` (the account-genesis key mint and
   ceremony), `/enrollment`, `/recovery`, `/clients`

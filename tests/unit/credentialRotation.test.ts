@@ -33,8 +33,10 @@ vi.mock('@interop/wallet-core/unlock', () => ({
   retireUnlockCredential: vi.fn()
 }))
 
-vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
+vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
+  ...(await importOriginal<
+    typeof import('@interop/wallet-core/clientAnnex')
+  >()),
   clientAnnexLogStore: vi.fn(() => ({ isClientAnnexLogStore: true })),
   retireClientAnnexRung: vi.fn(async () => {
     state.calls.push('retireClientAnnexRung')
@@ -93,13 +95,13 @@ vi.mock('@/session/verifiedLog', () => ({
 }))
 
 import { retireUnlockCredential } from '@interop/wallet-core/unlock'
+import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import {
   clientAnnexLogPinId,
   clientAnnexLogStore,
-  keyAgreementCommitment,
   retireClientAnnexRung,
   swapClientAnnexGeneration
-} from '@interop/wallet-core/webvh'
+} from '@interop/wallet-core/clientAnnex'
 import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
 import { durableSessionPersistence } from '@/session/persistence'
 import { sessionRosterStore } from '@/session/rosterStore'

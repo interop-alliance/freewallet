@@ -15,14 +15,14 @@
  * exactly the generations the report still lists.
  */
 import { WasClient } from '@interop/was-client'
+import { isWebvhDid } from '@interop/wallet-core/webvh'
 import {
   clientAnnexDidParts,
   clientAnnexLogPinId,
   delegatedClientsPointer,
-  isWebvhDid,
   runClientAnnexGc
-} from '@interop/wallet-core/webvh'
-import type { ClientAnnexGcReport } from '@interop/wallet-core/webvh'
+} from '@interop/wallet-core/clientAnnex'
+import type { ClientAnnexGcReport } from '@interop/wallet-core/clientAnnex'
 import { deleteLogPin } from '@/lib/sessionKey'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import { isDurableSession } from '@/session/persistence'

@@ -21,15 +21,17 @@ import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import { WasClient } from '@interop/was-client'
 import {
   clientSigningKeyMultibase,
+  type PublishedKeyDocument,
+  type RevokedClientKeys
+} from '@interop/wallet-core/webvh'
+import {
   clientAnnexDidParts,
   clientAnnexLogPinId,
   clientAnnexLogStore,
   delegatedClientsPointer,
   ensureGenerationDelegationCurrent,
-  mintGenerationDelegation,
-  type PublishedKeyDocument,
-  type RevokedClientKeys
-} from '@interop/wallet-core/webvh'
+  mintGenerationDelegation
+} from '@interop/wallet-core/clientAnnex'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
 import type { GenerationDelegationRemint } from '@interop/wallet-core/clients'
 import type { Session } from '@/types/auth'

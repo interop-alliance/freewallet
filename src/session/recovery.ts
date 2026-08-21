@@ -74,30 +74,35 @@ import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
   accountLogPinId,
   clientSigningKeyMultibase,
-  clientAnnexLogStore,
   delegatedWebvhLogStore,
   delegationKeyInDocument,
   didKeyZcapClient,
   documentKeyMultibases,
-  embeddedGenerationDelegation,
-  enrollTransientClient,
-  ensureGenerationDelegationCurrent,
   isWebvhDid,
   keyAgreementCommitment,
-  ladderVmAgent,
-  ladderVmZcapClient,
   mintClientWebvhUpdateKeys,
-  mintCredentialClientAnnexGeneration,
-  mintDelegatedClientsDelegation,
-  mintGenerationDelegation,
   updateKeyMultibase,
   verifyAccountLog,
   webvhZcapClient,
-  setDelegatedClientsPointer,
   type WebvhIdStore
 } from '@interop/wallet-core/webvh'
+import {
+  clientAnnexLogStore,
+  delegatedClientsDelegationMinter,
+  embeddedGenerationDelegation,
+  enrollTransientClient,
+  ensureGenerationDelegationCurrent,
+  generateLadderSeed,
+  ladderRung,
+  ladderVmAgent,
+  ladderVmZcapClient,
+  mintCredentialClientAnnexGeneration,
+  mintDelegatedClientsDelegation,
+  mintGenerationDelegation,
+  recoverWebvhLadderAnchored,
+  setDelegatedClientsPointer
+} from '@interop/wallet-core/clientAnnex'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
-import { generateLadderSeed, ladderRung } from '@interop/wallet-core/unlock'
 import { WasClient } from '@interop/was-client'
 import {
   currentAccountSigningKeys,
@@ -109,7 +114,6 @@ import {
   generateRecoveryCode,
   publishRecoveryKey,
   recoverWebvhClient,
-  recoverWebvhLadderAnchored,
   recoveryClientFromCode,
   RECOVERY_KDF,
   remintRecoveryDelegations as remintDelegationsCore,
@@ -1858,6 +1862,11 @@ export async function remintRecoveryDelegations({
     pointer,
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: session.profile.zcapClient,
+    mintDelegatedClientsDelegation: delegatedClientsDelegationMinter({
+      doc,
+      zcapClient: session.profile.zcapClient,
+      wasServerUrl: pointer.host
+    }),
     // The re-mint holds the credential's KAK public half but not its signing
     // key, so every record it re-PUTs is signed with this client's own
     // account key -- the mixed-signer case a reader settles against the

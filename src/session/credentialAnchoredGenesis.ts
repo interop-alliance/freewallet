@@ -41,32 +41,30 @@
  */
 import { WasClient } from '@interop/was-client'
 import type { IZcap } from '@interop/data-integrity-core'
-import {
-  ensureCredentialAnchoredAccountGenesis,
-  ensurePromotedSpaceController
-} from '@interop/wallet-core/genesis'
+import { ensurePromotedSpaceController } from '@interop/wallet-core/genesis'
 import {
   accountLogPinId,
+  didKeyZcapClient,
+  keyAgreementCommitment,
+  verifyAccountLog,
+  wasWebvhIdStore
+} from '@interop/wallet-core/webvh'
+import {
   clientAnnexDidParts,
   clientAnnexLogStore,
   delegatedClientsPointer,
-  didKeyZcapClient,
+  ensureCredentialAnchoredAccountGenesis,
   ensureGenerationDelegationCurrent,
-  keyAgreementCommitment,
+  ladderRung,
   ladderVmAgent,
   ladderVmZcapClient,
   mintCredentialClientAnnexGeneration,
   mintDelegatedClientsDelegation,
   mintGenerationDelegation,
-  setDelegatedClientsPointer,
-  verifyAccountLog,
-  wasWebvhIdStore
-} from '@interop/wallet-core/webvh'
+  setDelegatedClientsPointer
+} from '@interop/wallet-core/clientAnnex'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
-import {
-  ladderRung,
-  type UnlockKeyAgreementPublication
-} from '@interop/wallet-core/unlock'
+import type { UnlockKeyAgreementPublication } from '@interop/wallet-core/unlock'
 import {
   ensureWalletSpaceEpochs,
   mintUserKey,

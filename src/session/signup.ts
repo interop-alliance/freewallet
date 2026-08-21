@@ -9,7 +9,7 @@
 import { base64urlnopad } from '@scure/base'
 import { KEYRING_KDF, type AccountPointer } from '@interop/wallet-core/keyring'
 import { mintAccountKeySet as mintSharedAccountKeySet } from '@interop/wallet-core/genesis'
-import { generateLadderSeed } from '@interop/wallet-core/unlock'
+import { generateLadderSeed } from '@interop/wallet-core/clientAnnex'
 import { PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
 import {

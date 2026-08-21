@@ -34,15 +34,17 @@ import type {
 } from '@interop/wallet-core/unlock'
 import type { UserKey } from '@interop/wallet-core/keys'
 import {
+  keyAgreementCommitment,
+  type PublishedKeyDocument
+} from '@interop/wallet-core/webvh'
+import {
   clientAnnexDidParts,
   clientAnnexLogPinId,
   clientAnnexLogStore,
   delegatedClientsPointer,
-  keyAgreementCommitment,
   retireClientAnnexRung,
-  swapClientAnnexGeneration,
-  type PublishedKeyDocument
-} from '@interop/wallet-core/webvh'
+  swapClientAnnexGeneration
+} from '@interop/wallet-core/clientAnnex'
 import type { Session } from '@/types/auth'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import { sessionRosterStore } from '@/session/rosterStore'

@@ -41,8 +41,10 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   }))
 }))
 
-vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
+vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
+  ...(await importOriginal<
+    typeof import('@interop/wallet-core/clientAnnex')
+  >()),
   clientAnnexLogStore: vi.fn(() => ({ isClientAnnexLogStore: true })),
   mintGenerationDelegation: vi.fn(async () => ({ id: 'urn:zcap:fresh' })),
   ensureGenerationDelegationCurrent: vi.fn(async () => {
@@ -111,7 +113,7 @@ import {
   clientAnnexLogPinId,
   clientAnnexLogStore,
   ensureGenerationDelegationCurrent
-} from '@interop/wallet-core/webvh'
+} from '@interop/wallet-core/clientAnnex'
 import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
 import { durableSessionPersistence } from '@/session/persistence'
 import {

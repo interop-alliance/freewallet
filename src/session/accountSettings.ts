@@ -11,11 +11,13 @@ import type { IZcap } from '@interop/data-integrity-core'
 import { WasClient } from '@interop/was-client'
 import {
   accountLogPinId,
-  clientAnnexDidParts,
-  delegatedClientsPointer,
   isWebvhDid,
   rotateWebvhUpdateKey
 } from '@interop/wallet-core/webvh'
+import {
+  clientAnnexDidParts,
+  delegatedClientsPointer
+} from '@interop/wallet-core/clientAnnex'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { PASSKEY_KDF } from '@/app.config'
 import {

@@ -11,8 +11,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
+vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
+  ...(await importOriginal<
+    typeof import('@interop/wallet-core/clientAnnex')
+  >()),
   runClientAnnexGc: vi.fn()
 }))
 
@@ -40,7 +42,7 @@ vi.mock('@/session/verifiedLog', () => ({
 import {
   clientAnnexLogPinId,
   runClientAnnexGc
-} from '@interop/wallet-core/webvh'
+} from '@interop/wallet-core/clientAnnex'
 import { deleteLogPin } from '@/lib/sessionKey'
 import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
 import { enrolledClientContext } from '@/session/enrolledContext'

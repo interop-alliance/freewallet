@@ -26,22 +26,25 @@ import { KMS_SERVER_URL, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
 import { assertPasskeyPrf } from '@/lib/passkey'
 import {
-  clientAnnexDidParts,
-  clientAnnexLogPinId,
-  clientAnnexLogStore,
-  delegatedClientsDelegationSpaceId,
-  delegatedClientsPointer,
   delegationKeyInDocument,
-  ensureGenerationDelegationCurrent,
   isWebvhDid,
-  mintDelegatedClientsDelegation,
-  mintGenerationDelegation,
   webvhCapabilityAgent,
   webvhZcapClient,
   type ClientWebvhUpdateKeys,
   type ICapabilityAgent,
   type PublishedKeyDocument
 } from '@interop/wallet-core/webvh'
+import {
+  attributeLadderRung,
+  clientAnnexDidParts,
+  clientAnnexLogPinId,
+  clientAnnexLogStore,
+  delegatedClientsDelegationSpaceId,
+  delegatedClientsPointer,
+  ensureGenerationDelegationCurrent,
+  mintDelegatedClientsDelegation,
+  mintGenerationDelegation
+} from '@interop/wallet-core/clientAnnex'
 import {
   mintUserKey,
   userKeyVaultKeys,
@@ -82,7 +85,6 @@ import {
   delegationProofKeyId,
   zcapExpiring
 } from '@interop/wallet-core/recovery'
-import { attributeLadderRung } from '@interop/wallet-core/unlock'
 import { refreshStandingDelegationFields } from '@/session/unlockMethods'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import type { AccountPointer } from '@interop/wallet-core/keyring'

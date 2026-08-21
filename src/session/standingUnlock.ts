@@ -38,28 +38,30 @@ import type { IZcap } from '@interop/data-integrity-core'
 import { PreconditionFailedError, WasClient } from '@interop/was-client'
 import { resourcePath, toUrl } from '@interop/was-client/paths'
 import {
-  generateLadderSeed,
-  ladderRung,
   publishUnlockKey,
-  selfEnrollClientCore,
   type UnlockLogStore
 } from '@interop/wallet-core/unlock'
 import type { ClientKeyRecord } from '@interop/wallet-core/keys'
 import {
   accountLogPinId,
+  didKeyZcapClient,
+  isWebvhDid
+} from '@interop/wallet-core/webvh'
+import {
   commitClientAnnexRung,
   clientAnnexDidParts,
   clientAnnexLogPinId,
   clientAnnexLogStore,
   delegatedClientsPointer,
-  didKeyZcapClient,
   ensureGenerationDelegationCurrent,
-  isWebvhDid,
+  generateLadderSeed,
+  ladderRung,
   mintCredentialClientAnnexGeneration,
   mintDelegatedClientsDelegation,
   mintGenerationDelegation,
+  selfEnrollClientCore,
   setDelegatedClientsPointer
-} from '@interop/wallet-core/webvh'
+} from '@interop/wallet-core/clientAnnex'
 import {
   delegateLogWrite,
   delegationProofKeyId

@@ -31,16 +31,18 @@ import { agentsFromSeed } from '@interop/wallet-core/identity'
 import type { UnlockKdf } from '@interop/wallet-core/keyring'
 import {
   clientSigningKeyMultibase,
-  delegatedClientsDelegationSpaceId,
-  delegatedClientsPointer,
   delegatedWebvhLogStore,
-  embeddedGenerationDelegation,
-  enrollTransientClient,
   isWebvhDid,
   verifyAccountLog,
-  webvhZcapClient,
-  type ClientAnnexWriteStore
+  webvhZcapClient
 } from '@interop/wallet-core/webvh'
+import {
+  delegatedClientsDelegationSpaceId,
+  delegatedClientsPointer,
+  embeddedGenerationDelegation,
+  enrollTransientClient,
+  type ClientAnnexWriteStore
+} from '@interop/wallet-core/clientAnnex'
 import {
   ensureUserKeyRoster,
   ensureWalletSpaceEpochs,
@@ -49,7 +51,8 @@ import {
   userKeyRosterDescriptorStore,
   userKeyRosterLogSigner
 } from '@interop/wallet-core/keys'
-import { didKeyZcapClient, ladderVmAgent } from '@interop/wallet-core/webvh'
+import { didKeyZcapClient } from '@interop/wallet-core/webvh'
+import { ladderVmAgent } from '@interop/wallet-core/clientAnnex'
 import { ensurePromotedSpaceController } from '@interop/wallet-core/genesis'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import { WasClient } from '@interop/was-client'

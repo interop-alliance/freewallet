@@ -29,12 +29,18 @@ vi.mock('@/lib/sessionKey', async importOriginal => ({
 vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
   verifyAccountLog: vi.fn(),
+  delegatedWebvhLogStore: vi.fn(),
+  webvhZcapClient: vi.fn()
+}))
+
+vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
+  ...(await importOriginal<
+    typeof import('@interop/wallet-core/clientAnnex')
+  >()),
   enrollTransientClient: vi.fn(),
   embeddedGenerationDelegation: vi.fn(),
   delegatedClientsPointer: vi.fn(),
-  delegatedClientsDelegationSpaceId: vi.fn(),
-  delegatedWebvhLogStore: vi.fn(),
-  webvhZcapClient: vi.fn()
+  delegatedClientsDelegationSpaceId: vi.fn()
 }))
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
@@ -60,14 +66,16 @@ vi.mock('@/session/keyring', async importOriginal => ({
 }))
 
 import {
-  delegatedClientsDelegationSpaceId,
-  delegatedClientsPointer,
   delegatedWebvhLogStore,
-  embeddedGenerationDelegation,
-  enrollTransientClient,
   verifyAccountLog,
   webvhZcapClient
 } from '@interop/wallet-core/webvh'
+import {
+  delegatedClientsDelegationSpaceId,
+  delegatedClientsPointer,
+  embeddedGenerationDelegation,
+  enrollTransientClient
+} from '@interop/wallet-core/clientAnnex'
 import {
   ensureUserKeyRoster,
   ensureWalletSpaceEpochs,

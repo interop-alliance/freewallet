@@ -9,10 +9,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { deriveSpaceId } from '@interop/was-client/sync'
-import {
-  accountLogPinId,
-  clientAnnexLogPinId
-} from '@interop/wallet-core/webvh'
+import { accountLogPinId } from '@interop/wallet-core/webvh'
+import { clientAnnexLogPinId } from '@interop/wallet-core/clientAnnex'
 import { userKeyRosterPinId } from '@interop/wallet-core/keys'
 import {
   deleteSessionKeysByPrefix,
