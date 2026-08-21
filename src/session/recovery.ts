@@ -72,7 +72,6 @@ import {
 import { accountRosterStore, sessionRosterStore } from '@/session/rosterStore'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
-  accountLogPinId,
   clientSigningKeyMultibase,
   delegatedWebvhLogStore,
   delegationKeyInDocument,
@@ -83,8 +82,7 @@ import {
   mintClientWebvhUpdateKeys,
   updateKeyMultibase,
   verifyAccountLog,
-  webvhZcapClient,
-  type WebvhIdStore
+  webvhZcapClient
 } from '@interop/wallet-core/webvh'
 import {
   clientAnnexLogStore,
@@ -99,8 +97,7 @@ import {
   mintCredentialClientAnnexGeneration,
   mintDelegatedClientsDelegation,
   mintGenerationDelegation,
-  recoverWebvhLadderAnchored,
-  setDelegatedClientsPointer
+  recoverWebvhLadderAnchored
 } from '@interop/wallet-core/clientAnnex'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import { WasClient } from '@interop/was-client'
@@ -1131,20 +1128,20 @@ export async function recoverAccountWithCode({
  *    then the new credential's bridge and sibling (ladder-VM-signed), the new
  *    passphrase's unlock record (the ladder seed inside), and the replacement
  *    code's record are durably written -- the pinned ordering: a tab death
- *    must never leave a published anchor nobody can derive.
- * 2. After the add-and-retire entry: the `#DelegatedClients` pointer is
- *    re-pointed at the fresh generation through the NEW credential's bridge
- *    (`logOnly`: the bridge covers nothing but `did.jsonl`; the typed code's
- *    bridge may have rotted with the ladder VMs the entry removed), one more
- *    rung-0-signed account-log entry.
- * 3. A per-visit transient client is enrolled into the fresh generation (the
+ *    must never leave a published anchor nobody can derive. The seam names
+ *    the fresh generation back to the continuation, which points the
+ *    `#DelegatedClients` service entry at it inside the SAME add-and-retire
+ *    entry -- that entry retires the pre-recovery credential's ladder VM, so
+ *    a pointer written after it would leave a window where the document
+ *    names a generation no surviving record's sibling can reach.
+ * 2. A per-visit transient client is enrolled into the fresh generation (the
  *    loud entry), and the mandatory rotation runs as ONE ladder-signed roster
  *    append anchored at the add-and-retire entry (the ceremony-tail license's
  *    one shot): the spent code retired, the fresh credential and the
  *    replacement code escrowed, the fresh epoch minted -- invoked as the
  *    annex VM under the generation delegation, the only authority this
  *    visit holds over the promoted Space.
- * 4. The epoch cascade and the registry update (spent entry out, replacement
+ * 3. The epoch cascade and the registry update (spent entry out, replacement
  *    and new-passphrase entries in, re-sealed to the rotated user key) ride
  *    the same delegation; the spent code's unlock Space is deleted last.
  *
@@ -1200,7 +1197,6 @@ async function recoverAccountTransient({
   const { standing } = credential
   const ladderSeed = generateLadderSeed()
   const rung0 = await ladderRung({ ladderSeed, index: 0 })
-  const rung1 = await ladderRung({ ladderSeed, index: 1 })
   const bootstrapAgent = await ladderVmAgent({ ladderSeed })
   const bootstrapWas = new WasClient({
     serverUrl: host,
@@ -1248,7 +1244,10 @@ async function recoverAccountTransient({
     // The persist-before-publish seam: runs after the reveal entry stands
     // (a revoked code has been refused) and before the add entry publishes
     // the ladder VM the seed backs. Idempotent -- a conflict retry re-invokes
-    // it, converging on the same generation and re-writing the records.
+    // it, converging on the same generation and re-writing the records. Its
+    // returned annex DID rides INTO the add entry, so the `#DelegatedClients`
+    // pointer moves atomically with the retirement of the pre-recovery
+    // credential's ladder VM.
     onCommitted: async () => {
       // The fresh annex generation, minted once per run (a retry reuses
       // it): genesis under the bootstrap did:key self-commits the fresh
@@ -1335,6 +1334,7 @@ async function recoverAccountTransient({
         unlockKeyAgreementKeyMultibase:
           replacementBind.unlockKeyAgreementKeyMultibase
       })
+      return { clientAnnexDid }
     }
   })
   if (
@@ -1350,28 +1350,6 @@ async function recoverAccountTransient({
         "credential's records."
     )
   }
-
-  // Re-point the `#DelegatedClients` service entry at the fresh generation:
-  // one more rung-0-signed account-log entry, written through the NEW
-  // credential's bridge (the typed code's bridge may have rotted with the
-  // ladder VMs the add entry removed), log-only -- the bridge's narrow scope
-  // covers nothing but `did.jsonl`, and the projection heals at the next
-  // authorized write.
-  await setDelegatedClientsPointer({
-    // The narrow delegated store satisfies the `logOnly` contract (only the
-    // log read and the `did.jsonl` PUT are exercised).
-    idStore: unlockLogStore({
-      pointer,
-      delegation: bridge,
-      zcapClient: standing.agents.zcapClient
-    }) as unknown as WebvhIdStore,
-    updateKeys: { updateSeed: rung0.seed, stagedSeed: rung1.seed },
-    clientAnnexDid,
-    expectedDid: did,
-    pinStore: logPins,
-    logId: accountLogPinId({ spaceId }),
-    logOnly: true
-  })
 
   // The per-visit transient client, enrolled into the fresh generation
   // through the new record's sibling (the loud entry): the invocation
@@ -1426,10 +1404,9 @@ async function recoverAccountTransient({
 
   // The roster store the mandatory rotation drives: appends signed by the
   // fresh ladder VM, anchored at the continuation's own add-and-retire entry
-  // (the posture-changing version the ceremony-tail license admits -- the
-  // pointer entry after it changes no posture, so the controller view
-  // resolves from the continuation's returned log, not a fresh head), HTTP
-  // invoked as the annex VM under the generation delegation.
+  // (the posture-changing version the ceremony-tail license admits, and the
+  // log head -- the pointer rides inside that entry), HTTP invoked as the
+  // annex VM under the generation delegation.
   const rosterStore = userKeyRosterDescriptorStore({
     storageServerUrl: host,
     zcapClient: transientZcapClient,

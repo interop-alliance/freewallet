@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Transient recovery no longer strands the account when a flap follows the
+  add-and-retire entry. The `#DelegatedClients` pointer now rides into that
+  entry (the persist-before-publish seam names the fresh annex generation
+  back to wallet-core's `recoverWebvhLadderAnchored`) instead of being
+  written by a separate log entry afterwards, so the document can never name
+  a generation the surviving record's sibling delegation cannot reach while
+  the pre-recovery credential's ladder VM is already retired.
 - The forget ceremony re-seals the unlock-methods registry to the rotated
   user key while this client still invokes; before, the registry stayed
   sealed to the retired key after a forget, so the surviving clients and

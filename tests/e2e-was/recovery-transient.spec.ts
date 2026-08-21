@@ -17,6 +17,7 @@ import {
   readLogFromString,
   resolveDIDFromLog
 } from '@interop/did-method-webvh'
+import { delegatedClientsPointer } from '@interop/wallet-core/clientAnnex'
 import { fillSettled, signupViaWizard } from './helpers'
 import {
   captureLocalStorageKeys,
@@ -28,6 +29,23 @@ import {
 const APP_URL = 'http://localhost:5274'
 
 const NEW_PASSPHRASE = 'Recovered-transient-42!'
+
+/**
+ * The annex generation an account document currently points at, read the way
+ * every reader must: dispatching on the type IRI, never on the entry's
+ * fragment (the byoe service-entry convention).
+ *
+ * @param doc {object | null | undefined}   a resolved account document
+ * @returns {string | undefined}
+ */
+function delegatedClientsPointerOf(doc: object | null | undefined) {
+  if (!doc) {
+    return undefined
+  }
+  return delegatedClientsPointer({
+    doc: doc as Parameters<typeof delegatedClientsPointer>[0]['doc']
+  })
+}
 
 /**
  * The public-terminal browser: a fresh context holding nothing.
@@ -54,6 +72,7 @@ test.describe.serial('transient recovery (the recovery posture cell)', () => {
   let code: string
   let logUrl: string
   let entriesAfterIssuance: number
+  let generationBeforeRecovery: string | undefined
 
   test.beforeAll(async ({ browser }, testInfo) => {
     test.setTimeout(240_000)
@@ -94,9 +113,19 @@ test.describe.serial('transient recovery (the recovery posture cell)', () => {
       await expect(page.getByText('Recovery code 1')).toBeVisible({
         timeout: 60_000
       })
-      entriesAfterIssuance = readLogFromString(
+      const issuedLog = readLogFromString(
         await (await page.request.get(logUrl)).text()
-      ).length
+      )
+      entriesAfterIssuance = issuedLog.length
+      // The pre-recovery generation, so the assertion below can tell a moved
+      // pointer from a merely present one.
+      generationBeforeRecovery = delegatedClientsPointerOf(
+        (
+          await resolveDIDFromLog(issuedLog, {
+            verifier: defaultWebvhLogVerifier
+          })
+        ).doc
+      )
     } finally {
       await context.close()
     }
@@ -178,12 +207,13 @@ test.describe.serial('transient recovery (the recovery posture cell)', () => {
         baselineLocalStorageKeys: baseline
       })
 
-      // The account log shape: the continuation added exactly three entries
-      // (reveal-and-commit, add-and-retire, the `#DelegatedClients`
-      // re-point) and the extended log fully verifies.
+      // The account log shape: the continuation added exactly two entries
+      // (reveal-and-commit, then the add-and-retire that carries the
+      // `#DelegatedClients` pointer with it) and the extended log fully
+      // verifies.
       const logText = await (await page.request.get(logUrl)).text()
       const log = readLogFromString(logText)
-      expect(log).toHaveLength(entriesAfterIssuance + 3)
+      expect(log).toHaveLength(entriesAfterIssuance + 2)
       const resolved = await resolveDIDFromLog(log, {
         verifier: defaultWebvhLogVerifier
       })
@@ -209,19 +239,13 @@ test.describe.serial('transient recovery (the recovery posture cell)', () => {
       // commitment, the replacement code's key, and the recovered
       // passphrase's commitment -- the spent code's key is gone.
       expect(resolved.doc?.keyAgreement).toHaveLength(4)
-      // The fresh annex generation is pointed. Dispatch on the type IRI,
-      // per the byoe service-entry convention (the fragment is non-semantic).
-      const services = (resolved.doc?.service ?? []) as {
-        id?: string
-        type?: string | string[]
-      }[]
-      expect(
-        services.some(entry =>
-          (Array.isArray(entry.type) ? entry.type : [entry.type]).includes(
-            'https://w3id.org/byoe#DelegatedClients'
-          )
-        )
-      ).toBe(true)
+      // The FRESH annex generation is pointed, by the add-and-retire entry
+      // itself -- a pointer still naming the pre-recovery generation is the
+      // stranding this ordering exists to prevent, so the value is compared,
+      // not merely the entry's presence.
+      const pointed = delegatedClientsPointerOf(resolved.doc)
+      expect(pointed).toBeDefined()
+      expect(pointed).not.toBe(generationBeforeRecovery)
     } finally {
       await context.close()
     }

@@ -966,10 +966,13 @@ bootstrap did:key (a recovery record carries no annex sibling, so the
 old generation is unreachable and falls to orphan discovery) and durably
 writes the new passphrase's unlock record (ladder seed inside, bridge and
 sibling ladder-VM-signed) and the replacement code's record -- so a tab
-death can never publish an anchor nobody can derive. After the entry, the
-`#DelegatedClients` pointer is re-pointed through the NEW credential's
-bridge (log-only; the typed code's bridge may have rotted with the removed
-ladder VMs), a per-visit transient client is loudly enrolled into the fresh
+death can never publish an anchor nobody can derive. The seam names the
+fresh generation back to the ceremony, so the `#DelegatedClients` pointer
+moves to it inside the SAME add-and-retire entry: the entry retires the
+pre-recovery credential's ladder VM, and a pointer written after it would
+leave a window where the document names a generation no surviving record's
+sibling delegation targets and neither credential could enroll. After the
+entry a per-visit transient client is loudly enrolled into the fresh
 generation, and the mandatory rotation runs as the ONE ladder-signed roster
 append the ceremony-tail license admits
 (`replaceUserKeyRosterRecipients`: the spent code retired, the fresh
@@ -1776,6 +1779,14 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   several apps, several accounts), and a client is not tied to hardware.
   "App session" is informal prose for one live session of a client; nothing
   named `appSessionId` is persisted. Avoid: device, device id.
+- **Agent** — a connected app whose key is agent-held rather than
+  wallet-custodied: a CLI or LLM agent that mints its own did:key and asks
+  the wallet for scoped, expiring, revocable grants through a standalone
+  `AuthorizationCapabilityQuery`, with itself as `controller`. An agent is a
+  zcap grantee, the same slot a BYOE app occupies; it is not a wallet
+  client and holds neither the user key nor the unlock credential. A future
+  CLI-class wallet is a wallet client and is not called an agent. Avoid:
+  transient client (the annex posture), agent client, bot.
 - **`writerId`** — an unkeyed, clearable, unrecoverable attribution label
   saying which writing agent produced a revision. Its only jobs are history
   attribution and breaking last-write-wins ties; it is minted locally
