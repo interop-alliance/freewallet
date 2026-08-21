@@ -1,0 +1,608 @@
+/**
+ * @vitest-environment node
+ *
+ * The forget module: the no-unlock-material grade's whole-database wipe
+ * (`forgetBrowserWalletData`), its nothing-to-delete probe, and the
+ * login-time forgotten-browser detector (`assertClientStillEnrolled`) --
+ * wipe-on-VM-gone, no-op on a listed VM, and skip-on-unverifiable -- plus
+ * the two ceremony grades of `forgetThisBrowser`: the ordinary forget, the
+ * last-client transition and its record re-bind seam, and the wipe-last
+ * ordering both share.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { agentsFromSeed } from '@interop/wallet-core/identity'
+import {
+  assertClientStillEnrolled,
+  BrowserForgottenError,
+  forgetBrowserWalletData,
+  forgetThisBrowser,
+  hasForgettableBrowserData
+} from '@/session/forget'
+import type { KeyringFetchResult } from '@/session/keyring'
+import type { Session } from '@/types/auth'
+
+vi.mock('@interop/wallet-core/webvh', async importOriginal => {
+  const actual = await importOriginal<object>()
+  return {
+    ...actual,
+    verifyAccountLog: vi.fn(),
+    clientSigningKeyMultibase: vi.fn(() => 'zForgottenSigning'),
+    updateKeyMultibase: vi.fn(async () => 'zForgottenUpdate')
+  }
+})
+const { verifyAccountLog } = await import('@interop/wallet-core/webvh')
+
+vi.mock('@interop/did-method-webvh', async importOriginal => {
+  const actual = await importOriginal<object>()
+  return {
+    ...actual,
+    deriveNextKeyHash: vi.fn(async (multibase: string) => `hash:${multibase}`)
+  }
+})
+
+vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => {
+  const actual = await importOriginal<object>()
+  return {
+    ...actual,
+    forgetDurableClient: vi.fn(),
+    forgetLastDurableClient: vi.fn(),
+    ladderVmAgent: vi.fn(async () => ({ id: 'did:key:zLadderVm' })),
+    ladderVmZcapClient: vi.fn(async () => LADDER_ZCAP_CLIENT),
+    clientAnnexLogStore: vi.fn(() => ({ annexLogStore: true })),
+    mintDelegatedClientsDelegation: vi.fn(),
+    delegatedClientsDelegationSpaceId: vi.fn(),
+    delegatedClientsPointer: vi.fn(),
+    clientAnnexDidParts: vi.fn()
+  }
+})
+const {
+  clientAnnexDidParts,
+  delegatedClientsDelegationSpaceId,
+  delegatedClientsPointer,
+  forgetDurableClient,
+  forgetLastDurableClient,
+  ladderVmZcapClient,
+  mintDelegatedClientsDelegation
+} = await import('@interop/wallet-core/clientAnnex')
+
+vi.mock('@interop/wallet-core/keys', async importOriginal => {
+  const actual = await importOriginal<object>()
+  return {
+    ...actual,
+    userKeyRosterDescriptorStore: vi.fn(() => ({ rosterStore: true })),
+    userKeyRosterLogSigner: vi.fn(() => ({ signer: true }))
+  }
+})
+
+vi.mock('@interop/wallet-core/recovery', async importOriginal => {
+  const actual = await importOriginal<object>()
+  return {
+    ...actual,
+    delegateLogWrite: vi.fn(),
+    delegationProofKeyId: vi.fn(
+      (delegation: { id?: string }) => `${delegation.id}#key`
+    )
+  }
+})
+const { delegateLogWrite, delegationProofKeyId } =
+  await import('@interop/wallet-core/recovery')
+
+vi.mock('@/session/persistence', async importOriginal => {
+  const actual = await importOriginal<object>()
+  return {
+    ...actual,
+    assertAccountCeremonyAllowed: vi.fn()
+  }
+})
+const { assertAccountCeremonyAllowed } = await import('@/session/persistence')
+
+vi.mock('@/session/enrolledContext', () => ({
+  requireEnrolledClientContext: vi.fn()
+}))
+const { requireEnrolledClientContext } =
+  await import('@/session/enrolledContext')
+
+vi.mock('@/session/unlockMethods', () => ({
+  getUnlockMethods: vi.fn(),
+  refreshStandingDelegationFields: vi.fn()
+}))
+const { getUnlockMethods, refreshStandingDelegationFields } =
+  await import('@/session/unlockMethods')
+
+vi.mock('@/session/recovery', () => ({
+  recoveryEntriesOf: vi.fn(() => [])
+}))
+
+vi.mock('@/session/rosterStore', () => ({
+  sessionRosterStore: vi.fn(() => ({ sessionRosterStore: true }))
+}))
+
+vi.mock('@/session/standingUnlock', () => ({
+  unlockLogStore: vi.fn(() => ({ unlockLogStore: true }))
+}))
+
+vi.mock('@/session/userKeyCascade', () => ({
+  cascadeCollections: vi.fn(() => ({ collections: true }))
+}))
+
+vi.mock('@/session/userKeyAdoption', () => ({
+  adoptRotatedUserKey: vi.fn()
+}))
+const { adoptRotatedUserKey } = await import('@/session/userKeyAdoption')
+
+vi.mock('@/session/verifiedLog', () => ({
+  invalidateVerifiedLog: vi.fn(),
+  verifiedAccountLog: vi.fn()
+}))
+const { invalidateVerifiedLog, verifiedAccountLog } =
+  await import('@/session/verifiedLog')
+
+vi.mock('@/session/wipe', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/session/wipe')>()
+  return {
+    ...actual,
+    snapshotWipeTargets: vi.fn(() => WIPE_TARGETS),
+    executeLocalWipe: vi.fn(actual.executeLocalWipe)
+  }
+})
+const { executeLocalWipe, snapshotWipeTargets } = await import('@/session/wipe')
+
+/**
+ * The sentinel the ladder-VM zcap client mock hands back, so the re-bind's
+ * delegation mints can be asserted to sign with it.
+ */
+const LADDER_ZCAP_CLIENT = { ladderZcapClient: true }
+
+/**
+ * The sentinel wipe-target snapshot, threaded from `snapshotWipeTargets`
+ * into `executeLocalWipe` unchanged.
+ */
+const WIPE_TARGETS = { clientDid: 'did:key:zClientA', dbPrefix: 'prefix-a' }
+
+/**
+ * A fake IDBFactory-shaped global: `databases()` serves the live name list
+ * and `deleteDatabase` removes the name and fires `onsuccess` (the
+ * browserStore test suite's stub, deletion-success arm only).
+ *
+ * @param options {object}
+ * @param options.names {string[]}
+ * @returns {{ deleted: string[] }}
+ */
+function stubIndexedDb({ names }: { names: string[] }): {
+  deleted: string[]
+} {
+  const current = new Set(names)
+  const deleted: string[] = []
+  vi.stubGlobal('indexedDB', {
+    databases: async () => [...current].map(name => ({ name, version: 1 })),
+    deleteDatabase(name: string) {
+      const request: { onsuccess?: () => void; onerror?: () => void } = {}
+      queueMicrotask(() => {
+        current.delete(name)
+        deleted.push(name)
+        request.onsuccess?.()
+      })
+      return request
+    },
+    open() {
+      throw new Error('The wipe must not open databases.')
+    }
+  })
+  return { deleted }
+}
+
+/**
+ * A minimal in-memory `localStorage` stub carrying the supplied entries.
+ *
+ * @param options {object}
+ * @param options.entries {Record<string, string>}
+ * @returns {{ keys: () => string[] }}
+ */
+function stubLocalStorage({ entries }: { entries: Record<string, string> }): {
+  keys: () => string[]
+} {
+  const map = new Map(Object.entries(entries))
+  vi.stubGlobal('localStorage', {
+    get length() {
+      return map.size
+    },
+    key: (index: number) => [...map.keys()][index] ?? null,
+    getItem: (key: string) => map.get(key) ?? null,
+    setItem: (key: string, value: string) => void map.set(key, value),
+    removeItem: (key: string) => void map.delete(key)
+  })
+  return { keys: () => [...map.keys()] }
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.mocked(verifyAccountLog).mockReset()
+})
+
+describe('forgetBrowserWalletData (the no-unlock-material grade)', () => {
+  it('deletes every replica database, the session database, and the account localStorage families, keeping prefs', async () => {
+    vi.stubGlobal(
+      'BroadcastChannel',
+      class {
+        postMessage() {}
+        close() {}
+      }
+    )
+    const { deleted } = stubIndexedDb({
+      names: [
+        'rxdb-dexie-abc-123-wallet-db--0--internal',
+        'abc-123-sync-db',
+        'freewallet-session',
+        'unrelated-app-db'
+      ]
+    })
+    const { keys } = stubLocalStorage({
+      entries: {
+        'freewallet:collection-encryption:scope-a:col': 'x',
+        'freewallet:collection-meta:scope-b:col': 'x',
+        'freewallet:plaintext-migrated:abc-123': 'x',
+        'freewallet:public-cids-migrated:abc-123': 'x',
+        'freewallet:writerId': 'w1',
+        'fw-theme': 'dark'
+      }
+    })
+    const { failed } = await forgetBrowserWalletData()
+    expect(failed).toEqual([])
+    expect(deleted).toContain('rxdb-dexie-abc-123-wallet-db--0--internal')
+    expect(deleted).toContain('abc-123-sync-db')
+    expect(deleted).toContain('freewallet-session')
+    expect(deleted).not.toContain('unrelated-app-db')
+    expect(keys()).toEqual(['fw-theme'])
+  })
+
+  it('reports nothing to forget on a never-remembered browser', async () => {
+    stubIndexedDb({ names: ['unrelated-app-db'] })
+    stubLocalStorage({ entries: { 'fw-theme': 'dark' } })
+    expect(await hasForgettableBrowserData()).toBe(false)
+  })
+
+  it('reports forgettable data when the session database exists', async () => {
+    stubIndexedDb({ names: ['freewallet-session'] })
+    stubLocalStorage({ entries: {} })
+    expect(await hasForgettableBrowserData()).toBe(true)
+  })
+})
+
+describe('assertClientStillEnrolled (the forgotten-browser detector)', () => {
+  const clientSeed = new Uint8Array(32).fill(7)
+  const pointer = {
+    did: 'did:webvh:scid-x:example.com:space-1',
+    spaceId: 'space-1',
+    host: 'https://storage.example'
+  }
+
+  /**
+   * A keyring hit carrying this browser's client keys, shaped as the
+   * detector consumes it.
+   *
+   * @returns {KeyringFetchResult}
+   */
+  function hit(): KeyringFetchResult {
+    return {
+      controller: 'did:key:zClientA',
+      unlockSpaceId: 'unlock-1',
+      pointer,
+      clientKeys: { clientSeed, controller: 'did:key:zClientA' }
+    } as unknown as KeyringFetchResult
+  }
+
+  it('wipes the residue and throws when the verified document no longer lists this client', async () => {
+    vi.stubGlobal(
+      'BroadcastChannel',
+      class {
+        postMessage() {}
+        close() {}
+      }
+    )
+    const agents = await agentsFromSeed({ seed: clientSeed })
+    const { deriveSpaceId } = await import('@interop/was-client/sync')
+    const dbPrefix = deriveSpaceId(agents.keyAgent.id)
+    const { deleted } = stubIndexedDb({ names: [`${dbPrefix}-wallet-db`] })
+    stubLocalStorage({ entries: {} })
+    vi.mocked(verifyAccountLog).mockResolvedValue({
+      doc: { verificationMethod: [{ id: `${pointer.did}#zSomeOtherClient` }] },
+      log: [],
+      updateKeys: [],
+      nextKeyHashes: []
+    } as never)
+    await expect(assertClientStillEnrolled({ found: hit() })).rejects.toThrow(
+      BrowserForgottenError
+    )
+    expect(deleted).toContain(`${dbPrefix}-wallet-db`)
+  })
+
+  it('does nothing while the document still lists this client', async () => {
+    const agents = await agentsFromSeed({ seed: clientSeed })
+    const [, , multibase] = agents.keyAgent.id.split(':')
+    const { deleted } = stubIndexedDb({ names: ['x-wallet-db'] })
+    stubLocalStorage({ entries: {} })
+    vi.mocked(verifyAccountLog).mockResolvedValue({
+      doc: { verificationMethod: [{ id: `${pointer.did}#${multibase}` }] },
+      log: [],
+      updateKeys: [],
+      nextKeyHashes: []
+    } as never)
+    await expect(
+      assertClientStillEnrolled({ found: hit() })
+    ).resolves.toBeUndefined()
+    expect(deleted).toEqual([])
+  })
+
+  it('skips detection when the log cannot be verified', async () => {
+    const { deleted } = stubIndexedDb({ names: ['x-wallet-db'] })
+    stubLocalStorage({ entries: {} })
+    vi.mocked(verifyAccountLog).mockRejectedValue(new Error('network down'))
+    await expect(
+      assertClientStillEnrolled({ found: hit() })
+    ).resolves.toBeUndefined()
+    expect(deleted).toEqual([])
+  })
+
+  it('is a no-op for a hit without client keys or a webvh pointer', async () => {
+    stubIndexedDb({ names: [] })
+    stubLocalStorage({ entries: {} })
+    await expect(
+      assertClientStillEnrolled({
+        found: {
+          controller: 'did:key:zClientA',
+          unlockSpaceId: 'unlock-1'
+        } as unknown as KeyringFetchResult
+      })
+    ).resolves.toBeUndefined()
+    expect(vi.mocked(verifyAccountLog)).not.toHaveBeenCalled()
+  })
+})
+
+describe('forgetThisBrowser (the ceremony grades)', () => {
+  const pointer = {
+    did: 'did:webvh:scid-a:example.com:space-1',
+    spaceId: 'space-1',
+    host: 'https://storage.example'
+  }
+
+  /**
+   * A minimal live durable session, shaped as the forget prelude reads it:
+   * the standing members, the ladder seed, this client's key-agreement
+   * multibase, and the persistence handle's pin stores.
+   *
+   * @param options {object}
+   * @param [options.withRebind] {boolean}   carry the hit's record re-bind
+   *   closure (false exercises the transition's refusal)
+   * @returns {object}   the session and the closures worth asserting on
+   */
+  function fakeSession({ withRebind = true }: { withRebind?: boolean } = {}) {
+    const rebindRecord = vi.fn()
+    const saveFromDescriptor = vi.fn()
+    const persistClientKeys = vi.fn()
+    const session = {
+      user: { id: 'did:key:zClientA' },
+      isGuest: false,
+      storage: { wipeLocalStorage: vi.fn() },
+      profile: {
+        zcapClient: { zcapClient: true },
+        clientKeyAgreementKey: { publicKeyMultibase: 'zClientKak' },
+        userKey: { id: 'did:key:zUserKey' },
+        ladderSeed: new Uint8Array(32).fill(3),
+        persistClientKeys,
+        standingUnlock: {
+          delegation: { id: 'urn:zcap:bridge' },
+          delegatedClients: { id: 'urn:zcap:sibling' },
+          standingClient: {
+            clientDid: 'did:key:zStanding',
+            agents: {
+              zcapClient: { standingZcapClient: true },
+              keyAgreementKey: { id: 'did:key:zStandingKak' }
+            }
+          },
+          unlockSpaceId: 'unlock-1',
+          ...(withRebind ? { rebindRecord } : {})
+        },
+        persistence: {
+          epochPins: {
+            load: vi.fn(async () => 'epoch-1'),
+            saveFromDescriptor
+          },
+          logPins: { logPins: true }
+        }
+      }
+    } as unknown as Session
+    return { session, rebindRecord, saveFromDescriptor, persistClientKeys }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(requireEnrolledClientContext).mockReturnValue({
+      remoteStore: { remoteStore: true },
+      pointer,
+      clientWebvhKeys: { updateSeed: new Uint8Array(32).fill(1) },
+      keyAgent: { id: 'did:key:zClientA' }
+    } as never)
+    vi.mocked(getUnlockMethods).mockResolvedValue({
+      methods: [
+        {
+          type: 'passphrase',
+          unlockSpaceId: 'unlock-1',
+          updateKeyMultibase: 'zRung'
+        }
+      ]
+    } as never)
+    vi.mocked(verifiedAccountLog).mockResolvedValue({ doc: {} } as never)
+    vi.mocked(delegatedClientsPointer).mockReturnValue(
+      'did:webvh:scid-b:example.com:annex-space' as never
+    )
+    vi.mocked(clientAnnexDidParts).mockReturnValue({
+      spaceId: 'annex-space'
+    } as never)
+    vi.mocked(forgetDurableClient).mockResolvedValue({
+      rotated: true
+    } as never)
+    vi.mocked(forgetLastDurableClient).mockResolvedValue({
+      installed: true
+    } as never)
+    vi.mocked(executeLocalWipe).mockResolvedValue({ failed: [] })
+  })
+
+  it('runs the ordinary ceremony and wipes strictly after it', async () => {
+    const { session } = fakeSession()
+    const order: string[] = []
+    vi.mocked(forgetDurableClient).mockImplementation(async () => {
+      order.push('ceremony')
+      return { rotated: true } as never
+    })
+    vi.mocked(executeLocalWipe).mockImplementation(async () => {
+      order.push('wipe')
+      return { failed: ['session-db'] }
+    })
+    const outcome = await forgetThisBrowser({ session })
+    expect(outcome).toEqual({
+      lastClient: false,
+      ceremony: { rotated: true },
+      wipeFailed: ['session-db']
+    })
+    expect(vi.mocked(forgetDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(order).toEqual(['ceremony', 'wipe'])
+    expect(vi.mocked(executeLocalWipe).mock.calls[0]![0]).toMatchObject({
+      targets: WIPE_TARGETS,
+      clearWriter: true
+    })
+    expect(vi.mocked(snapshotWipeTargets).mock.calls[0]![0]).toMatchObject({
+      clientAnnexSpaceId: 'annex-space'
+    })
+    expect(vi.mocked(assertAccountCeremonyAllowed)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(invalidateVerifiedLog)).toHaveBeenCalled()
+  })
+
+  it('rethrows the last-client refusal without wiping anything', async () => {
+    const { session } = fakeSession()
+    const refusal = Object.assign(new Error('another ceremony applies'), {
+      name: 'LastDurableClientForgetError'
+    })
+    vi.mocked(forgetDurableClient).mockRejectedValue(refusal)
+    await expect(forgetThisBrowser({ session })).rejects.toBe(refusal)
+    expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
+  })
+
+  it('refuses the transition when the session carries no record re-bind', async () => {
+    const { session } = fakeSession({ withRebind: false })
+    await expect(
+      forgetThisBrowser({ session, lastClient: true })
+    ).rejects.toThrow(/record re-bind/)
+    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(forgetDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
+  })
+
+  it('runs the last-client transition with the annex reach and wipes after it', async () => {
+    const { session } = fakeSession()
+    const order: string[] = []
+    vi.mocked(forgetLastDurableClient).mockImplementation(async () => {
+      order.push('ceremony')
+      return { installed: true } as never
+    })
+    vi.mocked(executeLocalWipe).mockImplementation(async () => {
+      order.push('wipe')
+      return { failed: [] }
+    })
+    const outcome = await forgetThisBrowser({ session, lastClient: true })
+    expect(outcome).toEqual({
+      lastClient: true,
+      ceremony: { installed: true },
+      wipeFailed: []
+    })
+    expect(vi.mocked(forgetDurableClient)).not.toHaveBeenCalled()
+    expect(order).toEqual(['ceremony', 'wipe'])
+    const options = vi.mocked(forgetLastDurableClient).mock.calls[0]![0]
+    expect(options.annex).toMatchObject({
+      wasServerUrl: pointer.host,
+      accountSpaceId: pointer.spaceId,
+      pinStore: session.profile.persistence.logPins
+    })
+    expect(typeof options.annex.storeFor).toBe('function')
+    expect(typeof options.annex.revoke).toBe('function')
+    expect(typeof options.rosterStoreFor).toBe('function')
+    expect(typeof options.onBeforeRemoval).toBe('function')
+    expect(options.expectedDid).toBe(pointer.did)
+    expect(options.knownLatentHashes).toEqual(['hash:zRung'])
+  })
+
+  it('re-binds the login credential record from the transition onBeforeRemoval seam', async () => {
+    const { session, rebindRecord } = fakeSession()
+    const bridge = { id: 'urn:zcap:bridge2', expires: '2027-01-01T00:00:00Z' }
+    const sibling = { id: 'urn:zcap:sibling2', expires: '2027-02-01T00:00:00Z' }
+    vi.mocked(delegateLogWrite).mockResolvedValue(bridge as never)
+    vi.mocked(delegatedClientsDelegationSpaceId).mockReturnValue(
+      'annex-space' as never
+    )
+    vi.mocked(mintDelegatedClientsDelegation).mockResolvedValue(
+      sibling as never
+    )
+    await forgetThisBrowser({ session, lastClient: true })
+    const { onBeforeRemoval } = vi.mocked(forgetLastDurableClient).mock
+      .calls[0]![0]
+    await onBeforeRemoval!({
+      did: 'did:webvh:scid-a:example.com:space-1',
+      doc: {},
+      log: [] as never
+    })
+    expect(vi.mocked(ladderVmZcapClient)).toHaveBeenCalledWith({
+      accountDid: 'did:webvh:scid-a:example.com:space-1',
+      ladderSeed: session.profile.ladderSeed
+    })
+    expect(vi.mocked(delegateLogWrite).mock.calls[0]![0]).toMatchObject({
+      zcapClient: LADDER_ZCAP_CLIENT,
+      recoveryClientDid: 'did:key:zStanding'
+    })
+    expect(
+      vi.mocked(mintDelegatedClientsDelegation).mock.calls[0]![0]
+    ).toMatchObject({
+      zcapClient: LADDER_ZCAP_CLIENT,
+      wasServerUrl: pointer.host,
+      clientAnnexSpaceId: 'annex-space',
+      controller: 'did:key:zStanding'
+    })
+    expect(vi.mocked(rebindRecord)).toHaveBeenCalledWith({
+      delegation: bridge,
+      delegatedClients: sibling
+    })
+    expect(
+      vi.mocked(refreshStandingDelegationFields).mock.calls[0]![0]
+    ).toMatchObject({
+      unlockSpaceId: 'unlock-1',
+      delegationKeyId: delegationProofKeyId(bridge as never),
+      delegationExpires: bridge.expires,
+      delegatedClientsKeyId: delegationProofKeyId(sibling as never),
+      delegatedClientsExpires: sibling.expires
+    })
+  })
+
+  it('persists the epoch pin, the client keys, and the live session on a rotation', async () => {
+    const { session, saveFromDescriptor, persistClientKeys } = fakeSession()
+    await forgetThisBrowser({ session })
+    const { onUserKeyAdopted } =
+      vi.mocked(forgetDurableClient).mock.calls[0]![0]
+    const userKey = { id: 'did:key:zFreshUserKey' }
+    const descriptor = { currentEpoch: 'epoch-2' }
+    await onUserKeyAdopted!({
+      userKey: userKey as never,
+      latestEpochId: 'epoch-2',
+      descriptor: descriptor as never
+    })
+    expect(saveFromDescriptor).toHaveBeenCalledWith({
+      accountDid: pointer.did,
+      epochId: 'epoch-2',
+      descriptor
+    })
+    expect(persistClientKeys).toHaveBeenCalledWith({ userKey })
+    expect(vi.mocked(adoptRotatedUserKey)).toHaveBeenCalledWith({
+      session,
+      spaceId: pointer.spaceId,
+      userKey
+    })
+  })
+})

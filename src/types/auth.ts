@@ -145,16 +145,25 @@ export interface ControllerProfile {
   ladderSeed?: Uint8Array
   // The login credential's other standing members, stamped from the keyring
   // hit beside `ladderSeed`: the pre-minted PUT-on-`did.jsonl` bridge
-  // delegation (and the annex-Space sibling where the record carries one)
-  // plus the credential-derived client identity that invokes them. The
+  // delegation (and the annex-Space sibling where the record carries one),
+  // the credential-derived client identity that invokes them, the
+  // credential's unlock Space id (its registry key), and the hit's record
+  // re-bind closure (re-wraps and re-PUTs the unlock record with fresh
+  // bridge and sibling delegations, everything else restated verbatim). The
   // forget ceremony signs its ladder-signed removal entry through these
-  // without re-prompting for the secret. In-memory only, same trust class as
-  // `clientSeed`; absent for guests and for records without standing
-  // authority.
+  // without re-prompting for the secret, and the last-client transition
+  // re-binds the record through the closure before its removal entry.
+  // In-memory only, same trust class as `clientSeed`; absent for guests and
+  // for records without standing authority.
   standingUnlock?: {
     delegation: IZcap
     delegatedClients?: IZcap
     standingClient: StandingUnlockClient
+    unlockSpaceId: string
+    rebindRecord?: (options: {
+      delegation: IZcap
+      delegatedClients?: IZcap
+    }) => Promise<void>
   }
   // The invocation capability the session's WAS requests ride, when the
   // session's authority over the data Space is a delegated Space-subtree

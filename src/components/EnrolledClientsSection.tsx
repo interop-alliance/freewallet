@@ -85,6 +85,10 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
   const [forgetOpen, setForgetOpen] = useState(false)
   const [forgetting, setForgetting] = useState(false)
   const [forgetErrorKey, setForgetErrorKey] = useState<string | null>(null)
+  // Which forget the open dialog confirms: the ordinary ceremony, or the
+  // last-client transition (set from the listing when the dialog opens, and
+  // flipped by the ceremony's own refusal when the listing was stale).
+  const [forgetLastClient, setForgetLastClient] = useState(false)
   // The paste-code half of the connect card (the enrolling side): the pasted
   // connect code, its parsed request when valid, the new client's label, and
   // the ceremony state. Independent of the QR invite the same card shows:
@@ -223,9 +227,10 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
    * the shared local wipe -- and ends at the logout page, since the session's
    * local footing is gone. A torn run reads as "not forgotten" (the wipe
    * runs last), so the dialog's retry copy is honest: a re-click resumes.
-   * The account's last durable client is refused by the ceremony itself and
-   * mapped to the not-yet-available copy (that transition is its own
-   * ceremony, not built yet).
+   * The account's last durable client runs the two-entry transition instead
+   * (confirmed against its own copy); a listing that turned out stale -- the
+   * ordinary ceremony's name-stable refusal -- flips the dialog to the
+   * transition copy for a second confirm rather than running it unconfirmed.
    */
   const handleForget = async () => {
     if (forgetting) {
@@ -234,7 +239,10 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
     setForgetting(true)
     setForgetErrorKey(null)
     try {
-      const outcome = await forgetThisBrowser({ session })
+      const outcome = await forgetThisBrowser({
+        session,
+        lastClient: forgetLastClient
+      })
       if (outcome.wipeFailed.length > 0) {
         // Residue is self-healing: a surviving replica or trio is finished
         // by the next login's forgotten-browser detector.
@@ -246,7 +254,8 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       window.location.href = '/login'
     } catch (err) {
       if ((err as { name?: string })?.name === 'LastDurableClientForgetError') {
-        setForgetErrorKey('settings.forget.lastClient')
+        setForgetLastClient(true)
+        setForgetErrorKey('settings.forget.lastClientNow')
       } else {
         console.error('Could not forget this browser:', err)
         setForgetErrorKey('settings.forget.failed')
@@ -468,6 +477,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
                       disabled={forgetting}
                       onClick={() => {
                         setForgetErrorKey(null)
+                        setForgetLastClient(lastClient)
                         setForgetOpen(true)
                       }}
                       data-testid="forget-this-browser-button"
@@ -670,25 +680,49 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
         }}
         fullWidth
       >
-        <DialogTitle>{t('settings.forget.confirmTitle')}</DialogTitle>
+        <DialogTitle>
+          {t(
+            forgetLastClient
+              ? 'settings.forget.lastClientTitle'
+              : 'settings.forget.confirmTitle'
+          )}
+        </DialogTitle>
         <DialogContent>
           <Stack sx={{ gap: 1.5 }}>
-            <DialogContentText>
-              {t('settings.forget.confirmMessage')}
-            </DialogContentText>
+            {forgetLastClient ? (
+              // The transition copy: the account keeps no connected browser
+              // and stays anchored by the sign-in credentials alone -- the
+              // consequence the user confirms against.
+              <>
+                <DialogContentText data-testid="forget-last-client-copy">
+                  {t('settings.forget.lastClientMessage')}
+                </DialogContentText>
+                <DialogContentText>
+                  {t('settings.forget.lastClientConsequence')}
+                </DialogContentText>
+              </>
+            ) : (
+              <DialogContentText>
+                {t('settings.forget.confirmMessage')}
+              </DialogContentText>
+            )}
             <DialogContentText>
               {t('settings.forget.confirmCeiling')}
             </DialogContentText>
           </Stack>
           {forgetting && (
             <Alert severity="info" sx={{ mt: 2 }}>
-              {t('settings.forget.progress')}
+              {t(
+                forgetLastClient
+                  ? 'settings.forget.lastClientProgress'
+                  : 'settings.forget.progress'
+              )}
             </Alert>
           )}
           {forgetErrorKey && (
             <Alert
               severity={
-                forgetErrorKey === 'settings.forget.lastClient'
+                forgetErrorKey === 'settings.forget.lastClientNow'
                   ? 'info'
                   : 'error'
               }
@@ -706,7 +740,6 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
             variant="contained"
             color="error"
             loading={forgetting}
-            disabled={forgetErrorKey === 'settings.forget.lastClient'}
             onClick={() => void handleForget()}
             data-testid="forget-this-browser-confirm"
           >

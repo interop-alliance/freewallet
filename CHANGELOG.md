@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- The forget ceremony re-seals the unlock-methods registry to the rotated
+  user key while this client still invokes; before, the registry stayed
+  sealed to the retired key after a forget, so the surviving clients and
+  transient logins could no longer read it.
+- The login-time standing-delegation refresh now replaces the refreshed
+  bridge and sibling on the live session's standing members, so a forget run
+  later in the same session signs through the delegation that verifies.
 - Retiring an unlock credential that had self-enrolled a browser no longer
   leaves its live ladder commitment standing in the account document (a
   latent re-seizure credential). The ceremony resolves the ladder's current
@@ -17,6 +24,23 @@
 
 ### Added
 
+- The last-client forget transition: forgetting the account's only connected
+  browser runs wallet-core's `forgetLastDurableClient` instead of refusing,
+  landing the account client-less and anchored by its sign-in credentials
+  alone (the state a credential-anchored signup produces). Settings >
+  Connected wallets confirms it against transition-stating copy (chosen from
+  the listing; a stale listing's refusal flips the dialog to that copy for a
+  second confirm). The ceremony's stages on this side: a ladder-VM-signed
+  roster store over the post-install log for the rotation, the annex reach
+  (generation log store and revocation POST under this client's authority)
+  for the forced generation-delegation replacement and the revocation of
+  every ladder-signed delegation the annex history embedded, and the login
+  credential's record re-bind before the removal entry (bridge and sibling
+  re-signed by the ladder VM through the keyring hit's re-bind closure, now
+  stamped on the profile's standing members beside the unlock Space id, the
+  registry pair refreshed). The wipe runs last. Other unlock methods' records
+  (recovery codes included) may rot at the removal entry and are re-established
+  from a logged-in session; the confirm copy says so.
 - The forget affordance, in two grades over the shared wipe enumeration.
   From a live session, Settings > Connected wallets gains "Forget this
   browser" on the current client's row: wallet-core's `forgetDurableClient`
@@ -24,8 +48,7 @@
   fan-out under its still-standing authority, then one atomic ladder-signed
   removal entry through the login credential's bridge), followed by the
   local wipe with the writer id cleared; the wipe runs last, so a torn run
-  reads as "not forgotten" and a re-click resumes. The account's last
-  connected browser is refused with not-yet-available copy. From the login
+  reads as "not forgotten" and a re-click resumes. From the login
   page, the keyring authenticity/replay and continuity refusals now offer
   "Forget wallet data on this browser" -- the no-unlock-material grade: a
   whole-database, browser-scoped wipe (every replica database, the session

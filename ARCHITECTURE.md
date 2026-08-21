@@ -424,11 +424,45 @@ wipe from what the keyring hit alone derives and surfaces "this browser's
 access was removed", never raw authorization errors; nothing about the
 detection is persisted. The ceremony needs the standing members the login
 stamped on the profile (`profile.standingUnlock` beside
-`profile.ladderSeed`), deliberately writes no re-mint stages (a
-replacement signed by a key that dies at the removal entry would rot
-moments later -- the standing self-heals cover it), and refuses the
-account's last durable client with wallet-core's name-stable
-`LastDurableClientForgetError` (that transition is its own ceremony). From
+`profile.ladderSeed`), re-seals the unlock-methods registry to the rotated
+user key while this client still invokes (the registry is sealed to the
+vault keys, and its surviving readers would otherwise find it sealed to a
+retired generation), deliberately writes no re-mint stages (a replacement
+signed by a key that dies at the removal entry would rot moments later --
+the standing self-heals cover it), and refuses the account's last durable
+client with wallet-core's name-stable `LastDurableClientForgetError`.
+
+That refusal routes to the **last-client transition** (the same
+`forgetThisBrowser` entry with `lastClient: true`, chosen from the listing
+and confirmed against transition-stating copy; a stale listing's refusal
+flips the dialog to that copy for a second confirm): wallet-core's
+`forgetLastDurableClient`, the two-entry ceremony that lands the account
+client-less and ladder-anchored -- the state a credential-anchored signup
+and a transient recovery produce (wallet-core decision 0004's 2026-08-21
+amendment). The ladder VM's install entry goes first, while the client's
+footprint stays (the both-present transitional state); then the roster
+rotation off this client's wrap, ladder-signed and anchored at the install
+entry (the ceremony-tail license's posture-changing version) but
+HTTP-invoked under the still-standing client -- the roster store is built
+here with the ladder VM's signer over the ceremony-supplied post-install
+log (`ladderSignedRosterStoreFor`), so the roster head stays signed by a key
+the post-removal document lists and needs no seal completer on an account
+where no login sweep will ever run again; the collection fan-out; the
+forced replacement of the embedded generation delegation with a fresh
+ladder-signed one and the revocation, through this client's `WasClient`,
+of every still-unexpired ladder-signed delegation the annex history
+embedded; then the login credential's record re-bind
+(`rebindLoginCredentialRecord`, the ceremony's `onBeforeRemoval` seam): its
+bridge delegation and `delegatedClients` sibling are re-signed by the
+ladder VM and the record re-sealed through the keyring hit's re-bind
+closure, stamped on `profile.standingUnlock` at login beside the
+credential's unlock Space id, with the registry pair refreshed in this
+client's last window of registry authority -- the removed client's
+signatures rot at the removal entry, and on a client-less account no
+durable login's refresh block will ever heal them (other unlock methods'
+records, recovery codes included, are the stated residue of a follow-up
+item). The removal entry lands last, then the local wipe. A session whose
+hit carried no re-bind closure refuses the transition up front. From
 the login page's authenticity and continuity refusals -- reachable from
 passkey failures with no typed passphrase, reset between attempts -- it is
 the **no-unlock-material grade**: nothing can be derived or signed, so no
@@ -1684,6 +1718,11 @@ cascades, and the permanent wire-level constants.
 
 ## Glossary
 
+This is the repo's ubiquitous language: one canonical term per concept, used
+the same way in code, tests, docs, and conversation. Where an entry ends with
+`Avoid:`, that list names the synonyms this repo does not use. The convention
+is canonical in isomorphic-lib-template's ARCHITECTURE.md, Glossary section.
+
 Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
 
 - **VC (Verifiable Credential)** — a W3C-standard JSON-LD document asserting
@@ -1736,7 +1775,7 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   not called a "device": one machine hosts many clients (browser profiles,
   several apps, several accounts), and a client is not tied to hardware.
   "App session" is informal prose for one live session of a client; nothing
-  named `appSessionId` is persisted.
+  named `appSessionId` is persisted. Avoid: device, device id.
 - **`writerId`** — an unkeyed, clearable, unrecoverable attribution label
   saying which writing agent produced a revision. Its only jobs are history
   attribution and breaking last-write-wins ties; it is minted locally
@@ -1745,7 +1784,8 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   must not be treated as one. Distinct from a `clientId` in lifetime and in
   trust: it can vanish and be re-minted with nothing carried over. Also not a
   `replicaId`: it is minted per browser profile while the local database is
-  per user, so it is not 1:1 with a replica.
+  per user, so it is not 1:1 with a replica. Avoid: replicaId, device id,
+  session id.
 - **Share** — granting a third party read AND decrypt access to one of the
   wallet's own encrypted collections, asked for with a
   `https://w3id.org/byoe#shared-wallet-collection` invocation-target descriptor. One
@@ -1858,6 +1898,7 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   (`key-map/user-key.jsonl`), which confirms the cached copy current or
   delivers a rotated one. Never replicated in unwrapped form
   and never held by the KMS; it is present for the life of every session.
+  Avoid: PUK.
 - **Session** — the in-memory object (`src/types/auth.ts`) holding the logged-in
   user, their `ControllerProfile` (keyAgent + zcapClient), and their
   `StorageManager` instance.

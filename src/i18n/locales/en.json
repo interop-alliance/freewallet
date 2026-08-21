@@ -173,7 +173,11 @@
       "confirmMessage": "This browser will be removed from your account and all wallet data stored on it will be deleted. The removal is recorded in your account's public log, and the account's encrypted data is re-keyed first, so nothing written from now on is readable from this browser's leftovers. Your account itself is untouched -- logging in again reconnects this browser as new.",
       "confirmCeiling": "What cannot be taken back: data this browser already fetched may remain recoverable from the device by forensic means, and the browser profile itself keeps a trace that a wallet was used here. This may take a moment -- keep this tab open.",
       "progress": "Forgetting this browser -- re-keying the account and writing the removal. Keep this tab open.",
-      "lastClient": "This is the only browser connected to this account, so it cannot be forgotten from here yet -- that transition is not available in this version. Connect another browser first, or delete the account instead.",
+      "lastClientTitle": "Forget the only connected browser?",
+      "lastClientMessage": "This is the only browser connected to this account. Forgetting it removes the browser from the account and deletes all wallet data stored on it, leaving the account with no connected browser: it stays anchored by your passphrase and passkeys alone, the same state a brand-new account starts in. The transition is recorded in your account's public log, and the account's encrypted data is re-keyed first.",
+      "lastClientConsequence": "Nothing is lost. Any browser can still open the account with the passphrase or passkey you used here -- as a public-computer session that leaves nothing behind, or remembered as a connected browser again. Recovery codes and other sign-in methods set up from this browser may need to be re-established from a logged-in session before they work again.",
+      "lastClientProgress": "Forgetting this browser -- re-keying the account, re-anchoring it on your sign-in credentials, and writing the removal. Keep this tab open.",
+      "lastClientNow": "This browser is now the only one connected to the account, so forgetting it is the transition described above. Confirm again to continue.",
       "failed": "Forgetting this browser did not finish. Nothing was lost -- try again; it picks up where it stopped."
     },
     "recovery": {

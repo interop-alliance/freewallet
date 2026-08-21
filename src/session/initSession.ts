@@ -913,7 +913,11 @@ async function sessionFromKeyringHit({
       ...(found.standing.delegatedClients
         ? { delegatedClients: found.standing.delegatedClients }
         : {}),
-      standingClient: found.standingClient
+      standingClient: found.standingClient,
+      unlockSpaceId: found.unlockSpaceId,
+      ...(found.rebindStandingRecord
+        ? { rebindRecord: found.rebindStandingRecord }
+        : {})
     }
   }
 
@@ -995,6 +999,16 @@ async function sessionFromKeyringHit({
           delegation,
           ...(delegatedClients ? { delegatedClients } : {})
         })
+        // The live session acts through the members it carries, so the
+        // refreshed ones replace the stale pair there too (a forget run
+        // later this session signs through the delegation that verifies).
+        if (session.profile.standingUnlock) {
+          session.profile.standingUnlock = {
+            ...session.profile.standingUnlock,
+            delegation,
+            ...(delegatedClients ? { delegatedClients } : {})
+          }
+        }
         await refreshStandingDelegationFields({
           session,
           unlockSpaceId,
