@@ -250,23 +250,10 @@ export function localStorageMetaCache({
  * @returns {void}
  */
 export function deleteLocalCacheFamilies({ scope }: { scope: string }): void {
-  if (typeof localStorage === 'undefined') {
-    return
-  }
-  const prefixes = [
+  deleteLocalStorageByPrefixes([
     `${DESCRIPTOR_CACHE_PREFIX}:${scope}:`,
     `${META_CACHE_PREFIX}:${scope}:`
-  ]
-  const doomed: string[] = []
-  for (let index = 0; index < localStorage.length; index++) {
-    const key = localStorage.key(index)
-    if (key && prefixes.some(prefix => key.startsWith(prefix))) {
-      doomed.push(key)
-    }
-  }
-  for (const key of doomed) {
-    localStorage.removeItem(key)
-  }
+  ])
 }
 
 /**
@@ -279,10 +266,25 @@ export function deleteLocalCacheFamilies({ scope }: { scope: string }): void {
  * @returns {void}
  */
 export function deleteAllLocalCacheFamilies(): void {
+  deleteLocalStorageByPrefixes([
+    `${DESCRIPTOR_CACHE_PREFIX}:`,
+    `${META_CACHE_PREFIX}:`
+  ])
+}
+
+/**
+ * Removes every `localStorage` key carrying one of the given prefixes, in
+ * one pass over the store. The shared body of both cache-family deleters
+ * above -- they differ only in whether the prefixes are scope-qualified.
+ * A non-browser environment is a no-op.
+ *
+ * @param prefixes {string[]}
+ * @returns {void}
+ */
+function deleteLocalStorageByPrefixes(prefixes: string[]): void {
   if (typeof localStorage === 'undefined') {
     return
   }
-  const prefixes = [`${DESCRIPTOR_CACHE_PREFIX}:`, `${META_CACHE_PREFIX}:`]
   const doomed: string[] = []
   for (let index = 0; index < localStorage.length; index++) {
     const key = localStorage.key(index)

@@ -8,16 +8,12 @@
  */
 import { base64urlnopad } from '@scure/base'
 import type { IZcap } from '@interop/data-integrity-core'
-import { WasClient } from '@interop/was-client'
+import type { WasClient } from '@interop/was-client'
 import {
   accountLogPinId,
   isWebvhDid,
   rotateWebvhUpdateKey
 } from '@interop/wallet-core/webvh'
-import {
-  clientAnnexDidParts,
-  delegatedClientsPointer
-} from '@interop/wallet-core/clientAnnex'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { PASSKEY_KDF } from '@/app.config'
 import {
@@ -55,13 +51,11 @@ import {
   assertDurableSession,
   isDurableSession
 } from '@/session/persistence'
+import { pointedClientAnnexReach } from '@/session/annexReach'
 import { executeLocalWipe, snapshotWipeTargets } from '@/session/wipe'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
-import {
-  invalidateVerifiedLog,
-  verifiedAccountLog
-} from '@/session/verifiedLog'
+import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import { findLoginCredential, loginHandleOf } from '@/lib/loginCredential'
 import type { Session } from '@/types/auth'
 
@@ -828,20 +822,9 @@ export async function deleteAccount({
     try {
       const pointer = session.profile.accountPointer
       if (pointer && isWebvhDid(pointer.did)) {
-        const { doc } = await verifiedAccountLog({
-          profile: session.profile,
-          pointer
-        })
-        const pointedDid = delegatedClientsPointer({ doc })
-        if (pointedDid !== undefined) {
-          const clientAnnexSpaceId = clientAnnexDidParts({
-            did: pointedDid
-          }).spaceId
-          const was = new WasClient({
-            serverUrl: pointer.host,
-            zcapClient: session.profile.zcapClient
-          })
-          clientAnnex = { was, spaceId: clientAnnexSpaceId }
+        const reach = await pointedClientAnnexReach({ session, pointer })
+        if (reach !== null) {
+          clientAnnex = { was: reach.was, spaceId: reach.spaceId }
         }
       }
     } catch (err) {

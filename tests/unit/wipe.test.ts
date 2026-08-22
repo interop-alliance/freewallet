@@ -260,7 +260,7 @@ describe('the shared wipe enumeration', () => {
         registry: orderedRegistry,
         clientAnnexSpaceId: CLIENT_ANNEX_SPACE_ID
       })
-      expect(targets.dbPrefix).toBe(DB_PREFIX)
+      expect(deriveSpaceId(targets.clientDid)).toBe(DB_PREFIX)
       expect(targets.unlockSpaceIds).toContain(PASSPHRASE_UNLOCK_SPACE)
       expect(targets.unlockSpaceIds).toContain(PASSKEY_UNLOCK_SPACE)
 

@@ -16,7 +16,6 @@
  * record still surfaces the not-enrolled state and the
  * connect-another-wallet ceremony.
  */
-import { WasClient } from '@interop/was-client'
 import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
@@ -36,14 +35,8 @@ import {
 } from '@interop/wallet-core/webvh'
 import {
   attributeLadderRung,
-  clientAnnexDidParts,
-  clientAnnexLogPinId,
-  clientAnnexLogStore,
   delegatedClientsDelegationSpaceId,
-  delegatedClientsPointer,
-  ensureGenerationDelegationCurrent,
-  mintDelegatedClientsDelegation,
-  mintGenerationDelegation
+  mintDelegatedClientsDelegation
 } from '@interop/wallet-core/clientAnnex'
 import {
   mintUserKey,
@@ -86,8 +79,15 @@ import {
   delegationProofKeyId,
   zcapExpiring
 } from '@interop/wallet-core/recovery'
+import {
+  ensureGenerationDelegation,
+  pointedClientAnnexReach
+} from '@/session/annexReach'
 import { refreshStandingDelegationFields } from '@/session/unlockMethods'
-import { verifiedAccountLog } from '@/session/verifiedLog'
+import {
+  primeVerifiedAccountLog,
+  verifiedAccountLog
+} from '@/session/verifiedLog'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type {
   KeyringFetchResult,
@@ -850,9 +850,9 @@ async function sessionFromKeyringHit({
   // never run -- the residue is wiped here and the typed refusal surfaces
   // the state, instead of the raw authorization errors the dead key would
   // hit downstream. Skips itself on any verification failure.
-  if (found.clientKeys) {
-    await assertClientStillEnrolled({ found, idb })
-  }
+  const detectorLog = found.clientKeys
+    ? await assertClientStillEnrolled({ found, idb })
+    : undefined
   const enrolled = found.clientKeys
     ? undefined
     : await selfEnrollStandingClient({ found, idb })
@@ -870,6 +870,19 @@ async function sessionFromKeyringHit({
     provisionStorage,
     idb
   })
+  // The detector above already verified this account's log; seed the memo
+  // with it so the tails below read it instead of verifying it again.
+  if (detectorLog && found.pointer?.did) {
+    primeVerifiedAccountLog({
+      profile: session.profile,
+      pointer: {
+        did: found.pointer.did,
+        spaceId: found.pointer.spaceId,
+        host: found.pointer.host
+      },
+      verified: detectorLog
+    })
+  }
   // The local key set must have been bound for THIS account: an enrolled
   // client's record carries the controller it was bound under; a legacy
   // record (pre-enrollment) was necessarily written by the first client,
@@ -1033,12 +1046,18 @@ async function sessionFromKeyringHit({
     })
   }
 
+  // The login credential's ladder seed, shared by the three best-effort
+  // ceremonies below (the ladder-rung refresh, the generation-delegation
+  // heal, and the annex GC sweep) -- already stamped on `profile.ladderSeed`
+  // above.
+  const ladderSeed = found.standing?.ladderSeed
+
   // After a self-enrollment climbed the update-key ladder, refresh the
   // registry entry's recorded rung to the freshly committed one, so the
   // revocation edit's latent-hash attribution stays answerable. Best-effort:
   // a stale rung only makes that attribution fail closed later, never
   // silently misattribute.
-  const enrolledLadderSeed = enrolled ? found.standing?.ladderSeed : undefined
+  const enrolledLadderSeed = enrolled ? ladderSeed : undefined
   if (session.storageReady && enrolledLadderSeed) {
     const unlockSpaceId = found.unlockSpaceId
     session.storageReady = session.storageReady.then(async () => {
@@ -1120,56 +1139,25 @@ async function sessionFromKeyringHit({
   // annex rung 0; a healthy delegation is one no-op read. Best-effort: a
   // rung the generation does not commit (a credential bound mid-generation)
   // skips quietly, everything else warns and the next login retries.
-  const healLadderSeed = found.standing?.ladderSeed
-  if (session.storageReady && !remoteDirectStorage && healLadderSeed) {
+  if (session.storageReady && !remoteDirectStorage && ladderSeed) {
     session.storageReady = session.storageReady.then(async () => {
       try {
         const pointer = session.profile.accountPointer
         if (!pointer || !isWebvhDid(pointer.did)) {
           return
         }
-        const { doc } = await verifiedAccountLog({
-          profile: session.profile,
-          pointer
-        })
-        const pointedDid = delegatedClientsPointer({ doc })
-        if (pointedDid === undefined) {
+        const reach = await pointedClientAnnexReach({ session, pointer })
+        if (reach === null) {
           return
         }
-        const { spaceId: clientAnnexSpaceId, generationId } =
-          clientAnnexDidParts({
-            did: pointedDid
-          })
-        const was = new WasClient({
-          serverUrl: pointer.host,
-          zcapClient: session.profile.zcapClient
-        })
-        await ensureGenerationDelegationCurrent({
-          store: clientAnnexLogStore({
-            was,
-            spaceId: clientAnnexSpaceId,
-            generationId
-          }),
-          ladderSeed: healLadderSeed,
-          generationId,
-          mintGenerationDelegation: async ({ clientAnnexDid }) =>
-            mintGenerationDelegation({
-              zcapClient: session.profile.zcapClient,
-              wasServerUrl: pointer.host,
-              spaceId: pointer.spaceId,
-              clientAnnexDid
-            }),
-          expectedDid: pointedDid,
-          accountDoc: doc as PublishedKeyDocument,
-          ...(session.profile.persistence?.logPins
-            ? {
-                pinStore: session.profile.persistence.logPins,
-                logId: clientAnnexLogPinId({
-                  spaceId: clientAnnexSpaceId,
-                  generationId
-                })
-              }
-            : {})
+        const logPins = session.profile.persistence?.logPins
+        await ensureGenerationDelegation({
+          session,
+          pointer,
+          reach,
+          ladderSeed,
+          accountDoc: reach.doc as PublishedKeyDocument,
+          ...(logPins ? { pin: { pinStore: logPins, logId: reach.logId } } : {})
         })
       } catch (err) {
         if (
@@ -1195,14 +1183,13 @@ async function sessionFromKeyringHit({
   // remote-direct popup deliberately does not run it: a popup visit is a
   // constrained, latency-sensitive context, and the next top-level durable
   // login sweeps the same durable state.
-  const gcLadderSeed = found.standing?.ladderSeed
   if (session.storageReady && !remoteDirectStorage) {
     session.clientAnnexGcSweep = session.storageReady
       .catch(() => {})
       .then(() =>
         sweepClientAnnexGenerations({
           session,
-          ...(gcLadderSeed !== undefined ? { ladderSeed: gcLadderSeed } : {})
+          ...(ladderSeed !== undefined ? { ladderSeed } : {})
         })
       )
       .catch((err): null => {

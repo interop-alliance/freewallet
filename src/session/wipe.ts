@@ -27,11 +27,9 @@
 import { deriveSpaceId } from '@interop/was-client/sync'
 import {
   deleteAccountDidForSpace,
-  deleteClientKeyRecord,
-  deleteKeyringCache,
-  deleteKeyringFreshnessPin,
   deleteLogPinsForSpace,
   deletePasskeySafetyNotice,
+  deleteUnlockLocalTrio,
   deleteUnlockMethodsCache,
   deleteUserKeyEpochPin,
   sessionDatabaseExists
@@ -52,14 +50,12 @@ import type { Session } from '@/types/auth'
  */
 export interface WipeTargets {
   /**
-   * This browser's client did:key (`session.user.id`).
+   * This browser's client did:key (`session.user.id`). Also the source of
+   * the replica-database and migration-marker prefix,
+   * `deriveSpaceId(clientDid)` (the `BrowserStore.initClient` derivation),
+   * re-derived where needed rather than carried as a separate field.
    */
   clientDid: string
-  /**
-   * The replica-database and migration-marker prefix,
-   * `deriveSpaceId(clientDid)` (the `BrowserStore.initClient` derivation).
-   */
-  dbPrefix: string
   /**
    * The account did:webvh (or did:key pre-promotion), when the session holds
    * a pointer; keys the roster-epoch pin.
@@ -116,7 +112,6 @@ export function snapshotWipeTargets({
   const accountSpaceId = session.profile.accountPointer?.spaceId
   return {
     clientDid,
-    dbPrefix: deriveSpaceId(clientDid),
     accountDid: session.profile.accountPointer?.did,
     accountSpaceId,
     clientAnnexSpaceId,
@@ -182,9 +177,7 @@ export async function executeLocalWipe({
   if (haveSessionDb) {
     for (const unlockSpaceId of targets.unlockSpaceIds) {
       await stage(`unlock-trio:${unlockSpaceId}`, async () => {
-        await deleteKeyringCache({ spaceId: unlockSpaceId, idb })
-        await deleteClientKeyRecord({ spaceId: unlockSpaceId, idb })
-        await deleteKeyringFreshnessPin({ spaceId: unlockSpaceId, idb })
+        await deleteUnlockLocalTrio({ spaceId: unlockSpaceId, idb })
       })
     }
     if (targets.accountDid) {
@@ -226,7 +219,7 @@ export async function executeLocalWipe({
     if (typeof localStorage === 'undefined') {
       return
     }
-    const markers = migrationMarkerKeys(targets.dbPrefix)
+    const markers = migrationMarkerKeys(deriveSpaceId(targets.clientDid))
     localStorage.removeItem(markers.plaintext)
     localStorage.removeItem(markers.publicCids)
   })

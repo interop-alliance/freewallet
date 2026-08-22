@@ -162,9 +162,7 @@ import {
   rewrapUnlockRegistryToUserKey
 } from '@/session/userKeyAdoption'
 import {
-  deleteClientKeyRecord,
-  deleteKeyringFreshnessPin,
-  deleteKeyringCache,
+  deleteUnlockLocalTrio,
   loadUserKeyEpochPin,
   savePinFromDescriptor,
   sessionLogPinStore
@@ -940,7 +938,7 @@ export async function recoverAccountWithCode({
     zcapClient: newZcapClient,
     keyAgent: newClientAgents.keyAgent,
     pointer: { did: pointer.did, spaceId: pointer.spaceId, host: pointer.host },
-    idb
+    pinStore: sessionLogPinStore({ idb })
   })
   await addUserKeyRosterRecipient({
     store: rosterStore,
@@ -1047,9 +1045,7 @@ export async function recoverAccountWithCode({
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId
     })
-    await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
-    await deleteClientKeyRecord({ spaceId: unlock.spaceId, idb })
-    await deleteKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
+    await deleteUnlockLocalTrio({ spaceId: unlock.spaceId, idb })
   } catch (err) {
     console.warn("Could not delete the spent code's unlock Space:", err)
   }
@@ -1811,7 +1807,6 @@ export async function remintRecoveryDelegations({
   const remintEntries = [
     ...entries.map(entry => ({
       ...entry,
-      label: entry.label,
       delegatedClientsKeyId: undefined,
       delegatedClientsExpires: undefined,
       source: entry as UnlockMethod

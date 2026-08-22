@@ -18,23 +18,18 @@
  * held.
  */
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
-import { WasClient } from '@interop/was-client'
 import {
   clientSigningKeyMultibase,
   type PublishedKeyDocument,
   type RevokedClientKeys
 } from '@interop/wallet-core/webvh'
-import {
-  clientAnnexDidParts,
-  clientAnnexLogPinId,
-  clientAnnexLogStore,
-  delegatedClientsPointer,
-  ensureGenerationDelegationCurrent,
-  mintGenerationDelegation
-} from '@interop/wallet-core/clientAnnex'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
 import type { GenerationDelegationRemint } from '@interop/wallet-core/clients'
 import type { Session } from '@/types/auth'
+import {
+  clientAnnexReachFor,
+  ensureGenerationDelegation
+} from '@/session/annexReach'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { getUnlockMethods } from '@/session/unlockMethods'
 import type { UnlockMethodsRecord } from '@/session/unlockMethods'
@@ -67,14 +62,14 @@ export interface RevocationOutcome {
 }
 
 /**
- * The account's recovery-code registry entries, read once for the whole
- * cascade (the document edit's latent commitments, then the delegation
- * re-mint). Best-effort: an unreadable registry degrades both stages rather
- * than failing the revocation.
+ * The account's unlock-methods registry, read once for the whole cascade
+ * (the document edit's latent commitments, then the delegation re-mint).
+ * Best-effort: an unreadable registry degrades both stages rather than
+ * failing the revocation.
  *
  * @param options {object}
  * @param options.session {Session}
- * @returns {Promise<RecoveryCodeUnlockMethod[]>}
+ * @returns {Promise<UnlockMethodsRecord | null>}
  */
 async function unlockRegistry({
   session
@@ -264,42 +259,31 @@ async function remintGenerationDelegation({
 }): Promise<GenerationDelegationRemint> {
   try {
     const pointer = session.profile.accountPointer
-    const pointedDid = delegatedClientsPointer({
-      doc: document as Parameters<typeof delegatedClientsPointer>[0]['doc']
-    })
-    if (!pointer || pointedDid === undefined) {
+    const reach =
+      pointer === undefined
+        ? null
+        : clientAnnexReachFor({
+            session,
+            pointer,
+            doc: document as Parameters<typeof clientAnnexReachFor>[0]['doc']
+          })
+    if (!pointer || reach === null) {
       return { renewed: false, skipped: 'no-pointer' }
     }
     const ladderSeed = session.profile.ladderSeed
     if (ladderSeed === undefined) {
       return { renewed: false, skipped: 'no-ladder-seed' }
     }
-    const { spaceId: clientAnnexSpaceId, generationId } = clientAnnexDidParts({
-      did: pointedDid
-    })
-    const was = new WasClient({
-      serverUrl: pointer.host,
-      zcapClient: session.profile.zcapClient
-    })
-    const { renewed } = await ensureGenerationDelegationCurrent({
-      store: clientAnnexLogStore({
-        was,
-        spaceId: clientAnnexSpaceId,
-        generationId
-      }),
+    const { renewed } = await ensureGenerationDelegation({
+      session,
+      pointer,
+      reach,
       ladderSeed,
-      generationId,
-      mintGenerationDelegation: async ({ clientAnnexDid }) =>
-        mintGenerationDelegation({
-          zcapClient: session.profile.zcapClient,
-          wasServerUrl: pointer.host,
-          spaceId: pointer.spaceId,
-          clientAnnexDid
-        }),
-      expectedDid: pointedDid,
       accountDoc: document,
-      pinStore: session.profile.persistence.logPins,
-      logId: clientAnnexLogPinId({ spaceId: clientAnnexSpaceId, generationId })
+      pin: {
+        pinStore: session.profile.persistence.logPins,
+        logId: reach.logId
+      }
     })
     return { renewed }
   } catch (err) {

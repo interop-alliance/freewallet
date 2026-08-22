@@ -121,6 +121,7 @@ import {
   deleteClientKeyRecord,
   deleteKeyringCache,
   deleteKeyringFreshnessPin,
+  deleteUnlockLocalTrio,
   loadClientKeyRecord,
   loadKeyringCache,
   loadKeyringFreshnessPin,
@@ -380,6 +381,33 @@ async function saveClientKeys({
     keyResolver: unlock.keyResolver
   })
   await saveClientKeyRecord({ spaceId: unlock.spaceId, record, idb })
+}
+
+/**
+ * The unlock credential's key-agreement members, spread-ready: the key's id
+ * and its multibase, each present only when the derived key carries it. The
+ * cast is the one place the unlock identity's untyped key-agreement key is
+ * read for these two members, shared by both bind paths.
+ *
+ * @param options {object}
+ * @param options.unlock {UnlockIdentity}
+ * @returns {{ unlockKeyAgreementKeyId?: string,
+ *   unlockKeyAgreementKeyMultibase?: string }}
+ */
+function unlockKeyAgreementMembers({ unlock }: { unlock: UnlockIdentity }): {
+  unlockKeyAgreementKeyId?: string
+  unlockKeyAgreementKeyMultibase?: string
+} {
+  const { id, publicKeyMultibase } = unlock.keyAgreementKey as unknown as {
+    id?: string
+    publicKeyMultibase?: string
+  }
+  return {
+    ...(id ? { unlockKeyAgreementKeyId: id } : {}),
+    ...(publicKeyMultibase
+      ? { unlockKeyAgreementKeyMultibase: publicKeyMultibase }
+      : {})
+  }
 }
 
 /**
@@ -1466,19 +1494,11 @@ export async function bindUnlockSecret({
   })
   await saveKeyringFreshnessPin({ spaceId: unlock.spaceId, createdAt, idb })
 
-  const { id: unlockKeyAgreementKeyId, publicKeyMultibase } =
-    unlock.keyAgreementKey as unknown as {
-      id?: string
-      publicKeyMultibase?: string
-    }
   return {
     unlockSpaceId: unlock.spaceId,
     manageCapability,
     persistClientKeys: clientKeysPersister({ unlock, idb }),
-    ...(unlockKeyAgreementKeyId ? { unlockKeyAgreementKeyId } : {}),
-    ...(publicKeyMultibase
-      ? { unlockKeyAgreementKeyMultibase: publicKeyMultibase }
-      : {})
+    ...unlockKeyAgreementMembers({ unlock })
   }
 }
 
@@ -1694,19 +1714,11 @@ export async function bindCredentialAnchoredUnlockSecret({
     })
   }
 
-  const { id: unlockKeyAgreementKeyId, publicKeyMultibase } =
-    unlock.keyAgreementKey as unknown as {
-      id?: string
-      publicKeyMultibase?: string
-    }
   return {
     unlockSpaceId: unlock.spaceId,
     manageCapability,
     createdAt,
-    ...(unlockKeyAgreementKeyId ? { unlockKeyAgreementKeyId } : {}),
-    ...(publicKeyMultibase
-      ? { unlockKeyAgreementKeyMultibase: publicKeyMultibase }
-      : {})
+    ...unlockKeyAgreementMembers({ unlock })
   }
 }
 
@@ -1939,9 +1951,7 @@ async function retireUnlockIdentity({
       unlockSpaceDeleted = false
     }
   }
-  await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
-  await deleteClientKeyRecord({ spaceId: unlock.spaceId, idb })
-  await deleteKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
+  await deleteUnlockLocalTrio({ spaceId: unlock.spaceId, idb })
   return unlockSpaceDeleted
 }
 

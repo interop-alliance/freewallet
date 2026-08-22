@@ -213,9 +213,7 @@ export function LoginPage() {
   // fresh login attempt, so the dialog can never sit beside an error it did
   // not belong to (the FW-175 stale-state rule; the wipe itself is
   // browser-scoped, so there is no per-account binding to get wrong).
-  const [forgetState, setForgetState] = useState<{
-    hasData: boolean
-  } | null>(null)
+  const [forgetState, setForgetState] = useState<boolean | null>(null)
   const [forgetBusy, setForgetBusy] = useState(false)
   const { copied: codeCopied, copy: copyCode } = useCopyToClipboard({
     onError: (err: unknown) => {
@@ -393,7 +391,7 @@ export function LoginPage() {
    * destructive confirm).
    */
   const handleOpenForget = async () => {
-    setForgetState({ hasData: await hasForgettableBrowserData() })
+    setForgetState(await hasForgettableBrowserData())
   }
 
   /**
@@ -705,7 +703,7 @@ export function LoginPage() {
           {t('auth.forget.title')}
         </DialogTitle>
         <DialogContent>
-          {forgetState?.hasData ? (
+          {forgetState ? (
             <Stack sx={{ gap: 1.5 }}>
               <DialogContentText>{t('auth.forget.body')}</DialogContentText>
               <DialogContentText>
@@ -721,7 +719,7 @@ export function LoginPage() {
           <Button onClick={() => setForgetState(null)}>
             {t('common.cancel')}
           </Button>
-          {forgetState?.hasData && (
+          {forgetState && (
             <Button
               color="error"
               variant="contained"

@@ -14,22 +14,17 @@
  * pass never fails the login, and the next durable login's pass picks up
  * exactly the generations the report still lists.
  */
-import { WasClient } from '@interop/was-client'
 import { isWebvhDid } from '@interop/wallet-core/webvh'
 import {
-  clientAnnexDidParts,
   clientAnnexLogPinId,
-  delegatedClientsPointer,
   runClientAnnexGc
 } from '@interop/wallet-core/clientAnnex'
 import type { ClientAnnexGcReport } from '@interop/wallet-core/clientAnnex'
 import { deleteLogPin } from '@/lib/sessionKey'
+import { pointedClientAnnexReach } from '@/session/annexReach'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import { isDurableSession } from '@/session/persistence'
-import {
-  invalidateVerifiedLog,
-  verifiedAccountLog
-} from '@/session/verifiedLog'
+import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import type { Session } from '@/types/auth'
 
 /**
@@ -67,23 +62,15 @@ export async function sweepClientAnnexGenerations({
     return null
   }
 
-  const { doc, log } = await verifiedAccountLog({
-    profile: session.profile,
-    pointer
-  })
-  const pointedDid = delegatedClientsPointer({ doc })
-  if (pointedDid === undefined) {
+  const reach = await pointedClientAnnexReach({ session, pointer })
+  if (reach === null) {
     // No annex posture on this account: nothing to swap, and no
     // auxiliary Space to list orphans in.
     return null
   }
-  const clientAnnexSpaceId = clientAnnexDidParts({ did: pointedDid }).spaceId
+  const { doc, log, was, spaceId: clientAnnexSpaceId } = reach
 
   const idbFactory = persistence.idb
-  const was = new WasClient({
-    serverUrl: pointer.host,
-    zcapClient: session.profile.zcapClient
-  })
   const report = await runClientAnnexGc({
     was,
     wasServerUrl: pointer.host,

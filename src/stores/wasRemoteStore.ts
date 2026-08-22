@@ -1151,7 +1151,7 @@ export async function ensureUnlockMethodsCollection({
 }): Promise<void> {
   const was = unlockSpaceClient({ storageServerUrl, zcapClient })
   await was
-    .space(spaceId, capability !== undefined ? { capability } : {})
+    .space(spaceId, { capability })
     .collection(UNLOCK_METHODS_COLLECTION.id)
     .configure({ name: UNLOCK_METHODS_COLLECTION.name, force: true })
 }
@@ -1181,7 +1181,7 @@ export async function getUnlockMethodsRecord({
 }): Promise<unknown | null> {
   const was = unlockSpaceClient({ storageServerUrl, zcapClient })
   return await was
-    .space(spaceId, capability !== undefined ? { capability } : {})
+    .space(spaceId, { capability })
     .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
     .resource(UNLOCK_METHODS_RESOURCE)
     .get()
@@ -1216,7 +1216,7 @@ export async function putUnlockMethodsRecord({
   const was = unlockSpaceClient({ storageServerUrl, zcapClient })
   const body = new TextEncoder().encode(JSON.stringify(record))
   await was
-    .space(spaceId, capability !== undefined ? { capability } : {})
+    .space(spaceId, { capability })
     .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
     .resource(UNLOCK_METHODS_RESOURCE)
     .put(body, { contentType: 'application/json' })

@@ -34,7 +34,12 @@ import type {
   ResourceLogPinStore
 } from '@interop/wallet-core/resourceLog'
 
-const SESSION_DB_NAME = 'freewallet-session'
+/**
+ * The session database's name -- the one durable IndexedDB database this
+ * module owns. Exported so the wipe grades delete it by the same name the
+ * opens use, rather than restating the string.
+ */
+export const SESSION_DB_NAME = 'freewallet-session'
 const SESSION_STORE = 'session'
 
 /**
@@ -258,8 +263,7 @@ export async function hasClientKeyRecord({
   spaceId: string
   idb?: IDBFactory
 }): Promise<boolean> {
-  const databases = await idb.databases()
-  if (!databases.some(db => db.name === SESSION_DB_NAME)) {
+  if (!(await sessionDatabaseExists({ idb }))) {
     return false
   }
   return (await loadClientKeyRecord({ spaceId, idb })) !== null
@@ -454,6 +458,29 @@ export async function deleteKeyringFreshnessPin({
     store => store.delete(keyringFreshnessPinKey(spaceId)),
     idb
   )
+}
+
+/**
+ * Deletes the whole local trio one unlock method leaves on a browser: its
+ * keyring cache, its wrapped client-key record, and its freshness pin. The
+ * one list of what an unlock method owns locally, so a fourth per-credential
+ * artifact is added here rather than at every retiring site.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the unlock Space id
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
+export async function deleteUnlockLocalTrio({
+  spaceId,
+  idb
+}: {
+  spaceId: string
+  idb?: IDBFactory
+}): Promise<void> {
+  await deleteKeyringCache({ spaceId, idb })
+  await deleteClientKeyRecord({ spaceId, idb })
+  await deleteKeyringFreshnessPin({ spaceId, idb })
 }
 
 /**
@@ -1071,20 +1098,6 @@ export async function sessionDatabaseExists({
 }
 
 /**
- * Deletes every session-store key that starts with `prefix`, in one
- * transaction. The scan-then-delete shape exists for the key families whose
- * member keys a wipe cannot enumerate exactly -- the annex generations'
- * chain-head pin slots (`log-head/space/<clientAnnexSpaceId>/...`, one slot
- * per generation, with the generation ids gone once the auxiliary Space is)
- * -- and it is deliberately scoped by a caller-supplied prefix so a wipe
- * never crosses into another account's families.
- *
- * @param options {object}
- * @param options.prefix {string}   a non-empty key prefix
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
- */
-/**
  * Deletes every chain-head pin slot belonging to one Space, by prefix.
  * wallet-core derives every slot key as
  * `space/<spaceId>/<collectionId>/<resourceId>` (`resourceLogPinId`), so the
@@ -1111,6 +1124,20 @@ export async function deleteLogPinsForSpace({
   })
 }
 
+/**
+ * Deletes every session-store key that starts with `prefix`, in one
+ * transaction. The ranged delete covers the key families whose member keys a
+ * wipe cannot enumerate exactly -- the annex generations' chain-head pin
+ * slots (`log-head/space/<clientAnnexSpaceId>/...`, one slot per generation,
+ * with the generation ids gone once the auxiliary Space is) -- and it is
+ * deliberately scoped by a caller-supplied prefix so a wipe never crosses
+ * into another account's families.
+ *
+ * @param options {object}
+ * @param options.prefix {string}   a non-empty key prefix
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<void>}
+ */
 export async function deleteSessionKeysByPrefix({
   prefix,
   idb

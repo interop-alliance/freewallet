@@ -66,8 +66,6 @@ import { verifiedAccountLog } from '@/session/verifiedLog'
  *   agent -- its enrolled key signs the log appends
  * @param options.pointer {AccountLogPointer}   the account pointer; its `did`
  *   must name the did:webvh the roster log's entry proofs anchor to
- * @param [options.idb] {IDBFactory}   first-party IndexedDB for the chain-head
- *   pin (CHAPI popups thread the Storage Access API handle here)
  * @param [options.pinStore] {ResourceLogPinStore}   the chain-head pin store,
  *   overriding the durable default -- the posture seam's log-pin member for a
  *   caller holding a persistence handle
@@ -77,16 +75,14 @@ export function accountRosterStore({
   zcapClient,
   keyAgent,
   pointer,
-  idb,
   pinStore
 }: {
   zcapClient: ZcapClient
   keyAgent: ICapabilityAgent
   pointer: AccountLogPointer
-  idb?: IDBFactory
   pinStore?: ResourceLogPinStore
 }): SealableEncryptionDescriptorStore {
-  const pins = pinStore ?? sessionLogPinStore({ idb })
+  const pins = pinStore ?? sessionLogPinStore()
   let pending: Promise<ResourceLogController> | undefined
   return userKeyRosterDescriptorStore({
     storageServerUrl: pointer.host,

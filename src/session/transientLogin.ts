@@ -49,9 +49,13 @@ import {
   mintUserKey,
   readUserKeyRoster,
   userKeyRosterDescriptorStore,
-  userKeyRosterLogSigner
+  userKeyRosterLogSigner,
+  type SealableEncryptionDescriptorStore
 } from '@interop/wallet-core/keys'
-import { didKeyZcapClient } from '@interop/wallet-core/webvh'
+import {
+  didKeyZcapClient,
+  type ICapabilityAgent
+} from '@interop/wallet-core/webvh'
 import { ladderVmAgent } from '@interop/wallet-core/clientAnnex'
 import { ensurePromotedSpaceController } from '@interop/wallet-core/genesis'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
@@ -448,16 +452,24 @@ export async function transientSessionFromKeyringHit({
   // unwrap uses the credential's own key-agreement key, and no escrow runs
   // (the roster keys enrolled clients and standing credentials only).
   const transientZcapClient = webvhZcapClient({ keyAgent, did: clientAnnexDid })
-  const rosterStore = userKeyRosterDescriptorStore({
-    storageServerUrl: pointer.host,
-    zcapClient: transientZcapClient,
-    spaceId: pointer.spaceId,
-    resolveController: async () =>
-      webvhResourceLogController({ did: accountDid, log: verified.log }),
-    pinStore: persistence.logPins,
-    signer: userKeyRosterLogSigner({ keyAgent }),
-    capability: generationDelegation
-  })
+  // The roster store this visit reads and (in the heal below) appends
+  // through: always invoked as the annex VM under the generation
+  // delegation, anchored at the log this composition already verified, and
+  // signed by whichever agent the caller's stage is licensed to sign with.
+  const rosterStoreSignedBy = (
+    signingAgent: ICapabilityAgent
+  ): SealableEncryptionDescriptorStore =>
+    userKeyRosterDescriptorStore({
+      storageServerUrl: pointer.host,
+      zcapClient: transientZcapClient,
+      spaceId: pointer.spaceId,
+      resolveController: async () =>
+        webvhResourceLogController({ did: accountDid, log: verified.log }),
+      pinStore: persistence.logPins,
+      signer: userKeyRosterLogSigner({ keyAgent: signingAgent }),
+      capability: generationDelegation
+    })
+  const rosterStore = rosterStoreSignedBy(keyAgent)
   const readRoster = () =>
     readUserKeyRoster({
       store: rosterStore,
@@ -504,16 +516,7 @@ export async function transientSessionFromKeyringHit({
     // encrypted existed yet (the epoch gate in the ceremony guarantees it),
     // so the fresh key orphans nothing.
     const bootstrapAgent = await ladderVmAgent({ ladderSeed })
-    const healStore = userKeyRosterDescriptorStore({
-      storageServerUrl: pointer.host,
-      zcapClient: transientZcapClient,
-      spaceId: pointer.spaceId,
-      resolveController: async () =>
-        webvhResourceLogController({ did: accountDid, log: verified.log }),
-      pinStore: persistence.logPins,
-      signer: userKeyRosterLogSigner({ keyAgent: bootstrapAgent }),
-      capability: generationDelegation
-    })
+    const healStore = rosterStoreSignedBy(bootstrapAgent)
     const freshUserKey = await mintUserKey()
     await ensureUserKeyRoster({
       store: healStore,

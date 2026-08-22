@@ -53,12 +53,9 @@
  */
 import { deriveNextKeyHash, type DIDLog } from '@interop/did-method-webvh'
 import { WasClient } from '@interop/was-client'
-import { deriveSpaceId } from '@interop/was-client/sync'
 import {
-  clientAnnexDidParts,
   clientAnnexLogStore,
   delegatedClientsDelegationSpaceId,
-  delegatedClientsPointer,
   forgetDurableClient,
   forgetLastDurableClient,
   ladderVmAgent,
@@ -87,7 +84,8 @@ import {
 } from '@interop/wallet-core/webvh'
 import type { RevokedClientKeys } from '@interop/wallet-core/webvh'
 import type { Session, User } from '@/types/auth'
-import { sessionLogPinStore } from '@/lib/sessionKey'
+import type { VerifiedAccountLog } from '@interop/wallet-core/clients'
+import { SESSION_DB_NAME, sessionLogPinStore } from '@/lib/sessionKey'
 import { clearWriterId } from '@/lib/writerId'
 import { BrowserStore, migrationMarkerKeys } from '@/stores/browserStore'
 import {
@@ -103,12 +101,10 @@ import {
   getUnlockMethods,
   refreshStandingDelegationFields
 } from '@/session/unlockMethods'
+import { pointedClientAnnexReach } from '@/session/annexReach'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
 import { cascadeCollections } from '@/session/userKeyCascade'
-import {
-  invalidateVerifiedLog,
-  verifiedAccountLog
-} from '@/session/verifiedLog'
+import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import {
   executeLocalWipe,
   snapshotWipeTargets,
@@ -254,13 +250,9 @@ export async function forgetThisBrowser({
   // The annex Space id, for the wipe's pin-slot enumeration. Best-effort.
   let clientAnnexSpaceId: string | undefined
   try {
-    const { doc } = await verifiedAccountLog({
-      profile: session.profile,
-      pointer
-    })
-    const pointed = delegatedClientsPointer({ doc })
-    if (pointed) {
-      clientAnnexSpaceId = clientAnnexDidParts({ did: pointed }).spaceId
+    const reach = await pointedClientAnnexReach({ session, pointer })
+    if (reach) {
+      clientAnnexSpaceId = reach.spaceId
     }
   } catch (err) {
     console.warn(
@@ -353,7 +345,7 @@ export async function forgetThisBrowser({
           pointer,
           ladderSeed
         }),
-        annex: annexReach({ session, pointer }),
+        annex: annexCeremonyReach({ session, pointer }),
         onBeforeRemoval: async ({ did }) =>
           rebindLoginCredentialRecord({
             session,
@@ -431,7 +423,7 @@ async function ladderSignedRosterStoreFor({
  * @param options.pointer {{ host: string, spaceId: string }}
  * @returns {object}   the ceremony's `annex` option
  */
-function annexReach({
+function annexCeremonyReach({
   session,
   pointer
 }: {
@@ -550,10 +542,14 @@ async function rebindLoginCredentialRecord({
  * the ordinary login proceed to its own handling: only a VERIFIED document
  * may trigger a wipe.
  *
+ * Returns the verification it performed, so the session being built can
+ * seed its verified-log memo with it instead of fetching and re-verifying
+ * the same log moments later; `undefined` means detection was skipped.
+ *
  * @param options {object}
  * @param options.found {KeyringFetchResult}   a hit carrying `clientKeys`
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
+ * @returns {Promise<VerifiedAccountLog | undefined>}
  */
 export async function assertClientStillEnrolled({
   found,
@@ -561,43 +557,45 @@ export async function assertClientStillEnrolled({
 }: {
   found: KeyringFetchResult
   idb?: IDBFactory
-}): Promise<void> {
+}): Promise<VerifiedAccountLog | undefined> {
   const { clientKeys, pointer } = found
   if (!clientKeys || !pointer || !isWebvhDid(pointer.did)) {
-    return
+    return undefined
   }
-  let doc: { verificationMethod?: unknown }
+  let verified: VerifiedAccountLog
   let clientDid: string
+  let signingKeyMultibase: string
   try {
     const agents = await agentsFromSeed({ seed: clientKeys.clientSeed })
     clientDid = agents.keyAgent.id
-    const verified = await verifyAccountLog({
+    signingKeyMultibase = clientSigningKeyMultibase({
+      keyAgent: agents.keyAgent
+    })
+    verified = await verifyAccountLog({
       did: pointer.did,
       spaceId: pointer.spaceId,
       host: pointer.host,
       pinStore: sessionLogPinStore({ idb })
     })
-    doc = verified.doc
   } catch {
     // Unverifiable is not "forgotten": a flap, a missing log, and a
     // continuity refusal all fall through to the ordinary login, whose own
     // policy (and error mapping) applies.
-    return
+    return undefined
   }
-  const [, , signingKeyMultibase] = clientDid.split(':')
   const vmId = `${pointer.did}#${signingKeyMultibase}`
+  const doc = verified.doc as { verificationMethod?: unknown }
   const methods = Array.isArray(doc.verificationMethod)
     ? (doc.verificationMethod as { id?: string }[])
     : []
   if (methods.some(method => method.id === vmId)) {
-    return
+    return verified
   }
   // The removal entry landed; finish the wipe from what the hit alone can
   // derive (this credential's trio, this client's replica and cache
   // families, the account's pins).
   const targets: WipeTargets = {
     clientDid,
-    dbPrefix: deriveSpaceId(clientDid),
     accountDid: pointer.did,
     accountSpaceId: pointer.spaceId,
     unlockSpaceIds: [found.unlockSpaceId],
@@ -635,7 +633,7 @@ export async function hasForgettableBrowserData(): Promise<boolean> {
     if (
       databases.some(
         db =>
-          db.name === 'freewallet-session' ||
+          db.name === SESSION_DB_NAME ||
           (db.name !== undefined && REPLICA_DB_NAME_PATTERN.test(db.name))
       )
     ) {
@@ -706,7 +704,7 @@ export async function forgetBrowserWalletData(): Promise<{
     // caches live inside it).
     try {
       await new Promise<void>(resolve => {
-        const request = indexedDB.deleteDatabase('freewallet-session')
+        const request = indexedDB.deleteDatabase(SESSION_DB_NAME)
         request.onsuccess = () => resolve()
         request.onerror = () => resolve()
         // A sibling tab holding the database open queues the delete; give it
@@ -714,7 +712,7 @@ export async function forgetBrowserWalletData(): Promise<{
         setTimeout(resolve, 10_000)
       })
       const remaining = await indexedDB.databases().catch(() => [])
-      if (remaining.some(db => db.name === 'freewallet-session')) {
+      if (remaining.some(db => db.name === SESSION_DB_NAME)) {
         failed.push('session-db')
       }
     } catch (err) {

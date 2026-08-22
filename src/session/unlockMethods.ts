@@ -68,11 +68,7 @@ import {
   unwrapRecordEnvelope,
   wrapRecordEnvelope
 } from '@/session/recordEnvelope'
-import {
-  deleteClientKeyRecord,
-  deleteKeyringCache,
-  deleteKeyringFreshnessPin
-} from '@/lib/sessionKey'
+import { deleteUnlockLocalTrio } from '@/lib/sessionKey'
 import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
 import {
   ensureUnlockMethodsCollection,
@@ -775,9 +771,7 @@ export async function revokeUnlockMethod({
   // unlock layer's durable retirement and go straight to the session
   // database: they exist only on a remembered browser, and this path is
   // reached only from durable ceremonies.
-  await deleteKeyringCache({ spaceId: entry.unlockSpaceId, idb })
-  await deleteClientKeyRecord({ spaceId: entry.unlockSpaceId, idb })
-  await deleteKeyringFreshnessPin({ spaceId: entry.unlockSpaceId, idb })
+  await deleteUnlockLocalTrio({ spaceId: entry.unlockSpaceId, idb })
   await dropRegistryEntry({ session, entry })
   return rotation
 }
@@ -819,9 +813,7 @@ export async function deleteUnlockMethodArtifacts({
       capability: entry.manageCapability
     })
   }
-  await deleteKeyringCache({ spaceId: entry.unlockSpaceId, idb })
-  await deleteClientKeyRecord({ spaceId: entry.unlockSpaceId, idb })
-  await deleteKeyringFreshnessPin({ spaceId: entry.unlockSpaceId, idb })
+  await deleteUnlockLocalTrio({ spaceId: entry.unlockSpaceId, idb })
 }
 
 /**
@@ -933,23 +925,21 @@ export function upsertPassphraseUnlockMethod({
   // supplies fresh ones -- but only while the entry still names the same
   // unlock Space (a passphrase change retires the old credential's posture
   // wholesale).
-  const carried =
-    standing ??
-    (existing && existing.unlockSpaceId === unlockSpaceId
-      ? {
-          rosterKid: existing.rosterKid,
-          keyAgreementKeyMultibase: existing.keyAgreementKeyMultibase,
-          updateKeyMultibase: existing.updateKeyMultibase,
-          delegationKeyId: existing.delegationKeyId,
-          delegationExpires: existing.delegationExpires,
-          delegatedClientsKeyId: existing.delegatedClientsKeyId,
-          delegatedClientsExpires: existing.delegatedClientsExpires,
-          unlockClientDid: existing.unlockClientDid,
-          unlockKeyAgreementKeyId: existing.unlockKeyAgreementKeyId,
-          unlockKeyAgreementKeyMultibase:
-            existing.unlockKeyAgreementKeyMultibase
-        }
-      : undefined)
+  let carried: StandingUnlockFields | undefined = standing
+  if (!carried && existing && existing.unlockSpaceId === unlockSpaceId) {
+    // Everything the entry holds beside its non-standing members IS its
+    // standing posture, so the rest carries forward without restating the
+    // interface here (a field added to `StandingUnlockFields` is carried
+    // with no edit at this site).
+    const {
+      type: _type,
+      createdAt: _createdAt,
+      unlockSpaceId: _spaceId,
+      manageCapability: _manageCapability,
+      ...standingMembers
+    } = existing
+    carried = standingMembers
+  }
   const entry: PassphraseUnlockMethod = {
     type: 'passphrase',
     createdAt: existing?.createdAt ?? new Date().toISOString(),

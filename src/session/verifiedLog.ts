@@ -43,6 +43,10 @@ import type { ControllerProfile } from '@/types/auth'
  */
 export interface VerifiedLogCache {
   get: (options: { pointer: AccountLogPointer }) => Promise<VerifiedAccountLog>
+  prime: (options: {
+    pointer: AccountLogPointer
+    verified: VerifiedAccountLog
+  }) => void
   invalidate: () => void
 }
 
@@ -103,6 +107,10 @@ export function createVerifiedLogCache({
       pending = verification
       return verification
     },
+    prime({ pointer, verified }) {
+      key = pointerKey({ pointer })
+      pending = Promise.resolve(verified)
+    },
     invalidate() {
       key = undefined
       pending = undefined
@@ -145,6 +153,34 @@ export async function verifiedAccountLog({
   return await profile.verifiedLog.get({
     pointer: { did: target.did, spaceId: target.spaceId, host: target.host }
   })
+}
+
+/**
+ * Seeds the memo with a verification a login-path check already performed,
+ * so the session's first reader does not fetch and re-verify the same log.
+ * Takes the same pointer key `verifiedAccountLog` reads under, and is
+ * superseded by any later `invalidate`.
+ *
+ * @param options {object}
+ * @param options.profile {ControllerProfile}
+ * @param options.pointer {AccountLogPointer}   the pointer the log was
+ *   verified against
+ * @param options.verified {VerifiedAccountLog}
+ * @returns {void}
+ */
+export function primeVerifiedAccountLog({
+  profile,
+  pointer,
+  verified
+}: {
+  profile: ControllerProfile
+  pointer: AccountLogPointer
+  verified: VerifiedAccountLog
+}): void {
+  profile.verifiedLog ??= createVerifiedLogCache({
+    pinStore: profile.persistence.logPins
+  })
+  profile.verifiedLog.prime({ pointer, verified })
 }
 
 /**

@@ -35,8 +35,7 @@
  * (`unlockLogStore`) lives here too, shared with the recovery continuation's.
  */
 import type { IZcap } from '@interop/data-integrity-core'
-import { PreconditionFailedError, WasClient } from '@interop/was-client'
-import { resourcePath, toUrl } from '@interop/was-client/paths'
+import { WasClient } from '@interop/was-client'
 import {
   publishUnlockKey,
   type UnlockLogStore
@@ -44,21 +43,18 @@ import {
 import type { ClientKeyRecord } from '@interop/wallet-core/keys'
 import {
   accountLogPinId,
+  delegatedWebvhLogStore,
   didKeyZcapClient,
   isWebvhDid
 } from '@interop/wallet-core/webvh'
 import {
   commitClientAnnexRung,
   clientAnnexDidParts,
-  clientAnnexLogPinId,
-  clientAnnexLogStore,
   delegatedClientsPointer,
-  ensureGenerationDelegationCurrent,
   generateLadderSeed,
   ladderRung,
   mintCredentialClientAnnexGeneration,
   mintDelegatedClientsDelegation,
-  mintGenerationDelegation,
   selfEnrollClientCore,
   setDelegatedClientsPointer
 } from '@interop/wallet-core/clientAnnex'
@@ -87,6 +83,10 @@ import {
   enrolledClientContext,
   requireEnrolledClientContext
 } from '@/session/enrolledContext'
+import {
+  clientAnnexReachOf,
+  ensureGenerationDelegation
+} from '@/session/annexReach'
 import { sessionRosterStore } from '@/session/rosterStore'
 import {
   invalidateVerifiedLog,
@@ -105,11 +105,12 @@ import { mintSpaceId } from '@/stores/wasRemoteStore'
 
 /**
  * The narrow store a credential's self-enrollment continuation writes
- * through: public fetches for the world-readable log (carrying the response
+ * through: the shared delegated log store aimed at the account log --
+ * public fetches for the world-readable resource (carrying the response
  * ETag as the ceremony's compare-and-swap token), and the delegated PUT (the
  * record's bridge zcap, invoked by the credential-derived did:key client) for
- * `did.jsonl`, forwarding the ceremony's conditional-write preconditions.
- * Shared by the standing self-enrollment and the recovery continuation.
+ * `did.jsonl`. Shared by the standing self-enrollment and the recovery
+ * continuation.
  *
  * @param options {object}
  * @param options.pointer {AccountPointer}   the account pointer (host +
@@ -128,82 +129,14 @@ export function unlockLogStore({
   delegation: IZcap
   zcapClient: ZcapClient
 }): UnlockLogStore {
-  const was = new WasClient({
-    serverUrl: pointer.host,
-    zcapClient
+  return delegatedWebvhLogStore({
+    host: pointer.host,
+    spaceId: pointer.spaceId,
+    collectionId: ID_COLLECTION.id,
+    delegation,
+    zcapClient,
+    publicRead: true
   })
-  return {
-    async getIdResourceRaw({ resourceId }: { resourceId: string }) {
-      // Built with the paths helpers so a sub-path deployment fetches the
-      // resource the bridge delegation's target names (the root-anchored
-      // form was drift).
-      const response = await fetch(
-        toUrl({
-          serverUrl: pointer.host,
-          path: resourcePath(pointer.spaceId, ID_COLLECTION.id, resourceId)
-        })
-      )
-      if (response.status === 404) {
-        return undefined
-      }
-      if (!response.ok) {
-        throw new Error(
-          `Fetching "${resourceId}" failed (HTTP ${response.status}).`
-        )
-      }
-      return {
-        text: await response.text(),
-        etag: response.headers.get('etag') ?? undefined
-      }
-    },
-    async putIdResource({
-      resourceId,
-      content,
-      contentType,
-      ifMatch,
-      ifNoneMatch
-    }: {
-      resourceId: string
-      content: object | string
-      contentType?: string
-      ifMatch?: string
-      ifNoneMatch?: boolean
-    }) {
-      const serialized =
-        typeof content === 'string' ? content : JSON.stringify(content)
-      const headers: Record<string, string> = {
-        'content-type': contentType ?? 'application/json'
-      }
-      if (ifMatch !== undefined) {
-        headers['if-match'] = ifMatch
-      }
-      if (ifNoneMatch) {
-        headers['if-none-match'] = '*'
-      }
-      try {
-        await was.request({
-          path: resourcePath(pointer.spaceId, ID_COLLECTION.id, resourceId),
-          method: 'PUT',
-          headers,
-          body: new TextEncoder().encode(serialized),
-          capability: delegation
-        })
-      } catch (err) {
-        // `was.request` is the raw signed request and applies no error
-        // mapping, so a failed precondition surfaces as a bare HTTP 412;
-        // rethrow it under the `PreconditionFailedError` name the
-        // `WebvhIdStore` seam contract requires for the ceremony's rebase.
-        const status = (err as { status?: unknown })?.status
-        if (status === 412) {
-          throw new PreconditionFailedError(
-            `"${resourceId}" has moved on (stale precondition).`,
-            { status: 412, cause: err }
-          )
-        }
-        throw err
-      }
-    }
-  }
 }
 
 /**
@@ -359,22 +292,15 @@ export async function establishStandingUnlock({
   const actingLadderSeed = session.profile.ladderSeed
   if (clientAnnexDid && actingLadderSeed) {
     try {
-      const clientAnnex = clientAnnexDidParts({ did: clientAnnexDid })
+      const reach = clientAnnexReachOf({ session, pointer, clientAnnexDid })
       await commitClientAnnexRung({
-        store: clientAnnexLogStore({
-          was: new WasClient({ serverUrl: pointer.host, zcapClient }),
-          spaceId: clientAnnex.spaceId,
-          generationId: clientAnnex.generationId
-        }),
+        store: reach.logStore(),
         boundLadderSeed: ladderSeed,
         actingLadderSeed,
-        generationId: clientAnnex.generationId,
+        generationId: reach.generationId,
         expectedDid: clientAnnexDid,
         pinStore: session.profile.persistence.logPins,
-        logId: clientAnnexLogPinId({
-          spaceId: clientAnnex.spaceId,
-          generationId: clientAnnex.generationId
-        })
+        logId: reach.logId
       })
     } catch (err) {
       console.warn(
@@ -498,8 +424,6 @@ export async function establishClientAnnexGeneration({
     )
   }
 
-  const was = new WasClient({ serverUrl: pointer.host, zcapClient })
-
   // The generation: reuse the pointed one when the document already carries
   // the delegated-clients pointer; mint and point otherwise, in the standing
   // order (the annex log publishes first, the pointer follows).
@@ -543,23 +467,12 @@ export async function establishClientAnnexGeneration({
   // The embedded generation delegation, installed when the annex document
   // carries none yet (the fresh-genesis case) and renewed near expiry
   // otherwise -- signed by this enrolled client's promoted key either way.
-  const clientAnnex = clientAnnexDidParts({ did: clientAnnexDid })
-  await ensureGenerationDelegationCurrent({
-    store: clientAnnexLogStore({
-      was,
-      spaceId: clientAnnex.spaceId,
-      generationId: clientAnnex.generationId
-    }),
-    ladderSeed,
-    generationId: clientAnnex.generationId,
-    mintGenerationDelegation: async ({ clientAnnexDid: generationDid }) =>
-      mintGenerationDelegation({
-        zcapClient,
-        wasServerUrl: pointer.host,
-        spaceId: pointer.spaceId,
-        clientAnnexDid: generationDid
-      }),
-    expectedDid: clientAnnexDid
+  const clientAnnex = clientAnnexReachOf({ session, pointer, clientAnnexDid })
+  await ensureGenerationDelegation({
+    session,
+    pointer,
+    reach: clientAnnex,
+    ladderSeed
   })
 
   // The sibling delegation, re-sealed into the record beside the existing

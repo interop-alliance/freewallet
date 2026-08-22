@@ -26,26 +26,19 @@
  * user key generations the credential already delivered. Retirement stops
  * future reads.
  */
-import { WasClient } from '@interop/was-client'
 import { retireUnlockCredential } from '@interop/wallet-core/unlock'
 import type {
   ClientAnnexPostureRetirement,
   StandingUnlockKeys
 } from '@interop/wallet-core/unlock'
 import type { UserKey } from '@interop/wallet-core/keys'
+import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import {
-  keyAgreementCommitment,
-  type PublishedKeyDocument
-} from '@interop/wallet-core/webvh'
-import {
-  clientAnnexDidParts,
-  clientAnnexLogPinId,
-  clientAnnexLogStore,
-  delegatedClientsPointer,
   retireClientAnnexRung,
   swapClientAnnexGeneration
 } from '@interop/wallet-core/clientAnnex'
 import type { Session } from '@/types/auth'
+import { clientAnnexReachFor } from '@/session/annexReach'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import { sessionRosterStore } from '@/session/rosterStore'
 import {
@@ -253,44 +246,29 @@ async function retireClientAnnexPostureStage({
   >['remoteStore']
 }): Promise<ClientAnnexPostureRetirement> {
   try {
-    const doc = document as PublishedKeyDocument
-    const pointedDid = delegatedClientsPointer({
-      doc: doc as Parameters<typeof delegatedClientsPointer>[0]['doc']
-    })
-    if (pointedDid === undefined) {
+    const doc = document as Parameters<typeof clientAnnexReachFor>[0]['doc']
+    const reach = clientAnnexReachFor({ session, pointer, doc })
+    if (reach === null) {
       return { action: 'skipped', reason: 'no-pointer' }
     }
-    const { spaceId: clientAnnexSpaceId, generationId } = clientAnnexDidParts({
-      did: pointedDid
-    })
+    const { generationId, was } = reach
     const survivors = [survivingLadderSeed, session.profile.ladderSeed].filter(
       (seed): seed is Uint8Array =>
         seed !== undefined &&
         (retiredLadderSeed === undefined || !sameSeed(seed, retiredLadderSeed))
     )
-    const was = new WasClient({
-      serverUrl: pointer.host,
-      zcapClient: session.profile.zcapClient
-    })
     const logPins = session.profile.persistence.logPins
 
     if (retiredLadderSeed !== undefined && survivors.length > 0) {
       try {
         const { struck } = await retireClientAnnexRung({
-          store: clientAnnexLogStore({
-            was,
-            spaceId: clientAnnexSpaceId,
-            generationId
-          }),
+          store: reach.logStore(),
           retiredLadderSeed,
           actingLadderSeed: survivors[0],
           generationId,
-          expectedDid: pointedDid,
+          expectedDid: reach.clientAnnexDid,
           pinStore: logPins,
-          logId: clientAnnexLogPinId({
-            spaceId: clientAnnexSpaceId,
-            generationId
-          })
+          logId: reach.logId
         })
         return { action: struck ? 'struck' : 'clean' }
       } catch (err) {
@@ -312,7 +290,7 @@ async function retireClientAnnexPostureStage({
       accountSpaceId: pointer.spaceId,
       account: {
         did: pointer.did,
-        doc: doc as Parameters<typeof delegatedClientsPointer>[0]['doc']
+        doc
       },
       idStore: remoteStore.webvhIdStore(),
       updateKeys: clientWebvhKeys,

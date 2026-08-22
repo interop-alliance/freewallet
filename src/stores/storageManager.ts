@@ -1245,13 +1245,6 @@ export class StorageManager {
     await this.#localStore?.wipeStorage()
   }
 
-  async wipeStorage() {
-    // Remote first: if the remote wipe fails, the error surfaces while the
-    // local data (and session) are still intact.
-    await this.wipeRemoteStorage()
-    await this.wipeLocalStorage()
-  }
-
   /**
    * Closes the local database without removing data. Called on logout.
    *

@@ -63,14 +63,11 @@ import {
   mintGenerationDelegation,
   setDelegatedClientsPointer
 } from '@interop/wallet-core/clientAnnex'
-import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import type { UnlockKeyAgreementPublication } from '@interop/wallet-core/unlock'
 import {
   ensureWalletSpaceEpochs,
   mintUserKey,
   readUserKeyRoster,
-  userKeyRosterDescriptorStore,
-  userKeyRosterLogSigner,
   type SealableEncryptionDescriptorStore,
   type UserKey
 } from '@interop/wallet-core/keys'
@@ -86,6 +83,7 @@ import {
   type UnlockCredential
 } from '@/session/keyring'
 import type { TransientSessionPersistence } from '@/session/persistence'
+import { accountRosterStore } from '@/session/rosterStore'
 import type { StandingUnlockFields } from '@/session/unlockMethods'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
 
@@ -200,21 +198,11 @@ export async function establishCredentialAnchoredAccount({
   }: {
     did: string
   }): SealableEncryptionDescriptorStore =>
-    userKeyRosterDescriptorStore({
-      storageServerUrl: host,
+    accountRosterStore({
       zcapClient: bootstrapZcap,
-      spaceId,
-      resolveController: async () => {
-        const verified = await verifyAccountLog({
-          did,
-          spaceId,
-          host,
-          pinStore: persistence.logPins
-        })
-        return webvhResourceLogController({ did, log: verified.log })
-      },
-      pinStore: persistence.logPins,
-      signer: userKeyRosterLogSigner({ keyAgent: bootstrapAgent })
+      keyAgent: bootstrapAgent,
+      pointer: { did, spaceId, host },
+      pinStore: persistence.logPins
     })
 
   // 2. The genesis ceremony under the bootstrap did:key. The candidate user

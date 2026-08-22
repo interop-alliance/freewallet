@@ -114,7 +114,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   for (const session of openSessions) {
-    await session.wipeStorage()
+    await session.wipeLocalStorage()
   }
   openSessions.length = 0
   Reflect.deleteProperty(globalThis, 'localStorage')

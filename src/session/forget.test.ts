@@ -26,7 +26,9 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => {
   return {
     ...actual,
     verifyAccountLog: vi.fn(),
-    clientSigningKeyMultibase: vi.fn(() => 'zForgottenSigning'),
+    clientSigningKeyMultibase: vi.fn(
+      ({ keyAgent }: { keyAgent: { id: string } }) => keyAgent.id.split(':')[2]
+    ),
     updateKeyMultibase: vi.fn(async () => 'zForgottenUpdate')
   }
 })
@@ -157,7 +159,7 @@ const LADDER_ZCAP_CLIENT = { ladderZcapClient: true }
  * The sentinel wipe-target snapshot, threaded from `snapshotWipeTargets`
  * into `executeLocalWipe` unchanged.
  */
-const WIPE_TARGETS = { clientDid: 'did:key:zClientA', dbPrefix: 'prefix-a' }
+const WIPE_TARGETS = { clientDid: 'did:key:zClientA' }
 
 /**
  * A fake IDBFactory-shaped global: `databases()` serves the live name list
@@ -327,9 +329,13 @@ describe('assertClientStillEnrolled (the forgotten-browser detector)', () => {
       updateKeys: [],
       nextKeyHashes: []
     } as never)
+    // The verification is handed back so the login can prime its memo with
+    // it rather than verifying the same log again.
     await expect(
       assertClientStillEnrolled({ found: hit() })
-    ).resolves.toBeUndefined()
+    ).resolves.toMatchObject({
+      doc: { verificationMethod: [{ id: `${pointer.did}#${multibase}` }] }
+    })
     expect(deleted).toEqual([])
   })
 
