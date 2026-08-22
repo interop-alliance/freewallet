@@ -986,21 +986,35 @@ fresh generation back to the ceremony, so the `#DelegatedClients` pointer
 moves to it inside the SAME add-and-retire entry: the entry retires the
 pre-recovery credential's ladder VM, and a pointer written after it would
 leave a window where the document names a generation no surviving record's
-sibling delegation targets and neither credential could enroll. After the
-entry a per-visit transient client is loudly enrolled into the fresh
-generation, and the mandatory rotation runs as the ONE ladder-signed roster
-append the ceremony-tail license admits
-(`replaceUserKeyRosterRecipients`: the spent code retired, the fresh
-credential and the replacement code escrowed, the fresh epoch minted, in a
-single write anchored at the add-and-retire entry). The epoch cascade and
+sibling delegation targets and neither credential could enroll. The
+per-visit transient client is loudly enrolled into the fresh generation
+inside the same seam, written controller-tier while the auxiliary Space
+still answers to the bootstrap key (it exercises no authority there: the
+generation delegation it will invoke under is signed by a ladder VM the
+document does not list yet). What the placement buys is the window after
+the entry: the mandatory rotation, the ONE ladder-signed roster append the
+ceremony-tail license admits (`replaceUserKeyRosterRecipients`: the spent
+code retired, the fresh credential and the replacement code escrowed, the
+fresh epoch minted, in a single write anchored at the add-and-retire
+entry), is the first request after the entry, with no enrollment and no
+pre-read between the typed code dying in the document and the new
+credential gaining its wrap. The pre-rotation user key the registry update
+needs is unwrapped afterwards, from the superseded epoch's escrow to the
+fresh credential. The epoch cascade and
 the unlock-methods registry update (spent entry out, replacement and
 new-passphrase entries in, re-sealed to the rotated user key) ride the
 generation delegation, and the visit then enters through the ordinary
 transient composition with zero local residue -- the locate step's
-chain-head pin rides in memory too. A rotation torn mid-fan-out on a
+chain-head pin rides in memory too. Two residues are stated. A tear inside
+the append itself leaves the spent code dead (its key left the document, so
+a re-run refuses it as spent) and the current epoch wrapped to the removed
+code alone; on a client-less account no login sweep runs, so the closing
+mechanism is a completer holding both the spent code (to unwrap the epoch)
+and the new passphrase (its record's ladder seed and sibling), running the
+same append anchored at the same entry under the ceremony-tail license's
+still-unused shot -- not built yet. And a rotation torn mid-fan-out on a
 client-less account has no completer yet; a stranded collection stays
-keyed to the spent code until the next durable login or a spend re-run
-(the documented residue).
+keyed to the spent code until the next durable login or a spend re-run.
 
 Revoking a code from Settings is the issuance reversal and is REAL (the
 secret was only ever a pointer to the record): document entry out, user key

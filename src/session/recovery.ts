@@ -73,7 +73,6 @@ import { accountRosterStore, sessionRosterStore } from '@/session/rosterStore'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
   clientSigningKeyMultibase,
-  delegatedWebvhLogStore,
   delegationKeyInDocument,
   didKeyZcapClient,
   documentKeyMultibases,
@@ -85,10 +84,11 @@ import {
   webvhZcapClient
 } from '@interop/wallet-core/webvh'
 import {
+  clientAnnexLogPinId,
   clientAnnexLogStore,
   delegatedClientsDelegationMinter,
   embeddedGenerationDelegation,
-  enrollTransientClient,
+  enrollClientAnnexTransientClient,
   ensureGenerationDelegationCurrent,
   generateLadderSeed,
   ladderRung,
@@ -100,7 +100,8 @@ import {
   recoverWebvhLadderAnchored
 } from '@interop/wallet-core/clientAnnex'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
-import { WasClient } from '@interop/was-client'
+import { WasClient, type CollectionEncryption } from '@interop/was-client'
+import { unwrapEpochSecret } from '@interop/was-client/edv'
 import {
   currentAccountRecordSigners,
   type VerifiedAccountLog
@@ -1112,6 +1113,49 @@ export async function recoverAccountWithCode({
 }
 
 /**
+ * The user key of the epoch a rotation just superseded, unwrapped through a
+ * recipient escrowed into it. The roster is append-only and its current
+ * epoch is always the newest, so the superseded epoch is the one immediately
+ * before the current one in the descriptor's list.
+ *
+ * @param options {object}
+ * @param options.descriptor {CollectionEncryption}   the rotated roster
+ * @param options.keyAgreementKey {IKeyAgreementKey}   a recipient's
+ *   key-agreement key holding a wrap in the prior epoch
+ * @returns {Promise<UserKey>}
+ */
+async function unwrapPriorEpochUserKey({
+  descriptor,
+  keyAgreementKey
+}: {
+  descriptor: CollectionEncryption
+  keyAgreementKey: IKeyAgreementKey
+}): Promise<UserKey> {
+  const epochs = descriptor.epochs ?? []
+  const currentIndex = epochs.findIndex(
+    epoch => epoch.id === descriptor.currentEpoch
+  )
+  const prior = currentIndex > 0 ? epochs[currentIndex - 1] : undefined
+  const entry = prior?.recipients.find(
+    recipient => recipient.header.kid === keyAgreementKey.id
+  )
+  if (!prior || !entry) {
+    throw new Error(
+      'The rotated user key roster carries no prior epoch escrowed to the ' +
+        'fresh credential.'
+    )
+  }
+  const secret = await unwrapEpochSecret({ entry, keyAgreementKey })
+  if (!secret) {
+    throw new Error(
+      "The fresh credential's escrow in the prior user key epoch failed to " +
+        'unwrap.'
+    )
+  }
+  return { id: prior.id, secret }
+}
+
+/**
  * The TRANSIENT recovery variant (the default on a non-remembered browser):
  * `recoverWebvhLadderAnchored` publishes the fresh credential's ladder VM in
  * place of a durable client, so the account lands client-less and
@@ -1125,22 +1169,33 @@ export async function recoverAccountWithCode({
  *    did:key (a recovery record carries no annex sibling, so the old
  *    auxiliary Space is unreachable; the old generation falls to orphan
  *    discovery), its delegation embedded and its Space's controller flipped;
- *    then the new credential's bridge and sibling (ladder-VM-signed), the new
- *    passphrase's unlock record (the ladder seed inside), and the replacement
- *    code's record are durably written -- the pinned ordering: a tab death
- *    must never leave a published anchor nobody can derive. The seam names
- *    the fresh generation back to the continuation, which points the
- *    `#DelegatedClients` service entry at it inside the SAME add-and-retire
- *    entry -- that entry retires the pre-recovery credential's ladder VM, so
- *    a pointer written after it would leave a window where the document
- *    names a generation no surviving record's sibling can reach.
- * 2. A per-visit transient client is enrolled into the fresh generation (the
- *    loud entry), and the mandatory rotation runs as ONE ladder-signed roster
- *    append anchored at the add-and-retire entry (the ceremony-tail license's
- *    one shot): the spent code retired, the fresh credential and the
- *    replacement code escrowed, the fresh epoch minted -- invoked as the
- *    annex VM under the generation delegation, the only authority this
- *    visit holds over the promoted Space.
+ *    the per-visit transient client is enrolled into it there too (the loud
+ *    annex entry, written controller-tier while the auxiliary Space still
+ *    answers to the bootstrap key -- it exercises no authority until the
+ *    generation delegation's signer publishes); then the new credential's
+ *    bridge and sibling (ladder-VM-signed), the new passphrase's unlock
+ *    record (the ladder seed inside), and the replacement code's record are
+ *    durably written -- the pinned ordering: a tab death must never leave a
+ *    published anchor nobody can derive. The seam names the fresh generation
+ *    back to the continuation, which points the `#DelegatedClients` service
+ *    entry at it inside the SAME add-and-retire entry -- that entry retires
+ *    the pre-recovery credential's ladder VM, so a pointer written after it
+ *    would leave a window where the document names a generation no surviving
+ *    record's sibling can reach.
+ * 2. The mandatory rotation runs as ONE ladder-signed roster append anchored
+ *    at the add-and-retire entry (the ceremony-tail license's one shot), and
+ *    it is the FIRST request after that entry: the spent code retired, the
+ *    fresh credential and the replacement code escrowed, the fresh epoch
+ *    minted -- invoked as the annex VM under the generation delegation, the
+ *    only authority this visit holds over the promoted Space. Everything the
+ *    append needs (the enrolled visit key, the embedded delegation) is in
+ *    hand before the entry, so the window in which the typed code is dead
+ *    and the new credential holds no wrap is the append itself. A tear
+ *    inside it is the stated residue: the spent code can no longer re-run
+ *    (its key left the document), and no login sweep runs on a client-less
+ *    account, so the current epoch stays wrapped to the removed code alone
+ *    until a completer that holds both the spent code and the new
+ *    passphrase runs the append anchored at the same entry.
  * 3. The epoch cascade and the registry update (spent entry out, replacement
  *    and new-passphrase entries in, re-sealed to the rotated user key) ride
  *    the same delegation; the spent code's unlock Space is deleted last.
@@ -1212,9 +1267,18 @@ async function recoverAccountTransient({
     client: spent
   })
 
+  // The per-visit transient client: minted here, enrolled inside the seam
+  // below, and the invocation identity the rotation, the cascade, and the
+  // registry update ride -- the generation delegation is the only authority
+  // this visit holds over the promoted Space.
+  const visitSeed = crypto.getRandomValues(new Uint8Array(32))
+  const visitAgents = await agentsFromSeed({ seed: visitSeed })
+
   // Filled by the `onCommitted` seam, consumed by the tail below.
   let clientAnnexSpaceId: string | undefined
   let clientAnnexDid: string | undefined
+  let clientAnnexDoc:
+    Parameters<typeof embeddedGenerationDelegation>[0]['doc'] | undefined
   let bridge: IZcap | undefined
   let sibling: IZcap | undefined
   let newRecordBind:
@@ -1280,6 +1344,33 @@ async function recoverAccountTransient({
             }),
           expectedDid: minted.did
         })
+        // The visit's key enrolled into the fresh generation BEFORE the
+        // add-and-retire entry (the loud annex entry, signed by the
+        // credential's static rung 0), written controller-tier while the
+        // auxiliary Space still answers to the bootstrap key. Nothing is
+        // exercised here: the delegation it will invoke under is signed by a
+        // ladder VM the document does not list yet. What the placement buys
+        // is the window after the entry -- the roster append is then the
+        // first request that follows it.
+        const enrolled = await enrollClientAnnexTransientClient({
+          store: clientAnnexLogStore({
+            was: bootstrapWas,
+            spaceId: clientAnnexSpaceId,
+            generationId: minted.generationId
+          }),
+          ladderSeed,
+          generationId: minted.generationId,
+          transientKeyMultibase: clientSigningKeyMultibase({
+            keyAgent: visitAgents.keyAgent
+          }),
+          expectedDid: minted.did,
+          pinStore: logPins,
+          logId: clientAnnexLogPinId({
+            spaceId: clientAnnexSpaceId,
+            generationId: minted.generationId
+          })
+        })
+        clientAnnexDoc = enrolled.doc
         await bootstrapWas
           .space(clientAnnexSpaceId)
           .configure({ controller: did, force: true })
@@ -1340,6 +1431,7 @@ async function recoverAccountTransient({
   if (
     !clientAnnexSpaceId ||
     !clientAnnexDid ||
+    !clientAnnexDoc ||
     !bridge ||
     !sibling ||
     !newRecordBind ||
@@ -1351,44 +1443,8 @@ async function recoverAccountTransient({
     )
   }
 
-  // The per-visit transient client, enrolled into the fresh generation
-  // through the new record's sibling (the loud entry): the invocation
-  // identity the rotation, the cascade, and the registry update ride, since
-  // the generation delegation is the only authority this visit holds over
-  // the promoted Space.
-  const visitSeed = crypto.getRandomValues(new Uint8Array(32))
-  const visitAgents = await agentsFromSeed({ seed: visitSeed })
-  const { doc: clientAnnexDoc } = await enrollTransientClient({
-    readAccountDocument: async () =>
-      (
-        await verifyAccountLog({
-          did,
-          spaceId,
-          host,
-          pinStore: logPins
-        })
-      ).doc,
-    storeForGenerationId: generationId =>
-      delegatedWebvhLogStore({
-        host,
-        spaceId: clientAnnexSpaceId!,
-        collectionId: generationId,
-        delegation: sibling!,
-        zcapClient: standing.agents.zcapClient
-      }),
-    ladderSeed,
-    transientKeyMultibase: clientSigningKeyMultibase({
-      keyAgent: visitAgents.keyAgent
-    }),
-    // The fresh genesis embedded its delegation above; a generation without
-    // one here is a torn establishment, not a mintable state.
-    mintGenerationDelegation: async () => {
-      throw new Error(
-        'The fresh annex generation carries no embedded delegation.'
-      )
-    },
-    pinStore: logPins
-  })
+  // The fresh genesis embedded its delegation inside the seam; a generation
+  // without one here is a torn establishment, not a mintable state.
   const generationDelegation = embeddedGenerationDelegation({
     doc: clientAnnexDoc
   })
@@ -1417,24 +1473,17 @@ async function recoverAccountTransient({
     signer: userKeyRosterLogSigner({ keyAgent: bootstrapAgent }),
     capability: generationDelegation
   })
-  const preRotation = await readUserKeyRoster({
-    store: rosterStore,
-    clientKeyAgreementKey: spent.agents.keyAgreementKey
-  })
-  if (!preRotation) {
-    throw new Error(
-      'The account has no user key roster; it must finish provisioning before ' +
-        'it can be recovered.'
-    )
-  }
-  const oldUserKey = preRotation.userKey
 
   // The mandatory rotation, in the ONE ladder-signed append the license
-  // admits: the spent code's wrap retired, the fresh credential's standing
-  // key and the replacement code escrowed into every epoch, and the fresh
-  // epoch minted -- all in a single descriptor write. Convergent: a re-run
-  // writes nothing.
-  await replaceUserKeyRosterRecipients({
+  // admits, and the FIRST request after the add-and-retire entry -- no
+  // enrollment, no pre-read stands between the typed code dying in the
+  // document and the new credential gaining its wrap: the spent code's wrap
+  // retired, the fresh credential's standing key and the replacement code
+  // escrowed into every epoch, and the fresh epoch minted -- all in a single
+  // descriptor write. Convergent: a re-run writes nothing. An account with
+  // no roster yet is refused by the append itself (the owner has nothing
+  // to unwrap).
+  const rotated = await replaceUserKeyRosterRecipients({
     store: rosterStore,
     document: continuation.doc as Parameters<
       typeof replaceUserKeyRosterRecipients
@@ -1454,12 +1503,18 @@ async function recoverAccountTransient({
   })
   const postRotation = await readUserKeyRoster({
     store: rosterStore,
+    descriptor: rotated,
     clientKeyAgreementKey: standing.agents.keyAgreementKey
   })
-  if (!postRotation) {
-    throw new Error('The user key roster vanished during recovery.')
-  }
   const newUserKey = postRotation.userKey
+  // The pre-rotation user key (the registry below is still sealed to it):
+  // the epoch the append just superseded, unwrapped through the fresh
+  // credential's escrow -- the roster is append-only, so it is the epoch
+  // immediately before the current one.
+  const oldUserKey = await unwrapPriorEpochUserKey({
+    descriptor: rotated,
+    keyAgreementKey: standing.agents.keyAgreementKey
+  })
 
   // The epoch cascade under the generation delegation: every encrypted
   // collection takes a fresh epoch naming the rotated user key. Best-effort

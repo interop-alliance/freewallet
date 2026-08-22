@@ -25,6 +25,15 @@
 
 ### Fixed
 
+- Transient recovery's mandatory rotation is now the first request after
+  the add-and-retire entry. The per-visit transient client is enrolled into
+  the fresh annex generation inside the persist-before-publish seam
+  (controller-tier, before the auxiliary Space's controller flips) and the
+  pre-rotation roster read is gone (the superseded epoch's user key is
+  unwrapped from the rotated roster afterwards), so the window in which the
+  typed code is dead and the new credential holds no wrap is the append
+  alone. A tear inside it remains a stated residue. The transient-recovery
+  e2e cell pins the write order under an aborted append.
 - Transient recovery no longer strands the account when a flap follows the
   add-and-retire entry. The `#DelegatedClients` pointer now rides into that
   entry (the persist-before-publish seam names the fresh annex generation
