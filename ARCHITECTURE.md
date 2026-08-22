@@ -239,8 +239,15 @@ credential's committed rung can sign it, and otherwise -- a self-strike, or
 no committed survivor -- the whole generation is swapped onto a surviving
 credential's ladder (`swapClientAnnexGeneration`), the old generation left
 to orphan discovery. A passphrase change signs with the NEW credential's
-ladder seed (`survivingLadderSeed`); the stage is best-effort and reports
-itself on the outcome's `clientAnnex` member. Then the same
+ladder seed (`survivingLadderSeed`). Which ladder the session's own login
+seed may fill is settled against the pre-edit log, by the retired entry's
+recorded update key rather than by seed comparison (vacuous with no
+retired seed in hand): the login seed is the retired ladder when that key
+is one of its rungs up to the attributed one, a survivor only when it
+provably is not, and neither when the log attributes it nothing -- so a
+swap can never anchor the fresh generation on the credential being
+removed. The stage is best-effort and reports itself on the outcome's
+`clientAnnex` member. Then the same
 roster-and-cascade tail the client revocation runs --
 the user key rotates off the credential's wrap (pairing-free convergence
 onto the post-edit document) and every encrypted collection re-epochs onto

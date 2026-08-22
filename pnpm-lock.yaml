@@ -69,8 +69,8 @@ importers:
         specifier: link:../wallet-core
         version: link:../wallet-core
       '@interop/was-client':
-        specifier: ^0.44.2
-        version: 0.44.2(@interop/jsonld-signatures@11.8.5)
+        specifier: ^0.44.3
+        version: 0.44.3(@interop/jsonld-signatures@11.8.5)
       '@interop/webkms-client':
         specifier: ^14.7.3
         version: 14.7.3
@@ -668,8 +668,8 @@ packages:
     resolution: {integrity: sha512-Tt3AAB3H+6MCZfC7sIaQ7u9SMYB8pKW5YCmAQonXA2TGAs2/XEOnZjlermT7oDWlSdCSwedO4ka+LJLrAEGuAQ==}
     engines: {node: '>=24.0'}
 
-  '@interop/was-client@0.44.2':
-    resolution: {integrity: sha512-ddxxrPizeo8fn7CqhoOYhhAe1y/xBe3pIA6WwFfM73PNkRysR7qN3I/s+nkvthgUqM3n4ze4yfiNBaWG0PBNzQ==}
+  '@interop/was-client@0.44.3':
+    resolution: {integrity: sha512-3lmBCxNAusRgw5XxrRBtNdO6mvxf9OOM9ImpIBYffyFi6qX2zVAntjyQTBlrxE9RBgbeeBxgvp1KHAL+4LWW+w==}
     engines: {node: '>=24.0'}
 
   '@interop/webkms-client@14.7.3':
@@ -4053,7 +4053,7 @@ snapshots:
       '@interop/storage-core': 0.9.1
       json-canonicalize: 3.0.0
 
-  '@interop/was-client@0.44.2(@interop/jsonld-signatures@11.8.5)':
+  '@interop/was-client@0.44.3(@interop/jsonld-signatures@11.8.5)':
     dependencies:
       '@interop/data-integrity-core': 8.7.1
       '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.5)

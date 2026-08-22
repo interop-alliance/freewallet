@@ -35,6 +35,8 @@ import type {
 import type { UserKey } from '@interop/wallet-core/keys'
 import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import {
+  attributeLadderRung,
+  ladderRung,
   retireClientAnnexRung,
   swapClientAnnexGeneration
 } from '@interop/wallet-core/clientAnnex'
@@ -46,7 +48,10 @@ import {
   cascadeCollections,
   type UserKeyCascadeResult
 } from '@/session/userKeyCascade'
-import { invalidateVerifiedLog } from '@/session/verifiedLog'
+import {
+  invalidateVerifiedLog,
+  verifiedAccountLog
+} from '@/session/verifiedLog'
 
 /**
  * What a completed retirement reports: whether the roster actually rotated on
@@ -82,11 +87,15 @@ export interface CredentialRotationOutcome {
  * @param [options.method.updateKeyMultibase] {string}
  * @param [options.method.ladderSeed] {Uint8Array}   the credential's ladder
  *   seed, when the surrounding ceremony holds the secret; it strengthens the
- *   attribution but is not required
+ *   attribution but is not required. Absent, the session's own login seed is
+ *   taken as the retired seed when the recorded update key is a rung of its
+ *   ladder (`settleLadderSeeds`) -- the tap-free removal of the credential
+ *   this session logged in with
  * @param [options.survivingLadderSeed] {Uint8Array}   a SURVIVING standing
  *   credential's ladder seed (a passphrase change passes the new
  *   credential's), preferred over the session's login seed for the annex
- *   strike-or-swap stage below
+ *   strike-or-swap stage below. The login seed stands in only when it is
+ *   provably not the retired ladder
  * @param [options.onInventoryRemoved] {Function}   invoked once, after the
  *   document edit has landed and before the roster tail runs. "Landed" is
  *   proven by the callback having run: it fires from inside the annex stage,
@@ -147,11 +156,26 @@ export async function rotateOffUnlockCredential({
   // concurrent surface nor a later one sees the retired credential's inventory
   // still standing.
   invalidateVerifiedLog({ profile: session.profile })
+
+  // Which ladder is retired and which one the annex stage may anchor on is
+  // settled against the PRE-edit log, read fresh behind the invalidation:
+  // once the document edit lands, the retired ladder's rungs are gone from it
+  // and nothing could tell the two apart, and a memo from login may predate
+  // a self-enrollment elsewhere that climbed the login ladder past the rung
+  // the registry now records.
+  const ladders = await settleLadderSeeds({
+    session,
+    pointer,
+    method: { ...method, updateKeyMultibase },
+    survivingLadderSeed
+  })
   const result = await retireUnlockCredential({
     idStore: remoteStore.webvhIdStore(),
     updateKeys: clientWebvhKeys,
     unlockKeys: { keyAgreement, updateKeyMultibase },
-    ...(method.ladderSeed ? { ladderSeed: method.ladderSeed } : {}),
+    ...(ladders.retiredLadderSeed
+      ? { ladderSeed: ladders.retiredLadderSeed }
+      : {}),
     expectedDid: pointer.did,
     verb,
     rosterStore: sessionRosterStore({ profile: session.profile }),
@@ -176,8 +200,7 @@ export async function rotateOffUnlockCredential({
       return retireClientAnnexInventoryStage({
         session,
         document,
-        retiredLadderSeed: method.ladderSeed,
-        survivingLadderSeed,
+        ...ladders,
         pointer,
         clientWebvhKeys,
         remoteStore
@@ -217,12 +240,18 @@ export async function rotateOffUnlockCredential({
  * record dies with the unlock Space the caller deletes, and the generation
  * it targeted is struck clean or swapped away.
  *
+ * The seeds arrive settled (`settleLadderSeeds`): the surviving seed, when
+ * one is given, is never the retired ladder, so the swap can only ever
+ * anchor the fresh generation on a credential that stays standing. Holding
+ * no surviving seed is the `no-ladder-seed` skip, never a guess.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @param options.document {object}   the post-edit account document, from the
  *   retirement's stage 1
  * @param [options.retiredLadderSeed] {Uint8Array}
- * @param [options.survivingLadderSeed] {Uint8Array}
+ * @param [options.survivingLadderSeed] {Uint8Array}   a seed distinct from
+ *   the retired ladder's
  * @param options.pointer {object}   the account pointer
  * @param options.clientWebvhKeys {object}   this client's update-key seeds
  * @param options.remoteStore {object}   the session's remote store
@@ -256,20 +285,14 @@ async function retireClientAnnexInventoryStage({
       return { action: 'skipped', reason: 'no-pointer' }
     }
     const { generationId, was } = reach
-    const survivors = [survivingLadderSeed, session.profile.ladderSeed].filter(
-      (seed): seed is Uint8Array =>
-        seed !== undefined &&
-        (retiredLadderSeed === undefined ||
-          !equalBytes(seed, retiredLadderSeed))
-    )
     const logPins = session.profile.persistence.logPins
 
-    if (retiredLadderSeed !== undefined && survivors.length > 0) {
+    if (retiredLadderSeed !== undefined && survivingLadderSeed !== undefined) {
       try {
         const { struck } = await retireClientAnnexRung({
           store: reach.logStore(),
           retiredLadderSeed,
-          actingLadderSeed: survivors[0],
+          actingLadderSeed: survivingLadderSeed,
           generationId,
           expectedDid: reach.clientAnnexDid,
           pinStore: logPins,
@@ -286,7 +309,7 @@ async function retireClientAnnexInventoryStage({
         // the generation swap.
       }
     }
-    if (survivors.length === 0) {
+    if (survivingLadderSeed === undefined) {
       return { action: 'skipped', reason: 'no-ladder-seed' }
     }
     await swapClientAnnexGeneration({
@@ -300,7 +323,7 @@ async function retireClientAnnexInventoryStage({
       idStore: remoteStore.webvhIdStore(),
       updateKeys: clientWebvhKeys,
       zcapClient: session.profile.zcapClient,
-      ladderSeed: survivors[0],
+      ladderSeed: survivingLadderSeed,
       pinStore: logPins
     })
     return { action: 'swapped' }
@@ -312,4 +335,132 @@ async function retireClientAnnexInventoryStage({
     )
     return { action: 'skipped', reason: 'failed' }
   }
+}
+
+/**
+ * Settles the two ladder seeds the retirement acts with: the RETIRED seed
+ * (what the document edit's attribution and the annex strike name) and the
+ * SURVIVING seed the annex stage signs a strike or re-mints the generation
+ * with -- the caller's where given, else the session's login seed, and
+ * never a seed equal to the retired one.
+ *
+ * Whether the login seed may fill either role is decided by the recorded
+ * update key rather than by seed comparison, which is vacuous with no
+ * retired seed in hand: the recorded key is some rung of the retired
+ * credential's ladder (rung 0 at bind, the committed rung after a
+ * self-enrollment's refresh), so the login ladder IS the retired one exactly
+ * when that key is one of its rungs up to the rung the pre-edit log
+ * attributes to it. A login ladder the log attributes nothing to (already
+ * retired by a torn run, or ambiguous) fills neither role: a swap anchored
+ * on it would re-establish authority the document no longer backs.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.pointer {object}   the account pointer
+ * @param options.method {object}   the retired credential's recorded update
+ *   key and, when in hand, its ladder seed
+ * @param [options.survivingLadderSeed] {Uint8Array}   the caller's surviving
+ *   seed
+ * @returns {Promise<{ retiredLadderSeed?: Uint8Array, survivingLadderSeed?: Uint8Array }>}
+ */
+async function settleLadderSeeds({
+  session,
+  pointer,
+  method,
+  survivingLadderSeed
+}: {
+  session: Session
+  pointer: NonNullable<ReturnType<typeof enrolledClientContext>>['pointer']
+  method: { updateKeyMultibase: string; ladderSeed?: Uint8Array }
+  survivingLadderSeed?: Uint8Array
+}): Promise<{
+  retiredLadderSeed?: Uint8Array
+  survivingLadderSeed?: Uint8Array
+}> {
+  const loginSeed = session.profile.ladderSeed
+  let retiredLadderSeed = method.ladderSeed
+  // With the retired seed in hand the comparison below settles the login
+  // seed; without it, only the recorded update key can.
+  let loginSeedAdmissible =
+    loginSeed !== undefined && retiredLadderSeed !== undefined
+  if (loginSeed !== undefined && retiredLadderSeed === undefined) {
+    const standing = await loginLadderStanding({
+      session,
+      pointer,
+      ladderSeed: loginSeed,
+      updateKeyMultibase: method.updateKeyMultibase
+    })
+    if (standing === 'retired') {
+      retiredLadderSeed = loginSeed
+    }
+    loginSeedAdmissible = standing === 'survives'
+  }
+  const survivor = [
+    survivingLadderSeed,
+    ...(loginSeedAdmissible ? [loginSeed] : [])
+  ].find(
+    (seed): seed is Uint8Array =>
+      seed !== undefined &&
+      (retiredLadderSeed === undefined || !equalBytes(seed, retiredLadderSeed))
+  )
+  return {
+    ...(retiredLadderSeed ? { retiredLadderSeed } : {}),
+    ...(survivor ? { survivingLadderSeed: survivor } : {})
+  }
+}
+
+/**
+ * Where the session's login ladder stands relative to the credential being
+ * retired: `retired` when the retired credential's recorded update key is a
+ * rung of this ladder, `survives` when the pre-edit log attributes a rung to
+ * the ladder and the recorded key is none of its rungs up to it, and
+ * `unsettled` when the log attributes it nothing -- or cannot be read at
+ * all: a failed read says no more than "cannot tell", and the conservative
+ * verdict is the same, so it never fails a retirement whose every later
+ * stage reads the log for itself.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.pointer {object}   the account pointer
+ * @param options.ladderSeed {Uint8Array}   the login credential's seed
+ * @param options.updateKeyMultibase {string}   the retired credential's
+ *   recorded update key
+ * @returns {Promise<'retired' | 'survives' | 'unsettled'>}
+ */
+async function loginLadderStanding({
+  session,
+  pointer,
+  ladderSeed,
+  updateKeyMultibase
+}: {
+  session: Session
+  pointer: NonNullable<ReturnType<typeof enrolledClientContext>>['pointer']
+  ladderSeed: Uint8Array
+  updateKeyMultibase: string
+}): Promise<'retired' | 'survives' | 'unsettled'> {
+  let attributed: Awaited<ReturnType<typeof attributeLadderRung>>
+  try {
+    const published = await verifiedAccountLog({
+      profile: session.profile,
+      pointer
+    })
+    attributed = await attributeLadderRung({ ladderSeed, published })
+  } catch (err) {
+    console.warn(
+      "The login credential's ladder could not be placed in the account " +
+        'log; the retirement anchors no annex generation on it:',
+      err
+    )
+    return 'unsettled'
+  }
+  for (let index = 0; index <= attributed.rung.index; index++) {
+    const rung =
+      index === attributed.rung.index
+        ? attributed.rung
+        : await ladderRung({ ladderSeed, index })
+    if (rung.keyMultibase === updateKeyMultibase) {
+      return 'retired'
+    }
+  }
+  return 'survives'
 }

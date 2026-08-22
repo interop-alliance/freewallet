@@ -19,7 +19,13 @@ const state = vi.hoisted(() => ({
   // whether either half throws.
   struck: true,
   strikeError: null as Error | null,
-  swapError: null as Error | null
+  swapError: null as Error | null,
+  // The pre-edit verified log the ladder-seed settlement reads when the
+  // caller hands over no retired seed; commits nothing by default.
+  publishedLog: {
+    updateKeys: [] as string[],
+    nextKeyHashes: [] as string[]
+  }
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
@@ -91,14 +97,20 @@ vi.mock('@/session/userKeyCascade', () => ({
 vi.mock('@/session/verifiedLog', () => ({
   invalidateVerifiedLog: vi.fn(() => {
     state.calls.push('invalidateVerifiedLog')
+  }),
+  verifiedAccountLog: vi.fn(async () => {
+    state.calls.push('verifiedAccountLog')
+    return state.publishedLog
   })
 }))
 
+import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import { retireUnlockCredential } from '@interop/wallet-core/unlock'
 import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import {
   clientAnnexLogPinId,
   clientAnnexLogStore,
+  ladderRung,
   retireClientAnnexRung,
   swapClientAnnexGeneration
 } from '@interop/wallet-core/clientAnnex'
@@ -106,7 +118,10 @@ import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
 import { durableSessionPersistence } from '@/session/persistence'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { cascadeCollections } from '@/session/userKeyCascade'
-import { invalidateVerifiedLog } from '@/session/verifiedLog'
+import {
+  invalidateVerifiedLog,
+  verifiedAccountLog
+} from '@/session/verifiedLog'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import type { Session } from '@/types/auth'
 
@@ -125,6 +140,32 @@ const FRESH_USER_KEY = {
   secret: new Uint8Array(32).fill(2)
 }
 const ROSTER_DESCRIPTOR = { epochs: [{ id: FRESH_USER_KEY.id }] }
+
+/**
+ * A pre-edit log whose standing parameters commit exactly one rung of the
+ * given ladder, beside this client's own update key.
+ *
+ * @param options {object}
+ * @param options.ladderSeed {Uint8Array}
+ * @param options.index {number}   the committed rung
+ * @returns {Promise<{ updateKeys: string[], nextKeyHashes: string[] }>}
+ */
+async function logCommittingRung({
+  ladderSeed,
+  index
+}: {
+  ladderSeed: Uint8Array
+  index: number
+}): Promise<{ updateKeys: string[]; nextKeyHashes: string[] }> {
+  const rung = await ladderRung({ ladderSeed, index })
+  return {
+    updateKeys: ['z6MkRetiringClientUpdate'],
+    nextKeyHashes: [
+      await deriveNextKeyHash('z6MkRetiringClientUpdate'),
+      await deriveNextKeyHash(rung.keyMultibase)
+    ]
+  }
+}
 
 /**
  * A standing passphrase configuration (the registry entry's public halves).
@@ -236,6 +277,7 @@ beforeEach(() => {
   state.struck = true
   state.strikeError = null
   state.swapError = null
+  state.publishedLog = { updateKeys: [], nextKeyHashes: [] }
   vi.clearAllMocks()
   vi.mocked(retireUnlockCredential).mockImplementation(ceremonyDriving())
 })
@@ -442,8 +484,13 @@ describe('the document-edit landed signal', () => {
         rosterDescriptor: ROSTER_DESCRIPTOR
       } as never
     })
+    const sessionLadderSeed = new Uint8Array(32).fill(9)
+    state.publishedLog = await logCommittingRung({
+      ladderSeed: sessionLadderSeed,
+      index: 0
+    })
     await rotateOffUnlockCredential({
-      session: sessionWith({ ladderSeed: new Uint8Array(32).fill(9) }),
+      session: sessionWith({ ladderSeed: sessionLadderSeed }),
       method: PASSPHRASE_METHOD,
       onInventoryRemoved: () => {
         state.calls.push('onInventoryRemoved')
@@ -523,11 +570,13 @@ describe('the annex strike-or-swap stage', () => {
     retiredLadderSeed,
     survivingLadderSeed,
     sessionLadderSeed,
+    updateKeyMultibase = PASSPHRASE_METHOD.updateKeyMultibase,
     pointed = true
   }: {
     retiredLadderSeed?: Uint8Array
     survivingLadderSeed?: Uint8Array
     sessionLadderSeed?: Uint8Array
+    updateKeyMultibase?: string
     pointed?: boolean
   } = {}) {
     vi.mocked(retireUnlockCredential).mockImplementation(
@@ -537,6 +586,7 @@ describe('the annex strike-or-swap stage', () => {
       session: sessionWith({ ladderSeed: sessionLadderSeed }),
       method: {
         ...PASSPHRASE_METHOD,
+        updateKeyMultibase,
         ...(retiredLadderSeed ? { ladderSeed: retiredLadderSeed } : {})
       },
       ...(survivingLadderSeed ? { survivingLadderSeed } : {}),
@@ -686,5 +736,171 @@ describe('the annex strike-or-swap stage', () => {
     })
     expect(outcome?.rotated).toBe(true)
     warn.mockRestore()
+  })
+})
+
+describe('the ladder-seed settlement (the login seed with no retired seed in hand)', () => {
+  const LOGIN_SEED = new Uint8Array(32).fill(7)
+  const OTHER_SEED = new Uint8Array(32).fill(8)
+  const GENERATION_ID = 'gen-Ux3v0kQf9aPmB2hZ'
+  const CLIENT_ANNEX_DID =
+    'did:webvh:QmClientAnnexScid:was.example.test:space:' +
+    `clientAnnex-space-1:${GENERATION_ID}`
+  const POINTED_DOCUMENT = {
+    id: POINTER.did,
+    service: [
+      {
+        id: `${POINTER.did}#delegated-clients`,
+        type: 'https://w3id.org/byoe#DelegatedClients',
+        serviceEndpoint: CLIENT_ANNEX_DID
+      }
+    ]
+  }
+
+  /**
+   * The tap-free removal shape: a passkey entry recording
+   * `updateKeyMultibase`, no seed anywhere but the session's own.
+   *
+   * @param options {object}
+   * @param options.updateKeyMultibase {string}
+   * @returns {Promise<object>}   the outcome and the seed the ceremony got
+   */
+  async function removeTapFree({
+    updateKeyMultibase
+  }: {
+    updateKeyMultibase: string
+  }) {
+    vi.mocked(retireUnlockCredential).mockImplementation(
+      ceremonyDriving({ document: POINTED_DOCUMENT })
+    )
+    const outcome = await rotateOffUnlockCredential({
+      session: sessionWith({ ladderSeed: LOGIN_SEED }),
+      method: { ...PASSKEY_METHOD, updateKeyMultibase },
+      verb: 'removing a passkey'
+    })
+    const ceremony = vi.mocked(retireUnlockCredential).mock.calls[0]![0]
+    return { outcome, ceremonyLadderSeed: ceremony.ladderSeed }
+  }
+
+  it('never swaps onto the login ladder when the login credential is removed tap-free', async () => {
+    state.publishedLog = await logCommittingRung({
+      ladderSeed: LOGIN_SEED,
+      index: 0
+    })
+    const rung0 = await ladderRung({ ladderSeed: LOGIN_SEED, index: 0 })
+
+    const { outcome, ceremonyLadderSeed } = await removeTapFree({
+      updateKeyMultibase: rung0.keyMultibase
+    })
+
+    expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
+    expect(vi.mocked(retireClientAnnexRung)).not.toHaveBeenCalled()
+    expect(outcome?.clientAnnex).toEqual({
+      action: 'skipped',
+      reason: 'no-ladder-seed'
+    })
+    // The identification also hands the document edit the retired seed.
+    expect(ceremonyLadderSeed).toBe(LOGIN_SEED)
+    // Settled against a fresh pre-edit read: the memo is dropped first, so
+    // a login-time memo that predates a self-enrollment elsewhere cannot
+    // place the recorded rung above the attributed one.
+    expect(state.calls.indexOf('invalidateVerifiedLog')).toBeLessThan(
+      state.calls.indexOf('verifiedAccountLog')
+    )
+  })
+
+  it('recognizes the login ladder by a rung below the committed one', async () => {
+    // A self-enrollment climbed the ladder to rung 1 while the registry's
+    // recorded rung stayed at the bind-time rung 0 (the refresh is
+    // best-effort).
+    state.publishedLog = await logCommittingRung({
+      ladderSeed: LOGIN_SEED,
+      index: 1
+    })
+    const rung0 = await ladderRung({ ladderSeed: LOGIN_SEED, index: 0 })
+
+    const { outcome, ceremonyLadderSeed } = await removeTapFree({
+      updateKeyMultibase: rung0.keyMultibase
+    })
+
+    expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
+    expect(outcome?.clientAnnex).toEqual({
+      action: 'skipped',
+      reason: 'no-ladder-seed'
+    })
+    expect(ceremonyLadderSeed).toBe(LOGIN_SEED)
+  })
+
+  it('swaps onto the login ladder when another credential is removed tap-free', async () => {
+    state.publishedLog = await logCommittingRung({
+      ladderSeed: LOGIN_SEED,
+      index: 0
+    })
+    const otherRung0 = await ladderRung({ ladderSeed: OTHER_SEED, index: 0 })
+
+    const { outcome, ceremonyLadderSeed } = await removeTapFree({
+      updateKeyMultibase: otherRung0.keyMultibase
+    })
+
+    expect(vi.mocked(retireClientAnnexRung)).not.toHaveBeenCalled()
+    expect(vi.mocked(swapClientAnnexGeneration)).toHaveBeenCalledWith(
+      expect.objectContaining({ ladderSeed: LOGIN_SEED })
+    )
+    expect(outcome?.clientAnnex).toEqual({ action: 'swapped' })
+    expect(ceremonyLadderSeed).toBeUndefined()
+  })
+
+  it('anchors nothing on a login ladder the log attributes no rung to', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const { outcome, ceremonyLadderSeed } = await removeTapFree({
+      updateKeyMultibase: 'z6MkSomeRecordedRung'
+    })
+
+    expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
+    expect(outcome?.clientAnnex).toEqual({
+      action: 'skipped',
+      reason: 'no-ladder-seed'
+    })
+    expect(ceremonyLadderSeed).toBeUndefined()
+    expect(warn).toHaveBeenCalledOnce()
+    warn.mockRestore()
+  })
+
+  it('treats an unreadable log as unsettled, the retirement still run', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(verifiedAccountLog).mockRejectedValueOnce(
+      new Error('log unreachable')
+    )
+
+    const { outcome, ceremonyLadderSeed } = await removeTapFree({
+      updateKeyMultibase: 'z6MkSomeRecordedRung'
+    })
+
+    expect(outcome?.rotated).toBe(true)
+    expect(outcome?.clientAnnex).toEqual({
+      action: 'skipped',
+      reason: 'no-ladder-seed'
+    })
+    expect(ceremonyLadderSeed).toBeUndefined()
+    warn.mockRestore()
+  })
+
+  it('reads no log when the caller hands over the retired seed', async () => {
+    vi.mocked(retireUnlockCredential).mockImplementation(
+      ceremonyDriving({ document: POINTED_DOCUMENT })
+    )
+    await rotateOffUnlockCredential({
+      session: sessionWith({ ladderSeed: LOGIN_SEED }),
+      method: { ...PASSKEY_METHOD, ladderSeed: OTHER_SEED },
+      verb: 'removing a passkey'
+    })
+    expect(vi.mocked(verifiedAccountLog)).not.toHaveBeenCalled()
+    expect(vi.mocked(retireClientAnnexRung)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        retiredLadderSeed: OTHER_SEED,
+        actingLadderSeed: LOGIN_SEED
+      })
+    )
   })
 })

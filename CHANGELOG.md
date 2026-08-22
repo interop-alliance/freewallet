@@ -80,6 +80,19 @@
 
 ### Fixed
 
+- Retiring the unlock credential a session logged in with no longer swaps
+  the client annex generation onto that credential's own ladder.
+  `rotateOffUnlockCredential` settles its ladder seeds against a fresh,
+  pinned read of the pre-edit account log (the session memo is dropped
+  first, since a login-time memo can predate a self-enrollment elsewhere)
+  before the ceremony: with no retired seed in hand, the
+  session's login seed is identified as the retired ladder when the entry's
+  recorded update key is one of its rungs up to the attributed one (it then
+  also feeds the document edit's attribution), stands in as the surviving
+  seed only when it provably is not, and fills neither role when the log
+  attributes it nothing or cannot be read. The tap-free removal of the login passkey now
+  reports `{ action: 'skipped', reason: 'no-ladder-seed' }` instead of
+  re-establishing the retired ladder's annex authority as `swapped`.
 - App Connect no longer mints a second app key when the app-key scan could
   not read every row. `BrowserStore` and `RemoteDirectStore` (the popup's
   backend) now record what a `listAppKeys` scan skipped, and
