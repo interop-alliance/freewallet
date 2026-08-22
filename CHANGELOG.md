@@ -319,6 +319,9 @@
 
 ### Changed
 
+- The ladder-seed comparison in the unlock-credential retirement uses
+  `equalBytes` from `@noble/ciphers` (a direct dependency now) instead of a
+  local early-exit byte loop.
 - The transient-client subsystem formerly called the companion is renamed
   the client annex (`clientAnnex` symbols), across code and docs.
 - Enrollment now refuses a connect code whose key-agreement key is not the

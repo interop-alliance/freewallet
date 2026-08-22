@@ -26,6 +26,7 @@
  * user key generations the credential already delivered. Retirement stops
  * future reads.
  */
+import { equalBytes } from '@noble/ciphers/utils.js'
 import { retireUnlockCredential } from '@interop/wallet-core/unlock'
 import type {
   ClientAnnexPostureRetirement,
@@ -178,18 +179,6 @@ export async function rotateOffUnlockCredential({
 }
 
 /**
- * Whether two ladder seeds are the same bytes -- the guard that keeps the
- * retired credential's own seed out of the surviving-seed candidates.
- *
- * @param a {Uint8Array}
- * @param b {Uint8Array}
- * @returns {boolean}
- */
-function sameSeed(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((byte, index) => byte === b[index])
-}
-
-/**
  * The client annex reach of the retirement (the ceremony's stage 1b):
  * strike-or-swap. A standing credential's annex rung-0 key and hash live
  * in the pointed generation's log, out of the account document edit's reach,
@@ -255,7 +244,8 @@ async function retireClientAnnexPostureStage({
     const survivors = [survivingLadderSeed, session.profile.ladderSeed].filter(
       (seed): seed is Uint8Array =>
         seed !== undefined &&
-        (retiredLadderSeed === undefined || !sameSeed(seed, retiredLadderSeed))
+        (retiredLadderSeed === undefined ||
+          !equalBytes(seed, retiredLadderSeed))
     )
     const logPins = session.profile.persistence.logPins
 
