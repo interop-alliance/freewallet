@@ -554,8 +554,11 @@ one-entry ladder-anchored did:webvh genesis is signed by ladder rung 0
 commitment folded in; the roster's epoch[0] wraps the user key to the
 credential's standing KAK with a ladder-signed entry proof (the
 ceremony-tail license's first-entry shape); and the collection epochs are
-gated on the roster landing, since the user key exists only in the visit's
-memory. There is no KMS stage -- the keystore defers to the first durable
+gated on the roster landing AND on the roster's current epoch being the key
+the ceremony was handed, since the user key exists only in the visit's
+memory (a re-run that adopts an earlier run's roster skips the stage,
+reported as `epochsSkipped`, and the establishment's heal branch installs
+the missing epochs under the roster's real key). There is no KMS stage -- the keystore defers to the first durable
 enrollment. The ordering rule is the transposed persist-before-publish
 invariant: the unlock record carrying the ladder seed (with an interim
 bridge delegated by the ladder's bare did:key) is durably written BEFORE the

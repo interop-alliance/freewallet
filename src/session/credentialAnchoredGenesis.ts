@@ -23,6 +23,10 @@
  *    credential's `keyAgreement` posture folded in), the roster's epoch[0]
  *    wrapped to the credential's standing KAK with a ladder-signed entry
  *    proof, and the collection epochs. Promotion deferred (`promoteController: false`).
+ *    The ceremony installs collection epochs only when the roster's
+ *    current epoch IS the candidate key it was handed; an adopted roster
+ *    keyed to an earlier run's key skips that stage (reported as
+ *    `epochsSkipped`), leaving the heal branch below as the one installer.
  *    The ceremony collects its roster and epoch failures; the establishment
  *    treats them as fatal here, before anything names the DID, so the tear
  *    is the heal-able kind (a DID-less record) rather than a registry sealed
@@ -252,7 +256,11 @@ export async function establishCredentialAnchoredAccount({
 
   // A heal re-run that adopted a roster seeded by the torn earlier run: the
   // real user key is recovered from the credential's own standing wrap, and
-  // the collection epochs are completed under it.
+  // the collection epochs are completed under it. The ceremony skipped its
+  // own epochs stage on this mismatch, so a collection the earlier run never
+  // reached is still un-epoch'd here and gets epoch[0] under the roster's
+  // key (an epoch installed under the candidate would have been adopted
+  // as-is, keying the collection to a key nobody holds).
   let userKey: UserKey = candidateUserKey
   if (genesis.rosterDescriptor.currentEpoch !== candidateUserKey.id) {
     const read = await readUserKeyRoster({

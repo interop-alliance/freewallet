@@ -25,6 +25,16 @@
 
 ### Fixed
 
+- A credential-anchored establishment re-run over a roster an earlier run
+  keyed no longer leaves a collection epoch'd under the throwaway candidate
+  key. Wallet-core's ceremony now skips its epochs stage when the adopted
+  roster's current epoch is not the key it was handed (reported as
+  `epochsSkipped`), so the establishment's heal branch, which completes the
+  epochs under the roster's real key, is the one installer.
+- The transient login's empty-roster heal installs the collection epochs
+  under the key the roster delivers after its ensure, not the candidate it
+  minted, so two visits healing the same account concurrently can no longer
+  key a collection to the losing tab's throwaway key.
 - Transient recovery's mandatory rotation is now the first request after
   the add-and-retire entry. The per-visit transient client is enrolled into
   the fresh annex generation inside the persist-before-publish seam

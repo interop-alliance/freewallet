@@ -519,12 +519,20 @@ describe('transientSessionFromKeyringHit -- the credential-anchored signup heals
       found.standingClient.agents.keyAgreementKey
     )
     expect(ensureCall.userKey.id).toMatch(/^did:key:/)
-    // The collection epochs complete under the same delegated authority.
+    // The collection epochs complete under the same delegated authority,
+    // keyed to what the roster delivers after the ensure (a racing tab's
+    // heal may have landed the roster first), never to the minted candidate.
     expect(ensureWalletSpaceEpochs).toHaveBeenCalledWith(
       expect.objectContaining({
         spaceId: POINTER.spaceId,
-        capability: GENERATION_DELEGATION
+        capability: GENERATION_DELEGATION,
+        userKey: expect.objectContaining({ id: 'did:key:z6LSfresh' })
       })
+    )
+    expect(
+      vi.mocked(readUserKeyRoster).mock.invocationCallOrder.at(-1)!
+    ).toBeLessThan(
+      vi.mocked(ensureWalletSpaceEpochs).mock.invocationCallOrder[0]!
     )
     expect(session).toBeTruthy()
   })

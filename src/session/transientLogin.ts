@@ -514,28 +514,31 @@ export async function transientSessionFromKeyringHit({
     // invoked as the annex VM under the generation delegation, since the
     // promoted Space answers to nothing else this session holds. Nothing
     // encrypted existed yet (the epoch gate in the ceremony guarantees it),
-    // so the fresh key orphans nothing.
+    // so the fresh key orphans nothing. The collection epochs are installed
+    // under the key the roster DELIVERS after the ensure, not the minted
+    // candidate: the ensure adopts a roster another tab's heal landed first,
+    // and epoch[0] is create-if-absent, so installing under this tab's
+    // candidate would key a collection to a key nobody holds.
     const bootstrapAgent = await ladderVmAgent({ ladderSeed })
     const healStore = rosterStoreSignedBy(bootstrapAgent)
-    const freshUserKey = await mintUserKey()
     await ensureUserKeyRoster({
       store: healStore,
-      userKey: freshUserKey,
+      userKey: await mintUserKey(),
       clientKeyAgreementKey: found.standingClient.agents.keyAgreementKey
     })
+    rosterRead = await readRoster()
+    if (!rosterRead) {
+      throw new TransientLoginUnavailableError({ reason: 'no-user-key-roster' })
+    }
     await ensureWalletSpaceEpochs({
       was: new WasClient({
         serverUrl: pointer.host,
         zcapClient: transientZcapClient
       }),
       spaceId: pointer.spaceId,
-      userKey: freshUserKey,
+      userKey: rosterRead.userKey,
       capability: generationDelegation
     })
-    rosterRead = await readRoster()
-    if (!rosterRead) {
-      throw new TransientLoginUnavailableError({ reason: 'no-user-key-roster' })
-    }
   }
   await persistence.epochPins.saveFromDescriptor({
     accountDid,
