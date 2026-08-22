@@ -4,6 +4,21 @@
 
 ### Added
 
+- A local sign-in (passphrase, passkey, or completing the connect-this-
+  browser flow) records a `wallet-activity` Login entry built by wallet-core's
+  `addHistoryWalletLogin` ("Logged in to wallet."), through the new
+  `StorageManager.addHistoryWalletLogin` wrapper. The write is best-effort
+  and never blocks the login. The relying-party `addHistoryLogin` path is
+  unchanged.
+
+### Changed
+
+- The `json-canonicalize` resolution override (pinning 2.0.0 around the broken
+  2.0.1 publish) is lifted now that 3.0.0 ships intact. 2.0.0 stays in the
+  lockfile only through `@interop/did-method-webvh` until its 5.5.1 publish.
+
+### Added
+
 - Both forget ceremonies run under the session's account-log chain-head
   pin: `forgetThisBrowser` passes `profile.persistence.logPins` and the
   account log's slot into wallet-core's `forgetDurableClient` and

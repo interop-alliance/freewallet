@@ -1931,3 +1931,27 @@ describe('StorageManager blinded index writes', () => {
     }
   })
 })
+
+describe('StorageManager.addHistoryWalletLogin', () => {
+  it('records the local sign-in with the actor and no relying party', async () => {
+    const owner = await generateKey()
+    const ciphers = await buildCiphers(owner, {})
+    const { localStore, user } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      persistence: durableSessionPersistence(),
+      localStore,
+      ciphers,
+      vaultKeys: owner,
+      descriptors: {}
+    })
+
+    await storage.addHistoryWalletLogin({ user })
+
+    const history = await storage.listHistoryItems()
+    const loginEntry = history.find(({ doc }) => doc.type?.includes('Login'))
+    expect(loginEntry).toBeDefined()
+    expect(loginEntry!.doc.summary).toBe('Logged in to wallet.')
+    expect(loginEntry!.doc.actor).toEqual({ email: user.email })
+    expect(loginEntry!.doc.object).toBeUndefined()
+  })
+})

@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  json-canonicalize: 2.0.0
-
 importers:
 
   .:
@@ -120,8 +117,8 @@ importers:
         specifier: ^26.3.6
         version: 26.4.0(typescript@6.0.3)
       json-canonicalize:
-        specifier: 2.0.0
-        version: 2.0.0
+        specifier: ^3.0.0
+        version: 3.0.0
       nanotar:
         specifier: ^0.3.0
         version: 0.3.0
@@ -2208,6 +2205,10 @@ packages:
   json-canonicalize@2.0.0:
     resolution: {integrity: sha512-yyrnK/mEm6Na3ChbJUWueXdapueW0p380RUyTW87XGb1ww8l8hU0pRrGC3vSWHe9CxrbPHX2fGUOZpNiHR0IIg==}
 
+  json-canonicalize@3.0.0:
+    resolution: {integrity: sha512-PW21BtLiKRV7gJcT8jf2X4UNN2AF4c1TYEVug1wAWRQSGBJj7fL+v4NgOkIo54SCBPFDyqzMcOJNhjwywCIBuw==}
+    engines: {node: '>=8.5'}
+
   json-parse-even-better-errors@2.3.1:
     resolution: {integrity: sha512-xyFwyhro/JEof6Ghe2iz2NcXoj2sloNsWr/XsERDK/oiPCfaNhl5ONfp+jQdAZRQQ0IJWNzH9zIZF7li91kh2w==}
 
@@ -4053,7 +4054,7 @@ snapshots:
     dependencies:
       '@interop/did-method-webvh': 5.5.0
       '@interop/storage-core': 0.9.1
-      json-canonicalize: 2.0.0
+      json-canonicalize: 3.0.0
 
   '@interop/was-client@0.44.1(@interop/jsonld-signatures@11.8.5)':
     dependencies:
@@ -4068,7 +4069,7 @@ snapshots:
       '@interop/x25519-key-agreement-key': 5.2.2
       '@noble/hashes': 2.3.0
       '@scure/base': 2.3.0
-      json-canonicalize: 2.0.0
+      json-canonicalize: 3.0.0
     transitivePeerDependencies:
       - '@interop/jsonld-signatures'
       - expo-crypto
@@ -5694,6 +5695,8 @@ snapshots:
   json-buffer@3.0.1: {}
 
   json-canonicalize@2.0.0: {}
+
+  json-canonicalize@3.0.0: {}
 
   json-parse-even-better-errors@2.3.1: {}
 

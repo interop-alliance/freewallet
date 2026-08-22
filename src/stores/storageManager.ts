@@ -119,6 +119,7 @@ import {
   addHistoryCredentialShared as buildHistoryCredentialShared,
   addHistoryCredentialUnshared as buildHistoryCredentialUnshared,
   addHistoryLogin as buildHistoryLogin,
+  addHistoryWalletLogin as buildHistoryWalletLogin,
   addHistoryAppRevoke as buildHistoryAppRevoke,
   addHistoryClientRevoked as buildHistoryClientRevoked,
   addHistoryGenerationCollected as buildHistoryGenerationCollected,
@@ -2512,6 +2513,21 @@ export class StorageManager {
     await this.#recordActivity(id =>
       buildHistoryLogin({ user, origin, grants, appConnect, id })
     )
+  }
+
+  /**
+   * Records (in the `wallet-activity` collection) the Login activity for a
+   * local sign-in: the user opened their own wallet, no relying party
+   * involved. `addHistoryLogin` above stays the RP-login builder (an origin
+   * and its grants); this one carries only the actor, so both wallets record
+   * the same summary for the same event.
+   *
+   * @param options {object}
+   * @param options.user {User}
+   * @returns {Promise<void>}
+   */
+  async addHistoryWalletLogin({ user }: { user: User }) {
+    await this.#recordActivity(id => buildHistoryWalletLogin({ user, id }))
   }
 
   /**

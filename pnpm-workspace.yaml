@@ -5,11 +5,6 @@ allowedDeprecatedVersions:
   get-graphql-from-jsonschema: '8.1.0'
   defekt: '9.3.0'
   crypto-js: '4.2.0'
-# json-canonicalize@2.0.1 (2026-08-14) is a broken publish (ships only src/,
-# its main does not exist); pin until a fixed release lands, see WC-121.
-# DO NOT REMOVE THIS OVERRIDE
-overrides:
-  json-canonicalize: 2.0.0
 minimumReleaseAgeExclude:
   - '@interop/*'
   - 'byoe-context*'
