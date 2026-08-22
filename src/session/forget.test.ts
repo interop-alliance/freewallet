@@ -494,6 +494,20 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
   })
 
+  it('rethrows the record re-mint refusal without wiping anything', async () => {
+    const { session } = fakeSession()
+    const refusal = Object.assign(new Error('record unreachable'), {
+      name: 'RecordRemintFailedError',
+      failed: [{ label: 'Other method', outcome: 'failed' }]
+    })
+    vi.mocked(forgetLastDurableClient).mockRejectedValue(refusal)
+    await expect(forgetThisBrowser({ session, lastClient: true })).rejects.toBe(
+      refusal
+    )
+    expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
+    expect(vi.mocked(invalidateVerifiedLog)).toHaveBeenCalled()
+  })
+
   it('refuses the transition when the session carries no record re-bind', async () => {
     const { session } = fakeSession({ withRebind: false })
     await expect(

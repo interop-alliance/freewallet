@@ -461,8 +461,13 @@ client's last window of registry authority -- the removed client's
 signatures rot at the removal entry, and on a client-less account no
 durable login's refresh block will ever heal them (other unlock methods'
 records, recovery codes included, are the stated residue of a follow-up
-item). The removal entry lands last, then the local wipe. A session whose
-hit carried no re-bind closure refuses the transition up front. From
+item; once that item wires the ceremony's `unlockMethods` reach, a record
+the re-mint cannot re-seal withholds the removal entry with wallet-core's
+name-stable `RecordRemintFailedError`, which the settings dialog renders as
+a retryable stop naming the methods -- the browser stays connected and a
+re-click resumes at the re-mint). The removal entry lands last, then the
+local wipe. A session whose hit carried no re-bind closure refuses the
+transition up front. From
 the login page's authenticity and continuity refusals -- reachable from
 passkey failures with no typed passphrase, reset between attempts -- it is
 the **no-unlock-material grade**: nothing can be derived or signed, so no

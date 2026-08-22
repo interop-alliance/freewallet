@@ -25,6 +25,10 @@
  *   VM through the hit's re-bind closure, the registry pair refreshed),
  *   then the removal entry. The ordinary ceremony's `LastDurableClientForgetError`
  *   (name-stable) is the routing signal when the caller's view was stale.
+ *   The transition's own name-stable refusal, `RecordRemintFailedError`
+ *   (another sign-in method's record could not be re-sealed, so the
+ *   removal entry was withheld), propagates before the wipe: this browser
+ *   is still connected, and a re-run resumes at the re-mint.
  *
  * - **The no-unlock-material grade** (`forgetBrowserWalletData`, run from
  *   the login page's refusal states): nothing can be derived or signed, so
@@ -159,7 +163,11 @@ export type ForgetOutcome = ForgetCeremonyOutcome & { wipeFailed: string[] }
  * caller's listing was stale -- refuses with wallet-core's name-stable
  * `LastDurableClientForgetError` before any write, so the caller can
  * re-confirm against the transition copy; a `true` run on an account with
- * another durable client refuses from the ceremony's pre-install read.
+ * another durable client refuses from the ceremony's pre-install read, and
+ * one that could not re-seal another sign-in method's record refuses with
+ * the name-stable `RecordRemintFailedError` before its removal entry (the
+ * local wipe never runs on a refusal, so the browser stays connected and
+ * the next run resumes).
  *
  * Refusals before anything runs: a transient session (`StepUpRequiredError`
  * via the shared ceremony gate) and a session whose login did not carry the

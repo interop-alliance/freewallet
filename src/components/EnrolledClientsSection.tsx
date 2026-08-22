@@ -85,6 +85,11 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
   const [forgetOpen, setForgetOpen] = useState(false)
   const [forgetting, setForgetting] = useState(false)
   const [forgetErrorKey, setForgetErrorKey] = useState<string | null>(null)
+  // Interpolation values for the forget error copy (the unreachable sign-in
+  // methods' labels when a record re-mint refused the removal).
+  const [forgetErrorValues, setForgetErrorValues] = useState<
+    Record<string, string>
+  >({})
   // Which forget the open dialog confirms: the ordinary ceremony, or the
   // last-client transition (set from the listing when the dialog opens, and
   // flipped by the ceremony's own refusal when the listing was stale).
@@ -231,6 +236,11 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
    * (confirmed against its own copy); a listing that turned out stale -- the
    * ordinary ceremony's name-stable refusal -- flips the dialog to the
    * transition copy for a second confirm rather than running it unconfirmed.
+   * The transition's other name-stable refusal, `RecordRemintFailedError`,
+   * is a retryable stop, not a failure: another sign-in method's record
+   * could not be re-sealed, so the removal entry was withheld and this
+   * browser is still connected. The copy names those methods, and a re-click
+   * resumes at the re-mint.
    */
   const handleForget = async () => {
     if (forgetting) {
@@ -238,6 +248,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
     }
     setForgetting(true)
     setForgetErrorKey(null)
+    setForgetErrorValues({})
     try {
       const outcome = await forgetThisBrowser({
         session,
@@ -253,9 +264,17 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       // takes the same exit).
       window.location.href = '/login'
     } catch (err) {
-      if ((err as { name?: string })?.name === 'LastDurableClientForgetError') {
+      const name = (err as { name?: string })?.name
+      if (name === 'LastDurableClientForgetError') {
         setForgetLastClient(true)
         setForgetErrorKey('settings.forget.lastClientNow')
+      } else if (name === 'RecordRemintFailedError') {
+        console.warn('The last-client forget withheld the removal:', err)
+        const failed = (err as { failed?: Array<{ label: string }> }).failed
+        setForgetErrorValues({
+          methods: (failed ?? []).map(outcome => outcome.label).join(', ')
+        })
+        setForgetErrorKey('settings.forget.recordsUnreachable')
       } else {
         console.error('Could not forget this browser:', err)
         setForgetErrorKey('settings.forget.failed')
@@ -728,7 +747,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
               }
               sx={{ mt: 2 }}
             >
-              {t(forgetErrorKey)}
+              {t(forgetErrorKey, forgetErrorValues)}
             </Alert>
           )}
         </DialogContent>

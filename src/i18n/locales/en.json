@@ -177,6 +177,7 @@
       "lastClientMessage": "This is the only browser connected to this account. Forgetting it removes the browser from the account and deletes all wallet data stored on it, leaving the account with no connected browser: it stays anchored by your passphrase and passkeys alone, the same state a brand-new account starts in. The transition is recorded in your account's public log, and the account's encrypted data is re-keyed first.",
       "lastClientConsequence": "Nothing is lost. Any browser can still open the account with the passphrase or passkey you used here -- as a public-computer session that leaves nothing behind, or remembered as a connected browser again. Recovery codes and other sign-in methods set up from this browser may need to be re-established from a logged-in session before they work again.",
       "lastClientProgress": "Forgetting this browser -- re-keying the account, re-anchoring it on your sign-in credentials, and writing the removal. Keep this tab open.",
+      "recordsUnreachable": "Forgetting this browser stopped before the removal: the sign-in records for {{methods}} could not be updated, and this is the last browser that can update them. Nothing was lost and this browser is still connected -- try again; it picks up where it stopped.",
       "lastClientNow": "This browser is now the only one connected to the account, so forgetting it is the transition described above. Confirm again to continue.",
       "failed": "Forgetting this browser did not finish. Nothing was lost -- try again; it picks up where it stopped."
     },

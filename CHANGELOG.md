@@ -2,6 +2,14 @@
 
 ## 0.39.0 - TBD
 
+### Added
+
+- The forget-this-browser dialog handles wallet-core's name-stable
+  `RecordRemintFailedError` from the last-client transition: the removal entry
+  was withheld because another sign-in method's record could not be re-sealed,
+  so the dialog shows a retryable stop naming those methods (the browser stays
+  connected; a re-click resumes) instead of the generic failure copy.
+
 ### Fixed
 
 - Transient recovery no longer strands the account when a flap follows the
