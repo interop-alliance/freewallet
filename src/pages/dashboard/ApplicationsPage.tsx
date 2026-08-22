@@ -45,6 +45,11 @@ export function ApplicationsPage() {
   const [revokeTarget, setRevokeTarget] = useState<ConnectedApp | null>(null)
   const [revoking, setRevoking] = useState(false)
   const [revokeError, setRevokeError] = useState(false)
+  // Rows the app-key scan had to skip: undecryptable envelopes (purgeable
+  // garbage) and rows in a key epoch this session holds no key for (real data,
+  // never purged -- an app's only identity lives in this collection).
+  const [undecryptableAppKeys, setUndecryptableAppKeys] = useState(0)
+  const [noEpochKeyAppKeys, setNoEpochKeyAppKeys] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -60,6 +65,8 @@ export function ApplicationsPage() {
         if (!cancelled) {
           setApps(listed)
           setSigningKeys(keys)
+          setUndecryptableAppKeys(session.storage.undecryptableAppKeys)
+          setNoEpochKeyAppKeys(session.storage.noEpochKeyAppKeys)
           setLoadError(false)
         }
       } catch (err) {
@@ -111,6 +118,8 @@ export function ApplicationsPage() {
         })
         setApps(listed)
         setSigningKeys(keys)
+        setUndecryptableAppKeys(session.storage.undecryptableAppKeys)
+        setNoEpochKeyAppKeys(session.storage.noEpochKeyAppKeys)
         setLoadError(false)
       } catch (err) {
         console.error('Could not reload connected applications:', err)
@@ -124,6 +133,24 @@ export function ApplicationsPage() {
     }
   }
 
+  async function handleRemoveUndecryptable() {
+    if (!session?.storage) {
+      return
+    }
+    try {
+      const removed = await session.storage.purgeUndecryptableAppKeys()
+      setUndecryptableAppKeys(session.storage.undecryptableAppKeys)
+      showToast({
+        message: t('applications.undecryptableAppKeysRemoved', {
+          count: removed
+        })
+      })
+    } catch (err) {
+      console.error('Could not remove unreadable app connections:', err)
+      setLoadError(true)
+    }
+  }
+
   return (
     <DashboardLayout title={t('applications.title')}>
       {loading ? (
@@ -132,6 +159,31 @@ export function ApplicationsPage() {
         <Stack sx={{ gap: 1, mt: 2 }}>
           {loadError && (
             <Alert severity="warning">{t('applications.loadError')}</Alert>
+          )}
+          {noEpochKeyAppKeys > 0 && (
+            <Alert severity="warning">
+              {t('applications.noEpochKeyAppKeys', {
+                count: noEpochKeyAppKeys
+              })}
+            </Alert>
+          )}
+          {undecryptableAppKeys > 0 && (
+            <Alert
+              severity="warning"
+              action={
+                <Button
+                  color="inherit"
+                  size="small"
+                  onClick={handleRemoveUndecryptable}
+                >
+                  {t('applications.removeUndecryptableAppKeys')}
+                </Button>
+              }
+            >
+              {t('applications.undecryptableAppKeys', {
+                count: undecryptableAppKeys
+              })}
+            </Alert>
           )}
           {apps.length === 0 ? (
             <Typography color="text.secondary">

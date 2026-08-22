@@ -318,7 +318,7 @@ export async function listConnectedApps({
 }: {
   storage: StorageManager
 }): Promise<ConnectedApp[]> {
-  const [credentials, history] = await Promise.all([
+  const [{ appKeys: credentials }, history] = await Promise.all([
     storage.listAppKeys(),
     storage.listHistoryItems()
   ])

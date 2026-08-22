@@ -17,7 +17,7 @@ import type { EncryptionDescriptorCache } from '@interop/wallet-core/descriptors
 import {
   memoryResourceLogPinStore,
   type ResourceLogPinStore
-} from '@interop/wallet-core/resourceLog'
+} from '@interop/vh-resource-log'
 import { uuidv7 } from 'uuidv7'
 import { getOrCreateWriterId } from '@/lib/writerId'
 import {

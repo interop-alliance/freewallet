@@ -32,7 +32,7 @@
 import type {
   ResourceLogHeadPin,
   ResourceLogPinStore
-} from '@interop/wallet-core/resourceLog'
+} from '@interop/vh-resource-log'
 
 /**
  * The session database's name -- the one durable IndexedDB database this
@@ -680,7 +680,8 @@ export async function deleteUserKeyEpochPin({
 
 /**
  * The object-store key under which one log's chain-head pin lives. The slot
- * identity is wallet-core's host-free pin-slot key (`resourceLogPinId`:
+ * identity is the library's host-free pin-slot key
+ * (`@interop/vh-resource-log`'s `resourceLogPinId`:
  * `space/<spaceId>/<collectionId>/<resourceId>`, built by `accountLogPinId` /
  * `userKeyRosterPinId` for the two account logs), namespaced under its own
  * prefix in the shared session database.
@@ -703,8 +704,8 @@ function logPinSlotKey(logId: string): string {
  * A pin records a log's verified identity (method, SCID) and latest verified
  * head, and is what turns one-shot log verification into continuity: a served
  * log that forks, rolls back, or switches identity against the pin is refused
- * rather than adopted (see `@interop/wallet-core/resourceLog`). Plaintext
- * local state, like the epoch pin beside it. The wallet-core verifiers own
+ * rather than adopted (see `@interop/vh-resource-log`). Plaintext
+ * local state, like the epoch pin beside it. The library's verifiers own
  * the write discipline (trust-on-first-use, advance after full verification
  * only), so this store is a plain read/write seam.
  *
@@ -1099,8 +1100,9 @@ export async function sessionDatabaseExists({
 
 /**
  * Deletes every chain-head pin slot belonging to one Space, by prefix.
- * wallet-core derives every slot key as
- * `space/<spaceId>/<collectionId>/<resourceId>` (`resourceLogPinId`), so the
+ * Every slot key is derived as
+ * `space/<spaceId>/<collectionId>/<resourceId>` (`@interop/vh-resource-log`'s
+ * `resourceLogPinId`, called by wallet-core's named builders), so the
  * `log-head/space/<spaceId>/` prefix covers the account Space's two slots
  * (account log and roster log) and, applied to the auxiliary annex
  * Space's id, every annex generation's slot -- including ones whose

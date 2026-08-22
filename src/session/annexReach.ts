@@ -29,7 +29,7 @@ import {
   ensureGenerationDelegationCurrent,
   mintGenerationDelegation
 } from '@interop/wallet-core/clientAnnex'
-import type { ResourceLogPinStore } from '@interop/wallet-core/resourceLog'
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import type { PublishedKeyDocument } from '@interop/wallet-core/webvh'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import type { Session } from '@/types/auth'

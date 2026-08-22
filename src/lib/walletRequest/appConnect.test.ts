@@ -4,7 +4,11 @@ import { CapabilityAgent } from '@interop/webkms-client'
 import type { Session } from '@/types/auth'
 import type { StoredCredential } from '@/types/credential'
 import { mintAppKeyCredential } from '@interop/wallet-core/request'
-import { appConnectZcapRequests, processAppConnect } from './appConnect'
+import {
+  AppKeysUnreadableError,
+  appConnectZcapRequests,
+  processAppConnect
+} from './appConnect'
 import type { IZcap } from './types'
 
 vi.mock('./processZcaps', () => ({
@@ -35,10 +39,16 @@ const CAPABILITY_QUERY = {
  */
 async function fakeSession({
   appKeys = [],
-  credentials = []
+  credentials = [],
+  skipped = { unknownEpoch: 0, noEpochKey: 0, undecryptable: 0 }
 }: {
   appKeys?: StoredCredential[]
   credentials?: StoredCredential[]
+  skipped?: {
+    unknownEpoch: number
+    noEpochKey: number
+    undecryptable: number
+  }
 } = {}): Promise<{ session: Session; added: unknown[]; deleted: string[] }> {
   const keyAgent = await CapabilityAgent.fromSecret({
     secret: new Uint8Array(32).fill(9),
@@ -50,7 +60,7 @@ async function fakeSession({
     user: { id: keyAgent.id },
     profile: { keyAgent },
     storage: {
-      listAppKeys: async () => appKeys,
+      listAppKeys: async () => ({ appKeys, skipped }),
       listCredentials: async () => credentials,
       deleteCredential: async ({ cid }: { cid: string }) => {
         deleted.push(cid)
@@ -114,6 +124,91 @@ describe('processAppConnect', () => {
     expect(presentation.appConnect).toEqual({ firstRun: true })
     expect(presentation.verifiableCredential).toHaveLength(1)
     expect(presentation.zcap).toEqual([{ id: 'urn:zcap:delegated:test' }])
+  })
+
+  it('refuses to mint when the scan skipped no-epoch-key rows', async () => {
+    // The rotation residue: every app-connections row sits in an epoch this
+    // session holds no wrap for, so "no match" does not mean "never
+    // connected" and a mint would orphan the app's prior identity.
+    const { session, added } = await fakeSession({
+      skipped: { unknownEpoch: 0, noEpochKey: 1, undecryptable: 0 }
+    })
+
+    await expect(
+      processAppConnect({
+        appConnect: { app: APP, capabilityQueries: [CAPABILITY_QUERY] },
+        session,
+        origin: ORIGIN,
+        challenge: 'challenge-skip-1',
+        domain: ORIGIN,
+        didAuthRequested: true
+      })
+    ).rejects.toThrow(AppKeysUnreadableError)
+    expect(added).toHaveLength(0)
+  })
+
+  it('refuses to mint when rows are still unknown-epoch after the refresh', async () => {
+    // The facade spends at most one descriptor refresh per collection per
+    // session, and a failed fetch is swallowed -- so an unknown-epoch row can
+    // reach the match path unresolved (the consent preview already spent the
+    // refresh before this scan ran).
+    const { session, added } = await fakeSession({
+      skipped: { unknownEpoch: 1, noEpochKey: 0, undecryptable: 0 }
+    })
+
+    await expect(
+      processAppConnect({
+        appConnect: { app: APP, capabilityQueries: [CAPABILITY_QUERY] },
+        session,
+        origin: ORIGIN,
+        challenge: 'challenge-skip-0',
+        domain: ORIGIN,
+        didAuthRequested: true
+      })
+    ).rejects.toThrow(AppKeysUnreadableError)
+    expect(added).toHaveLength(0)
+  })
+
+  it('refuses to mint when the scan skipped undecryptable rows', async () => {
+    const { session, added } = await fakeSession({
+      skipped: { unknownEpoch: 0, noEpochKey: 0, undecryptable: 2 }
+    })
+
+    await expect(
+      processAppConnect({
+        appConnect: { app: APP, capabilityQueries: [CAPABILITY_QUERY] },
+        session,
+        origin: ORIGIN,
+        challenge: 'challenge-skip-2',
+        domain: ORIGIN,
+        didAuthRequested: true
+      })
+    ).rejects.toThrow(AppKeysUnreadableError)
+    expect(added).toHaveLength(0)
+  })
+
+  it('serves a match found despite skipped rows', async () => {
+    const { credential, subjectDid } = await mintAppKeyCredential({
+      app: APP,
+      origin: ORIGIN
+    })
+    const stored = [{ cid: 'cid-1', vc: credential }] as StoredCredential[]
+    const { session, added } = await fakeSession({
+      appKeys: stored,
+      skipped: { unknownEpoch: 1, noEpochKey: 1, undecryptable: 1 }
+    })
+
+    const response = await processAppConnect({
+      appConnect: { app: APP, capabilityQueries: [CAPABILITY_QUERY] },
+      session,
+      origin: ORIGIN,
+      challenge: 'challenge-skip-3',
+      domain: ORIGIN,
+      didAuthRequested: true
+    })
+
+    expect(response.appConnect).toEqual({ firstRun: false, subjectDid })
+    expect(added).toHaveLength(0)
   })
 
   it('returns the stored app key without minting on a match', async () => {

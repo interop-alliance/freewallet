@@ -124,7 +124,7 @@ import {
   wrapUnlockRecord
 } from '@interop/wallet-core/unlock'
 import { currentAccountRecordSigners } from '@interop/wallet-core/clients'
-import { memoryResourceLogPinStore } from '@interop/wallet-core/resourceLog'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 
 const KDF = {
   version: 1,

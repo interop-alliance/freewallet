@@ -105,6 +105,7 @@ type BlockReason =
   | 'unsupported'
   | 'domainMismatch'
   | 'zcapUnavailable'
+  | 'appKeysUnreadable'
   | 'processFailed'
   | 'malformedRequest'
   | 'exchangeFailed'
@@ -113,6 +114,7 @@ const BLOCK_MESSAGE_KEY: Record<BlockReason, string> = {
   unsupported: 'chapi.get.didAuthUnsupported',
   domainMismatch: 'chapi.get.domainMismatch',
   zcapUnavailable: 'chapi.get.zcapUnavailable',
+  appKeysUnreadable: 'chapi.get.appKeysUnreadable',
   processFailed: 'chapi.get.processFailed',
   malformedRequest: 'chapi.get.malformedRequest',
   exchangeFailed: 'chapi.get.exchangeFailed'
@@ -394,13 +396,28 @@ export function WalletGetPage() {
         // Over the dedicated `app-connections` collection, exactly as the
         // approve-time processing matches: app keys never sit among the
         // ordinary credentials listed above.
-        const appKeys = await loggedIn.storage.listAppKeys()
+        const { appKeys, skipped } = await loggedIn.storage.listAppKeys()
         const credentials = appKeys.map(({ vc }) => vc)
         const existing = await findAppKeyCredential({
           credentials,
           appUrl: profile.appConnect.app.appUrl,
           origin: requestOrigin
         })
+        // The scan skipped rows this session cannot read and nothing matched,
+        // so approval would refuse rather than mint (`AppKeysUnreadableError`).
+        // Block here instead of showing first-run "Connect {app}?" copy the
+        // user would only see fail after clicking.
+        if (
+          !existing &&
+          (skipped.unknownEpoch > 0 ||
+            skipped.noEpochKey > 0 ||
+            skipped.undecryptable > 0)
+        ) {
+          setSession(loggedIn)
+          setBlockReason('appKeysUnreadable')
+          setPageState('blocked')
+          return
+        }
         const existingDid = existing ? (appKeySubjectDid(existing) ?? '') : ''
         setAppKeyFirstRun(!existing)
         setPreviewedAppKeyDid(existingDid || null)

@@ -136,7 +136,10 @@ function fakeStorage({
   history: Array<{ id: string; doc: unknown }>
 }) {
   return {
-    listAppKeys: vi.fn(async () => appKeys),
+    listAppKeys: vi.fn(async () => ({
+      appKeys,
+      skipped: { unknownEpoch: 0, noEpochKey: 0, undecryptable: 0 }
+    })),
     listHistoryItems: vi.fn(async () => history),
     deleteAppKey: vi.fn(async () => {}),
     addHistoryAppRevoke: vi.fn(async () => {}),

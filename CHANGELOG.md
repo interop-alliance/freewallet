@@ -31,6 +31,13 @@
 
 ### Changed
 
+- The generic resource-log names (`ResourceLogPinStore`, `ResourceLogHeadPin`,
+  `memoryResourceLogPinStore`) are imported from `@interop/vh-resource-log`,
+  now a direct dependency; `webvhResourceLogController` stays on
+  `@interop/wallet-core/resourceLog`, and the bare-parts roster store's
+  controller memo re-types against wallet-core's extended
+  `WebvhResourceLogController`. `@interop/was-client` raised to 0.44.0 to
+  match wallet-core's floor.
 - Retired the "posture" terminology: the session axis is now durability (the
   durable and transient variants), a credential's durable entries in the
   account document, annex log, and ladder are its inventory, and named
@@ -40,6 +47,19 @@
 
 ### Fixed
 
+- App Connect no longer mints a second app key when the app-key scan could
+  not read every row. `BrowserStore` and `RemoteDirectStore` (the popup's
+  backend) now record what a `listAppKeys` scan skipped, and
+  `StorageManager.listAppKeys` returns those counts beside the listing,
+  captured from the same scan: rows whose key epoch is still unknown after
+  the one descriptor refresh the facade spends per collection per session,
+  rows in a known epoch this session holds no wrap for, and envelopes that
+  will not decrypt at all. With no match and anything skipped,
+  `processAppConnect` throws `AppKeysUnreadableError` (surfaced in the popup
+  as the `appKeysUnreadable` block, set at consent-preview time), instead of
+  minting a fresh seed and DID that would orphan whatever the app encrypted
+  under its first identity. The undecryptable rows are purgeable from the
+  Applications page; the other two kinds are never purged.
 - Retiring a passphrase or a tap-confirmed passkey now removes the
   credential's ladder VM from the account document when one stands (the
   residue of a last-client forget torn after its install entry), so the

@@ -16,6 +16,7 @@ import type {
   WalletRequestProfile
 } from './types'
 import { ZcapUnavailableError } from './processZcaps'
+import { AppKeysUnreadableError } from './appConnect'
 
 /**
  * Why a response could not be produced or delivered. Mirrors the popup's block
@@ -23,7 +24,7 @@ import { ZcapUnavailableError } from './processZcaps'
  * from the underlying error.
  */
 type WalletResponseFailureReason =
-  'zcapUnavailable' | 'processFailed' | 'exchangeFailed'
+  'zcapUnavailable' | 'appKeysUnreadable' | 'processFailed' | 'exchangeFailed'
 
 /**
  * A response that was refused before anything reached the relying party. When
@@ -179,6 +180,12 @@ export async function composeAndDeliverResponse({
     // matching block reason rather than the generic processing failure.
     if (err instanceof ZcapUnavailableError) {
       throw new WalletResponseFailure('zcapUnavailable', { cause: err })
+    }
+    // App Connect refused to mint over an unreadable app-key scan; the user
+    // needs the "could not read this app's connection" message, not the
+    // generic processing failure.
+    if (err instanceof AppKeysUnreadableError) {
+      throw new WalletResponseFailure('appKeysUnreadable', { cause: err })
     }
     console.error('CHAPI request processing failed:', err)
     throw new WalletResponseFailure('processFailed', { cause: err })

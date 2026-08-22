@@ -27,6 +27,40 @@ import type {
 } from './types'
 
 /**
+ * The match scan skipped rows this session cannot read, and no stored app key
+ * matched. Carries the skipped counts so the popup can say which way the read
+ * failed: rows whose key epoch is still unknown after the one descriptor
+ * refresh, rows in a known epoch this session holds no wrap for, and
+ * envelopes that will not decrypt at all.
+ */
+export class AppKeysUnreadableError extends Error {
+  unknownEpoch: number
+  noEpochKey: number
+  undecryptable: number
+
+  constructor({
+    unknownEpoch,
+    noEpochKey,
+    undecryptable
+  }: {
+    unknownEpoch: number
+    noEpochKey: number
+    undecryptable: number
+  }) {
+    super(
+      'Could not read the stored app keys: ' +
+        `${unknownEpoch} row(s) in a still-unknown key epoch, ` +
+        `${noEpochKey} row(s) in a key epoch this session holds no key for, ` +
+        `${undecryptable} undecryptable row(s).`
+    )
+    this.name = 'AppKeysUnreadableError'
+    this.unknownEpoch = unknownEpoch
+    this.noEpochKey = noEpochKey
+    this.undecryptable = undecryptable
+  }
+}
+
+/**
  * Fills the `controller` an App Connect capability query leaves open with the
  * app-key subject DID, yielding the standard capability-query details that
  * `resolveGrants` / `processZcaps` operate on. Used with the real subject DID
@@ -98,13 +132,33 @@ export async function processAppConnect({
   expectedSubjectDid?: string
 }): Promise<WalletResponse> {
   const { app, capabilityQueries } = appConnect
-  const stored = await session.storage.listAppKeys()
-  const credentials = stored.map(({ vc }) => vc)
+  const { appKeys, skipped } = await session.storage.listAppKeys()
+  const credentials = appKeys.map(({ vc }) => vc)
   const existing = await findAppKeyCredential({
     credentials,
     appUrl: app.appUrl,
     origin
   })
+
+  // No match, but the scan could not read every row: refuse rather than mint.
+  // None of the three buckets is resolvable from here. An unknown-epoch row
+  // survived the facade's one descriptor refresh (its fetch failed, or the
+  // refresh was already spent earlier this session -- the consent preview
+  // scans before this call does); a no-epoch-key row names an epoch this
+  // session holds no wrap for (the residue of a rotation whose
+  // `app-connections` fan-out did not complete); and an undecryptable
+  // envelope will not open under any descriptor. So "no match" here does not
+  // mean "this app has never connected", and minting would hand the app a
+  // second seed and DID, permanently orphaning whatever it encrypted under
+  // the first.
+  if (
+    !existing &&
+    (skipped.unknownEpoch > 0 ||
+      skipped.noEpochKey > 0 ||
+      skipped.undecryptable > 0)
+  ) {
+    throw new AppKeysUnreadableError(skipped)
+  }
 
   const firstRun = !existing
   let credential: IVerifiableCredential

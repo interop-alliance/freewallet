@@ -38,10 +38,10 @@ import {
   userKeyRosterLogSigner
 } from '@interop/wallet-core/keys'
 import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
-import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
-import type {
-  ResourceLogController,
-  ResourceLogPinStore
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
+import {
+  webvhResourceLogController,
+  type WebvhResourceLogController
 } from '@interop/wallet-core/resourceLog'
 import {
   verifyAccountLog,
@@ -83,7 +83,7 @@ export function accountRosterStore({
   pinStore?: ResourceLogPinStore
 }): SealableEncryptionDescriptorStore {
   const pins = pinStore ?? sessionLogPinStore()
-  let pending: Promise<ResourceLogController> | undefined
+  let pending: Promise<WebvhResourceLogController> | undefined
   return userKeyRosterDescriptorStore({
     storageServerUrl: pointer.host,
     zcapClient,

@@ -234,6 +234,18 @@ export class BrowserStore {
   // load-bearing here: an app key read as absent would mint a second identity
   // for the app rather than merely hiding a row.
   #unknownEpochAppKeys = 0
+  // Count of `app-connections` rows the most recent {@link listAppKeys} call
+  // had to skip because this wallet holds no key for their (known) key epoch
+  // -- KeyUnwrapError, the app-key sibling of `#noEpochKeyCredentials`. No
+  // descriptor refresh can help, and the rows are real data, so they are never
+  // purged; they are surfaced because a skipped app key read as absent would
+  // mint a second identity for the app.
+  #noEpochKeyAppKeys = 0
+  // Count of `app-connections` rows the most recent {@link listAppKeys} call
+  // had to skip because their envelope would not decrypt at all (corrupted, or
+  // written under a mismatched KAK). Purgeable garbage, exactly like the
+  // credential collection's undecryptable rows.
+  #undecryptableAppKeys = 0
   // The content cid of each decrypted `app-connections` envelope row, keyed by
   // row id (the app-key sibling of `#credentialCidByRow`). The collection
   // holds one row per connected app, so it is scanned per call rather than
@@ -1039,13 +1051,21 @@ export class BrowserStore {
    * not decrypt are skipped exactly as in the credential scan.
    *
    * @returns {Promise<{ entries: Array<{ rowId: string; cid: string;
-   *   vc: IVerifiableCredential }>; unknownEpochRowIds: string[] }>}
+   *   vc: IVerifiableCredential }>; undecryptableRowIds: string[];
+   *   unknownEpochRowIds: string[]; noEpochKeyRowIds: string[] }>}
    */
   async #appKeyEntries(): Promise<{
     entries: Array<{ rowId: string; cid: string; vc: IVerifiableCredential }>
+    undecryptableRowIds: string[]
     unknownEpochRowIds: string[]
+    noEpochKeyRowIds: string[]
   }> {
-    const { entries: rows, unknownEpochRowIds } = await this.#decryptedRows({
+    const {
+      entries: rows,
+      undecryptableRowIds,
+      unknownEpochRowIds,
+      noEpochKeyRowIds
+    } = await this.#decryptedRows({
       logicalKey: 'appConnections',
       sort: 'asc'
     })
@@ -1066,7 +1086,12 @@ export class BrowserStore {
       }
       entries.push({ rowId, cid, vc })
     }
-    return { entries, unknownEpochRowIds }
+    return {
+      entries,
+      undecryptableRowIds,
+      unknownEpochRowIds,
+      noEpochKeyRowIds
+    }
   }
 
   /**
@@ -1110,8 +1135,15 @@ export class BrowserStore {
    * @returns {Promise<Array<StoredCredential>>}
    */
   async listAppKeys(): Promise<Array<StoredCredential>> {
-    const { entries, unknownEpochRowIds } = await this.#appKeyEntries()
+    const {
+      entries,
+      undecryptableRowIds,
+      unknownEpochRowIds,
+      noEpochKeyRowIds
+    } = await this.#appKeyEntries()
     this.#unknownEpochAppKeys = unknownEpochRowIds.length
+    this.#noEpochKeyAppKeys = noEpochKeyRowIds.length
+    this.#undecryptableAppKeys = undecryptableRowIds.length
     const seen = new Set<string>()
     const appKeys: StoredCredential[] = []
     for (const { cid, vc } of entries) {
@@ -1160,6 +1192,56 @@ export class BrowserStore {
    */
   get unknownEpochAppKeys(): number {
     return this.#unknownEpochAppKeys
+  }
+
+  /**
+   * The count of `app-connections` rows the most recent {@link listAppKeys}
+   * call had to skip because this wallet holds no key for their (known) key
+   * epoch. Load-bearing on the match path: no descriptor refresh can reveal
+   * them, so a caller that found no match must refuse rather than mint.
+   *
+   * @returns {number}
+   */
+  get noEpochKeyAppKeys(): number {
+    return this.#noEpochKeyAppKeys
+  }
+
+  /**
+   * The count of `app-connections` rows the most recent {@link listAppKeys}
+   * call had to skip because their envelope would not decrypt at all.
+   * Purgeable via {@link purgeUndecryptableAppKeys}.
+   *
+   * @returns {number}
+   */
+  get undecryptableAppKeys(): number {
+    return this.#undecryptableAppKeys
+  }
+
+  /**
+   * Removes every `app-connections` row whose envelope will not decrypt under
+   * the current vault KAK, the app-key sibling of
+   * {@link purgeUndecryptableCredentials}. Returns the number of rows removed.
+   *
+   * Only the `undecryptableRowIds` bucket is purged. Unknown-epoch rows and
+   * rows this wallet holds no epoch key for are real data -- an app's only
+   * identity, in this collection -- and are left in place.
+   *
+   * @returns {Promise<number>}
+   */
+  async purgeUndecryptableAppKeys(): Promise<number> {
+    const { undecryptableRowIds } = await this.#appKeyEntries()
+    for (const rowId of undecryptableRowIds) {
+      const doc = await this.rxCollection('appConnections')
+        .findOne(rowId)
+        .exec()
+      if (doc) {
+        await doc.remove()
+      }
+      this.#cacheFor('appConnections').delete(rowId)
+      this.#appKeyCidByRow.delete(rowId)
+    }
+    this.#undecryptableAppKeys = 0
+    return undecryptableRowIds.length
   }
 
   /**

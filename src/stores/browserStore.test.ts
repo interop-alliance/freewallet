@@ -430,6 +430,63 @@ describe('BrowserStore (encrypted collections)', () => {
     expect(await localStore.listAppKeys()).toHaveLength(2)
   })
 
+  it('counts the app-key rows it skipped, and purges only the poisoned one', async () => {
+    // A cipher standing in for a session that holds no key for the
+    // collection's current epoch: a well-formed row raises KeyUnwrapError,
+    // while a poisoned row still fails as ordinary garbage.
+    const skippingCipher: DocCipher = {
+      async encrypt({ data }: { data: Json }) {
+        fakeCipherCounter += 1
+        const id = `z6SkipEnvelope${fakeCipherCounter}`
+        return {
+          id,
+          envelope: {
+            id,
+            sequence: 0,
+            jwe: { ciphertext: JSON.stringify(data) }
+          } as Json
+        }
+      },
+      async decrypt({ envelope }: { envelope: Json }) {
+        const { ciphertext } = (envelope as { jwe: { ciphertext: string } }).jwe
+        JSON.parse(ciphertext)
+        throw new KeyUnwrapError('No epoch key for "app-connections".')
+      }
+    }
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        privateCredentials: makeFakeCipher(),
+        appConnections: skippingCipher,
+        walletActivity: makeFakeCipher()
+      }
+    })
+    const collection = localStore.rxCollection('appConnections')
+    const { id, envelope } = await skippingCipher.encrypt({
+      data: makeAppKey('https://app.example/editor') as unknown as Json
+    })
+    await collection.insert({
+      id,
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: envelope
+    })
+    await insertUndecryptableRow(localStore, 'appConnections', 'z6Poison')
+
+    // Nothing lists, and the two skipped rows are counted on their own axes.
+    expect(await localStore.listAppKeys()).toEqual([])
+    expect(localStore.noEpochKeyAppKeys).toBe(1)
+    expect(localStore.undecryptableAppKeys).toBe(1)
+    expect(localStore.unknownEpochAppKeys).toBe(0)
+
+    // The purge takes the poisoned row only: the no-epoch-key row is an app's
+    // real identity and must survive.
+    expect(await localStore.purgeUndecryptableAppKeys()).toBe(1)
+    expect(localStore.undecryptableAppKeys).toBe(0)
+    const remaining = await collection.find().exec()
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0].id).toBe(id)
+  })
+
   it('stores history as envelopes, preserving activity ids and order', async () => {
     const { localStore } = await initLocalStore({ ciphers: encryptedCiphers() })
     await localStore.addHistoryItem({
@@ -1592,6 +1649,55 @@ describe('RemoteDirectStore', () => {
     // The purge deletes from the SERVER, so this bucket must stay out of it.
     expect(await store.purgeUndecryptableCredentials()).toBe(0)
     expect(collections.get('privateCredentials')!.size).toBe(1)
+  })
+
+  it('counts the app-key resources it skipped, purging only the poisoned one', async () => {
+    // The half the CHAPI popup runs on: a skipped app key read as absent
+    // would mint a second identity for the app.
+    const { remoteStore, collections } = makeFakeRemoteStore()
+    const good = makeFakeCipher()
+    const { id, envelope } = await good.encrypt({
+      data: makeAppKey('https://app.example/editor') as unknown as Json
+    })
+    collections.set(
+      'appConnections',
+      new Map([
+        [id, envelope],
+        [
+          'z6Poison',
+          {
+            id: 'z6Poison',
+            sequence: 0,
+            jwe: { ciphertext: 'not-json{' }
+          } as Json
+        ]
+      ])
+    )
+    const skippingCipher: DocCipher = {
+      encrypt: good.encrypt,
+      async decrypt({ envelope: body }: { envelope: Json }) {
+        const { ciphertext } = (body as { jwe: { ciphertext: string } }).jwe
+        JSON.parse(ciphertext)
+        throw new KeyUnwrapError('No epoch key for "app-connections".')
+      }
+    }
+    const store = new RemoteDirectStore({
+      remoteStore,
+      ciphers: {
+        privateCredentials: makeFakeCipher(),
+        appConnections: skippingCipher,
+        walletActivity: makeFakeCipher()
+      }
+    })
+
+    expect(await store.listAppKeys()).toEqual([])
+    expect(store.noEpochKeyAppKeys).toBe(1)
+    expect(store.undecryptableAppKeys).toBe(1)
+    expect(store.unknownEpochAppKeys).toBe(0)
+
+    // The purge deletes from the SERVER, so only the poisoned resource goes.
+    expect(await store.purgeUndecryptableAppKeys()).toBe(1)
+    expect([...collections.get('appConnections')!.keys()]).toEqual([id])
   })
 
   it('dedupes adds against the session cache without re-listing per item', async () => {

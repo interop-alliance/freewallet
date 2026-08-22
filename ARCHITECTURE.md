@@ -359,7 +359,8 @@ every `verifyAccountLog` read carries a durable chain-head pin
 with the roster log, beside the keyring-freshness pin and the roster-epoch
 pin):
 a served log that is a rollback, a fork, or an SCID/method switch against
-the pinned head is refused (wallet-core's `ResourceLogContinuityError` --
+the pinned head is refused (`@interop/vh-resource-log`'s
+`ResourceLogContinuityError` --
 the same seam and refusal class as the roster log's pin), established at
 first contact (trust-on-first-use) and advanced only by a log verifying
 past it, never regressed. The pin rides the verified-log memo
@@ -384,7 +385,7 @@ surface it to the user.
 **The pin inventory.** The session database holds four durable continuity
 priors, in three shapes. The two chain-head pins -- the account log's and
 the roster log's -- live in ONE keyed store (`sessionLogPinStore` in
-`src/lib/sessionKey.ts`, implementing wallet-core's keyed
+`src/lib/sessionKey.ts`, implementing `@interop/vh-resource-log`'s keyed
 `ResourceLogPinStore`): `read` and `write` take a per-log slot key that
 wallet-core itself derives (`accountLogPinId` / `userKeyRosterPinId`, both
 `space/<spaceId>/<collection>/<resource>` under the hood), so one store
@@ -1489,7 +1490,17 @@ whole-Space read grant still covers its ciphertext, as for every private
 collection -- the grantee is not an epoch recipient, so it decrypts
 nothing.) Match and consent-preview candidates come from
 `StorageManager.listAppKeys()`, so ordinary stored credentials never enter
-the match. There is no migration from the old in-`private-credentials`
+the match. That call reports what its scan had to skip: rows whose key epoch
+is still unknown after the one descriptor refresh, rows in a known epoch this
+session holds no wrap for, and envelopes that will not decrypt at all. A
+match scan that found nothing but skipped such rows refuses to mint, since
+"no match" there does not mean "never connected" and a fresh mint would
+orphan the app's prior identity. The refresh is spent at most once per
+collection per session and swallows a failed fetch, so an unknown-epoch row
+can still reach the match path -- which is why it is reported rather than
+assumed resolved. Undecryptable rows are purgeable from the Applications
+page; the other two kinds are real data and are never purged.
+There is no migration from the old in-`private-credentials`
 placement and no legacy (pre-`appUrl`) re-issue path: an idempotent
 login-time sweep deletes stranded app-key rows from `private-credentials`
 (marker-typed or matching the old self-issued-with-origin shape), and an
@@ -1774,10 +1785,19 @@ cascades, and the permanent wire-level constants.
   login-time roster policy), `/descriptors`, `/identity`, `/space` (collection
   layout, activity builders, `was-link`), `/request` (classification,
   matching, VP composition, exchanges, and the App Connect app-key
-  credential), `/display`, and `/sync` (only the
+  credential), `/display`, `/resourceLog` (the wallet-domain residue of the
+  resource-log client side: the did:webvh controller adapter
+  `webvhResourceLogController` and the ceremony-tail license), and `/sync`
+  (only the
   contacts LWW conflict resolution -- freewallet keeps its own RxDB
   replication driver in `src/lib/sync/`, over the wire contract from
   `@interop/was-client/sync`).
+- **`@interop/vh-resource-log`** -- the Resource Log Profile's generic client
+  side: chain verification, the chain-head pin port (`ResourceLogPinStore`,
+  `ResourceLogHeadPin`, `memoryResourceLogPinStore`) and its host-free slot
+  keys, and the continuity/integrity refusal classes. Freewallet imports the
+  pin port and refusal classes directly; the did:webvh controller adapter
+  stays on `@interop/wallet-core/resourceLog`.
 - **`@interop/was-client`** (+ `/edv`, `/sync`) -- the WAS HTTP client, the
   sync wire contract the RxDB driver speaks, the EDV envelope cipher and
   key-epoch construction (`createEdvDocCipher`, `x25519RecipientFromDidKey`),

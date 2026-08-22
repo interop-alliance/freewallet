@@ -35,7 +35,7 @@ import type {
   AccountLogPointer,
   VerifiedAccountLog
 } from '@interop/wallet-core/clients'
-import type { ResourceLogPinStore } from '@interop/wallet-core/resourceLog'
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import type { ControllerProfile } from '@/types/auth'
 
 /**

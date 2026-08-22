@@ -151,7 +151,7 @@ describe('StorageManager.addCredential app-key screening', () => {
       storage.addMintedAppKey({ credential: await plantedAppKey() })
     ).rejects.toThrow(AppKeyMintInvariantError)
     expect(await storage.listCredentials()).toEqual([])
-    expect(await storage.listAppKeys()).toEqual([])
+    expect((await storage.listAppKeys()).appKeys).toEqual([])
   })
 
   it('stores an ordinary credential that merely carries seed / origin claims', async () => {
@@ -178,9 +178,15 @@ describe('StorageManager app-key collection surface', () => {
 
     await storage.addMintedAppKey({ credential })
 
-    const appKeys = await storage.listAppKeys()
+    const { appKeys, skipped } = await storage.listAppKeys()
     expect(appKeys).toHaveLength(1)
     expect(appKeys[0].vc).toEqual(credential)
+    // Nothing was skipped, so the match path is free to mint on a miss.
+    expect(skipped).toEqual({
+      unknownEpoch: 0,
+      noEpochKey: 0,
+      undecryptable: 0
+    })
     // The credential-wide surfaces (the dashboard, public links, shares) must
     // not be able to reach the app's seed, so the key is nowhere among them.
     expect(await storage.listCredentials()).toEqual([])
@@ -206,7 +212,7 @@ describe('StorageManager app-key collection surface', () => {
     await storage.addMintedAppKey({ credential })
     await storage.addMintedAppKey({ credential })
 
-    expect(await storage.listAppKeys()).toHaveLength(1)
+    expect((await storage.listAppKeys()).appKeys).toHaveLength(1)
   })
 
   it('lists two apps apart and deletes one by cid', async () => {
@@ -219,19 +225,23 @@ describe('StorageManager app-key collection surface', () => {
     await storage.addMintedAppKey({ credential: editor.credential })
     await storage.addMintedAppKey({ credential: reader.credential })
 
-    const listed = await storage.listAppKeys()
-    expect(listed.map(({ vc }) => vc)).toEqual([
-      editor.credential,
-      reader.credential
-    ])
+    // Two inserts can land in the same millisecond, so the listing's
+    // `updatedAt` order is not decidable here: assert membership, and address
+    // the delete by the credential's own cid.
+    const { appKeys: listed } = await storage.listAppKeys()
+    expect(listed.map(({ vc }) => vc)).toEqual(
+      expect.arrayContaining([editor.credential, reader.credential])
+    )
+    expect(listed).toHaveLength(2)
+    const editorCid = listed.find(({ vc }) => vc === editor.credential)!.cid
 
-    await storage.deleteAppKey({ cid: listed[0].cid })
+    await storage.deleteAppKey({ cid: editorCid })
 
-    expect((await storage.listAppKeys()).map(({ vc }) => vc)).toEqual([
+    expect((await storage.listAppKeys()).appKeys.map(({ vc }) => vc)).toEqual([
       reader.credential
     ])
     // Deleting an already-absent app key is a no-op, not an error.
-    await storage.deleteAppKey({ cid: listed[0].cid })
-    expect(await storage.listAppKeys()).toHaveLength(1)
+    await storage.deleteAppKey({ cid: editorCid })
+    expect((await storage.listAppKeys()).appKeys).toHaveLength(1)
   })
 })

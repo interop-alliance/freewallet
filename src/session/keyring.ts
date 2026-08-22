@@ -111,7 +111,7 @@ import {
   type UnlockRecordProofState
 } from '@interop/wallet-core/unlock'
 import { currentAccountRecordSigners } from '@interop/wallet-core/clients'
-import type { ResourceLogPinStore } from '@interop/wallet-core/resourceLog'
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import {
   unwrapRecordEnvelope,

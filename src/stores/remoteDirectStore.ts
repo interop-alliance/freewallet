@@ -72,6 +72,9 @@ export interface SyncedCollectionStore {
   listAppKeys(): Promise<Array<StoredCredential>>
   deleteAppKey(options: { cid: string }): Promise<void>
   readonly unknownEpochAppKeys: number
+  readonly noEpochKeyAppKeys: number
+  readonly undecryptableAppKeys: number
+  purgeUndecryptableAppKeys(): Promise<number>
   readonly undecryptableCredentials: number
   purgeUndecryptableCredentials(): Promise<number>
   readonly unknownEpochCredentials: number
@@ -126,6 +129,8 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   // client cannot make a stored app key read as absent (which would mint a
   // second identity for the app).
   #unknownEpochAppKeys = 0
+  #noEpochKeyAppKeys = 0
+  #undecryptableAppKeys = 0
   // Count of resources the last read skipped because this wallet holds no key
   // for their key epoch (never a recipient, or removed and the epoch rotated).
   // Never purged -- they are another reader's data, not garbage -- and they
@@ -144,6 +149,10 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   // The resource ids of undecryptable rows from the most recent scan, so
   // `purgeUndecryptableCredentials` can remove them without a second scan.
   #undecryptableCredentialRowIds: string[] = []
+  // The same list for the most recent app-key scan, so
+  // `purgeUndecryptableAppKeys` can remove those resources without a second
+  // scan.
+  #undecryptableAppKeyRowIds: string[] = []
 
   constructor({
     remoteStore,
@@ -467,10 +476,14 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }
 
   async listAppKeys(): Promise<Array<StoredCredential>> {
-    const { entries, unknownEpoch } = await this.#scanContentCollection({
-      logicalKey: 'appConnections'
-    })
+    const { entries, undecryptableRowIds, unknownEpoch, noEpochKey } =
+      await this.#scanContentCollection({
+        logicalKey: 'appConnections'
+      })
     this.#unknownEpochAppKeys = unknownEpoch
+    this.#noEpochKeyAppKeys = noEpochKey
+    this.#undecryptableAppKeyRowIds = undecryptableRowIds
+    this.#undecryptableAppKeys = undecryptableRowIds.length
     const seen = new Set<string>()
     const appKeys: StoredCredential[] = []
     for (const { cid, vc } of entries) {
@@ -500,6 +513,37 @@ export class RemoteDirectStore implements SyncedCollectionStore {
 
   get unknownEpochAppKeys(): number {
     return this.#unknownEpochAppKeys
+  }
+
+  get noEpochKeyAppKeys(): number {
+    return this.#noEpochKeyAppKeys
+  }
+
+  get undecryptableAppKeys(): number {
+    return this.#undecryptableAppKeys
+  }
+
+  /**
+   * Removes the remote `app-connections` resources whose envelopes will not
+   * decrypt at all, from the most recent scan. Only that bucket is deleted:
+   * unknown-epoch resources and resources this wallet holds no key for are an
+   * app's real identity and stay on the server.
+   *
+   * @returns {Promise<number>}
+   */
+  async purgeUndecryptableAppKeys(): Promise<number> {
+    // A fresh scan collects the current undecryptable resource ids.
+    await this.listAppKeys()
+    for (const resourceId of this.#undecryptableAppKeyRowIds) {
+      await this.#remote.deleteSyncedResource({
+        logicalKey: 'appConnections',
+        resourceId
+      })
+    }
+    const removed = this.#undecryptableAppKeyRowIds.length
+    this.#undecryptableAppKeyRowIds = []
+    this.#undecryptableAppKeys = 0
+    return removed
   }
 
   get undecryptableCredentials(): number {

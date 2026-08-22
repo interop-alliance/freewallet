@@ -1050,9 +1050,25 @@ export class StorageManager {
    * credential-wide surfaces (the dashboard, public links, shares) must not be
    * able to reach an app's private seed.
    *
-   * @returns {Promise<Array<StoredCredential>>}
+   * The skipped counts are captured inside the read, right after the scan that
+   * produced the listing, and travel back with it: the match path has to
+   * decide on exactly the scan it consumed, and counts read off the store
+   * afterwards could describe an interleaved one.
+   *
+   * `skipped.unknownEpoch` counts what is still unreadable AFTER the one
+   * refresh below, which is why it is reported rather than assumed resolved.
+   *
+   * @returns {Promise<{ appKeys: StoredCredential[]; skipped: {
+   *   unknownEpoch: number; noEpochKey: number; undecryptable: number } }>}
    */
-  async listAppKeys(): Promise<Array<StoredCredential>> {
+  async listAppKeys(): Promise<{
+    appKeys: StoredCredential[]
+    skipped: {
+      unknownEpoch: number
+      noEpochKey: number
+      undecryptable: number
+    }
+  }> {
     // Unknown-epoch rows mean the cipher may be built from a stale descriptor
     // (a rekey emits no change-feed entry); refresh the descriptor once and
     // re-read, as the credential list does. Load-bearing here: an app key
@@ -1060,10 +1076,18 @@ export class StorageManager {
     // second identity, orphaning what the app encrypted under the first.
     return this.#readWithEpochRefresh({
       collectionId: 'app-connections',
-      read: async () => ({
-        value: await this.#store.listAppKeys(),
-        unknownEpoch: this.#store.unknownEpochAppKeys > 0
-      })
+      read: async () => {
+        const appKeys = await this.#store.listAppKeys()
+        const skipped = {
+          unknownEpoch: this.#store.unknownEpochAppKeys,
+          noEpochKey: this.#store.noEpochKeyAppKeys,
+          undecryptable: this.#store.undecryptableAppKeys
+        }
+        return {
+          value: { appKeys, skipped },
+          unknownEpoch: skipped.unknownEpoch > 0
+        }
+      }
     })
   }
 
@@ -1218,6 +1242,39 @@ export class StorageManager {
    */
   async purgeUndecryptableCredentials(): Promise<number> {
     return await this.#store.purgeUndecryptableCredentials()
+  }
+
+  /**
+   * The count of `app-connections` rows the most recent {@link listAppKeys}
+   * read had to skip because their envelope would not decrypt at all.
+   * Surfaced on the Applications page beside its purge action.
+   *
+   * @returns {number}
+   */
+  get undecryptableAppKeys(): number {
+    return this.#store.undecryptableAppKeys
+  }
+
+  /**
+   * The count of `app-connections` rows the most recent {@link listAppKeys}
+   * read had to skip because this wallet holds no key for their (known) key
+   * epoch. Never purged: the row is an app's real identity, readable again
+   * once the collection's epochs wrap a key this session holds.
+   *
+   * @returns {number}
+   */
+  get noEpochKeyAppKeys(): number {
+    return this.#store.noEpochKeyAppKeys
+  }
+
+  /**
+   * Removes the `app-connections` rows that could not be decrypted at all.
+   * Returns the number of rows removed.
+   *
+   * @returns {Promise<number>}
+   */
+  async purgeUndecryptableAppKeys(): Promise<number> {
+    return await this.#store.purgeUndecryptableAppKeys()
   }
 
   /**
