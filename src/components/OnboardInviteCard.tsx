@@ -26,12 +26,14 @@ import Typography from '@mui/material/Typography'
 import { QRCodeSVG } from 'qrcode.react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { composeWalletOnboardingRequest } from '@interop/wallet-core/request'
 import {
-  createOnboardingExchange,
+  composeWalletOnboardingRequest,
+  createEphemeralExchange,
+  pollEphemeralExchange
+} from '@interop/wallet-core/request'
+import {
   ONBOARDING_INVITE_TTL_MS,
   parseOnboardingResponse,
-  pollOnboardingExchange,
   type EnrollmentRequest
 } from '@interop/wallet-core/enrollment'
 import type { Session } from '@/types/auth'
@@ -112,7 +114,7 @@ export function OnboardInviteCard({
               'configured storage server.'
           )
         }
-        const created = await createOnboardingExchange({
+        const created = await createEphemeralExchange({
           serverUrl: context.remoteStore.storageServerUrl,
           request: composeWalletOnboardingRequest({
             pointer: context.pointer,
@@ -134,7 +136,7 @@ export function OnboardInviteCard({
         return
       }
       try {
-        const response = await pollOnboardingExchange({
+        const response = await pollEphemeralExchange({
           exchangeUrl,
           signal: controller.signal
         })
@@ -161,7 +163,7 @@ export function OnboardInviteCard({
         // Matched by name, not instanceof: the class lives in
         // @interop/wallet-core, and a linked or duplicated copy of the
         // package would make an instanceof check silently miss.
-        if ((err as Error)?.name === 'OnboardingExchangeGoneError') {
+        if ((err as Error)?.name === 'EphemeralExchangeGoneError') {
           setPhase('expired')
           return
         }

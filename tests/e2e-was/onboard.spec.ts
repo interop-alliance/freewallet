@@ -30,7 +30,7 @@ import { signupViaWizard } from './helpers'
  */
 
 /**
- * The suffix `createOnboardingExchange` appends to an exchange URL to make the
+ * The suffix `createEphemeralExchange` appends to an exchange URL to make the
  * interaction URL the QR code carries.
  */
 const INTERACTION_SUFFIX = '/protocols?iuv=1'
