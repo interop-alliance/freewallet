@@ -23,6 +23,10 @@
  *    credential's `keyAgreement` posture folded in), the roster's epoch[0]
  *    wrapped to the credential's standing KAK with a ladder-signed entry
  *    proof, and the collection epochs. Promotion deferred (`promoteController: false`).
+ *    The ceremony collects its roster and epoch failures; the establishment
+ *    treats them as fatal here, before anything names the DID, so the tear
+ *    is the heal-able kind (a DID-less record) rather than a registry sealed
+ *    under a key only this tab ever held.
  * 3. The annex generation: minted under the bootstrap did:key, the
  *    generation delegation embedded (ladder-VM-signed) while the auxiliary
  *    Space is still bootstrap-controlled, the Space's controller flipped to
@@ -41,7 +45,10 @@
  */
 import { WasClient } from '@interop/was-client'
 import type { IZcap } from '@interop/data-integrity-core'
-import { ensurePromotedSpaceController } from '@interop/wallet-core/genesis'
+import {
+  ensurePromotedSpaceController,
+  type AccountGenesisResult
+} from '@interop/wallet-core/genesis'
 import {
   accountLogPinId,
   didKeyZcapClient,
@@ -69,7 +76,8 @@ import {
   mintUserKey,
   readUserKeyRoster,
   type SealableEncryptionDescriptorStore,
-  type UserKey
+  type UserKey,
+  type WalletSpaceEpochsResult
 } from '@interop/wallet-core/keys'
 import {
   delegateLogWrite,
@@ -123,6 +131,9 @@ export interface CredentialAnchoredEstablishment {
  *   invocation under the bootstrap did:key works (the signup's registry
  *   write). Best-effort: a throw is warned, never fatal
  * @returns {Promise<CredentialAnchoredEstablishment>}
+ * @throws {Error}   when the genesis's roster or epoch stage did not land
+ *   (the underlying failure as `cause`); the record stays DID-less, so the
+ *   next login's heal re-runs the establishment
  */
 export async function establishCredentialAnchoredAccount({
   credential,
@@ -227,15 +238,23 @@ export async function establishCredentialAnchoredAccount({
   })
   const did = genesis.did
   const fullPointer: AccountPointer = { spaceId, host, did }
+  // The ceremony collects its roster and epoch failures instead of
+  // throwing; here they are fatal. A roster that never landed leaves the
+  // candidate key held in this tab's memory alone, and a registry sealed
+  // under it would be unreadable forever (the transient entry's empty-roster
+  // heal mints a different key). Refusing BEFORE the re-bind keeps the
+  // record DID-less, which is exactly what routes the next login into the
+  // establishment re-run that converges.
+  assertGenesisLanded({ failed: genesis.failed, epochs: genesis.epochs })
+  if (!genesis.rosterDescriptor) {
+    throw new Error('The user-key roster genesis did not land.')
+  }
 
   // A heal re-run that adopted a roster seeded by the torn earlier run: the
   // real user key is recovered from the credential's own standing wrap, and
   // the collection epochs are completed under it.
   let userKey: UserKey = candidateUserKey
-  if (
-    genesis.rosterDescriptor &&
-    genesis.rosterDescriptor.currentEpoch !== candidateUserKey.id
-  ) {
+  if (genesis.rosterDescriptor.currentEpoch !== candidateUserKey.id) {
     const read = await readUserKeyRoster({
       store: rosterStoreFor({ did }),
       clientKeyAgreementKey: standing.agents.keyAgreementKey
@@ -247,7 +266,12 @@ export async function establishCredentialAnchoredAccount({
       )
     }
     userKey = read.userKey
-    await ensureWalletSpaceEpochs({ was: bootstrapWas, spaceId, userKey })
+    const epochs = await ensureWalletSpaceEpochs({
+      was: bootstrapWas,
+      spaceId,
+      userKey
+    })
+    assertGenesisLanded({ failed: [], epochs })
   }
 
   // 3. The annex generation, so the very next login can enroll a
@@ -399,4 +423,44 @@ export async function establishCredentialAnchoredAccount({
   })
 
   return establishment
+}
+
+/**
+ * Refuses a genesis whose roster or epoch stages did not land: the ceremony
+ * reports them on `failed` (a stage that could not run) and on
+ * `epochs.failed` (a collection the fan-out could not epoch) rather than
+ * throwing, and on a credential-anchored account no login-time sweep ever
+ * finishes them -- the establishment re-run is the only completer, so the
+ * establishment must stop here for it to be reached.
+ *
+ * @param options {object}
+ * @param options.failed {Array}   the ceremony's collected stage failures
+ * @param [options.epochs] {WalletSpaceEpochsResult}   the collection
+ *   epoch fan-out's result, when the stage ran
+ * @throws {Error}   carrying the first underlying failure as `cause`
+ */
+function assertGenesisLanded({
+  failed,
+  epochs
+}: {
+  failed: AccountGenesisResult['failed']
+  epochs?: WalletSpaceEpochsResult
+}): void {
+  const stage = failed.find(
+    entry => entry.stage === 'roster' || entry.stage === 'epochs'
+  )
+  if (stage) {
+    throw new Error(
+      `The credential-anchored genesis's ${stage.stage} stage failed.`,
+      { cause: stage.error }
+    )
+  }
+  const collection = epochs?.failed[0]
+  if (collection) {
+    throw new Error(
+      'The credential-anchored genesis could not install a key epoch on ' +
+        `collection "${collection.collectionId}".`,
+      { cause: collection.error }
+    )
+  }
 }

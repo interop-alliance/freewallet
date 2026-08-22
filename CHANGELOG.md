@@ -58,6 +58,17 @@
   old unlock Space is deleted, and the tapped-passkey removal reads it off
   the tapped credential's record (`standingLadderSeed`). The tap-free
   removal of a lost passkey relies on the seed-less log attribution.
+- The credential-anchored establishment now refuses to continue when the
+  genesis ceremony reports a failed roster or epochs stage, before the annex
+  generation is minted and before the record re-bind. Previously such a
+  failure was carried past silently: signup continued on a user key held
+  only in the tab's memory, the unlock-methods registry was sealed under it,
+  and every later registry read (recovery-code issuance, passkey add and
+  remove, the standing upsert) failed forever. Refusing before the re-bind
+  leaves the unlock record DID-less, so the next login routes into the
+  establishment re-run and converges. The heal branch's own epoch fan-out
+  result is checked the same way. A regression test covers a genesis whose
+  roster stage failed.
 
 ### Added
 
