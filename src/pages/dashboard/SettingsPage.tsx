@@ -35,6 +35,7 @@ import {
   addAccountPasskey,
   addAccountPassphrase,
   changeAccountPassphrase,
+  SamePassphraseError,
   deleteAccount,
   loadUnlockRegistry,
   readLoginHandle,
@@ -174,7 +175,7 @@ export function SettingsPage() {
     'rotated' | 'skipped' | 'failed'
   >('skipped')
   const [passphraseChangeError, setPassphraseChangeError] = useState<
-    'incorrect' | 'failed' | null
+    'incorrect' | 'same' | 'failed' | null
   >(null)
   const newPassphraseLengthPassed =
     newPassphrase.length >= PASSWORD_RULES.minlength
@@ -211,6 +212,8 @@ export function SettingsPage() {
     } catch (err) {
       if (err instanceof WrongPassphraseError) {
         setPassphraseChangeError('incorrect')
+      } else if (err instanceof SamePassphraseError) {
+        setPassphraseChangeError('same')
       } else {
         console.error('Could not change the passphrase:', err)
         setPassphraseChangeError('failed')
@@ -792,7 +795,9 @@ export function SettingsPage() {
                     <Alert severity="error">
                       {passphraseChangeError === 'incorrect'
                         ? t('settings.passphraseIncorrect')
-                        : t('settings.passphraseChangeFailed')}
+                        : passphraseChangeError === 'same'
+                          ? t('settings.passphraseSame')
+                          : t('settings.passphraseChangeFailed')}
                     </Alert>
                   )}
                   <Typography variant="body2" color="text.secondary">

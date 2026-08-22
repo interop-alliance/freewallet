@@ -26,7 +26,13 @@ const state = vi.hoisted(() => ({
   clientAnnexDeleteFails: false,
   artifactFailures: [] as string[],
   // What the shared wipe enumeration reports back to `deleteAccount`.
-  localWipeFailed: [] as string[]
+  localWipeFailed: [] as string[],
+  // Whether the session resolves an enrolled-client context at all: a session
+  // that cannot run a retirement never reads the registry.
+  enrolled: true,
+  // The key-agreement multibase the NEW passphrase's credential derives.
+  // Distinct from the old posture's unless a test says otherwise.
+  newKeyAgreementKeyMultibase: 'z6LSNewPassphraseKak'
 }))
 
 const FRESH_USER_KEY = { id: 'did:key:z6LSFreshUserKey' }
@@ -93,7 +99,12 @@ vi.mock('@/session/keyring', () => ({
   }),
   bindPassphrase: vi.fn(async () => ({ unlockSpaceId: 'space-bound' })),
   bindUnlockSecret: vi.fn(async () => ({ unlockSpaceId: 'space-bound' })),
-  deriveUnlockCredential: vi.fn(async () => ({ unlock: {}, standing: {} })),
+  deriveUnlockCredential: vi.fn(async () => ({
+    unlock: {},
+    standing: {
+      keyAgreementKeyMultibase: state.newKeyAgreementKeyMultibase
+    }
+  })),
   unlockManagementGrantee: vi.fn(() => 'did:key:grantee')
 }))
 
@@ -211,6 +222,15 @@ vi.mock('@/lib/loginCredential', () => ({
   loginHandleOf: vi.fn(() => '')
 }))
 
+vi.mock('@/session/enrolledContext', () => ({
+  enrolledClientContext: vi.fn(() =>
+    state.enrolled ? { controller: 'did:key:zAccount' } : null
+  ),
+  requireEnrolledClientContext: vi.fn(() => ({
+    controller: 'did:key:zAccount'
+  }))
+}))
+
 vi.mock('@/session/wipe', () => ({
   snapshotWipeTargets: vi.fn(
     ({
@@ -240,8 +260,12 @@ vi.mock('@/session/wipe', () => ({
   })
 }))
 
-const { changeAccountPassphrase, deleteAccount, removeAccountPasskey } =
-  await import('@/session/accountSettings')
+const {
+  changeAccountPassphrase,
+  deleteAccount,
+  removeAccountPasskey,
+  SamePassphraseError
+} = await import('@/session/accountSettings')
 const { rotateOffUnlockCredential } =
   await import('@/session/credentialRotation')
 const { adoptRotatedUserKey } = await import('@/session/userKeyAdoption')
@@ -250,7 +274,9 @@ const {
   revokeUnlockMethodByCeremony,
   canRevokeWithoutCeremony
 } = await import('@/session/unlockMethods')
-const { deleteUnlockMethodArtifacts } = await import('@/session/unlockMethods')
+const { deleteUnlockMethodArtifacts, getUnlockMethods } =
+  await import('@/session/unlockMethods')
+const { changePassphrase } = await import('@/session/keyring')
 const { executeLocalWipe, snapshotWipeTargets } = await import('@/session/wipe')
 const { durableSessionPersistence } = await import('@/session/persistence')
 
@@ -309,6 +335,34 @@ function registryWithTwoMethods(): object {
   }
 }
 
+/**
+ * A registry whose passphrase entry records a standing posture -- the
+ * multibases the retirement must hold before the rebind overwrites them.
+ *
+ * @param options {object}
+ * @param options.keyAgreementKeyMultibase {string}
+ * @returns {object}
+ */
+function registryWithPassphrasePosture({
+  keyAgreementKeyMultibase
+}: {
+  keyAgreementKeyMultibase: string
+}): object {
+  return {
+    version: 1,
+    userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+    methods: [
+      {
+        type: 'passphrase',
+        createdAt: '2026-08-01T00:00:00.000Z',
+        unlockSpaceId: 'unlock-space-passphrase',
+        keyAgreementKeyMultibase,
+        updateKeyMultibase: 'z6MkOldPassphraseUpdateKey'
+      }
+    ]
+  }
+}
+
 function makeSession() {
   return {
     user: { id: 'did:key:zClient' },
@@ -348,6 +402,8 @@ beforeEach(() => {
   state.clientAnnexDeleteFails = false
   state.artifactFailures = []
   state.localWipeFailed = []
+  state.enrolled = true
+  state.newKeyAgreementKeyMultibase = 'z6LSNewPassphraseKak'
   vi.clearAllMocks()
 })
 
@@ -635,6 +691,120 @@ describe('changeAccountPassphrase', () => {
     expect(rotation).toBe('failed')
     expect(vi.mocked(adoptRotatedUserKey)).not.toHaveBeenCalled()
     error.mockRestore()
+  })
+
+  it('refuses the change when the old posture cannot be read', async () => {
+    state.registryFails = true
+    await expect(
+      changeAccountPassphrase({
+        session: makeSession(),
+        oldPassphrase: 'old',
+        newPassphrase: 'new'
+      })
+    ).rejects.toThrow('the passphrase was not changed')
+    // Nothing was written: the rebind would have replaced the registry entry
+    // with the new passphrase's multibases, leaving the old credential
+    // standing with nothing left to name it by.
+    expect(state.calls).toEqual([])
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+  })
+
+  it('reads the old posture before the rebind and retires by it', async () => {
+    state.registry = registryWithPassphrasePosture({
+      keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+    })
+    const { rotation } = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    expect(rotation).toBe('skipped')
+    expect(state.calls).toEqual([
+      'changePassphrase',
+      'adoptPassphraseRebind',
+      'establishPassphrasePosture',
+      'rotateOffUnlockCredential'
+    ])
+    // The read is the first thing that happens, ahead of the rebind.
+    expect(
+      vi.mocked(getUnlockMethods).mock.invocationCallOrder[0]
+    ).toBeLessThan(vi.mocked(changePassphrase).mock.invocationCallOrder[0])
+    expect(vi.mocked(rotateOffUnlockCredential)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: expect.objectContaining({
+          type: 'passphrase',
+          keyAgreementKeyMultibase: 'z6LSOldPassphraseKak',
+          updateKeyMultibase: 'z6MkOldPassphraseUpdateKey'
+        })
+      })
+    )
+  })
+
+  it('treats a registry that resolves to null as nothing to retire', async () => {
+    state.registry = null
+    await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    // No posture recorded is not a refusal: the ceremony runs, and the
+    // retirement is handed a method carrying no multibases.
+    expect(vi.mocked(getUnlockMethods)).toHaveBeenCalled()
+    expect(state.calls).toContain('rotateOffUnlockCredential')
+    const [call] = vi.mocked(rotateOffUnlockCredential).mock.calls
+    expect(call[0].method).toEqual({ type: 'passphrase' })
+  })
+
+  it('refuses a new passphrase deriving the same credential as the old', async () => {
+    state.registry = registryWithPassphrasePosture({
+      keyAgreementKeyMultibase: 'z6LSSameKak'
+    })
+    state.newKeyAgreementKeyMultibase = 'z6LSSameKak'
+    await expect(
+      changeAccountPassphrase({
+        session: makeSession(),
+        oldPassphrase: 'old',
+        newPassphrase: 'derives-the-same'
+      })
+    ).rejects.toThrow(expect.objectContaining({ name: 'SamePassphraseError' }))
+    // Neither outcome is a change: retiring would strip the posture the
+    // establishment just re-published, and skipping the retirement would
+    // orphan the old ladder's committed rung.
+    expect(state.calls).toEqual([])
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+  })
+
+  it('refuses a same-string change before anything is written', async () => {
+    // The plain case, caught without needing a recorded posture at all.
+    await expect(
+      changeAccountPassphrase({
+        session: makeSession(),
+        oldPassphrase: 'same',
+        newPassphrase: 'same'
+      })
+    ).rejects.toThrow(SamePassphraseError)
+    expect(state.calls).toEqual([])
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+  })
+
+  it('does not read the registry when the session cannot retire at all', async () => {
+    state.enrolled = false
+    state.registryFails = true
+    const { rotation } = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    // No WAS, a guest, or an unpromoted account: there is no posture to
+    // read, so an unreadable registry cannot refuse the change.
+    expect(rotation).toBe('skipped')
+    expect(vi.mocked(getUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).toEqual([
+      'changePassphrase',
+      'adoptPassphraseRebind',
+      'establishPassphrasePosture',
+      'rotateOffUnlockCredential'
+    ])
   })
 })
 

@@ -106,6 +106,7 @@
     "passphraseChangedRotationPending": "Se cambió su frase de contraseña, pero el retiro de la anterior no terminó. Se reanuda automáticamente la próxima vez que inicie sesión.",
     "passphraseLeakHint": "Si cree que su frase de contraseña pudo filtrarse, cámbiela aquí. El cambio también rota las claves de contenido de la cuenta, así que la frase anterior no puede leer nada escrito después. Los datos que un atacante ya descargó siguen siendo legibles para él.",
     "passphraseIncorrect": "La frase de contraseña actual es incorrecta.",
+    "passphraseSame": "La nueva frase de contraseña debe ser distinta de la actual.",
     "passphraseChangeFailed": "No se pudo cambiar su frase de contraseña. Inténtelo de nuevo.",
     "passphraseRequiresFullSession": "Inicie sesión con su frase de contraseña para cambiarla.",
     "passkeysSection": "Llaves de acceso",

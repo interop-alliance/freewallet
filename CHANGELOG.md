@@ -25,6 +25,15 @@
 
 ### Fixed
 
+- The passphrase-change ceremony no longer strips its own posture or
+  misreads a failed registry read. A change whose new passphrase is the
+  current one (the same derived credential) is refused up front
+  (`SamePassphraseError`, rendered as its own Settings message): retiring it
+  would strip the posture just re-published, and skipping the retirement
+  would orphan the old ladder's committed rung. An unlock-methods registry
+  that cannot be read refuses the change before anything is written instead
+  of overwriting the old entry's multibases and reporting the retirement as
+  skipped.
 - The self-enrollment completion now persists the freshly minted client key
   set into the local client-key record before writing the user key roster
   epoch pin, not after. A rejecting pin write (quota, a blocked IndexedDB

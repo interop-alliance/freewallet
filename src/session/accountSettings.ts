@@ -52,6 +52,7 @@ import {
   isDurableSession
 } from '@/session/persistence'
 import { pointedClientAnnexReach } from '@/session/annexReach'
+import { enrolledClientContext } from '@/session/enrolledContext'
 import { executeLocalWipe, snapshotWipeTargets } from '@/session/wipe'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
@@ -123,6 +124,18 @@ export async function loadUnlockRegistry({
  * 'failed'`): the change itself cannot be rolled back, and a torn retirement
  * converges at the next login's completion sweep.
  *
+ * Two guards keep the retirement honest. The old credential's posture (its
+ * registry multibases) is read BEFORE anything is written, and a read that
+ * fails refuses the whole change: the rebind would overwrite the registry
+ * entry with the new passphrase's multibases, leaving the leaked credential
+ * standing (commitment and roster wrap intact) with nothing left to name it
+ * by. And a "change" whose new passphrase derives the same credential as the
+ * old one is refused (`SamePassphraseError`) before anything is written: the
+ * retirement would strip the posture the establishment just re-published,
+ * while skipping it would orphan the old ladder's committed rung (the
+ * establishment mints a fresh ladder seed every run), so neither outcome is
+ * a change at all.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @param options.oldPassphrase {string}
@@ -130,6 +143,7 @@ export async function loadUnlockRegistry({
  * @returns {Promise<{ oldPassphraseRetired: boolean, unlockSpaceId: string,
  *   manageCapability?: IZcap, rotation: 'rotated' | 'skipped' | 'failed' }>}
  * @throws {WrongPassphraseError}   the current passphrase did not verify
+ * @throws {SamePassphraseError}   the new passphrase is the current one
  */
 export async function changeAccountPassphrase({
   session,
@@ -155,10 +169,14 @@ export async function changeAccountPassphrase({
     throw new Error('Changing the passphrase needs this client key set.')
   }
   // The OLD credential's standing posture, captured before the rebind
-  // replaces the registry entry with the new passphrase's. Best-effort: an
-  // unreadable registry (or an entry that never held a posture) simply means
-  // there is nothing to retire.
-  const oldStanding = await standingPosture({ session })
+  // replaces the registry entry with the new passphrase's -- the retirement
+  // must hold the old multibases before the upsert destroys them. A session
+  // that cannot run a retirement at all (no WAS, a guest, an unpromoted
+  // account) has nothing to read; otherwise an unreadable registry refuses
+  // the change up front, while nothing has been written yet.
+  const oldStanding = enrolledClientContext({ session })
+    ? await standingPosture({ session })
+    : {}
   // The keyring record is bound under the ACCOUNT controller (the first
   // client's did:key) -- on an enrolled second client it differs from this
   // client's `user.id`, so verification must match against it.
@@ -168,6 +186,19 @@ export async function changeAccountPassphrase({
     secret: newPassphrase,
     kdf: KEYRING_KDF
   })
+  // The derivation is deterministic, so a same-string change derives the
+  // credential the registry already records. Refused, not skipped: retiring
+  // it would strip the posture just re-published, and skipping the
+  // retirement would leave the old ladder's rung committed with no registry
+  // entry naming it.
+  if (
+    newPassphrase === oldPassphrase ||
+    (oldStanding.keyAgreementKeyMultibase !== undefined &&
+      oldStanding.keyAgreementKeyMultibase ===
+        newCredential.standing.keyAgreementKeyMultibase)
+  ) {
+    throw new SamePassphraseError()
+  }
   const {
     oldPassphraseRetired,
     unlockSpaceId,
@@ -248,36 +279,52 @@ export async function changeAccountPassphrase({
 }
 
 /**
+ * The new passphrase is the current one: a change that would retire the
+ * credential it just re-established, refused before anything is written.
+ */
+export class SamePassphraseError extends Error {
+  constructor(
+    message = 'The new passphrase must differ from the current one.'
+  ) {
+    super(message)
+    this.name = 'SamePassphraseError'
+  }
+}
+
+/**
  * The standing-posture members the registry records for the account's current
- * passphrase entry, read before a change replaces it. Best-effort: an
- * unreadable registry, or no passphrase entry at all, resolves to an empty
- * posture, which makes the retirement a skip.
+ * passphrase entry, read before a change replaces it. No registry, or no
+ * passphrase entry (a bind that never established a posture), resolves to an
+ * empty posture, which makes the retirement a skip. A read that FAILS is not
+ * an empty posture: it throws, so the caller refuses the change instead of
+ * overwriting the entry it could not read.
  *
  * @param options {object}
  * @param options.session {Session}
  * @returns {Promise<{ keyAgreementKeyMultibase?: string,
  *   updateKeyMultibase?: string }>}
+ * @throws {Error}   the registry could not be read
  */
 async function standingPosture({ session }: { session: Session }): Promise<{
   keyAgreementKeyMultibase?: string
   updateKeyMultibase?: string
 }> {
+  let record: UnlockMethodsRecord | null
   try {
-    const record = await getUnlockMethods({ session })
-    const entry = record?.methods.find(
-      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
-    )
-    return {
-      keyAgreementKeyMultibase: entry?.keyAgreementKeyMultibase,
-      updateKeyMultibase: entry?.updateKeyMultibase
-    }
+    record = await getUnlockMethods({ session })
   } catch (err) {
-    console.warn(
-      'Could not read the passphrase posture to retire; skipping the ' +
-        'credential rotation:',
-      err
+    throw new Error(
+      'Could not read the passphrase posture to retire; the passphrase was ' +
+        'not changed.',
+      { cause: err }
     )
-    return {}
+  }
+  const entry = record?.methods.find(
+    (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+  )
+  return {
+    keyAgreementKeyMultibase: entry?.keyAgreementKeyMultibase,
+    updateKeyMultibase: entry?.updateKeyMultibase
   }
 }
 

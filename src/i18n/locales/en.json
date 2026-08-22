@@ -106,6 +106,7 @@
     "passphraseChangedRotationPending": "Your passphrase was changed, but retiring the old one did not finish. It resumes automatically the next time you log in.",
     "passphraseLeakHint": "If you think your passphrase may have leaked, change it here. Changing it also rotates the account's content keys, so the old passphrase cannot read anything written afterwards. Data an attacker already downloaded stays readable to them.",
     "passphraseIncorrect": "The current passphrase is incorrect.",
+    "passphraseSame": "The new passphrase must differ from the current one.",
     "passphraseChangeFailed": "Could not change your passphrase. Please try again.",
     "passphraseRequiresFullSession": "Log in with your passphrase to change it.",
     "passkeysSection": "Passkeys",
