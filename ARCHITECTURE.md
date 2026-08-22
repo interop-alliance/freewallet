@@ -489,10 +489,11 @@ forced replacement of the embedded generation delegation with a fresh
 ladder-signed one and the revocation, through this client's `WasClient`,
 of every still-unexpired ladder-signed delegation the annex history
 embedded; then the login credential's record re-bind
-(`rebindLoginCredentialRecord`, the ceremony's `onBeforeRemoval` seam): its
-bridge delegation and `delegatedClients` sibling are re-signed by the
-ladder VM and the record re-sealed through the keyring hit's re-bind
-closure, stamped on `profile.standingUnlock` at login beside the
+(`rebindLoginCredentialRecord`, the ceremony's required `onBeforeRemoval`
+seam -- the one stage that reaches the login credential's own record, which
+the re-mint pass below skips): its bridge delegation and `delegatedClients`
+sibling are re-signed by the ladder VM and the record re-sealed through the
+keyring hit's re-bind closure, stamped on `profile.standingUnlock` at login beside the
 credential's unlock Space id, with the registry pair refreshed in this
 client's last window of registry authority -- the removed client's
 signatures rot at the removal entry, and on a client-less account no
