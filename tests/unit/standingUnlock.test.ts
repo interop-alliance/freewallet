@@ -1,10 +1,10 @@
 // @vitest-environment node
 /**
- * Unit tests for the standing-posture establishment's passphrase wrapper
- * (`establishPassphrasePosture` in `src/session/standingUnlock.ts`): who
+ * Unit tests for the standing-configuration establishment's passphrase wrapper
+ * (`establishPassphraseStanding` in `src/session/standingUnlock.ts`): who
  * writes the unlock-methods registry entry. A passphrase change takes that
  * write over, so it can decide -- after the old credential's retirement has
- * reported -- which credential's posture the entry must name.
+ * reported -- which credential's standing configuration the entry must name.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -104,7 +104,7 @@ const CREDENTIAL = {
   }
 }
 
-const { establishPassphrasePosture } = await import('@/session/standingUnlock')
+const { establishPassphraseStanding } = await import('@/session/standingUnlock')
 const { putUnlockMethods } = await import('@/session/unlockMethods')
 
 function makeSession() {
@@ -117,16 +117,16 @@ function makeSession() {
       zcapClient: { isZcapClient: true },
       userKey: { id: 'did:key:zUserKey', secret: new Uint8Array(32) }
     }
-  } as unknown as Parameters<typeof establishPassphrasePosture>[0]['session']
+  } as unknown as Parameters<typeof establishPassphraseStanding>[0]['session']
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('establishPassphrasePosture', () => {
+describe('establishPassphraseStanding', () => {
   it('writes the registry entry by default', async () => {
-    const { established } = await establishPassphrasePosture({
+    const { established } = await establishPassphraseStanding({
       session: makeSession(),
       passphrase: 'new'
     })
@@ -135,7 +135,7 @@ describe('establishPassphrasePosture', () => {
   })
 
   it('hands the entry members back instead when the caller writes it', async () => {
-    const { established } = await establishPassphrasePosture({
+    const { established } = await establishPassphraseStanding({
       session: makeSession(),
       passphrase: 'new',
       recordInRegistry: false

@@ -173,7 +173,7 @@ test.describe('The last-durable-client forget transition', () => {
       })
       passphrase = user.passphrase
       // Something to decrypt from a later terminal: the transient session
-      // stores it over the replica-less remote-direct posture.
+      // stores it over the replica-less remote-direct variant.
       await addCredentialViaPaste(first.page)
       await first.page.getByRole('button', { name: 'Log out' }).click()
       await expect(first.page).toHaveURL(/\/#?\/?$/)

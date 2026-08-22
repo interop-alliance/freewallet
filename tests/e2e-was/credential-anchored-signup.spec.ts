@@ -1,10 +1,10 @@
 /**
- * The credential-anchored signup's posture cell, pinned end to end: a fresh
+ * The credential-anchored signup's durability cell, pinned end to end: a fresh
  * browser context runs the DEFAULT signup through the real wizard (no
  * remember seam), which mints no durable client anywhere -- the account's
  * genesis is anchored on the passphrase's ladder, the visit lands on the
  * dashboard as a transient session over the replica-less remote-direct
- * posture, and the browser holds zero trace afterwards (the shared
+ * variant, and the browser holds zero trace afterwards (the shared
  * assertions in `tests/shared/storageResidue.ts`).
  *
  * The second test is the standing-credential proof: a SECOND cold terminal
@@ -54,7 +54,7 @@ test.describe.serial('credential-anchored signup', () => {
       passphrase = user.passphrase
 
       // The transient session works: a credential stores over the
-      // replica-less remote-direct posture.
+      // replica-less remote-direct variant.
       await addCredentialViaPaste(page)
 
       await page.getByRole('button', { name: 'Log out' }).click()

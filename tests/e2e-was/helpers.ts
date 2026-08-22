@@ -164,7 +164,7 @@ export async function deleteCredential(page: Page) {
 
 /**
  * Forces the durable login route (the programmatic remember-this-browser
- * entry) for login submits on this page. The transient posture is the
+ * entry) for login submits on this page. A transient session is the
  * default on a non-remembered browser, so specs exercising the standing
  * self-enrollment set this non-production seam before submitting. The flag
  * is read at submit time, so it can be set on an already-loaded page.
@@ -183,7 +183,7 @@ export async function forceRememberBrowser(page: Page): Promise<void> {
 /**
  * Submits the login form on an already-loaded login page WITHOUT the
  * remember-this-browser seam, so a non-remembered browser takes its default
- * posture -- the transient (public-terminal) login -- and waits for the
+ * durability -- the transient (public-terminal) login -- and waits for the
  * dashboard. Split from the `goto` so a caller can capture a localStorage
  * baseline on the loaded page before anything is typed.
  *

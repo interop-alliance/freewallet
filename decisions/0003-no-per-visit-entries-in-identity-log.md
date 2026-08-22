@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-08-19
-- Driving work: the public-computer posture redesign for the browser
+- Driving work: the public-computer login redesign for the browser
   wallet (default persist-nothing login; per-visit transient clients).
   The transient client class needed a membership venue, and the obvious
   one -- the account's own did:webvh document, with expiring

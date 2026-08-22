@@ -102,7 +102,7 @@ export class WASRemoteStore {
   public spaceUrl: string
   public collections?: ICollectionsSet
   // The invocation capability every request rides when one was supplied (a
-  // delegated Space-subtree zcap -- the transient posture's generation
+  // delegated Space-subtree zcap -- the transient session's generation
   // delegation). Absent, every request invokes the root capability, exactly
   // as before the option existed.
   #capability?: IZcap
@@ -685,7 +685,7 @@ export class WASRemoteStore {
       spaceId,
       controller,
       // A session holding only a delegated Space-subtree zcap (the transient
-      // posture's generation delegation) rides it on every request.
+      // session's generation delegation) rides it on every request.
       capability: profile.invocationCapability
     })
 
@@ -1092,7 +1092,7 @@ export class WASRemoteStore {
  * than `WASRemoteStore` methods (the store is bound to the data identity). Each
  * builds its own `WasClient` over the unlock agent's `zcapClient`, whose
  * invocation signer is the unlock root key (root invocation, no capability
- * attached -- the same posture the data Space uses). The one resource is a
+ * attached -- the same invocation shape the data Space uses). The one resource is a
  * plaintext JSON document (its keyring payload is
  * already ciphertext), so no encryption provider is wired in -- and the
  * read/write handles pass the explicit `{ encryption: 'plaintext' }` override.

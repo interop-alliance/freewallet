@@ -1,5 +1,5 @@
 /**
- * The UI-prefs half of the posture seam: the transient overlay shadows
+ * The UI-prefs half of the durability seam: the transient overlay shadows
  * localStorage for the visit and leaves it untouched.
  */
 import { afterEach, describe, expect, it } from 'vitest'
@@ -13,13 +13,13 @@ afterEach(() => {
 })
 
 describe('the prefs storage seam', () => {
-  it('reads and writes localStorage in the durable posture', () => {
+  it('reads and writes localStorage in a durable session', () => {
     writePref({ key: KEY, value: 'stored' })
     expect(localStorage.getItem(KEY)).toBe('stored')
     expect(readPref(KEY)).toBe('stored')
   })
 
-  it('writes only the overlay while the transient posture is active', () => {
+  it('writes only the overlay while a transient session is active', () => {
     localStorage.setItem(KEY, 'durable')
     setTransientPrefs({ active: true })
     // A pref never toggled this visit still reads the terminal's stored one.
@@ -29,7 +29,7 @@ describe('the prefs storage seam', () => {
     expect(localStorage.getItem(KEY)).toBe('durable')
   })
 
-  it('discards the overlay when the transient posture ends', () => {
+  it('discards the overlay when the transient session ends', () => {
     setTransientPrefs({ active: true })
     writePref({ key: KEY, value: 'transient' })
     setTransientPrefs({ active: false })

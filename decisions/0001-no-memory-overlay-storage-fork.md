@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-08-17
-- Driving work: the default public-computer login posture (a login
+- Driving work: the default public-computer login (a login
   persists nothing locally unless the user opts into remembering the
   browser). Its first implementation shipped as a read-through
   in-memory overlay over IndexedDB and was reverted the next day; this
@@ -17,7 +17,7 @@ Freewallet's local persistence is invariant-dense. Ceremonies persist
 key material before publishing log entries, the forget and
 account-deletion remedies promise complete removal of local traces,
 and continuity pins must only move forward. All of these assume that a
-write to local storage is durable. The public-computer posture needs
+write to local storage is durable. The transient variant needs
 the opposite default: a non-remembered login must leave nothing on
 disk, while reads still see whatever durable state the browser already
 holds (pins keep protecting, a remembered browser stays enrolled).
@@ -42,13 +42,13 @@ surfaces: a durable log publication whose staged key material died
 with the tab, forget and account-deletion runs that missed durable
 state or deleted only in memory, a cache lifecycle split into two
 disconnected instances, and a first-contact read that durably created
-the database the posture promised not to create. Each bug was the same
+the database the transient session promised not to create. Each bug was the same
 defect instantiated at another write site, and every future write site
 would have inherited the hazard.
 
 ## Consequences
 
-- The posture goal stands and still needs a design: the redo must
+- The transient-session goal stands and still needs a design: the redo must
   express ephemerality in the data or the session lifecycle (for
   example, a persistence handle whose type states its durability), so
   that durable-publish ceremonies can refuse or demand durability

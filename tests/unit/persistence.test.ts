@@ -1,5 +1,5 @@
 /**
- * The session-persistence posture seam: the transient handle's in-memory
+ * The session durability seam: the transient handle's in-memory
  * members and refusals, and the durable handle's cache memoization.
  */
 import { describe, expect, it } from 'vitest'
@@ -139,7 +139,7 @@ describe('the durable persistence handle', () => {
   })
 })
 
-describe('the posture refusals', () => {
+describe('the durability refusals', () => {
   it('refuses a durable-subject ceremony from a transient session', () => {
     const transient = transientSessionPersistence()
     expect(() =>

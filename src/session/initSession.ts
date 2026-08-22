@@ -389,7 +389,7 @@ export async function initSessionFromSeed({
   // configured, provisions the remote Space / did:web -- so it is correct for
   // guests (local only) and returning logins alike. The new-wallet flows opt
   // out (`provisionStorage: false`) and provision explicitly.
-  // The transient posture skips provisioning and every login-time sweep: the
+  // A transient session skips provisioning and every login-time sweep: the
   // sweeps perform governed writes (roster convergence, epoch rotation, the
   // app-key deletes) a transient session must not run, and provisioning's
   // bare-Space-URL reads and promotion PUTs are the durable bootstrap's.
@@ -664,7 +664,7 @@ async function checkUserKeyRosterAtLogin({
  * passphrase derives an unlock identity that locates the account and unwraps
  * this client's local key set.
  *
- * The post-KDF posture routing runs first (`routeUnlockLogin`): with a WAS
+ * The post-KDF durability routing runs first (`routeUnlockLogin`): with a WAS
  * server configured and no client-key record held for this credential, the
  * DEFAULT is the transient login -- the public-terminal composition in
  * `src/session/transientLogin.ts`, which persists nothing locally -- and the
@@ -714,11 +714,11 @@ async function checkUserKeyRosterAtLogin({
  * @param [options.credential] {UnlockCredential}   an already-derived unlock
  *   credential for this passphrase, so a caller that has just unlocked (the
  *   enrollment ceremony) does not run the KDF again
- * @param [options.rememberBrowser] {boolean}   the explicit posture input:
+ * @param [options.rememberBrowser] {boolean}   the explicit durability input:
  *   `true` proceeds durable (running the standing self-enrollment on a fresh
  *   browser -- the programmatic entry the signup probe, the recovery tail,
  *   and tests use until the login form grows the choice); `false` demands
- *   the transient posture (refused as `AlreadyRememberedError` on a browser
+ *   the transient session (refused as `AlreadyRememberedError` on a browser
  *   already holding this credential's client-key record). Absent, the
  *   routing decides: record present -> durable (the silent ratchet), absent
  *   -> transient, the default on a non-remembered browser
@@ -749,7 +749,7 @@ export async function loginWithPassphrase({
     remoteDirectStorage,
     rememberBrowser
   })
-  if (routed.posture === 'transient') {
+  if (routed.durability === 'transient') {
     const found = await fetchTransientKeyring({
       credential: routed.credential,
       accountLogPinStore: routed.persistence.logPins
@@ -1030,7 +1030,7 @@ async function sessionFromKeyringHit({
         await refreshStandingDelegationFields({
           session,
           unlockSpaceId,
-          // The entry may still record an earlier credential's posture (a
+          // The entry may still record an earlier credential's standing configuration (a
           // pending retirement); these members are this credential's.
           ...(standingKeyAgreementKeyMultibase
             ? {
@@ -1060,10 +1060,10 @@ async function sessionFromKeyringHit({
 
   // The pending-retirement completer: a passphrase change whose retirement
   // failed at its document edit leaves the registry's passphrase entry
-  // naming the OLD credential's posture under the new unlock Space, and
+  // naming the OLD credential's standing configuration under the new unlock Space, and
   // nothing else can find that credential (the roster sweep only rotates
   // away recipients the document does not back). This login retires it and
-  // records its own posture. Ordered ahead of the ladder-rung refresh below,
+  // records its own standing configuration. Ordered ahead of the ladder-rung refresh below,
   // which would otherwise overwrite the entry's recorded rung -- the very
   // anchor the retirement attributes by. Best-effort behind provisioning.
   if (session.storageReady && !remoteDirectStorage) {
@@ -1268,7 +1268,7 @@ async function sessionFromKeyringHit({
  *   from session creation and expose it as `session.storageReady`; default
  *   true
  * @param [options.signal] {AbortSignal}   aborts the WebAuthn ceremony
- * @param [options.rememberBrowser] {boolean}   the explicit posture input,
+ * @param [options.rememberBrowser] {boolean}   the explicit durability input,
  *   exactly as on `loginWithPassphrase`
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
@@ -1294,7 +1294,7 @@ export async function loginWithPasskey({
     remoteDirectStorage,
     rememberBrowser
   })
-  if (routed.posture === 'transient') {
+  if (routed.durability === 'transient') {
     const found = await fetchTransientKeyring({
       credential: routed.credential,
       accountLogPinStore: routed.persistence.logPins

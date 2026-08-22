@@ -733,7 +733,7 @@ describe('the standing delegation scalar pairs (FW-194)', () => {
 
 describe('the credential rotation inside a revocation', () => {
   /**
-   * A passkey entry carrying a standing posture, so the rotation ceremony has
+   * A passkey entry carrying a standing configuration, so the rotation ceremony has
    * something to retire.
    *
    * @returns {PasskeyUnlockMethod}

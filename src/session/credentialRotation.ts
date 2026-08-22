@@ -2,14 +2,14 @@
  * Retiring a standing unlock credential -- the ceremony behind "change my
  * passphrase" and "remove this passkey". A standing credential is not a
  * stored string to overwrite: it holds a wrap in the user key roster and a
- * `keyAgreement` posture in the account's did:webvh document, so retiring one
+ * `keyAgreement` entry in the account's did:webvh document, so retiring one
  * is a real rotation. The ceremony itself is `retireUnlockCredential` in
  * `@interop/wallet-core/unlock`, run once for every wallet; this module
  * supplies the freewallet-shaped seams around it (the session preconditions,
  * the roster store, the epoch pin, the collections source, and the durable
  * persistence of a rotated key).
  *
- * The order is load-bearing: the credential's document posture leaves first,
+ * The order is load-bearing: the credential's document inventory leaves first,
  * then the user key rotates off its roster wrap, then every encrypted
  * collection re-epochs onto the fresh key. A run torn anywhere after the
  * document edit leaves the roster keying a recipient the document no longer
@@ -29,7 +29,7 @@
 import { equalBytes } from '@noble/ciphers/utils.js'
 import { retireUnlockCredential } from '@interop/wallet-core/unlock'
 import type {
-  ClientAnnexPostureRetirement,
+  ClientAnnexInventoryRetirement,
   StandingUnlockKeys
 } from '@interop/wallet-core/unlock'
 import type { UserKey } from '@interop/wallet-core/keys'
@@ -57,16 +57,16 @@ export interface CredentialRotationOutcome {
   rotated: boolean
   collections: UserKeyCascadeResult
   userKey?: UserKey
-  clientAnnex?: ClientAnnexPostureRetirement
+  clientAnnex?: ClientAnnexInventoryRetirement
 }
 
 /**
  * Retires one standing unlock credential from the account: its document
- * posture out, the user key rotated off its roster wrap, every encrypted
+ * inventory out, the user key rotated off its roster wrap, every encrypted
  * collection re-epoch'd onto the fresh key.
  *
  * Resolves to `null` -- nothing to retire -- when the method records no
- * standing posture (a pre-promotion or no-WAS bind never established one) or
+ * standing configuration (a pre-promotion or no-WAS bind never established one) or
  * when this session cannot act as an enrolled client on a promoted account
  * (a guest, a no-WAS deployment, an unpromoted account). Otherwise the
  * ceremony is real and its failures propagate: the caller decides whether the
@@ -74,7 +74,7 @@ export interface CredentialRotationOutcome {
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.method {object}   the retired credential's public posture,
+ * @param options.method {object}   the retired credential's public inventory,
  *   as its unlock-methods registry entry recorded it; the recorded update key
  *   is an anchor for the ceremony's ladder attribution, not trusted verbatim
  * @param options.method.type {'passphrase' | 'passkey'}
@@ -87,7 +87,7 @@ export interface CredentialRotationOutcome {
  *   credential's ladder seed (a passphrase change passes the new
  *   credential's), preferred over the session's login seed for the annex
  *   strike-or-swap stage below
- * @param [options.onPostureRemoved] {Function}   invoked once, after the
+ * @param [options.onInventoryRemoved] {Function}   invoked once, after the
  *   document edit has landed and before the roster tail runs. "Landed" is
  *   proven by the callback having run: it fires from inside the annex stage,
  *   which the ceremony reaches only once `removeUnlockKey` has returned. A
@@ -104,7 +104,7 @@ export async function rotateOffUnlockCredential({
   session,
   method,
   survivingLadderSeed,
-  onPostureRemoved,
+  onInventoryRemoved,
   verb
 }: {
   session: Session
@@ -115,7 +115,7 @@ export async function rotateOffUnlockCredential({
     ladderSeed?: Uint8Array
   }
   survivingLadderSeed?: Uint8Array
-  onPostureRemoved?: () => void
+  onInventoryRemoved?: () => void
   verb: string
 }): Promise<CredentialRotationOutcome | null> {
   const { keyAgreementKeyMultibase, updateKeyMultibase } = method
@@ -131,7 +131,7 @@ export async function rotateOffUnlockCredential({
 
   // A low-entropy passphrase publishes only a hash commitment of its
   // key-agreement key; a passkey's PRF-derived key publishes verbatim. The
-  // posture the document carries is what the removal must name.
+  // inventory the document carries is what the removal must name.
   const keyAgreement: StandingUnlockKeys['keyAgreement'] =
     method.type === 'passphrase'
       ? {
@@ -144,7 +144,7 @@ export async function rotateOffUnlockCredential({
 
   // The ceremony opens with a document edit, so nothing may keep reading a
   // memo taken before it. Dropped up front and again after, so neither a
-  // concurrent surface nor a later one sees the retired credential's posture
+  // concurrent surface nor a later one sees the retired credential's inventory
   // still standing.
   invalidateVerifiedLog({ profile: session.profile })
   const result = await retireUnlockCredential({
@@ -169,11 +169,11 @@ export async function rotateOffUnlockCredential({
       await session.profile.persistClientKeys?.({ userKey })
     },
     collections: cascadeCollections({ remoteStore }),
-    retireClientAnnexPosture: async ({ document }) => {
+    retireClientAnnexInventory: async ({ document }) => {
       // The document edit has landed: this closure runs only once
       // `removeUnlockKey` has returned, and before the roster tail.
-      onPostureRemoved?.()
-      return retireClientAnnexPostureStage({
+      onInventoryRemoved?.()
+      return retireClientAnnexInventoryStage({
         session,
         document,
         retiredLadderSeed: method.ladderSeed,
@@ -226,9 +226,9 @@ export async function rotateOffUnlockCredential({
  * @param options.pointer {object}   the account pointer
  * @param options.clientWebvhKeys {object}   this client's update-key seeds
  * @param options.remoteStore {object}   the session's remote store
- * @returns {Promise<ClientAnnexPostureRetirement>}
+ * @returns {Promise<ClientAnnexInventoryRetirement>}
  */
-async function retireClientAnnexPostureStage({
+async function retireClientAnnexInventoryStage({
   session,
   document,
   retiredLadderSeed,
@@ -248,7 +248,7 @@ async function retireClientAnnexPostureStage({
   remoteStore: NonNullable<
     ReturnType<typeof enrolledClientContext>
   >['remoteStore']
-}): Promise<ClientAnnexPostureRetirement> {
+}): Promise<ClientAnnexInventoryRetirement> {
   try {
     const doc = document as Parameters<typeof clientAnnexReachFor>[0]['doc']
     const reach = clientAnnexReachFor({ session, pointer, doc })
@@ -306,7 +306,7 @@ async function retireClientAnnexPostureStage({
     return { action: 'swapped' }
   } catch (err) {
     console.warn(
-      "Could not retire the credential's annex posture; the retired " +
+      "Could not retire the credential's annex inventory; the retired " +
         'rung stands until the next generation swap:',
       err
     )

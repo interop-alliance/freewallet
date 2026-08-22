@@ -23,15 +23,24 @@
   so the dialog shows a retryable stop naming those methods (the browser stays
   connected; a re-click resumes) instead of the generic failure copy.
 
+### Changed
+
+- Retired the "posture" terminology: the session axis is now durability (the
+  durable and transient variants), a credential's durable entries in the
+  account document, annex log, and ladder are its inventory, and named
+  arrangements use qualified configuration phrases (the split configuration,
+  the standing configuration). Glossary entries added; wallet-core's renamed
+  inventory exports adopted.
+
 ### Fixed
 
 - A passphrase change whose retirement fails at its document edit can now be
   finished. The registry's passphrase entry is written after the retirement
   reports, so an edit that never landed leaves the entry naming the new
-  unlock Space but the old credential's whole standing posture, and the next
+  unlock Space but the old credential's whole standing configuration, and the next
   passphrase login retires it (`finishPendingPassphraseRetirement`) and
-  records its own posture -- or, when that credential is already out of the
-  document, records the posture without re-running the retirement.
+  records its own standing configuration -- or, when that credential is already out of the
+  document, records the standing configuration without re-running the retirement.
   Previously the entry named the new credential immediately, leaving the old
   one standing with nothing able to name it, and the Settings copy promised a
   resumption that could not happen.
@@ -39,18 +48,18 @@
   refused before anything is written (`PendingPassphraseRetirementError`,
   shown in Settings as "log out and log in again with your passphrase, then
   try again"). Running it would have removed one credential's document
-  posture while striking the other credential's ladder, leaving the second
+  inventory while striking the other credential's ladder, leaving the second
   one standing and unnamed.
 - The login-time delegation and ladder-rung refreshes no longer write onto a
-  registry entry that records another credential's posture: they match on the
+  registry entry that records another credential's standing configuration: they match on the
   acting credential's key-agreement multibase beside the unlock Space id. A
   rung stamped next to a pending credential's key would have made the next
   completion run strike the current passphrase's ladder.
-- The passphrase-change ceremony no longer strips its own posture or
+- The passphrase-change ceremony no longer strips its own standing configuration or
   misreads a failed registry read. A change whose new passphrase is the
   current one (the same derived credential) is refused up front
   (`SamePassphraseError`, rendered as its own Settings message): retiring it
-  would strip the posture just re-published, and skipping the retirement
+  would strip the standing configuration just re-published, and skipping the retirement
   would orphan the old ladder's committed rung. An unlock-methods registry
   that cannot be read refuses the change before anything is written instead
   of overwriting the old entry's multibases and reporting the retirement as
@@ -106,7 +115,7 @@
 - Retiring an unlock credential that had self-enrolled a browser no longer
   leaves its live ladder commitment standing in the account document (a
   latent re-seizure credential). The ceremony resolves the ladder's current
-  footprint from the log (wallet-core's `attributeLadderPosture`) instead of
+  inventory from the log (wallet-core's `attributeLadderInventory`) instead of
   trusting the registry's recorded bind-time rung, and the ceremonies that
   hold the credential's secret pass its ladder seed through to strengthen the
   attribution: a passphrase change captures the old record's seed before the
@@ -189,14 +198,14 @@
   ride the generation delegation as the enrolled per-visit annex VM.
   The durable continuation stays reachable through the remember entry, and
   the recover page's locate step now pins the account log in memory unless
-  the browser is being remembered. Both posture cells are pinned by e2e
+  the browser is being remembered. Both durability cells are pinned by e2e
   (`recovery.spec.ts` durable, `recovery-transient.spec.ts` transient).
 - The bind ceremonies close the mid-generation annex lockout: making a
   credential standing (passkey add, passphrase add or change, the signup
   tail) appends one atomic hash-restating annex commit entry adding the
   new credential's rung-0 hash, signed by the login credential's committed
   rung (wallet-core's `commitClientAnnexRung`). Without it a freshly bound
-  credential could not enter the transient posture until the next
+  credential could not enter the transient session until the next
   generation swap. Best-effort: an acting rung the generation does not
   commit is the honest skip.
 - The existing account ceremonies reach the client-annex artifacts. Client
@@ -207,7 +216,7 @@
   disconnect; the login credential's ladder seed rides the session in memory
   (`profile.ladderSeed`) to sign it, and the stage skips with a report when
   it is absent. The credential-rotation ceremony retires the retired
-  credential's annex posture beside its account-side one
+  credential's annex inventory beside its account-side one
   (`src/session/credentialRotation.ts`): a strike entry drops its revealed
   annex rung and standing hash when a distinct surviving credential's
   rung can sign it, and otherwise the generation is swapped onto a surviving
@@ -277,7 +286,7 @@
   re-runs the establishment, and a promoted account with no roster -- the
   genesis-to-epoch[0] tear -- mints a fresh user key and lands epoch[0]
   under the generation delegation (the carve-out from the sweeps-skipped
-  rule). The signup posture cell is pinned by
+  rule). The signup durability cell is pinned by
   `tests/e2e-was/credential-anchored-signup.spec.ts` (residue-zero signup
   plus a cold-terminal re-entry on the passphrase alone).
 
@@ -297,7 +306,7 @@
   simulated crash (the page closed with no logout): no IndexedDB database
   (checked via CDP), no localStorage key gained over a before/after delta,
   and an empty sessionStorage. The assertions are a reusable helper
-  (`tests/shared/storageResidue.ts`) shared by later transient-posture
+  (`tests/shared/storageResidue.ts`) shared by later transient-session
   specs. The account fixture drives a new non-production
   `window.__E2E_MINT_CLIENT_ANNEX_GENERATION__` seam over
   `establishClientAnnexGeneration` (`src/session/standingUnlock.ts`), which
@@ -315,7 +324,7 @@
   fetched transiently, a per-visit key enrolls into the account's annex
   generation through the record's sibling delegation, the session invokes as
   `<clientAnnexDid>#<vm>` under the embedded generation delegation on the
-  replica-less remote-direct storage posture, and the user key comes from
+  replica-less remote-direct storage variant, and the user key comes from
   the credential's standing roster wrap (never escrowed to the transient
   client). A browser already holding the credential's client-key record
   proceeds durable as before (checked without creating the session
@@ -337,7 +346,7 @@
   request it makes rides -- the navigational handles through one private
   Space-handle helper, the raw request sites directly -- threaded from the
   profile's `invocationCapability`; absent, behavior is unchanged (root
-  invocations). In the transient posture `StorageManager.initStorageClients`
+  invocations). In a transient session `StorageManager.initStorageClients`
   constructs no local `BrowserStore` at all (opening one durably creates the
   per-user database): the remote-direct backend serves every
   synced-collection operation, and the sync controller never starts for a
@@ -352,7 +361,7 @@
   store as a parameter, with the durable session-database store staying the
   default for existing callers.
 
-- The session-persistence posture seam. Every posture-sensitive local write
+- The session durability seam. Every durability-sensitive local write
   (the chain-head and roster-epoch pins, the unlock-methods registry cache,
   the passkey-safety notice, the descriptor/meta cache pair, the `writerId`
   mint) now rides one typed `SessionPersistence` handle chosen at login and
@@ -368,7 +377,7 @@
   writes land in an in-memory overlay instead of localStorage.
 
 - Standing unlock credentials with self-enrolling login. Every passphrase and
-  passkey bound on a promoted account now holds the recovery-code posture
+  passkey bound on a promoted account now holds the recovery-code configuration
   minus spend-on-use: a user-key roster wrap escrowed into every epoch, a
   document `keyAgreement` entry (a hash commitment for a passphrase, the key
   verbatim for a passkey PRF output), a committed update-key ladder, and an
@@ -382,10 +391,10 @@
   re-mints standing bridge delegations beside the recovery ones, a standing
   credential's own login refreshes its bridge inside the renewal window, and
   a self-enrolled login refreshes the registry's recorded ladder rung.
-  Passphrase/passkey registry entries record the standing posture
+  Passphrase/passkey registry entries record the standing configuration
   (`rosterKid`, key multibases, delegation key id and expiry,
   `unlockClientDid`, unlock-KAK members). Existing accounts are not
-  migrated in place: re-provision to adopt the standing posture (the plain
+  migrated in place: re-provision to adopt the standing configuration (the plain
   record keeps logging in via the connect ceremony).
 
 - The unlock record's `delegatedClients` member and registry pair. A standing
@@ -403,7 +412,7 @@
 
 - Unlock-credential rotation ceremony. Changing the passphrase and removing
   a passkey now retire the old credential for real instead of only
-  rebinding the unlock record: its document posture (keyAgreement entry and
+  rebinding the unlock record: its document inventory (keyAgreement entry and
   committed ladder-rung hash) leaves the account log, the user key rotates
   off its roster wrap, every encrypted collection re-epochs onto the fresh
   key, the unlock-methods registry is re-sealed, and the live session

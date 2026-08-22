@@ -20,7 +20,7 @@
  * 2. Wallet-core's `ensureCredentialAnchoredAccountGenesis` under the ladder
  *    VM's bare did:key as bootstrap controller: Space + collections, the
  *    one-entry ladder-anchored did:webvh genesis (ladder VM and the
- *    credential's `keyAgreement` posture folded in), the roster's epoch[0]
+ *    credential's `keyAgreement` commitment folded in), the roster's epoch[0]
  *    wrapped to the credential's standing KAK with a ladder-signed entry
  *    proof, and the collection epochs. Promotion deferred (`promoteController: false`).
  *    The ceremony installs collection epochs only when the roster's
@@ -421,7 +421,7 @@ export async function establishCredentialAnchoredAccount({
   }
 
   // 6. The promotion, last: from here on the ladder's authority is exactly
-  // its licensed document posture (delegation and log-anchored signing), and
+  // its licensed document inventory (delegation and log-anchored signing), and
   // the bootstrap did:key stops verifying.
   await ensurePromotedSpaceController({
     was: bootstrapWas,

@@ -1,6 +1,6 @@
 /**
  * The session persistence seam: one typed handle, chosen at login, through
- * which every posture-sensitive local write travels. Durability is a property
+ * which every durability-sensitive local write travels. Durability is a property
  * of the handle's TYPE, never a flag a write site consults -- the durable
  * variant reaches the `freewallet-session` IndexedDB database (it alone
  * carries the `idb` factory), durable localStorage caches, and the durable
@@ -33,7 +33,7 @@ import {
 } from '@/lib/sessionKey'
 
 /**
- * The two durability postures, as the handle's type discriminant. Write
+ * The two durability variants, as the handle's type discriminant. Write
  * sites never compare these directly -- they use {@link isDurableSession}
  * or the asserts below.
  */
@@ -48,7 +48,7 @@ const META_CACHE_PREFIX = 'freewallet:collection-meta'
 /**
  * The cache for a collection's stored `/meta` value (the `custom` envelope
  * carrying the persisted blinded-index schema), beside the encryption
- * descriptor cache and under the same posture.
+ * descriptor cache and under the same durability.
  */
 export interface CollectionMetaCache {
   readMeta(options: {
@@ -106,7 +106,7 @@ export interface PasskeySafetyNoticeStore {
 }
 
 /**
- * The members both variants carry -- what a posture-agnostic write site is
+ * The members both variants carry -- what a durability-agnostic write site is
  * allowed to depend on.
  */
 interface SessionPersistenceBase {
@@ -131,7 +131,7 @@ interface SessionPersistenceBase {
 }
 
 /**
- * The durable posture: today's behavior. Alone in carrying `idb` -- the
+ * The durable variant: today's behavior. Alone in carrying `idb` -- the
  * first-party `freewallet-session` factory (the Storage Access seam threads
  * through it) -- so sessionKey access is structurally durable-only.
  */
@@ -141,7 +141,7 @@ export interface DurableSessionPersistence extends SessionPersistenceBase {
 }
 
 /**
- * The transient posture: a public-terminal visit. Nothing this handle serves
+ * A transient session: a public-terminal visit. Nothing this handle serves
  * outlives the tab, and it has no member reaching the session database.
  */
 export interface TransientSessionPersistence extends SessionPersistenceBase {
@@ -198,7 +198,7 @@ export function localStorageDescriptorCache({
 
 /**
  * The localStorage cache for a collection's stored `/meta` value, under
- * `freewallet:collection-meta:<scope>:<collectionId>`. Same posture as the
+ * `freewallet:collection-meta:<scope>:<collectionId>`. Same durability as the
  * descriptor cache: the offline fallback, with a corrupt entry (or a
  * non-browser environment) read as absent and writes no-oping without
  * localStorage.
@@ -335,7 +335,7 @@ export function memoryMetaCache(): CollectionMetaCache {
 }
 
 /**
- * Builds the durable persistence handle -- today's posture, and the default
+ * Builds the durable persistence handle -- today's behavior, and the default
  * every login constructs unless the caller supplies a transient handle.
  *
  * @param options {object}
@@ -527,7 +527,7 @@ export class StepUpRequiredError extends Error {
 }
 
 /**
- * Whether this session's persistence is the durable posture -- the one
+ * Whether this session's persistence is the durable variant -- the one
  * predicate gating sites use in place of comparing the discriminant.
  *
  * @param persistence {SessionPersistence}

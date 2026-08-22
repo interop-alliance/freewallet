@@ -77,7 +77,7 @@ import {
 } from '@/stores/wasRemoteStore'
 
 /**
- * The standing-posture members a passphrase or passkey entry records once the
+ * The standing-inventory members a passphrase or passkey entry records once the
  * credential holds standing authority (FW-154's one-codepath model): the
  * credential's user-key roster kid (`rosterKid` -- the neutral twin of the
  * recovery entry's `recoveryKid`), its published or commitment-published
@@ -110,7 +110,7 @@ export interface StandingUnlockFields {
  * unlock identity delegated to the data identity -- is present once a full
  * passphrase login or a passphrase change has backfilled it (see
  * `backfillPassphraseUnlockMethod`). The standing fields are recorded by the
- * bind-time posture ceremony; a passphrase's `keyAgreement` key is published
+ * bind-time inventory ceremony; a passphrase's `keyAgreement` key is published
  * as a hash commitment (never the key verbatim -- a low-entropy-derived
  * public key in the world-readable document would be an offline grind
  * oracle).
@@ -131,7 +131,7 @@ export interface PassphraseUnlockMethod extends StandingUnlockFields {
  * passkey (deletion of its unlock Space) with the session's root key; it
  * lives one year, refreshed near expiry by a login with this passkey (the
  * backfill's passkey branch). The standing fields are recorded by the
- * bind-time posture ceremony; a passkey's PRF-derived `keyAgreement` key is
+ * bind-time inventory ceremony; a passkey's PRF-derived `keyAgreement` key is
  * high-entropy, so it publishes verbatim.
  */
 export interface PasskeyUnlockMethod extends StandingUnlockFields {
@@ -149,7 +149,7 @@ export interface PasskeyUnlockMethod extends StandingUnlockFields {
 /**
  * A recovery-code unlock method (the code is a minimal
  * always-enrolled client). Beside the shared members, the entry records the
- * code's public posture so Settings can correlate it with the document and
+ * code's public inventory so Settings can correlate it with the document and
  * roster without the code: `recoveryKid` (its user-key roster kid),
  * `keyAgreementKeyMultibase` / `updateKeyMultibase` (the published
  * `keyAgreement` VM and the `nextKeyHashes` commitment), and
@@ -740,7 +740,7 @@ export async function revokeUnlockMethod({
   verb?: string
 }): Promise<CredentialRotationOutcome | null> {
   // A standing passphrase or passkey is retired for real: its document
-  // posture out, the user key rotated off its roster wrap, every encrypted
+  // inventory out, the user key rotated off its roster wrap, every encrypted
   // collection re-epoch'd. Run BEFORE the Space delete and the registry drop
   // below, which still go out under the pre-rotation vault keys. A
   // recovery-code entry has already rotated in its own ceremony.
@@ -899,7 +899,7 @@ export async function revokeUnlockMethodByCeremony({
  * @param [options.manageCapability] {IZcap}
  * @param [options.keepAbsentManageCapability] {boolean}   write the
  *   `manageCapability` key even when there is none; default false
- * @param [options.standing] {StandingUnlockFields}   the standing-posture
+ * @param [options.standing] {StandingUnlockFields}   the standing-configuration
  *   fields recorded by the establishment ceremony; when absent, an existing
  *   entry's standing fields are carried forward (a backfill must not erase
  *   them)
@@ -923,12 +923,12 @@ export function upsertPassphraseUnlockMethod({
   )
   // Carry an existing entry's standing fields forward unless the caller
   // supplies fresh ones -- but only while the entry still names the same
-  // unlock Space (a passphrase change retires the old credential's posture
+  // unlock Space (a passphrase change retires the old credential's standing configuration
   // wholesale).
   let carried: StandingUnlockFields | undefined = standing
   if (!carried && existing && existing.unlockSpaceId === unlockSpaceId) {
     // Everything the entry holds beside its non-standing members IS its
-    // standing posture, so the rest carries forward without restating the
+    // standing configuration, so the rest carries forward without restating the
     // interface here (a field added to `StandingUnlockFields` is carried
     // with no edit at this site).
     const {
@@ -1089,7 +1089,7 @@ export async function backfillPassphraseUnlockMethod({
  * The unlock Space alone is not always enough to identify the credential: a
  * passphrase change whose retirement failed at its document edit leaves the
  * entry pointing at the NEW unlock Space while recording the OLD credential's
- * posture, so a caller holding the login credential passes its
+ * standing configuration, so a caller holding the login credential passes its
  * `keyAgreementKeyMultibase` too, and a mismatch writes nothing. Stamping a
  * fresh rung beside another credential's key-agreement multibase would make
  * the next completion run strike the wrong ladder.
@@ -1140,7 +1140,7 @@ export async function refreshStandingDelegationFields({
   if (!stored) {
     return
   }
-  // The entry records another credential's posture (a pending retirement):
+  // The entry records another credential's standing configuration (a pending retirement):
   // its members belong to that credential, so nothing here may land on them.
   if (
     keyAgreementKeyMultibase !== undefined &&

@@ -1592,7 +1592,7 @@ describe('StorageManager unknown-epoch refresh', () => {
     expect(listed).toEqual([{ cid, vc: credential }])
   })
 
-  it('transient posture: the refresh still runs, with zero localStorage residue', async () => {
+  it('transient session: the refresh still runs, with zero localStorage residue', async () => {
     const owner = await generateKey()
     const extra = await generateKey()
     const { remoteStore } = makeFakeRemote()
@@ -1655,7 +1655,7 @@ describe('StorageManager unknown-epoch refresh', () => {
     })
 
     // The unknown-epoch read drives the same one-time refresh as the durable
-    // posture -- into the handle's in-memory cache, not localStorage.
+    // variant -- into the handle's in-memory cache, not localStorage.
     const listed = await storage.listCredentials()
     expect(listed).toEqual([{ cid, vc: credential }])
     const cached = await persistence

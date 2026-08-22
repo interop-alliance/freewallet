@@ -23,7 +23,7 @@
  *   (the spent code presumed compromised), the epoch cascade re-keying every
  *   encrypted collection off the spent code's reach, a replacement code
  *   issued hard, and the fresh passphrase bound. The continuation enrolls
- *   what the browser's posture would enroll at login: a new durable client
+ *   what the browser's durability decision would enroll at login: a new durable client
  *   with `rememberBrowser`, and otherwise (the default) the fresh
  *   credential's LADDER VM -- the transient variant, which lands the account
  *   client-less and ladder-anchored with zero local residue.
@@ -45,7 +45,7 @@ import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import { WAS_SERVER_URL } from '@/app.config'
 import { DID_DOCUMENT_RESOURCE } from '@interop/wallet-core/space'
 import {
-  establishPassphrasePosture,
+  establishPassphraseStanding,
   unlockLogStore
 } from '@/session/standingUnlock'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
@@ -776,7 +776,7 @@ export interface RecoveryOutcome {
  * The whole recovery flow on a fresh browser, from a typed code to a
  * recovered account under a new passphrase (the caller then performs an
  * ordinary passphrase login). The continuation enrolls what this browser's
- * posture would enroll at login: with `rememberBrowser` a new DURABLE client
+ * durability decision would enroll at login: with `rememberBrowser` a new DURABLE client
  * (today's flow -- the client-key record persists and the login is durable),
  * and otherwise -- the default, a public terminal -- the TRANSIENT variant:
  * the fresh credential's ladder VM stands in for a durable client, the
@@ -789,7 +789,7 @@ export interface RecoveryOutcome {
  *
  * Error discipline: a malformed code throws `RecoveryCodeInvalidError`; a
  * code with no unlock record throws `RecoveryCodeNotFoundError`; a code
- * whose posture the log no longer commits throws
+ * whose inventory the log no longer commits throws
  * `RecoveryKeyNotCommittedError` (revoked while its record survived); a
  * network failure rethrows unchanged, so "could not check" never reads as
  * "no account"; and an account-log continuity refusal
@@ -1042,7 +1042,7 @@ export async function recoverAccountWithCode({
   }
 
   // Retire the spent code's unlock Space -- a typed code is a spent
-  // credential. Best-effort: its posture is already out of the document and
+  // credential. Best-effort: its inventory is already out of the document and
   // roster, so a surviving record can locate but never act.
   try {
     await deleteUnlockSpace({
@@ -1056,7 +1056,7 @@ export async function recoverAccountWithCode({
   }
 
   // The replacement code's record + delegation, minted by the NEW client
-  // (its posture -- VM, commitment, roster wrap -- already landed above).
+  // (its standing configuration -- VM, commitment, roster wrap -- already landed above).
   const replacementPointer: AccountPointer = { ...pointer, did }
   const replacementDelegation = await delegateLogWrite({
     zcapClient: newZcapClient,
@@ -1460,7 +1460,7 @@ async function recoverAccountTransient({
 
   // The roster store the mandatory rotation drives: appends signed by the
   // fresh ladder VM, anchored at the continuation's own add-and-retire entry
-  // (the posture-changing version the ceremony-tail license admits, and the
+  // (the inventory-changing version the ceremony-tail license admits, and the
   // log head -- the pointer rides inside that entry), HTTP invoked as the
   // annex VM under the generation delegation.
   const rosterStore = userKeyRosterDescriptorStore({
@@ -1693,7 +1693,7 @@ export async function updateRegistryAfterRecovery({
   if (passphrase) {
     // Best-effort inside (a plain-layout record still logs in); runs after
     // the registry writes so its upsert reads their result.
-    await establishPassphrasePosture({ session, passphrase, idb })
+    await establishPassphraseStanding({ session, passphrase, idb })
   }
 }
 
@@ -1988,7 +1988,7 @@ export interface RecoveryHealthFlag {
   entry: RecoveryCodeUnlockMethod
   delegationRotted: boolean
   delegationExpiring: boolean
-  postureMissing: boolean
+  standingMissing: boolean
 }
 
 /**
@@ -1997,7 +1997,7 @@ export interface RecoveryHealthFlag {
  * current document (its signing client's verification method is still
  * listed -- the current-key-set rule), that it is not expired or inside the
  * renewal window (the one-year TTL lapses within a code's expected
- * lifetime), and that the code's posture (its `keyAgreement` VM and
+ * lifetime), and that the code's inventory (its `keyAgreement` VM and
  * committed update-key hash) still stands. A stale delegation bricks
  * recovery exactly when it is needed. The revocation cascade re-mints stale
  * delegations automatically (`remintRecoveryDelegations`); this check is
@@ -2064,15 +2064,15 @@ export async function checkRecoveryHealth({
     const delegationExpiring = zcapExpiring({
       ...(entry.delegationExpires ? { expires: entry.delegationExpires } : {})
     })
-    const postureMissing =
+    const standingMissing =
       !publishedMultibases.has(entry.keyAgreementKeyMultibase) ||
       !nextKeyHashes.includes(updateKeyHashes[position])
-    if (delegationRotted || delegationExpiring || postureMissing) {
+    if (delegationRotted || delegationExpiring || standingMissing) {
       flags.push({
         entry,
         delegationRotted,
         delegationExpiring,
-        postureMissing
+        standingMissing
       })
     }
   }

@@ -463,7 +463,7 @@ describe('checkRecoveryHealth and the current-key-set rule', () => {
   }
 
   /**
-   * A registry entry whose posture (keyAgreement VM + committed update-key
+   * A registry entry whose standing configuration (keyAgreement VM + committed update-key
    * hash) stands in the mocked document, so only the delegation axis varies.
    */
   async function standingEntry({
@@ -509,7 +509,7 @@ describe('checkRecoveryHealth and the current-key-set rule', () => {
     expect(flags).toHaveLength(1)
     expect(flags[0]?.delegationRotted).toBe(true)
     expect(flags[0]?.delegationExpiring).toBe(false)
-    expect(flags[0]?.postureMissing).toBe(false)
+    expect(flags[0]?.standingMissing).toBe(false)
   })
 
   it('flags an entry whose delegation is inside the renewal window', async () => {
@@ -526,7 +526,7 @@ describe('checkRecoveryHealth and the current-key-set rule', () => {
     expect(flags).toHaveLength(1)
     expect(flags[0]?.delegationRotted).toBe(false)
     expect(flags[0]?.delegationExpiring).toBe(true)
-    expect(flags[0]?.postureMissing).toBe(false)
+    expect(flags[0]?.standingMissing).toBe(false)
   })
 
   // The FW-86 agreement: an entry recording no delegation key is uncheckable,

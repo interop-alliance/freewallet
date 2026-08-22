@@ -306,7 +306,7 @@ export function LoginPage() {
     } catch (err) {
       const key = loginErrorKey({ err, label: 'Login' })
       setErrorKey(key)
-      // A torn enrollment, or a transient login the account's posture cannot
+      // A torn enrollment, or a transient login the account's state cannot
       // serve: connecting this browser mints a fresh key set and redoes the
       // wrap, so offer that flow.
       if (

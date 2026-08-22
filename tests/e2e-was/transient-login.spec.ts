@@ -1,7 +1,7 @@
 /**
  * The residue-zero e2e: a fresh browser context runs the full DEFAULT
  * transient login through the real login form (no remember seam), does work
- * (stores a credential over the replica-less remote-direct posture), and
+ * (stores a credential over the replica-less remote-direct variant), and
  * ends the visit -- once by logging out, once by a simulated crash (the page
  * closes with no logout) -- and in both cases the browser holds zero trace:
  * no IndexedDB database, no new localStorage key, an empty sessionStorage
@@ -45,7 +45,7 @@ async function coldTerminal(browser: Browser): Promise<{
 
 /**
  * The default transient login through the real login form -- deliberately no
- * `forceRememberBrowser`: a non-remembered browser's default posture is the
+ * `forceRememberBrowser`: a non-remembered browser's default is the
  * transient login. Returns the localStorage baseline captured on the loaded
  * login page, before any input.
  */
@@ -119,7 +119,7 @@ test.describe.serial('transient login residue', () => {
     try {
       const baseline = await transientLogin(page, passphrase)
       await addCredentialViaPaste(page)
-      // The simulated crash: the tab dies with no logout (posture D). The
+      // The simulated crash: the tab dies with no logout (scenario D). The
       // context stays live so the assertions can inspect what the origin
       // still holds afterwards.
       await page.close()

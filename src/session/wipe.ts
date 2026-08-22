@@ -232,7 +232,7 @@ export async function executeLocalWipe({
 }
 
 /**
- * The guest-wipe consumer: a guest session's whole durable footprint is its
+ * The guest-wipe consumer: a guest session's whole durable residue is its
  * replica databases, the migration markers, and (in principle) local-mode
  * cache families, all derived from the guest's random client did:key. The
  * guest holds no keyring, no pins, and no registry, so those families

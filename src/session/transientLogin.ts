@@ -1,17 +1,17 @@
 /**
  * The transient login: the public-terminal composition over the transient
- * unlock-record fetch and the capability-bound replica-less storage posture.
+ * unlock-record fetch and the capability-bound replica-less storage variant.
  * Nothing here performs a durable local write -- the whole flow rides one
  * in-memory persistence handle (trust-on-first-use pins, per-visit writer id)
  * and dies with the tab.
  *
- * Two exports drive it. `routeUnlockLogin` is the post-KDF posture decision
+ * Two exports drive it. `routeUnlockLogin` is the post-KDF durability decision
  * both keyring login entry points run: a browser already holding this
  * credential's client-key record proceeds durable (the mechanical ratchet --
  * silent until the remember-this-browser UX lands), a browser holding none
- * defaults to the transient posture, and an explicit `rememberBrowser` input
+ * defaults to the transient session, and an explicit `rememberBrowser` input
  * forces either side (true runs the durable standing self-enrollment; false
- * on a remembered browser refuses rather than forking postures, per
+ * on a remembered browser refuses rather than forking the durability decision, per
  * `decisions/0001`). `transientSessionFromKeyringHit` is the composition
  * itself: verify the account log, enroll a per-visit key into the client
  * annex generation through the record's sibling delegation (the loud entry
@@ -19,7 +19,7 @@
  * generation delegation as embedded, read the user key from the credential's
  * standing roster wrap (no escrow -- a transient client never joins the
  * roster), and assemble the session on the replica-less remote-direct
- * storage posture, invoking as `<clientAnnexDid>#<vm>` under the delegation.
+ * storage variant, invoking as `<clientAnnexDid>#<vm>` under the delegation.
  *
  * Failure states are typed, not designed (the honest login copy over them is
  * a separate concern): each precondition refuses with
@@ -80,8 +80,8 @@ import type { Session } from '@/types/auth'
  * Why a transient login cannot proceed. Typed reasons, no copy: the login
  * page maps them (for now, onto the existing not-enrolled guidance).
  *
- * - `no-was-server`: the transient posture presupposes a remote WAS server.
- * - `remote-direct`: the partitioned CHAPI popup keeps its own posture.
+ * - `no-was-server`: transient login presupposes a remote WAS server.
+ * - `remote-direct`: the partitioned CHAPI popup keeps its own storage variant.
  * - `no-standing`: the unlock record carries no standing authority (a plain
  *   pointer record -- pre-promotion, or bound before standing credentials).
  * - `no-delegated-clients`: a standing record without the annex-Space
@@ -107,7 +107,7 @@ export type TransientLoginUnavailableReason =
 
 /**
  * A transient login refused before any ceremony byte was written: the
- * credential, the record, or the account is not in the posture the transient
+ * credential, the record, or the account is not in the shape the transient
  * flow needs. Carries the typed `reason` above.
  */
 export class TransientLoginUnavailableError extends Error {
@@ -129,7 +129,7 @@ export class TransientLoginUnavailableError extends Error {
 /**
  * A login that asked NOT to be remembered on a browser that already holds
  * this credential's client-key record. Honoring it would mean either a
- * dual-posture fork (`decisions/0001` forbids one) or a destructive wipe, so
+ * dual-durability fork (`decisions/0001` forbids one) or a destructive wipe, so
  * the routing refuses; the remember-this-browser UX turns this refusal into
  * a loud coerce-and-notify.
  */
@@ -141,14 +141,14 @@ export class AlreadyRememberedError extends Error {
 }
 
 /**
- * The post-KDF posture decision both keyring login entry points run, BEFORE
+ * The post-KDF durability decision both keyring login entry points run, BEFORE
  * any fetch: durable (today's `fetchKeyring` path) or transient. The check is
  * create-nothing -- the credential is derived once (threaded onward so the
  * KDF never re-runs) and the client-key record probe never creates the
  * session database.
  *
  * The decision table: no WAS server or a remote-direct (CHAPI popup) session
- * is always durable (the transient posture is unreachable there);
+ * is always durable (transient login is unreachable there);
  * `rememberBrowser: true` is durable (the programmatic standing
  * self-enrollment entry); a browser holding this credential's client-key
  * record is durable (the ratchet -- with `rememberBrowser: false` refused as
@@ -162,11 +162,11 @@ export class AlreadyRememberedError extends Error {
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for the same secret
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the probe
- * @param [options.remoteDirectStorage] {boolean}   the CHAPI popup posture
- * @param [options.rememberBrowser] {boolean}   the explicit posture input;
+ * @param [options.remoteDirectStorage] {boolean}   the CHAPI popup variant
+ * @param [options.rememberBrowser] {boolean}   the explicit durability input;
  *   absent means route on the record probe
- * @returns {Promise<object>}   `{ posture: 'durable', credential? }` or
- *   `{ posture: 'transient', credential, persistence }` -- the transient arm
+ * @returns {Promise<object>}   `{ durability: 'durable', credential? }` or
+ *   `{ durability: 'transient', credential, persistence }` -- the transient arm
  *   carries the visit's in-memory persistence handle so every later stage
  *   (the record fetch's account-log pins included) shares it
  */
@@ -185,9 +185,9 @@ export async function routeUnlockLogin({
   remoteDirectStorage?: boolean
   rememberBrowser?: boolean
 }): Promise<
-  | { posture: 'durable'; credential?: UnlockCredential }
+  | { durability: 'durable'; credential?: UnlockCredential }
   | {
-      posture: 'transient'
+      durability: 'transient'
       credential: UnlockCredential
       persistence: TransientSessionPersistence
     }
@@ -198,10 +198,10 @@ export async function routeUnlockLogin({
         reason: WAS_SERVER_URL ? 'remote-direct' : 'no-was-server'
       })
     }
-    return { posture: 'durable', ...(credential ? { credential } : {}) }
+    return { durability: 'durable', ...(credential ? { credential } : {}) }
   }
   if (rememberBrowser === true) {
-    return { posture: 'durable', ...(credential ? { credential } : {}) }
+    return { durability: 'durable', ...(credential ? { credential } : {}) }
   }
   const derived =
     credential ??
@@ -217,10 +217,10 @@ export async function routeUnlockLogin({
     if (rememberBrowser === false) {
       throw new AlreadyRememberedError()
     }
-    return { posture: 'durable', credential: derived }
+    return { durability: 'durable', credential: derived }
   }
   return {
-    posture: 'transient',
+    durability: 'transient',
     credential: derived,
     persistence: transientSessionPersistence()
   }
@@ -271,7 +271,7 @@ function refuseMissingGeneration(
  *    roster request signs as `<clientAnnexDid>#<vm>` under the generation
  *    delegation, and the unwrap uses the credential's own key-agreement key.
  *    Deliberately no escrow -- a transient client never joins the roster.
- * 5. Assemble the session on the replica-less storage posture
+ * 5. Assemble the session on the replica-less storage variant
  *    (`initSessionFromSeed` with the transient option: annex signing,
  *    the delegation as `profile.invocationCapability`, no KMS, no second
  *    roster read, no sweeps).

@@ -1,9 +1,9 @@
 /**
- * The UI-prefs half of the posture seam (`src/session/persistence.ts` is the
+ * The UI-prefs half of the durability seam (`src/session/persistence.ts` is the
  * session half): global preferences -- the theme and the UI language -- are
  * not session state, so they cannot ride the profile's persistence handle,
  * but a transient visit must still leave no durable residue. While the
- * transient posture is active, writes land in an in-memory overlay that
+ * transient session is active, writes land in an in-memory overlay that
  * shadows reads and dies with the tab; otherwise reads and writes go to
  * localStorage as before. Reads outside the overlay still fall through to
  * localStorage -- a public terminal's stored prefs belong to the terminal
@@ -13,7 +13,7 @@
 let overlay: Map<string, string> | null = null
 
 /**
- * Switches the prefs posture. Activated when a transient session logs in and
+ * Switches the prefs durability. Activated when a transient session logs in and
  * deactivated (overlay discarded) when it ends; the auth store drives it from
  * the session's persistence handle.
  *
@@ -42,7 +42,7 @@ export function readPref(key: string): string | null {
 }
 
 /**
- * Writes one preference: into the overlay while the transient posture is
+ * Writes one preference: into the overlay while the transient session is
  * active, durably into localStorage otherwise.
  *
  * @param options {object}

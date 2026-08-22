@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * Unit tests for the transient login (`src/session/transientLogin.ts`): the
- * post-KDF posture routing (`routeUnlockLogin`) and the public-terminal
+ * post-KDF durability routing (`routeUnlockLogin`) and the public-terminal
  * composition (`transientSessionFromKeyringHit`). The wallet-core annex
  * and roster boundaries are mocked at the module seam so the composition's
  * wiring -- what enrolls with which key, what reads under which capability,
@@ -195,11 +195,11 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('routeUnlockLogin -- the post-KDF posture decision', () => {
+describe('routeUnlockLogin -- the post-KDF durability decision', () => {
   it('defaults to transient on a non-remembered browser', async () => {
     const routed = await routeUnlockLogin({ kdf: KDF, credential: CREDENTIAL })
-    expect(routed.posture).toBe('transient')
-    if (routed.posture === 'transient') {
+    expect(routed.durability).toBe('transient')
+    if (routed.durability === 'transient') {
       expect(routed.credential).toBe(CREDENTIAL)
       expect(routed.persistence.durability).toBe('in-memory')
     }
@@ -212,7 +212,7 @@ describe('routeUnlockLogin -- the post-KDF posture decision', () => {
   it('routes durable when this credential is remembered here (the ratchet)', async () => {
     vi.mocked(hasClientKeyRecord).mockResolvedValue(true)
     const routed = await routeUnlockLogin({ kdf: KDF, credential: CREDENTIAL })
-    expect(routed.posture).toBe('durable')
+    expect(routed.durability).toBe('durable')
   })
 
   it('refuses rememberBrowser: false on a remembered browser', async () => {
@@ -232,14 +232,14 @@ describe('routeUnlockLogin -- the post-KDF posture decision', () => {
       credential: CREDENTIAL,
       rememberBrowser: true
     })
-    expect(routed.posture).toBe('durable')
+    expect(routed.durability).toBe('durable')
     expect(hasClientKeyRecord).not.toHaveBeenCalled()
   })
 
   it('routes durable with no WAS server, refusing an explicit transient ask', async () => {
     state.wasUrl = undefined
     const routed = await routeUnlockLogin({ kdf: KDF, credential: CREDENTIAL })
-    expect(routed.posture).toBe('durable')
+    expect(routed.durability).toBe('durable')
     expect(hasClientKeyRecord).not.toHaveBeenCalled()
     await expect(
       routeUnlockLogin({
@@ -259,7 +259,7 @@ describe('routeUnlockLogin -- the post-KDF posture decision', () => {
       credential: CREDENTIAL,
       remoteDirectStorage: true
     })
-    expect(routed.posture).toBe('durable')
+    expect(routed.durability).toBe('durable')
     expect(hasClientKeyRecord).not.toHaveBeenCalled()
     await expect(
       routeUnlockLogin({

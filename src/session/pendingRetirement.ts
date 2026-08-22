@@ -5,7 +5,7 @@
  * Changing a passphrase writes the registry's passphrase entry only after the
  * old credential's retirement has reported. When the retirement failed before
  * its document edit landed, the entry is written naming the NEW unlock Space
- * but the OLD credential's standing posture -- the one state that still names
+ * but the OLD credential's standing configuration -- the one state that still names
  * the credential left standing (its `keyAgreement` commitment in the account
  * document and its wrap in the user key roster). Nothing else can find it:
  * the login-time roster sweep only rotates away recipients the document does
@@ -14,7 +14,7 @@
  * So the next login with the (new) passphrase finishes the job: an entry
  * naming a credential other than the one logging in is a pending retirement,
  * and it is retired here, after which the entry records the login
- * credential's own posture. When the named credential is already out of the
+ * credential's own standing configuration. When the named credential is already out of the
  * document -- a run whose retirement landed but whose registry write did not
  * -- only the entry is rewritten; the roster and cascade residue of that run
  * is the ordinary login sweep's. Best-effort throughout -- a failure leaves
@@ -92,7 +92,7 @@ export async function finishPendingPassphraseRetirement({
   ) {
     return
   }
-  // Whether the named credential's document posture is still standing. Gone
+  // Whether the named credential's document inventory is still standing. Gone
   // means the retirement's document edit landed after all and only the
   // registry write was lost: the roster and cascade residue of such a run is
   // the ordinary login sweep's business, and re-running the retirement here
@@ -108,7 +108,7 @@ export async function finishPendingPassphraseRetirement({
       (stillStanding
         ? 'retiring the credential the registry still names.'
         : 'the credential is already out of the document, recording this ' +
-          "credential's posture.")
+          "credential's standing configuration.")
   )
   if (stillStanding) {
     // The entry's own ladder seed is unknown here (only its holder derives
@@ -128,7 +128,7 @@ export async function finishPendingPassphraseRetirement({
       })
     }
   }
-  // The entry now records the login credential's own posture. The registry is
+  // The entry now records the login credential's own standing configuration. The registry is
   // re-read because the adoption above re-sealed it to the rotated user key.
   const current = await getUnlockMethods({ session })
   if (!current) {
@@ -150,7 +150,7 @@ export async function finishPendingPassphraseRetirement({
 
 /**
  * Whether the account document still carries one credential's `keyAgreement`
- * posture, by the commitment verification-method id a passphrase publishes
+ * entry, by the commitment verification-method id a passphrase publishes
  * under.
  *
  * @param options {object}
@@ -179,7 +179,7 @@ async function documentListsCredential({
 
 /**
  * Whether the account document lists a verification method by id, over both
- * the `verificationMethod` set (where wallet-core's own posture edit looks)
+ * the `verificationMethod` set (where wallet-core's own inventory edit looks)
  * and the `keyAgreement` relation, whose members may be ids or embedded
  * methods.
  *

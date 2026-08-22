@@ -63,8 +63,8 @@ importers:
         specifier: ^3.5.5
         version: 3.5.5
       '@interop/wallet-core':
-        specifier: ^0.51.0
-        version: 0.51.0(@interop/jsonld-signatures@11.8.5)
+        specifier: link:../wallet-core
+        version: link:../wallet-core
       '@interop/was-client':
         specifier: ^0.43.0
         version: 0.43.0(@interop/jsonld-signatures@11.8.5)
@@ -655,10 +655,6 @@ packages:
 
   '@interop/verifier-core@3.5.5':
     resolution: {integrity: sha512-PH84wCBCaIdB9yF2q4mDqsYyMckHcS97hPNK3D7CHT8IAcH2e4pogpFyJWOFA5FmwTEC4hQB+N2m7mEorQ+7Hw==}
-    engines: {node: '>=24.0'}
-
-  '@interop/wallet-core@0.51.0':
-    resolution: {integrity: sha512-pAs9CDVh2KBtEPRi/WPoiycib/XDbGMgosTyunMnVx3Y9l2rs8NleAzxLCICIbWPZdllsOu14bWW8T98ct/fnA==}
     engines: {node: '>=24.0'}
 
   '@interop/was-client@0.43.0':
@@ -4033,29 +4029,6 @@ snapshots:
       klona: 2.0.6
       zod: 3.25.76
     transitivePeerDependencies:
-      - react-native-get-random-values
-
-  '@interop/wallet-core@0.51.0(@interop/jsonld-signatures@11.8.5)':
-    dependencies:
-      '@interop/data-integrity-core': 8.7.1
-      '@interop/data-integrity-proof': 3.4.5
-      '@interop/did-method-webvh': 5.5.0
-      '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.5)
-      '@interop/ed25519-verification-key': 8.0.4
-      '@interop/ezcap': 7.4.3
-      '@interop/security-document-loader': 10.0.4
-      '@interop/social-core': 0.8.1
-      '@interop/vc': 11.0.7
-      '@interop/was-client': 0.43.0(@interop/jsonld-signatures@11.8.5)
-      '@interop/webkms-client': 14.7.3
-      '@interop/x25519-key-agreement-key': 5.2.2
-      '@noble/ciphers': 2.3.0
-      '@noble/hashes': 2.3.0
-      '@scure/base': 2.3.0
-      byoe-context: 0.5.0
-    transitivePeerDependencies:
-      - '@interop/jsonld-signatures'
-      - expo-crypto
       - react-native-get-random-values
 
   '@interop/was-client@0.43.0(@interop/jsonld-signatures@11.8.5)':

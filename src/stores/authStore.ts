@@ -27,7 +27,7 @@ function publishStorageSeam(session: Session | null): void {
  * (`establishClientAnnexGeneration` in `src/session/standingUnlock.ts`) runs
  * from a live enrolled session holding the credential's secret; no shipped
  * login ceremony triggers it yet, and the transient-login e2e needs an
- * account in that posture. In non-production builds only, publish a driver on
+ * account in that state. In non-production builds only, publish a driver on
  * `window.__E2E_MINT_CLIENT_ANNEX_GENERATION__` so a Playwright spec can run it
  * from the signed-in durable context. Cleared on logout. No-op in production.
  */
@@ -72,7 +72,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ session })
     publishStorageSeam(session)
     publishClientAnnexFixtureSeam(session)
-    // The UI-prefs half of the posture seam: while a transient session is
+    // The UI-prefs half of the durability seam: while a transient session is
     // live, theme/language toggles land in an in-memory overlay instead of
     // localStorage (`src/lib/prefsStorage.ts`).
     setTransientPrefs({

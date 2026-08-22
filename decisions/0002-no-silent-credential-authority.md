@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-08-19
-- Driving work: the public-computer posture redesign for the browser
+- Driving work: the public-computer login redesign for the browser
   wallet (default persist-nothing login; per-visit transient clients in
   a disposable companion did:webvh) -- the same design effort whose
   first implementation decision 0001 records. The design needed a

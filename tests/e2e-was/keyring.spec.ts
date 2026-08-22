@@ -23,7 +23,7 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
  *    passphrase no longer resolves to an account anywhere, the new one logs
  *    into the same wallet on this client, and a cold profile with the new
  *    passphrase self-enrolls into the same wallet (the change established
- *    the new credential's standing posture).
+ *    the new credential's standing configuration).
  * 3. Passphrase surface: a fresh signup shows the Settings Passphrase section
  *    with its change form.
  * 4. Guests are untouched: guest login works and shows no Passphrase section.
@@ -174,7 +174,7 @@ test.describe('Keyring v2', () => {
     await expect(changeButton).toBeEnabled({ timeout: 30_000 })
     await changeButton.click()
 
-    // The old credential is retired for real -- document posture out, user
+    // The old credential is retired for real -- document inventory out, user
     // key rotated, collections re-epoch'd -- so the success copy is the
     // rotated variant.
     await expect(
@@ -210,7 +210,7 @@ test.describe('Keyring v2', () => {
     ).toBeVisible({ timeout: 30_000 })
 
     // Cold profile: the NEW passphrase self-enrolls (the change established
-    // its standing posture) and lands on the same wallet.
+    // its standing configuration) and lands on the same wallet.
     const newDevice = await coldDevicePage(browser)
     try {
       await newDevice.goto('/#/login')

@@ -246,7 +246,7 @@ export async function saveClientKeyRecord({
  * Whether this browser holds a client-key record for an unlock method,
  * WITHOUT durably creating the session database. Any read through
  * `openSessionDb` creates `freewallet-session` on a miss (the versioned open
- * runs `onupgradeneeded`), so the login posture routing -- which must decide
+ * runs `onupgradeneeded`), so the login durability routing -- which must decide
  * "remembered here?" while remaining free to leave no trace -- first checks
  * the database's existence via `indexedDB.databases()` and only opens one
  * that already exists (an open of an EXISTING database creates nothing).

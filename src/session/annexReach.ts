@@ -8,7 +8,7 @@
  * pointer's host under this session's own authority.
  *
  * "No pointed generation" is resolved as `null` rather than thrown: an
- * account with no annex posture is an ordinary state, and each caller keeps
+ * account with no annex inventory is an ordinary state, and each caller keeps
  * its own reaction to it (the GC sweep and the deletion teardown skip, the
  * revocation cascade reports `no-pointer`, the login-time heal returns).
  *
@@ -129,7 +129,7 @@ export function clientAnnexReachFor({
 /**
  * The reach for the generation this session's account currently points at,
  * off the locally verified account log (through the session's verified-log
- * memo), or `null` when the account carries no annex posture. The verified
+ * memo), or `null` when the account carries no annex inventory. The verified
  * log's document and entries ride along for callers that need them.
  *
  * @param options {object}

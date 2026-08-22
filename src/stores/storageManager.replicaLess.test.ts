@@ -1,12 +1,12 @@
 /**
- * Unit tests for the capability-bound, replica-less remote storage posture:
+ * Unit tests for the capability-bound, replica-less remote storage variant:
  *
  * - `WASRemoteStore` accepts an optional invocation capability and every
  *   request it makes rides it -- the navigational handles through the one
  *   private Space-handle helper, and the raw `was.request()` escape hatch
  *   sites directly. Absent the option, every handle and request carries no
  *   capability (root invocations, byte-identical to before).
- * - `StorageManager.initStorageClients` in the transient posture constructs
+ * - `StorageManager.initStorageClients` in a transient session constructs
  *   no `BrowserStore` (the versioned RxDB open alone durably creates the
  *   per-user database), routes every synced-collection operation through the
  *   remote-direct backend, starts no replication (no local end exists), and
@@ -366,7 +366,7 @@ describe('replica-less remote-direct StorageManager', () => {
       // replica -- the sync controller's gate.
       expect(browserStoreSpy).not.toHaveBeenCalled()
       expect(storage.hasLocalReplica).toBe(false)
-      // The transient posture trusts the keyring hit that produced it.
+      // A transient session trusts the keyring hit that produced it.
       expect(userExists).toBe(true)
       // Reads need no local provisioning.
       await storage.ready()

@@ -352,7 +352,7 @@ export class PublicCopyRetractionError extends Error {
  */
 export class StorageManager {
   // The local active replica -- absent in the replica-less (transient)
-  // posture, where constructing one would durably create the per-user RxDB
+  // variant, where constructing one would durably create the per-user RxDB
   // database and every synced-collection operation is served remote-direct.
   #localStore?: BrowserStore
   #remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
@@ -389,7 +389,7 @@ export class StorageManager {
   // store (a guest / no-WAS session has no descriptors to cache).
   #descriptorCache?: EncryptionDescriptorCache
   // The durable (localStorage) collection-metadata cache, beside the
-  // descriptor cache and under the same posture.
+  // descriptor cache and under the same durability.
   #metaCache?: CollectionMetaCache
   // The once-per-collection-per-session unknown-epoch refresh guard, shared by
   // the standard and the app-provisioned encrypted collections, so a genuinely
@@ -452,7 +452,7 @@ export class StorageManager {
     this.#persistence = persistence
     // The cache pair rides the persistence handle: one instance per scope per
     // session (the handle memoizes), durable-localStorage or in-memory by the
-    // handle's posture, and absent only when there is no remote Space to
+    // handle's durability, and absent only when there is no remote Space to
     // cache for.
     this.#descriptorCache = remoteStore
       ? persistence.descriptorCache({ scope: remoteStore.spaceId })
@@ -463,7 +463,7 @@ export class StorageManager {
     // Remote-direct routing is only meaningful when a remote store is configured
     // (a guest / no-WAS session always uses the local BrowserStore). A
     // replica-less construction -- no local store at all, the transient
-    // posture -- is remote-direct outright, so it requires a remote store.
+    // variant -- is remote-direct outright, so it requires a remote store.
     if (!localStore && !remoteStore) {
       throw new Error('Replica-less storage requires a remote WAS store.')
     }
@@ -478,7 +478,7 @@ export class StorageManager {
 
   /**
    * Whether this session carries the local active replica. False exactly for
-   * the replica-less remote-direct posture (a transient session), whose
+   * the replica-less remote-direct variant (a transient session), whose
    * synced-collection operations never touch a local database -- so the sync
    * controller has no local end to replicate and must not start.
    *
@@ -909,8 +909,8 @@ export class StorageManager {
           acquireDescriptors({
             source: remoteStore,
             // The same handle-memoized instance the constructor binds below
-            // (one cache pair per session in both postures), seeding the
-            // in-memory pair at login in the transient posture.
+            // (one cache pair per session in both variants), seeding the
+            // in-memory pair at login in a transient session.
             cache: persistence.descriptorCache({ scope: remoteStore.spaceId }),
             collectionIds: ENCRYPTED_COLLECTION_IDS,
             onFetchError: warnDescriptorFetchError
@@ -959,7 +959,7 @@ export class StorageManager {
     if (remoteStore) {
       // A returning user may be on a fresh browser (no local db yet) but have
       // an existing remote Space. A transient session skips the probe -- a
-      // bare-Space-URL describe the posture must not make -- and trusts the
+      // bare-Space-URL describe a transient session must not make -- and trusts the
       // account resolution that produced it (a transient login only ever
       // proceeds from a keyring hit naming the account).
       userExists =

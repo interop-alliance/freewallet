@@ -68,7 +68,7 @@ function pointerKey({ pointer }: { pointer: AccountLogPointer }): string {
  *
  * @param options {object}
  * @param options.pinStore {ResourceLogPinStore}   the account-log chain-head
- *   pin store -- the posture seam's log-pin member (durable on a remembered
+ *   pin store -- the durability seam's log-pin member (durable on a remembered
  *   browser, in-memory for a transient visit)
  * @returns {VerifiedLogCache}
  */

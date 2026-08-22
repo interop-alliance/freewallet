@@ -21,10 +21,10 @@
  * the shared orchestrator from the document edit's own post-edit log) reaches
  * the store as-is.
  *
- * The chain-head pin rides the posture seam: the session builder takes it
+ * The chain-head pin rides the durability seam: the session builder takes it
  * from the profile's persistence handle, and the bare-parts builder defaults
  * to the durable `sessionLogPinStore` (its callers are durable ceremonies)
- * unless a `pinStore` is supplied. In the durable posture the pin is the
+ * unless a `pinStore` is supplied. In a durable session the pin is the
  * keyed store in the session database (wallet-core derives the roster log's
  * slot key from the Space id), so log continuity spans logins; a transient
  * session pins in memory for the visit. The bare-parts builder's own
@@ -67,7 +67,7 @@ import { verifiedAccountLog } from '@/session/verifiedLog'
  * @param options.pointer {AccountLogPointer}   the account pointer; its `did`
  *   must name the did:webvh the roster log's entry proofs anchor to
  * @param [options.pinStore] {ResourceLogPinStore}   the chain-head pin store,
- *   overriding the durable default -- the posture seam's log-pin member for a
+ *   overriding the durable default -- the durability seam's log-pin member for a
  *   caller holding a persistence handle
  * @returns {SealableEncryptionDescriptorStore}
  */

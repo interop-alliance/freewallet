@@ -2572,7 +2572,7 @@ describe('fetchTransientKeyring (FW-215)', () => {
 
   it('resolves a standing record without creating the session database', async () => {
     // Bind through another browser profile, so this one starts with nothing
-    // local -- the public-terminal posture.
+    // local -- the public-terminal case.
     await bindPassphrase({
       clientSeed: randomSeed(),
       controller: DATA_CONTROLLER,

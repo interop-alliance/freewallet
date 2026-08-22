@@ -30,7 +30,7 @@ import type { Session } from '@/types/auth'
 /**
  * One annex GC pass for a live durable session. Resolves null when the
  * session cannot run it (not durable, not an enrolled did:webvh account) --
- * the same silent-skip posture as the other login-time sweeps -- and
+ * the same silent-skip policy as the other login-time sweeps -- and
  * otherwise returns wallet-core's per-pass report. A pass that swapped the
  * generation invalidates the session's verified-log memo (the account log
  * gained the pointer-update entry).
@@ -64,7 +64,7 @@ export async function sweepClientAnnexGenerations({
 
   const reach = await pointedClientAnnexReach({ session, pointer })
   if (reach === null) {
-    // No annex posture on this account: nothing to swap, and no
+    // No annex inventory on this account: nothing to swap, and no
     // auxiliary Space to list orphans in.
     return null
   }

@@ -41,7 +41,7 @@ import { RecoveryCodeDisplay } from '@/components/RecoveryCodeDisplay'
  * a replacement code is pushed hard -- the typed code is a spent credential.
  * The final step is an ordinary passphrase login.
  *
- * The continuation follows the browser's login posture: by default (a
+ * The continuation follows the browser's login durability: by default (a
  * non-remembered browser) the TRANSIENT variant runs -- the fresh
  * credential's ladder VM stands in for a durable client, nothing local
  * persists, and the login lands a transient session -- while the
@@ -183,7 +183,7 @@ export function RecoverPage() {
         // Fire-and-forget: the sequencing the registry updates need lives in
         // `updateRegistryAfterRecovery`, and every half is best-effort. The
         // passphrase still in hand lets it promote the fresh credential to
-        // the standing posture (self-enrolling on the next fresh browser).
+        // the standing configuration (self-enrolling on the next fresh browser).
         // The transient variant already updated the registry inside the
         // ceremony (a transient session cannot write it later).
         void updateRegistryAfterRecovery({ session, outcome, passphrase })

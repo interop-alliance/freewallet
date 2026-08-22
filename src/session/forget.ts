@@ -415,7 +415,7 @@ export async function forgetThisBrowser({
  * head needs no seal completer on an account where no enrolled client's
  * login sweep will ever run again), the controller view resolved from the
  * post-install log the ceremony supplies (the ceremony-tail license's
- * posture-changing anchor), and the HTTP requests invoked under this
+ * inventory-changing anchor), and the HTTP requests invoked under this
  * still-standing client.
  *
  * @param options {object}

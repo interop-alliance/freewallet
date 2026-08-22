@@ -179,7 +179,7 @@ test.describe('The Settings connected-wallets surface', () => {
    * the enrollee is holding its connect code, so the record the rebind
    * re-states is a full standing record.
    */
-  test('the two-party enrollment rebind keeps the transient posture alive', async ({
+  test('the two-party enrollment rebind keeps transient login alive', async ({
     page,
     browser
   }, testInfo) => {

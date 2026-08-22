@@ -16,7 +16,7 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
  * collections INCLUDING pre-enrollment writes (the escrow-every-epoch
  * semantics; the welcome credential was sealed before the second client
  * existed). The self-enrollment is two verifiable entries on the
- * world-readable log, and the credential's own posture stands untouched for
+ * world-readable log, and the credential's own inventory stands untouched for
  * the next fresh browser.
  *
  * PBKDF2 unlock derivations run several times across the flow, on top of a

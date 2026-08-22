@@ -24,7 +24,7 @@ import { transientSessionPersistence } from '@/session/persistence'
 import { transientSessionFromKeyringHit } from '@/session/transientLogin'
 import { provisionNewWallet } from '@/session/provisionNewWallet'
 import {
-  establishPassphrasePosture,
+  establishPassphraseStanding,
   establishStandingUnlock
 } from '@/session/standingUnlock'
 import {
@@ -211,7 +211,7 @@ async function signUpCredentialAnchoredWithPassphrase({
  * Creates a new wallet under a passphrase, or reports that this passphrase
  * already has one.
  *
- * Posture routing mirrors the login's: on a non-remembered browser with a
+ * Durability routing mirrors the login's: on a non-remembered browser with a
  * WAS server configured the signup is CREDENTIAL-ANCHORED (ladder-anchored
  * genesis, transient session, zero local residue); an explicit
  * `rememberBrowser: true` -- the programmatic remember-this-browser entry
@@ -321,11 +321,11 @@ export async function signUpWithPassphrase({
   })
 
   // Make the passphrase a STANDING credential (roster wrap, document entry,
-  // bridge delegation, standing-layout record) and record its posture in the
+  // bridge delegation, standing-layout record) and record its standing configuration in the
   // registry. Best-effort like the backfill above: a failure leaves the
   // record in the plain layout, which logs in normally and falls back to the
   // connect-another-wallet ceremony on a fresh browser.
-  await establishPassphrasePosture({ session, passphrase, email, credential })
+  await establishPassphraseStanding({ session, passphrase, email, credential })
 
   return { session, userExists: false }
 }

@@ -110,7 +110,7 @@ beforeEach(() => {
   // branch matrix below exercises.
   vi.mocked(routeUnlockLogin).mockReset()
   vi.mocked(routeUnlockLogin).mockImplementation(async ({ credential }) => ({
-    posture: 'durable',
+    durability: 'durable',
     ...(credential ? { credential } : {})
   }))
   vi.mocked(canSelfEnroll).mockReset()
@@ -397,7 +397,7 @@ describe('loginWithPassphrase -- fetch failure', () => {
   })
 })
 
-describe('loginWithPassphrase -- posture routing glue', () => {
+describe('loginWithPassphrase -- durability routing glue', () => {
   const CREDENTIAL = {
     unlock: { spaceId: 'unlock-space-test' },
     standing: {}
@@ -424,7 +424,7 @@ describe('loginWithPassphrase -- posture routing glue', () => {
   it('runs the transient route over the shared in-memory handle', async () => {
     const persistence = transientSessionPersistence()
     vi.mocked(routeUnlockLogin).mockResolvedValue({
-      posture: 'transient',
+      durability: 'transient',
       credential: CREDENTIAL,
       persistence
     })
@@ -463,7 +463,7 @@ describe('loginWithPassphrase -- posture routing glue', () => {
 
   it('reports no account on a transient keyring miss', async () => {
     vi.mocked(routeUnlockLogin).mockResolvedValue({
-      posture: 'transient',
+      durability: 'transient',
       credential: CREDENTIAL,
       persistence: transientSessionPersistence()
     })

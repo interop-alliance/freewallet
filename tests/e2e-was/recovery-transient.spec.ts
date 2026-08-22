@@ -1,5 +1,5 @@
 /**
- * The TRANSIENT recovery posture cell, pinned end to end: recovering on a
+ * The TRANSIENT recovery durability cell, pinned end to end: recovering on a
  * cold terminal WITHOUT the remember seam runs the default (transient)
  * variant -- the add-and-retire entry publishes the fresh credential's
  * ladder VM in place of a durable client, a fresh annex generation is
@@ -76,7 +76,8 @@ async function logOut(page: Page) {
   await expect(page).toHaveURL(/#\/$/, { timeout: 15_000 })
 }
 
-test.describe.serial('transient recovery (the recovery posture cell)', () => {
+test.describe
+  .serial('transient recovery (the recovery durability cell)', () => {
   let code: string
   let replacementCode: string
   let logUrl: string
@@ -146,7 +147,7 @@ test.describe.serial('transient recovery (the recovery posture cell)', () => {
     test.setTimeout(360_000)
     const { context, page } = await coldTerminal(browser)
     try {
-      // Deliberately no remember seam: the default posture is the transient
+      // Deliberately no remember seam: the default is the transient
       // variant. The localStorage baseline is captured before any input.
       await page.goto('/#/recover')
       const baseline = await captureLocalStorageKeys({ page })
@@ -196,7 +197,7 @@ test.describe.serial('transient recovery (the recovery posture cell)', () => {
       ).toBeVisible({ timeout: 30_000 })
 
       // The spent code fails afterwards, with wording distinct from "wrong
-      // code": its unlock Space is gone and its posture left the document.
+      // code": its unlock Space is gone and its inventory left the document.
       await logOut(page)
       await page.goto('/#/recover')
       await fillSettled(page.locator('input[name="recovery-code"]'), code)

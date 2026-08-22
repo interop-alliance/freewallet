@@ -113,7 +113,7 @@ test('signup publishes a verifying did:webvh log and a Multikey did:web projecti
   const logRes = await page.request.get(logUrl)
   expect(logRes.status()).toBe(200)
   const log = readLogFromString(await logRes.text())
-  // Two entries: the genesis, then the passphrase's standing-posture entry
+  // Two entries: the genesis, then the passphrase's standing-configuration entry
   // (its commitment-published keyAgreement key and committed ladder rung).
   expect(log).toHaveLength(2)
 
@@ -122,7 +122,7 @@ test('signup publishes a verifying did:webvh log and a Multikey did:web projecti
   expect(resolved.meta.error).toBeUndefined()
   expect(resolved.did).toMatch(/^did:webvh:.+:space:.+:id$/)
   expect(resolved.meta.scid.length).toBeGreaterThan(0)
-  // Version 2 (genesis + posture), with prerotation committed (non-empty
+  // Version 2 (genesis + the standing-configuration entry), with prerotation committed (non-empty
   // next-key hashes: the client's carry-over + staged hashes and the
   // passphrase's ladder-rung commitment).
   expect(resolved.meta.versionId.startsWith('2-')).toBe(true)
@@ -196,7 +196,7 @@ test('rotating the update key appends a verifying entry and rolls the staged key
   })
 
   // --- The published log gained a verifying rotation entry (entry 3, after
-  //     the genesis and the passphrase's standing-posture entry). ---
+  //     the genesis and the passphrase's standing-configuration entry). ---
   const after = readLogFromString(await (await page.request.get(logUrl)).text())
   expect(after).toHaveLength(3)
   const resolvedAfter = await resolveDIDFromLog(after)

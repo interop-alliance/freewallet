@@ -3,7 +3,7 @@
  * Unit tests for the annex GC sweep (`src/session/clientAnnexGc.ts`): the
  * login-time driver of wallet-core's `runClientAnnexGc`. The ceremony itself is
  * mocked at the module seam so what this module actually supplies -- the
- * durable-posture and enrolled-client preconditions, the verified-log memo,
+ * durable-session and enrolled-client preconditions, the verified-log memo,
  * the options it threads, the GenerationCollect digest write, and the local
  * pin-slot cleanup -- is what runs; the pure annex helpers
  * (`clientAnnexDidParts`, `clientAnnexLogPinId`, `delegatedClientsPointer`,
@@ -180,7 +180,7 @@ describe('sweepClientAnnexGenerations -- the preconditions', () => {
     expect(verifiedAccountLog).not.toHaveBeenCalled()
   })
 
-  it('skips an account with no annex posture in its document', async () => {
+  it('skips an account with no annex inventory in its document', async () => {
     vi.mocked(verifiedAccountLog).mockResolvedValue({
       doc: accountDoc({ pointed: false }),
       log: [{ entry: 1 }],

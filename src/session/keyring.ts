@@ -1148,7 +1148,7 @@ export interface TransientKeyringFetchResult extends KeyringRecordContents {
 /**
  * The transient unlock-record fetch: `fetchKeyring`'s public-terminal
  * sibling, which performs no durable operation at all. Remote-only (the
- * transient posture presupposes a WAS server -- with none configured it
+ * transient login presupposes a WAS server -- with none configured it
  * throws), it fetches the record, verifies its proof and, for a standing
  * record, the credential-authenticated account binding, and settles a
  * pending proof (a cascade-re-minted record) against the account log under
@@ -1158,7 +1158,7 @@ export interface TransientKeyringFetchResult extends KeyringRecordContents {
  * What it deliberately does not do, per the durable `fetchKeyring` contract
  * it parallels: no keyring cache read or write (so no offline fallback -- a
  * network error rethrows unchanged, could-not-check), no freshness pin read,
- * write, or delete (per-visit trust-on-first-use is the posture's stated
+ * write, or delete (per-visit trust-on-first-use is the transient variant's stated
  * bound: replay protection is what durable state buys, and a transient visit
  * holds none), no client-key record read (a transient session never holds
  * one), and no management zcap mint. The refusal classes are otherwise
@@ -1631,7 +1631,7 @@ export async function bindPassphrase({
  * @param options.ladderSeed {Uint8Array}
  * @param [options.delegateManagementTo] {string}   an account DID to delegate
  *   the unlock Space management zcap to (widened with PUT, the standing
- *   posture)
+ *   standing configuration)
  * @param [options.priorCreatedAt] {string}   the previous bind's stamp, the
  *   freshness floor for this one
  * @param [options.credential] {UnlockCredential}   an already-derived
@@ -1823,7 +1823,7 @@ async function verifyUnlockKeyring({
  * A standing credential's ladder seed, read from its unlock record --
  * best-effort, for a retirement that holds the credential's secret (the
  * tapped-passkey removal): the seed lets the ladder attribution strike the
- * credential's whole footprint independent of the registry's recorded rung.
+ * credential's whole inventory independent of the registry's recorded rung.
  * Any failure (no record, a non-standing layout, a controller mismatch)
  * resolves to `undefined`, and the retirement's log-walk attribution carries
  * on without it.
@@ -2076,11 +2076,11 @@ export async function deleteKeyring({
  *   did:webvh update-key seeds to carry into the new client-key record (the
  *   session's copy; falls back to the old record's)
  * @param [options.newCredential] {UnlockCredential}   an already-derived
- *   credential for the new passphrase (the standing-posture ceremony derives
+ *   credential for the new passphrase (the standing-configuration ceremony derives
  *   it to mint the bridge delegation, so the rebind must not re-stretch)
  * @param [options.oldCredential] {UnlockCredential}   an already-derived
  *   credential for the old passphrase (the change ceremony derives it to
- *   settle the registry's recorded posture against the typed secret, so the
+ *   settle the registry's recorded inventory against the typed secret, so the
  *   verification must not re-stretch either)
  * @param [options.delegation] {IZcap}   the new passphrase's bridge
  *   delegation, for a standing rebind (see `bindUnlockSecret`)

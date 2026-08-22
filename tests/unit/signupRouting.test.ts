@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * Unit tests for the signup posture routing (`src/session/signup.ts`): a
+ * Unit tests for the signup durability routing (`src/session/signup.ts`): a
  * WAS-configured signup on a non-remembered browser runs CREDENTIAL-ANCHORED
  * (a ladder-anchored genesis, transient entry, a create-nothing probe),
  * while an explicit `rememberBrowser: true` runs the durable flow with its
@@ -57,7 +57,7 @@ vi.mock('@/session/provisionNewWallet', () => ({
 }))
 
 vi.mock('@/session/standingUnlock', () => ({
-  establishPassphrasePosture: vi.fn(),
+  establishPassphraseStanding: vi.fn(),
   establishStandingUnlock: vi.fn()
 }))
 
@@ -87,7 +87,7 @@ afterEach(() => {
   state.wasUrl = 'https://was.example.test'
 })
 
-describe('signUpWithPassphrase -- posture routing', () => {
+describe('signUpWithPassphrase -- durability routing', () => {
   it('runs credential-anchored by default: probe, establish, transient entry', async () => {
     // The probe misses; the post-establishment fetch hits.
     vi.mocked(fetchTransientKeyring)

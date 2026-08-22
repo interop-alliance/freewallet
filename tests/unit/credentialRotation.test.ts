@@ -2,11 +2,11 @@
 /**
  * Unit tests for freewallet's half of the standing-unlock-credential
  * retirement ceremony (`src/session/credentialRotation.ts`). The ceremony
- * itself -- the document posture edit, the roster rotation, the collection
+ * itself -- the document inventory edit, the roster rotation, the collection
  * fan-out, and their convergence -- is `retireUnlockCredential` in
  * `@interop/wallet-core/unlock` and is covered by that package's own tests;
  * what is exercised here is the glue this wallet supplies: the two skip
- * conditions, the posture shape handed over per method type, the stores and
+ * conditions, the standing-configuration shape handed over per method type, the stores and
  * pins, the adoption callback's paired persistence, the error discipline, and
  * the verified-log memo invalidation on both sides of the call.
  */
@@ -127,7 +127,7 @@ const FRESH_USER_KEY = {
 const ROSTER_DESCRIPTOR = { epochs: [{ id: FRESH_USER_KEY.id }] }
 
 /**
- * A standing passphrase posture (the registry entry's public halves).
+ * A standing passphrase configuration (the registry entry's public halves).
  */
 const PASSPHRASE_METHOD = {
   type: 'passphrase' as const,
@@ -167,7 +167,7 @@ function ceremonyDriving({
       })
     }
     const clientAnnex = document
-      ? await options.retireClientAnnexPosture?.({ document } as never)
+      ? await options.retireClientAnnexInventory?.({ document } as never)
       : undefined
     return {
       rotated,
@@ -241,7 +241,7 @@ beforeEach(() => {
 })
 
 describe('the skip conditions', () => {
-  it('skips a method with no standing posture recorded', async () => {
+  it('skips a method with no standing configuration recorded', async () => {
     const withoutKak = await rotateOffUnlockCredential({
       session: sessionWith(),
       method: { type: 'passphrase', updateKeyMultibase: 'z6MkRung' },
@@ -287,7 +287,7 @@ describe('the skip conditions', () => {
 })
 
 describe('the ceremony hand-off', () => {
-  it('publishes a passphrase posture as a hash commitment', async () => {
+  it('publishes a passphrase key-agreement entry as a hash commitment', async () => {
     const session = sessionWith()
     await rotateOffUnlockCredential({
       session,
@@ -426,7 +426,7 @@ describe('the document-edit landed signal', () => {
     // has returned, and runs the roster tail after it.
     vi.mocked(retireUnlockCredential).mockImplementation(async options => {
       state.calls.push('retireUnlockCredential')
-      await options.retireClientAnnexPosture?.({
+      await options.retireClientAnnexInventory?.({
         document: { id: POINTER.did }
       } as never)
       await options.onUserKeyAdopted?.({
@@ -445,12 +445,12 @@ describe('the document-edit landed signal', () => {
     await rotateOffUnlockCredential({
       session: sessionWith({ ladderSeed: new Uint8Array(32).fill(9) }),
       method: PASSPHRASE_METHOD,
-      onPostureRemoved: () => {
-        state.calls.push('onPostureRemoved')
+      onInventoryRemoved: () => {
+        state.calls.push('onInventoryRemoved')
       },
       verb: 'changing the passphrase'
     })
-    const fired = state.calls.indexOf('onPostureRemoved')
+    const fired = state.calls.indexOf('onInventoryRemoved')
     expect(fired).toBeGreaterThan(state.calls.indexOf('retireUnlockCredential'))
     expect(fired).toBeLessThan(state.calls.indexOf('persistClientKeys'))
   })
@@ -464,13 +464,13 @@ describe('the document-edit landed signal', () => {
       rotateOffUnlockCredential({
         session: sessionWith(),
         method: PASSPHRASE_METHOD,
-        onPostureRemoved: () => {
-          state.calls.push('onPostureRemoved')
+        onInventoryRemoved: () => {
+          state.calls.push('onInventoryRemoved')
         },
         verb: 'changing the passphrase'
       })
     ).rejects.toThrow('the document edit failed')
-    expect(state.calls).not.toContain('onPostureRemoved')
+    expect(state.calls).not.toContain('onInventoryRemoved')
   })
 })
 

@@ -135,7 +135,7 @@ async function commitmentVmId(
 }
 
 /**
- * A registry entry recording one credential's standing posture.
+ * A registry entry recording one credential's standing configuration.
  *
  * @param options {object}
  * @param options.keyAgreementKeyMultibase {string}
@@ -187,7 +187,7 @@ beforeEach(() => {
 })
 
 describe('finishPendingPassphraseRetirement', () => {
-  it('retires the named credential and records its own posture', async () => {
+  it('retires the named credential and records its own standing configuration', async () => {
     await finishPendingPassphraseRetirement({
       session: makeSession(),
       found: makeFound()
@@ -239,7 +239,7 @@ describe('finishPendingPassphraseRetirement', () => {
     )
   })
 
-  it('records the posture without retiring when the edit already landed', async () => {
+  it('records the standing configuration without retiring when the edit already landed', async () => {
     // The torn run's document edit landed and only its registry write was
     // lost: the roster and cascade residue is the ordinary login sweep's,
     // and a retirement here would swap the annex generation every login.

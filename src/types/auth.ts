@@ -167,7 +167,7 @@ export interface ControllerProfile {
   }
   // The invocation capability the session's WAS requests ride, when the
   // session's authority over the data Space is a delegated Space-subtree
-  // zcap rather than the root capability -- the transient posture's
+  // zcap rather than the root capability -- the transient session's
   // generation delegation. Absent for durable sessions, whose invocations
   // root on the Space controller. In-memory only, never persisted.
   invocationCapability?: IZcap
@@ -178,7 +178,7 @@ export interface ControllerProfile {
   // and on sessions that never read the log (guests, no-WAS).
   verifiedLog?: VerifiedLogCache
   // The typed persistence handle chosen at login (`src/session/persistence.ts`):
-  // every posture-sensitive local write -- the continuity pins, the
+  // every durability-sensitive local write -- the continuity pins, the
   // descriptor/meta caches, the writer id -- travels through it, so a write's
   // durability is a property of the handle's type, never a flag a write site
   // consults. The durable variant alone reaches the `freewallet-session`

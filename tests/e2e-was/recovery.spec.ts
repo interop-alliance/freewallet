@@ -9,7 +9,7 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 /**
  * The recovery-code flow e2e (WAS mode), end to end -- the DURABLE
  * (remembered-browser) recovery cell: a code issued from
- * Settings (the split posture: roster wrap, the code's `keyAgreement`
+ * Settings (the split configuration: roster wrap, the code's `keyAgreement`
  * VM, `nextKeyHashes` commitment, delegated unlock record), then recovery on
  * a COLD browser profile holding nothing but the code -- the delegated log
  * write enrolls a brand-new client, the user key comes out of the code's standing
@@ -20,7 +20,7 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
  * entries on the world-readable log.
  *
  * The durable continuation runs behind the remember seam: the DEFAULT on a
- * non-remembered browser is the transient variant, whose posture cell is
+ * non-remembered browser is the transient variant, whose durability cell is
  * pinned in `recovery-transient.spec.ts`.
  *
  * Several PBKDF2 unlock derivations run across the flow on top of a full
@@ -238,7 +238,7 @@ test.describe('Recovery codes', () => {
       await logIn(secondClient, NEW_PASSPHRASE)
 
       // The spent code now fails, with wording distinct from "wrong code":
-      // its unlock Space is gone and its posture left the document.
+      // its unlock Space is gone and its inventory left the document.
       await logOut(secondClient)
       await secondClient.goto('/#/recover')
       await expect(
@@ -265,7 +265,7 @@ test.describe('Recovery codes', () => {
 
     // The ceremony is verifiable entries on the public log: issuance (1),
     // the reveal-and-commit and add-and-retire continuation (2), and the
-    // recovered passphrase's standing-posture entry (1, published
+    // recovered passphrase's standing-configuration entry (1, published
     // best-effort after the recovered login -- hence the poll), and the
     // extended log still fully verifies (SCID, hash chain, prerotation,
     // proofs).

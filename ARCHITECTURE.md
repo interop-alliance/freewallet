@@ -101,7 +101,7 @@ rule, only a keyId the resolved document lists can authorize anything.
 `user.id` stays the client did:key (it is also the App Connect response VP's
 holder, which must remain resolvable by app-side loaders).
 
-Every unlock method is a **standing credential** (the recovery-code posture
+Every unlock method is a **standing credential** (the recovery-code configuration
 minus spend-on-use): beside locating the account, it holds a wrap in the
 user-key roster (escrowed into every epoch, kept alive by rotation fan-out)
 and latent self-enrollment authority -- its record carries a pre-minted
@@ -113,13 +113,13 @@ generation, the establishment also appends one atomic hash-restating
 annex commit entry adding the new credential's rung-0 hash, signed by
 the login credential's committed rung (`commitClientAnnexRung` -- the bind
 half of the mid-generation lockout hybrid; without it the fresh credential
-could not enter the transient posture until the next generation swap).
+could not enter the transient session until the next generation swap).
 Best-effort: an acting rung the generation does not commit is the honest
 skip. A fresh browser holding nothing but the
 credential can therefore **self-enroll** at login as an ordinary full
 client, with no second browser involved -- reachable today through the
 programmatic `rememberBrowser: true` entry, since the DEFAULT login on a
-non-remembered browser is the transient posture (see "Session persistence"
+non-remembered browser is the transient session (see "Session persistence"
 below); the login-form choice is a planned follow-up. The self-enrollment:
 two loud entries extend the
 world-readable hash-chained log through the bridge (a reveal-and-commit
@@ -225,11 +225,11 @@ credential's standing rather than merely rebinding the unlock record. The
 shared sequence is wallet-core's `retireUnlockCredential`
 (`@interop/wallet-core/unlock`), wrapped session-side by
 `rotateOffUnlockCredential` (`src/session/credentialRotation.ts`): the
-credential's document posture leaves first (its `keyAgreement` entry --
-commitment or verbatim -- and its ladder's whole standing footprint, resolved
+credential's document inventory leaves first (its `keyAgreement` entry --
+commitment or verbatim -- and its ladder's whole standing inventory, resolved
 from the log itself rather than from the registry's recorded bind-time rung,
-in one log entry), then the credential's annex posture (between the
-document edit and the roster tail, wallet-core's `retireClientAnnexPosture`
+in one log entry), then the credential's annex inventory (between the
+document edit and the roster tail, wallet-core's `retireClientAnnexInventory`
 closure): a strike entry on the annex log drops the retired
 credential's revealed rung and standing hash when a distinct surviving
 credential's committed rung can sign it, and otherwise -- a self-strike, or
@@ -253,14 +253,14 @@ readable, and Settings says so -- the ceremony is the documented "I think
 my passphrase leaked" remedy there.
 
 A passphrase change writes the registry's passphrase entry only after the
-retirement has reported, because the entry's posture depends on how the
+retirement has reported, because the entry's standing configuration depends on how the
 retirement ended. One that failed before its document edit landed leaves the
 entry naming the new unlock Space but the OLD credential's whole standing
-posture, which is the one state that still names the credential left
+configuration, which is the one state that still names the credential left
 standing. While the entry stands pending, a second change from the same
 session is refused (`PendingPassphraseRetirementError`, when the entry
 records a credential the typed old passphrase does not derive): the
-retirement would otherwise remove one credential's document posture while
+retirement would otherwise remove one credential's document inventory while
 striking the other's ladder. Registry writes matched by unlock Space id
 carry the acting credential's key-agreement multibase for the same reason,
 and a mismatch writes nothing.
@@ -269,7 +269,7 @@ The next passphrase login's completer (`finishPendingPassphraseRetirement`
 in `src/session/pendingRetirement.ts`) clears it: an entry naming a
 credential other than the one logging in, with the login credential itself
 standing in the account document. It retires the named credential and
-records its own posture in the entry. The login-credential check keeps it
+records its own standing configuration in the entry. The login-credential check keeps it
 from firing in the other direction, where an old passphrase whose unlock
 Space delete failed logs in after a change that completed elsewhere. When
 the named credential is already out of the document -- the retirement landed
@@ -449,7 +449,7 @@ still-standing authority (the self-forget inversion of the revocation's
 document-edit-first order, forced by the entry-proof and current-key-set
 rules; wallet-core decision 0008), then ONE atomic ladder-signed removal
 entry through the login credential's bridge takes the client's whole
-document footprint out, and only then does the local wipe run
+document inventory out, and only then does the local wipe run
 (`clearWriter: true` -- the forget grade is the wipe's one writerId
 consumer). The wipe-last order is the tear story: a run torn anywhere
 before the entry reads as "not forgotten" and a re-click resumes; the
@@ -477,9 +477,9 @@ flips the dialog to that copy for a second confirm): wallet-core's
 client-less and ladder-anchored -- the state a credential-anchored signup
 and a transient recovery produce (wallet-core decision 0004's 2026-08-21
 amendment). The ladder VM's install entry goes first, while the client's
-footprint stays (the both-present transitional state); then the roster
+inventory stays (the both-present transitional state); then the roster
 rotation off this client's wrap, ladder-signed and anchored at the install
-entry (the ceremony-tail license's posture-changing version) but
+entry (the ceremony-tail license's inventory-changing version) but
 HTTP-invoked under the still-standing client -- the roster store is built
 here with the ladder VM's signer over the ceremony-supplied post-install
 log (`ladderSignedRosterStoreFor`), so the roster head stays signed by a key
@@ -630,12 +630,12 @@ the session and the user logs in again. The vault is
 therefore always unlocked while a session exists (the KAK is present) and
 simply gone once it ends; there is no "locked vault" state.
 
-**The posture seam** (`src/session/persistence.ts`): what a session may write
+**The durability seam** (`src/session/persistence.ts`): what a session may write
 to LOCAL durable storage is decided once, at login, by the typed
 `SessionPersistence` handle carried at `profile.persistence`. Durability is a
 property of the handle's type; a write site consults no flag and takes no
 branch (freewallet `decisions/0001-no-memory-overlay-storage-fork.md`). Every
-posture-sensitive local family rides the handle: the keyed chain-head pin
+durability-sensitive local family rides the handle: the keyed chain-head pin
 store (the account log's and the roster log's), the roster-epoch pin, the
 unlock-methods registry cache, the passkey-safety notice, the
 descriptor/meta cache pair (one instance per scope per session), and the
@@ -654,7 +654,7 @@ reads; reads still fall through to localStorage, which writes nothing.
 **Replica-less, capability-bound storage.** A transient session constructs
 no `BrowserStore` at all -- the versioned RxDB open alone durably creates
 the per-user database -- so `StorageManager.initStorageClients` builds it
-only for the durable posture, and a replica-less session serves every
+only for a durable session, and a replica-less session serves every
 synced-collection operation through the remote-direct backend (the CHAPI
 popup's, over the remote WAS collections). The sync controller never starts
 for a session with no local replica (there is no local end to replicate;
@@ -664,12 +664,12 @@ capability (threaded from `profile.invocationCapability`) that every request
 it makes rides -- the navigational handles through one private Space-handle
 helper, the raw request sites directly -- and wallet-core's
 `userKeyRosterDescriptorStore` takes the same option, so a session holding
-only a delegated Space-subtree zcap (the transient posture's generation
+only a delegated Space-subtree zcap (the transient session's generation
 delegation) can use the store and read the roster. Absent the option, every
 request invokes the root capability, exactly as before.
 
 **The transient login (the default on a non-remembered browser).** Both
-keyring login entry points run a post-KDF posture decision
+keyring login entry points run a post-KDF durability decision
 (`routeUnlockLogin` in `src/session/transientLogin.ts`): with a WAS server
 configured, a browser holding this credential's client-key record proceeds
 durable exactly as before (the record probe is create-nothing --
@@ -679,7 +679,7 @@ the transient composition. An explicit `rememberBrowser` input forces
 either side: `true` is the programmatic durable entry (the standing
 self-enrollment; the signup probe and the recovery tail pass it, and e2e
 sets it through a non-production seam), and `false` on a remembered
-browser refuses (`AlreadyRememberedError`) rather than forking postures.
+browser refuses (`AlreadyRememberedError`) rather than forking the durability decision.
 The composition (`transientSessionFromKeyringHit`): the transient
 unlock-record fetch (`fetchTransientKeyring`, no durable operation), the
 account log verified under the visit's in-memory pins, a per-visit key
@@ -691,7 +691,7 @@ embedded (never minted from here -- its mint takes a durable signer), the
 user key unwrapped from the credential's standing roster wrap (the read
 signs as `<clientAnnexDid>#<vm>` under the delegation; no escrow -- a
 transient client never joins the roster), and a session on the
-replica-less storage posture above. Transient sessions skip the KMS
+replica-less storage variant above. Transient sessions skip the KMS
 keystore, the login-time roster read, provisioning, and every login-time
 sweep. Every unavailable state -- a record without standing authority or
 the sibling, an unpromoted account, no live generation or embedded
@@ -723,8 +723,8 @@ roster read failing outright, rather than empty, additionally retries once
 behind a bootstrap-signed promotion completion -- the one-request-wide
 tear between the record re-bind and the promotion.
 
-The handle also carries the posture's refusals. Update-key rotation requires
-the durable posture outright (`DurableSessionRequiredError`): its subject is
+The handle also carries the durability refusals. Update-key rotation requires
+the durable variant outright (`DurableSessionRequiredError`): its subject is
 this browser's durable update key, and its persist-before-publish invariant
 needs a client-key record to persist into. The account-management ceremonies
 (passphrase change, passphrase/passkey add and remove, client revocation,
@@ -733,7 +733,7 @@ deletion, Space export and import) refuse from a transient session with
 `StepUpRequiredError`: they are reachable from a public terminal only inside
 the step-up ceremony (a loudly enrolled in-memory client, bracketed by
 ladder-signed enroll and retire entries), which is designed but not yet
-implemented. Contacts are not reachable in the transient posture either --
+implemented. Contacts are not reachable in a transient session either --
 the remote-direct backend rejects them today -- a stated reduction until
 remote-direct contacts land.
 
@@ -885,7 +885,7 @@ commitments (the add entry alone is appended, never a fork).
 is a camera-holding wallet rather than a browser with a paste box, the same
 ceremony runs over the WAS server's ephemeral-exchanges facet
 (`/workflows/ephemeral/exchanges` -- unauthenticated, capability-URL
-posture: the unguessable exchange URL is the only access control, and it
+access model: the unguessable exchange URL is the only access control, and it
 travels point-to-point in the QR). Settings > Connected wallets > "Connect
 another wallet" opens one card offering both halves of the ceremony -- the
 QR invite and the paste-a-connect-code form. The invite side creates an
@@ -926,7 +926,7 @@ never derive the same unlock Space -- plus a client seed, one did:webvh
 update key, and a binding MAC key), so the key material exists nowhere until
 the code is typed.
 
-Its posture is deliberately split. **Decryption stands**: the code's
+Its inventory is deliberately split. **Decryption stands**: the code's
 `keyAgreement` verification method is published in the did:webvh document
 (an ordinary, deliberately unmarked Multikey entry -- a recovery key is the
 keyAgreement-only case, so client listings keyed on `capabilityInvocation`
@@ -990,12 +990,12 @@ code's pre-committed update key (with prerotation active, an entry verifies
 against its own re-stated `updateKeys`, each hashing into the previous
 entry's `nextKeyHashes` -- which is exactly what lets a committed key reveal
 itself), then an **add-and-retire** entry. The continuation enrolls what the
-browser's posture would enroll at login. With `rememberBrowser` (the
+browser's durability decision would enroll at login. With `rememberBrowser` (the
 programmatic remember entry) a brand-new ordinary client key set is minted
 and the add-and-retire entry, signed by the new client's update
 key, brings the new client in (both VMs, all four signing relations, update
 authority), the spent code's VM, update key, and hash out, and a replacement
-code's posture in. The user key is unwrapped from the code's standing wrap
+code's inventory in. The user key is unwrapped from the code's standing wrap
 and
 **mandatorily rotated** off the spent code (recipients of the fresh epoch
 resolved from the just-updated verified document); a replacement code is
@@ -1012,7 +1012,7 @@ variant** (wallet-core's `recoverWebvhLadderAnchored`): no durable client is
 minted anywhere, the add-and-retire entry publishes the fresh credential's
 ladder VM in its place (`assertionMethod` and `capabilityDelegation` only)
 beside the new passphrase's `keyAgreement` commitment and the replacement
-code's posture, retires every standing ladder VM (the stale-third-party
+code's inventory, retires every standing ladder VM (the stale-third-party
 retirement no other ceremony performs), and the account lands client-less
 and ladder-anchored. Inside the continuation's persist-before-publish seam
 (after the reveal entry validates the code, before the ladder VM publishes)
@@ -1491,7 +1491,7 @@ login-time sweep deletes stranded app-key rows from `private-credentials`
 (marker-typed or matching the old self-issued-with-origin shape), and an
 affected app reconnects through the ordinary flow as a first run -- its
 prior identity, and whatever it encrypted under it, is deliberately
-orphaned (the greenfield re-provision posture).
+orphaned (the greenfield re-provision rule).
 
 **Externally arriving app keys are refused at store time, unconditionally.**
 Every minted app key carries the marker type `AppKeyCredential`
@@ -1855,7 +1855,7 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   zcap grantee, the same slot a BYOE app occupies; it is not a wallet
   client and holds neither the user key nor the unlock credential. A future
   CLI-class wallet is a wallet client and is not called an agent. Avoid:
-  transient client (the annex posture), agent client, bot.
+  transient client (the annex inventory), agent client, bot.
 - **`writerId`** — an unkeyed, clearable, unrecoverable attribution label
   saying which writing agent produced a revision. Its only jobs are history
   attribution and breaking last-write-wins ties; it is minted locally
@@ -1900,13 +1900,13 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   key was listed verifies forever and history never rots. See "The
   did:webvh identity".
 - **Standing unlock credential** — an unlock method (passphrase or passkey)
-  in the standing posture: beside locating the account through its unlock
+  in the standing configuration: beside locating the account through its unlock
   record, it holds a wrap of the user key in the roster (kept alive by
   rotation fan-out) and latent self-enrollment authority — a bridge
   delegation and a ladder seed carried in its unlock record — so a fresh
   browser holding nothing but the credential can self-enroll at login (the
   programmatic durable entry; the default non-remembered login is the
-  transient posture). The
+  transient session). The
   credential's entropy bounds everything server-held that it alone decrypts;
   the rotation ceremony is the remedy when it leaks. See "Session & auth
   flow".
@@ -1936,6 +1936,16 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   `encryption` descriptor. All three deliver key material or membership;
   none is a source of authority on its own (the document is verified
   independently, and wraps are minted only against log-verified keys).
+- **Inventory** -- a credential's or client's set of durable entries in the
+  account document, the annex log, or the ladder: its `keyAgreement` entry or
+  commitment, its ladder VMs, its committed rung hashes, its annex rung
+  hashes. Ceremonies install it; retirement sweeps it out (wallet-core's
+  `removeUnlockKey`, the annex rung strike). The ceremony-tail license
+  compares it per document version: an entry is inventory-changing iff the
+  set differs from the previous version's. A named arrangement of an
+  inventory is a qualified "configuration" phrase -- the split configuration,
+  the carry-over configuration, the standing configuration -- never bare.
+  Avoid: posture, footprint.
 - **Loudness** — the design property that any exercise of
   credential-derived authority must first extend a hash-chained, auditable
   log (the account log, or the annex log) before it can read or grant
@@ -1945,7 +1955,7 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   mechanism "fails loudness" when it would let a credential exercise
   authority with no world-visible record.
 - **Client annex** (`clientAnnex`) — the transient-session counterpart of
-  an enrolled client for the public-computer posture: a did:webvh whose log
+  an enrolled client for the public-computer case: a did:webvh whose log
   lives in a capability-gated auxiliary Space beside the account Space,
   recording per-visit transient verification methods in GC'd
   **generations** instead of permanent account-log entries. "The annex" is
@@ -1982,6 +1992,13 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
 - **Session** — the in-memory object (`src/types/auth.ts`) holding the logged-in
   user, their `ControllerProfile` (keyAgent + zcapClient), and their
   `StorageManager` instance.
+- **Session durability** -- the axis deciding what a session may write to
+  LOCAL durable storage, fixed once at login by the typed `SessionPersistence`
+  handle at `profile.persistence` (see "Session persistence"). Two variants:
+  durable (the `freewallet-session` database, the localStorage caches, the
+  durable `writerId`) and transient (in-memory throughout, dies with the
+  tab). Durability is a property of the handle's type; a write site consults
+  no flag. Avoid: posture, tier, mode.
 - **StorageManager** — the facade class in `src/stores/storageManager.ts`.
   Routes all wallet reads/writes to the local `BrowserStore` (the active
   replica) and exposes the optional `WASRemoteStore` for background

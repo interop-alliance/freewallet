@@ -1,8 +1,8 @@
 /**
- * The standing-posture establishment ceremony: what turns a passphrase or
+ * The standing-configuration establishment ceremony: what turns a passphrase or
  * passkey bind into a STANDING unlock credential -- one a fresh browser can
  * later self-enroll with, holding nothing but the credential (FW-154's
- * one-codepath model, the recovery-code posture minus spend-on-use). Run from
+ * one-codepath model, the recovery-code configuration minus spend-on-use). Run from
  * a live enrolled session, in the recovery-anchor order (decryption material
  * before authorization):
  *
@@ -285,7 +285,7 @@ export async function establishStandingUnlock({
   // entry signed by the LOGIN credential's committed rung 0
   // (`profile.ladderSeed`; on a passphrase change still the OLD credential's
   // seed here, by the caller's reassignment ordering). Without it a freshly
-  // bound credential is locked out of the transient posture until the next
+  // bound credential is locked out of transient login until the next
   // generation swap. Best-effort: an acting rung the generation does not
   // commit is the honest skip (nothing licenses a bind to mint a
   // generation), and the lockout consequence stands as documented.
@@ -367,7 +367,7 @@ export async function establishStandingUnlock({
 }
 
 /**
- * Establishes the annex-generation posture for one standing unlock
+ * Establishes the annex-generation inventory for one standing unlock
  * credential, from a live enrolled session holding its secret: ensure a
  * generation exists and the account document points at it (minting the typed
  * auxiliary Space, the credential-signed genesis, and the embedded generation
@@ -405,7 +405,7 @@ export async function establishClientAnnexGeneration({
   const { remoteStore, pointer, clientWebvhKeys, keyAgent } =
     requireEnrolledClientContext({
       session,
-      action: 'Establishing the annex-generation posture'
+      action: 'Establishing the annex-generation inventory'
     })
   const { zcapClient } = session.profile
 
@@ -415,7 +415,7 @@ export async function establishClientAnnexGeneration({
   if (!found || !foundStanding || !ladderSeed || !found.standingClient) {
     throw new Error(
       'This credential holds no standing unlock record; establish the ' +
-        'standing posture before the annex generation.'
+        'standing configuration before the annex generation.'
     )
   }
   if (!found.rebindStandingRecord) {
@@ -643,13 +643,13 @@ export async function selfEnrollStandingClient({
  *   it writes the entry itself, after the old credential's retirement, so a
  *   retirement that fails before its document edit lands leaves the entry
  *   still naming the old credential
- * @returns {Promise<object>}   the established posture's ladder seed (absent
+ * @returns {Promise<object>}   the established configuration's ladder seed (absent
  *   when the establishment skipped or failed -- a passphrase change threads
  *   it into the old credential's retirement as the surviving seed), and,
  *   when the establishment ran and the registry write was left to the
  *   caller, the members that entry needs
  */
-export async function establishPassphrasePosture({
+export async function establishPassphraseStanding({
   session,
   passphrase,
   email,
@@ -672,7 +672,7 @@ export async function establishPassphrasePosture({
   }
 }> {
   // A session that cannot act as an enrolled client on a promoted account
-  // (a no-WAS deployment, a guest, an unpromoted account) has no posture to
+  // (a no-WAS deployment, a guest, an unpromoted account) has no standing configuration to
   // establish; skip quietly rather than warn on every such signup.
   if (!enrolledClientContext({ session })) {
     return {}
