@@ -434,7 +434,13 @@ the client-keyed families (the unlock-methods cache, the passkey-safety
 notice, the replica-database prefix, the local-mode cache scope) from this
 browser's own client did:key, never the account controller; each unlock
 method's local trio (keyring cache, client-key record, freshness pin) from
-the registry walked across every method; the epoch pin from the account
+the registry walked across every method, always including the session's
+own login credential (`profile.unlockMethod` and the standing members'
+unlock Space id), so a registry read lost to a transient server error
+narrows the trio enumeration only to the other methods and is
+reported on the wipe outcome (`unlock-methods-registry`) rather than
+leaving this browser's client-key record behind a wipe that reads as
+clean; the epoch pin from the account
 DID; the chain-head pin slots by Space-scoped prefix, which also clears
 every annex generation's slot without needing the generation ids; the
 Space-to-DID mapping; and the per-account localStorage families (the
@@ -1941,16 +1947,18 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   key was listed verifies forever and history never rots. See "The
   did:webvh identity".
 - **Standing unlock credential** — an unlock method (passphrase or passkey)
-  in the standing configuration: beside locating the account through its unlock
-  record, it holds a wrap of the user key in the roster (kept alive by
-  rotation fan-out) and latent self-enrollment authority — a bridge
-  delegation and a ladder seed carried in its unlock record — so a fresh
-  browser holding nothing but the credential can self-enroll at login (the
-  programmatic durable entry; the default non-remembered login is the
-  transient session). The
-  credential's entropy bounds everything server-held that it alone decrypts;
-  the rotation ceremony is the remedy when it leaks. See "Session & auth
-  flow".
+  in the standing configuration: beside locating the account through its
+  unlock record, it holds a wrap of the user key in the roster (escrowed
+  into every epoch, kept alive by rotation fan-out) and latent
+  self-enrollment authority carried in that record -- a bridge delegation,
+  the `delegatedClients` sibling delegation into the client annex, and a
+  random ladder seed. A fresh browser holding nothing but the credential can
+  therefore self-enroll at login as a durable client (the programmatic
+  `rememberBrowser: true` entry) or enter the transient session (the
+  default on a non-remembered browser, through the sibling delegation). The
+  credential's entropy bounds everything server-held that it alone
+  decrypts; the rotation ceremony is the remedy when it leaks. See "Session
+  & auth flow".
 - **Bridge delegation** — the pre-minted, narrowly scoped zcap carried
   inside an unlock or recovery record beside the account pointer: a
   PUT-on-`did.jsonl` capability (plus annex-log access where that
@@ -1964,10 +1972,17 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   prerotation), and a rung reveals itself exactly when the credential
   self-enrolls — a reveal-and-commit log entry signed by the current rung.
   It is how a credential extends the log with no durable client key in
-  hand. The **ladder VM** (design stage, not yet implemented) is a
-  document-visible verification method derived from the ladder that anchors
-  an account while it has zero enrolled clients; its authority breadth is
-  an open design question.
+  hand. The **ladder VM** is the document-visible verification method
+  derived from the ladder (published under `assertionMethod` and
+  `capabilityDelegation`; it holds no invocation relation) that anchors an
+  account while it has zero enrolled clients: installed by the
+  credential-anchored genesis, the
+  transient recovery, and the last-client forget transition; it signs the
+  roster's entry proofs, the generation delegation, and the unlock records'
+  re-minted bridges on such an account, and it is struck from the document
+  when its credential retires. Its bare did:key (`ladderVmAgent`) is the
+  bootstrap identity the credential-anchored genesis creates the Space
+  under.
 - **Roster** — three related uses. The **enrolled-client roster** is the
   did:webvh document itself (each client's verification methods). The
   **user key wrap-set roster** (`key-map/user-key.jsonl`) is the

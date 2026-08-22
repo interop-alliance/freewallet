@@ -2,6 +2,17 @@
 
 ## 0.39.0 - TBD
 
+### Fixed
+
+- The shared wipe enumeration (`snapshotWipeTargets`) now always includes
+  the session's own login credential's unlock Space (`profile.unlockMethod`
+  and `profile.standingUnlock`) beside the unlock-methods registry's
+  entries. A registry read that failed (a transient server error) used to
+  yield an empty list, so a forget or account deletion left this browser's
+  client-key record, keyring cache, and freshness pin in place while
+  reporting a clean wipe. The failed read is now passed as `registryUnread`
+  and reported as the `unlock-methods-registry` stage on the wipe outcome.
+
 ### Added
 
 - A local sign-in (passphrase, passkey, completing the connect-this-browser

@@ -247,6 +247,7 @@ export async function forgetThisBrowser({
   // could not read, and a record it leaves unreached would rot for good at
   // the removal entry, so there the read failure refuses up front.
   const { epochPins } = session.profile.persistence
+  let registryUnread = false
   const [registry, pinnedEpochId] = await Promise.all([
     getUnlockMethods({ session }).catch((err: unknown) => {
       if (lastClient) {
@@ -262,6 +263,7 @@ export async function forgetThisBrowser({
           'ceremony:',
         err
       )
+      registryUnread = true
       return null
     }),
     epochPins.load({ accountDid: pointer.did })
@@ -294,9 +296,14 @@ export async function forgetThisBrowser({
 
   // Snapshot-first: every wipe target derives from the live session BEFORE
   // the ceremony ends this client's authority (and before anything deletes).
+  // The login credential's own trio is enumerated from the session itself,
+  // so an unread registry narrows the wipe to the other methods' trios and
+  // is reported on the outcome, rather than leaving this browser's
+  // client-key record behind a wipe that reads as clean.
   const targets = snapshotWipeTargets({
     session,
     registry,
+    registryUnread,
     ...(clientAnnexSpaceId ? { clientAnnexSpaceId } : {})
   })
 

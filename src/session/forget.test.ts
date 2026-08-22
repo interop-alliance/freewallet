@@ -605,6 +605,26 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     })
   })
 
+  it('still wipes the login credential trio and reports an unread registry', async () => {
+    const { session } = fakeSession()
+    vi.mocked(getUnlockMethods).mockRejectedValue(new Error('503'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(executeLocalWipe).mockResolvedValue({
+      failed: ['unlock-methods-registry']
+    })
+    const outcome = await forgetThisBrowser({ session })
+    warn.mockRestore()
+    // The ordinary forget proceeds, with the wipe snapshot told the read
+    // failed (the snapshot itself always enumerates the session's own
+    // unlock Space) and the narrowing reported on the outcome.
+    expect(vi.mocked(forgetDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(snapshotWipeTargets).mock.calls[0]![0]).toMatchObject({
+      registry: null,
+      registryUnread: true
+    })
+    expect(outcome.wipeFailed).toEqual(['unlock-methods-registry'])
+  })
+
   it('refuses the transition up front when the registry cannot be read', async () => {
     const { session } = fakeSession()
     vi.mocked(getUnlockMethods).mockRejectedValue(new Error('offline'))

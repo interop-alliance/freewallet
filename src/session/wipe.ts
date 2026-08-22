@@ -73,10 +73,21 @@ export interface WipeTargets {
    */
   clientAnnexSpaceId?: string
   /**
-   * Every unlock method's unlock Space id, across the whole registry -- each
-   * keys a local trio (keyring cache, client-key record, freshness pin).
+   * Every unlock method's unlock Space id -- each keys a local trio (keyring
+   * cache, client-key record, freshness pin): the whole registry, unioned
+   * with the live session's own credential (`profile.unlockMethod` and
+   * `profile.standingUnlock`), so a registry the consumer could not read
+   * still leaves the login credential's trio -- this browser's client seed
+   * and its cached user key -- in the enumeration.
    */
   unlockSpaceIds: string[]
+  /**
+   * Whether the consumer's registry read failed (as opposed to finding no
+   * registry). The enumeration above then holds at minimum the session's
+   * own credential, and the executor reports the narrowing as a failed
+   * stage rather than letting the wipe read as clean.
+   */
+  registryUnread: boolean
   /**
    * The descriptor/meta localStorage cache scopes: the account Space id
    * (remote mode) and `local:<clientDid>` (local mode) -- both are covered,
@@ -91,31 +102,47 @@ export interface WipeTargets {
  * caller's own discovery (the registry rides in the data Space and the
  * annex behind the account document's pointer, so reading either is the
  * consumer's ceremony-specific step); absent, the affected families are
- * simply not enumerated -- best-effort narrowing, never a failure.
+ * narrowed, with one exception: the unlock Space of the credential the
+ * session itself logged in with (`profile.unlockMethod`, and the standing
+ * members' `unlockSpaceId`) is always enumerated, so a registry read lost
+ * to a transient server error can never leave this browser's client-key
+ * record behind a wipe reported as clean. A read that failed is passed as
+ * `registryUnread` and reported by the executor.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param [options.registry] {UnlockMethodsRecord | null}
+ * @param [options.registryUnread] {boolean}   the consumer's registry read
+ *   failed (default false: the registry was read, or the consumer has none)
  * @param [options.clientAnnexSpaceId] {string}
  * @returns {WipeTargets}
  */
 export function snapshotWipeTargets({
   session,
   registry,
+  registryUnread = false,
   clientAnnexSpaceId
 }: {
   session: Session
   registry?: UnlockMethodsRecord | null
+  registryUnread?: boolean
   clientAnnexSpaceId?: string
 }): WipeTargets {
   const clientDid = session.user.id
   const accountSpaceId = session.profile.accountPointer?.spaceId
+  const { unlockMethod, standingUnlock } = session.profile
+  const unlockSpaceIds = new Set<string>([
+    ...(unlockMethod ? [unlockMethod.unlockSpaceId] : []),
+    ...(standingUnlock ? [standingUnlock.unlockSpaceId] : []),
+    ...(registry?.methods ?? []).map(entry => entry.unlockSpaceId)
+  ])
   return {
     clientDid,
     accountDid: session.profile.accountPointer?.did,
     accountSpaceId,
     clientAnnexSpaceId,
-    unlockSpaceIds: (registry?.methods ?? []).map(entry => entry.unlockSpaceId),
+    unlockSpaceIds: [...unlockSpaceIds],
+    registryUnread,
     cacheScopes: [
       ...(accountSpaceId ? [accountSpaceId] : []),
       `local:${clientDid}`
@@ -162,6 +189,13 @@ export async function executeLocalWipe({
       failed.push(name)
       console.warn(`Local wipe stage "${name}" failed:`, err)
     }
+  }
+
+  // A registry the consumer could not read is a narrowed enumeration (the
+  // other unlock methods' trios may survive), reported as a failed stage up
+  // front so the outcome never reads as clean.
+  if (targets.registryUnread) {
+    failed.push('unlock-methods-registry')
   }
 
   // The replica databases first (cross-tab teardown rides inside).

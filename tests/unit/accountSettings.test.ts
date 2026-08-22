@@ -595,6 +595,12 @@ describe('deleteAccount', () => {
     expect(result).toBe('deleted')
     expect(vi.mocked(deleteUnlockMethodArtifacts)).not.toHaveBeenCalled()
     expect(state.calls).toContain('wipeRemoteStorage')
+    // The failed read reaches the wipe snapshot, which still enumerates the
+    // session's own unlock Space and reports the narrowing.
+    expect(vi.mocked(snapshotWipeTargets).mock.calls[0]![0]).toMatchObject({
+      registry: null,
+      registryUnread: true
+    })
     warn.mockRestore()
   })
 

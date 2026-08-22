@@ -960,6 +960,7 @@ export async function deleteAccount({
   // the account document's pointer. Both best-effort -- an unreadable
   // registry or log narrows the teardown, never blocks the deletion.
   let registry: UnlockMethodsRecord | null = null
+  let registryUnread = false
   let clientAnnex: { was: WasClient; spaceId: string } | undefined
   // The Storage Access seam: a session begun from the CHAPI popup carries the
   // unpartitioned factory here, so every session-database delete below lands
@@ -971,6 +972,7 @@ export async function deleteAccount({
     try {
       registry = await getUnlockMethods({ session })
     } catch (err) {
+      registryUnread = true
       console.warn(
         'Could not read the unlock-methods registry for deletion; other ' +
           "methods' unlock Spaces survive:",
@@ -1032,6 +1034,7 @@ export async function deleteAccount({
   const targets = snapshotWipeTargets({
     session,
     registry,
+    registryUnread,
     clientAnnexSpaceId: clientAnnex?.spaceId
   })
   // (b) Wipe the remote data Space. On failure keep the old semantics:

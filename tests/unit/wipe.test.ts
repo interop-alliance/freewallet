@@ -88,16 +88,24 @@ function createFakeLocalStorage(): {
 
 function sessionFixture({
   isGuest = false,
-  storage
+  storage,
+  unlockSpaceId
 }: {
   isGuest?: boolean
   storage?: { wipeLocalStorage: () => Promise<void> }
+  unlockSpaceId?: string
 } = {}): Session {
   return {
     user: { id: CLIENT_DID },
     isGuest,
     storage,
     profile: {
+      ...(unlockSpaceId
+        ? {
+            unlockMethod: { type: 'passphrase', unlockSpaceId },
+            standingUnlock: { unlockSpaceId }
+          }
+        : {}),
       accountPointer: isGuest
         ? undefined
         : {
@@ -297,6 +305,43 @@ describe('the shared wipe enumeration', () => {
       )
     })
   }
+
+  it("enumerates the login credential's unlock Space when the registry read failed", async () => {
+    const { idb, sessionStore } = createFakeSessionIdb()
+    await seedSessionDatabase(idb)
+    const session = sessionFixture({ unlockSpaceId: PASSPHRASE_UNLOCK_SPACE })
+    // The registry read rejected: no record, flagged as unread.
+    const targets = snapshotWipeTargets({
+      session,
+      registry: null,
+      registryUnread: true
+    })
+    expect(targets.unlockSpaceIds).toEqual([PASSPHRASE_UNLOCK_SPACE])
+    expect(targets.registryUnread).toBe(true)
+
+    const { failed } = await executeLocalWipe({ targets, idb })
+
+    // Reported, never read as "no other methods".
+    expect(failed).toEqual(['unlock-methods-registry'])
+    // The login credential's trio -- the client-key record above all -- is
+    // gone; the unread passkey method's trio is the stated residue.
+    for (const family of ['keyring', 'client-keys', 'keyring-freshness']) {
+      expect(sessionStore.has(`${family}/${PASSPHRASE_UNLOCK_SPACE}`)).toBe(
+        false
+      )
+      expect(sessionStore.has(`${family}/${PASSKEY_UNLOCK_SPACE}`)).toBe(true)
+    }
+  })
+
+  it('unions the session credential with the registry without duplicating it', () => {
+    const session = sessionFixture({ unlockSpaceId: PASSPHRASE_UNLOCK_SPACE })
+    const targets = snapshotWipeTargets({ session, registry })
+    expect(targets.unlockSpaceIds).toEqual([
+      PASSPHRASE_UNLOCK_SPACE,
+      PASSKEY_UNLOCK_SPACE
+    ])
+    expect(targets.registryUnread).toBe(false)
+  })
 
   it('keeps the writer id unless the consumer asks (deleteAccount, guest)', async () => {
     const { idb } = createFakeSessionIdb()
