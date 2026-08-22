@@ -20,10 +20,15 @@
  *   VM's install entry, the ladder-signed roster rotation anchored there and
  *   the fan-out under this client's still-standing authority, the forced
  *   ladder-signed generation-delegation replacement and the revocation of
- *   every ladder-signed delegation the annex history embedded, the login
- *   credential's record re-bind (bridge and sibling re-signed by the ladder
- *   VM through the hit's re-bind closure, the registry pair refreshed),
- *   then the removal entry. The ordinary ceremony's `LastDurableClientForgetError`
+ *   every ladder-signed delegation the annex history embedded, the OTHER
+ *   unlock methods' record re-mint (every other standing credential's and
+ *   recovery code's bridge and sibling re-signed by the ladder VM and its
+ *   record re-sealed through the entry's management zcap -- the revocation
+ *   cascade's re-mint pass over the registry, this client's last window of
+ *   registry authority, since on a client-less account no durable login's
+ *   refresh block will ever heal them), the login credential's record
+ *   re-bind (bridge and sibling re-signed by the ladder VM through the hit's
+ *   re-bind closure, the registry pair refreshed), then the removal entry. The ordinary ceremony's `LastDurableClientForgetError`
  *   (name-stable) is the routing signal when the caller's view was stale.
  *   The transition's own name-stable refusal, `RecordRemintFailedError`
  *   (another sign-in method's record could not be re-sealed, so the
@@ -87,6 +92,7 @@ import {
   verifyAccountLog
 } from '@interop/wallet-core/webvh'
 import type { RevokedClientKeys } from '@interop/wallet-core/webvh'
+import { WAS_SERVER_URL } from '@/app.config'
 import type { Session, User } from '@/types/auth'
 import type { VerifiedAccountLog } from '@interop/wallet-core/clients'
 import { SESSION_DB_NAME, sessionLogPinStore } from '@/lib/sessionKey'
@@ -98,11 +104,16 @@ import {
 } from '@/session/persistence'
 import { requireEnrolledClientContext } from '@/session/enrolledContext'
 import type { KeyringFetchResult } from '@/session/keyring'
-import { recoveryEntriesOf } from '@/session/recovery'
+import {
+  recordRemintedEntry,
+  recoveryEntriesOf,
+  remintEntriesOf
+} from '@/session/recovery'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { unlockLogStore } from '@/session/standingUnlock'
 import {
   getUnlockMethods,
+  managementZcapClient,
   refreshStandingDelegationFields
 } from '@/session/unlockMethods'
 import { pointedClientAnnexReach } from '@/session/annexReach'
@@ -228,12 +239,23 @@ export async function forgetThisBrowser({
     )
   }
 
-  // One registry read serves the removal entry's latent-hash vouching AND
-  // the wipe snapshot's unlock-Space enumeration; best-effort, like the
-  // revocation cascade's.
+  // One registry read serves the removal entry's latent-hash vouching, the
+  // wipe snapshot's unlock-Space enumeration, and (the transition) the other
+  // unlock methods' record re-mint. Best-effort for the ordinary forget,
+  // like the revocation cascade's; the transition cannot walk entries it
+  // could not read, and a record it leaves unreached would rot for good at
+  // the removal entry, so there the read failure refuses up front.
   const { epochPins } = session.profile.persistence
   const [registry, pinnedEpochId] = await Promise.all([
     getUnlockMethods({ session }).catch((err: unknown) => {
+      if (lastClient) {
+        throw new Error(
+          'Could not read the unlock-methods registry, which the last-' +
+            "client forget needs to re-seal the other sign-in methods' " +
+            'records; try again.',
+          { cause: err }
+        )
+      }
       console.warn(
         'Could not read the unlock-methods registry for the forget ' +
           'ceremony:',
@@ -354,6 +376,12 @@ export async function forgetThisBrowser({
           ladderSeed
         }),
         annex: annexCeremonyReach({ session, pointer }),
+        unlockMethods: unlockMethodsRemintReach({
+          session,
+          pointer,
+          registry,
+          loginUnlockSpaceId: standing.unlockSpaceId
+        }),
         onBeforeRemoval: async ({ did }) =>
           rebindLoginCredentialRecord({
             session,
@@ -455,6 +483,54 @@ function annexCeremonyReach({
     wasServerUrl: pointer.host,
     accountSpaceId: pointer.spaceId,
     pinStore: session.profile.persistence.logPins
+  }
+}
+
+/**
+ * The transition's reach into the OTHER unlock methods' records (the
+ * ceremony's `unlockMethods` stage): every registry entry but the login
+ * credential's own (re-bound through the hit's closure in the
+ * `onBeforeRemoval` seam instead), in the revocation cascade's re-mint shape,
+ * with the management zcaps invoked under this still-standing client and the
+ * refreshed fields written back to the registry while this client can still
+ * write it. An unreachable record refuses the removal entry inside the
+ * ceremony (`RecordRemintFailedError`), so nothing here is best-effort.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.pointer {AccountPointer}
+ * @param options.registry {UnlockMethodsRecord | null}
+ * @param options.loginUnlockSpaceId {string}   the login credential's
+ *   unlock Space, whose entry is left out
+ * @returns {UnlockMethodsRemintReach}
+ */
+function unlockMethodsRemintReach({
+  session,
+  pointer,
+  registry,
+  loginUnlockSpaceId
+}: {
+  session: Session
+  pointer: Parameters<typeof delegateLogWrite>[0]['pointer']
+  registry: Parameters<typeof remintEntriesOf>[0]['record']
+  loginUnlockSpaceId: string
+}): NonNullable<
+  Parameters<typeof forgetLastDurableClient>[0]['unlockMethods']
+> {
+  return {
+    entries: remintEntriesOf({
+      record: registry,
+      excludeUnlockSpaceIds: [loginUnlockSpaceId]
+    }),
+    pointer,
+    storageServerUrl: WAS_SERVER_URL ?? pointer.host,
+    managementZcapClient: ({ capability }) =>
+      managementZcapClient({ session, capability }),
+    recordEntry: async ({ entry }) =>
+      recordRemintedEntry({
+        session,
+        entry: entry as Parameters<typeof recordRemintedEntry>[0]['entry']
+      })
   }
 }
 

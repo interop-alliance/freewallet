@@ -47,7 +47,7 @@ const clientsState = vi.hoisted(() => ({
 
 vi.mock('@interop/wallet-core/clients', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/clients')>()),
-  currentAccountSigningKeys: vi.fn(async () => {
+  currentAccountRecordSigners: vi.fn(async () => {
     if (clientsState.signingKeysError) {
       throw clientsState.signingKeysError
     }
@@ -258,11 +258,11 @@ describe('locateRecoveryAccount error discipline', () => {
 
 describe('recovery record proof (the mixed-signer policy)', () => {
   it('verifies an issuance-signed record without consulting the document', async () => {
-    const { currentAccountSigningKeys } =
+    const { currentAccountRecordSigners } =
       await import('@interop/wallet-core/clients')
     const { code } = await storeRecordForCode()
     await expect(locateRecoveryAccount({ code })).resolves.toBeUndefined()
-    expect(vi.mocked(currentAccountSigningKeys)).not.toHaveBeenCalled()
+    expect(vi.mocked(currentAccountRecordSigners)).not.toHaveBeenCalled()
   })
 
   it('completes a re-minted record against the account document keys', async () => {

@@ -4,6 +4,19 @@
 
 ### Added
 
+- The last-client forget transition re-seals every OTHER unlock method's
+  record before the removal entry: the standing passphrase and passkey
+  credentials' and the recovery codes' bridge delegations (and
+  `delegatedClients` siblings) are re-signed by the ladder VM through
+  wallet-core's `unlockMethods` reach, so they no longer rot with the client
+  that signed them. A registry the transition cannot read refuses up front.
+  The confirm copy no longer states the re-establish residue, and the
+  last-client e2e walk issues a recovery code from the forgotten browser and
+  recovers with it afterwards.
+- Unlock and recovery record proofs are settled against wallet-core's
+  `currentAccountRecordSigners` (the enrolled clients' signing keys plus the
+  ladder VMs) instead of the enrolled-client set alone, so a ladder-VM-signed
+  re-mint on a client-less account is accepted.
 - The forget-this-browser dialog handles wallet-core's name-stable
   `RecordRemintFailedError` from the last-client transition: the removal entry
   was withheld because another sign-in method's record could not be re-sealed,

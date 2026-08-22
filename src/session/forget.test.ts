@@ -106,14 +106,22 @@ const { requireEnrolledClientContext } =
 
 vi.mock('@/session/unlockMethods', () => ({
   getUnlockMethods: vi.fn(),
+  managementZcapClient: vi.fn(() => ({ managementZcapClient: true })),
   refreshStandingDelegationFields: vi.fn()
 }))
-const { getUnlockMethods, refreshStandingDelegationFields } =
-  await import('@/session/unlockMethods')
+const {
+  getUnlockMethods,
+  managementZcapClient,
+  refreshStandingDelegationFields
+} = await import('@/session/unlockMethods')
 
 vi.mock('@/session/recovery', () => ({
-  recoveryEntriesOf: vi.fn(() => [])
+  recoveryEntriesOf: vi.fn(() => []),
+  remintEntriesOf: vi.fn(() => []),
+  recordRemintedEntry: vi.fn()
 }))
+const { remintEntriesOf, recordRemintedEntry } =
+  await import('@/session/recovery')
 
 vi.mock('@/session/rosterStore', () => ({
   sessionRosterStore: vi.fn(() => ({ sessionRosterStore: true }))
@@ -549,6 +557,59 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     expect(typeof options.onBeforeRemoval).toBe('function')
     expect(options.expectedDid).toBe(pointer.did)
     expect(options.knownLatentHashes).toEqual(['hash:zRung'])
+  })
+
+  it('hands the transition the other unlock methods as its re-mint reach', async () => {
+    const { session } = fakeSession()
+    const registry = {
+      methods: [
+        { type: 'passphrase', unlockSpaceId: 'unlock-1' },
+        { type: 'passkey', unlockSpaceId: 'unlock-2' },
+        { type: 'recovery-code', unlockSpaceId: 'unlock-3' }
+      ]
+    }
+    vi.mocked(getUnlockMethods).mockResolvedValue(registry as never)
+    const otherEntries = [
+      { label: 'passkey', unlockSpaceId: 'unlock-2', source: {} },
+      { label: 'recovery-code', unlockSpaceId: 'unlock-3', source: {} }
+    ]
+    vi.mocked(remintEntriesOf).mockReturnValue(otherEntries as never)
+    await forgetThisBrowser({ session, lastClient: true })
+    // The login credential's own record is the onBeforeRemoval seam's.
+    expect(vi.mocked(remintEntriesOf)).toHaveBeenCalledWith({
+      record: registry,
+      excludeUnlockSpaceIds: ['unlock-1']
+    })
+    const { unlockMethods } = vi.mocked(forgetLastDurableClient).mock
+      .calls[0]![0]
+    expect(unlockMethods).toMatchObject({
+      entries: otherEntries,
+      pointer,
+      storageServerUrl: expect.any(String)
+    })
+    const capability = { id: 'urn:zcap:manage' } as never
+    expect(unlockMethods!.managementZcapClient({ capability })).toEqual({
+      managementZcapClient: true
+    })
+    expect(vi.mocked(managementZcapClient)).toHaveBeenCalledWith({
+      session,
+      capability
+    })
+    await unlockMethods!.recordEntry({ entry: otherEntries[1] as never })
+    expect(vi.mocked(recordRemintedEntry)).toHaveBeenCalledWith({
+      session,
+      entry: otherEntries[1]
+    })
+  })
+
+  it('refuses the transition up front when the registry cannot be read', async () => {
+    const { session } = fakeSession()
+    vi.mocked(getUnlockMethods).mockRejectedValue(new Error('offline'))
+    await expect(
+      forgetThisBrowser({ session, lastClient: true })
+    ).rejects.toThrow(/unlock-methods registry/)
+    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
   })
 
   it('re-binds the login credential record from the transition onBeforeRemoval seam', async () => {

@@ -102,7 +102,7 @@ import {
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import { WasClient } from '@interop/was-client'
 import {
-  currentAccountSigningKeys,
+  currentAccountRecordSigners,
   type VerifiedAccountLog
 } from '@interop/wallet-core/clients'
 import {
@@ -119,6 +119,7 @@ import {
   wrapUnlockRecord,
   zcapExpiring,
   type RecoveryClient,
+  type RecoveryDelegationEntry,
   type RecoveryLogStore,
   type UnlockRecordProofState
 } from '@interop/wallet-core/recovery'
@@ -686,7 +687,10 @@ async function completeRecoveryRecordProof({
       spaceId: pointer.spaceId,
       host: pointer.host
     }
-    const signingKeys = await currentAccountSigningKeys({
+    // The allowlist is the record-signer set, not the enrolled-client set:
+    // a code's record re-minted by the last-client forget is signed by the
+    // ladder VM, the one key a client-less account's document still lists.
+    const signingKeys = await currentAccountRecordSigners({
       pointer: logPointer,
       ...(verifiedLog
         ? { verifiedLog }
@@ -1757,15 +1761,118 @@ export async function revokeRecoveryCode({
 }
 
 /**
+ * One registry entry shaped for the shared re-mint pass: wallet-core's
+ * `RecoveryDelegationEntry` plus the registry entry it was built from, so
+ * the record-back seam can write the refreshed fields to the right place.
+ */
+export type RemintEntry = RecoveryDelegationEntry & { source: UnlockMethod }
+
+/**
+ * The unlock-methods registry entries a re-mint pass walks, in the shape the
+ * shared pass takes: the recovery codes AND the standing passphrase/passkey
+ * credentials alike (one bridge machinery, per FW-154's one-codepath
+ * model), with `unlockClientDid` filling the delegation-grantee slot the
+ * recovery entries call `recoveryClientDid`. The sibling pair is absent on
+ * recovery codes by construction; stating it keeps the entry union uniform
+ * for the record-back seam.
+ *
+ * @param options {object}
+ * @param options.record {UnlockMethodsRecord | null}   the registry
+ * @param [options.excludeUnlockSpaceIds] {string[]}   entries to leave out
+ *   (the last-client forget re-binds the login credential's own record
+ *   through the keyring hit's closure instead)
+ * @returns {RemintEntry[]}
+ */
+export function remintEntriesOf({
+  record,
+  excludeUnlockSpaceIds = []
+}: {
+  record: UnlockMethodsRecord | null
+  excludeUnlockSpaceIds?: string[]
+}): RemintEntry[] {
+  const entries = recoveryEntriesOf({ record })
+  const standingSources = (record?.methods ?? []).filter(
+    (method): method is PassphraseUnlockMethod | PasskeyUnlockMethod =>
+      (method.type === 'passphrase' || method.type === 'passkey') &&
+      !!method.unlockClientDid
+  )
+  const mapped: RemintEntry[] = [
+    ...entries.map(entry => ({
+      ...entry,
+      delegatedClientsKeyId: undefined,
+      delegatedClientsExpires: undefined,
+      source: entry as UnlockMethod
+    })),
+    ...standingSources.map(method => ({
+      label: method.type,
+      unlockSpaceId: method.unlockSpaceId,
+      manageCapability: method.manageCapability,
+      delegationKeyId: method.delegationKeyId,
+      delegationExpires: method.delegationExpires,
+      delegatedClientsKeyId: method.delegatedClientsKeyId,
+      delegatedClientsExpires: method.delegatedClientsExpires,
+      recoveryClientDid: method.unlockClientDid,
+      unlockKeyAgreementKeyId: method.unlockKeyAgreementKeyId,
+      unlockKeyAgreementKeyMultibase: method.unlockKeyAgreementKeyMultibase,
+      source: method as UnlockMethod
+    }))
+  ]
+  return mapped.filter(
+    entry => !excludeUnlockSpaceIds.includes(entry.unlockSpaceId)
+  )
+}
+
+/**
+ * The re-mint pass's record-back seam: writes a re-minted entry's refreshed
+ * delegation fields to the unlock-methods registry, by the entry's kind.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.entry {RemintEntry}
+ * @returns {Promise<void>}
+ */
+export async function recordRemintedEntry({
+  session,
+  entry
+}: {
+  session: Session
+  entry: RemintEntry
+}): Promise<void> {
+  if (entry.source.type === 'recovery-code') {
+    await recordRecoveryMethod({
+      session,
+      entry: {
+        ...(entry.source as RecoveryCodeUnlockMethod),
+        ...(entry.delegationKeyId
+          ? { delegationKeyId: entry.delegationKeyId }
+          : {}),
+        ...(entry.delegationExpires
+          ? { delegationExpires: entry.delegationExpires }
+          : {})
+      }
+    })
+    return
+  }
+  await refreshStandingDelegationFields({
+    session,
+    unlockSpaceId: entry.unlockSpaceId,
+    delegationKeyId: entry.delegationKeyId,
+    delegationExpires: entry.delegationExpires,
+    delegatedClientsKeyId: entry.delegatedClientsKeyId,
+    delegatedClientsExpires: entry.delegatedClientsExpires
+  })
+}
+
+/**
  * Re-mints the unlock-record bridge delegations the current document no
  * longer backs -- the delta riding the revocation cascade, for the recovery
- * codes AND the standing passphrase/passkey credentials alike (one bridge
- * machinery, per FW-154's one-codepath model). The mechanism, the skip
- * policy, and the binding-carried-forward re-wrap all live in
- * `@interop/wallet-core/recovery`; this binding supplies the app seams: the
- * storage server URL, the session's delegating signer and account record
- * signer, the management-zcap client factory, and the unlock-methods registry
- * read/record halves.
+ * codes AND the standing passphrase/passkey credentials alike. The
+ * mechanism, the skip policy, and the binding-carried-forward re-wrap all
+ * live in `@interop/wallet-core/recovery`; this binding supplies the app
+ * seams: the storage server URL, the session's delegating signer and account
+ * record signer, the management-zcap client factory, and the unlock-methods
+ * registry read/record halves (`remintEntriesOf` / `recordRemintedEntry`,
+ * shared with the last-client forget's ladder-signed pass).
  *
  * @param options {object}
  * @param options.session {Session}
@@ -1792,39 +1899,7 @@ export async function remintRecoveryDelegations({
   }
   const record =
     prefetched !== undefined ? prefetched : await getUnlockMethods({ session })
-  const entries = recoveryEntriesOf({ record })
-  // The standing passphrase/passkey entries ride the same re-mint: their
-  // bridge delegations rot on the same document edit and refresh through
-  // the same record machinery, with `unlockClientDid` filling the
-  // delegation-grantee slot the recovery entries call `recoveryClientDid`.
-  const standingSources = (record?.methods ?? []).filter(
-    (method): method is PassphraseUnlockMethod | PasskeyUnlockMethod =>
-      (method.type === 'passphrase' || method.type === 'passkey') &&
-      !!method.unlockClientDid
-  )
-  // The sibling pair is absent on recovery codes by construction; stating it
-  // keeps the entry union uniform for the recordEntry callback below.
-  const remintEntries = [
-    ...entries.map(entry => ({
-      ...entry,
-      delegatedClientsKeyId: undefined,
-      delegatedClientsExpires: undefined,
-      source: entry as UnlockMethod
-    })),
-    ...standingSources.map(method => ({
-      label: method.type,
-      unlockSpaceId: method.unlockSpaceId,
-      manageCapability: method.manageCapability,
-      delegationKeyId: method.delegationKeyId,
-      delegationExpires: method.delegationExpires,
-      delegatedClientsKeyId: method.delegatedClientsKeyId,
-      delegatedClientsExpires: method.delegatedClientsExpires,
-      recoveryClientDid: method.unlockClientDid,
-      unlockKeyAgreementKeyId: method.unlockKeyAgreementKeyId,
-      unlockKeyAgreementKeyMultibase: method.unlockKeyAgreementKeyMultibase,
-      source: method as UnlockMethod
-    }))
-  ]
+  const remintEntries = remintEntriesOf({ record })
   if (remintEntries.length === 0) {
     return { reminted: 0, skipped: 0 }
   }
@@ -1846,31 +1921,7 @@ export async function remintRecoveryDelegations({
     recordSigner: recordSignerFromAgent({ keyAgent }),
     managementZcapClient: ({ capability }) =>
       managementZcapClient({ session, capability }),
-    recordEntry: async ({ entry }) => {
-      if (entry.source.type === 'recovery-code') {
-        await recordRecoveryMethod({
-          session,
-          entry: {
-            ...(entry.source as RecoveryCodeUnlockMethod),
-            ...(entry.delegationKeyId
-              ? { delegationKeyId: entry.delegationKeyId }
-              : {}),
-            ...(entry.delegationExpires
-              ? { delegationExpires: entry.delegationExpires }
-              : {})
-          }
-        })
-        return
-      }
-      await refreshStandingDelegationFields({
-        session,
-        unlockSpaceId: entry.unlockSpaceId,
-        delegationKeyId: entry.delegationKeyId,
-        delegationExpires: entry.delegationExpires,
-        delegatedClientsKeyId: entry.delegatedClientsKeyId,
-        delegatedClientsExpires: entry.delegatedClientsExpires
-      })
-    }
+    recordEntry: async ({ entry }) => recordRemintedEntry({ session, entry })
   })
 }
 

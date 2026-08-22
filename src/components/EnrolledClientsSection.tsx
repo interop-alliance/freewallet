@@ -259,6 +259,22 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
         // by the next login's forgotten-browser detector.
         console.warn('The forget wipe left residue behind:', outcome.wipeFailed)
       }
+      if (outcome.lastClient && outcome.ceremony.unlockMethods) {
+        // The other sign-in methods' record re-mint report: a `failed`
+        // outcome never reaches here (it refuses the removal), so what is
+        // left to note is an entry predating the re-mint fields, which the
+        // pass skips and the recovery health check keeps flagging.
+        const skipped = outcome.ceremony.unlockMethods.outcomes.filter(
+          entry => entry.outcome === 'incomplete-entry'
+        )
+        if (skipped.length > 0) {
+          console.warn(
+            'The last-client forget skipped sign-in records predating the ' +
+              're-mint fields:',
+            skipped.map(entry => entry.label)
+          )
+        }
+      }
       // A hard reload, not a router navigate: the wipe just deleted the
       // storage this tab's in-memory handles point at (the guest-wipe logout
       // takes the same exit).

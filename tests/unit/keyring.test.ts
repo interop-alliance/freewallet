@@ -59,7 +59,7 @@ vi.mock('@/app.config', async importOriginal => ({
 }))
 
 /**
- * The enrolled-client signing keys the mocked `currentAccountSigningKeys`
+ * The enrolled-client signing keys the mocked `currentAccountRecordSigners`
  * answers with, for the pending-proof settlement paths (a cascade-re-minted
  * record signed by an account key rather than the unlock key).
  */
@@ -69,7 +69,7 @@ const clientsState = vi.hoisted(() => ({
 
 vi.mock('@interop/wallet-core/clients', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/clients')>()),
-  currentAccountSigningKeys: vi.fn(
+  currentAccountRecordSigners: vi.fn(
     async () => new Set(clientsState.signingKeys)
   )
 }))
@@ -123,7 +123,7 @@ import {
   standingClientFromUnlockSeed,
   wrapUnlockRecord
 } from '@interop/wallet-core/unlock'
-import { currentAccountSigningKeys } from '@interop/wallet-core/clients'
+import { currentAccountRecordSigners } from '@interop/wallet-core/clients'
 import { memoryResourceLogPinStore } from '@interop/wallet-core/resourceLog'
 
 const KDF = {
@@ -2701,7 +2701,7 @@ describe('fetchTransientKeyring (FW-215)', () => {
     })
 
     expect(found!.pointer).toEqual(POINTER)
-    const settleArgs = vi.mocked(currentAccountSigningKeys).mock
+    const settleArgs = vi.mocked(currentAccountRecordSigners).mock
       .calls[0][0] as unknown as {
       pointer: { did: string }
       accountLogPinStore: unknown

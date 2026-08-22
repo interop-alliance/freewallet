@@ -11,8 +11,13 @@
  * database, the world-readable account log has grown by the transition's
  * entries and resolves with no durable client in `capabilityInvocation`
  * while the ladder VM still stands under `assertionMethod` and
- * `capabilityDelegation`, and a third cold terminal still reaches the
- * account -- and its stored credential -- with the passphrase alone.
+ * `capabilityDelegation`, a third cold terminal still reaches the
+ * account -- and its stored credential -- with the passphrase alone, and a
+ * recovery code issued from the forgotten browser still recovers the account
+ * from a fourth: its record was re-sealed and its bridge re-signed by the
+ * ladder VM before the removal entry (the other unlock methods' re-mint
+ * stage), so the code's authority did not rot with the client that issued
+ * it.
  *
  * Every stage pays the deliberately slow unlock KDF on top of several WAS
  * ceremonies, hence `test.slow()` and the generous timeouts.
@@ -35,6 +40,8 @@ import {
 const APP_URL = 'http://localhost:5274'
 
 const REPLICA_DB_NAME_PATTERN = /-(?:wallet|credentials|sync)-db/
+
+const RECOVERED_PASSPHRASE = 'Recovered-after-forget-42!'
 
 /**
  * Opens a fresh, cold browser context (empty IndexedDB and localStorage) to
@@ -154,11 +161,12 @@ test.describe('The last-durable-client forget transition', () => {
     browser
   }, testInfo) => {
     test.slow()
-    test.setTimeout(300_000)
+    test.setTimeout(540_000)
 
     // --- Terminal A: the credential-anchored signup (no durable client). ---
     const first = await coldTerminal(browser)
     let passphrase: string
+    let recoveryCode: string
     try {
       const user = await signupViaWizard(first.page, testInfo, {
         rememberBrowser: false
@@ -205,6 +213,27 @@ test.describe('The last-durable-client forget transition', () => {
       // The log as it stands before the transition, and the URL to re-read it
       // from afterwards (Settings is gone once the browser is forgotten).
       const logUrl = await readLogUrl(second.page)
+
+      // A recovery code issued from THIS browser: its bridge delegation is
+      // signed by this client's account key, which the removal entry rots.
+      // The transition must re-seal it before the removal, or the code is
+      // dead the moment the browser is forgotten.
+      const generateButton = second.page.getByRole('button', {
+        name: 'Generate recovery code'
+      })
+      await expect(generateButton).toBeEnabled({ timeout: 30_000 })
+      await generateButton.click()
+      await expect(
+        second.page.getByText('This code is shown only once', { exact: false })
+      ).toBeVisible()
+      recoveryCode = (await second.page.locator('code').textContent()) ?? ''
+      expect(recoveryCode).not.toBe('')
+      await second.page
+        .getByRole('button', { name: 'I saved this code' })
+        .click()
+      await expect(second.page.getByText('Recovery code 1')).toBeVisible({
+        timeout: 60_000
+      })
       const logBefore = await fetchLog(second.page, logUrl)
 
       // Exactly one wallet card, and it is this browser: the account's only
@@ -306,6 +335,47 @@ test.describe('The last-durable-client forget transition', () => {
       })
     } finally {
       await third.context.close()
+    }
+
+    // --- Terminal D: the recovery code issued from the forgotten browser
+    // still recovers the account. The locate step settles the code's
+    // re-minted record (now ladder-VM-signed) against the document, and the
+    // recovery's reveal entry rides the re-signed bridge. ---
+    const fourth = await coldTerminal(browser)
+    try {
+      await fourth.page.goto('/#/recover')
+      await fillSettled(
+        fourth.page.locator('input[name="recovery-code"]'),
+        recoveryCode!
+      )
+      await fourth.page
+        .getByRole('button', { name: 'Check code', exact: true })
+        .click()
+      await expect(
+        fourth.page.getByText('Found a wallet account', { exact: false })
+      ).toBeVisible({ timeout: 30_000 })
+      await fillSettled(
+        fourth.page.locator('input[id="new-passphrase"]'),
+        RECOVERED_PASSPHRASE
+      )
+      await fourth.page
+        .getByRole('button', { name: 'Recover wallet', exact: true })
+        .click()
+      await expect(
+        fourth.page.getByText('Your wallet was recovered', { exact: false })
+      ).toBeVisible({ timeout: 120_000 })
+      await fourth.page
+        .getByRole('button', { name: 'I saved the new code' })
+        .click()
+      await fourth.page
+        .getByRole('button', { name: 'Log in to your wallet' })
+        .click()
+      await expect(fourth.page).toHaveURL(/#\/dashboard/, { timeout: 60_000 })
+      await expect(
+        fourth.page.getByRole('link', { name: 'E2E Test Credential' })
+      ).toBeVisible({ timeout: 30_000 })
+    } finally {
+      await fourth.context.close()
     }
   })
 })

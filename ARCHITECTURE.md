@@ -459,15 +459,25 @@ closure, stamped on `profile.standingUnlock` at login beside the
 credential's unlock Space id, with the registry pair refreshed in this
 client's last window of registry authority -- the removed client's
 signatures rot at the removal entry, and on a client-less account no
-durable login's refresh block will ever heal them (other unlock methods'
-records, recovery codes included, are the stated residue of a follow-up
-item; once that item wires the ceremony's `unlockMethods` reach, a record
-the re-mint cannot re-seal withholds the removal entry with wallet-core's
-name-stable `RecordRemintFailedError`, which the settings dialog renders as
-a retryable stop naming the methods -- the browser stays connected and a
-re-click resumes at the re-mint). The removal entry lands last, then the
-local wipe. A session whose hit carried no re-bind closure refuses the
-transition up front. From
+durable login's refresh block will ever heal them. The OTHER unlock
+methods' records (the standing passphrase and passkey credentials, the
+recovery codes) get the same treatment one stage earlier, through the
+ceremony's `unlockMethods` reach (`unlockMethodsRemintReach`): the
+revocation cascade's re-mint pass walks every registry entry but the login
+credential's (`remintEntriesOf`, shared with the cascade), signs each
+bridge and sibling with the ladder VM, re-seals each record through its
+management zcap (invoked under this still-standing client), and writes the
+refreshed fields back to the registry. A record the pass cannot re-seal
+withholds the removal entry with wallet-core's name-stable
+`RecordRemintFailedError`, which the settings dialog renders as a
+retryable stop naming the methods -- the browser stays connected and a
+re-click resumes at the re-mint; a registry the transition cannot read
+refuses up front for the same reason. Readers settle a re-minted record's
+proof against `currentAccountRecordSigners` (the enrolled clients' signing
+keys plus the ladder VMs the document lists), since on a client-less
+account the ladder VM is the only record signer left. The removal entry
+lands last, then the local wipe. A session whose hit carried no re-bind
+closure refuses the transition up front. From
 the login page's authenticity and continuity refusals -- reachable from
 passkey failures with no typed passphrase, reset between attempts -- it is
 the **no-unlock-material grade**: nothing can be derived or signed, so no

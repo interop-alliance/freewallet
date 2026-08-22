@@ -66,8 +66,8 @@ importers:
         specifier: ^0.50.0
         version: 0.50.0(@interop/jsonld-signatures@11.8.5)
       '@interop/was-client':
-        specifier: ^0.41.0
-        version: 0.41.0(@interop/jsonld-signatures@11.8.5)
+        specifier: ^0.42.0
+        version: 0.42.0(@interop/jsonld-signatures@11.8.5)
       '@interop/webkms-client':
         specifier: ^14.7.3
         version: 14.7.3
@@ -667,6 +667,10 @@ packages:
 
   '@interop/was-client@0.41.0':
     resolution: {integrity: sha512-tKImsaYDBrbRYd9Fjy84GZZT2nMGMcRg4EabG1o4ObHskst3+LR2jfKM/0emfzCrebljvcP0Pxs0xRTTkQN85g==}
+    engines: {node: '>=24.0'}
+
+  '@interop/was-client@0.42.0':
+    resolution: {integrity: sha512-+CoY1ds4b/v9glNEc3LObkeOGb75v5YOvlQ5f7jobhbE3uhUj2QstRsN32JJz7X7BxTRUj6KGGkVwNou6EmIIg==}
     engines: {node: '>=24.0'}
 
   '@interop/webkms-client@14.7.3':
@@ -4059,6 +4063,24 @@ snapshots:
       - react-native-get-random-values
 
   '@interop/was-client@0.41.0(@interop/jsonld-signatures@11.8.5)':
+    dependencies:
+      '@interop/data-integrity-core': 8.7.1
+      '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.5)
+      '@interop/edv-client': 17.8.1
+      '@interop/ezcap': 7.4.3
+      '@interop/http-client': 1.0.5
+      '@interop/minimal-cipher': 7.8.3
+      '@interop/storage-core': 0.9.1
+      '@interop/x25519-key-agreement-key': 5.2.2
+      '@noble/hashes': 2.3.0
+      '@scure/base': 2.3.0
+      json-canonicalize: 2.0.0
+    transitivePeerDependencies:
+      - '@interop/jsonld-signatures'
+      - expo-crypto
+      - react-native-get-random-values
+
+  '@interop/was-client@0.42.0(@interop/jsonld-signatures@11.8.5)':
     dependencies:
       '@interop/data-integrity-core': 8.7.1
       '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.5)
