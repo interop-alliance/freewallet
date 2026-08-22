@@ -25,6 +25,12 @@
 
 ### Fixed
 
+- The enrollment completion's unlock-record rebind (the connect-code
+  ceremony's last step) re-states every standing member the fetched record
+  carried, the `delegatedClients` sibling included. It previously forwarded
+  only the bridge delegation and ladder seed, so the rewritten record lost the
+  annex-Space sibling and the credential's public-terminal login refused from
+  then on with `TransientLoginUnavailableError`.
 - A credential-anchored establishment re-run over a roster an earlier run
   keyed no longer leaves a collection epoch'd under the throwaway candidate
   key. Wallet-core's ceremony now skips its epochs stage when the adopted

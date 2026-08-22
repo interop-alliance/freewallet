@@ -17,7 +17,11 @@
  * `credential-anchored-signup.spec.ts`.
  */
 import { test, expect, type Browser, type Page } from '@playwright/test'
-import { addCredentialViaPaste, fillSettled, signupViaWizard } from './helpers'
+import {
+  addCredentialViaPaste,
+  signupViaWizard,
+  submitTransientLogin
+} from './helpers'
 import {
   captureLocalStorageKeys,
   expectNoStorageResidue
@@ -51,9 +55,7 @@ async function transientLogin(
 ): Promise<string[]> {
   await page.goto('/#/login')
   const baseline = await captureLocalStorageKeys({ page })
-  await fillSettled(page.locator('input[type="password"]'), passphrase)
-  await page.getByRole('button', { name: 'Log in', exact: true }).click()
-  await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
+  await submitTransientLogin(page, passphrase)
   return baseline
 }
 

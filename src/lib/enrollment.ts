@@ -180,9 +180,11 @@ export async function completeEnrollment({
 
   // Persist the key set under the unlock layer (this also pins the account
   // pointer and refreshes the keyring cache); the next passphrase login
-  // finds an enrolled client. A standing record's bridge delegation and
-  // ladder seed are re-stated verbatim, so the rebind can never downgrade
-  // the credential's standing authority to a plain pointer record.
+  // finds an enrolled client. A standing record's members -- the bridge
+  // delegation, the annex-Space `delegatedClients` sibling, the ladder seed
+  // -- are re-stated whole (spread, not enumerated), so the rebind can
+  // never downgrade the credential's standing authority to a plain pointer
+  // record or drop a member the transient login depends on.
   await bindPassphrase({
     clientSeed,
     controller: found.controller,
@@ -191,12 +193,7 @@ export async function completeEnrollment({
     userKey,
     webvhUpdateKeys,
     pointer,
-    ...(found.standing
-      ? {
-          delegation: found.standing.delegation,
-          ladderSeed: found.standing.ladderSeed
-        }
-      : {}),
+    ...(found.standing ?? {}),
     credential,
     idb
   })

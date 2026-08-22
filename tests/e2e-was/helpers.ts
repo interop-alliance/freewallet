@@ -179,3 +179,23 @@ export async function forceRememberBrowser(page: Page): Promise<void> {
     ).__E2E_REMEMBER_BROWSER__ = true
   })
 }
+
+/**
+ * Submits the login form on an already-loaded login page WITHOUT the
+ * remember-this-browser seam, so a non-remembered browser takes its default
+ * posture -- the transient (public-terminal) login -- and waits for the
+ * dashboard. Split from the `goto` so a caller can capture a localStorage
+ * baseline on the loaded page before anything is typed.
+ *
+ * @param page {Page}
+ * @param passphrase {string}
+ * @returns {Promise<void>}
+ */
+export async function submitTransientLogin(
+  page: Page,
+  passphrase: string
+): Promise<void> {
+  await fillSettled(page.locator('input[type="password"]'), passphrase)
+  await page.getByRole('button', { name: 'Log in', exact: true }).click()
+  await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
+}

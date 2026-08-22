@@ -1,5 +1,10 @@
 import { test, expect, type Browser, type Page } from '@playwright/test'
-import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
+import {
+  fillSettled,
+  forceRememberBrowser,
+  signupViaWizard,
+  submitTransientLogin
+} from './helpers'
 
 /**
  * The Settings "Connected wallets" surface e2e (WAS mode): the enrolled
@@ -154,6 +159,115 @@ test.describe('The Settings connected-wallets surface', () => {
       expect(secondClient.url()).not.toMatch(/#\/dashboard/)
     } finally {
       await secondClient.context().close()
+    }
+  })
+
+  /**
+   * Guards the two-party enrollment's record rebind against dropping the
+   * credential's standing members. The enrollee half (`completeEnrollment`
+   * in `src/lib/enrollment.ts`) re-binds the unlock record with the freshly
+   * minted key set; when it enumerated the standing members it knew about
+   * (the bridge delegation and the ladder seed) instead of re-stating them
+   * whole, it silently dropped the annex-Space `delegatedClients` sibling
+   * delegation -- after which every later public-terminal (transient) login
+   * with that passphrase refused with `TransientLoginUnavailableError`,
+   * because the sibling is what enrolls the per-visit key into the annex
+   * generation.
+   *
+   * The ordering is what makes the regression reachable: the annex
+   * generation is minted (and the record therefore gains its sibling) while
+   * the enrollee is holding its connect code, so the record the rebind
+   * re-states is a full standing record.
+   */
+  test('the two-party enrollment rebind keeps the transient posture alive', async ({
+    page,
+    browser
+  }, testInfo) => {
+    test.slow()
+
+    // Client 1: a durable signup. No annex generation yet, so a cold
+    // browser's default (transient) login has nothing to enroll into --
+    // which is exactly the login-page state the two-party ceremony starts
+    // from.
+    const { passphrase } = await signupViaWizard(page, testInfo)
+
+    const enrollee = await coldClientPage(browser)
+    const terminal = await coldClientPage(browser)
+    try {
+      // Client 2 (cold): the ordinary login form, deliberately without the
+      // remember seam. The passphrase locates the account, the transient
+      // route cannot serve it, and the page offers "Connect this browser".
+      await enrollee.goto('/#/login')
+      await fillSettled(enrollee.locator('input[type="password"]'), passphrase)
+      await enrollee
+        .getByRole('button', { name: 'Log in', exact: true })
+        .click()
+      await expect(
+        enrollee.getByRole('button', { name: 'Connect this browser' })
+      ).toBeVisible({ timeout: 60_000 })
+      await enrollee
+        .getByRole('button', { name: 'Connect this browser' })
+        .click()
+      const codeField = enrollee.getByTestId('enroll-connect-code')
+      await expect(codeField).toBeVisible({ timeout: 30_000 })
+      const connectCode = (await codeField.inputValue()).trim()
+      expect(connectCode.startsWith('freewallet-connect:')).toBe(true)
+
+      // Client 1 mints the annex generation (the non-production fixture
+      // seam) BEFORE the enrollee finishes: the shared unlock record now
+      // carries the `delegatedClients` sibling the rebind must preserve.
+      await page.evaluate(
+        async fixture => {
+          const seam = (
+            window as unknown as {
+              __E2E_MINT_CLIENT_ANNEX_GENERATION__?: (options: {
+                passphrase: string
+              }) => Promise<void>
+            }
+          ).__E2E_MINT_CLIENT_ANNEX_GENERATION__
+          if (!seam) {
+            throw new Error(
+              'The annex-generation fixture seam is not installed.'
+            )
+          }
+          await seam(fixture)
+        },
+        { passphrase }
+      )
+
+      // Client 1 approves the pasted connect code (Settings > Connected
+      // wallets > Connect another wallet, the paste half of the card).
+      await page.goto('/#/settings')
+      await expect(page.getByText('Connected wallets')).toBeVisible()
+      await page.getByRole('button', { name: 'Connect another wallet' }).click()
+      await fillSettled(page.getByTestId('enroll-code-input'), connectCode)
+      await fillSettled(
+        page.getByTestId('enroll-label-input'),
+        'Second browser'
+      )
+      await page.getByRole('button', { name: 'Approve', exact: true }).click()
+      await expect(
+        page.getByText('The new browser was enrolled', { exact: false })
+      ).toBeVisible({ timeout: 120_000 })
+
+      // Client 2 finishes: `completeEnrollment` verifies the enrollment off
+      // the log, reads the roster, and re-binds the unlock record.
+      await enrollee
+        .getByRole('button', { name: 'I approved it -- finish connecting' })
+        .click()
+      await expect(enrollee).toHaveURL(/#\/dashboard/, { timeout: 120_000 })
+
+      // Client 3 (a public terminal): the DEFAULT transient login with the
+      // same passphrase. It reaches the dashboard and decrypts the account's
+      // data only if the rebound record still carries its sibling.
+      await terminal.goto('/#/login')
+      await submitTransientLogin(terminal, passphrase)
+      await expect(
+        terminal.getByRole('link', { name: 'Your First Credential' })
+      ).toBeVisible({ timeout: 30_000 })
+    } finally {
+      await enrollee.context().close()
+      await terminal.context().close()
     }
   })
 })
