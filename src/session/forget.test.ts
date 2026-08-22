@@ -32,7 +32,8 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => {
     updateKeyMultibase: vi.fn(async () => 'zForgottenUpdate')
   }
 })
-const { verifyAccountLog } = await import('@interop/wallet-core/webvh')
+const { accountLogPinId, verifyAccountLog } =
+  await import('@interop/wallet-core/webvh')
 
 vi.mock('@interop/did-method-webvh', async importOriginal => {
   const actual = await importOriginal<object>()
@@ -557,6 +558,8 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     expect(typeof options.onBeforeRemoval).toBe('function')
     expect(options.expectedDid).toBe(pointer.did)
     expect(options.knownLatentHashes).toEqual(['hash:zRung'])
+    // The account log's chain-head pin rides every read the ceremony makes.
+    expect(options.pinStore).toBe(session.profile.persistence.logPins)
   })
 
   it('hands the transition the other unlock methods as its re-mint reach', async () => {
@@ -660,6 +663,14 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       delegatedClientsKeyId: delegationProofKeyId(sibling as never),
       delegatedClientsExpires: sibling.expires
     })
+  })
+
+  it("threads the account log's chain-head pin and slot into the ceremony", async () => {
+    const { session } = fakeSession()
+    await forgetThisBrowser({ session })
+    const options = vi.mocked(forgetDurableClient).mock.calls[0]![0]
+    expect(options.pinStore).toBe(session.profile.persistence.logPins)
+    expect(options.logId).toBe(accountLogPinId({ spaceId: pointer.spaceId }))
   })
 
   it('persists the epoch pin, the client keys, and the live session on a rotation', async () => {

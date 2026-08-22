@@ -4,6 +4,12 @@
 
 ### Added
 
+- Both forget ceremonies run under the session's account-log chain-head
+  pin: `forgetThisBrowser` passes `profile.persistence.logPins` and the
+  account log's slot into wallet-core's `forgetDurableClient` and
+  `forgetLastDurableClient`, so a host serving a truncated prefix of the log
+  is refused before any roster append or log publish instead of having the
+  removal (and install) entries published on top of it.
 - The last-client forget transition re-seals every OTHER unlock method's
   record before the removal entry: the standing passphrase and passkey
   credentials' and the recovery codes' bridge delegations (and

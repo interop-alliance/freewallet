@@ -86,6 +86,7 @@ import {
 } from '@interop/wallet-core/recovery'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import {
+  accountLogPinId,
   clientSigningKeyMultibase,
   isWebvhDid,
   updateKeyMultibase,
@@ -318,6 +319,11 @@ export async function forgetThisBrowser({
       latentMultibases.map(multibase => deriveNextKeyHash(multibase))
     ),
     expectedDid: pointer.did,
+    // The account log's chain-head pin: every read the ceremony makes (the
+    // pre-edit read the roster rotation's recipient document comes from,
+    // and each ladder entry's own read) is checked against it, so a served
+    // truncated prefix is refused before anything is built on it.
+    pinStore: session.profile.persistence.logPins,
     ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
     credentialKeyAgreementKey: standing.standingClient.agents.keyAgreementKey,
     pinnedEpochId,
@@ -364,6 +370,7 @@ export async function forgetThisBrowser({
     if (!lastClient) {
       const ceremony = await forgetDurableClient({
         ...shared,
+        logId: accountLogPinId({ spaceId: pointer.spaceId }),
         rosterStore: sessionRosterStore({ profile: session.profile })
       })
       outcome = { lastClient: false, ceremony }
