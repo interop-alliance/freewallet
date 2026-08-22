@@ -2531,6 +2531,32 @@ describe('standing unlock records (FW-154)', () => {
     const cap = manageCapability as unknown as { allowedAction: string[] }
     expect(cap.allowedAction).toEqual(['GET', 'PUT', 'DELETE'])
   })
+
+  it('mints the widened management zcap on every standing login too', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'standing login management actions',
+      pointer: POINTER,
+      delegation: DELEGATION,
+      ladderSeed: ladderSeed(),
+      idb,
+      kdf: KDF
+    })
+
+    const found = await fetchKeyring({
+      passphrase: 'standing login management actions',
+      idb,
+      kdf: KDF,
+      mintManageCapability: true
+    })
+
+    // The registry backfill stores whichever capability the login minted, so
+    // a narrow mint here would strip the standing record's re-PUT authority.
+    const cap = found!.manageCapability as IDelegatedZcap
+    expect(cap.allowedAction).toEqual(['GET', 'PUT', 'DELETE'])
+  })
 })
 
 describe('fetchTransientKeyring (FW-215)', () => {

@@ -958,6 +958,130 @@ export function upsertPassphraseUnlockMethod({
 }
 
 /**
+ * The zcap's `allowedAction` set as a string array, or `null` for a
+ * capability carrying no `allowedAction` at all -- which permits every action
+ * and so is wider than any concrete set. A zcap carries the member as a bare
+ * string or an array (ezcap accepts both).
+ *
+ * @param [zcap] {IZcap}
+ * @returns {string[] | null}
+ */
+function zcapActionsOf(zcap?: IZcap): string[] | null {
+  const allowedAction = (zcap as { allowedAction?: unknown } | undefined)
+    ?.allowedAction
+  if (Array.isArray(allowedAction)) {
+    return allowedAction.filter(
+      (action): action is string => typeof action === 'string'
+    )
+  }
+  return typeof allowedAction === 'string' ? [allowedAction] : null
+}
+
+/**
+ * Whether a freshly minted management zcap covers a stored one's action set.
+ * The refresh exists to push a later expiry, never to narrow authority -- a
+ * stored standing capability carries PUT (the record re-mint the revocation
+ * cascade runs needs it). An unrestricted capability is covered only by
+ * another unrestricted one.
+ *
+ * @param options {object}
+ * @param options.stored {IZcap}   the registry's current capability
+ * @param options.fresh {IZcap}   the login-minted replacement
+ * @returns {boolean}
+ */
+function capabilityCoversStored({
+  stored,
+  fresh
+}: {
+  stored: IZcap
+  fresh: IZcap
+}): boolean {
+  const storedActions = zcapActionsOf(stored)
+  const freshActions = zcapActionsOf(fresh)
+  if (freshActions === null) {
+    return true
+  }
+  if (storedActions === null) {
+    return false
+  }
+  return storedActions.every(action => freshActions.includes(action))
+}
+
+/**
+ * Whether a freshly minted management zcap strictly widens a stored one:
+ * it covers the stored action set and adds at least one action. A widening
+ * mint is written even when the stored capability is nowhere near expiry,
+ * which is what heals an entry a past login narrowed (the login mint once
+ * dropped PUT from a standing record's capability) without waiting a year
+ * for its renewal window.
+ *
+ * @param options {object}
+ * @param options.stored {IZcap}   the registry's current capability
+ * @param options.fresh {IZcap}   the login-minted replacement
+ * @returns {boolean}
+ */
+function capabilityWidensStored({
+  stored,
+  fresh
+}: {
+  stored: IZcap
+  fresh: IZcap
+}): boolean {
+  if (!capabilityCoversStored({ stored, fresh })) {
+    return false
+  }
+  const storedActions = zcapActionsOf(stored)
+  const freshActions = zcapActionsOf(fresh)
+  if (storedActions === null) {
+    return false
+  }
+  return (
+    freshActions === null ||
+    freshActions.some(action => !storedActions.includes(action))
+  )
+}
+
+/**
+ * Whether the registry may adopt a fresh management zcap over a stored one.
+ * A stored capability that is not expiring is replaced only by a mint that
+ * covers its actions (a widening one, in practice). An expiring or expired
+ * stored capability is replaced regardless -- without the refresh the entry
+ * would soon hold a dead capability, which loses DELETE beside PUT -- and a
+ * replacement that narrows it is logged as an error, since no login can
+ * re-widen what its own mint does not carry.
+ *
+ * @param options {object}
+ * @param options.stored {IZcap}
+ * @param options.fresh {IZcap}
+ * @param options.label {string}   the entry, for the log line
+ * @returns {boolean}
+ */
+function shouldAdoptFreshCapability({
+  stored,
+  fresh,
+  label
+}: {
+  stored: IZcap
+  fresh: IZcap
+  label: string
+}): boolean {
+  const expiring = zcapExpiring({
+    expires: (stored as { expires?: string }).expires
+  })
+  const covers = capabilityCoversStored({ stored, fresh })
+  if (expiring) {
+    if (!covers) {
+      console.error(
+        `Refreshing the ${label} entry's expiring management zcap with one ` +
+          "that does not cover the stored one's actions."
+      )
+    }
+    return true
+  }
+  return covers && capabilityWidensStored({ stored, fresh })
+}
+
+/**
  * Backfills the registry's passphrase entry from the current full session,
  * without re-prompting for the passphrase. When this session was produced by a
  * passphrase login (`profile.unlockMethod.type === 'passphrase'`) with the
@@ -968,7 +1092,12 @@ export function upsertPassphraseUnlockMethod({
  * one is expired or inside the renewal window (every login mints a fresh
  * one-year delegation). A passkey session performs the same expiry refresh on
  * its own passkey entry (matched on unlock Space) and otherwise writes
- * nothing -- but still returns the existing
+ * nothing. An in-place refresh never narrows a stored capability that is not
+ * expiring (the mint is dropped, leaving the entry as it stands), writes one
+ * that strictly widens it regardless of expiry, and on expiry writes the
+ * fresh one regardless -- logging an error if it narrows -- since a dead
+ * capability would lose DELETE beside PUT. But it still returns the
+ * existing
  * registry when it can be read, so callers (the Settings passkeys section)
  * can use this as their load-plus-backfill entry point for any session.
  *
@@ -1014,8 +1143,10 @@ export async function backfillPassphraseUnlockMethod({
     const stale =
       !!stored &&
       (!stored.manageCapability ||
-        zcapExpiring({
-          expires: (stored.manageCapability as { expires?: string }).expires
+        shouldAdoptFreshCapability({
+          stored: stored.manageCapability,
+          fresh: unlockMethod.manageCapability,
+          label: 'passkey'
         }))
     if (!stale) {
       return record
@@ -1054,14 +1185,19 @@ export async function backfillPassphraseUnlockMethod({
   // (a passphrase change happened elsewhere), or lacks a management capability
   // the profile now carries -- or holds one that is expired or inside the
   // renewal window (the login minted a fresh one-year delegation to replace
-  // it with).
+  // it with) -- or one the fresh capability strictly widens (an entry a past
+  // login narrowed). An in-place refresh never narrows a capability that is
+  // not expiring. An entry naming another unlock Space is a rebind, whose
+  // stored capability belongs to the retired Space and is replaced wholesale.
   const changed =
     !existing ||
     existing.unlockSpaceId !== unlockSpaceId ||
     (!!manageCapability &&
       (!existing.manageCapability ||
-        zcapExpiring({
-          expires: (existing.manageCapability as { expires?: string }).expires
+        shouldAdoptFreshCapability({
+          stored: existing.manageCapability,
+          fresh: manageCapability,
+          label: 'passphrase'
         })))
   if (!changed) {
     return record

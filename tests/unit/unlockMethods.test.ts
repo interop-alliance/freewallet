@@ -261,17 +261,26 @@ const FAKE_CAP = {
 
 /**
  * A stand-in management zcap expiring the given interval from now, for the
- * backfill's expiry-refresh cases.
+ * backfill's expiry-refresh cases. The action set is optional: only the
+ * action-coverage cases care about it.
  *
  * @param options {object}
  * @param options.msFromNow {number}
+ * @param [options.allowedAction] {string[]}
  * @returns {IZcap}
  */
-function capExpiringIn({ msFromNow }: { msFromNow: number }): IZcap {
+function capExpiringIn({
+  msFromNow,
+  allowedAction
+}: {
+  msFromNow: number
+  allowedAction?: string[]
+}): IZcap {
   return {
-    id: `urn:zcap:test-management-${msFromNow}`,
+    id: `urn:zcap:test-management-${msFromNow}-${(allowedAction ?? []).join('')}`,
     invocationTarget: 'https://was.example.test/space/unlock-space-abc',
-    expires: new Date(Date.now() + msFromNow).toISOString()
+    expires: new Date(Date.now() + msFromNow).toISOString(),
+    ...(allowedAction ? { allowedAction } : {})
   } as unknown as IZcap
 }
 
@@ -1123,6 +1132,324 @@ describe('backfillPassphraseUnlockMethod', () => {
     )
     expect(entry!.manageCapability).toEqual(stored)
     expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+  })
+
+  it('refreshes an expiring passphrase entry with the standing PUT action set', async () => {
+    const idb = createFakeIdb()
+    const fresh = capExpiringIn({
+      msFromNow: ONE_YEAR_MS,
+      allowedAction: ['GET', 'PUT', 'DELETE']
+    })
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'ps-space',
+      manageCapability: fresh,
+      idb
+    })
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            unlockSpaceId: 'ps-space',
+            manageCapability: capExpiringIn({
+              msFromNow: 1000,
+              allowedAction: ['GET', 'PUT', 'DELETE']
+            })
+          }
+        ]
+      }
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session })
+    const entry = result!.methods.find(
+      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+    )
+    expect(entry!.manageCapability).toEqual(fresh)
+    expect(
+      (entry!.manageCapability as unknown as { allowedAction: string[] })
+        .allowedAction
+    ).toContain('PUT')
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+  })
+
+  it('leaves a non-expiring wide passphrase capability alone against a narrow mint', async () => {
+    const idb = createFakeIdb()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'ps-space',
+      manageCapability: capExpiringIn({
+        msFromNow: ONE_YEAR_MS,
+        allowedAction: ['GET', 'DELETE']
+      }),
+      idb
+    })
+    const stored = capExpiringIn({
+      msFromNow: ONE_YEAR_MS / 2,
+      allowedAction: ['GET', 'PUT', 'DELETE']
+    })
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            unlockSpaceId: 'ps-space',
+            manageCapability: stored
+          }
+        ]
+      }
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session })
+    const entry = result!.methods.find(
+      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+    )
+    expect(entry!.manageCapability).toEqual(stored)
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('leaves a non-expiring wide passkey capability alone against a narrow mint', async () => {
+    const idb = createFakeIdb()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const session = await makeSession(idb)
+    session.profile.unlockMethod = {
+      type: 'passkey',
+      unlockSpaceId: 'unlock-space-abc',
+      manageCapability: capExpiringIn({
+        msFromNow: ONE_YEAR_MS,
+        allowedAction: ['GET', 'DELETE']
+      })
+    }
+    const stored = capExpiringIn({
+      msFromNow: ONE_YEAR_MS / 2,
+      allowedAction: ['GET', 'PUT', 'DELETE']
+    })
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [passkeyEntry({ manageCapability: stored })]
+      }
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session })
+    const entry = result!.methods.find(
+      (method): method is PasskeyUnlockMethod => method.type === 'passkey'
+    )
+    expect(entry!.manageCapability).toEqual(stored)
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('refreshes an expiring wide passphrase capability even with a narrow mint, loudly', async () => {
+    const idb = createFakeIdb()
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fresh = capExpiringIn({
+      msFromNow: ONE_YEAR_MS,
+      allowedAction: ['GET', 'DELETE']
+    })
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'ps-space',
+      manageCapability: fresh,
+      idb
+    })
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            unlockSpaceId: 'ps-space',
+            manageCapability: capExpiringIn({
+              msFromNow: 1000,
+              allowedAction: ['GET', 'PUT', 'DELETE']
+            })
+          }
+        ]
+      }
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session })
+    const entry = result!.methods.find(
+      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+    )
+    // A dead capability would lose DELETE beside PUT; the narrowing is
+    // logged rather than refused.
+    expect(entry!.manageCapability).toEqual(fresh)
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+    expect(error).toHaveBeenCalled()
+    error.mockRestore()
+  })
+
+  it('never narrows an unrestricted stored capability before expiry', async () => {
+    const idb = createFakeIdb()
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'ps-space',
+      manageCapability: capExpiringIn({
+        msFromNow: ONE_YEAR_MS,
+        allowedAction: ['GET', 'PUT', 'DELETE']
+      }),
+      idb
+    })
+    const stored = capExpiringIn({ msFromNow: ONE_YEAR_MS / 2 })
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            unlockSpaceId: 'ps-space',
+            manageCapability: stored
+          }
+        ]
+      }
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session })
+    const entry = result!.methods.find(
+      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+    )
+    expect(entry!.manageCapability).toEqual(stored)
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+  })
+
+  it('refreshes an expiring passkey entry with the standing PUT action set', async () => {
+    const idb = createFakeIdb()
+    const fresh = capExpiringIn({
+      msFromNow: ONE_YEAR_MS,
+      allowedAction: ['GET', 'PUT', 'DELETE']
+    })
+    const session = await makeSession(idb)
+    session.profile.unlockMethod = {
+      type: 'passkey',
+      unlockSpaceId: 'unlock-space-abc',
+      manageCapability: fresh
+    }
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          passkeyEntry({
+            manageCapability: capExpiringIn({
+              msFromNow: 1000,
+              allowedAction: ['GET', 'PUT', 'DELETE']
+            })
+          })
+        ]
+      }
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session })
+    const entry = result!.methods.find(
+      (method): method is PasskeyUnlockMethod => method.type === 'passkey'
+    )
+    expect(entry!.manageCapability).toEqual(fresh)
+    expect(
+      (entry!.manageCapability as unknown as { allowedAction: string[] })
+        .allowedAction
+    ).toContain('PUT')
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+  })
+
+  it('re-widens a passphrase entry a past login narrowed, before expiry', async () => {
+    const idb = createFakeIdb()
+    const fresh = capExpiringIn({
+      msFromNow: ONE_YEAR_MS,
+      allowedAction: ['GET', 'PUT', 'DELETE']
+    })
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'ps-space',
+      manageCapability: fresh,
+      idb
+    })
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            unlockSpaceId: 'ps-space',
+            manageCapability: capExpiringIn({
+              msFromNow: ONE_YEAR_MS / 2,
+              allowedAction: ['GET', 'DELETE']
+            })
+          }
+        ]
+      }
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session })
+    const entry = result!.methods.find(
+      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+    )
+    expect(entry!.manageCapability).toEqual(fresh)
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+  })
+
+  it('re-widens a passkey entry a past login narrowed, before expiry', async () => {
+    const idb = createFakeIdb()
+    const fresh = capExpiringIn({
+      msFromNow: ONE_YEAR_MS,
+      allowedAction: ['GET', 'PUT', 'DELETE']
+    })
+    const session = await makeSession(idb)
+    session.profile.unlockMethod = {
+      type: 'passkey',
+      unlockSpaceId: 'unlock-space-abc',
+      manageCapability: fresh
+    }
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          passkeyEntry({
+            manageCapability: capExpiringIn({
+              msFromNow: ONE_YEAR_MS / 2,
+              allowedAction: ['GET', 'DELETE']
+            })
+          })
+        ]
+      }
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session })
+    const entry = result!.methods.find(
+      (method): method is PasskeyUnlockMethod => method.type === 'passkey'
+    )
+    expect(entry!.manageCapability).toEqual(fresh)
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
   })
 
   it('is idempotent: a second call writes nothing', async () => {

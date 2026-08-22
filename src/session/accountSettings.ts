@@ -334,10 +334,13 @@ export async function changeAccountPassphrase({
     standing =
       Object.keys(oldStanding).length > 0 ? { ...oldStanding } : undefined
   }
+  // The standing establishment re-minted the management zcap with PUT (the
+  // bind's is the narrow GET/DELETE one); the entry records the wide one, so
+  // the revocation cascade can re-PUT this credential's record.
   const registry = await recordPassphraseEntry({
     session,
     unlockSpaceId,
-    manageCapability,
+    manageCapability: established?.manageCapability ?? manageCapability,
     standing
   })
   return {

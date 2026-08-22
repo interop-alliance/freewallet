@@ -305,9 +305,14 @@ export function unlockManagementGrantee({
  * called when a WAS server is configured -- the unlock Space, and thus the
  * capability, exist only then.
  *
- * A recovery code widens the actions to include PUT: that is what lets the
- * revocation cascade re-PUT the code's record with a freshly minted
- * delegation when the original's signing client is revoked.
+ * A standing record's management zcap widens the actions to include PUT --
+ * a recovery code's, and a standing passphrase's or passkey's alike. That is
+ * what lets the revocation cascade re-PUT the record with a freshly minted
+ * bridge delegation when the original's signing client is revoked. A plain
+ * keyring record (a pointer with no standing members) keeps the narrow
+ * GET/DELETE set. The rule holds at every mint site -- the bind, the
+ * per-login mint in `buildFetchResult`, and the rebind -- because the
+ * registry stores whichever capability was minted last.
  *
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the unlock identity's client (it can
@@ -1328,13 +1333,18 @@ async function buildFetchResult({
         })
   }
   if (mintManageCapability && WAS_SERVER_URL) {
+    // A standing record's capability carries PUT, exactly as its bind
+    // delegated it: the login mints a fresh delegation every time and the
+    // registry backfill stores it, so a narrower mint here would strip the
+    // re-PUT authority the revocation cascade's record re-mint needs.
     result.manageCapability = await delegateUnlockManagement({
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId,
       controller: unlockManagementGrantee({
         pointer: found.pointer,
         controller: found.controller
-      })
+      }),
+      ...(standing ? { allowedActions: ['GET', 'PUT', 'DELETE'] } : {})
     })
   }
   return result

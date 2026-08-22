@@ -84,6 +84,10 @@ vi.mock('@/session/standingUnlock', () => ({
           ? {
               established: {
                 unlockSpaceId: 'space-new',
+                manageCapability: {
+                  id: 'urn:zcap:wide',
+                  allowedAction: ['GET', 'PUT', 'DELETE']
+                },
                 standingFields: {
                   keyAgreementKeyMultibase: state.newKeyAgreementKeyMultibase,
                   updateKeyMultibase: 'z6MkNewRung0'
@@ -122,7 +126,10 @@ vi.mock('@/session/keyring', () => ({
     return {
       oldPassphraseRetired: true,
       unlockSpaceId: 'space-new',
-      manageCapability: undefined,
+      manageCapability: {
+        id: 'urn:zcap:narrow',
+        allowedAction: ['GET', 'DELETE']
+      },
       persistClientKeys: async () => {}
     }
   }),
@@ -809,6 +816,25 @@ describe('changeAccountPassphrase', () => {
       })
     )
     expect(registry).not.toBeNull()
+  })
+
+  it("records the standing establishment's wide management zcap, not the bind's", async () => {
+    state.registry = registryWithPassphraseStanding({
+      keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+    })
+    await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    // The bind mints GET/DELETE; the establishment re-mints with PUT, which
+    // the revocation cascade's record re-PUT needs.
+    expect(vi.mocked(upsertPassphraseUnlockMethod)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        unlockSpaceId: 'space-new',
+        manageCapability: expect.objectContaining({ id: 'urn:zcap:wide' })
+      })
+    )
   })
 
   it('records the OLD standing configuration when the retirement failed at its edit', async () => {

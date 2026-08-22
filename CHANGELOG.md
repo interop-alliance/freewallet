@@ -80,6 +80,19 @@
 
 ### Fixed
 
+- A standing unlock credential's management zcap keeps its PUT action across
+  logins. The per-login mint (`buildFetchResult`) now delegates
+  `GET/PUT/DELETE` for a record in the standing layout, matching the bind,
+  instead of the `GET/DELETE` default; the registry's near-expiry refresh
+  (`backfillPassphraseUnlockMethod`, passphrase and passkey entries alike)
+  no longer narrows a stored capability that is not expiring, writes a
+  strictly wider fresh one even before expiry (so an entry a past login
+  narrowed heals at the next login), and on expiry writes the fresh one
+  regardless, logging an error if it narrows (a dead capability would lose
+  DELETE too). A passphrase change records the wide capability the standing
+  establishment minted rather than the bind's narrow one. Without this the
+  revocation cascade's record re-PUT (`remintRecoveryDelegations`) failed
+  unauthorized once the refresh had run.
 - Retiring the unlock credential a session logged in with no longer swaps
   the client annex generation onto that credential's own ladder.
   `rotateOffUnlockCredential` settles its ladder seeds against a fresh,
