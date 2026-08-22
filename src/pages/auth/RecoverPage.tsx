@@ -10,6 +10,7 @@ import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
 import { Link as RouterLink, useNavigate } from 'react-router'
 import type { SubmitEvent } from 'react'
+import { recordWalletLogin } from '@/session/walletLoginActivity'
 import { useState } from 'react'
 import { AuthPageHeader } from '@/components/AuthPageHeader'
 import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
@@ -179,6 +180,7 @@ export function RecoverPage() {
       }
       await session.storageReady
       login(session)
+      recordWalletLogin({ session })
       if (remembered) {
         // Fire-and-forget: the sequencing the registry updates need lives in
         // `updateRegistryAfterRecovery`, and every half is best-effort. The

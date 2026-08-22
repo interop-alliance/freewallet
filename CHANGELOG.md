@@ -4,11 +4,12 @@
 
 ### Added
 
-- A local sign-in (passphrase, passkey, or completing the connect-this-
-  browser flow) records a `wallet-activity` Login entry built by wallet-core's
-  `addHistoryWalletLogin` ("Logged in to wallet."), through the new
-  `StorageManager.addHistoryWalletLogin` wrapper. The write is best-effort
-  and never blocks the login. The relying-party `addHistoryLogin` path is
+- A local sign-in (passphrase, passkey, completing the connect-this-browser
+  flow, or the login that ends a recovery) records a `wallet-activity` Login
+  entry built by wallet-core's `addHistoryWalletLogin` ("Logged in to
+  wallet."), through the new `StorageManager.addHistoryWalletLogin` wrapper
+  and the shared `recordWalletLogin` helper (`src/session/walletLoginActivity.ts`).
+  The write is best-effort and never blocks the login. The relying-party `addHistoryLogin` path is
   unchanged.
 
 ### Changed

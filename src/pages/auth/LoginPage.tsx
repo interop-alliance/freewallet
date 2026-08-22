@@ -30,6 +30,7 @@ import {
 import { TransientLoginUnavailableError } from '@/session/transientLogin'
 import { backfillPassphraseUnlockMethod } from '@/session/unlockMethods'
 import { checkRecoveryHealth } from '@/session/recovery'
+import { recordWalletLogin } from '@/session/walletLoginActivity'
 import { showToast } from '@/stores/toastStore'
 import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
 import {
@@ -50,7 +51,7 @@ import {
 import { registerWallet } from '@/lib/registerWallet'
 import { forcedRememberBrowser } from '@/lib/e2eSeams'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
-import type { AuthLocationState, Session } from '@/types/auth'
+import type { AuthLocationState } from '@/types/auth'
 
 /**
  * The `name` of a thrown value, if it carries one.
@@ -173,20 +174,6 @@ function loginErrorKey({
  * signed, and each account's standing document client remains (stated in the
  * dialog copy).
  */
-/**
- * Records the local sign-in in `wallet-activity` ("Logged in to wallet.",
- * the same entry the mobile wallet writes at unlock). Fire-and-forget: the
- * entry is an audit trail, so a failed write is logged and never blocks or
- * fails the login.
- *
- * @param session {Session}
- */
-function recordWalletLogin(session: Session) {
-  void session.storage
-    .addHistoryWalletLogin({ user: session.user })
-    .catch(err => console.warn('Could not record the wallet login:', err))
-}
-
 const FORGETTABLE_ERROR_KEYS = new Set([
   'auth.errors.keyringForged',
   'auth.errors.keyringRolledBack',
@@ -286,7 +273,7 @@ export function LoginPage() {
       // wait for the collections to be provisioned/opened before proceeding.
       await session.storageReady
       login(session)
-      recordWalletLogin(session)
+      recordWalletLogin({ session })
       // The roster read adopted a rotated user key but could not write this
       // browser's durable copy (client-key record or epoch pin): the session
       // is fine, so warn rather than fail the login.
@@ -383,7 +370,7 @@ export function LoginPage() {
       })
       await session.storageReady
       login(session)
-      recordWalletLogin(session)
+      recordWalletLogin({ session })
       void backfillPassphraseUnlockMethod({ session }).catch(err =>
         console.warn('Could not backfill the unlock-methods registry:', err)
       )
@@ -472,7 +459,7 @@ export function LoginPage() {
       // wait for the collections to be provisioned/opened before proceeding.
       await session.storageReady
       login(session)
-      recordWalletLogin(session)
+      recordWalletLogin({ session })
       navigate('/dashboard', { replace: true })
     } catch (err) {
       if (err instanceof PasskeyCancelledError) {
