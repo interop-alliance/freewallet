@@ -1,7 +1,7 @@
 import type { TFunction } from 'i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import { buildVerificationChecklist } from '@interop/wallet-core/display'
-import type { ChecklistMsgKey } from '@interop/wallet-core/display'
+import { buildVerificationChecklist } from '@interop/vc-display'
+import type { ChecklistMsgKey } from '@interop/vc-display'
 import type { VerificationResult } from '@/types/credential'
 
 /**

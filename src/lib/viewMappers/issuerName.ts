@@ -1,6 +1,6 @@
 /**
  * Issuer display helpers (`issuerName`, `getIssuerDetails`) moved to
- * `@interop/wallet-core/display`; re-exported here so existing importers are
+ * `@interop/vc-display`; re-exported here so existing importers are
  * unaffected.
  */
-export { issuerName, getIssuerDetails } from '@interop/wallet-core/display'
+export { issuerName, getIssuerDetails } from '@interop/vc-display'

@@ -1,6 +1,6 @@
 /**
  * Verification aggregate-status helpers moved to
- * `@interop/wallet-core/display`; re-exported here so existing importers are
+ * `@interop/vc-display`; re-exported here so existing importers are
  * unaffected. They read the five-step checklist and roll it up (hard failures:
  * bad signature / format / revocation; warnings: unknown issuer or expired).
  */
@@ -9,4 +9,4 @@ export {
   isFullyVerified,
   isExpiredOnly,
   hasVerificationWarning
-} from '@interop/wallet-core/display'
+} from '@interop/vc-display'

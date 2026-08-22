@@ -1,5 +1,5 @@
 /**
- * VC display-field helpers moved to `@interop/wallet-core/display` (reconciled
+ * VC display-field helpers moved to `@interop/vc-display` (reconciled
  * with DCW's implementation). Re-exported here so existing
  * `@/lib/viewMappers/displayFieldsHelpers` importers are unaffected.
  */
@@ -18,4 +18,4 @@ export {
   getAchievementImage,
   getAchievementType,
   normalizeAlignments
-} from '@interop/wallet-core/display'
+} from '@interop/vc-display'

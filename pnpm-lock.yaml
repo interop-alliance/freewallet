@@ -59,18 +59,21 @@ importers:
       '@interop/vc':
         specifier: ^11.0.7
         version: 11.0.7
+      '@interop/vc-display':
+        specifier: ^0.1.0
+        version: 0.1.0
       '@interop/verifier-core':
         specifier: ^3.5.5
         version: 3.5.5
       '@interop/vh-resource-log':
-        specifier: ^0.1.2
-        version: 0.1.2
+        specifier: ^0.2.0
+        version: 0.2.0
       '@interop/wallet-core':
         specifier: link:../wallet-core
         version: link:../wallet-core
       '@interop/was-client':
-        specifier: ^0.44.0
-        version: 0.44.0(@interop/jsonld-signatures@11.8.5)
+        specifier: ^0.44.1
+        version: 0.44.1(@interop/jsonld-signatures@11.8.5)
       '@interop/webkms-client':
         specifier: ^14.7.3
         version: 14.7.3
@@ -652,6 +655,10 @@ packages:
     resolution: {integrity: sha512-zhk5ryXfx3RqyPc5CxAcom6nwQX/yARrpciiysLL0iGVvDjYZppUx3XOVeB3MD861e+39uiw9LyN0St+xGGmEQ==}
     engines: {node: '>=24.0'}
 
+  '@interop/vc-display@0.1.0':
+    resolution: {integrity: sha512-+naZ6vsKlB/G7kjD6bDKnxNDEJ2stRPi7Hq/OiPq12y+0FhiwPbNu8+Spx56isx6SfgBcXntum2fx4Q4vj86ag==}
+    engines: {node: '>=24.0'}
+
   '@interop/vc@11.0.7':
     resolution: {integrity: sha512-oOeWf3JqwEDqSoAKxuZkivPA0kKMnUjskp6U/7Y0X7ozS9ZxfcZWplRItqtf9EqOWJ3k++NJtzHnRmjjpka6uQ==}
     engines: {node: '>=24.0'}
@@ -660,12 +667,12 @@ packages:
     resolution: {integrity: sha512-PH84wCBCaIdB9yF2q4mDqsYyMckHcS97hPNK3D7CHT8IAcH2e4pogpFyJWOFA5FmwTEC4hQB+N2m7mEorQ+7Hw==}
     engines: {node: '>=24.0'}
 
-  '@interop/vh-resource-log@0.1.2':
-    resolution: {integrity: sha512-GnJJjHIKz93tmXftZX6OjhGCU4Q1Tu6zRQSGR9w2dlDsGyGDc3hRlnBIi06VHloc07RGK8Oi/PkJVswR2TkYLQ==}
+  '@interop/vh-resource-log@0.2.0':
+    resolution: {integrity: sha512-DW/SjcxBMaXkrY/5oMrTVnyVmXExGc0UI2xOs6/UHqlwd1T0AAKrJ+Zo7wqjYwCLIeCj3DNBQpx7wTbQDM8f4w==}
     engines: {node: '>=24.0'}
 
-  '@interop/was-client@0.44.0':
-    resolution: {integrity: sha512-AVQwdnd7JE1fb5RJxl4dXZU4T2k5/pu4dJsy2xgCnlZvWfOcx4TpFkk+MIitd2RO/lSUA2G9Wga6YmCE1lAmbg==}
+  '@interop/was-client@0.44.1':
+    resolution: {integrity: sha512-gVmFn9j+FpyFztzqnwBFd7lV7W38nj8E7Ty7dlJRMrtcnIGsWseVXRrG7UhlZsOBqRoz2vvdKlAqeKN+GH5mDw==}
     engines: {node: '>=24.0'}
 
   '@interop/webkms-client@14.7.3':
@@ -4009,6 +4016,10 @@ snapshots:
       '@digitalbazaar/vc-bitstring-status-list-context': 1.1.0
       '@interop/vc': 11.0.7
 
+  '@interop/vc-display@0.1.0':
+    dependencies:
+      '@interop/data-integrity-core': 8.7.1
+
   '@interop/vc@11.0.7':
     dependencies:
       '@digitalcredentials/credentials-v2-context': 1.0.0
@@ -4038,13 +4049,13 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/vh-resource-log@0.1.2':
+  '@interop/vh-resource-log@0.2.0':
     dependencies:
       '@interop/did-method-webvh': 5.5.0
       '@interop/storage-core': 0.9.1
       json-canonicalize: 2.0.0
 
-  '@interop/was-client@0.44.0(@interop/jsonld-signatures@11.8.5)':
+  '@interop/was-client@0.44.1(@interop/jsonld-signatures@11.8.5)':
     dependencies:
       '@interop/data-integrity-core': 8.7.1
       '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.5)
@@ -4053,7 +4064,7 @@ snapshots:
       '@interop/http-client': 1.0.5
       '@interop/minimal-cipher': 7.8.3
       '@interop/storage-core': 0.9.1
-      '@interop/vh-resource-log': 0.1.2
+      '@interop/vh-resource-log': 0.2.0
       '@interop/x25519-key-agreement-key': 5.2.2
       '@noble/hashes': 2.3.0
       '@scure/base': 2.3.0
