@@ -228,7 +228,10 @@ shared sequence is wallet-core's `retireUnlockCredential`
 credential's document inventory leaves first (its `keyAgreement` entry --
 commitment or verbatim -- and its ladder's whole standing inventory, resolved
 from the log itself rather than from the registry's recorded bind-time rung,
-in one log entry), then the credential's annex inventory (between the
+in one log entry; with the credential's ladder seed in hand, as the
+passphrase change and the tap-confirmed passkey removal hold it, the entry
+also strikes the seed's ladder VM when one stands, the residue of a
+last-client forget torn after its install entry), then the credential's annex inventory (between the
 document edit and the roster tail, wallet-core's `retireClientAnnexInventory`
 closure): a strike entry on the annex log drops the retired
 credential's revealed rung and standing hash when a distinct surviving

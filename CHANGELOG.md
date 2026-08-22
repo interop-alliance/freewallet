@@ -34,6 +34,12 @@
 
 ### Fixed
 
+- Retiring a passphrase or a tap-confirmed passkey now removes the
+  credential's ladder VM from the account document when one stands (the
+  residue of a last-client forget torn after its install entry), so the
+  retired seed no longer signs log appends or account delegations. Through
+  wallet-core's `removeUnlockKey`; the seedless removals (management
+  capability, the pending-retirement completer) leave it.
 - A passphrase change whose retirement fails at its document edit can now be
   finished. The registry's passphrase entry is written after the retirement
   reports, so an edit that never landed leaves the entry naming the new
