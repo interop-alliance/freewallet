@@ -227,6 +227,12 @@ export interface KeyringFetchResult extends KeyringRecordContents {
     delegation: IZcap
     delegatedClients?: IZcap
   }) => Promise<void>
+  // The credential's own unlock key-agreement key, as the bind paths record
+  // it in the registry entry: the key's id and its multibase, each present
+  // only when the derived key carries it. In-memory only -- recomputed from
+  // the derived unlock identity on every fetch, never stored in the record.
+  unlockKeyAgreementKeyId?: string
+  unlockKeyAgreementKeyMultibase?: string
 }
 
 /**
@@ -1135,6 +1141,8 @@ export interface TransientKeyringFetchResult extends KeyringRecordContents {
     ladderSeed?: Uint8Array
   }
   standingClient: StandingUnlockClient
+  unlockKeyAgreementKeyId?: string
+  unlockKeyAgreementKeyMultibase?: string
 }
 
 /**
@@ -1222,7 +1230,8 @@ export async function fetchTransientKeyring({
     ...unwrapped.found,
     unlockSpaceId: unlock.spaceId,
     standingClient,
-    ...(unwrapped.standing ? { standing: unwrapped.standing } : {})
+    ...(unwrapped.standing ? { standing: unwrapped.standing } : {}),
+    ...unlockKeyAgreementMembers({ unlock })
   }
 }
 
@@ -1257,6 +1266,7 @@ async function buildFetchResult({
     ...found,
     unlockSpaceId: unlock.spaceId,
     standingClient,
+    ...unlockKeyAgreementMembers({ unlock }),
     ...(standing
       ? {
           standing,
@@ -2068,6 +2078,10 @@ export async function deleteKeyring({
  * @param [options.newCredential] {UnlockCredential}   an already-derived
  *   credential for the new passphrase (the standing-posture ceremony derives
  *   it to mint the bridge delegation, so the rebind must not re-stretch)
+ * @param [options.oldCredential] {UnlockCredential}   an already-derived
+ *   credential for the old passphrase (the change ceremony derives it to
+ *   settle the registry's recorded posture against the typed secret, so the
+ *   verification must not re-stretch either)
  * @param [options.delegation] {IZcap}   the new passphrase's bridge
  *   delegation, for a standing rebind (see `bindUnlockSecret`)
  * @param [options.delegatedClients] {IZcap}   the new passphrase's
@@ -2087,6 +2101,7 @@ export async function changePassphrase({
   userKey,
   webvhUpdateKeys,
   newCredential,
+  oldCredential: derivedOldCredential,
   delegation,
   delegatedClients,
   ladderSeed,
@@ -2100,6 +2115,7 @@ export async function changePassphrase({
   userKey?: UserKey
   webvhUpdateKeys?: ClientWebvhUpdateKeys
   newCredential?: UnlockCredential
+  oldCredential?: UnlockCredential
   delegation?: IZcap
   delegatedClients?: IZcap
   ladderSeed?: Uint8Array
@@ -2114,10 +2130,12 @@ export async function changePassphrase({
   unlockKeyAgreementKeyMultibase?: string
   oldLadderSeed?: Uint8Array
 }> {
-  const oldCredential = await deriveUnlockCredential({
-    secret: oldPassphrase,
-    kdf
-  })
+  const oldCredential =
+    derivedOldCredential ??
+    (await deriveUnlockCredential({
+      secret: oldPassphrase,
+      kdf
+    }))
   const oldUnlock = oldCredential.unlock
 
   // Verify the old passphrase via its keyring. With a WAS server configured

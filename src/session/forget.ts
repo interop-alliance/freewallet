@@ -601,6 +601,7 @@ async function rebindLoginCredentialRecord({
   await refreshStandingDelegationFields({
     session,
     unlockSpaceId: standing.unlockSpaceId,
+    keyAgreementKeyMultibase: standing.standingClient.keyAgreementKeyMultibase,
     delegationKeyId: delegationProofKeyId(delegation),
     delegationExpires: (delegation as { expires?: string }).expires,
     ...(delegatedClients

@@ -87,6 +87,15 @@ export interface CredentialRotationOutcome {
  *   credential's ladder seed (a passphrase change passes the new
  *   credential's), preferred over the session's login seed for the annex
  *   strike-or-swap stage below
+ * @param [options.onPostureRemoved] {Function}   invoked once, after the
+ *   document edit has landed and before the roster tail runs. "Landed" is
+ *   proven by the callback having run: it fires from inside the annex stage,
+ *   which the ceremony reaches only once `removeUnlockKey` has returned. A
+ *   throw before it therefore reads as "the edit did not land", including
+ *   the narrow case of a throw inside `removeUnlockKey` after its log
+ *   compare-and-swap won. That is the conservative direction: the caller
+ *   keeps the registry naming the OLD credential, and a re-run converges,
+ *   since every stage no-ops once it is settled
  * @param options.verb {string}   what the caller is doing, for the
  *   pending-rotation refusal message (e.g. `'changing the passphrase'`)
  * @returns {Promise<CredentialRotationOutcome | null>}
@@ -95,6 +104,7 @@ export async function rotateOffUnlockCredential({
   session,
   method,
   survivingLadderSeed,
+  onPostureRemoved,
   verb
 }: {
   session: Session
@@ -105,6 +115,7 @@ export async function rotateOffUnlockCredential({
     ladderSeed?: Uint8Array
   }
   survivingLadderSeed?: Uint8Array
+  onPostureRemoved?: () => void
   verb: string
 }): Promise<CredentialRotationOutcome | null> {
   const { keyAgreementKeyMultibase, updateKeyMultibase } = method
@@ -158,8 +169,11 @@ export async function rotateOffUnlockCredential({
       await session.profile.persistClientKeys?.({ userKey })
     },
     collections: cascadeCollections({ remoteStore }),
-    retireClientAnnexPosture: async ({ document }) =>
-      retireClientAnnexPostureStage({
+    retireClientAnnexPosture: async ({ document }) => {
+      // The document edit has landed: this closure runs only once
+      // `removeUnlockKey` has returned, and before the roster tail.
+      onPostureRemoved?.()
+      return retireClientAnnexPostureStage({
         session,
         document,
         retiredLadderSeed: method.ladderSeed,
@@ -168,6 +182,7 @@ export async function rotateOffUnlockCredential({
         clientWebvhKeys,
         remoteStore
       })
+    }
   }).finally(() => invalidateVerifiedLog({ profile: session.profile }))
 
   return {

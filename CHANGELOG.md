@@ -25,6 +25,27 @@
 
 ### Fixed
 
+- A passphrase change whose retirement fails at its document edit can now be
+  finished. The registry's passphrase entry is written after the retirement
+  reports, so an edit that never landed leaves the entry naming the new
+  unlock Space but the old credential's whole standing posture, and the next
+  passphrase login retires it (`finishPendingPassphraseRetirement`) and
+  records its own posture -- or, when that credential is already out of the
+  document, records the posture without re-running the retirement.
+  Previously the entry named the new credential immediately, leaving the old
+  one standing with nothing able to name it, and the Settings copy promised a
+  resumption that could not happen.
+- A passphrase change over an entry that still names an earlier passphrase is
+  refused before anything is written (`PendingPassphraseRetirementError`,
+  shown in Settings as "log out and log in again with your passphrase, then
+  try again"). Running it would have removed one credential's document
+  posture while striking the other credential's ladder, leaving the second
+  one standing and unnamed.
+- The login-time delegation and ladder-rung refreshes no longer write onto a
+  registry entry that records another credential's posture: they match on the
+  acting credential's key-agreement multibase beside the unlock Space id. A
+  rung stamped next to a pending credential's key would have made the next
+  completion run strike the current passphrase's ladder.
 - The passphrase-change ceremony no longer strips its own posture or
   misreads a failed registry read. A change whose new passphrase is the
   current one (the same derived credential) is refused up front

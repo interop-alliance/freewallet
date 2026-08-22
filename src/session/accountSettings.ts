@@ -111,10 +111,9 @@ export async function loadUnlockRegistry({
  * Ordering: the rebind retires the unlock identity this session logged in
  * under, so the live profile is swapped onto the new one immediately -- later
  * re-wraps (rolled update-key seeds, a rotated user key) must hit the new
- * client-key record, and the registry backfill must never repoint at the
- * deleted unlock Space. Repointing the registry's passphrase entry is a
- * separate, best-effort follow-up (`repointPassphraseUnlockMethod`), because
- * the change itself has already succeeded by then.
+ * client-key record. The registry's passphrase entry is written LAST, after
+ * the retirement, and it is the retirement's outcome that decides what
+ * posture the entry names (see below).
  *
  * The old passphrase is then RETIRED for real (`rotateOffUnlockCredential`):
  * its document posture leaves, the user key rotates off its roster wrap, and
@@ -124,26 +123,45 @@ export async function loadUnlockRegistry({
  * 'failed'`): the change itself cannot be rolled back, and a torn retirement
  * converges at the next login's completion sweep.
  *
- * Two guards keep the retirement honest. The old credential's posture (its
- * registry multibases) is read BEFORE anything is written, and a read that
- * fails refuses the whole change: the rebind would overwrite the registry
- * entry with the new passphrase's multibases, leaving the leaked credential
- * standing (commitment and roster wrap intact) with nothing left to name it
- * by. And a "change" whose new passphrase derives the same credential as the
- * old one is refused (`SamePassphraseError`) before anything is written: the
+ * Four guards keep the retirement honest. The old credential's posture (its
+ * registry standing members) is read BEFORE anything is written, and a read
+ * that fails refuses the whole change: the entry would end up naming the new
+ * passphrase's multibases, leaving the leaked credential standing
+ * (commitment and roster wrap intact) with nothing left to name it by. An
+ * entry naming a credential the TYPED old passphrase does not derive is a
+ * pending retirement from an earlier change, and is refused
+ * (`PendingPassphraseRetirementError`): the entry's posture and the record's
+ * ladder seed would then belong to two different credentials, so the
+ * retirement would remove one credential's document posture while striking
+ * the other's ladder, and the post-edit roster would re-wrap to the
+ * credential just left unnamed. A login with the passphrase clears it (the
+ * login-time completer), and the change can then run. A
+ * "change" whose new passphrase derives the same credential as the old one
+ * is refused (`SamePassphraseError`) before anything is written: the
  * retirement would strip the posture the establishment just re-published,
  * while skipping it would orphan the old ladder's committed rung (the
  * establishment mints a fresh ladder seed every run), so neither outcome is
- * a change at all.
+ * a change at all. And the registry write is deferred until the retirement
+ * has reported, which splits its two failure directions. A retirement that
+ * threw AFTER its document edit landed (`onPostureRemoved` fired) records
+ * the new posture: the old credential's document posture is already gone, so
+ * any login's completion sweep finishes the roster rotation and the
+ * collection cascade. A retirement that failed AT the edit records the OLD
+ * credential's posture under the new unlock Space, which is the one state
+ * that still names the credential left standing -- the next passphrase
+ * login's completer (`finishPendingPassphraseRetirement`) retires it.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.oldPassphrase {string}
  * @param options.newPassphrase {string}
  * @returns {Promise<{ oldPassphraseRetired: boolean, unlockSpaceId: string,
- *   manageCapability?: IZcap, rotation: 'rotated' | 'skipped' | 'failed' }>}
+ *   manageCapability?: IZcap, rotation: 'rotated' | 'skipped' | 'failed',
+ *   registry: UnlockMethodsRecord | null }>}
  * @throws {WrongPassphraseError}   the current passphrase did not verify
  * @throws {SamePassphraseError}   the new passphrase is the current one
+ * @throws {PendingPassphraseRetirementError}   the registry still names an
+ *   earlier passphrase whose retirement did not finish
  */
 export async function changeAccountPassphrase({
   session,
@@ -158,6 +176,7 @@ export async function changeAccountPassphrase({
   unlockSpaceId: string
   manageCapability?: IZcap
   rotation: 'rotated' | 'skipped' | 'failed'
+  registry: UnlockMethodsRecord | null
 }> {
   assertAccountCeremonyAllowed({
     persistence: session.profile.persistence,
@@ -180,12 +199,24 @@ export async function changeAccountPassphrase({
   // The keyring record is bound under the ACCOUNT controller (the first
   // client's did:key) -- on an enrolled second client it differs from this
   // client's `user.id`, so verification must match against it.
-  // One derivation for the new passphrase, shared by the rebind and the
-  // standing-posture establishment below.
-  const newCredential = await deriveUnlockCredential({
-    secret: newPassphrase,
-    kdf: KEYRING_KDF
-  })
+  // One derivation each for the typed old and new passphrases, shared by the
+  // rebind, the pending-retirement guard, and the standing-posture
+  // establishment below, so neither KDF runs twice.
+  const [oldCredential, newCredential] = await Promise.all([
+    deriveUnlockCredential({ secret: oldPassphrase, kdf: KEYRING_KDF }),
+    deriveUnlockCredential({ secret: newPassphrase, kdf: KEYRING_KDF })
+  ])
+  // An entry recording a credential the typed old passphrase does not derive
+  // is an earlier change's pending retirement. Refused before anything is
+  // written: this run's retirement would be handed that credential's posture
+  // beside the record's own ladder seed, which belongs to the typed one.
+  if (
+    oldStanding.keyAgreementKeyMultibase !== undefined &&
+    oldStanding.keyAgreementKeyMultibase !==
+      oldCredential.standing.keyAgreementKeyMultibase
+  ) {
+    throw new PendingPassphraseRetirementError()
+  }
   // The derivation is deterministic, so a same-string change derives the
   // credential the registry already records. Refused, not skipped: retiring
   // it would strip the posture just re-published, and skipping the
@@ -212,7 +243,8 @@ export async function changeAccountPassphrase({
     newPassphrase,
     userKey: profile.userKey,
     webvhUpdateKeys: profile.clientWebvhKeys,
-    newCredential
+    newCredential,
+    oldCredential
   })
   // The rebind retired the unlock identity this session logged in under:
   // swap the live profile onto the new one, so later re-wraps (rolled
@@ -227,12 +259,17 @@ export async function changeAccountPassphrase({
   // Give the NEW passphrase the standing posture (roster wrap, commitment
   // document entry, bridge delegation, standing-layout record). Best-effort:
   // a failure leaves the plain rebind above, which logs in normally.
-  const { ladderSeed: newLadderSeed } = await establishPassphrasePosture({
-    session,
-    passphrase: newPassphrase,
-    email: session.user.email,
-    credential: newCredential
-  })
+  const { ladderSeed: newLadderSeed, established } =
+    await establishPassphrasePosture({
+      session,
+      passphrase: newPassphrase,
+      email: session.user.email,
+      credential: newCredential,
+      // The registry entry is written below, once the retirement has
+      // reported: which credential's posture it must name depends on how the
+      // retirement ended.
+      recordInRegistry: false
+    })
   // The session's annex-writing seed follows the live credential: the
   // old passphrase's seed is being retired, so mid-session annex writes
   // (the revocation cascade's re-mint, a later rotation's strike) must sign
@@ -246,8 +283,15 @@ export async function changeAccountPassphrase({
   // already landed and cannot roll back, and a torn retirement is finished by
   // the login-time completion sweep.
   let rotation: 'rotated' | 'skipped' | 'failed' = 'skipped'
+  // Whether the retirement's document edit landed. It is proven by the
+  // ceremony having reached the stage that fires this, never inferred from
+  // the throw.
+  let postureRemoved = false
   try {
     const outcome = await rotateOffUnlockCredential({
+      onPostureRemoved: () => {
+        postureRemoved = true
+      },
       session,
       method: {
         type: 'passphrase',
@@ -275,7 +319,34 @@ export async function changeAccountPassphrase({
     console.error('Could not retire the old passphrase credential:', err)
     rotation = 'failed'
   }
-  return { oldPassphraseRetired, unlockSpaceId, manageCapability, rotation }
+  // The registry write, last. A retirement that succeeded, that had nothing
+  // to retire, or that died after its document edit landed, records the NEW
+  // credential's posture (undefined when the establishment did not run,
+  // which leaves the upsert's carry rule in charge). A retirement that
+  // failed AT the edit records the OLD credential's posture instead: the
+  // entry then names the new unlock Space but the old credential's
+  // multibases, which is the state the login-time completer detects and
+  // finishes. Restating it explicitly is what makes it survive -- the upsert
+  // drops an entry's carried standing fields when the unlock Space changes.
+  const retirementFailedAtTheEdit = rotation === 'failed' && !postureRemoved
+  let standing: StandingUnlockFields | undefined = established?.standingFields
+  if (retirementFailedAtTheEdit) {
+    standing =
+      Object.keys(oldStanding).length > 0 ? { ...oldStanding } : undefined
+  }
+  const registry = await recordPassphraseEntry({
+    session,
+    unlockSpaceId,
+    manageCapability,
+    standing
+  })
+  return {
+    oldPassphraseRetired,
+    unlockSpaceId,
+    manageCapability,
+    rotation,
+    registry
+  }
 }
 
 /**
@@ -292,23 +363,43 @@ export class SamePassphraseError extends Error {
 }
 
 /**
+ * The registry's passphrase entry names a credential the typed old
+ * passphrase does not derive: an earlier change whose retirement did not
+ * finish. Refused before anything is written -- a login with the passphrase
+ * runs the completer, after which the change can proceed.
+ */
+export class PendingPassphraseRetirementError extends Error {
+  constructor(
+    message = 'The registry still names a passphrase whose retirement did ' +
+      'not finish; log in again with the passphrase first so it completes.'
+  ) {
+    super(message)
+    this.name = 'PendingPassphraseRetirementError'
+  }
+}
+
+/**
  * The standing-posture members the registry records for the account's current
- * passphrase entry, read before a change replaces it. No registry, or no
- * passphrase entry (a bind that never established a posture), resolves to an
- * empty posture, which makes the retirement a skip. A read that FAILS is not
- * an empty posture: it throws, so the caller refuses the change instead of
- * overwriting the entry it could not read.
+ * passphrase entry, read before a change replaces it -- the WHOLE set, not
+ * just the two multibases the retirement names by: a change whose retirement
+ * fails at its document edit restates this verbatim, and an entry that lost
+ * `unlockClientDid` would silently drop out of every delegation re-mint pass
+ * while it stands pending. No registry, or no passphrase entry (a bind that
+ * never established a posture), resolves to an empty posture, which makes the
+ * retirement a skip. A read that FAILS is not an empty posture: it throws, so
+ * the caller refuses the change instead of overwriting the entry it could not
+ * read.
  *
  * @param options {object}
  * @param options.session {Session}
- * @returns {Promise<{ keyAgreementKeyMultibase?: string,
- *   updateKeyMultibase?: string }>}
+ * @returns {Promise<StandingUnlockFields>}
  * @throws {Error}   the registry could not be read
  */
-async function standingPosture({ session }: { session: Session }): Promise<{
-  keyAgreementKeyMultibase?: string
-  updateKeyMultibase?: string
-}> {
+async function standingPosture({
+  session
+}: {
+  session: Session
+}): Promise<StandingUnlockFields> {
   let record: UnlockMethodsRecord | null
   try {
     record = await getUnlockMethods({ session })
@@ -322,10 +413,20 @@ async function standingPosture({ session }: { session: Session }): Promise<{
   const entry = record?.methods.find(
     (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
   )
-  return {
-    keyAgreementKeyMultibase: entry?.keyAgreementKeyMultibase,
-    updateKeyMultibase: entry?.updateKeyMultibase
+  if (!entry) {
+    return {}
   }
+  // Everything the entry holds beside its non-standing members IS its
+  // standing posture, so the set carries across without restating the
+  // interface here (the upsert's carry rule reads the same way).
+  const {
+    type: _type,
+    createdAt: _createdAt,
+    unlockSpaceId: _unlockSpaceId,
+    manageCapability: _manageCapability,
+    ...standingMembers
+  } = entry
+  return standingMembers
 }
 
 /**
@@ -341,39 +442,46 @@ function rotationSpaceId({ session }: { session: Session }): string {
 }
 
 /**
- * Repoints the registry's passphrase entry at the unlock Space a passphrase
- * change (or bind) produced, preserving the entry's original creation date.
- * Best-effort: the passphrase change itself has already succeeded, so a
- * failure resolves to `null` instead of throwing.
+ * Writes the registry's passphrase entry for a change that has already
+ * landed: it points at the new unlock Space and carries the standing posture
+ * the caller decided on (the new credential's, or the old one's when the
+ * retirement failed at its document edit). The entry's original creation date
+ * is preserved. Best-effort -- the passphrase change itself has already
+ * succeeded, so a failure resolves to `null` instead of throwing.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.unlockSpaceId {string}
  * @param [options.manageCapability] {IZcap}
+ * @param [options.standing] {StandingUnlockFields}   the posture the entry
+ *   must name; absent leaves the upsert's carry rule in charge
  * @returns {Promise<UnlockMethodsRecord | null>}   the updated registry, or
  *   null when there was nothing to update (or the update failed)
  */
-export async function repointPassphraseUnlockMethod({
+async function recordPassphraseEntry({
   session,
   unlockSpaceId,
-  manageCapability
+  manageCapability,
+  standing
 }: {
   session: Session
   unlockSpaceId: string
   manageCapability?: IZcap
+  standing?: StandingUnlockFields
 }): Promise<UnlockMethodsRecord | null> {
   try {
     const current = await getUnlockMethods({ session })
     if (!current) {
       return null
     }
-    // The repoint sets `manageCapability` unconditionally: a change that
-    // minted none must clear the one the retired unlock Space's entry carried.
+    // `manageCapability` is written unconditionally: a change that minted
+    // none must clear the one the retired unlock Space's entry carried.
     const updated = upsertPassphraseUnlockMethod({
       record: current,
       unlockSpaceId,
       manageCapability,
-      keepAbsentManageCapability: true
+      keepAbsentManageCapability: true,
+      ...(standing ? { standing } : {})
     })
     await putUnlockMethods({ session, record: updated })
     return updated

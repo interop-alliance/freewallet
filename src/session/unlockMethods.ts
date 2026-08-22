@@ -1086,9 +1086,20 @@ export async function backfillPassphraseUnlockMethod({
  * (both refreshes are fire-and-forget behind provisioning); writes only when
  * an entry matches.
  *
+ * The unlock Space alone is not always enough to identify the credential: a
+ * passphrase change whose retirement failed at its document edit leaves the
+ * entry pointing at the NEW unlock Space while recording the OLD credential's
+ * posture, so a caller holding the login credential passes its
+ * `keyAgreementKeyMultibase` too, and a mismatch writes nothing. Stamping a
+ * fresh rung beside another credential's key-agreement multibase would make
+ * the next completion run strike the wrong ladder.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @param options.unlockSpaceId {string}   the credential's unlock Space
+ * @param [options.keyAgreementKeyMultibase] {string}   the acting
+ *   credential's key-agreement multibase; when given and the matched entry
+ *   records a different one, nothing is written
  * @param [options.delegationKeyId] {string}
  * @param [options.delegationExpires] {string}
  * @param [options.delegatedClientsKeyId] {string}   the annex-Space
@@ -1101,6 +1112,7 @@ export async function backfillPassphraseUnlockMethod({
 export async function refreshStandingDelegationFields({
   session,
   unlockSpaceId,
+  keyAgreementKeyMultibase,
   delegationKeyId,
   delegationExpires,
   delegatedClientsKeyId,
@@ -1109,6 +1121,7 @@ export async function refreshStandingDelegationFields({
 }: {
   session: Session
   unlockSpaceId: string
+  keyAgreementKeyMultibase?: string
   delegationKeyId?: string
   delegationExpires?: string
   delegatedClientsKeyId?: string
@@ -1125,6 +1138,15 @@ export async function refreshStandingDelegationFields({
       method.unlockSpaceId === unlockSpaceId
   )
   if (!stored) {
+    return
+  }
+  // The entry records another credential's posture (a pending retirement):
+  // its members belong to that credential, so nothing here may land on them.
+  if (
+    keyAgreementKeyMultibase !== undefined &&
+    stored.keyAgreementKeyMultibase !== undefined &&
+    stored.keyAgreementKeyMultibase !== keyAgreementKeyMultibase
+  ) {
     return
   }
   const nextRecord = {

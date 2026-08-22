@@ -84,6 +84,7 @@ import {
   pointedClientAnnexReach
 } from '@/session/annexReach'
 import { refreshStandingDelegationFields } from '@/session/unlockMethods'
+import { finishPendingPassphraseRetirement } from '@/session/pendingRetirement'
 import {
   primeVerifiedAccountLog,
   verifiedAccountLog
@@ -948,6 +949,10 @@ async function sessionFromKeyringHit({
   const standingDelegation = found.standing?.delegation
   const standingDelegatedClients = found.standing?.delegatedClients
   const standingClientDid = found.standingClient?.clientDid
+  // This credential's key-agreement multibase, the identity every registry
+  // write below matches the entry on beside its unlock Space id.
+  const standingKeyAgreementKeyMultibase =
+    found.standingClient?.keyAgreementKeyMultibase
   if (
     session.storageReady &&
     rebindStandingRecord &&
@@ -1025,6 +1030,13 @@ async function sessionFromKeyringHit({
         await refreshStandingDelegationFields({
           session,
           unlockSpaceId,
+          // The entry may still record an earlier credential's posture (a
+          // pending retirement); these members are this credential's.
+          ...(standingKeyAgreementKeyMultibase
+            ? {
+                keyAgreementKeyMultibase: standingKeyAgreementKeyMultibase
+              }
+            : {}),
           delegationKeyId: delegationProofKeyId(delegation),
           delegationExpires: (delegation as { expires?: string }).expires,
           ...(delegatedClients
@@ -1040,6 +1052,28 @@ async function sessionFromKeyringHit({
         console.warn(
           'Could not refresh the expiring standing delegations; the ' +
             'next login retries:',
+          err
+        )
+      }
+    })
+  }
+
+  // The pending-retirement completer: a passphrase change whose retirement
+  // failed at its document edit leaves the registry's passphrase entry
+  // naming the OLD credential's posture under the new unlock Space, and
+  // nothing else can find that credential (the roster sweep only rotates
+  // away recipients the document does not back). This login retires it and
+  // records its own posture. Ordered ahead of the ladder-rung refresh below,
+  // which would otherwise overwrite the entry's recorded rung -- the very
+  // anchor the retirement attributes by. Best-effort behind provisioning.
+  if (session.storageReady && !remoteDirectStorage) {
+    session.storageReady = session.storageReady.then(async () => {
+      try {
+        await finishPendingPassphraseRetirement({ session, found })
+      } catch (err) {
+        console.warn(
+          'Could not finish the pending passphrase retirement; the next ' +
+            'login retries:',
           err
         )
       }
@@ -1078,6 +1112,11 @@ async function sessionFromKeyringHit({
           await refreshStandingDelegationFields({
             session,
             unlockSpaceId,
+            ...(standingKeyAgreementKeyMultibase
+              ? {
+                  keyAgreementKeyMultibase: standingKeyAgreementKeyMultibase
+                }
+              : {}),
             updateKeyMultibase: rung.keyMultibase
           })
         }

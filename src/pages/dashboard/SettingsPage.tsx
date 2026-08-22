@@ -17,7 +17,6 @@ import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import { MdContentCopy, MdEdit } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
-import type { IZcap } from '@interop/data-integrity-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { useInfoBox } from '@/hooks/useInfoBox'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
@@ -35,13 +34,13 @@ import {
   addAccountPasskey,
   addAccountPassphrase,
   changeAccountPassphrase,
+  PendingPassphraseRetirementError,
   SamePassphraseError,
   deleteAccount,
   loadUnlockRegistry,
   readLoginHandle,
   removeAccountPasskey,
   renameAccountPasskey,
-  repointPassphraseUnlockMethod,
   rotateAccountUpdateKey
 } from '@/session/accountSettings'
 import {
@@ -175,7 +174,7 @@ export function SettingsPage() {
     'rotated' | 'skipped' | 'failed'
   >('skipped')
   const [passphraseChangeError, setPassphraseChangeError] = useState<
-    'incorrect' | 'same' | 'failed' | null
+    'incorrect' | 'same' | 'pending' | 'failed' | null
   >(null)
   const newPassphraseLengthPassed =
     newPassphrase.length >= PASSWORD_RULES.minlength
@@ -192,28 +191,28 @@ export function SettingsPage() {
     setPassphraseChangeSuccess(null)
     setPassphraseChangeError(null)
     try {
-      const {
-        oldPassphraseRetired,
-        unlockSpaceId,
-        manageCapability,
-        rotation
-      } = await changeAccountPassphrase({
-        session,
-        oldPassphrase,
-        newPassphrase
-      })
+      const { oldPassphraseRetired, rotation, registry } =
+        await changeAccountPassphrase({
+          session,
+          oldPassphrase,
+          newPassphrase
+        })
       setOldPassphrase('')
       setNewPassphrase('')
       setPassphraseRotation(rotation)
       setPassphraseChangeSuccess(oldPassphraseRetired)
-      // The passphrase now lives in a new unlock Space; point the registry's
-      // passphrase entry at it (fire-and-forget -- the change itself succeeded).
-      void updatePassphraseEntry({ unlockSpaceId, manageCapability })
+      // The ceremony wrote the registry's passphrase entry itself, after the
+      // retirement; show what it wrote.
+      if (registry) {
+        setUnlockRegistry(registry)
+      }
     } catch (err) {
       if (err instanceof WrongPassphraseError) {
         setPassphraseChangeError('incorrect')
       } else if (err instanceof SamePassphraseError) {
         setPassphraseChangeError('same')
+      } else if (err instanceof PendingPassphraseRetirementError) {
+        setPassphraseChangeError('pending')
       } else {
         console.error('Could not change the passphrase:', err)
         setPassphraseChangeError('failed')
@@ -223,24 +222,6 @@ export function SettingsPage() {
     }
   }
 
-  // Repoints the registry's passphrase entry at the unlock Space a passphrase
-  // change (or bind) produced. Best-effort: the passphrase change itself has
-  // already succeeded, so a null result is simply left on screen as-is.
-  const updatePassphraseEntry = async (options: {
-    unlockSpaceId: string
-    manageCapability?: IZcap
-  }) => {
-    if (!session) {
-      return
-    }
-    const updated = await repointPassphraseUnlockMethod({
-      session,
-      ...options
-    })
-    if (updated) {
-      setUnlockRegistry(updated)
-    }
-  }
   // Passkeys (keyring v2 unlock methods). The section is shown only where
   // WebAuthn exists; adding a passkey binds this client's in-memory key set
   // under the passkey's PRF-derived unlock identity, so it needs the seed
@@ -797,7 +778,9 @@ export function SettingsPage() {
                         ? t('settings.passphraseIncorrect')
                         : passphraseChangeError === 'same'
                           ? t('settings.passphraseSame')
-                          : t('settings.passphraseChangeFailed')}
+                          : passphraseChangeError === 'pending'
+                            ? t('settings.passphrasePendingRetirement')
+                            : t('settings.passphraseChangeFailed')}
                     </Alert>
                   )}
                   <Typography variant="body2" color="text.secondary">

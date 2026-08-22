@@ -420,6 +420,60 @@ describe('the ceremony hand-off', () => {
   })
 })
 
+describe('the document-edit landed signal', () => {
+  it('fires once the edit landed, before the roster tail', async () => {
+    // The real ceremony reaches the annex stage only after `removeUnlockKey`
+    // has returned, and runs the roster tail after it.
+    vi.mocked(retireUnlockCredential).mockImplementation(async options => {
+      state.calls.push('retireUnlockCredential')
+      await options.retireClientAnnexPosture?.({
+        document: { id: POINTER.did }
+      } as never)
+      await options.onUserKeyAdopted?.({
+        userKey: FRESH_USER_KEY,
+        latestEpochId: FRESH_USER_KEY.id,
+        descriptor: ROSTER_DESCRIPTOR as never
+      })
+      return {
+        rotated: true,
+        collections: { outcomes: {}, failed: [] },
+        document: { id: POINTER.did },
+        userKey: FRESH_USER_KEY,
+        rosterDescriptor: ROSTER_DESCRIPTOR
+      } as never
+    })
+    await rotateOffUnlockCredential({
+      session: sessionWith({ ladderSeed: new Uint8Array(32).fill(9) }),
+      method: PASSPHRASE_METHOD,
+      onPostureRemoved: () => {
+        state.calls.push('onPostureRemoved')
+      },
+      verb: 'changing the passphrase'
+    })
+    const fired = state.calls.indexOf('onPostureRemoved')
+    expect(fired).toBeGreaterThan(state.calls.indexOf('retireUnlockCredential'))
+    expect(fired).toBeLessThan(state.calls.indexOf('persistClientKeys'))
+  })
+
+  it('does not fire when the document edit throws', async () => {
+    vi.mocked(retireUnlockCredential).mockImplementation(async () => {
+      state.calls.push('retireUnlockCredential')
+      throw new Error('the document edit failed')
+    })
+    await expect(
+      rotateOffUnlockCredential({
+        session: sessionWith(),
+        method: PASSPHRASE_METHOD,
+        onPostureRemoved: () => {
+          state.calls.push('onPostureRemoved')
+        },
+        verb: 'changing the passphrase'
+      })
+    ).rejects.toThrow('the document edit failed')
+    expect(state.calls).not.toContain('onPostureRemoved')
+  })
+})
+
 describe('the annex strike-or-swap stage', () => {
   const RETIRED_SEED = new Uint8Array(32).fill(3)
   const SURVIVING_SEED = new Uint8Array(32).fill(4)

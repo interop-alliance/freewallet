@@ -252,6 +252,30 @@ cascade's: ciphertext the credential's holder already fetched stays
 readable, and Settings says so -- the ceremony is the documented "I think
 my passphrase leaked" remedy there.
 
+A passphrase change writes the registry's passphrase entry only after the
+retirement has reported, because the entry's posture depends on how the
+retirement ended. One that failed before its document edit landed leaves the
+entry naming the new unlock Space but the OLD credential's whole standing
+posture, which is the one state that still names the credential left
+standing. While the entry stands pending, a second change from the same
+session is refused (`PendingPassphraseRetirementError`, when the entry
+records a credential the typed old passphrase does not derive): the
+retirement would otherwise remove one credential's document posture while
+striking the other's ladder. Registry writes matched by unlock Space id
+carry the acting credential's key-agreement multibase for the same reason,
+and a mismatch writes nothing.
+
+The next passphrase login's completer (`finishPendingPassphraseRetirement`
+in `src/session/pendingRetirement.ts`) clears it: an entry naming a
+credential other than the one logging in, with the login credential itself
+standing in the account document. It retires the named credential and
+records its own posture in the entry. The login-credential check keeps it
+from firing in the other direction, where an old passphrase whose unlock
+Space delete failed logs in after a change that completed elsewhere. When
+the named credential is already out of the document -- the retirement landed
+and only the registry write was lost -- only the entry is rewritten, and the
+roster and cascade residue is the ordinary login sweep's.
+
 The `Session` object is stored in the Zustand
 `authStore`; it is **in-memory only** (the passphrase is never persisted), so
 reloading the browser logs the user out and they must log in again. Guest

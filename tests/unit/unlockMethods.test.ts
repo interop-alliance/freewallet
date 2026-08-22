@@ -663,6 +663,72 @@ describe('the standing delegation scalar pairs (FW-194)', () => {
     )
     expect(entry.delegatedClientsExpires).toBe('2027-08-19T01:00:00.000Z')
   })
+
+  it('writes nothing when the entry records another credential', async () => {
+    // The pending-retirement state: the entry points at the login's unlock
+    // Space but records the credential whose retirement did not finish.
+    // Stamping a fresh rung there would make the completer strike the
+    // CURRENT passphrase's ladder.
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-08-19T00:00:00.000Z',
+            unlockSpaceId: 'unlock-space-1',
+            keyAgreementKeyMultibase: 'z6LSPendingCredentialKak',
+            updateKeyMultibase: 'z6MkPendingRung'
+          } as PassphraseUnlockMethod
+        ]
+      }
+    })
+    await refreshStandingDelegationFields({
+      session,
+      unlockSpaceId: 'unlock-space-1',
+      keyAgreementKeyMultibase: 'z6LSLoginCredentialKak',
+      updateKeyMultibase: 'z6MkLoginRung',
+      delegationKeyId: 'did:key:zFresh#zFresh'
+    })
+    const record = await getUnlockMethods({ session })
+    const entry = record!.methods[0] as PassphraseUnlockMethod
+    expect(entry.updateKeyMultibase).toBe('z6MkPendingRung')
+    expect(entry.delegationKeyId).toBeUndefined()
+  })
+
+  it('writes when the entry records the acting credential', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    await putUnlockMethods({
+      session,
+      record: {
+        version: 1,
+        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-08-19T00:00:00.000Z',
+            unlockSpaceId: 'unlock-space-1',
+            keyAgreementKeyMultibase: 'z6LSLoginCredentialKak',
+            updateKeyMultibase: 'z6MkStaleRung'
+          } as PassphraseUnlockMethod
+        ]
+      }
+    })
+    await refreshStandingDelegationFields({
+      session,
+      unlockSpaceId: 'unlock-space-1',
+      keyAgreementKeyMultibase: 'z6LSLoginCredentialKak',
+      updateKeyMultibase: 'z6MkFreshRung'
+    })
+    const record = await getUnlockMethods({ session })
+    const entry = record!.methods[0] as PassphraseUnlockMethod
+    expect(entry.updateKeyMultibase).toBe('z6MkFreshRung')
+  })
 })
 
 describe('the credential rotation inside a revocation', () => {

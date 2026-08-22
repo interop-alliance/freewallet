@@ -492,6 +492,7 @@ export async function establishClientAnnexGeneration({
   await refreshStandingDelegationFields({
     session,
     unlockSpaceId: found.unlockSpaceId,
+    keyAgreementKeyMultibase: found.standingClient.keyAgreementKeyMultibase,
     ...(delegatedClientsKeyId ? { delegatedClientsKeyId } : {}),
     ...((delegatedClients as { expires?: string }).expires
       ? {
@@ -637,24 +638,39 @@ export async function selfEnrollStandingClient({
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for the passphrase
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<{ ladderSeed?: Uint8Array }>}   the established
- *   posture's ladder seed, absent when the establishment skipped or failed
- *   (a passphrase change threads it into the old credential's retirement as
- *   the surviving seed)
+ * @param [options.recordInRegistry] {boolean}   write the registry's
+ *   passphrase entry here; default true. A passphrase change passes false:
+ *   it writes the entry itself, after the old credential's retirement, so a
+ *   retirement that fails before its document edit lands leaves the entry
+ *   still naming the old credential
+ * @returns {Promise<object>}   the established posture's ladder seed (absent
+ *   when the establishment skipped or failed -- a passphrase change threads
+ *   it into the old credential's retirement as the surviving seed), and,
+ *   when the establishment ran and the registry write was left to the
+ *   caller, the members that entry needs
  */
 export async function establishPassphrasePosture({
   session,
   passphrase,
   email,
   credential,
-  idb
+  idb,
+  recordInRegistry = true
 }: {
   session: Session
   passphrase: string
   email?: string
   credential?: UnlockCredential
   idb?: IDBFactory
-}): Promise<{ ladderSeed?: Uint8Array }> {
+  recordInRegistry?: boolean
+}): Promise<{
+  ladderSeed?: Uint8Array
+  established?: {
+    unlockSpaceId: string
+    manageCapability?: IZcap
+    standingFields: StandingUnlockFields
+  }
+}> {
   // A session that cannot act as an enrolled client on a promoted account
   // (a no-WAS deployment, a guest, an unpromoted account) has no posture to
   // establish; skip quietly rather than warn on every such signup.
@@ -677,18 +693,29 @@ export async function establishPassphrasePosture({
       unlockSpaceId: established.unlockSpaceId,
       manageCapability: established.manageCapability
     }
-    const record =
-      (await getUnlockMethods({ session })) ?? emptyUnlockMethodsRegistry()
-    await putUnlockMethods({
-      session,
-      record: upsertPassphraseUnlockMethod({
-        record,
-        unlockSpaceId: established.unlockSpaceId,
-        manageCapability: established.manageCapability,
-        standing: established.standingFields
+    if (recordInRegistry) {
+      const record =
+        (await getUnlockMethods({ session })) ?? emptyUnlockMethodsRegistry()
+      await putUnlockMethods({
+        session,
+        record: upsertPassphraseUnlockMethod({
+          record,
+          unlockSpaceId: established.unlockSpaceId,
+          manageCapability: established.manageCapability,
+          standing: established.standingFields
+        })
       })
-    })
-    return { ladderSeed: established.ladderSeed }
+    }
+    return {
+      ladderSeed: established.ladderSeed,
+      established: {
+        unlockSpaceId: established.unlockSpaceId,
+        ...(established.manageCapability
+          ? { manageCapability: established.manageCapability }
+          : {}),
+        standingFields: established.standingFields
+      }
+    }
   } catch (err) {
     console.warn(
       'Could not establish the passphrase as a standing credential; a fresh ' +
@@ -696,5 +723,65 @@ export async function establishPassphrasePosture({
       err
     )
     return {}
+  }
+}
+
+/**
+ * The standing fields of a credential whose keyring hit is already in hand --
+ * what `establishStandingUnlock` would have returned for it, rebuilt from the
+ * record's own members rather than from a fresh establishment. The recorded
+ * `updateKeyMultibase` is ladder rung 0 by convention (the credential's
+ * CURRENT rung is recovered from the log, with the recorded one as the
+ * attribution anchor).
+ *
+ * @param options {object}
+ * @param options.found {KeyringFetchResult}   the login credential's hit
+ * @returns {Promise<StandingUnlockFields>}
+ */
+export async function standingFieldsOfKeyringHit({
+  found
+}: {
+  found: KeyringFetchResult
+}): Promise<StandingUnlockFields> {
+  const standingClient = found.standingClient
+  const delegation = found.standing?.delegation
+  const delegatedClients = found.standing?.delegatedClients
+  const ladderSeed = found.standing?.ladderSeed
+  const rung0 = ladderSeed
+    ? await ladderRung({ ladderSeed, index: 0 })
+    : undefined
+  const delegationKeyId = delegation
+    ? delegationProofKeyId(delegation)
+    : undefined
+  const delegationExpires = delegation
+    ? (delegation as { expires?: string }).expires
+    : undefined
+  const delegatedClientsKeyId = delegatedClients
+    ? delegationProofKeyId(delegatedClients)
+    : undefined
+  const delegatedClientsExpires = delegatedClients
+    ? (delegatedClients as { expires?: string }).expires
+    : undefined
+  return {
+    ...(standingClient
+      ? {
+          rosterKid: standingClient.recipientKid,
+          keyAgreementKeyMultibase: standingClient.keyAgreementKeyMultibase,
+          unlockClientDid: standingClient.clientDid
+        }
+      : {}),
+    ...(rung0 ? { updateKeyMultibase: rung0.keyMultibase } : {}),
+    ...(delegationKeyId ? { delegationKeyId } : {}),
+    ...(delegationExpires ? { delegationExpires } : {}),
+    ...(delegatedClientsKeyId ? { delegatedClientsKeyId } : {}),
+    ...(delegatedClientsExpires ? { delegatedClientsExpires } : {}),
+    ...(found.unlockKeyAgreementKeyId
+      ? { unlockKeyAgreementKeyId: found.unlockKeyAgreementKeyId }
+      : {}),
+    ...(found.unlockKeyAgreementKeyMultibase
+      ? {
+          unlockKeyAgreementKeyMultibase: found.unlockKeyAgreementKeyMultibase
+        }
+      : {})
   }
 }
