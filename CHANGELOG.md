@@ -25,6 +25,15 @@
 
 ### Fixed
 
+- The self-enrollment completion now persists the freshly minted client key
+  set into the local client-key record before writing the user key roster
+  epoch pin, not after. A rejecting pin write (quota, a blocked IndexedDB
+  upgrade) previously threw out of the login with the account document
+  already listing the new client, but its seeds unpersisted -- a phantom
+  client that a re-run would accrete another of and that
+  `listAccountClients` still counted. The pin write is now best-effort: a
+  failure is logged and the login proceeds, and the next login's roster read
+  establishes the pin.
 - The enrollment completion's unlock-record rebind (the connect-code
   ceremony's last step) re-states every standing member the fetched record
   carried, the `delegatedClients` sibling included. It previously forwarded

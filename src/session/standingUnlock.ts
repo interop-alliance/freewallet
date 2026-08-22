@@ -533,11 +533,26 @@ export function canSelfEnroll({
  * nothing but the credential's keyring hit: runs wallet-core's composed
  * continuation (the reveal-and-commit and add log entries through the
  * record's bridge delegation, the first roster read through the credential's
- * standing wrap, and the new client's own roster escrow), pins the roster
- * epoch, and persists the freshly minted key set under the credential's
- * unlock identity -- so this login, and every later one, proceeds as an
- * ordinary enrolled client. Loud by construction: the world-readable
- * hash-chained log extends before a single byte is read.
+ * standing wrap, and the new client's own roster escrow), persists the
+ * freshly minted key set under the credential's unlock identity, and only
+ * then pins the roster epoch -- so this login, and every later one,
+ * proceeds as an ordinary enrolled client. Loud by construction: the
+ * world-readable hash-chained log extends before a single byte is read.
+ *
+ * The persist runs before the pin on purpose: once the add entry has landed
+ * the document lists the new client, so a login that fails past that point
+ * with the seeds unpersisted leaves a phantom client (listed, counted by the
+ * last-durable-client refusal, roster-wrapped, never usable), and a re-run
+ * mints another. A rejecting pin write (quota, a blocked upgrade) is
+ * therefore not a login failure once the key set is persisted: it is
+ * logged and the login proceeds, and the next login's roster read
+ * establishes the pin from the verified roster. What stays open is the
+ * window inside wallet-core's `selfEnrollClientCore` between the add entry
+ * and its return (the verification read and the roster escrow), which has
+ * no persist hook: a tab closing there still strands a phantom client. It
+ * is visible as an unlabeled row in Settings > Connected wallets with no
+ * browser answering to it, and is removed through that row's ordinary
+ * Disconnect (the revocation cascade).
  *
  * @param options {object}
  * @param options.found {KeyringFetchResult}   a hit `canSelfEnroll` accepted
@@ -576,17 +591,25 @@ export async function selfEnrollStandingClient({
     // pin's trust-on-first-use establishment; later logins verify against it.
     accountLogPinStore: sessionLogPinStore({ idb })
   })
-  await saveUserKeyEpochPin({
-    accountDid: result.did,
-    epochId: result.latestEpochId,
-    idb
-  })
   const persistClientKeys = await enrollClientKeys({
     clientSeed: result.clientSeed,
     userKey: result.userKey,
     webvhUpdateKeys: result.webvhUpdateKeys,
     controller: found.controller
   })
+  try {
+    await saveUserKeyEpochPin({
+      accountDid: result.did,
+      epochId: result.latestEpochId,
+      idb
+    })
+  } catch (err) {
+    console.warn(
+      'The self-enrolled client could not pin the user key roster epoch; ' +
+        'the next login establishes it from the verified roster:',
+      err
+    )
+  }
   const clientKeys: ClientKeyRecord = {
     clientSeed: result.clientSeed,
     userKey: result.userKey,

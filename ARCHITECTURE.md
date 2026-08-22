@@ -125,7 +125,20 @@ two loud entries extend the
 world-readable hash-chained log through the bridge (a reveal-and-commit
 entry signed by the ladder's current rung, then an add entry publishing the
 freshly minted client), and only then is the user key unwrapped from the
-credential's standing wrap. On a ladder-anchored account the enrollment's
+credential's standing wrap. The freshly minted key set is persisted into the
+local client-key record before the user key roster epoch pin is written, not
+after: once the add entry lands the document already lists the new client,
+so a login that dies past that point with the seeds unpersisted would leave
+a phantom client -- listed, roster-wrapped, counted by the
+last-durable-client refusal, but answered by no browser. A rejecting pin
+write (quota, a blocked IndexedDB upgrade) is therefore not a login failure
+once the key set is persisted: it is logged, and the next login's roster
+read establishes the pin from the verified roster. What stays open is the
+narrower window inside wallet-core's `selfEnrollClientCore`, between the add
+entry and its return, which has no persist hook; a tab closing there still
+strands a phantom client, visible as an unlabeled row in Settings > Connected
+wallets that no browser answers to, and removed through that row's ordinary
+Disconnect. On a ladder-anchored account the enrollment's
 add entry removes the ladder VM, so a still-unexpired bridge delegation
 (and `delegatedClients` sibling) it signed stops verifying under the
 current-key-set rule; the same login's refresh block catches that -- its
