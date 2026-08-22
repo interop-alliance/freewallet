@@ -1966,6 +1966,17 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   narrow scope is what keeps credential use loud: the only thing the bridge
   can do is extend the world-readable log. Re-minted by the revocation
   cascade and refreshed near expiry by the credential's own login.
+- **Unlock trio** -- the three durable local artifacts one unlock method
+  leaves on a browser, all keyed by its unlock Space id: the keyring cache,
+  the wrapped client-key record, and the keyring-freshness pin. It is the
+  whole of what a credential owns locally, so a fourth per-credential
+  artifact joins it rather than each retiring site. "The trio" is the short
+  form in prose; the code names it the local trio
+  (`deleteUnlockLocalTrio` in `src/lib/sessionKey.ts`, the one deleter),
+  and the shared wipe enumeration walks one per registered unlock method,
+  always including the login credential's (see "The shared wipe
+  enumeration" under "The did:webvh identity"). Avoid: local state,
+  unlock artifacts, credential residue.
 - **Ladder (update-key ladder)** — the chain of did:webvh update keys
   derived from a standing credential's random ladder seed. Each rung is
   committed ahead of use as a hash in `nextKeyHashes` (the method's
