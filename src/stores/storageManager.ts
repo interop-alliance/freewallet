@@ -1170,54 +1170,164 @@ export class StorageManager {
    * user believes is deleted.
    *
    * Retraction of a live public copy is therefore BLOCKING, not best-effort:
-   * if the credential has a public copy that cannot be retracted (offline
-   * while a remote store is configured, say), the delete is refused with a
-   * {@link PublicCopyRetractionError} and the private credential is left in
-   * place, so the user can retry once the retraction can land. A credential
-   * with no public copy deletes normally, offline included.
+   * if the credential has a public copy that cannot be retracted, the delete
+   * is refused with a {@link PublicCopyRetractionError} and the private
+   * credential is left in place, so the user can retry once the retraction can
+   * land. A credential with no public copy deletes normally, offline included.
    *
    * `keepPublicCopy` is the user's deliberate "keep the public link" choice
    * from the delete dialog: a retention the user was asked about and chose, as
    * distinct from the accidental orphan above. It skips the retraction (and
    * therefore the refusal) entirely.
    *
+   * `consultRemote` makes the retraction check the remote `public-credentials`
+   * collection as well (see {@link retractPublicCopy}). The interactive delete
+   * leaves it off and decides on the local replica, so an offline delete of a
+   * credential with no local public copy keeps working; the unattended app-key
+   * sweep turns it on, since a seed-bearing copy the replica has not pulled
+   * yet must not be left standing.
+   *
    * @param options {object}
    * @param options.cid {string}
    * @param [options.keepPublicCopy] {boolean}
+   * @param [options.consultRemote] {boolean}
    * @returns {Promise<void>}
    */
   async deleteCredential({
     cid,
-    keepPublicCopy = false
+    keepPublicCopy = false,
+    consultRemote = false
   }: {
     cid: string
     keepPublicCopy?: boolean
+    consultRemote?: boolean
   }): Promise<void> {
     if (!keepPublicCopy) {
-      await this.#retractPublicCopy({ cid })
+      await this.retractPublicCopy({ cid, consultRemote })
     }
     await this.#store.deleteCredential({ cid })
   }
 
   /**
-   * Removes a credential's public copy, if it has one, ahead of deleting the
-   * credential itself. A failure to determine whether a public copy exists is
-   * treated exactly like a failed retraction -- an unknown public copy is
-   * indistinguishable from an unretracted one -- so both refuse the delete.
+   * Removes a credential's world-readable public copy, if it has one, ahead of
+   * deleting the credential itself. A failure to determine whether a public
+   * copy exists is treated exactly like a failed retraction -- an unknown
+   * public copy is indistinguishable from an unretracted one -- so both refuse
+   * the delete with a {@link PublicCopyRetractionError}.
+   *
+   * With `consultRemote`, the remote collection is consulted first whenever
+   * one is configured and this session carries the local replica. The local
+   * `public-credentials` replica cannot prove the ABSENCE of a remote copy: a
+   * freshly enrolled browser, or one whose `public-credentials` replication
+   * sits in retry backoff, has not pulled the copy yet, and deciding
+   * retraction on the local rows alone would let the world-readable copy
+   * stand with no handle left to retract it. A remote that cannot be reached
+   * then refuses. Without the option the decision is the local replica's, the
+   * interactive delete's offline-tolerant behaviour. (In the replica-less
+   * remote-direct variant the store's own `hasPublicCredential` /
+   * `removePublicCredential` already go straight to the remote either way.)
+   *
+   * The local row is then removed as before. Its replication push is a
+   * tombstone against a resource this call has already deleted remotely, which
+   * the push path tolerates: a `DELETE` of an absent resource is the
+   * tombstone's goal state, and a conditional delete refused on a vanished
+   * master resolves as an ordinary delete/delete conflict (`deleteContent` and
+   * `assembleConflict` in `src/lib/sync/pushWrites.ts`).
    *
    * @param options {object}
    * @param options.cid {string}
+   * @param [options.consultRemote] {boolean}
    * @returns {Promise<void>}
    */
-  async #retractPublicCopy({ cid }: { cid: string }): Promise<void> {
+  async retractPublicCopy({
+    cid,
+    consultRemote = false
+  }: {
+    cid: string
+    consultRemote?: boolean
+  }): Promise<void> {
     try {
-      if (!(await this.#store.hasPublicCredential({ cid }))) {
-        return
+      const remote =
+        consultRemote && this.hasLocalReplica ? this.#remoteStore : undefined
+      if (remote) {
+        const body = await remote.getSyncedResource({
+          logicalKey: 'publicCredentials',
+          resourceId: cid
+        })
+        if (body !== undefined) {
+          await remote.deleteSyncedResource({
+            logicalKey: 'publicCredentials',
+            resourceId: cid
+          })
+        }
       }
-      await this.#store.removePublicCredential({ cid })
+      if (await this.#store.hasPublicCredential({ cid })) {
+        await this.#store.removePublicCredential({ cid })
+      }
     } catch (err) {
       throw new PublicCopyRetractionError({ cid, cause: err })
     }
+  }
+
+  /**
+   * Every world-readable public credential copy this session can see: the
+   * local `public-credentials` replica's rows, unioned by cid with the remote
+   * collection's resources when a remote store is configured and this session
+   * carries the replica. The collection is plaintext and keyed by the
+   * credential's content cid, so a row's id IS its cid.
+   *
+   * `skipCids` names the cids whose bodies the caller does not need (the
+   * app-key sweep already reaches those through `deleteCredential`, which
+   * retracts their public copies). They are left out of the result and, more
+   * to the point, out of the remote body fetches -- so the sweep costs one
+   * remote listing plus a `GET` per public copy that has NO private row,
+   * rather than a `GET` per public credential on every login.
+   *
+   * A remote listing or fetch failure throws: an unreadable remote collection
+   * is not an empty one.
+   *
+   * @param options {object}
+   * @param [options.skipCids] {Set<string>}
+   * @returns {Promise<Array<StoredCredential>>}
+   */
+  async listPublicCredentials({
+    skipCids
+  }: {
+    skipCids?: Set<string>
+  } = {}): Promise<Array<StoredCredential>> {
+    const wanted = (cid: string): boolean => !skipCids?.has(cid)
+    const byCid = new Map<string, StoredCredential>()
+    for (const entry of await this.#store.listPublicCredentials()) {
+      if (wanted(entry.cid)) {
+        byCid.set(entry.cid, entry)
+      }
+    }
+    const remote = this.hasLocalReplica ? this.#remoteStore : undefined
+    if (!remote) {
+      return [...byCid.values()]
+    }
+    const resources = await remote.listSyncedResources({
+      logicalKey: 'publicCredentials'
+    })
+    const missing = resources
+      .map(({ id }) => id)
+      .filter(id => wanted(id) && !byCid.has(id))
+    const bodies = await Promise.all(
+      missing.map(id =>
+        remote.getSyncedResource({
+          logicalKey: 'publicCredentials',
+          resourceId: id
+        })
+      )
+    )
+    missing.forEach((cid, index) => {
+      const body = bodies[index]
+      if (body === undefined) {
+        return
+      }
+      byCid.set(cid, { cid, vc: body as unknown as IVerifiableCredential })
+    })
+    return [...byCid.values()]
   }
 
   /**

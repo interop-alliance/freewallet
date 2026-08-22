@@ -107,6 +107,10 @@ function fakeStorage(stored: StoredCredential[]) {
       failed: 0
     })),
     revokeAppGrants: vi.fn(async () => ({ revoked: 0, skipped: 0 })),
+    // The orphan public-copy pass has its own suite too; here the account has
+    // no public copies, so it is a no-op.
+    listPublicCredentials: vi.fn(async () => []),
+    retractPublicCopy: vi.fn(async () => {}),
     deleteCredential: vi.fn(async ({ cid }: { cid: string }) => {
       const index = rows.findIndex(row => row.cid === cid)
       if (index >= 0) {
@@ -125,12 +129,18 @@ describe('sweepStrandedAppKeys', () => {
       { cid: 'c-diploma', vc: credential() }
     ])
 
-    expect(await sweepStrandedAppKeys({ storage })).toBe(2)
+    expect((await sweepStrandedAppKeys({ storage })).deleted).toBe(2)
 
     // Through the ordinary delete path, so a stranded key ever published as a
     // public link has that world-readable copy retracted first.
-    expect(calls.deleteCredential).toHaveBeenCalledWith({ cid: 'c-marked' })
-    expect(calls.deleteCredential).toHaveBeenCalledWith({ cid: 'c-legacy' })
+    expect(calls.deleteCredential).toHaveBeenCalledWith({
+      cid: 'c-marked',
+      consultRemote: true
+    })
+    expect(calls.deleteCredential).toHaveBeenCalledWith({
+      cid: 'c-legacy',
+      consultRemote: true
+    })
     expect(rows.map(({ cid }) => cid)).toEqual(['c-diploma'])
   })
 
@@ -144,7 +154,7 @@ describe('sweepStrandedAppKeys', () => {
       }
     ])
 
-    expect(await sweepStrandedAppKeys({ storage })).toBe(0)
+    expect((await sweepStrandedAppKeys({ storage })).deleted).toBe(0)
     expect(calls.deleteCredential).not.toHaveBeenCalled()
   })
 
@@ -156,7 +166,7 @@ describe('sweepStrandedAppKeys', () => {
       { cid: 'c-membership', vc: selfIssuedWithOrigin() }
     ])
 
-    expect(await sweepStrandedAppKeys({ storage })).toBe(0)
+    expect((await sweepStrandedAppKeys({ storage })).deleted).toBe(0)
     expect(calls.deleteCredential).not.toHaveBeenCalled()
     expect(rows.map(({ cid }) => cid)).toEqual(['c-membership'])
   })
@@ -166,7 +176,7 @@ describe('sweepStrandedAppKeys', () => {
       { cid: 'c-legacy', vc: await legacyAppKey() }
     ])
 
-    expect(await sweepStrandedAppKeys({ storage })).toBe(1)
+    expect((await sweepStrandedAppKeys({ storage })).deleted).toBe(1)
     expect(rows).toEqual([])
   })
 
@@ -185,7 +195,7 @@ describe('sweepStrandedAppKeys', () => {
       await realDelete({ cid })
     })
 
-    expect(await sweepStrandedAppKeys({ storage })).toBe(1)
+    expect((await sweepStrandedAppKeys({ storage })).deleted).toBe(1)
     expect(calls.deleteCredential).toHaveBeenCalledTimes(2)
     expect(rows.map(({ cid }) => cid)).toEqual(['c-stuck'])
   })
@@ -195,7 +205,7 @@ describe('sweepStrandedAppKeys', () => {
       { cid: 'c-diploma', vc: credential() }
     ])
 
-    expect(await sweepStrandedAppKeys({ storage })).toBe(0)
+    expect((await sweepStrandedAppKeys({ storage })).deleted).toBe(0)
     expect(calls.listCredentials).toHaveBeenCalledOnce()
     expect(calls.deleteCredential).not.toHaveBeenCalled()
   })
@@ -205,8 +215,8 @@ describe('sweepStrandedAppKeys', () => {
       { cid: 'c-marked', vc: markedAppKey() }
     ])
 
-    expect(await sweepStrandedAppKeys({ storage })).toBe(1)
-    expect(await sweepStrandedAppKeys({ storage })).toBe(0)
+    expect((await sweepStrandedAppKeys({ storage })).deleted).toBe(1)
+    expect((await sweepStrandedAppKeys({ storage })).deleted).toBe(0)
     expect(calls.deleteCredential).toHaveBeenCalledOnce()
   })
 })

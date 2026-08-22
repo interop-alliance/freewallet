@@ -1337,8 +1337,15 @@ wallet's order): once the private credential is gone nothing is left to retract
 the public copy with, so the reverse order can strand a world-readable orphan.
 Retraction of a live public copy is blocking -- a public copy that cannot be
 retracted refuses the delete (`PublicCopyRetractionError`) rather than deleting
-anyway -- while the delete dialog's deliberate "keep public copy" choice skips
-it, and a credential with no public copy deletes normally offline.
+anyway. The interactive delete decides on the local replica, so a credential
+with no local public copy deletes normally offline. The unattended app-key
+sweep instead has retraction consult the remote `public-credentials`
+collection too (`consultRemote`): the local replica cannot prove that a
+remote copy is absent, since a fresh enrollment or a replication run stuck in
+retry backoff may not have pulled it yet, and a remote that cannot be reached
+then refuses the delete rather than deleting on the local replica's say-so.
+The delete dialog's deliberate "keep public copy" choice skips retraction
+entirely.
 
 The world-readable share link a public copy gets
 (`WASRemoteStore.publicCredentialUrl`, over wallet-core's
@@ -1506,7 +1513,10 @@ login-time sweep deletes stranded app-key rows from `private-credentials`
 (marker-typed or matching the old self-issued-with-origin shape), and an
 affected app reconnects through the ordinary flow as a first run -- its
 prior identity, and whatever it encrypted under it, is deliberately
-orphaned (the greenfield re-provision rule).
+orphaned (the greenfield re-provision rule). The same sweep also retracts
+app-key public copies left with no private row behind them (a pre-upgrade
+app key kept through the delete dialog's "keep public copy" choice), through
+the remote-aware retraction path described above under "Storage model".
 
 **Externally arriving app keys are refused at store time, unconditionally.**
 Every minted app key carries the marker type `AppKeyCredential`

@@ -1247,7 +1247,11 @@ describe('StorageManager (local-first facade)', () => {
     const { localStore, user } = await initLocalStore()
     const remoteStore = {
       publicCredentialUrl: (cid: string) =>
-        `https://was.example/space/s/public-credentials/${cid}`
+        `https://was.example/space/s/public-credentials/${cid}`,
+      // The retraction consults the remote collection first (the local replica
+      // cannot prove a remote copy's absence); this account has none there.
+      getSyncedResource: async () => undefined,
+      deleteSyncedResource: async () => {}
     } as unknown as WASRemoteStore
     const storage = new StorageManager({
       persistence: durableSessionPersistence(),
@@ -1283,7 +1287,11 @@ describe('StorageManager (local-first facade)', () => {
     const { localStore, user } = await initLocalStore()
     const remoteStore = {
       publicCredentialUrl: (cid: string) =>
-        `https://was.example/space/s/public-credentials/${cid}`
+        `https://was.example/space/s/public-credentials/${cid}`,
+      // The retraction consults the remote collection first (the local replica
+      // cannot prove a remote copy's absence); this account has none there.
+      getSyncedResource: async () => undefined,
+      deleteSyncedResource: async () => {}
     } as unknown as WASRemoteStore
     const storage = new StorageManager({
       persistence: durableSessionPersistence(),
@@ -1310,7 +1318,11 @@ describe('StorageManager (local-first facade)', () => {
     const { localStore, user } = await initLocalStore()
     const remoteStore = {
       publicCredentialUrl: (cid: string) =>
-        `https://was.example/space/s/public-credentials/${cid}`
+        `https://was.example/space/s/public-credentials/${cid}`,
+      // The retraction consults the remote collection first (the local replica
+      // cannot prove a remote copy's absence); this account has none there.
+      getSyncedResource: async () => undefined,
+      deleteSyncedResource: async () => {}
     } as unknown as WASRemoteStore
     const storage = new StorageManager({
       persistence: durableSessionPersistence(),

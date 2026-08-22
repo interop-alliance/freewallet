@@ -31,6 +31,23 @@
 
 ### Changed
 
+- Public-copy retraction (`StorageManager.retractPublicCopy`, formerly
+  private) can consult the remote `public-credentials` collection when one
+  is configured (`consultRemote`, also on `deleteCredential`), deleting a
+  present remote copy before the local row: the local replica cannot prove a
+  remote copy's absence on a fresh enrollment or while replication sits in
+  retry backoff, and a remote that cannot be reached refuses the delete. The
+  login-time app-key sweep turns it on; the interactive delete keeps deciding
+  on the local replica, so an offline delete of a credential with no local
+  public copy still works. New `StorageManager.listPublicCredentials` unions the local
+  and remote `public-credentials` rows (`BrowserStore.listPublicCredentials`
+  and the remote-direct backend gained the same method).
+- The login-time stranded app-key sweep also retracts orphaned public
+  copies -- app keys kept as a public copy with no private row through the
+  delete dialog's "keep public copy" choice. The affected app's grants are
+  revoked first when the copy states a revocable identity. The sweep now
+  returns `{ deleted, retracted }`.
+
 - The generic resource-log names (`ResourceLogPinStore`, `ResourceLogHeadPin`,
   `memoryResourceLogPinStore`) are imported from `@interop/vh-resource-log`,
   now a direct dependency; `webvhResourceLogController` stays on

@@ -224,10 +224,10 @@ export interface Session {
   // The app-key sweep fired by session creation: deletes app keys stranded in
   // `private-credentials` by a version that stored them there, now that they
   // live in `app-connections`. Chained behind `storageReady`, strictly
-  // best-effort -- resolves the number of rows deleted, or `null` when the
-  // sweep itself failed (it never rejects) -- and absent on the flows that
-  // own their own provisioning.
-  appKeySweep?: Promise<number | null>
+  // best-effort -- resolves the counts of private rows deleted and orphaned
+  // public copies retracted, or `null` when the sweep itself failed (it never
+  // rejects) -- and absent on the flows that own their own provisioning.
+  appKeySweep?: Promise<{ deleted: number; retracted: number } | null>
   // The annex GC sweep fired by the keyring logins: the quarterly
   // generation swap (when due and the pointed generation is GC-quiet) plus
   // the collect fan-out over every non-pointed `gen-` collection. Chained

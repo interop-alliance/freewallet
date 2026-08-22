@@ -1284,6 +1284,29 @@ export class BrowserStore {
   }
 
   /**
+   * Reads every live `public-credentials` row. The collection is plaintext (it
+   * is public data) and keyed directly by the credential's content cid, so a
+   * row needs no decryption and its id IS the cid.
+   *
+   * @returns {Promise<Array<StoredCredential>>}
+   */
+  async listPublicCredentials(): Promise<Array<StoredCredential>> {
+    const docs = await this.rxCollection('publicCredentials').find().exec()
+    const credentials: StoredCredential[] = []
+    for (const doc of docs) {
+      const { id, data } = doc.toMutableJSON()
+      if (data === undefined) {
+        continue
+      }
+      credentials.push({
+        cid: id,
+        vc: data as unknown as IVerifiableCredential
+      })
+    }
+    return credentials
+  }
+
+  /**
    * Whether a credential currently has a public copy in `public-credentials`.
    *
    * @param options {object}

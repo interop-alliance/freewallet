@@ -401,7 +401,8 @@ export async function initSessionFromSeed({
     // collection, so any left in `private-credentials` by an earlier version
     // are deleted here rather than migrated -- their seeds must not stay
     // reachable from the credential-wide surfaces (a public link, a share of
-    // the credentials collection). Chained behind provisioning and strictly
+    // the credentials collection). A second pass retracts the world-readable
+    // copies left with no private row behind them. Chained behind provisioning and strictly
     // best-effort, like the cascade sweep below: a failed sweep never fails
     // the login, and the next login runs it again.
     session.appKeySweep = storageReady

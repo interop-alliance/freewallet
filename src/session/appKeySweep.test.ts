@@ -2,8 +2,12 @@
  * The revoke-before-delete half of the login-time app-key sweep: deleting a
  * stranded row removes the app's only listing on the Applications page, so its
  * authority must be retired first, and a revocation that does not fully land
- * leaves the row in place to be retried at the next login. The sweep's
- * detection rules have their own suite (`tests/unit/appKeySweep.test.ts`).
+ * leaves the row in place to be retried at the next login. The second half is
+ * the orphan pass: a public copy with no private row behind it (a pre-upgrade
+ * app key kept through the delete dialog's "keep public copy" choice) is
+ * retracted on its own, while a copy that still has a private row is left to
+ * that row's delete. The sweep's detection rules have their own suite
+ * (`tests/unit/appKeySweep.test.ts`).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { sweepStrandedAppKeys } from '@/session/appKeySweep'
@@ -58,12 +62,16 @@ function plainCredential(): IVerifiableCredential {
  *
  * @param options {object}
  * @param options.credentials {Array<{ cid: string; vc: IVerifiableCredential }>}
+ * @param [options.publicCopies] {Array<{ cid: string; vc: IVerifiableCredential }>}
+ *   the world-readable public copies, private row or not
  * @returns {StorageManager}
  */
 function storageDouble({
-  credentials
+  credentials,
+  publicCopies = []
 }: {
   credentials: Array<{ cid: string; vc: IVerifiableCredential }>
+  publicCopies?: Array<{ cid: string; vc: IVerifiableCredential }>
 }) {
   const storage = {
     listCredentials: vi.fn(async () => credentials),
@@ -83,6 +91,13 @@ function storageDouble({
     }),
     deleteCredential: vi.fn(async ({ cid }: { cid: string }) => {
       calls.push(`delete:${cid}`)
+    }),
+    listPublicCredentials: vi.fn(
+      async ({ skipCids }: { skipCids?: Set<string> } = {}) =>
+        publicCopies.filter(({ cid }) => !skipCids?.has(cid))
+    ),
+    retractPublicCopy: vi.fn(async ({ cid }: { cid: string }) => {
+      calls.push(`retract:${cid}`)
     })
   }
   return storage
@@ -99,7 +114,7 @@ describe('sweepStrandedAppKeys', () => {
       credentials: [{ cid: 'cid-1', vc: appKeyFixture() }]
     })
 
-    const deleted = await sweepStrandedAppKeys({
+    const { deleted } = await sweepStrandedAppKeys({
       storage: storage as unknown as StorageManager
     })
 
@@ -130,7 +145,7 @@ describe('sweepStrandedAppKeys', () => {
       ]
     })
 
-    const deleted = await sweepStrandedAppKeys({
+    const { deleted } = await sweepStrandedAppKeys({
       storage: storage as unknown as StorageManager
     })
 
@@ -150,7 +165,7 @@ describe('sweepStrandedAppKeys', () => {
       throw new Error('server unreachable')
     })
 
-    const deleted = await sweepStrandedAppKeys({
+    const { deleted } = await sweepStrandedAppKeys({
       storage: storage as unknown as StorageManager
     })
 
@@ -171,7 +186,7 @@ describe('sweepStrandedAppKeys', () => {
       return { collections: 2, rotated: 1, failed: 1 }
     })
 
-    const deleted = await sweepStrandedAppKeys({
+    const { deleted } = await sweepStrandedAppKeys({
       storage: storage as unknown as StorageManager
     })
 
@@ -188,7 +203,7 @@ describe('sweepStrandedAppKeys', () => {
       credentials: [{ cid: 'cid-1', vc: originless }]
     })
 
-    const deleted = await sweepStrandedAppKeys({
+    const { deleted } = await sweepStrandedAppKeys({
       storage: storage as unknown as StorageManager
     })
 
@@ -204,12 +219,83 @@ describe('sweepStrandedAppKeys', () => {
       credentials: [{ cid: 'cid-1', vc: plainCredential() }]
     })
 
-    const deleted = await sweepStrandedAppKeys({
+    const { deleted } = await sweepStrandedAppKeys({
       storage: storage as unknown as StorageManager
     })
 
     expect(deleted).toBe(0)
     expect(calls).toEqual([])
     expect(storage.deleteCredential).not.toHaveBeenCalled()
+  })
+  it('retracts an orphaned public app-key copy with no private row', async () => {
+    const storage = storageDouble({
+      credentials: [],
+      publicCopies: [{ cid: 'pub-1', vc: appKeyFixture() }]
+    })
+
+    const { deleted, retracted } = await sweepStrandedAppKeys({
+      storage: storage as unknown as StorageManager
+    })
+
+    expect(deleted).toBe(0)
+    expect(retracted).toBe(1)
+    expect(calls).toEqual([
+      'listHistoryItems',
+      'rotate:did:key:z6MkfakeAppSubject',
+      'revoke:did:key:z6MkfakeAppSubject',
+      'retract:pub-1'
+    ])
+  })
+
+  it('leaves a public copy that has a private row to the row delete', async () => {
+    const appKey = appKeyFixture()
+    const storage = storageDouble({
+      credentials: [{ cid: 'cid-1', vc: appKey }],
+      publicCopies: [{ cid: 'cid-1', vc: appKey }]
+    })
+
+    const { deleted, retracted } = await sweepStrandedAppKeys({
+      storage: storage as unknown as StorageManager
+    })
+
+    expect(deleted).toBe(1)
+    expect(retracted).toBe(0)
+    expect(calls).toContain('delete:cid-1')
+    expect(calls).not.toContain('retract:cid-1')
+    expect(storage.listPublicCredentials).toHaveBeenCalledWith({
+      skipCids: new Set(['cid-1'])
+    })
+  })
+
+  it('leaves an ordinary public credential alone', async () => {
+    const storage = storageDouble({
+      credentials: [],
+      publicCopies: [{ cid: 'pub-1', vc: plainCredential() }]
+    })
+
+    const { retracted } = await sweepStrandedAppKeys({
+      storage: storage as unknown as StorageManager
+    })
+
+    expect(retracted).toBe(0)
+    expect(storage.retractPublicCopy).not.toHaveBeenCalled()
+  })
+
+  it('completes the private pass when the public listing fails', async () => {
+    const storage = storageDouble({
+      credentials: [{ cid: 'cid-1', vc: appKeyFixture() }]
+    })
+    storage.listPublicCredentials.mockImplementationOnce(async () => {
+      throw new Error('collection unreachable')
+    })
+
+    const { deleted, retracted } = await sweepStrandedAppKeys({
+      storage: storage as unknown as StorageManager
+    })
+
+    expect(deleted).toBe(1)
+    expect(retracted).toBe(0)
+    expect(calls).toContain('delete:cid-1')
+    expect(console.warn).toHaveBeenCalled()
   })
 })

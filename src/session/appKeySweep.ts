@@ -21,8 +21,22 @@
  * delegated zcaps would stand until their TTL expired and it would stay a key
  * epoch recipient indefinitely, with nothing left to revoke it from.
  *
+ * Retraction of a world-readable public copy is the delete path's job. The
+ * sweep has it consult the remote `public-credentials` collection whenever
+ * one is configured (`consultRemote`): the local replica may not have pulled the public copy yet (a
+ * fresh enrollment, or replication sitting in retry backoff), so its rows
+ * cannot show that no world-readable copy of a seed exists. A remote that
+ * cannot be consulted refuses the delete, and the row is left for the next
+ * login.
+ *
+ * A second pass covers the public copies with NO private row: a pre-upgrade
+ * app key deleted through the delete dialog's "keep public copy" choice left
+ * exactly that, and the private-row pass can never see it. Those copies are
+ * retracted on their own.
+ *
  * The sweep is idempotent and cheap on a healthy account: one credential list,
- * a filter, and no writes when nothing matches.
+ * one public-copy listing whose bodies are fetched only for the copies with no
+ * private row, a filter, and no writes when nothing matches.
  */
 import {
   appKeyOrigin,
@@ -84,15 +98,25 @@ async function isStrandedAppKey(
  * The activity history both revocation calls scan is fetched once, and only
  * when at least one row needs revoking.
  *
+ * The orphan pass then retracts every app-key public copy that has no private
+ * row -- a public copy the user kept through the delete dialog's "keep public
+ * copy" choice, which no private-row delete will ever reach. It runs the same
+ * revoke-before-delete pair when the public copy states a revocable identity
+ * (an app whose row is gone still has live grants), and its per-copy failures
+ * are logged and skipped like the rows'. A public-copy listing that throws --
+ * an unreadable remote collection is not an empty one -- is logged and leaves
+ * the whole pass for the next login, without disturbing the private one.
+ *
  * @param options {object}
  * @param options.storage {StorageManager}
- * @returns {Promise<number>}   how many rows were deleted
+ * @returns {Promise<{ deleted: number; retracted: number }>}   how many
+ *   private rows were deleted, and how many orphan public copies retracted
  */
 export async function sweepStrandedAppKeys({
   storage
 }: {
   storage: StorageManager
-}): Promise<number> {
+}): Promise<{ deleted: number; retracted: number }> {
   const credentials = await storage.listCredentials()
   const stranded: Array<{
     cid: string
@@ -134,12 +158,93 @@ export async function sweepStrandedAppKeys({
       }
       // Through the ordinary delete path, so a stranded key that was ever
       // published as a public link has that world-readable copy retracted
-      // first -- the one case where the row's seed is already exposed.
-      await storage.deleteCredential({ cid })
+      // first -- the one case where the row's seed is already exposed. The
+      // remote collection is consulted too: the local replica may not have
+      // pulled the copy yet.
+      await storage.deleteCredential({ cid, consultRemote: true })
       deleted += 1
     } catch (err) {
       console.warn(`Could not delete the stranded app key "${cid}":`, err)
     }
   }
-  return deleted
+
+  const retracted = await retractOrphanPublicAppKeys({
+    storage,
+    privateCids: new Set(credentials.map(({ cid }) => cid)),
+    items
+  })
+  return { deleted, retracted }
+}
+
+/**
+ * Retracts every app-key public copy with no private row behind it.
+ *
+ * The bodies of the public copies that DO have a private row are never
+ * fetched: `deleteCredential` retracts those as part of the row's delete, so
+ * the pass costs one listing plus a read per genuinely orphaned copy.
+ *
+ * @param options {object}
+ * @param options.storage {StorageManager}
+ * @param options.privateCids {Set<string>}   the cids the private pass covered
+ * @param [options.items] {Array}   the activity history, if already fetched
+ * @returns {Promise<number>}   how many public copies were retracted
+ */
+async function retractOrphanPublicAppKeys({
+  storage,
+  privateCids,
+  items
+}: {
+  storage: StorageManager
+  privateCids: Set<string>
+  items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
+}): Promise<number> {
+  let publicCopies: Awaited<ReturnType<StorageManager['listCredentials']>>
+  try {
+    publicCopies = await storage.listPublicCredentials({
+      skipCids: privateCids
+    })
+  } catch (err) {
+    console.warn(
+      'Could not list the public credential copies; leaving any orphaned ' +
+        'app-key copy for the next login:',
+      err
+    )
+    return 0
+  }
+
+  let history = items
+  let retracted = 0
+  for (const { cid, vc } of publicCopies) {
+    if (!(await isStrandedAppKey(vc))) {
+      continue
+    }
+    const origin = appKeyOrigin(vc)
+    const subjectDid = subjectId(vc)
+    try {
+      if (origin && subjectDid) {
+        history ??= await storage.listHistoryItems()
+        const rotation = await storage.revokeAppCollectionRecipients({
+          origin,
+          subjectDid,
+          items: history
+        })
+        if (rotation.failed > 0) {
+          console.warn(
+            `Could not rotate every collection off the orphaned public app ` +
+              `key "${cid}"; leaving it in place to retry at the next login.`
+          )
+          continue
+        }
+        await storage.revokeAppGrants({ origin, subjectDid, items: history })
+      }
+      await storage.retractPublicCopy({ cid, consultRemote: true })
+      retracted += 1
+    } catch (err) {
+      console.warn(
+        `Could not retract the orphaned public app key "${cid}":`,
+        err
+      )
+    }
+  }
+  return retracted
 }
