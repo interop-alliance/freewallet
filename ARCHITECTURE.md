@@ -566,12 +566,23 @@ revocation cascade's re-mint pass walks every registry entry but the login
 credential's (`remintEntriesOf`, shared with the cascade), signs each
 bridge and sibling with the ladder VM, re-seals each record through its
 management zcap (invoked under this still-standing client), and writes the
-refreshed fields back to the registry. A record the pass cannot re-seal
-withholds the removal entry with wallet-core's name-stable
+refreshed fields back to the registry. A record the pass cannot re-seal --
+or an entry it skips as pending-shaped, whose bridge the removal would rot
+just as surely -- withholds the removal entry with wallet-core's name-stable
 `RecordRemintFailedError`, which the settings dialog renders as a
 retryable stop naming the methods -- the browser stays connected and a
 re-click resumes at the re-mint; a registry the transition cannot read
-refuses up front for the same reason. Readers settle a re-minted record's
+refuses up front for the same reason. A pending-shaped passphrase entry --
+one whose recorded unlock key-agreement key is not the credential the
+record at its unlock Space is sealed to, the residue of a passphrase change
+torn before its retirement landed -- refuses the transition up front too
+(`PendingRetirementForgetError`, rendered by the transition dialog; the
+record itself is the detector, since an entry naming another credential is
+also what a superseded passphrase's own login sees on a healthy account):
+that
+state's only mender is the torn-retirement repair, which needs a durable
+enrolled login, and the transition ends durable logins on the account
+forever. Readers settle a re-minted record's
 proof against `currentAccountRecordSigners` (the enrolled clients' signing
 keys plus the ladder VMs the document lists), since on a client-less
 account the ladder VM is the only record signer left. The removal entry
@@ -1137,7 +1148,12 @@ cryptoperiod guidance), so the registry entry records its `expires` and a
 delegation expired or inside the 30-day renewal window is flagged the same
 way. The check nudges regeneration; a client revocation re-mints the
 affected delegations itself as part of its cascade, and the same expiry
-predicate makes it refresh a near-lapse delegation too. The re-mint core
+predicate makes it refresh a near-lapse delegation too. The passes skip a
+pending-shaped entry -- one whose record is sealed to a credential other
+than the one its identity members name, the residue of a passphrase change
+torn before its retirement -- rather than sealing the half-retired
+credential a fresh bridge into the standing credential's record. The
+re-mint core
 (the staleness checks, the skip policy, the binding-carried-forward
 re-wrap) and the delegation builder live in
 `@interop/wallet-core/recovery`; `src/session/recovery.ts` binds them to
@@ -1933,23 +1949,23 @@ freewallet-side wrappers and the app-only ceremonies, each row pointing at
 the module that drives it. The mender column names how a torn run gets
 finished (see Tear mending in the Glossary).
 
-| Ceremony                                | Entry point                          | Module                                    | Shared half            | Mender                                                            |
-| --------------------------------------- | ------------------------------------ | ----------------------------------------- | ---------------------- | ----------------------------------------------------------------- |
-| Account genesis (durable)               | signup; healed at every login        | `src/session/signup.ts`                   | `/genesis`             | re-run (every stage an ensure)                                    |
-| Credential-anchored genesis             | default signup, non-remembered browser | `src/session/credentialAnchoredGenesis.ts` | `/clientAnnex`       | re-run; the transient login's heal branch re-runs it              |
-| Self-enrollment at login                | durable login on a fresh browser     | login path in `src/session/initSession.ts` | `/clientAnnex`        | re-run; a phantom client is removed via Disconnect                |
-| Client enrollment (two-party)           | Settings > Connected wallets + login page | `src/components/EnrolledClientsSection.tsx` | `/enrollment`     | re-run with the same connect code                                 |
-| Client revocation + epoch cascade       | Settings > Connected wallets         | `src/session/revocation.ts`               | `/clients`             | re-run; cascade-completion sweep                                  |
-| Recovery-code issuance                  | Settings > Recovery codes            | `src/session/recovery.ts`                 | `/recovery`            | re-run (nothing binds until the confirm)                          |
-| Recovery spend (durable and transient)  | `/recover`                           | `src/session/recovery.ts`                 | `/recovery`, `/clientAnnex` | re-run; the transient variant's roster-append repair is not built yet |
-| Recovery-code revocation                | Settings > Recovery codes            | `src/session/recovery.ts`                 | `/recovery`            | re-run; cascade-completion sweep                                  |
-| Unlock-credential rotation              | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts` | `/unlock`            | torn-retirement repair at the next passphrase login; login sweep; re-seal repair for a torn registry re-seal |
-| Forget ceremony                         | Settings > Connected wallets, own row | `src/session/forget.ts`                  | `/clientAnnex`         | re-run (wipe last); forgotten-browser detector at the next login  |
-| Last-client transition                  | same row, `lastClient` confirm       | `src/session/forget.ts`                   | `/clientAnnex`         | re-run; the record re-mint refusal is a retryable stop            |
-| Update-key rotation                     | Settings                             | `src/session/accountSettings.ts`          | `/webvh`               | re-run (persist-before-publish)                                   |
-| Account deletion                        | Settings                             | `src/session/accountSettings.ts` + `wipe.ts` | app-side phase order | re-run; a wipe failure after the unlock-method walk is accepted   |
-| Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies | `src/session/wipe.ts`               | app-side               | re-probe verification; the `unverified` report                    |
-| Step-up ceremony                        | designed, not built                  | --                                        | --                     | --                                                                |
+| Ceremony                                | Entry point                                   | Module                                       | Shared half                 | Mender                                                                                                       |
+| --------------------------------------- | --------------------------------------------- | -------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Account genesis (durable)               | signup; healed at every login                 | `src/session/signup.ts`                      | `/genesis`                  | re-run (every stage an ensure)                                                                               |
+| Credential-anchored genesis             | default signup, non-remembered browser        | `src/session/credentialAnchoredGenesis.ts`   | `/clientAnnex`              | re-run; the transient login's heal branch re-runs it                                                         |
+| Self-enrollment at login                | durable login on a fresh browser              | login path in `src/session/initSession.ts`   | `/clientAnnex`              | re-run; a phantom client is removed via Disconnect                                                           |
+| Client enrollment (two-party)           | Settings > Connected wallets + login page     | `src/components/EnrolledClientsSection.tsx`  | `/enrollment`               | re-run with the same connect code                                                                            |
+| Client revocation + epoch cascade       | Settings > Connected wallets                  | `src/session/revocation.ts`                  | `/clients`                  | re-run; cascade-completion sweep                                                                             |
+| Recovery-code issuance                  | Settings > Recovery codes                     | `src/session/recovery.ts`                    | `/recovery`                 | re-run (nothing binds until the confirm)                                                                     |
+| Recovery spend (durable and transient)  | `/recover`                                    | `src/session/recovery.ts`                    | `/recovery`, `/clientAnnex` | re-run; the transient variant's roster-append repair is not built yet                                        |
+| Recovery-code revocation                | Settings > Recovery codes                     | `src/session/recovery.ts`                    | `/recovery`                 | re-run; cascade-completion sweep                                                                             |
+| Unlock-credential rotation              | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts`          | `/unlock`                   | torn-retirement repair at the next passphrase login; login sweep; re-seal repair for a torn registry re-seal |
+| Forget ceremony                         | Settings > Connected wallets, own row         | `src/session/forget.ts`                      | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next login                                             |
+| Last-client transition                  | same row, `lastClient` confirm                | `src/session/forget.ts`                      | `/clientAnnex`              | re-run; the record re-mint refusal is a retryable stop; refused outright on a pending passphrase entry       |
+| Update-key rotation                     | Settings                                      | `src/session/accountSettings.ts`             | `/webvh`                    | re-run (persist-before-publish)                                                                              |
+| Account deletion                        | Settings                                      | `src/session/accountSettings.ts` + `wipe.ts` | app-side phase order        | re-run; a wipe failure after the unlock-method walk is accepted                                              |
+| Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies    | `src/session/wipe.ts`                        | app-side                    | re-probe verification; the `unverified` report                                                               |
+| Step-up ceremony                        | designed, not built                           | --                                           | --                          | --                                                                                                           |
 
 The honest ledger of unbuilt menders, both on client-less accounts (where
 no login sweep will ever run): the transient recovery's roster-append

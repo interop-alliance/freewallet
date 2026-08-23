@@ -69,6 +69,16 @@ const {
   mintDelegatedClientsDelegation
 } = await import('@interop/wallet-core/clientAnnex')
 
+vi.mock('@interop/wallet-core/keyring', async importOriginal => {
+  const actual = await importOriginal<object>()
+  return {
+    ...actual,
+    getUnlockKeyringWithCapability: vi.fn()
+  }
+})
+const { getUnlockKeyringWithCapability } =
+  await import('@interop/wallet-core/keyring')
+
 vi.mock('@interop/wallet-core/keys', async importOriginal => {
   const actual = await importOriginal<object>()
   return {
@@ -708,6 +718,196 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       registryUnread: true
     })
     expect(outcome.wipeFailed).toEqual(['unlock-methods-registry'])
+  })
+
+  /**
+   * A stored unlock record shaped as the frame parser reads it: version 2, a
+   * fixed-shape proof, and a one-epoch descriptor whose only recipient is the
+   * named key-agreement key.
+   *
+   * @param options {object}
+   * @param options.keyAgreementKeyMultibase {string}   the sealing recipient
+   * @returns {object}
+   */
+  function sealedRecord({
+    keyAgreementKeyMultibase
+  }: {
+    keyAgreementKeyMultibase: string
+  }) {
+    return {
+      version: 2,
+      encryption: {
+        scheme: 'edv',
+        currentEpoch: 'epoch-0',
+        epochs: [
+          {
+            id: 'epoch-0',
+            recipients: [
+              {
+                header: {
+                  kid: `did:key:zUnlock#${keyAgreementKeyMultibase}`,
+                  alg: 'ECDH-ES+A256KW'
+                },
+                encrypted_key: 'ZW5jcnlwdGVk'
+              }
+            ]
+          }
+        ]
+      },
+      wrapped: { jwe: true },
+      proof: {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        proofPurpose: 'assertionMethod',
+        verificationMethod: 'did:key:zUnlock#zUnlock',
+        proofValue: 'zProof'
+      }
+    }
+  }
+
+  it('refuses the transition on a pending-shaped passphrase entry', async () => {
+    const { session } = fakeSession()
+    // The entry's Space and management zcap are the new credential's; its
+    // identity members are the old one's, so the record served there is
+    // sealed to a key the entry does not name.
+    vi.mocked(getUnlockMethods).mockResolvedValue({
+      methods: [
+        {
+          type: 'passphrase',
+          unlockSpaceId: 'unlock-new',
+          manageCapability: { id: 'urn:zcap:manage' },
+          unlockKeyAgreementKeyMultibase: 'zOldUnlockKak'
+        }
+      ]
+    } as never)
+    vi.mocked(getUnlockKeyringWithCapability).mockResolvedValue(
+      sealedRecord({ keyAgreementKeyMultibase: 'zNewUnlockKak' }) as never
+    )
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(
+      forgetThisBrowser({ session, lastClient: true })
+    ).rejects.toMatchObject({ name: 'PendingRetirementForgetError' })
+    warn.mockRestore()
+    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
+  })
+
+  it('runs the transition when the entry names the credential its record is sealed to', async () => {
+    const { session } = fakeSession()
+    vi.mocked(getUnlockMethods).mockResolvedValue({
+      methods: [
+        {
+          type: 'passphrase',
+          unlockSpaceId: 'unlock-1',
+          manageCapability: { id: 'urn:zcap:manage' },
+          unlockKeyAgreementKeyMultibase: 'zUnlockKak'
+        }
+      ]
+    } as never)
+    vi.mocked(getUnlockKeyringWithCapability).mockResolvedValue(
+      sealedRecord({ keyAgreementKeyMultibase: 'zUnlockKak' }) as never
+    )
+    await forgetThisBrowser({ session, lastClient: true })
+    expect(vi.mocked(forgetLastDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledTimes(1)
+  })
+
+  it('runs the transition for an old passphrase entry whose record still matches it', async () => {
+    // The direction the session-derived comparison would get wrong: an OLD
+    // passphrase logging in after a change completed elsewhere sees an entry
+    // naming another credential, on a perfectly healthy account. The record
+    // at the entry's Space is sealed to the credential the entry names, so
+    // the transition proceeds.
+    const { session } = fakeSession()
+    ;(
+      session.profile as unknown as { unlockMethod: { type: string } }
+    ).unlockMethod = { type: 'passphrase' }
+    ;(
+      session.profile.standingUnlock!.standingClient as unknown as {
+        keyAgreementKeyMultibase: string
+      }
+    ).keyAgreementKeyMultibase = 'zOldStandingKak'
+    vi.mocked(getUnlockMethods).mockResolvedValue({
+      methods: [
+        {
+          type: 'passphrase',
+          unlockSpaceId: 'unlock-new',
+          manageCapability: { id: 'urn:zcap:manage' },
+          keyAgreementKeyMultibase: 'zNewStandingKak',
+          unlockKeyAgreementKeyMultibase: 'zNewUnlockKak'
+        }
+      ]
+    } as never)
+    vi.mocked(getUnlockKeyringWithCapability).mockResolvedValue(
+      sealedRecord({ keyAgreementKeyMultibase: 'zNewUnlockKak' }) as never
+    )
+    await forgetThisBrowser({ session, lastClient: true })
+    expect(vi.mocked(forgetLastDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses the transition when the fetched record is malformed', async () => {
+    const { session } = fakeSession()
+    vi.mocked(getUnlockMethods).mockResolvedValue({
+      methods: [
+        {
+          type: 'passphrase',
+          unlockSpaceId: 'unlock-1',
+          manageCapability: { id: 'urn:zcap:manage' },
+          unlockKeyAgreementKeyMultibase: 'zUnlockKak'
+        }
+      ]
+    } as never)
+    // A record whose descriptor lists no epochs: unusable, not "sealed to
+    // someone else", so it refuses as could-not-settle rather than as a
+    // pending entry.
+    const record = sealedRecord({ keyAgreementKeyMultibase: 'zUnlockKak' })
+    record.encryption.epochs = []
+    vi.mocked(getUnlockKeyringWithCapability).mockResolvedValue(record as never)
+    await expect(
+      forgetThisBrowser({ session, lastClient: true })
+    ).rejects.toThrow(/sign-in record/)
+    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
+  })
+
+  it('refuses the transition when the record behind an entry cannot be read', async () => {
+    const { session } = fakeSession()
+    vi.mocked(getUnlockMethods).mockResolvedValue({
+      methods: [
+        {
+          type: 'passphrase',
+          unlockSpaceId: 'unlock-1',
+          manageCapability: { id: 'urn:zcap:manage' },
+          unlockKeyAgreementKeyMultibase: 'zUnlockKak'
+        }
+      ]
+    } as never)
+    vi.mocked(getUnlockKeyringWithCapability).mockRejectedValue(
+      new Error('503')
+    )
+    await expect(
+      forgetThisBrowser({ session, lastClient: true })
+    ).rejects.toThrow(/sign-in record/)
+    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
+  })
+
+  it('settles no records for the ordinary forget', async () => {
+    const { session } = fakeSession()
+    vi.mocked(getUnlockMethods).mockResolvedValue({
+      methods: [
+        {
+          type: 'passphrase',
+          unlockSpaceId: 'unlock-new',
+          manageCapability: { id: 'urn:zcap:manage' },
+          unlockKeyAgreementKeyMultibase: 'zOldUnlockKak'
+        }
+      ]
+    } as never)
+    await forgetThisBrowser({ session })
+    expect(vi.mocked(getUnlockKeyringWithCapability)).not.toHaveBeenCalled()
+    expect(vi.mocked(forgetDurableClient)).toHaveBeenCalledTimes(1)
   })
 
   it('refuses the transition up front when the registry cannot be read', async () => {

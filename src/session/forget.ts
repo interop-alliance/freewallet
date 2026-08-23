@@ -33,7 +33,12 @@
  *   The transition's own name-stable refusal, `RecordRemintFailedError`
  *   (another sign-in method's record could not be re-sealed, so the
  *   removal entry was withheld), propagates before the wipe: this browser
- *   is still connected, and a re-run resumes at the re-mint.
+ *   is still connected, and a re-run resumes at the re-mint. Before any of
+ *   it runs, the transition refuses on a pending-shaped passphrase registry
+ *   entry (`PendingRetirementForgetError`): a passphrase change torn before
+ *   its retirement landed is mended only by the torn-retirement repair,
+ *   which needs a durable enrolled login -- the very thing this ceremony
+ *   ends forever.
  *
  * - **The no-unlock-material grade** (`forgetBrowserWalletData`, run from
  *   the login page's refusal states): nothing can be derived or signed, so
@@ -76,6 +81,8 @@ import type {
   LastDurableClientForgetResult
 } from '@interop/wallet-core/clientAnnex'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { getUnlockKeyringWithCapability } from '@interop/wallet-core/keyring'
+import { unlockRecordSealedTo } from '@interop/wallet-core/unlock'
 import {
   userKeyRosterDescriptorStore,
   userKeyRosterLogSigner
@@ -117,7 +124,8 @@ import { unlockLogStore } from '@/session/standingUnlock'
 import {
   getUnlockMethods,
   managementZcapClient,
-  refreshStandingDelegationFields
+  refreshStandingDelegationFields,
+  type PassphraseUnlockMethod
 } from '@/session/unlockMethods'
 import { pointedClientAnnexReach } from '@/session/annexReach'
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
@@ -159,6 +167,28 @@ export class BrowserForgottenError extends Error {
 }
 
 /**
+ * Thrown by the last-client transition when the unlock-methods registry
+ * carries a pending-shaped passphrase entry: the entry's unlock Space and
+ * management zcap name one credential while its identity members name
+ * another, the state a passphrase change torn before its retirement leaves.
+ * The transition is refused because it would destroy that state's only
+ * mender -- the torn-retirement repair runs from a durable enrolled login,
+ * which the transition ends forever, leaving the half-retired credential
+ * standing and decryptable with nothing left to finish the change. Matched
+ * on `name` by the settings surface.
+ */
+export class PendingRetirementForgetError extends Error {
+  constructor() {
+    super(
+      'This browser cannot be forgotten yet: a passphrase change on this ' +
+        'account did not finish, and this browser is the only one that can ' +
+        'finish it.'
+    )
+    this.name = 'PendingRetirementForgetError'
+  }
+}
+
+/**
  * What a completed forget reports: which ceremony ran (`lastClient: false`
  * is the ordinary forget, `true` the last-client transition) with that
  * ceremony's own result, plus the local wipe's failed-stage names and the
@@ -195,7 +225,9 @@ export type ForgetOutcome = ForgetCeremonyOutcome & {
  * local wipe never runs on a refusal, so the browser stays connected and
  * the next run resumes).
  *
- * Refusals before anything runs: a transient session (`StepUpRequiredError`
+ * Refusals before anything runs: a pending-shaped passphrase registry entry
+ * on the transition (`PendingRetirementForgetError`), a transient session
+ * (`StepUpRequiredError`
  * via the shared ceremony gate) and a session whose login did not carry the
  * credential's standing members (the bridge delegation and ladder seed; the
  * transition additionally needs the hit's record re-bind closure, since a
@@ -293,6 +325,14 @@ export async function forgetThisBrowser({
         : []
     )
   ]
+
+  // The transition's pending-retirement guard, before anything is written:
+  // a passphrase change torn before its retirement landed leaves a registry
+  // entry only a durable enrolled login can finish, and this ceremony ends
+  // durable logins on this account forever.
+  if (lastClient) {
+    await assertNoPendingPassphraseEntry({ session, pointer, registry })
+  }
 
   // The annex Space id, for the wipe's pin-slot enumeration. Best-effort.
   let clientAnnexSpaceId: string | undefined
@@ -959,4 +999,78 @@ function derivableReplicaPrefixes(): Set<string> {
     }
   }
   return prefixes
+}
+
+/**
+ * Refuses the last-client transition on a pending-shaped passphrase entry
+ * ({@link PendingRetirementForgetError}): the unlock record served at the
+ * entry's `unlockSpaceId` is sealed to a credential other than the one the
+ * entry's identity members name (wallet-core's `unlockRecordSealedTo`), the
+ * residue of a passphrase change torn before its retirement landed.
+ *
+ * The record IS the detector, deliberately, rather than the session-derived
+ * comparison the torn-retirement repair opens with: that comparison needs
+ * the repair's direction guard (an entry naming another credential is also
+ * what an OLD passphrase sees, logging in after a change that completed
+ * elsewhere, on a perfectly healthy account), and the record settles the
+ * question outright for a passkey login too.
+ *
+ * An entry carrying no management zcap or no unlock key-agreement multibase
+ * is unsettleable either way and passes: it is a bare entry, not a pending
+ * one. A record that cannot be read, parsed, or read for its recipients
+ * refuses too, with the registry-read refusal's reasoning -- the transition
+ * must not run over an entry it could not settle.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.pointer {AccountPointer}
+ * @param options.registry {UnlockMethodsRecord | null}
+ * @returns {Promise<void>}
+ */
+async function assertNoPendingPassphraseEntry({
+  session,
+  pointer,
+  registry
+}: {
+  session: Session
+  pointer: Parameters<typeof delegateLogWrite>[0]['pointer']
+  registry: { methods?: unknown[] } | null
+}): Promise<void> {
+  const entries = (
+    (registry?.methods ?? []) as PassphraseUnlockMethod[]
+  ).filter(method => method.type === 'passphrase')
+  for (const entry of entries) {
+    if (!entry.manageCapability || !entry.unlockKeyAgreementKeyMultibase) {
+      continue
+    }
+    let sealedToEntry: boolean
+    try {
+      const record = await getUnlockKeyringWithCapability({
+        storageServerUrl: WAS_SERVER_URL ?? pointer.host,
+        zcapClient: managementZcapClient({
+          session,
+          capability: entry.manageCapability
+        }),
+        spaceId: entry.unlockSpaceId,
+        capability: entry.manageCapability
+      })
+      // Inside the same try: a malformed frame or a degenerate descriptor
+      // is a record this ceremony could not settle, not a pending entry and
+      // not a generic ceremony failure.
+      sealedToEntry = unlockRecordSealedTo({
+        record,
+        keyAgreementKeyMultibase: entry.unlockKeyAgreementKeyMultibase
+      })
+    } catch (err) {
+      throw new Error(
+        'Could not read the sign-in record the unlock-methods registry ' +
+          'names, which the last-client forget must settle before it runs; ' +
+          'try again.',
+        { cause: err }
+      )
+    }
+    if (!sealedToEntry) {
+      throw new PendingRetirementForgetError()
+    }
+  }
 }

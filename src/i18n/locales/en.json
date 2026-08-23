@@ -182,6 +182,7 @@
       "lastClientConsequence": "Nothing is lost. Any browser can still open the account with the passphrase or passkey you used here -- as a public-computer session that leaves nothing behind, or remembered as a connected browser again. Recovery codes and other sign-in methods keep working; their records are re-sealed before this browser is removed.",
       "lastClientProgress": "Forgetting this browser -- re-keying the account, re-anchoring it on your sign-in credentials, and writing the removal. Keep this tab open.",
       "recordsUnreachable": "Forgetting this browser stopped before the removal: the sign-in records for {{methods}} could not be updated, and this is the last browser that can update them. Nothing was lost and this browser is still connected -- try again; it picks up where it stopped.",
+      "pendingRetirement": "This browser cannot be forgotten yet: a passphrase change on this account did not finish, and this browser is the only one that can finish it. Log in again with the current passphrase to complete the change, then try again.",
       "lastClientNow": "This browser is now the only one connected to the account, so forgetting it is the transition described above. Confirm again to continue.",
       "failed": "Forgetting this browser did not finish. Nothing was lost -- try again; it picks up where it stopped."
     },

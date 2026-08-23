@@ -236,6 +236,10 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
    * (confirmed against its own copy); a listing that turned out stale -- the
    * ordinary ceremony's name-stable refusal -- flips the dialog to the
    * transition copy for a second confirm rather than running it unconfirmed.
+   * The transition also refuses up front, name-stably
+   * (`PendingRetirementForgetError`), when a passphrase change on the
+   * account was torn before its retirement landed: only a durable login can
+   * finish that change, and the transition ends durable logins forever.
    * The transition's other name-stable refusal, `RecordRemintFailedError`,
    * is a retryable stop, not a failure: another sign-in method's record
    * could not be re-sealed, so the removal entry was withheld and this
@@ -292,6 +296,9 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       if (name === 'LastDurableClientForgetError') {
         setForgetLastClient(true)
         setForgetErrorKey('settings.forget.lastClientNow')
+      } else if (name === 'PendingRetirementForgetError') {
+        console.warn('The last-client forget refused a pending change:', err)
+        setForgetErrorKey('settings.forget.pendingRetirement')
       } else if (name === 'RecordRemintFailedError') {
         console.warn('The last-client forget withheld the removal:', err)
         const failed = (err as { failed?: Array<{ label: string }> }).failed

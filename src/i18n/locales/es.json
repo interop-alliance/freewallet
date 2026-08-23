@@ -182,6 +182,7 @@
       "lastClientConsequence": "No se pierde nada. Cualquier navegador puede seguir abriendo la cuenta con la frase de contraseña o la llave de acceso que usó aquí: como sesión de computadora pública que no deja rastro, o recordado de nuevo como navegador conectado. Los códigos de recuperación y otros métodos de acceso siguen funcionando; sus registros se vuelven a sellar antes de eliminar este navegador.",
       "lastClientProgress": "Olvidando este navegador: recifrando la cuenta, volviendo a anclarla a sus credenciales de acceso y registrando la eliminación. Mantenga esta pestaña abierta.",
       "recordsUnreachable": "Olvidar este navegador se detuvo antes de la eliminación: los registros de acceso de {{methods}} no se pudieron actualizar, y este es el último navegador que puede actualizarlos. No se perdió nada y este navegador sigue conectado: inténtelo de nuevo; continúa donde se detuvo.",
+      "pendingRetirement": "Este navegador todavía no se puede olvidar: un cambio de contraseña en esta cuenta no terminó, y este navegador es el único que puede terminarlo. Vuelva a iniciar sesión con la contraseña actual para completar el cambio y luego inténtelo de nuevo.",
       "lastClientNow": "Este navegador es ahora el único conectado a la cuenta, así que olvidarlo es la transición descrita arriba. Confirme de nuevo para continuar.",
       "failed": "Olvidar este navegador no terminó. No se perdió nada: inténtelo de nuevo; continúa donde se detuvo."
     },

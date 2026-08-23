@@ -29,6 +29,19 @@
 
 ### Fixed
 
+- The last-client transition refuses up front on a pending-shaped passphrase
+  registry entry -- one whose recorded unlock key-agreement key does not
+  match the credential the record at its unlock Space is sealed to, the
+  state a passphrase change torn before its retirement leaves. Only a
+  durable enrolled login can finish that change, and the transition ends
+  durable logins on the account forever, so it stops with the name-stable
+  `PendingRetirementForgetError` before any write (en + es copy on the
+  transition dialog). A record the check cannot read refuses the same way.
+  With wallet-core's matching skip, the re-mint passes now leave such an
+  entry alone instead of sealing the old credential a fresh bridge into the
+  new credential's record, and the transition's own re-mint stage treats
+  that skip as blocking -- so an entry the up-front check does not cover (a
+  passkey or recovery-code entry) still withholds the removal entry.
 - The Settings registry writes are read-first. `addAccountPasskey`,
   `addAccountPassphrase`, and `renameAccountPasskey` re-read the
   unlock-methods registry immediately before their PUT and merge the change
