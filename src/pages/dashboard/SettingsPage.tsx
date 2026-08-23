@@ -358,7 +358,6 @@ export function SettingsPage() {
     try {
       const updated = await renameAccountPasskey({
         session,
-        registry: unlockRegistry,
         entry,
         label: trimmed
       })
@@ -433,7 +432,6 @@ export function SettingsPage() {
     try {
       const updated = await addAccountPassphrase({
         session,
-        registry: unlockRegistry,
         passphrase: addPassphrase
       })
       setUnlockRegistry(updated)

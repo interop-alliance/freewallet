@@ -7,6 +7,7 @@
  * seam is mocked; only the ordering is under test.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { base64urlnopad } from '@scure/base'
 
 const state = vi.hoisted(() => ({
   calls: [] as string[],
@@ -38,8 +39,37 @@ const state = vi.hoisted(() => ({
   oldKeyAgreementKeyMultibase: 'z6LSOldPassphraseKak',
   // Whether a failing retirement fires `onInventoryRemoved` first (its document
   // edit landed and it died afterwards) or not (it failed at the edit).
-  inventoryRemovedBeforeFailure: false
+  inventoryRemovedBeforeFailure: false,
+  // Every record handed to `putUnlockMethods`, newest last -- what the
+  // read-first merge is asserted on.
+  puts: [] as UnlockRecord[],
+  // The unlock Space the standing establishment reports for the passphrase
+  // and passkey add ceremonies.
+  boundUnlockSpaceId: 'space-bound',
+  // The passkey entry `enrollPasskey` hands back, and the options it was
+  // called with.
+  passkeyCredentialId: 'Y3JlZC1uZXc',
+  enrollPasskeyOptions: null as {
+    userHandle?: Uint8Array
+    excludeCredentialIds?: Uint8Array[]
+  } | null
 }))
+
+/**
+ * The registry shape the assertions below read -- the stored record's own
+ * members, without importing the module under mock.
+ */
+interface UnlockRecord {
+  version: 1
+  userHandle: string
+  methods: {
+    type: string
+    unlockSpaceId?: string
+    credentialId?: string
+    label?: string
+    [key: string]: unknown
+  }[]
+}
 
 const FRESH_USER_KEY = { id: 'did:key:z6LSFreshUserKey' }
 const NEW_LADDER_SEED = new Uint8Array(32).fill(7)
@@ -100,7 +130,7 @@ vi.mock('@/session/standingUnlock', () => ({
     }
   ),
   establishStandingUnlock: vi.fn(async () => ({
-    unlockSpaceId: 'space-bound',
+    unlockSpaceId: state.boundUnlockSpaceId,
     standingFields: {}
   }))
 }))
@@ -148,58 +178,89 @@ vi.mock('@/session/keyring', () => ({
   unlockManagementGrantee: vi.fn(() => 'did:key:grantee')
 }))
 
-vi.mock('@/session/unlockMethods', () => ({
-  adoptPassphraseRebind: vi.fn(() => {
-    state.calls.push('adoptPassphraseRebind')
-  }),
-  backfillPassphraseUnlockMethod: vi.fn(async () => null),
-  canRevokeWithoutCeremony: vi.fn(() => true),
-  emptyUnlockMethodsRegistry: vi.fn(() => ({
-    version: 1,
-    userHandle: 'handle',
-    methods: []
-  })),
-  enrollPasskey: vi.fn(async () => ({ entry: {}, registration: {} })),
-  deleteUnlockMethodArtifacts: vi.fn(
-    async ({ entry }: { entry: { type: string } }) => {
-      state.calls.push(`deleteUnlockMethodArtifacts:${entry.type}`)
-      if (state.artifactFailures.includes(entry.type)) {
-        throw new Error(`could not delete the ${entry.type} artifacts`)
+vi.mock('@/session/unlockMethods', async importOriginal => {
+  const actual =
+    await importOriginal<typeof import('@/session/unlockMethods')>()
+  return {
+    // The merge helpers are pure and are exactly what the read-first writes
+    // are built on, so the real ones run here; only the durable seams are
+    // faked. The passphrase upsert stays a spy over the real implementation,
+    // since tests assert what the ceremonies hand it.
+    ...actual,
+    upsertPassphraseUnlockMethod: vi.fn(actual.upsertPassphraseUnlockMethod),
+    adoptPassphraseRebind: vi.fn(() => {
+      state.calls.push('adoptPassphraseRebind')
+    }),
+    backfillPassphraseUnlockMethod: vi.fn(async () => null),
+    canRevokeWithoutCeremony: vi.fn(() => true),
+    emptyUnlockMethodsRegistry: vi.fn(() => ({
+      version: 1,
+      userHandle: 'handle',
+      methods: []
+    })),
+    enrollPasskey: vi.fn(
+      async (options: {
+        userHandle?: Uint8Array
+        excludeCredentialIds?: Uint8Array[]
+      }) => {
+        state.calls.push('enrollPasskey')
+        state.enrollPasskeyOptions = options
+        return {
+          registration: { prfOutput: new Uint8Array(32) },
+          entry: {
+            type: 'passkey',
+            label: 'Passkey',
+            createdAt: '2026-08-20T00:00:00.000Z',
+            credentialId: state.passkeyCredentialId,
+            transports: ['internal'],
+            backupEligibility: true,
+            backupState: true,
+            unlockSpaceId: state.boundUnlockSpaceId
+          }
+        }
       }
-    }
-  ),
-  getUnlockMethods: vi.fn(async () => {
-    if (state.registryFails) {
-      throw new Error('registry unreadable')
-    }
-    return state.registry
-  }),
-  putUnlockMethods: vi.fn(async () => {
-    state.calls.push('putUnlockMethods')
-  }),
-  refreshStandingDelegationFields: vi.fn(async () => {}),
-  revokeUnlockMethod: vi.fn(async () => {
-    state.calls.push('revokeUnlockMethod')
-    return state.rotation === 'rotated'
-      ? {
-          rotated: true,
-          collections: { outcomes: {}, failed: [] },
-          userKey: FRESH_USER_KEY
+    ),
+    deleteUnlockMethodArtifacts: vi.fn(
+      async ({ entry }: { entry: { type: string } }) => {
+        state.calls.push(`deleteUnlockMethodArtifacts:${entry.type}`)
+        if (state.artifactFailures.includes(entry.type)) {
+          throw new Error(`could not delete the ${entry.type} artifacts`)
         }
-      : null
-  }),
-  revokeUnlockMethodByCeremony: vi.fn(async () => {
-    state.calls.push('revokeUnlockMethodByCeremony')
-    return state.rotation === 'rotated'
-      ? {
-          rotated: true,
-          collections: { outcomes: {}, failed: [] },
-          userKey: FRESH_USER_KEY
-        }
-      : null
-  }),
-  upsertPassphraseUnlockMethod: vi.fn(({ record }) => record)
-}))
+      }
+    ),
+    getUnlockMethods: vi.fn(async () => {
+      if (state.registryFails) {
+        throw new Error('registry unreadable')
+      }
+      return state.registry
+    }),
+    putUnlockMethods: vi.fn(async ({ record }: { record: UnlockRecord }) => {
+      state.calls.push('putUnlockMethods')
+      state.puts.push(record)
+    }),
+    refreshStandingDelegationFields: vi.fn(async () => {}),
+    revokeUnlockMethod: vi.fn(async () => {
+      state.calls.push('revokeUnlockMethod')
+      return state.rotation === 'rotated'
+        ? {
+            rotated: true,
+            collections: { outcomes: {}, failed: [] },
+            userKey: FRESH_USER_KEY
+          }
+        : null
+    }),
+    revokeUnlockMethodByCeremony: vi.fn(async () => {
+      state.calls.push('revokeUnlockMethodByCeremony')
+      return state.rotation === 'rotated'
+        ? {
+            rotated: true,
+            collections: { outcomes: {}, failed: [] },
+            userKey: FRESH_USER_KEY
+          }
+        : null
+    })
+  }
+})
 
 vi.mock('@/lib/sessionKey', () => ({
   deletePasskeySafetyNotice: vi.fn(async () => {
@@ -306,9 +367,12 @@ vi.mock('@/session/wipe', () => ({
 }))
 
 const {
+  addAccountPasskey,
+  addAccountPassphrase,
   changeAccountPassphrase,
   deleteAccount,
   removeAccountPasskey,
+  renameAccountPasskey,
   PendingPassphraseRetirementError,
   SamePassphraseError
 } = await import('@/session/accountSettings')
@@ -322,6 +386,7 @@ const {
 } = await import('@/session/unlockMethods')
 const {
   deleteUnlockMethodArtifacts,
+  enrollPasskey,
   getUnlockMethods,
   putUnlockMethods,
   upsertPassphraseUnlockMethod
@@ -420,7 +485,13 @@ function makeSession() {
     user: { id: 'did:key:zClient' },
     isGuest: false,
     profile: {
-      persistence: durableSessionPersistence(),
+      persistence: {
+        ...durableSessionPersistence(),
+        // The add ceremonies clear the passkey-only safety notice; the store
+        // itself reaches IndexedDB, which this node-environment suite has
+        // none of.
+        passkeyNotices: { delete: vi.fn(async () => {}) }
+      },
       clientSeed: new Uint8Array(32),
       accountController: 'did:key:zAccount',
       accountPointer: {
@@ -459,6 +530,10 @@ beforeEach(() => {
   state.newKeyAgreementKeyMultibase = 'z6LSNewPassphraseKak'
   state.oldKeyAgreementKeyMultibase = 'z6LSOldPassphraseKak'
   state.inventoryRemovedBeforeFailure = false
+  state.puts = []
+  state.boundUnlockSpaceId = 'space-bound'
+  state.passkeyCredentialId = 'Y3JlZC1uZXc'
+  state.enrollPasskeyOptions = null
   vi.clearAllMocks()
 })
 
@@ -1054,5 +1129,264 @@ describe('removeAccountPasskey', () => {
       removeAccountPasskey({ session: makeSession(), entry: ENTRY })
     ).rejects.toThrow('down')
     expect(vi.mocked(adoptRotatedUserKey)).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * A registry the page never saw: the passphrase entry it loaded plus a
+ * recovery-code entry written afterwards by another client. The read-first
+ * merge must carry the second one forward.
+ *
+ * @returns {UnlockRecord}
+ */
+function registryWithConcurrentEntry(): UnlockRecord {
+  return {
+    version: 1,
+    userHandle: 'FRESHHANDLEFRESHHANDLE',
+    methods: [
+      {
+        type: 'passphrase',
+        createdAt: '2026-08-01T00:00:00.000Z',
+        unlockSpaceId: 'unlock-space-passphrase'
+      },
+      {
+        type: 'recovery-code',
+        label: 'Recovery code',
+        createdAt: '2026-08-20T00:00:00.000Z',
+        unlockSpaceId: 'unlock-space-recovery',
+        recoveryKid: 'did:key:zRecovery#z6LSRecoveryKak',
+        keyAgreementKeyMultibase: 'z6LSRecoveryKak',
+        updateKeyMultibase: 'z6MkRecoveryUpdateKey'
+      }
+    ]
+  }
+}
+
+/**
+ * The record the page loaded at mount: the passphrase entry alone, under an
+ * older user handle.
+ *
+ * @returns {UnlockRecord}
+ */
+function pageHeldRegistry(): UnlockRecord {
+  return {
+    version: 1,
+    userHandle: 'PAGEHANDLEPAGEHANDLEAA',
+    methods: [
+      {
+        type: 'passphrase',
+        createdAt: '2026-08-01T00:00:00.000Z',
+        unlockSpaceId: 'unlock-space-passphrase'
+      }
+    ]
+  }
+}
+
+/**
+ * The newest record handed to `putUnlockMethods`.
+ *
+ * @returns {UnlockRecord}
+ */
+function lastPut(): UnlockRecord {
+  return state.puts[state.puts.length - 1]
+}
+
+describe('addAccountPasskey', () => {
+  it('merges the new passkey into a fresh read, keeping a concurrent entry', async () => {
+    state.registry = registryWithConcurrentEntry()
+    const { recorded } = await addAccountPasskey({
+      session: makeSession(),
+      registry: pageHeldRegistry() as never,
+      locale: 'en',
+      userName: 'user@example.test',
+      promptForPrfRetry: async () => false
+    })
+    expect(recorded).toBe(true)
+    const record = lastPut()
+    expect(record.methods.map(method => method.type)).toEqual([
+      'passphrase',
+      'recovery-code',
+      'passkey'
+    ])
+    // The stored record is the source of truth, handle included.
+    expect(record.userHandle).toBe('FRESHHANDLEFRESHHANDLE')
+    expect(vi.mocked(getUnlockMethods)).toHaveBeenCalled()
+  })
+
+  it('registers under the page-held handle and excludes its passkeys', async () => {
+    const held = pageHeldRegistry()
+    held.methods.push({
+      type: 'passkey',
+      label: 'Old passkey',
+      createdAt: '2026-08-02T00:00:00.000Z',
+      credentialId: 'Y3JlZC1vbGQ',
+      transports: ['internal'],
+      backupEligibility: true,
+      backupState: true,
+      unlockSpaceId: 'unlock-space-old-passkey'
+    })
+    state.registry = registryWithConcurrentEntry()
+    await addAccountPasskey({
+      session: makeSession(),
+      registry: held as never,
+      locale: 'en',
+      userName: 'user@example.test',
+      promptForPrfRetry: async () => false
+    })
+    expect(vi.mocked(enrollPasskey)).toHaveBeenCalledOnce()
+    const options = state.enrollPasskeyOptions!
+    expect(options.userHandle).toEqual(
+      base64urlnopad.decode('PAGEHANDLEPAGEHANDLEAA')
+    )
+    expect(options.excludeCredentialIds).toEqual([
+      base64urlnopad.decode('Y3JlZC1vbGQ')
+    ])
+  })
+
+  it('persists the handle the passkey registered under when nothing is stored yet', async () => {
+    state.registry = null
+    await addAccountPasskey({
+      session: makeSession(),
+      registry: pageHeldRegistry() as never,
+      locale: 'en',
+      userName: 'user@example.test',
+      promptForPrfRetry: async () => false
+    })
+    expect(lastPut().userHandle).toBe('PAGEHANDLEPAGEHANDLEAA')
+  })
+})
+
+describe('addAccountPassphrase', () => {
+  it('merges the passphrase entry into a fresh read, keeping a concurrent entry', async () => {
+    state.registry = registryWithConcurrentEntry()
+    state.boundUnlockSpaceId = 'unlock-space-new-passphrase'
+    await addAccountPassphrase({
+      session: makeSession(),
+      passphrase: 'correct horse battery staple'
+    })
+    const record = lastPut()
+    expect(record.methods.some(method => method.type === 'recovery-code')).toBe(
+      true
+    )
+    const passphrases = record.methods.filter(
+      method => method.type === 'passphrase'
+    )
+    expect(passphrases).toHaveLength(1)
+    expect(passphrases[0].unlockSpaceId).toBe('unlock-space-new-passphrase')
+  })
+
+  it('upserts rather than appends, so two runs leave one passphrase entry', async () => {
+    state.registry = null
+    state.boundUnlockSpaceId = 'unlock-space-first'
+    await addAccountPassphrase({
+      session: makeSession(),
+      passphrase: 'first passphrase'
+    })
+    // The second run reads back what the first one wrote.
+    state.registry = lastPut()
+    state.boundUnlockSpaceId = 'unlock-space-second'
+    await addAccountPassphrase({
+      session: makeSession(),
+      passphrase: 'second passphrase'
+    })
+    const passphrases = lastPut().methods.filter(
+      method => method.type === 'passphrase'
+    )
+    expect(passphrases).toHaveLength(1)
+    expect(passphrases[0].unlockSpaceId).toBe('unlock-space-second')
+  })
+})
+
+describe('renameAccountPasskey', () => {
+  const ENTRY = {
+    type: 'passkey',
+    label: 'Passkey',
+    createdAt: '2026-08-02T00:00:00.000Z',
+    credentialId: 'Y3JlZC1vbGQ',
+    transports: ['internal'],
+    backupEligibility: true,
+    backupState: true,
+    unlockSpaceId: 'unlock-space-old-passkey'
+  }
+
+  it('maps the label onto a fresh read, keeping a concurrent entry', async () => {
+    const fresh = registryWithConcurrentEntry()
+    fresh.methods.push({ ...ENTRY })
+    state.registry = fresh
+    const record = await renameAccountPasskey({
+      session: makeSession(),
+      entry: ENTRY as never,
+      label: 'Yubikey'
+    })
+    expect(record.methods.some(method => method.type === 'recovery-code')).toBe(
+      true
+    )
+    expect(
+      record.methods.find(method => method.credentialId === 'Y3JlZC1vbGQ')
+        ?.label
+    ).toBe('Yubikey')
+    expect(lastPut()).toEqual(record)
+  })
+
+  it('writes nothing when the fresh read no longer lists the passkey', async () => {
+    state.registry = registryWithConcurrentEntry()
+    const record = await renameAccountPasskey({
+      session: makeSession(),
+      entry: ENTRY as never,
+      label: 'Yubikey'
+    })
+    expect(record).toEqual(state.registry)
+    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+  })
+
+  it('refuses when no registry has been written at all', async () => {
+    state.registry = null
+    await expect(
+      renameAccountPasskey({
+        session: makeSession(),
+        entry: ENTRY as never,
+        label: 'Yubikey'
+      })
+    ).rejects.toThrow('no unlock-methods registry')
+    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+  })
+})
+
+describe('the SettingsPage reload-after-mutation race', () => {
+  it('merges each mutation into a fresh read, not into the page-held record', async () => {
+    // The page loaded R0 at mount.
+    const pageHeld = pageHeldRegistry()
+    // A concurrent write landed R1 = R0 + a recovery-code entry.
+    state.registry = registryWithConcurrentEntry()
+    state.boundUnlockSpaceId = 'unlock-space-new-passphrase'
+    // The page, still holding R0, runs the add.
+    await addAccountPassphrase({
+      session: makeSession(),
+      passphrase: 'correct horse battery staple'
+    })
+    const afterAdd = lastPut()
+    expect(
+      afterAdd.methods.some(method => method.type === 'recovery-code')
+    ).toBe(true)
+    // The page's reload has not landed yet, so its state is still R0 -- and
+    // the next mutation merges into the newest stored record regardless.
+    state.registry = afterAdd
+    await addAccountPasskey({
+      session: makeSession(),
+      registry: pageHeld as never,
+      locale: 'en',
+      userName: 'user@example.test',
+      promptForPrfRetry: async () => false
+    })
+    const afterPasskey = lastPut()
+    expect(afterPasskey.methods.map(method => method.type)).toEqual([
+      'passphrase',
+      'recovery-code',
+      'passkey'
+    ])
+    expect(
+      afterPasskey.methods.find(method => method.type === 'passphrase')
+        ?.unlockSpaceId
+    ).toBe('unlock-space-new-passphrase')
   })
 })

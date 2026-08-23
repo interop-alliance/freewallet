@@ -29,6 +29,18 @@
 
 ### Fixed
 
+- The Settings registry writes are read-first. `addAccountPasskey`,
+  `addAccountPassphrase`, and `renameAccountPasskey` re-read the
+  unlock-methods registry immediately before their PUT and merge the change
+  into that fresh record, instead of writing a read-modify-write off the
+  page-held record loaded at mount -- so an entry written since (another
+  tab, another client, a login-time refresh) is no longer reverted. The
+  passphrase add is an upsert (`upsertPassphraseUnlockMethod`), so two runs
+  leave one passphrase entry rather than duplicates naming different
+  credentials. The page-held record now seeds only the WebAuthn user handle
+  and the exclude list of the passkey ceremony; a rename whose fresh read no
+  longer lists the passkey writes nothing rather than re-adding a retired
+  entry.
 - Both signup registry writes are read-first. The credential-anchored
   signup's pre-promotion hook reads the unlock-methods registry
   (`getUnlockMethodsWithClient`) and upserts the passphrase entry into it,

@@ -41,6 +41,7 @@ import {
   putUnlockMethods,
   revokeUnlockMethod,
   revokeUnlockMethodByCeremony,
+  upsertPasskeyUnlockMethod,
   upsertPassphraseUnlockMethod,
   type PassphraseUnlockMethod,
   type PasskeyUnlockMethod,
@@ -503,11 +504,18 @@ async function recordPassphraseEntry({
  * succeeded. The passkey-safety notice is cleared only once the account
  * positively has a second unlock method.
  *
+ * The registry is re-read immediately before the write and the new entry is
+ * merged into that FRESH record, so a change another tab, another client, or
+ * a login-time refresh landed since the page loaded is not reverted. The
+ * page-held record seeds only the two inputs the WebAuthn ceremony needs
+ * before the write exists: the wallet-wide user handle the passkey registers
+ * under, and the exclude list of authenticators already holding one.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @param options.registry {UnlockMethodsRecord | null}   the registry already
- *   in hand (it may carry the backfilled passphrase entry); a fresh one is
- *   minted when none has been written yet
+ *   in hand, used ONLY for the WebAuthn user handle and the exclude list; a
+ *   fresh one is minted when none has been written yet
  * @param options.locale {string}   active i18n language code
  * @param options.userName {string}   WebAuthn user name for the ceremony
  * @param options.promptForPrfRetry {function}   resolves the user's choice
@@ -599,11 +607,21 @@ export async function addAccountPasskey({
     )
   }
 
-  const record: UnlockMethodsRecord = {
-    ...base,
-    methods: [...base.methods, entry]
-  }
+  // Merge into a FRESH read rather than into the page-held record: anything
+  // written between the page's load and this write (another tab, another
+  // client, a login-time refresh) must survive. A fresh read that comes back
+  // empty falls back to `base` rather than to a new empty registry -- the
+  // passkey was just registered under `base.userHandle`, so that handle is
+  // the one that has to be persisted. A fresh read carrying a DIFFERENT
+  // handle wins anyway: the stored record is the source of truth, and the
+  // registration is already bound either way.
+  let record: UnlockMethodsRecord = upsertPasskeyUnlockMethod({
+    record: base,
+    entry
+  })
   try {
+    const fresh = await getUnlockMethods({ session })
+    record = upsertPasskeyUnlockMethod({ record: fresh ?? base, entry })
     await putUnlockMethods({ session, record })
   } catch (err) {
     // The passkey is already bound and will log in; only the registry
@@ -628,27 +646,46 @@ export async function addAccountPasskey({
 /**
  * Saves an edited passkey label back to the registry.
  *
+ * The label is mapped onto a FRESH read of the registry rather than onto the
+ * page-held record, so a rename does not revert whatever else was written
+ * since the page loaded. Two cases end without a write: a fresh read that no
+ * longer lists the renamed `credentialId` (the passkey was removed
+ * elsewhere) returns that record unchanged rather than re-adding a retired
+ * entry, and a registry that does not exist at all throws -- the UI offers
+ * rename only on a listed entry, so there is nothing honest to write.
+ *
  * @param options {object}
  * @param options.session {Session}
- * @param options.registry {UnlockMethodsRecord}
  * @param options.entry {PasskeyUnlockMethod}   the passkey being renamed
  * @param options.label {string}   the new label (already trimmed)
  * @returns {Promise<UnlockMethodsRecord>}   the updated registry
+ * @throws {Error}   no registry has been written for this account
  */
 export async function renameAccountPasskey({
   session,
-  registry,
   entry,
   label
 }: {
   session: Session
-  registry: UnlockMethodsRecord
   entry: PasskeyUnlockMethod
   label: string
 }): Promise<UnlockMethodsRecord> {
+  const current = await getUnlockMethods({ session })
+  if (!current) {
+    throw new Error(
+      'There is no unlock-methods registry to rename a passkey in.'
+    )
+  }
+  const listed = current.methods.some(
+    method =>
+      method.type === 'passkey' && method.credentialId === entry.credentialId
+  )
+  if (!listed) {
+    return current
+  }
   const record: UnlockMethodsRecord = {
-    ...registry,
-    methods: registry.methods.map(method =>
+    ...current,
+    methods: current.methods.map(method =>
       method.type === 'passkey' && method.credentialId === entry.credentialId
         ? { ...method, label }
         : method
@@ -709,19 +746,22 @@ export async function removeAccountPasskey({
  * a passphrase that logs in. The passkey-safety notice is cleared last and is
  * best-effort -- the account now has a passphrase backup either way.
  *
+ * The registry is re-read immediately before the write and the entry is
+ * UPSERTED into that fresh record (there is only ever one passphrase entry),
+ * so neither a concurrent write nor a second run of this ceremony can be
+ * reverted or duplicated. A fresh read that comes back empty starts from a
+ * newly minted registry.
+ *
  * @param options {object}
  * @param options.session {Session}
- * @param options.registry {UnlockMethodsRecord | null}
  * @param options.passphrase {string}
  * @returns {Promise<UnlockMethodsRecord>}   the updated registry
  */
 export async function addAccountPassphrase({
   session,
-  registry,
   passphrase
 }: {
   session: Session
-  registry: UnlockMethodsRecord | null
   passphrase: string
 }): Promise<UnlockMethodsRecord> {
   assertAccountCeremonyAllowed({
@@ -780,18 +820,22 @@ export async function addAccountPassphrase({
     unlockSpaceId = bound.unlockSpaceId
     manageCapability = bound.manageCapability
   }
-  const base = registry ?? emptyUnlockMethodsRegistry()
-  const entry: PassphraseUnlockMethod = {
-    type: 'passphrase',
-    createdAt: new Date().toISOString(),
+  // The merge base is a fresh read, never the page-held record: a concurrent
+  // write must not be reverted here. The upsert also makes a second run of
+  // this ceremony replace the single passphrase entry instead of appending a
+  // duplicate one naming a different credential.
+  const current = await getUnlockMethods({ session })
+  const record = upsertPassphraseUnlockMethod({
+    record: current ?? emptyUnlockMethodsRegistry(),
     unlockSpaceId,
+    // The plain-bind fallback mints no capability; `keepAbsentManageCapability`
+    // stays false so no `manageCapability: undefined` key is stored.
     manageCapability,
-    ...(standingFields ?? {})
-  }
-  const record: UnlockMethodsRecord = {
-    ...base,
-    methods: [...base.methods, entry]
-  }
+    // The plain-bind fallback establishes no standing configuration either.
+    // Its entry names a freshly bound unlock Space, so the upsert's carry
+    // rule has nothing stale to carry forward.
+    ...(standingFields ? { standing: standingFields } : {})
+  })
   await putUnlockMethods({ session, record })
   // The account now has a passphrase backup, so the passkey-only safety
   // prompt is resolved. Best-effort.
