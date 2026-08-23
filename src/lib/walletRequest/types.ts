@@ -70,6 +70,11 @@ export type IVPRDetails = {
   challenge?: string
   domain?: string
   interact?: IVPRInteract
+  /**
+   * The requester's self-declared display name on a standalone capability
+   * request (the shared vocabulary's root `agent` member).
+   */
+  agent?: { name: string }
 }
 
 /**
@@ -85,4 +90,10 @@ export type WalletRequestProfile = {
   vcQueries: IQueryByExample[]
   zcapRequests: ICapabilityQueryDetail[]
   appConnect: IAppConnectRequest | null
+  /**
+   * The requester's self-declared display name (the VPR's `agent.name`,
+   * validated and trimmed by the shared `requestingAgentOf`), present only
+   * when the request carried one. Display only, never evidence of identity.
+   */
+  agent?: { name: string }
 }

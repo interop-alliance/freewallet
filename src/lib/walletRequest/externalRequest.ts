@@ -231,7 +231,13 @@ export function precheckExternalRequest({
   if (queries.some(query => (query.type as string) === 'AppConnectQuery')) {
     throw new ExternalRequestRefusedError('appConnect')
   }
-  const profile = classifyRequest({ request })
+  let profile: WalletRequestProfile
+  try {
+    profile = classifyRequest({ request })
+  } catch (err) {
+    // A malformed capability entry or agent member: nothing to consent to.
+    throw new ExternalRequestRefusedError('malformedRequest', { cause: err })
+  }
   if (profile.didAuth) {
     throw new ExternalRequestRefusedError('didAuth')
   }

@@ -166,6 +166,25 @@ describe('precheckExternalRequest', () => {
     expect(deliveryHost).toBe('was.example')
   })
 
+  it('surfaces the self-declared agent name on the profile', () => {
+    const { profile } = precheckExternalRequest({
+      request: zcapOnlyRequest({ agent: { name: ' research-bot ' } }),
+      exchangeUrl: EXCHANGE_URL
+    })
+    expect(profile.agent).toEqual({ name: 'research-bot' })
+  })
+
+  it('refuses an agent name outside the limits as malformed', () => {
+    expect(
+      refusalOf(() =>
+        precheckExternalRequest({
+          request: zcapOnlyRequest({ agent: { name: 'bad\nname' } }),
+          exchangeUrl: EXCHANGE_URL
+        })
+      )
+    ).toBe('malformedRequest')
+  })
+
   it('refuses an empty query set as malformed', () => {
     expect(
       refusalOf(() =>

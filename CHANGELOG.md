@@ -2,6 +2,18 @@
 
 ## 0.39.0 - TBD
 
+### Added
+
+- The interaction-URL request page shows the requester's self-declared name
+  when the VPR carries one (the root `agent: { name }` member wallet-core
+  0.53.0 classifies, sent by `di was request-grant --name`): "An agent
+  calling itself ..." beside the grantee key, with copy marking the name as
+  unverified. The name is recorded as `object.actor` on the Login activity
+  for the Applications listing to show. A name outside the limits (trimmed,
+  1 to 64 characters, no control characters) refuses the request as
+  malformed before consent, as does any other classification failure on
+  this entry point (previously a generic processing failure). en + es.
+
 ### Fixed
 
 - A grant delegated from a transient session chains under the session's

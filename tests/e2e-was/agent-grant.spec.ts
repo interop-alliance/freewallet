@@ -35,6 +35,7 @@ const WAS_URL = 'http://localhost:3002'
  */
 const PAGE_HTML = '<!doctype html><title>agent</title><h1>Hello</h1>'
 const PAGE_CONTENT_TYPE = 'text/html'
+const E2E_AGENT_NAME = 'e2e-agent'
 
 /**
  * A fresh agent identity: 32 random bytes, held only by the test, standing in
@@ -70,6 +71,7 @@ async function storeAgentRequest({
   return createEphemeralExchange({
     serverUrl: WAS_URL,
     request: composeCapabilityRequest({
+      agent: { name: E2E_AGENT_NAME },
       capabilityQueries: [
         {
           referenceId: collectionName,
@@ -197,6 +199,11 @@ test.describe('agent grant over an interaction URL', () => {
     await expect(
       page.getByRole('button', { name: 'Grant access' })
     ).toBeVisible({ timeout: 30_000 })
+    // The self-declared name renders beside the key, marked as the agent's
+    // own claim.
+    await expect(
+      page.getByText(`An agent calling itself "${E2E_AGENT_NAME}"`)
+    ).toBeVisible()
     await page.getByRole('button', { name: 'Grant access' }).click()
     await expect(
       page.getByText('Access granted', { exact: false })

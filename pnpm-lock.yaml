@@ -66,8 +66,8 @@ importers:
         specifier: ^0.4.0
         version: 0.4.0
       '@interop/wallet-core':
-        specifier: ^0.52.1
-        version: 0.52.1(@interop/jsonld-signatures@11.8.5)
+        specifier: link:../wallet-core
+        version: link:../wallet-core
       '@interop/was-client':
         specifier: ^0.44.4
         version: 0.44.4(@interop/jsonld-signatures@11.8.5)
@@ -666,10 +666,6 @@ packages:
 
   '@interop/vh-resource-log@0.4.0':
     resolution: {integrity: sha512-+ZL5EGd6OyNfQXOIpneWTJCQRaS6ABzzVqrYjvNqDH2myYWCJ2zRfCH80OODN9ffvVEQNtng1Y9XNXH+hx1qsA==}
-    engines: {node: '>=24.0'}
-
-  '@interop/wallet-core@0.52.1':
-    resolution: {integrity: sha512-npKzRdcvOcHYpNCwWbh0J2ag2dqJtQdp2/9Bb0yQ8wjiDGZiofJakiWDMk9EhmeFIZljMwuTTPM22T1icNtPvg==}
     engines: {node: '>=24.0'}
 
   '@interop/was-client@0.44.4':
@@ -4056,31 +4052,6 @@ snapshots:
       '@interop/did-method-webvh': 5.5.1
       '@interop/storage-core': 0.9.1
       json-canonicalize: 3.0.0
-
-  '@interop/wallet-core@0.52.1(@interop/jsonld-signatures@11.8.5)':
-    dependencies:
-      '@interop/data-integrity-core': 8.7.1
-      '@interop/data-integrity-proof': 3.4.5
-      '@interop/did-method-webvh': 5.5.1
-      '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.5)
-      '@interop/ed25519-verification-key': 8.0.4
-      '@interop/ezcap': 7.4.3
-      '@interop/security-document-loader': 10.0.4
-      '@interop/social-core': 0.8.1
-      '@interop/storage-core': 0.9.1
-      '@interop/vc': 11.0.7
-      '@interop/vh-resource-log': 0.4.0
-      '@interop/was-client': 0.44.4(@interop/jsonld-signatures@11.8.5)
-      '@interop/webkms-client': 14.7.3
-      '@interop/x25519-key-agreement-key': 5.2.2
-      '@noble/ciphers': 2.3.0
-      '@noble/hashes': 2.3.0
-      '@scure/base': 2.3.0
-      byoe-context: 0.5.0
-    transitivePeerDependencies:
-      - '@interop/jsonld-signatures'
-      - expo-crypto
-      - react-native-get-random-values
 
   '@interop/was-client@0.44.4(@interop/jsonld-signatures@11.8.5)':
     dependencies:

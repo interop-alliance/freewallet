@@ -369,8 +369,21 @@ export function ExternalRequestPage() {
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
                 {t('externalRequest.requestedBy')}
               </Typography>
+              {profile.agent && (
+                // Self-declared: the name is whatever the link's author
+                // typed, bounded by classification (64 characters, no
+                // control characters) and never a substitute for the key.
+                <Typography
+                  variant="body2"
+                  sx={{ fontStyle: 'italic', overflowWrap: 'anywhere' }}
+                >
+                  {t('externalRequest.agentName', { name: profile.agent.name })}
+                </Typography>
+              )}
               <Typography variant="caption" color="text.secondary">
-                {t('externalRequest.requesterNote')}
+                {profile.agent
+                  ? t('externalRequest.agentNameNote')
+                  : t('externalRequest.requesterNote')}
               </Typography>
               {requesters.map(did => (
                 <Typography

@@ -515,8 +515,11 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     vi.mocked(delegatedClientsPointer).mockReturnValue(
       'did:webvh:scid-b:example.com:annex-space' as never
     )
+    // Both parts: the reach's log pin id is built from them, and the pin-id
+    // builder asserts every segment.
     vi.mocked(clientAnnexDidParts).mockReturnValue({
-      spaceId: 'annex-space'
+      spaceId: 'annex-space',
+      generationId: 'gen-1'
     } as never)
     vi.mocked(forgetDurableClient).mockResolvedValue({
       rotated: true

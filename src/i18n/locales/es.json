@@ -769,6 +769,8 @@
     "title": "Solicitud de acceso al almacenamiento",
     "requestedBy": "Solicitado por",
     "requesterNote": "Esta solicitud no proviene de un sitio web. Se identifica solo con esta clave, así que compárela con lo que muestra el programa solicitante.",
+    "agentName": "Un agente que se hace llamar \"{{name}}\"",
+    "agentNameNote": "Ese nombre es una autodeclaración sin verificar. Esta solicitud no proviene de un sitio web; solo esta clave identifica al solicitante, así que compárela con lo que muestra el programa solicitante.",
     "deliveryLabel": "Su respuesta se enviará a:",
     "preparing": "Comprobando la solicitud...",
     "responding": "Concediendo acceso...",

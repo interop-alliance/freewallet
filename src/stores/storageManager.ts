@@ -2499,13 +2499,17 @@ export class StorageManager {
    *   name, whether the app key was minted on this connect (first run) or
    *   matched (returning), and the validated request's `appUrl` -- what tells
    *   two apps sharing an origin apart
+   * @param [options.actor] {{ name: string }}   the requester's self-declared
+   *   display name on a standalone capability request, recorded as
+   *   `object.actor`
    * @returns {Promise<void>}
    */
   async addHistoryLogin({
     user,
     origin,
     grants,
-    appConnect
+    appConnect,
+    actor
   }: {
     user: User
     origin: string
@@ -2517,9 +2521,10 @@ export class StorageManager {
       zcap?: IZcap
     }>
     appConnect?: { name: string; firstRun: boolean; appUrl?: string }
+    actor?: { name: string }
   }) {
     await this.#recordActivity(id =>
-      buildHistoryLogin({ user, origin, grants, appConnect, id })
+      buildHistoryLogin({ user, origin, grants, appConnect, actor, id })
     )
   }
 

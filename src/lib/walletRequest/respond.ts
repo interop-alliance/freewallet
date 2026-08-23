@@ -120,7 +120,10 @@ async function recordLoginActivity({
             // credential's `credentialSubject.appUrl`.
             appUrl: profile.appConnect.app.appUrl
           }
-        : undefined
+        : undefined,
+    // The requester's self-declared name, for the listing that keys agent
+    // rows on the origin marker; it never stands in for the grantee key.
+    ...(profile.agent !== undefined && { actor: profile.agent })
   })
 }
 

@@ -211,5 +211,40 @@ describe('composeAndDeliverResponse', () => {
     expect(session.storage.addHistoryLogin).toHaveBeenCalledWith(
       expect.objectContaining({ origin: 'n/a (API request)' })
     )
+    expect(session.storage.addHistoryLogin).not.toHaveBeenCalledWith(
+      expect.objectContaining({ actor: expect.anything() })
+    )
+  })
+
+  it('records the self-declared agent name as the activity actor', async () => {
+    const { EXTERNAL_REQUEST_ORIGIN } =
+      await import('@/lib/walletRequest/externalRequest')
+    state.zcaps = [{ id: 'urn:zcap:1', invocationTarget: 'https://was/x' }]
+    const session = makeSession()
+    const agentProfile = {
+      didAuth: false,
+      vcQueries: [],
+      zcapRequests: [{ referenceId: 'web' }],
+      appConnect: null,
+      agent: { name: 'research-bot' }
+    } as unknown as typeof profile
+
+    await composeAndDeliverResponse({
+      request: { query: [] } as unknown as Parameters<
+        typeof composeAndDeliverResponse
+      >[0]['request'],
+      session,
+      profile: agentProfile,
+      requestOrigin: EXTERNAL_REQUEST_ORIGIN,
+      selectedVCs: [],
+      exchangeUrl: 'https://was.example/workflows/ephemeral/exchanges/1'
+    })
+
+    expect(session.storage.addHistoryLogin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        origin: 'n/a (API request)',
+        actor: { name: 'research-bot' }
+      })
+    )
   })
 })

@@ -117,6 +117,28 @@ describe('queriesOf', () => {
       appConnect: null
     })
   })
+
+  it('carries the self-declared agent name through the wrapper', () => {
+    const profile = classifyRequest({
+      request: {
+        agent: { name: ' research-bot ' },
+        query: [
+          {
+            type: 'AuthorizationCapabilityQuery',
+            capabilityQuery: {
+              controller: 'did:key:zAgent',
+              invocationTarget: 'https://was.example/space/x/web'
+            }
+          }
+        ]
+      }
+    })
+    expect(profile.agent).toEqual({ name: 'research-bot' })
+    expect(classifyRequest({ request: {} })).not.toHaveProperty('agent')
+    expect(() =>
+      classifyRequest({ request: { agent: { name: 'a'.repeat(65) } } })
+    ).toThrow(/at most 64/)
+  })
 })
 
 describe('classifyRequest (App Connect axis)', () => {

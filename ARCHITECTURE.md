@@ -1673,11 +1673,19 @@ page runs the ordinary login in place (the same durability decision
 `/login` makes, a transient session by default on a non-remembered
 browser) and adopts it app-wide. The Login activity records the grant
 under the fixed origin marker `n/a (API request)`, which is what the
-Applications page will key agent rows on.
+Applications page will key agent rows on. A request may name its
+requester through the VPR's root `agent: { name }` member (the parallel of
+App Connect's `app.name`, sent by `di was request-grant --name`): the
+consent panel renders it as "an agent calling itself ..." beside the
+grantee key, with copy marking it self-declared, and the activity records
+it as `object.actor` (the ActivityStreams member; the activity's own
+`actor` stays the user). The shared classifier enforces the limits
+(trimmed, 1 to 64 characters, no control characters), and a name outside
+them refuses the request as malformed.
 
 The entry point is stricter than the popup, because the only requester
-signal is the grantee DID and request-supplied `reason` text, both chosen
-by whoever wrote the link. Everything it refuses is decided before consent
+signals are the grantee DID and request-supplied text (the `reason` and
+the agent name), all chosen by whoever wrote the link. Everything it refuses is decided before consent
 renders, in the pure module `src/lib/walletRequest/externalRequest.ts`,
 each refusal with its own copy: a deep link that is not an interaction URL
 (a bare exchange URL included); an exchange that is gone (a 404 on either

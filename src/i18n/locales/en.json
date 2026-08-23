@@ -769,6 +769,8 @@
     "title": "Storage access request",
     "requestedBy": "Requested by",
     "requesterNote": "This request did not come from a website. It identifies itself only by this key, so check it against what the requesting program shows you.",
+    "agentName": "An agent calling itself \"{{name}}\"",
+    "agentNameNote": "That name is self-declared and unverified. This request did not come from a website; only this key identifies the requester, so check it against what the requesting program shows you.",
     "deliveryLabel": "Your answer will be sent to:",
     "preparing": "Checking the request...",
     "responding": "Granting access...",

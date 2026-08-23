@@ -10,6 +10,7 @@ import {
   appConnectRequestOf,
   isDIDAuthRequested,
   queriesOf as sharedQueriesOf,
+  requestingAgentOf,
   zcapQueriesOf
 } from '@interop/wallet-core/request'
 import type {
@@ -30,6 +31,7 @@ export {
   isDIDAuthRequested,
   credentialQueriesOf,
   serializedAppUrl,
+  requestingAgentOf,
   zcapQueriesOf,
   didAuthMethodSupported
 } from '@interop/wallet-core/request'
@@ -53,9 +55,11 @@ export function queriesOf(request: IVPRDetails): ISpecVPRQuery[] {
  * response assembly work from: whether DID Authentication is requested, and
  * separately the credential (`QueryByExample`), capability
  * (`AuthorizationCapabilityQuery` / `ZcapQuery`), and App Connect
- * (`AppConnectQuery`) content asked for. Any combination of the first three
- * is valid, including zcap-only; an App Connect request excludes the
- * credential and standalone capability queries (enforced by the shared
+ * (`AppConnectQuery`) content asked for, plus the requester's self-declared
+ * `agent` name when the body carries one (validated by the shared
+ * `requestingAgentOf`). Any combination of the first three is valid,
+ * including zcap-only; an App Connect request excludes the credential and
+ * standalone capability queries (enforced by the shared
  * `appConnectRequestOf`, which also validates the `app.appUrl` against the
  * attested requesting origin).
  *
@@ -81,6 +85,7 @@ export function classifyRequest({
   if (carriesAppConnect && !origin) {
     throw new Error('An App Connect request requires a requesting origin.')
   }
+  const agent = requestingAgentOf(request as ISpecVPRDetails)
   return {
     didAuth: isDIDAuthRequested({ queries }),
     vcQueries: queries.filter(
@@ -89,7 +94,8 @@ export function classifyRequest({
     zcapRequests: zcapQueriesOf(queries),
     appConnect: carriesAppConnect
       ? appConnectRequestOf({ queries, origin: origin! })
-      : null
+      : null,
+    ...(agent !== undefined && { agent })
   }
 }
 
