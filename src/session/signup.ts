@@ -30,13 +30,10 @@ import {
 import {
   emptyUnlockMethodsRegistry,
   enrollPasskey,
-  getUnlockMethods,
-  getUnlockMethodsWithClient,
-  putUnlockMethods,
-  putUnlockMethodsWithClient,
+  updateUnlockMethods,
+  updateUnlockMethodsWithClient,
   upsertPasskeyUnlockMethod,
-  upsertPassphraseUnlockMethod,
-  type UnlockMethodsRecord
+  upsertPassphraseUnlockMethod
 } from '@/session/unlockMethods'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
 import type { Session } from '@/types/auth'
@@ -176,41 +173,36 @@ async function signUpCredentialAnchoredWithPassphrase({
     beforePromotion: async ({ zcapClient, userKey, establishment }) => {
       // The registry entry, in the last root-invocation window. Best-effort
       // by the hook's contract: a miss is re-recordable later, never fatal.
-      // Read first: the transient login's heal branch re-runs the whole
-      // establishment, and a re-fired hook starting from a fresh registry
-      // would clobber the first run's record (its user handle re-minted,
-      // every other entry dropped). Only a true absent starts fresh. A
-      // THROWN read -- the bootstrap-signed read refused against an
-      // account a concurrent run already promoted, say -- skips the write
-      // with a report: a write on an empty base there would be the same
-      // clobber, and the miss stays re-recordable by the later recorders.
-      let existing: UnlockMethodsRecord | null
+      // Read first (the compare-and-swap wrapper's own fresh read): the
+      // transient login's heal branch re-runs the whole establishment, and
+      // a re-fired hook starting from a fresh registry would clobber the
+      // first run's record (its user handle re-minted, every other entry
+      // dropped). Only a true absent starts fresh. A THROWN read or write
+      // -- the bootstrap-signed read refused against an account a
+      // concurrent run already promoted, say -- skips with a report: a
+      // write on an empty base there would be the same clobber, and the
+      // miss stays re-recordable by the later recorders.
       try {
-        existing = await getUnlockMethodsWithClient({
+        await updateUnlockMethodsWithClient({
           zcapClient,
           spaceId,
-          userKey
+          userKey,
+          mutate: existing =>
+            upsertPassphraseUnlockMethod({
+              record: existing ?? emptyUnlockMethodsRegistry(),
+              unlockSpaceId: establishment.unlockSpaceId,
+              manageCapability: establishment.manageCapability,
+              standing: establishment.standingFields
+            })
         })
       } catch (err) {
         console.warn(
-          'Could not read the unlock-methods registry before the signup ' +
-            'write; skipping the passphrase entry (re-recordable at the ' +
-            'next durable login):',
+          'Could not update the unlock-methods registry at signup; ' +
+            'skipping the passphrase entry (re-recordable at the next ' +
+            'durable login):',
           err
         )
-        return
       }
-      await putUnlockMethodsWithClient({
-        zcapClient,
-        spaceId,
-        userKey,
-        record: upsertPassphraseUnlockMethod({
-          record: existing ?? emptyUnlockMethodsRegistry(),
-          unlockSpaceId: establishment.unlockSpaceId,
-          manageCapability: establishment.manageCapability,
-          standing: establishment.standingFields
-        })
-      })
     }
   })
 
@@ -488,7 +480,7 @@ export async function signUpWithPasskey({
 
   // Write the initial unlock-methods registry only now: it lives in the
   // data Space, which `provisionNewWallet` just created, so this must run
-  // after provisioning (`putUnlockMethods` needs the Space to exist).
+  // after provisioning (the registry write needs the Space to exist).
   // Non-fatal -- the passkey already logs in. Read first: a registry that
   // already exists keeps its user handle (the handle is minted once per
   // account -- a re-minted one would register a second resident credential
@@ -497,16 +489,18 @@ export async function signUpWithPasskey({
   // registered above. A THROWN read skips the write rather than starting
   // from an empty base, which would be the same clobber.
   try {
-    const existing = await getUnlockMethods({ session })
-    const record = upsertPasskeyUnlockMethod({
-      record: existing ?? {
-        version: 1,
-        userHandle: base64urlnopad.encode(userHandle),
-        methods: []
-      },
-      entry
+    await updateUnlockMethods({
+      session,
+      mutate: existing =>
+        upsertPasskeyUnlockMethod({
+          record: existing ?? {
+            version: 1,
+            userHandle: base64urlnopad.encode(userHandle),
+            methods: []
+          },
+          entry
+        })
     })
-    await putUnlockMethods({ session, record })
   } catch (err) {
     console.warn('Could not record the new passkey in the registry:', err)
   }

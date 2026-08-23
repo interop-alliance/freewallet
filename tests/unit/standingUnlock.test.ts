@@ -83,7 +83,10 @@ vi.mock('@/session/unlockMethods', () => ({
     userHandle: 'handle',
     methods: []
   })),
-  putUnlockMethods: vi.fn(async () => {}),
+  updateUnlockMethods: vi.fn(
+    async ({ mutate }: { mutate: (current: never) => unknown }) =>
+      mutate({ version: 1, userHandle: 'handle', methods: [] } as never)
+  ),
   refreshStandingDelegationFields: vi.fn(async () => {}),
   upsertPassphraseUnlockMethod: vi.fn(({ record }) => record)
 }))
@@ -105,7 +108,7 @@ const CREDENTIAL = {
 }
 
 const { establishPassphraseStanding } = await import('@/session/standingUnlock')
-const { putUnlockMethods } = await import('@/session/unlockMethods')
+const { updateUnlockMethods } = await import('@/session/unlockMethods')
 
 function makeSession() {
   return {
@@ -130,7 +133,7 @@ describe('establishPassphraseStanding', () => {
       session: makeSession(),
       passphrase: 'new'
     })
-    expect(vi.mocked(putUnlockMethods)).toHaveBeenCalled()
+    expect(vi.mocked(updateUnlockMethods)).toHaveBeenCalled()
     expect(established?.unlockSpaceId).toBe('space-new')
   })
 
@@ -140,7 +143,7 @@ describe('establishPassphraseStanding', () => {
       passphrase: 'new',
       recordInRegistry: false
     })
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(vi.mocked(updateUnlockMethods)).not.toHaveBeenCalled()
     expect(established?.unlockSpaceId).toBe('space-new')
     expect(established?.manageCapability).toEqual({ id: 'urn:zcap:manage' })
     expect(established?.standingFields).toEqual(

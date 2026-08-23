@@ -11,9 +11,8 @@ import {
   DURABILITY_INDEXEDDB
 } from '@/session/persistence'
 
-const { backfillPassphraseUnlockMethod } = await import(
-  '@/session/unlockMethods'
-)
+const { backfillPassphraseUnlockMethod } =
+  await import('@/session/unlockMethods')
 
 /**
  * A minimal session shaped as `backfillPassphraseUnlockMethod` reads it: the

@@ -1,5 +1,18 @@
 # History
 
+## 0.39.1 - TBD
+
+### Changed
+
+- Every unlock-methods registry write is now a compare-and-swap: the PUT
+  carries `If-Match` on the ETag of the fresh read it was based on (or
+  `If-None-Match` for the first materialization), and a lost race re-reads
+  and re-applies the change on the fresh record, up to three attempts. This
+  closes the seal-downgrade race (a stale tab's registry write can no longer
+  undo another tab's rotation re-seal) and the lost-update window between
+  two concurrent registry writers. The bare last-write-wins registry write
+  is gone; all writers go through the shared read-modify-write wrapper.
+
 ## 0.39.0 - TBD
 
 ### Added

@@ -80,8 +80,8 @@ vi.mock('@/session/verifiedLog', () => ({
   })
 }))
 
-vi.mock('@/session/unlockMethods', () => ({
-  getUnlockMethods: vi.fn(async () => {
+vi.mock('@/session/unlockMethods', () => {
+  const read = async () => {
     state.calls.push('getUnlockMethods')
     if (!state.registry) {
       return null
@@ -91,20 +91,39 @@ vi.mock('@/session/unlockMethods', () => ({
       ...state.passkeyEntries
     ]
     return { version: 1, userHandle: 'handle', methods }
-  }),
-  putUnlockMethods: vi.fn(async () => {
-    state.calls.push('putUnlockMethods')
-  }),
-  upsertPassphraseUnlockMethod: vi.fn(({ record }) => record),
-  upsertPasskeyUnlockMethod: vi.fn(({ record }) => record)
-}))
+  }
+  return {
+    getUnlockMethods: vi.fn(read),
+    // The wrapper's internal fresh read is surfaced as 'getUnlockMethods' so
+    // the call-order assertions keep reading like the flow they describe; a
+    // landed write is 'putUnlockMethods'.
+    updateUnlockMethods: vi.fn(
+      async ({
+        mutate
+      }: {
+        mutate: (current: never) => never | null | Promise<never | null>
+      }) => {
+        const current = (await read()) as never
+        const next = await mutate(current)
+        if (next === null) {
+          return current
+        }
+        state.calls.push('putUnlockMethods')
+        return next
+      }
+    ),
+    upsertPassphraseUnlockMethod: vi.fn(
+      ({ record }: { record: never }) => record
+    ),
+    upsertPasskeyUnlockMethod: vi.fn(({ record }: { record: never }) => record)
+  }
+})
 
 import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import { unlockKeyVmId } from '@interop/wallet-core/unlock'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
 import {
-  putUnlockMethods,
   upsertPassphraseUnlockMethod,
   upsertPasskeyUnlockMethod
 } from '@/session/unlockMethods'
@@ -324,7 +343,7 @@ describe('repairTornPassphraseRetirement', () => {
     })
     expect(state.calls).toEqual(['getUnlockMethods', 'verifiedAccountLog'])
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
   })
 
   it('rebuilds a bare entry when the login credential is standing', async () => {
@@ -337,6 +356,8 @@ describe('repairTornPassphraseRetirement', () => {
     expect(state.calls).toEqual([
       'getUnlockMethods',
       'verifiedAccountLog',
+      // The write's own fresh read inside the compare-and-swap wrapper.
+      'getUnlockMethods',
       'putUnlockMethods'
     ])
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
@@ -362,7 +383,7 @@ describe('repairTornPassphraseRetirement', () => {
       found: makeFound()
     })
     expect(state.calls).toEqual(['getUnlockMethods', 'verifiedAccountLog'])
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
   })
 
   it('rebuilds an absent passphrase entry the same way', async () => {
@@ -375,6 +396,8 @@ describe('repairTornPassphraseRetirement', () => {
     expect(state.calls).toEqual([
       'getUnlockMethods',
       'verifiedAccountLog',
+      // The write's own fresh read inside the compare-and-swap wrapper.
+      'getUnlockMethods',
       'putUnlockMethods'
     ])
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
@@ -404,7 +427,7 @@ describe('repairTornPassphraseRetirement', () => {
       found: makeFound()
     })
     expect(state.calls).toEqual(['getUnlockMethods'])
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
     warn.mockRestore()
   })
@@ -423,6 +446,8 @@ describe('repairTornPassphraseRetirement', () => {
     expect(state.calls).toEqual([
       'getUnlockMethods',
       'verifiedAccountLog',
+      // The write's own fresh read inside the compare-and-swap wrapper.
+      'getUnlockMethods',
       'putUnlockMethods'
     ])
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
@@ -437,7 +462,7 @@ describe('repairTornPassphraseRetirement', () => {
       found: makeFound()
     })
     expect(state.calls).toEqual(['getUnlockMethods'])
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
   })
 
   it('skips a passkey login', async () => {
@@ -466,7 +491,7 @@ describe('repairTornPassphraseRetirement', () => {
         found: makeFound()
       })
     ).rejects.toThrow('log conflict')
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
     warn.mockRestore()
   })
 })
@@ -512,6 +537,8 @@ describe('rebuildBarePasskeyEntry', () => {
     expect(state.calls).toEqual([
       'getUnlockMethods',
       'verifiedAccountLog',
+      // The write's own fresh read inside the compare-and-swap wrapper.
+      'getUnlockMethods',
       'putUnlockMethods'
     ])
     expect(vi.mocked(upsertPasskeyUnlockMethod)).toHaveBeenCalledWith({
@@ -536,7 +563,7 @@ describe('rebuildBarePasskeyEntry', () => {
       found: makeFound()
     })
     expect(state.calls).toEqual(['getUnlockMethods', 'verifiedAccountLog'])
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
   })
 
   it('leaves an entry that already names a credential alone', async () => {
@@ -546,7 +573,7 @@ describe('rebuildBarePasskeyEntry', () => {
       found: makeFound()
     })
     expect(state.calls).toEqual(['getUnlockMethods'])
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
   })
 
   it('writes nothing when this passkey has no entry at all', async () => {
@@ -558,7 +585,7 @@ describe('rebuildBarePasskeyEntry', () => {
       found: makeFound()
     })
     expect(state.calls).toEqual(['getUnlockMethods'])
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
   })
 
   it('skips a passphrase login', async () => {

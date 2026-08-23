@@ -63,14 +63,14 @@ importers:
         specifier: ^3.5.5
         version: 3.5.5
       '@interop/vh-resource-log':
-        specifier: ^0.4.0
-        version: 0.4.0
+        specifier: ^0.4.1
+        version: 0.4.1
       '@interop/wallet-core':
         specifier: link:../wallet-core
         version: link:../wallet-core
       '@interop/was-client':
-        specifier: ^0.44.4
-        version: 0.44.4(@interop/jsonld-signatures@11.8.5)
+        specifier: ^0.44.5
+        version: 0.44.5(@interop/jsonld-signatures@11.8.5)
       '@interop/webkms-client':
         specifier: ^14.7.3
         version: 14.7.3
@@ -664,12 +664,12 @@ packages:
     resolution: {integrity: sha512-PH84wCBCaIdB9yF2q4mDqsYyMckHcS97hPNK3D7CHT8IAcH2e4pogpFyJWOFA5FmwTEC4hQB+N2m7mEorQ+7Hw==}
     engines: {node: '>=24.0'}
 
-  '@interop/vh-resource-log@0.4.0':
-    resolution: {integrity: sha512-+ZL5EGd6OyNfQXOIpneWTJCQRaS6ABzzVqrYjvNqDH2myYWCJ2zRfCH80OODN9ffvVEQNtng1Y9XNXH+hx1qsA==}
+  '@interop/vh-resource-log@0.4.1':
+    resolution: {integrity: sha512-wP7/x9+TOo0DF9OmKgAhSRgOnvQrJlWReL3IsxX3/9jxyFEbdIZ+CV62uoplM3VbjYPSX9VJCzd0LZtHhNOPlQ==}
     engines: {node: '>=24.0'}
 
-  '@interop/was-client@0.44.4':
-    resolution: {integrity: sha512-2lqRZDsAKygDxX75wiOAACT369f1/1QVa9xtx91L8vkhIx1N/KPqdgxK6+Xu6ua4LP6Dy53NL92+0/vQhF0F1g==}
+  '@interop/was-client@0.44.5':
+    resolution: {integrity: sha512-SnIDBKmnx7As/wGtBsvlYvXvduMXGwPuwhL/NeIwgbbAdokEg8/yjPlEFxhk+TBYOBRvNyGJGp5Tr1zyVJFnpg==}
     engines: {node: '>=24.0'}
 
   '@interop/webkms-client@14.7.3':
@@ -4047,13 +4047,12 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/vh-resource-log@0.4.0':
+  '@interop/vh-resource-log@0.4.1':
     dependencies:
       '@interop/did-method-webvh': 5.5.1
       '@interop/storage-core': 0.9.1
-      json-canonicalize: 3.0.0
 
-  '@interop/was-client@0.44.4(@interop/jsonld-signatures@11.8.5)':
+  '@interop/was-client@0.44.5(@interop/jsonld-signatures@11.8.5)':
     dependencies:
       '@interop/data-integrity-core': 8.7.1
       '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.5)
@@ -4062,7 +4061,7 @@ snapshots:
       '@interop/http-client': 1.0.5
       '@interop/minimal-cipher': 7.8.3
       '@interop/storage-core': 0.9.1
-      '@interop/vh-resource-log': 0.4.0
+      '@interop/vh-resource-log': 0.4.1
       '@interop/x25519-key-agreement-key': 5.2.2
       '@noble/hashes': 2.3.0
       '@scure/base': 2.3.0

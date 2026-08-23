@@ -68,8 +68,8 @@ vi.mock('@/session/unlockMethods', () => ({
     methods: []
   })),
   enrollPasskey: vi.fn(),
-  putUnlockMethods: vi.fn(),
-  putUnlockMethodsWithClient: vi.fn(),
+  updateUnlockMethods: vi.fn(),
+  updateUnlockMethodsWithClient: vi.fn(),
   upsertPassphraseUnlockMethod: vi.fn(({ record }) => record)
 }))
 

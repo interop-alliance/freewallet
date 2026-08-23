@@ -138,11 +138,10 @@ import {
   backfillPassphraseUnlockMethod,
   emptyUnlockMethodsRegistry,
   getUnlockMethods,
-  getUnlockMethodsWithClient,
   managementZcapClient,
-  putUnlockMethods,
-  putUnlockMethodsWithClient,
   refreshStandingDelegationFields,
+  updateUnlockMethods,
+  updateUnlockMethodsWithClient,
   revokeUnlockMethod,
   upsertPassphraseUnlockMethod,
   type PassphraseUnlockMethod,
@@ -373,9 +372,9 @@ export function recoveryEntriesOf({
  * Appends (or replaces, matching on `recoveryKid`) a recovery entry in the
  * unlock-methods registry, minting the registry when absent. `dropKids` drops
  * further recovery entries in the same write -- the post-recovery update,
- * which records the replacement code and retires the spent one together (two
- * writes would race: both are read-modify-writes over one resource with
- * last-write-wins puts).
+ * which records the replacement code and retires the spent one together in
+ * one atomic write (the write itself is the shared compare-and-swap
+ * read-modify-write, so a lost race re-applies both on the fresh record).
  *
  * @param options {object}
  * @param options.session {Session}
@@ -392,17 +391,21 @@ export async function recordRecoveryMethod({
   entry: RecoveryCodeUnlockMethod
   dropKids?: string[]
 }): Promise<void> {
-  const existing = await getUnlockMethods({ session })
-  const record = existing ?? emptyUnlockMethodsRegistry()
   const dropped = new Set([entry.recoveryKid, ...dropKids])
-  const methods = [
-    ...record.methods.filter(
-      method =>
-        method.type !== 'recovery-code' || !dropped.has(method.recoveryKid)
-    ),
-    entry
-  ]
-  await putUnlockMethods({ session, record: { ...record, methods } })
+  await updateUnlockMethods({
+    session,
+    mutate: existing => {
+      const record = existing ?? emptyUnlockMethodsRegistry()
+      const methods = [
+        ...record.methods.filter(
+          method =>
+            method.type !== 'recovery-code' || !dropped.has(method.recoveryKid)
+        ),
+        entry
+      ]
+      return { ...record, methods }
+    }
+  })
 }
 
 /**
@@ -1544,60 +1547,64 @@ async function recoverAccountTransient({
   // and the new passphrase's in, the record re-sealed to the rotated user
   // key. Best-effort -- the account is recovered without it, and the next
   // durable login surfaces a stale registry as a warning.
+  // Captured consts: the guard above already proved these present, and the
+  // narrowing of a `let` does not survive into the mutate closure below.
+  const recordBind = newRecordBind
+  const replacementMethod = replacementEntry
   try {
-    const existing = await getUnlockMethodsWithClient({
+    const dropped = new Set([replacementMethod.recoveryKid, spent.recipientKid])
+    const bridgeKeyId = delegationProofKeyId(bridge)
+    const siblingKeyId = delegationProofKeyId(sibling)
+    await updateUnlockMethodsWithClient({
       zcapClient: transientZcapClient,
       spaceId,
       userKey: oldUserKey,
-      capability: generationDelegation
-    })
-    const base = existing ?? emptyUnlockMethodsRegistry()
-    const dropped = new Set([replacementEntry.recoveryKid, spent.recipientKid])
-    const methods = [
-      ...base.methods.filter(
-        method =>
-          method.type !== 'recovery-code' || !dropped.has(method.recoveryKid)
-      ),
-      replacementEntry
-    ]
-    const bridgeKeyId = delegationProofKeyId(bridge)
-    const siblingKeyId = delegationProofKeyId(sibling)
-    const updated = upsertPassphraseUnlockMethod({
-      record: { ...base, methods },
-      unlockSpaceId: newRecordBind.unlockSpaceId,
-      manageCapability: newRecordBind.manageCapability,
-      standing: {
-        rosterKid: standing.recipientKid,
-        keyAgreementKeyMultibase: standing.keyAgreementKeyMultibase,
-        updateKeyMultibase: rung0.keyMultibase,
-        unlockClientDid: standing.clientDid,
-        ...(bridgeKeyId ? { delegationKeyId: bridgeKeyId } : {}),
-        ...((bridge as { expires?: string }).expires
-          ? { delegationExpires: (bridge as { expires?: string }).expires }
-          : {}),
-        ...(siblingKeyId ? { delegatedClientsKeyId: siblingKeyId } : {}),
-        ...((sibling as { expires?: string }).expires
-          ? {
-              delegatedClientsExpires: (sibling as { expires?: string }).expires
-            }
-          : {}),
-        ...(newRecordBind.unlockKeyAgreementKeyId
-          ? { unlockKeyAgreementKeyId: newRecordBind.unlockKeyAgreementKeyId }
-          : {}),
-        ...(newRecordBind.unlockKeyAgreementKeyMultibase
-          ? {
-              unlockKeyAgreementKeyMultibase:
-                newRecordBind.unlockKeyAgreementKeyMultibase
-            }
-          : {})
+      writeUserKey: newUserKey,
+      capability: generationDelegation,
+      mutate: existing => {
+        const base = existing ?? emptyUnlockMethodsRegistry()
+        const methods = [
+          ...base.methods.filter(
+            method =>
+              method.type !== 'recovery-code' ||
+              !dropped.has(method.recoveryKid)
+          ),
+          replacementMethod
+        ]
+        return upsertPassphraseUnlockMethod({
+          record: { ...base, methods },
+          unlockSpaceId: recordBind.unlockSpaceId,
+          manageCapability: recordBind.manageCapability,
+          standing: {
+            rosterKid: standing.recipientKid,
+            keyAgreementKeyMultibase: standing.keyAgreementKeyMultibase,
+            updateKeyMultibase: rung0.keyMultibase,
+            unlockClientDid: standing.clientDid,
+            ...(bridgeKeyId ? { delegationKeyId: bridgeKeyId } : {}),
+            ...((bridge as { expires?: string }).expires
+              ? { delegationExpires: (bridge as { expires?: string }).expires }
+              : {}),
+            ...(siblingKeyId ? { delegatedClientsKeyId: siblingKeyId } : {}),
+            ...((sibling as { expires?: string }).expires
+              ? {
+                  delegatedClientsExpires: (sibling as { expires?: string })
+                    .expires
+                }
+              : {}),
+            ...(recordBind.unlockKeyAgreementKeyId
+              ? {
+                  unlockKeyAgreementKeyId: recordBind.unlockKeyAgreementKeyId
+                }
+              : {}),
+            ...(recordBind.unlockKeyAgreementKeyMultibase
+              ? {
+                  unlockKeyAgreementKeyMultibase:
+                    recordBind.unlockKeyAgreementKeyMultibase
+                }
+              : {})
+          }
+        })
       }
-    })
-    await putUnlockMethodsWithClient({
-      zcapClient: transientZcapClient,
-      spaceId,
-      userKey: newUserKey,
-      record: updated,
-      capability: generationDelegation
     })
   } catch (err) {
     console.warn(

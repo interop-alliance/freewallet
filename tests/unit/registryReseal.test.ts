@@ -18,6 +18,7 @@ import type { Session } from '@/types/auth'
 const wasState = vi.hoisted(() => ({
   url: 'https://was.example.test' as string | undefined,
   records: new Map<string, unknown>(),
+  versions: new Map<string, number>(),
   generations: [] as UserKey[],
   putError: undefined as unknown
 }))
@@ -32,15 +33,50 @@ vi.mock('@/app.config', async importOriginal => ({
 vi.mock('@/stores/wasRemoteStore', () => ({
   ensureUnlockMethodsCollection: vi.fn(async () => {}),
   putUnlockMethodsRecord: vi.fn(
-    async ({ spaceId, record }: { spaceId: string; record: unknown }) => {
+    async ({
+      spaceId,
+      record,
+      ifMatch,
+      ifNoneMatch
+    }: {
+      spaceId: string
+      record: unknown
+      ifMatch?: string
+      ifNoneMatch?: boolean
+    }) => {
       if (wasState.putError) {
         throw wasState.putError
       }
+      const { PreconditionFailedError } = await import('@interop/was-client')
+      const exists = wasState.records.has(spaceId)
+      const version = wasState.versions.get(spaceId) ?? 0
+      if (ifNoneMatch && exists) {
+        throw new PreconditionFailedError(
+          'A registry record already exists (If-None-Match).'
+        )
+      }
+      if (ifMatch !== undefined && (!exists || ifMatch !== `v${version}`)) {
+        throw new PreconditionFailedError(
+          'The registry record changed since the read (If-Match).'
+        )
+      }
+      if (ifMatch === undefined && !ifNoneMatch) {
+        throw new Error(
+          'Unconditional registry write: every PUT must carry a precondition.'
+        )
+      }
       wasState.records.set(spaceId, record)
+      wasState.versions.set(spaceId, version + 1)
+      return { etag: `v${version + 1}` }
     }
   ),
   getUnlockMethodsRecord: vi.fn(async ({ spaceId }: { spaceId: string }) =>
-    wasState.records.has(spaceId) ? wasState.records.get(spaceId) : null
+    wasState.records.has(spaceId)
+      ? {
+          record: wasState.records.get(spaceId),
+          etag: `v${wasState.versions.get(spaceId) ?? 0}`
+        }
+      : null
   )
 }))
 
@@ -53,7 +89,7 @@ import { mintUserKey, userKeyVaultKeys } from '@interop/wallet-core/keys'
 import { durableSessionPersistence } from '@/session/persistence'
 import {
   getUnlockMethods,
-  putUnlockMethods,
+  updateUnlockMethods,
   UnlockRegistryStaleSealError,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
@@ -159,9 +195,29 @@ function rosterReadFor({ userKey }: { userKey: UserKey }) {
 beforeEach(() => {
   wasState.url = 'https://was.example.test'
   wasState.records.clear()
+  wasState.versions.clear()
   wasState.generations = []
   wasState.putError = undefined
 })
+
+/**
+ * Seeds the stored registry through the compare-and-swap wrapper (the bare
+ * unconditional put no longer exists).
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.record {UnlockMethodsRecord}
+ * @returns {Promise<void>}
+ */
+async function seedRegistry({
+  session,
+  record
+}: {
+  session: Session
+  record: UnlockMethodsRecord
+}): Promise<void> {
+  await updateUnlockMethods({ session, mutate: () => record })
+}
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -171,7 +227,7 @@ describe('the stale-seal detector', () => {
   it('throws UnlockRegistryStaleSealError when the record will not decrypt', async () => {
     const oldKey = await mintUserKey()
     const session = makeSession({ userKey: oldKey })
-    await putUnlockMethods({ session, record: sampleRecord() })
+    await seedRegistry({ session, record: sampleRecord() })
 
     swapVaultKeys({ session, userKey: await mintUserKey() })
 
@@ -183,7 +239,7 @@ describe('the stale-seal detector', () => {
   it('does not call a version mismatch a stale seal', async () => {
     const userKey = await mintUserKey()
     const session = makeSession({ userKey })
-    await putUnlockMethods({ session, record: sampleRecord() })
+    await seedRegistry({ session, record: sampleRecord() })
     // A frame stamped by a future client: refused before any decrypt is
     // attempted, so it is not a seal problem.
     ;(wasState.records.get(SPACE_ID) as { version: number }).version = 2
@@ -196,7 +252,7 @@ describe('the stale-seal detector', () => {
   it('reads a record sealed to the current key without complaint', async () => {
     const userKey = await mintUserKey()
     const session = makeSession({ userKey })
-    await putUnlockMethods({ session, record: sampleRecord() })
+    await seedRegistry({ session, record: sampleRecord() })
 
     await expect(getUnlockMethods({ session })).resolves.toEqual(sampleRecord())
   })
@@ -207,7 +263,7 @@ describe('the login-time re-seal repair', () => {
     const oldKey = await mintUserKey()
     const currentKey = await mintUserKey()
     const session = makeSession({ userKey: oldKey })
-    await putUnlockMethods({ session, record: sampleRecord() })
+    await seedRegistry({ session, record: sampleRecord() })
     // The rotation landed in the roster and this browser adopted the fresh
     // key, but the re-seal was lost.
     swapVaultKeys({ session, userKey: currentKey })
@@ -226,7 +282,7 @@ describe('the login-time re-seal repair', () => {
   it('is a no-op read on a registry the current key already opens', async () => {
     const userKey = await mintUserKey()
     const session = makeSession({ userKey })
-    await putUnlockMethods({ session, record: sampleRecord() })
+    await seedRegistry({ session, record: sampleRecord() })
     const sealed = wasState.records.get(SPACE_ID)
 
     const outcome = await repairStaleUnlockRegistrySeal({
@@ -240,7 +296,7 @@ describe('the login-time re-seal repair', () => {
 
   it('reports an unrepaired seal when no escrowed generation opens it', async () => {
     const session = makeSession({ userKey: await mintUserKey() })
-    await putUnlockMethods({ session, record: sampleRecord() })
+    await seedRegistry({ session, record: sampleRecord() })
     const currentKey = await mintUserKey()
     swapVaultKeys({ session, userKey: currentKey })
     // A generation that never sealed this record.
@@ -268,7 +324,7 @@ describe('the in-band adoption when its re-seal fails', () => {
   it('leaves the session on the pre-rotation keys', async () => {
     const oldKey = await mintUserKey()
     const session = makeSession({ userKey: oldKey })
-    await putUnlockMethods({ session, record: sampleRecord() })
+    await seedRegistry({ session, record: sampleRecord() })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     wasState.putError = new Error('503 from the storage server')
 

@@ -81,9 +81,32 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
 vi.mock('@/session/unlockMethods', async importOriginal => ({
   ...(await importOriginal<typeof import('@/session/unlockMethods')>()),
   getUnlockMethods: vi.fn(async () => registryState.record),
-  putUnlockMethods: vi.fn(async ({ record }: { record: never }) => {
-    registryState.record = record
-  }),
+  updateUnlockMethods: vi.fn(
+    async ({
+      mutate
+    }: {
+      mutate: (current: never) => never | null | Promise<never | null>
+    }) => {
+      const next = await mutate(registryState.record as never)
+      if (next !== null) {
+        registryState.record = next
+      }
+      return next ?? registryState.record
+    }
+  ),
+  updateUnlockMethodsWithClient: vi.fn(
+    async ({
+      mutate
+    }: {
+      mutate: (current: never) => never | null | Promise<never | null>
+    }) => {
+      const next = await mutate(registryState.record as never)
+      if (next !== null) {
+        registryState.record = next
+      }
+      return next ?? registryState.record
+    }
+  ),
   revokeUnlockMethod: vi.fn(async () => {})
 }))
 

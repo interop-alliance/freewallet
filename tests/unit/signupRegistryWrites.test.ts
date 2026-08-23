@@ -17,7 +17,9 @@ import type {
 
 const state = vi.hoisted(() => ({
   registry: null as UnlockMethodsRecord | null,
-  readThrows: false
+  readThrows: false,
+  // Landed registry writes, labeled by wrapper flavor ('session' | 'client').
+  writes: [] as string[]
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
@@ -104,23 +106,38 @@ vi.mock('@/session/unlockMethods', async importOriginal => {
   const write = async ({ record }: { record: UnlockMethodsRecord }) => {
     state.registry = structuredClone(record)
   }
+  const update = (label: string) =>
+    vi.fn(
+      async ({
+        mutate
+      }: {
+        mutate: (
+          current: UnlockMethodsRecord | null
+        ) => UnlockMethodsRecord | null | Promise<UnlockMethodsRecord | null>
+      }) => {
+        const current = await read()
+        const next = await mutate(current)
+        if (next === null) {
+          return current
+        }
+        state.writes.push(label)
+        await write({ record: next })
+        return next
+      }
+    )
   return {
     ...original,
     enrollPasskey: vi.fn(),
     getUnlockMethods: vi.fn(read),
-    putUnlockMethods: vi.fn(write),
     getUnlockMethodsWithClient: vi.fn(read),
-    putUnlockMethodsWithClient: vi.fn(write)
+    updateUnlockMethods: update('session'),
+    updateUnlockMethodsWithClient: update('client')
   }
 })
 
 import { base64urlnopad } from '@scure/base'
 import { fetchTransientKeyring } from '@/session/keyring'
-import {
-  enrollPasskey,
-  putUnlockMethods,
-  putUnlockMethodsWithClient
-} from '@/session/unlockMethods'
+import { enrollPasskey } from '@/session/unlockMethods'
 import { signUpWithPassphrase, signUpWithPasskey } from '@/session/signup'
 
 /**
@@ -143,6 +160,7 @@ function passkeyEntry(credentialId: string): PasskeyUnlockMethod {
 beforeEach(() => {
   state.registry = null
   state.readThrows = false
+  state.writes = []
   vi.mocked(fetchTransientKeyring)
     .mockReset()
     .mockResolvedValueOnce(null)
@@ -159,7 +177,7 @@ describe('the credential-anchored signup hook -- read-first registry write', () 
   it('mints a fresh registry on a true absent', async () => {
     await signUpWithPassphrase({ passphrase: 'correct horse' })
 
-    expect(putUnlockMethodsWithClient).toHaveBeenCalledTimes(1)
+    expect(state.writes.filter(write => write === 'client')).toHaveLength(1)
     expect(state.registry?.methods).toEqual([
       expect.objectContaining({
         type: 'passphrase',
@@ -181,7 +199,7 @@ describe('the credential-anchored signup hook -- read-first registry write', () 
 
     await signUpWithPassphrase({ passphrase: 'correct horse' })
 
-    expect(putUnlockMethodsWithClient).toHaveBeenCalledTimes(2)
+    expect(state.writes.filter(write => write === 'client')).toHaveLength(2)
     expect(state.registry?.userHandle).toBe(first.userHandle)
     expect(state.registry?.methods.map(method => method.type)).toEqual([
       'passphrase',
@@ -203,7 +221,7 @@ describe('the credential-anchored signup hook -- read-first registry write', () 
 
     // The establishment is not failed by the skipped write.
     expect(result.session).toBeTruthy()
-    expect(putUnlockMethodsWithClient).toHaveBeenCalledTimes(1)
+    expect(state.writes.filter(write => write === 'client')).toHaveLength(1)
     expect(state.registry).toEqual(first)
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('skipping the passphrase entry'),
@@ -243,7 +261,7 @@ describe('the passkey signup -- read-first registry mint', () => {
   it('mints the registry from the registered handle on a true absent', async () => {
     const handle = await signUp('cred-1')
 
-    expect(putUnlockMethods).toHaveBeenCalledTimes(1)
+    expect(state.writes.filter(write => write === 'session')).toHaveLength(1)
     expect(state.registry).toEqual({
       version: 1,
       userHandle: handle,
@@ -281,7 +299,7 @@ describe('the passkey signup -- read-first registry mint', () => {
 
     await signUp('cred-2')
 
-    expect(putUnlockMethods).toHaveBeenCalledTimes(1)
+    expect(state.writes.filter(write => write === 'session')).toHaveLength(1)
     expect(state.registry).toEqual(first)
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('Could not record the new passkey'),

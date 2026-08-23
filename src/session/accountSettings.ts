@@ -41,8 +41,8 @@ import {
   deleteUnlockMethodArtifacts,
   enrollPasskey,
   getUnlockMethods,
-  putUnlockMethods,
   revokeUnlockMethod,
+  updateUnlockMethods,
   revokeUnlockMethodByCeremony,
   upsertPasskeyUnlockMethod,
   upsertPassphraseUnlockMethod,
@@ -686,23 +686,25 @@ async function recordPassphraseEntry({
   createIfMissing?: boolean
 }): Promise<UnlockMethodsRecord | null> {
   try {
-    const current =
-      (await getUnlockMethods({ session })) ??
-      (createIfMissing ? emptyUnlockMethodsRegistry() : null)
-    if (!current) {
-      return null
-    }
-    // `manageCapability` is written unconditionally: a change that minted
-    // none must clear the one the retired unlock Space's entry carried.
-    const updated = upsertPassphraseUnlockMethod({
-      record: current,
-      unlockSpaceId,
-      manageCapability,
-      keepAbsentManageCapability: true,
-      ...(standing ? { standing } : {})
+    return await updateUnlockMethods({
+      session,
+      mutate: current => {
+        const base =
+          current ?? (createIfMissing ? emptyUnlockMethodsRegistry() : null)
+        if (!base) {
+          return null
+        }
+        // `manageCapability` is written unconditionally: a change that minted
+        // none must clear the one the retired unlock Space's entry carried.
+        return upsertPassphraseUnlockMethod({
+          record: base,
+          unlockSpaceId,
+          manageCapability,
+          keepAbsentManageCapability: true,
+          ...(standing ? { standing } : {})
+        })
+      }
     })
-    await putUnlockMethods({ session, record: updated })
-    return updated
   } catch (err) {
     console.warn('Could not update the passphrase unlock-method entry:', err)
     return null
@@ -834,9 +836,12 @@ export async function addAccountPasskey({
     entry
   })
   try {
-    const fresh = await getUnlockMethods({ session })
-    record = upsertPasskeyUnlockMethod({ record: fresh ?? base, entry })
-    await putUnlockMethods({ session, record })
+    record =
+      (await updateUnlockMethods({
+        session,
+        mutate: fresh =>
+          upsertPasskeyUnlockMethod({ record: fresh ?? base, entry })
+      })) ?? record
   } catch (err) {
     // The passkey is already bound and will log in; only the registry
     // listing entry failed to persist.
@@ -884,29 +889,34 @@ export async function renameAccountPasskey({
   entry: PasskeyUnlockMethod
   label: string
 }): Promise<UnlockMethodsRecord> {
-  const current = await getUnlockMethods({ session })
-  if (!current) {
-    throw new Error(
-      'There is no unlock-methods registry to rename a passkey in.'
-    )
-  }
-  const listed = current.methods.some(
-    method =>
-      method.type === 'passkey' && method.credentialId === entry.credentialId
-  )
-  if (!listed) {
-    return current
-  }
-  const record: UnlockMethodsRecord = {
-    ...current,
-    methods: current.methods.map(method =>
-      method.type === 'passkey' && method.credentialId === entry.credentialId
-        ? { ...method, label }
-        : method
-    )
-  }
-  await putUnlockMethods({ session, record })
-  return record
+  const record = await updateUnlockMethods({
+    session,
+    mutate: current => {
+      if (!current) {
+        throw new Error(
+          'There is no unlock-methods registry to rename a passkey in.'
+        )
+      }
+      const listed = current.methods.some(
+        method =>
+          method.type === 'passkey' &&
+          method.credentialId === entry.credentialId
+      )
+      if (!listed) {
+        return null
+      }
+      return {
+        ...current,
+        methods: current.methods.map(method =>
+          method.type === 'passkey' &&
+          method.credentialId === entry.credentialId
+            ? { ...method, label }
+            : method
+        )
+      }
+    }
+  })
+  return record!
 }
 
 /**
@@ -1041,19 +1051,22 @@ export async function addAccountPassphrase({
   // write must not be reverted here. The upsert also makes a second run of
   // this ceremony replace the single passphrase entry instead of appending a
   // duplicate one naming a different credential.
-  const current = await getUnlockMethods({ session })
-  const record = upsertPassphraseUnlockMethod({
-    record: current ?? emptyUnlockMethodsRegistry(),
-    unlockSpaceId,
-    // The plain-bind fallback mints no capability; `keepAbsentManageCapability`
-    // stays false so no `manageCapability: undefined` key is stored.
-    manageCapability,
-    // The plain-bind fallback establishes no standing configuration either.
-    // Its entry names a freshly bound unlock Space, so the upsert's carry
-    // rule has nothing stale to carry forward.
-    ...(standingFields ? { standing: standingFields } : {})
-  })
-  await putUnlockMethods({ session, record })
+  const record = (await updateUnlockMethods({
+    session,
+    mutate: current =>
+      upsertPassphraseUnlockMethod({
+        record: current ?? emptyUnlockMethodsRegistry(),
+        unlockSpaceId,
+        // The plain-bind fallback mints no capability;
+        // `keepAbsentManageCapability` stays false so no
+        // `manageCapability: undefined` key is stored.
+        manageCapability,
+        // The plain-bind fallback establishes no standing configuration
+        // either. Its entry names a freshly bound unlock Space, so the
+        // upsert's carry rule has nothing stale to carry forward.
+        ...(standingFields ? { standing: standingFields } : {})
+      })
+  }))!
   // The account now has a passphrase backup, so the passkey-only safety
   // prompt is resolved. Best-effort.
   try {

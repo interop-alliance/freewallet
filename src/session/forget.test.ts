@@ -120,7 +120,8 @@ const { requireEnrolledClientContext } =
 vi.mock('@/session/unlockMethods', () => ({
   getUnlockMethods: vi.fn(),
   managementZcapClient: vi.fn(() => ({ managementZcapClient: true })),
-  refreshStandingDelegationFields: vi.fn()
+  refreshStandingDelegationFields: vi.fn(),
+  updateUnlockMethods: vi.fn()
 }))
 const {
   getUnlockMethods,

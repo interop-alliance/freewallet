@@ -33,7 +33,11 @@ import {
 const wasState = vi.hoisted(() => ({
   url: 'https://was.example.test' as string | undefined,
   records: new Map<string, unknown>(),
+  versions: new Map<string, number>(),
   getError: undefined as unknown,
+  // A one-shot hook fired at the START of the next PUT -- the seam the CAS
+  // tests use to land a concurrent write between a read and its PUT.
+  beforePut: undefined as (() => void | Promise<void>) | undefined,
   calls: [] as string[]
 }))
 
@@ -47,15 +51,55 @@ vi.mock('@/app.config', async importOriginal => ({
 vi.mock('@/stores/wasRemoteStore', () => ({
   ensureUnlockMethodsCollection: vi.fn(async () => {}),
   putUnlockMethodsRecord: vi.fn(
-    async ({ spaceId, record }: { spaceId: string; record: unknown }) => {
+    async ({
+      spaceId,
+      record,
+      ifMatch,
+      ifNoneMatch
+    }: {
+      spaceId: string
+      record: unknown
+      ifMatch?: string
+      ifNoneMatch?: boolean
+    }) => {
+      if (wasState.beforePut) {
+        const hook = wasState.beforePut
+        wasState.beforePut = undefined
+        await hook()
+      }
+      const { PreconditionFailedError } = await import('@interop/was-client')
+      const exists = wasState.records.has(spaceId)
+      const version = wasState.versions.get(spaceId) ?? 0
+      if (ifNoneMatch && exists) {
+        throw new PreconditionFailedError(
+          'A registry record already exists (If-None-Match).'
+        )
+      }
+      if (ifMatch !== undefined && (!exists || ifMatch !== `v${version}`)) {
+        throw new PreconditionFailedError(
+          'The registry record changed since the read (If-Match).'
+        )
+      }
+      if (ifMatch === undefined && !ifNoneMatch) {
+        throw new Error(
+          'Unconditional registry write: every PUT must carry a precondition.'
+        )
+      }
       wasState.records.set(spaceId, record)
+      wasState.versions.set(spaceId, version + 1)
+      return { etag: `v${version + 1}` }
     }
   ),
   getUnlockMethodsRecord: vi.fn(async ({ spaceId }: { spaceId: string }) => {
     if (wasState.getError) {
       throw wasState.getError
     }
-    return wasState.records.has(spaceId) ? wasState.records.get(spaceId) : null
+    return wasState.records.has(spaceId)
+      ? {
+          record: wasState.records.get(spaceId),
+          etag: `v${wasState.versions.get(spaceId) ?? 0}`
+        }
+      : null
   })
 }))
 
@@ -94,16 +138,18 @@ import {
   deleteUnlockMethodArtifacts,
   getUnlockMethods,
   managementZcapClient,
-  putUnlockMethods,
   refreshStandingDelegationFields,
   revokeUnlockMethod,
   revokeUnlockMethodByCeremony,
   rewrapUnlockMethodsRecord,
+  updateUnlockMethods,
   upsertPassphraseUnlockMethod,
   type PasskeyUnlockMethod,
   type PassphraseUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
+import { PreconditionFailedError } from '@interop/was-client'
+import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
 import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { durableSessionPersistence } from '@/session/persistence'
@@ -336,10 +382,31 @@ async function makePassphraseSession({
   return session
 }
 
+/**
+ * Seeds the stored registry through the compare-and-swap wrapper (the bare
+ * unconditional put no longer exists).
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.record {UnlockMethodsRecord}
+ * @returns {Promise<void>}
+ */
+async function seedRegistry({
+  session,
+  record
+}: {
+  session: Session
+  record: UnlockMethodsRecord
+}): Promise<void> {
+  await updateUnlockMethods({ session, mutate: () => record })
+}
+
 beforeEach(() => {
   wasState.url = 'https://was.example.test'
   wasState.records.clear()
+  wasState.versions.clear()
   wasState.getError = undefined
+  wasState.beforePut = undefined
   wasState.calls = []
   vi.clearAllMocks()
 })
@@ -354,7 +421,7 @@ describe('put / get round-trip', () => {
     const session = await makeSession(idb)
     const record = sampleRecord()
 
-    await putUnlockMethods({ session, record })
+    await seedRegistry({ session, record })
     expect(ensureUnlockMethodsCollection).toHaveBeenCalledOnce()
 
     // The remote body is the JWE-wrapped envelope, not the plaintext record.
@@ -366,6 +433,7 @@ describe('put / get round-trip', () => {
     expect(stored.wrapped.jwe).toBeDefined()
     expect(JSON.stringify(stored)).not.toContain('unlock-space-abc')
 
+    vi.mocked(getUnlockMethodsRecord).mockClear()
     const found = await getUnlockMethods({ session })
     expect(found).toEqual(record)
     expect(getUnlockMethodsRecord).toHaveBeenCalledOnce()
@@ -392,7 +460,7 @@ describe('no-WAS cache-only path', () => {
     const session = await makeSession(idb)
     const record = sampleRecord()
 
-    await putUnlockMethods({ session, record })
+    await seedRegistry({ session, record })
     expect(ensureUnlockMethodsCollection).not.toHaveBeenCalled()
     expect(wasState.records.size).toBe(0)
 
@@ -408,7 +476,7 @@ describe('remote-first read', () => {
     const record = sampleRecord()
     // Populate the remote (and a throwaway profile's cache) via one idb, then
     // read on a fresh idb whose cache starts empty.
-    await putUnlockMethods({ session, record })
+    await seedRegistry({ session, record })
     vi.clearAllMocks()
 
     const freshIdb = createFakeIdb()
@@ -436,7 +504,7 @@ describe('remote-first read', () => {
   it('drops the cache and returns null when the remote registry is gone', async () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
-    await putUnlockMethods({ session, record: sampleRecord() })
+    await seedRegistry({ session, record: sampleRecord() })
     // The registry was deleted remotely while this profile's cache still holds
     // a copy.
     wasState.records.clear()
@@ -462,7 +530,7 @@ describe('revokeUnlockMethod', () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
     const entry = passkeyEntry({ manageCapability: FAKE_CAP })
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -510,7 +578,7 @@ describe('revokeUnlockMethod', () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
     const entry = passkeyEntry()
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -540,7 +608,7 @@ describe('deleteUnlockMethodArtifacts', () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
     const entry = passkeyEntry({ manageCapability: FAKE_CAP })
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -640,7 +708,7 @@ describe('the standing delegation scalar pairs (FW-194)', () => {
   it('refreshStandingDelegationFields records both fresh pairs', async () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -680,7 +748,7 @@ describe('the standing delegation scalar pairs (FW-194)', () => {
     // CURRENT passphrase's ladder.
     const idb = createFakeIdb()
     const session = await makeSession(idb)
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -712,7 +780,7 @@ describe('the standing delegation scalar pairs (FW-194)', () => {
   it('writes when the entry records the acting credential', async () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -759,7 +827,7 @@ describe('the credential rotation inside a revocation', () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
     const entry = standingEntry()
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -804,7 +872,7 @@ describe('the credential rotation inside a revocation', () => {
       keyAgreementKeyMultibase: 'z6LSCodeKak',
       updateKeyMultibase: 'z6MkCodeUpdate'
     } as const
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -822,7 +890,7 @@ describe('the credential rotation inside a revocation', () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
     const entry = standingEntry()
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -913,7 +981,7 @@ describe('backfillPassphraseUnlockMethod', () => {
   it('still returns an existing registry for a non-passphrase session', async () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb) // e.g. a passkey login
-    await putUnlockMethods({ session, record: sampleRecord() })
+    await seedRegistry({ session, record: sampleRecord() })
     vi.mocked(putUnlockMethodsRecord).mockClear()
 
     // The Settings section loads through this function for every session; a
@@ -970,7 +1038,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       idb
     })
     // An existing registry (one passkey entry, no passphrase).
-    await putUnlockMethods({ session, record: sampleRecord() })
+    await seedRegistry({ session, record: sampleRecord() })
 
     const result = await backfillPassphraseUnlockMethod({ session })
     expect(result!.methods).toHaveLength(2)
@@ -993,7 +1061,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       unlockSpaceId: 'old-ps-space'
     }
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1025,7 +1093,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       unlockSpaceId: 'ps-space',
       manageCapability: capExpiringIn({ msFromNow: 1000 })
     }
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1051,7 +1119,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       idb
     })
     const stored = capExpiringIn({ msFromNow: ONE_YEAR_MS / 2 })
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1085,7 +1153,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       unlockSpaceId: 'unlock-space-abc',
       manageCapability: fresh
     }
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1116,7 +1184,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       manageCapability: capExpiringIn({ msFromNow: ONE_YEAR_MS })
     }
     const stored = capExpiringIn({ msFromNow: ONE_YEAR_MS / 2 })
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1145,7 +1213,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       manageCapability: fresh,
       idb
     })
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1192,7 +1260,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       msFromNow: ONE_YEAR_MS / 2,
       allowedAction: ['GET', 'PUT', 'DELETE']
     })
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1235,7 +1303,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       msFromNow: ONE_YEAR_MS / 2,
       allowedAction: ['GET', 'PUT', 'DELETE']
     })
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1267,7 +1335,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       manageCapability: fresh,
       idb
     })
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1310,7 +1378,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       idb
     })
     const stored = capExpiringIn({ msFromNow: ONE_YEAR_MS / 2 })
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1347,7 +1415,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       unlockSpaceId: 'unlock-space-abc',
       manageCapability: fresh
     }
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1387,7 +1455,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       manageCapability: fresh,
       idb
     })
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1427,7 +1495,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       unlockSpaceId: 'unlock-space-abc',
       manageCapability: fresh
     }
-    await putUnlockMethods({
+    await seedRegistry({
       session,
       record: {
         version: 1,
@@ -1542,7 +1610,7 @@ describe('rewrapUnlockMethodsRecord', () => {
   it('re-seals the stored record so only the new keys decrypt it', async () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
-    await putUnlockMethods({ session, record: sampleRecord() })
+    await seedRegistry({ session, record: sampleRecord() })
 
     const from = {
       keyAgreementKey: session.profile.keyAgreementKey! as IKeyAgreementKey,
@@ -1580,5 +1648,193 @@ describe('rewrapUnlockMethodsRecord', () => {
       to
     })
     expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+  })
+})
+
+describe('the registry compare-and-swap (FW-299)', () => {
+  /**
+   * A distinct vault key set (a different seed), standing in for another
+   * writer's post-rotation user key.
+   */
+  async function makeVaultKeys(fillByte: number) {
+    const seed = new Uint8Array(32)
+    seed.fill(fillByte)
+    const agent = await CapabilityAgent.fromSeed({
+      seed,
+      handle: `test-cas-${fillByte}`,
+      keyName: 'test-cas-key'
+    })
+    const keyAgreementKey =
+      X25519KeyAgreementKey2020.fromEd25519VerificationKey2020({
+        keyPair: agent.getVerificationKeyPair()
+      })
+    const keyResolver = async () => ({
+      id: keyAgreementKey.id,
+      type: keyAgreementKey.type,
+      publicKeyMultibase: keyAgreementKey.publicKeyMultibase
+    })
+    return {
+      keyAgreementKey: keyAgreementKey as IKeyAgreementKey,
+      keyResolver: keyResolver as IKeyResolver
+    }
+  }
+
+  it('closes the seal-downgrade race: a stale re-seal conflicts and cannot undo a fresh one', async () => {
+    // Tab A holds the pre-rotation keys; tab B rotates the user key and
+    // re-seals the registry between A's read and A's PUT. A's stale-based
+    // hygiene re-seal must conflict, re-read, and refuse the fresh base it
+    // cannot open -- not land a record sealed back to the old keys.
+    const session = await makeSession(createFakeIdb())
+    await seedRegistry({ session, record: sampleRecord() })
+    const from = {
+      keyAgreementKey: session.profile.keyAgreementKey! as IKeyAgreementKey,
+      keyResolver: session.profile.keyResolver! as IKeyResolver
+    }
+    const freshSeal = await makeVaultKeys(11)
+    const staleTarget = await makeVaultKeys(12)
+    // B's rotation re-seal lands between A's read and A's first PUT.
+    wasState.beforePut = async () => {
+      await rewrapUnlockMethodsRecord({
+        storageServerUrl: 'https://was.example.test',
+        zcapClient: {} as never,
+        spaceId: DATA_SPACE_ID,
+        from,
+        to: freshSeal
+      })
+    }
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    await expect(
+      rewrapUnlockMethodsRecord({
+        storageServerUrl: 'https://was.example.test',
+        zcapClient: {} as never,
+        spaceId: DATA_SPACE_ID,
+        from,
+        to: staleTarget
+      })
+    ).rejects.toBeInstanceOf(RecordEnvelopeDecryptError)
+    // B's PUT landed; A's first PUT conflicted and its retry refused the
+    // fresh base instead of writing.
+    expect(putUnlockMethodsRecord).toHaveBeenCalledTimes(2)
+
+    // The landed record still opens under B's fresh seal -- no downgrade.
+    const reader = await makeSession(createFakeIdb())
+    reader.profile.keyAgreementKey = freshSeal.keyAgreementKey as never
+    reader.profile.keyResolver = freshSeal.keyResolver as never
+    await expect(getUnlockMethods({ session: reader })).resolves.toEqual(
+      sampleRecord()
+    )
+  })
+
+  it('rethrows the conflict after three attempts, with no stale write landed', async () => {
+    const session = await makeSession(createFakeIdb())
+    await seedRegistry({ session, record: sampleRecord() })
+    // Bump the stored version behind every attempt, so each PUT is stale.
+    const bump = () => {
+      const version = wasState.versions.get(DATA_SPACE_ID) ?? 0
+      wasState.versions.set(DATA_SPACE_ID, version + 1)
+      wasState.beforePut = bump
+    }
+    wasState.beforePut = bump
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    await expect(
+      updateUnlockMethods({
+        session,
+        mutate: current => ({
+          ...(current as UnlockMethodsRecord),
+          userHandle: 'STALEWRITEHANDLEAAAAAA'
+        })
+      })
+    ).rejects.toBeInstanceOf(PreconditionFailedError)
+    expect(putUnlockMethodsRecord).toHaveBeenCalledTimes(3)
+
+    // Nothing stale landed: the stored record is untouched.
+    wasState.beforePut = undefined
+    await expect(getUnlockMethods({ session })).resolves.toEqual(sampleRecord())
+  })
+
+  it("re-applies a lost race on the fresh base, keeping both writers' intents", async () => {
+    // The within-one-login backstop: one writer upserts a passphrase entry,
+    // the other renames the passkey. The loser conflicts and re-applies on
+    // the winner's record, so neither intent is silently reverted.
+    const session = await makeSession(createFakeIdb())
+    await seedRegistry({ session, record: sampleRecord() })
+    wasState.beforePut = async () => {
+      await updateUnlockMethods({
+        session,
+        mutate: current =>
+          upsertPassphraseUnlockMethod({
+            record: current as UnlockMethodsRecord,
+            unlockSpaceId: 'unlock-space-pp'
+          })
+      })
+    }
+
+    const result = await updateUnlockMethods({
+      session,
+      mutate: current => ({
+        ...(current as UnlockMethodsRecord),
+        methods: (current as UnlockMethodsRecord).methods.map(method =>
+          method.type === 'passkey' ? { ...method, label: 'Renamed' } : method
+        )
+      })
+    })
+
+    expect(result?.methods.map(method => method.type).sort()).toEqual([
+      'passkey',
+      'passphrase'
+    ])
+    expect(
+      result?.methods.find(method => method.type === 'passkey')
+    ).toMatchObject({ label: 'Renamed' })
+    await expect(getUnlockMethods({ session })).resolves.toEqual(result)
+  })
+
+  it('writes nothing when mutate resolves null', async () => {
+    const session = await makeSession(createFakeIdb())
+    await seedRegistry({ session, record: sampleRecord() })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await updateUnlockMethods({ session, mutate: () => null })
+
+    expect(result).toEqual(sampleRecord())
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+  })
+
+  it('first-materializes create-if-absent and upserts into a record that won the create race', async () => {
+    const session = await makeSession(createFakeIdb())
+    const other = sampleRecord()
+    // Another writer creates the first record between this writer's read
+    // (which found nothing) and its create.
+    wasState.beforePut = async () => {
+      const winner = await makeSession(createFakeIdb())
+      await seedRegistry({ session: winner, record: other })
+    }
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await updateUnlockMethods({
+      session,
+      mutate: current =>
+        upsertPassphraseUnlockMethod({
+          record: current ?? {
+            version: 1,
+            userHandle: 'FRESHMINTEDHANDLEAAAAA',
+            methods: []
+          },
+          unlockSpaceId: 'unlock-space-pp'
+        })
+    })
+
+    // The first attempt was a create-if-absent; losing it retried and
+    // upserted into the existing record, whose handle and entries survive.
+    const firstPut = vi.mocked(putUnlockMethodsRecord).mock.calls[0]![0]
+    expect(firstPut.ifNoneMatch).toBe(true)
+    expect(result?.userHandle).toBe(other.userHandle)
+    expect(result?.methods.map(method => method.type).sort()).toEqual([
+      'passkey',
+      'passphrase'
+    ])
+    await expect(getUnlockMethods({ session })).resolves.toEqual(result)
   })
 })

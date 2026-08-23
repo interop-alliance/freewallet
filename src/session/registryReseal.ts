@@ -119,7 +119,11 @@ export async function repairStaleUnlockRegistrySeal({
       if (err instanceof RecordEnvelopeDecryptError) {
         // The wrong generation: expected for every candidate but one, so it
         // is not worth a warning. The caller reports the state once the loop
-        // runs out.
+        // runs out. (The same error can also mean a lost CAS race: the first
+        // read opened under this generation, the PUT conflicted, and the
+        // retry's fresh base is already sealed forward -- a healthy registry
+        // then reads as unrepaired here. Inert: the outcome is advisory and
+        // Settings re-detects from its own read.)
         continue
       }
       // The record opened under this generation and the re-wrap or the PUT

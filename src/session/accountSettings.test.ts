@@ -12,11 +12,11 @@ import {
 
 vi.mock('@/session/unlockMethods', () => ({
   backfillPassphraseUnlockMethod: vi.fn(),
-  getUnlockMethods: vi.fn()
+  getUnlockMethods: vi.fn(),
+  updateUnlockMethods: vi.fn()
 }))
-const { backfillPassphraseUnlockMethod, getUnlockMethods } = await import(
-  '@/session/unlockMethods'
-)
+const { backfillPassphraseUnlockMethod, getUnlockMethods } =
+  await import('@/session/unlockMethods')
 
 const { loadUnlockRegistry } = await import('@/session/accountSettings')
 
@@ -49,9 +49,7 @@ describe('loadUnlockRegistry (FW-295 transient gate)', () => {
   it('backfills with createIfMissing on a durable session', async () => {
     const session = fakeSession({ durability: DURABILITY_INDEXEDDB })
     const record = { methods: [] }
-    vi.mocked(backfillPassphraseUnlockMethod).mockResolvedValue(
-      record as never
-    )
+    vi.mocked(backfillPassphraseUnlockMethod).mockResolvedValue(record as never)
 
     const result = await loadUnlockRegistry({ session })
 

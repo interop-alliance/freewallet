@@ -95,9 +95,8 @@ import {
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
   emptyUnlockMethodsRegistry,
-  getUnlockMethods,
-  putUnlockMethods,
   refreshStandingDelegationFields,
+  updateUnlockMethods,
   upsertPassphraseUnlockMethod,
   type StandingUnlockFields
 } from '@/session/unlockMethods'
@@ -694,16 +693,15 @@ export async function establishPassphraseStanding({
       manageCapability: established.manageCapability
     }
     if (recordInRegistry) {
-      const record =
-        (await getUnlockMethods({ session })) ?? emptyUnlockMethodsRegistry()
-      await putUnlockMethods({
+      await updateUnlockMethods({
         session,
-        record: upsertPassphraseUnlockMethod({
-          record,
-          unlockSpaceId: established.unlockSpaceId,
-          manageCapability: established.manageCapability,
-          standing: established.standingFields
-        })
+        mutate: current =>
+          upsertPassphraseUnlockMethod({
+            record: current ?? emptyUnlockMethodsRegistry(),
+            unlockSpaceId: established.unlockSpaceId,
+            manageCapability: established.manageCapability,
+            standing: established.standingFields
+          })
       })
     }
     return {

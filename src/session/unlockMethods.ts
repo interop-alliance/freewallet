@@ -33,6 +33,7 @@ import type {
   IZcap
 } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
+import { PreconditionFailedError } from '@interop/was-client'
 import { base64urlnopad } from '@scure/base'
 import {
   DATE_FMT,
@@ -405,128 +406,366 @@ export async function getUnlockMethods({
     }
   }
 
-  const record = await getUnlockMethodsRecord({
+  const stored = await getUnlockMethodsRecord({
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: session.profile.zcapClient,
     spaceId: requireSpaceId(session)
   })
-  if (!record) {
+  if (!stored) {
     await unlockMethodsCache.delete({ controller })
     return null
   }
   let parsed: UnlockMethodsRecord
   try {
-    parsed = await unwrapRecord({ record, keyAgreementKey, keyResolver })
+    parsed = await unwrapRecord({
+      record: stored.record,
+      keyAgreementKey,
+      keyResolver
+    })
   } catch (err) {
     if (err instanceof RecordEnvelopeDecryptError) {
       throw new UnlockRegistryStaleSealError({ cause: err })
     }
     throw err
   }
-  await unlockMethodsCache.save({ controller, record })
+  await unlockMethodsCache.save({ controller, record: stored.record })
   return parsed
 }
 
 /**
- * Writes the account's unlock-methods registry (last-write-wins). Wraps the
- * record under the vault KAK, and -- when a WAS server is configured -- ensures
- * the `unlock-methods` collection exists in the data Space before PUTting the
- * record there with the root zcapClient. Always refreshes the local cache.
+ * The registry's bounded compare-and-swap attempts, matching the roster's
+ * recipient loop and the account-log publish retry.
+ */
+const MAX_CAS_ATTEMPTS = 3
+
+/**
+ * Whether `err` is the compare-and-swap conflict a conditional registry PUT
+ * raises (`PreconditionFailedError`, 412). Matched by `name` as well as
+ * `instanceof`: in a dependency tree that resolves was-client twice the class
+ * object differs, and an `instanceof`-only check would turn every lost race
+ * into a hard failure instead of a rebase.
+ *
+ * @param err {unknown}
+ * @returns {boolean}
+ */
+function isPreconditionFailed(err: unknown): boolean {
+  return (
+    err instanceof PreconditionFailedError ||
+    (err instanceof Error && err.name === 'PreconditionFailedError')
+  )
+}
+
+/**
+ * The one read-modify-write loop every registry write runs: a fresh read
+ * (stored envelope plus ETag), `mutate` over the freshly unwrapped record,
+ * and a conditional PUT -- `If-Match` on the read's ETag, or `If-None-Match`
+ * when the read found nothing (the create-if-absent first materialization). A
+ * lost race (412) re-enters the loop with a fresh read, up to
+ * {@link MAX_CAS_ATTEMPTS}; exhaustion rethrows the conflict. A read that
+ * served a record with no ETag refuses the unconditional overwrite outright
+ * rather than degrading to last-write-wins (defensive only: the WAS server
+ * always serves ETags).
+ *
+ * @param options {object}
+ * @param options.read {Function}   fresh read of the stored envelope + ETag
+ * @param options.write {Function}   conditional PUT of a wrapped envelope
+ * @param options.unwrap {Function}   stored envelope to registry record
+ * @param options.wrap {Function}   registry record to stored envelope
+ * @param options.mutate {Function}   fresh record (or null) to the next
+ *   record, or null for "no write needed"
+ * @param [options.onUnchanged] {Function}   called with the stored envelope
+ *   (or null) when mutate declined the write
+ * @param [options.onWritten] {Function}   called with the wrapped envelope
+ *   after a landed write
+ * @returns {Promise<UnlockMethodsRecord | null>}   the written record, or the
+ *   current one when mutate declined (null when none exists)
+ */
+async function casUpdateRegistryRecord({
+  read,
+  write,
+  unwrap,
+  wrap,
+  mutate,
+  onUnchanged,
+  onWritten
+}: {
+  read: () => Promise<{ record: unknown; etag?: string } | null>
+  write: (
+    record: object,
+    precondition: { ifMatch?: string; ifNoneMatch?: boolean }
+  ) => Promise<void>
+  unwrap: (stored: unknown) => Promise<UnlockMethodsRecord>
+  wrap: (record: UnlockMethodsRecord) => Promise<object>
+  mutate: (
+    current: UnlockMethodsRecord | null
+  ) => UnlockMethodsRecord | null | Promise<UnlockMethodsRecord | null>
+  onUnchanged?: (stored: { record: unknown } | null) => Promise<void>
+  onWritten?: (wrapped: object) => Promise<void>
+}): Promise<UnlockMethodsRecord | null> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+    const stored = await read()
+    const current = stored ? await unwrap(stored.record) : null
+    const next = await mutate(current)
+    if (next === null) {
+      await onUnchanged?.(stored)
+      return current
+    }
+    if (stored && stored.etag === undefined) {
+      throw new Error(
+        'The unlock-methods registry read carried no ETag; refusing an ' +
+          'unconditional overwrite.'
+      )
+    }
+    const wrapped = await wrap(next)
+    try {
+      await write(
+        wrapped,
+        stored ? { ifMatch: stored.etag } : { ifNoneMatch: true }
+      )
+    } catch (err) {
+      if (isPreconditionFailed(err)) {
+        // Another writer landed first: re-read and re-apply on the fresh
+        // base.
+        lastError = err
+        continue
+      }
+      throw err
+    }
+    await onWritten?.(wrapped)
+    return next
+  }
+  throw new PreconditionFailedError(
+    'The unlock-methods registry write lost the compare-and-swap race ' +
+      `after ${MAX_CAS_ATTEMPTS} attempts (another writer kept updating ` +
+      'the record). Retry the operation.',
+    { cause: lastError as Error }
+  )
+}
+
+/**
+ * The account registry's one write path: applies `mutate` to a FRESH read of
+ * the unlock-methods registry and writes the result back as a compare-and-swap
+ * on that read's ETag, retrying on a lost race (`casUpdateRegistryRecord`).
+ * `mutate` receives the freshly unwrapped record (or `null` when none exists
+ * yet) and returns the record to store, or `null` for "no write needed"; it
+ * may run more than once, so a caller expresses an intent computed beforehand
+ * (upsert this entry, drop that one) rather than reusing a stale page-held
+ * record as the base. Wraps under the vault KAK, ensures the `unlock-methods`
+ * collection exists before the first PUT, and refreshes the local cache the
+ * way a read does: saved after a landed write (or a declined one over an
+ * existing record), dropped on a true absent. With no WAS server the local
+ * cache is the only copy and the loop is one read-modify-write over it.
+ *
+ * A served record that does not decrypt under this session's vault keys
+ * throws `UnlockRegistryStaleSealError`, the same stale-seal refusal the read
+ * path makes -- no mutate may run over a record this session cannot read.
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.record {UnlockMethodsRecord}
- * @returns {Promise<void>}
+ * @param options.mutate {Function}   fresh record (or null) to the next
+ *   record, or null for "no write needed"
+ * @returns {Promise<UnlockMethodsRecord | null>}   the written record, or the
+ *   current one when mutate declined (null when none exists)
+ * @throws {UnlockRegistryStaleSealError}
  */
-export async function putUnlockMethods({
+export async function updateUnlockMethods({
   session,
-  record
+  mutate
 }: {
   session: Session
-  record: UnlockMethodsRecord
-}): Promise<void> {
+  mutate: (
+    current: UnlockMethodsRecord | null
+  ) => UnlockMethodsRecord | null | Promise<UnlockMethodsRecord | null>
+}): Promise<UnlockMethodsRecord | null> {
   const controller = session.user.id
+  const { unlockMethodsCache } = session.profile.persistence
   const { keyAgreementKey, keyResolver } = requireVaultKeys(session)
-  const wrapped = await wrapRecord({ record, keyAgreementKey, keyResolver })
 
-  if (WAS_SERVER_URL) {
-    const spaceId = requireSpaceId(session)
-    await ensureUnlockMethodsCollection({
-      storageServerUrl: WAS_SERVER_URL,
-      zcapClient: session.profile.zcapClient,
-      spaceId
+  if (!WAS_SERVER_URL) {
+    const cached = await unlockMethodsCache.load({ controller })
+    let current: UnlockMethodsRecord | null = null
+    if (cached) {
+      try {
+        current = await unwrapRecord({
+          record: cached,
+          keyAgreementKey,
+          keyResolver
+        })
+      } catch (err) {
+        console.warn(
+          'Discarding an unusable cached unlock-methods record:',
+          err
+        )
+        await unlockMethodsCache.delete({ controller })
+      }
+    }
+    const next = await mutate(current)
+    if (next === null) {
+      return current
+    }
+    const wrapped = await wrapRecord({
+      record: next,
+      keyAgreementKey,
+      keyResolver
     })
-    await putUnlockMethodsRecord({
-      storageServerUrl: WAS_SERVER_URL,
-      zcapClient: session.profile.zcapClient,
-      spaceId,
-      record: wrapped
-    })
+    await unlockMethodsCache.save({ controller, record: wrapped })
+    return next
   }
 
-  await session.profile.persistence.unlockMethodsCache.save({
-    controller,
-    record: wrapped
+  const storageServerUrl = WAS_SERVER_URL
+  const zcapClient = session.profile.zcapClient
+  const spaceId = requireSpaceId(session)
+  let ensured = false
+  return await casUpdateRegistryRecord({
+    read: () =>
+      getUnlockMethodsRecord({ storageServerUrl, zcapClient, spaceId }),
+    unwrap: async stored => {
+      try {
+        return await unwrapRecord({
+          record: stored,
+          keyAgreementKey,
+          keyResolver
+        })
+      } catch (err) {
+        if (err instanceof RecordEnvelopeDecryptError) {
+          throw new UnlockRegistryStaleSealError({ cause: err })
+        }
+        throw err
+      }
+    },
+    wrap: record => wrapRecord({ record, keyAgreementKey, keyResolver }),
+    write: async (record, precondition) => {
+      if (!ensured) {
+        await ensureUnlockMethodsCollection({
+          storageServerUrl,
+          zcapClient,
+          spaceId
+        })
+        ensured = true
+      }
+      await putUnlockMethodsRecord({
+        storageServerUrl,
+        zcapClient,
+        spaceId,
+        record,
+        ...precondition
+      })
+    },
+    mutate,
+    onUnchanged: async stored => {
+      if (stored) {
+        await unlockMethodsCache.save({ controller, record: stored.record })
+      } else {
+        await unlockMethodsCache.delete({ controller })
+      }
+    },
+    onWritten: async wrapped => {
+      await unlockMethodsCache.save({ controller, record: wrapped })
+    }
   })
 }
 
 /**
- * Writes the registry with a caller-supplied signing client and user key --
- * no session involved. The credential-anchored signup's registry write: it
- * runs inside the establishment ceremony's pre-promotion window (the bootstrap
- * did:key still invokes the root capability there), before any session
- * exists. No local cache is touched: the caller is a transient visit.
+ * The write wrapper's session-less flavor: the same compare-and-swap
+ * read-modify-write loop with a caller-supplied signing client and user key.
+ * The credential-anchored signup's registry write and the transient recovery
+ * ceremony's registry update both run here, before any session exists. Reads
+ * decrypt with `userKey`'s vault keys; when the written record must seal to a
+ * rotated key instead (the recovery spend, whose base is still sealed to the
+ * pre-rotation key), `writeUserKey` names it. No local cache is touched: the
+ * callers are transient visits.
  *
  * @param options {object}
- * @param options.zcapClient {ZcapClient}   the client the collection ensure
- *   and the record PUT invoke with
+ * @param options.zcapClient {ZcapClient}   the client the collection ensure,
+ *   the record GET, and the record PUT invoke with
  * @param options.spaceId {string}   the data Space id
- * @param options.userKey {UserKey}   the account's user key; its vault KAK
- *   seals the record
- * @param options.record {UnlockMethodsRecord}
+ * @param options.userKey {UserKey}   the user key whose vault KAK the stored
+ *   record is sealed to
+ * @param [options.writeUserKey] {UserKey}   the user key the written record
+ *   seals to; defaults to `userKey`
+ * @param options.mutate {Function}   fresh record (or null) to the next
+ *   record, or null for "no write needed"
  * @param [options.capability] {IZcap}   an invocation capability every request
  *   rides (the transient recovery ceremony's generation delegation); the root
  *   capability is invoked otherwise
- * @returns {Promise<void>}
+ * @returns {Promise<UnlockMethodsRecord | null>}   the written record, or the
+ *   current one when mutate declined (null when none exists)
  */
-export async function putUnlockMethodsWithClient({
+export async function updateUnlockMethodsWithClient({
   zcapClient,
   spaceId,
   userKey,
-  record,
+  writeUserKey,
+  mutate,
   capability
 }: {
   zcapClient: ZcapClient
   spaceId: string
   userKey: UserKey
-  record: UnlockMethodsRecord
+  writeUserKey?: UserKey
+  mutate: (
+    current: UnlockMethodsRecord | null
+  ) => UnlockMethodsRecord | null | Promise<UnlockMethodsRecord | null>
   capability?: IZcap
-}): Promise<void> {
+}): Promise<UnlockMethodsRecord | null> {
   if (!WAS_SERVER_URL) {
     throw new TypeError(
       'The direct registry write requires a configured WAS server.'
     )
   }
-  const { keyAgreementKey, keyResolver } = userKeyVaultKeys({ userKey })
-  const wrapped = await wrapRecord({ record, keyAgreementKey, keyResolver })
-  await ensureUnlockMethodsCollection({
-    storageServerUrl: WAS_SERVER_URL,
-    zcapClient,
-    spaceId,
-    ...(capability ? { capability } : {})
-  })
-  await putUnlockMethodsRecord({
-    storageServerUrl: WAS_SERVER_URL,
-    zcapClient,
-    spaceId,
-    record: wrapped,
-    ...(capability ? { capability } : {})
+  const storageServerUrl = WAS_SERVER_URL
+  const readKeys = userKeyVaultKeys({ userKey })
+  const writeKeys = writeUserKey
+    ? userKeyVaultKeys({ userKey: writeUserKey })
+    : readKeys
+  let ensured = false
+  return await casUpdateRegistryRecord({
+    read: () =>
+      getUnlockMethodsRecord({
+        storageServerUrl,
+        zcapClient,
+        spaceId,
+        ...(capability ? { capability } : {})
+      }),
+    unwrap: stored =>
+      unwrapRecord({
+        record: stored,
+        keyAgreementKey: readKeys.keyAgreementKey,
+        keyResolver: readKeys.keyResolver
+      }),
+    wrap: record =>
+      wrapRecord({
+        record,
+        keyAgreementKey: writeKeys.keyAgreementKey,
+        keyResolver: writeKeys.keyResolver
+      }),
+    write: async (record, precondition) => {
+      if (!ensured) {
+        await ensureUnlockMethodsCollection({
+          storageServerUrl,
+          zcapClient,
+          spaceId,
+          ...(capability ? { capability } : {})
+        })
+        ensured = true
+      }
+      await putUnlockMethodsRecord({
+        storageServerUrl,
+        zcapClient,
+        spaceId,
+        record,
+        ...(capability ? { capability } : {}),
+        ...precondition
+      })
+    },
+    mutate
   })
 }
 
 /**
  * Reads the registry with a caller-supplied signing client and user key -- no
- * session involved, the read half of `putUnlockMethodsWithClient`. The
+ * session involved, the read half of `updateUnlockMethodsWithClient`. The
  * transient recovery ceremony's registry update: it runs before any session
  * exists, decrypting the stored record with the PRE-rotation user key still in
  * hand. No local cache is consulted or touched: the caller is a transient
@@ -558,17 +797,21 @@ export async function getUnlockMethodsWithClient({
       'The direct registry read requires a configured WAS server.'
     )
   }
-  const record = await getUnlockMethodsRecord({
+  const stored = await getUnlockMethodsRecord({
     storageServerUrl: WAS_SERVER_URL,
     zcapClient,
     spaceId,
     ...(capability ? { capability } : {})
   })
-  if (!record) {
+  if (!stored) {
     return null
   }
   const { keyAgreementKey, keyResolver } = userKeyVaultKeys({ userKey })
-  return await unwrapRecord({ record, keyAgreementKey, keyResolver })
+  return await unwrapRecord({
+    record: stored.record,
+    keyAgreementKey,
+    keyResolver
+  })
 }
 
 /**
@@ -578,10 +821,14 @@ export async function getUnlockMethodsWithClient({
  * the registry to the new one, or every later session (holding only the
  * rotated user key) meets an envelope it cannot decrypt and the registry is lost
  * for good. Reads the remote copy (the source of truth), decrypts with the
- * pre-rotation keys, re-encrypts to the post-rotation keys, and PUTs it back;
- * a registry that does not exist yet is a no-op. The local cache is left
- * alone: with a WAS server the remote copy is read first and refreshes the
- * cache on the next hit.
+ * pre-rotation keys, re-encrypts to the post-rotation keys, and PUTs it back
+ * as a compare-and-swap on the read's ETag, re-reading and re-wrapping on a
+ * lost race -- so a concurrent registry write is never met with a stale
+ * re-seal, and a concurrent re-seal is never downgraded (a fresh base no
+ * longer sealed to `from` surfaces as `RecordEnvelopeDecryptError`, which
+ * callers already treat as "not sealed to these keys"). A registry that does
+ * not exist yet is a no-op. The local cache is left alone: with a WAS server
+ * the remote copy is read first and refreshes the cache on the next hit.
  *
  * @param options {object}
  * @param options.storageServerUrl {string}
@@ -608,30 +855,56 @@ export async function rewrapUnlockMethodsRecord({
   from: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
   to: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
 }): Promise<void> {
-  const stored = await getUnlockMethodsRecord({
-    storageServerUrl,
-    zcapClient,
-    spaceId
-  })
-  if (!stored) {
-    return
+  let lastError: unknown
+  for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+    const stored = await getUnlockMethodsRecord({
+      storageServerUrl,
+      zcapClient,
+      spaceId
+    })
+    if (!stored) {
+      return
+    }
+    if (stored.etag === undefined) {
+      throw new Error(
+        'The unlock-methods registry read carried no ETag; refusing an ' +
+          'unconditional overwrite.'
+      )
+    }
+    const record = await unwrapRecord({
+      record: stored.record,
+      keyAgreementKey: from.keyAgreementKey,
+      keyResolver: from.keyResolver
+    })
+    const wrapped = await wrapRecord({
+      record,
+      keyAgreementKey: to.keyAgreementKey,
+      keyResolver: to.keyResolver
+    })
+    try {
+      await putUnlockMethodsRecord({
+        storageServerUrl,
+        zcapClient,
+        spaceId,
+        record: wrapped,
+        ifMatch: stored.etag
+      })
+      return
+    } catch (err) {
+      if (isPreconditionFailed(err)) {
+        // Another writer landed first: re-read and re-seal the fresh base.
+        lastError = err
+        continue
+      }
+      throw err
+    }
   }
-  const record = await unwrapRecord({
-    record: stored,
-    keyAgreementKey: from.keyAgreementKey,
-    keyResolver: from.keyResolver
-  })
-  const wrapped = await wrapRecord({
-    record,
-    keyAgreementKey: to.keyAgreementKey,
-    keyResolver: to.keyResolver
-  })
-  await putUnlockMethodsRecord({
-    storageServerUrl,
-    zcapClient,
-    spaceId,
-    record: wrapped
-  })
+  throw new PreconditionFailedError(
+    'The unlock-methods registry re-seal lost the compare-and-swap race ' +
+      `after ${MAX_CAS_ATTEMPTS} attempts (another writer kept updating ` +
+      'the record). Retry the operation.',
+    { cause: lastError as Error }
+  )
 }
 
 /**
@@ -693,12 +966,21 @@ async function dropRegistryEntry({
   session: Session
   entry: UnlockMethod
 }): Promise<void> {
-  const record = await getUnlockMethods({ session })
-  if (!record) {
-    return
-  }
-  const methods = record.methods.filter(method => !isSameMethod(method, entry))
-  await putUnlockMethods({ session, record: { ...record, methods } })
+  await updateUnlockMethods({
+    session,
+    mutate: current => {
+      if (!current) {
+        return null
+      }
+      const methods = current.methods.filter(
+        method => !isSameMethod(method, entry)
+      )
+      if (methods.length === current.methods.length) {
+        return null
+      }
+      return { ...current, methods }
+    }
+  })
 }
 
 /**
@@ -1205,89 +1487,96 @@ export async function backfillPassphraseUnlockMethod({
     return null
   }
 
-  let record = await getUnlockMethods({ session })
-  // A passkey full session refreshes only its own entry's management zcap
-  // (matched on unlock Space): the login minted a fresh delegation, and the
-  // stored copy goes stale at the one-year TTL. It never creates entries.
-  if (unlockMethod?.type === 'passkey') {
-    if (!record || !unlockMethod.manageCapability) {
-      return record
-    }
-    const stored = record.methods.find(
-      (method): method is PasskeyUnlockMethod =>
-        method.type === 'passkey' &&
-        method.unlockSpaceId === unlockMethod.unlockSpaceId
-    )
-    const stale =
-      !!stored &&
-      (!stored.manageCapability ||
-        shouldAdoptFreshCapability({
-          stored: stored.manageCapability,
-          fresh: unlockMethod.manageCapability,
-          label: 'passkey'
-        }))
-    if (!stale) {
-      return record
-    }
-    const nextRecord = {
-      ...record,
-      methods: record.methods.map(method =>
-        method === stored
-          ? { ...stored, manageCapability: unlockMethod.manageCapability }
-          : method
+  // The whole decision runs inside the shared compare-and-swap wrapper's
+  // mutate, over a FRESH read each attempt, so a concurrent registry write
+  // is merged on a re-read rather than reverted.
+  return await updateUnlockMethods({
+    session,
+    mutate: record => {
+      // A passkey full session refreshes only its own entry's management zcap
+      // (matched on unlock Space): the login minted a fresh delegation, and
+      // the stored copy goes stale at the one-year TTL. It never creates
+      // entries.
+      if (unlockMethod?.type === 'passkey') {
+        if (!record || !unlockMethod.manageCapability) {
+          return null
+        }
+        const stored = record.methods.find(
+          (method): method is PasskeyUnlockMethod =>
+            method.type === 'passkey' &&
+            method.unlockSpaceId === unlockMethod.unlockSpaceId
+        )
+        const stale =
+          !!stored &&
+          (!stored.manageCapability ||
+            shouldAdoptFreshCapability({
+              stored: stored.manageCapability,
+              fresh: unlockMethod.manageCapability,
+              label: 'passkey'
+            }))
+        if (!stale) {
+          return null
+        }
+        return {
+          ...record,
+          methods: record.methods.map(method =>
+            method === stored
+              ? { ...stored, manageCapability: unlockMethod.manageCapability }
+              : method
+          )
+        }
+      }
+      // Only a passphrase full session can backfill; any other session just
+      // reports the registry as it stands -- never null when one exists, so a
+      // Settings load through this function cannot mistake an account with
+      // passkeys for one with no registry.
+      if (unlockMethod?.type !== 'passphrase') {
+        return null
+      }
+      let base = record
+      if (!base) {
+        if (!createIfMissing) {
+          return null
+        }
+        base = emptyUnlockMethodsRegistry()
+      }
+
+      const existing = base.methods.find(
+        (method): method is PassphraseUnlockMethod =>
+          method.type === 'passphrase'
       )
+      const { unlockSpaceId, manageCapability } = unlockMethod
+
+      // Write only when the stored entry is missing, points at a stale unlock
+      // Space (a passphrase change happened elsewhere), or lacks a management
+      // capability the profile now carries -- or holds one that is expired or
+      // inside the renewal window (the login minted a fresh one-year
+      // delegation to replace it with) -- or one the fresh capability
+      // strictly widens (an entry a past login narrowed). An in-place refresh
+      // never narrows a capability that is not expiring. An entry naming
+      // another unlock Space is a rebind, whose stored capability belongs to
+      // the retired Space and is replaced wholesale.
+      const changed =
+        !existing ||
+        existing.unlockSpaceId !== unlockSpaceId ||
+        (!!manageCapability &&
+          (!existing.manageCapability ||
+            shouldAdoptFreshCapability({
+              stored: existing.manageCapability,
+              fresh: manageCapability,
+              label: 'passphrase'
+            })))
+      if (!changed) {
+        return null
+      }
+
+      return upsertPassphraseUnlockMethod({
+        record: base,
+        unlockSpaceId,
+        manageCapability
+      })
     }
-    await putUnlockMethods({ session, record: nextRecord })
-    return nextRecord
-  }
-  // Only a passphrase full session can backfill; any other session just
-  // reports the registry as it stands -- never null when one exists, so a
-  // Settings load through this function cannot mistake an account with
-  // passkeys for one with no registry.
-  if (unlockMethod?.type !== 'passphrase') {
-    return record
-  }
-  if (!record) {
-    if (!createIfMissing) {
-      return null
-    }
-    record = emptyUnlockMethodsRegistry()
-  }
-
-  const existing = record.methods.find(
-    (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
-  )
-  const { unlockSpaceId, manageCapability } = unlockMethod
-
-  // Write only when the stored entry is missing, points at a stale unlock Space
-  // (a passphrase change happened elsewhere), or lacks a management capability
-  // the profile now carries -- or holds one that is expired or inside the
-  // renewal window (the login minted a fresh one-year delegation to replace
-  // it with) -- or one the fresh capability strictly widens (an entry a past
-  // login narrowed). An in-place refresh never narrows a capability that is
-  // not expiring. An entry naming another unlock Space is a rebind, whose
-  // stored capability belongs to the retired Space and is replaced wholesale.
-  const changed =
-    !existing ||
-    existing.unlockSpaceId !== unlockSpaceId ||
-    (!!manageCapability &&
-      (!existing.manageCapability ||
-        shouldAdoptFreshCapability({
-          stored: existing.manageCapability,
-          fresh: manageCapability,
-          label: 'passphrase'
-        })))
-  if (!changed) {
-    return record
-  }
-
-  const nextRecord = upsertPassphraseUnlockMethod({
-    record,
-    unlockSpaceId,
-    manageCapability
   })
-  await putUnlockMethods({ session, record: nextRecord })
-  return nextRecord
 }
 
 /**
@@ -1342,43 +1631,47 @@ export async function refreshStandingDelegationFields({
   delegatedClientsExpires?: string
   updateKeyMultibase?: string
 }): Promise<void> {
-  const record = await getUnlockMethods({ session })
-  if (!record) {
-    return
-  }
-  const stored = record.methods.find(
-    method =>
-      (method.type === 'passphrase' || method.type === 'passkey') &&
-      method.unlockSpaceId === unlockSpaceId
-  )
-  if (!stored) {
-    return
-  }
-  // The entry records another credential's standing configuration (a pending retirement):
-  // its members belong to that credential, so nothing here may land on them.
-  if (
-    keyAgreementKeyMultibase !== undefined &&
-    stored.keyAgreementKeyMultibase !== undefined &&
-    stored.keyAgreementKeyMultibase !== keyAgreementKeyMultibase
-  ) {
-    return
-  }
-  const nextRecord = {
-    ...record,
-    methods: record.methods.map(method =>
-      method === stored
-        ? {
-            ...stored,
-            ...(delegationKeyId ? { delegationKeyId } : {}),
-            ...(delegationExpires ? { delegationExpires } : {}),
-            ...(delegatedClientsKeyId ? { delegatedClientsKeyId } : {}),
-            ...(delegatedClientsExpires ? { delegatedClientsExpires } : {}),
-            ...(updateKeyMultibase ? { updateKeyMultibase } : {})
-          }
-        : method
-    )
-  }
-  await putUnlockMethods({ session, record: nextRecord })
+  await updateUnlockMethods({
+    session,
+    mutate: record => {
+      if (!record) {
+        return null
+      }
+      const stored = record.methods.find(
+        method =>
+          (method.type === 'passphrase' || method.type === 'passkey') &&
+          method.unlockSpaceId === unlockSpaceId
+      )
+      if (!stored) {
+        return null
+      }
+      // The entry records another credential's standing configuration (a
+      // pending retirement): its members belong to that credential, so
+      // nothing here may land on them.
+      if (
+        keyAgreementKeyMultibase !== undefined &&
+        stored.keyAgreementKeyMultibase !== undefined &&
+        stored.keyAgreementKeyMultibase !== keyAgreementKeyMultibase
+      ) {
+        return null
+      }
+      return {
+        ...record,
+        methods: record.methods.map(method =>
+          method === stored
+            ? {
+                ...stored,
+                ...(delegationKeyId ? { delegationKeyId } : {}),
+                ...(delegationExpires ? { delegationExpires } : {}),
+                ...(delegatedClientsKeyId ? { delegatedClientsKeyId } : {}),
+                ...(delegatedClientsExpires ? { delegatedClientsExpires } : {}),
+                ...(updateKeyMultibase ? { updateKeyMultibase } : {})
+              }
+            : method
+        )
+      }
+    }
+  })
 }
 
 /**

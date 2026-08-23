@@ -1159,6 +1159,9 @@ export async function ensureUnlockMethodsCollection({
 /**
  * Reads the unlock-methods registry record from the data Space, or returns
  * `null` when it does not exist yet. A network / unreachable error propagates.
+ * The served ETag rides beside the record so a later conditional PUT can name
+ * the read it was based on -- `unlockSpaceClient` builds a fresh client per
+ * call, so the validator must travel as a value, never as client state.
  *
  * @param options {object}
  * @param options.storageServerUrl {string}
@@ -1166,7 +1169,7 @@ export async function ensureUnlockMethodsCollection({
  * @param options.spaceId {string}   the data Space id
  * @param [options.capability] {IZcap}   an invocation capability every request
  *   rides; the root capability is invoked otherwise
- * @returns {Promise<unknown | null>}
+ * @returns {Promise<{ record: unknown, etag?: string } | null>}
  */
 export async function getUnlockMethodsRecord({
   storageServerUrl,
@@ -1178,18 +1181,24 @@ export async function getUnlockMethodsRecord({
   zcapClient: ZcapClient
   spaceId: string
   capability?: IZcap
-}): Promise<unknown | null> {
+}): Promise<{ record: unknown; etag?: string } | null> {
   const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  return await was
+  const found = await was
     .space(spaceId, { capability })
     .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
     .resource(UNLOCK_METHODS_RESOURCE)
-    .get()
+    .getWithEtag()
+  if (!found) {
+    return null
+  }
+  return { record: found.data, etag: found.etag }
 }
 
 /**
  * Writes (upserts) the unlock-methods registry record into the data Space as a
- * JSON document.
+ * JSON document. `ifMatch` (the ETag from the read the record was built on)
+ * makes the write an update-if-unchanged; `ifNoneMatch` a create-if-absent. A
+ * failed precondition throws was-client's `PreconditionFailedError` (412).
  *
  * @param options {object}
  * @param options.storageServerUrl {string}
@@ -1198,26 +1207,36 @@ export async function getUnlockMethodsRecord({
  * @param options.record {object}   the wrapped registry record
  * @param [options.capability] {IZcap}   an invocation capability every request
  *   rides; the root capability is invoked otherwise
- * @returns {Promise<void>}
+ * @param [options.ifMatch] {string}   write only if the stored ETag matches
+ * @param [options.ifNoneMatch] {boolean}   write only if no record exists yet
+ * @returns {Promise<{ etag?: string }>}   the stored record's new ETag
  */
 export async function putUnlockMethodsRecord({
   storageServerUrl,
   zcapClient,
   spaceId,
   record,
-  capability
+  capability,
+  ifMatch,
+  ifNoneMatch
 }: {
   storageServerUrl: string
   zcapClient: ZcapClient
   spaceId: string
   record: object
   capability?: IZcap
-}): Promise<void> {
+  ifMatch?: string
+  ifNoneMatch?: boolean
+}): Promise<{ etag?: string }> {
   const was = unlockSpaceClient({ storageServerUrl, zcapClient })
   const body = new TextEncoder().encode(JSON.stringify(record))
-  await was
+  return await was
     .space(spaceId, { capability })
     .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
     .resource(UNLOCK_METHODS_RESOURCE)
-    .put(body, { contentType: 'application/json' })
+    .put(body, {
+      contentType: 'application/json',
+      ...(ifMatch !== undefined ? { ifMatch } : {}),
+      ...(ifNoneMatch ? { ifNoneMatch } : {})
+    })
 }

@@ -48,7 +48,7 @@ import { standingFieldsOfKeyringHit } from '@/session/standingUnlock'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import {
   getUnlockMethods,
-  putUnlockMethods,
+  updateUnlockMethods,
   upsertPassphraseUnlockMethod,
   upsertPasskeyUnlockMethod,
   type PasskeyUnlockMethod,
@@ -182,23 +182,26 @@ export async function repairTornPassphraseRetirement({
     }
   }
   // The entry now records the login credential's own standing configuration.
-  // The registry is re-read because the retirement re-sealed it to the
-  // rotated user key (in band, or on the retry above).
-  const current = await getUnlockMethods({ session })
-  if (!current) {
-    return
-  }
-  await putUnlockMethods({
+  // The write's base is the wrapper's own fresh read, because the retirement
+  // re-sealed the registry to the rotated user key (in band, or on the retry
+  // above).
+  const standing = await standingFieldsOfKeyringHit({ found })
+  await updateUnlockMethods({
     session,
-    record: upsertPassphraseUnlockMethod({
-      record: current,
-      unlockSpaceId: found.unlockSpaceId,
-      // The entry's unlock Space is unchanged, so this is not a repoint: a
-      // login whose management-zcap mint returned nothing must not clear the
-      // one the entry already carries.
-      manageCapability: found.manageCapability ?? entry.manageCapability,
-      standing: await standingFieldsOfKeyringHit({ found })
-    })
+    mutate: current => {
+      if (!current) {
+        return null
+      }
+      return upsertPassphraseUnlockMethod({
+        record: current,
+        unlockSpaceId: found.unlockSpaceId,
+        // The entry's unlock Space is unchanged, so this is not a repoint: a
+        // login whose management-zcap mint returned nothing must not clear
+        // the one the entry already carries.
+        manageCapability: found.manageCapability ?? entry.manageCapability,
+        standing
+      })
+    }
   })
 }
 
@@ -207,8 +210,9 @@ export async function repairTornPassphraseRetirement({
  * keyring hit, once the account document shows that credential standing. A
  * credential the document does not list has nothing to record -- a bare
  * entry on a never-established credential is honest -- so that case writes
- * nothing. The registry read by the caller is the write's base: no rotation
- * ran, so nothing can have re-sealed it in between.
+ * nothing. The caller's registry read decided the rebuild; the write itself
+ * runs over the compare-and-swap wrapper's own fresh read, with that read as
+ * the fallback base on a true absent.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -252,14 +256,16 @@ async function rebuildBareEntry({
     "The registry's passphrase entry is bare; rebuilding it from the " +
       'credential logging in.'
   )
-  await putUnlockMethods({
+  const standing = await standingFieldsOfKeyringHit({ found })
+  await updateUnlockMethods({
     session,
-    record: upsertPassphraseUnlockMethod({
-      record: registry,
-      unlockSpaceId: found.unlockSpaceId,
-      manageCapability: found.manageCapability ?? entry?.manageCapability,
-      standing: await standingFieldsOfKeyringHit({ found })
-    })
+    mutate: current =>
+      upsertPassphraseUnlockMethod({
+        record: current ?? registry,
+        unlockSpaceId: found.unlockSpaceId,
+        manageCapability: found.manageCapability ?? entry?.manageCapability,
+        standing
+      })
   })
 }
 
@@ -330,15 +336,17 @@ export async function rebuildBarePasskeyEntry({
     "The registry's entry for the passkey logging in is bare; rebuilding " +
       'it from that credential.'
   )
-  await putUnlockMethods({
+  const rebuilt = {
+    ...entry,
+    ...(await standingFieldsOfKeyringHit({ found }))
+  }
+  await updateUnlockMethods({
     session,
-    record: upsertPasskeyUnlockMethod({
-      record: registry,
-      entry: {
-        ...entry,
-        ...(await standingFieldsOfKeyringHit({ found }))
-      }
-    })
+    mutate: current =>
+      upsertPasskeyUnlockMethod({
+        record: current ?? registry,
+        entry: rebuilt
+      })
   })
 }
 

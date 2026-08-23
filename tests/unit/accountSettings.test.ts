@@ -266,10 +266,27 @@ vi.mock('@/session/unlockMethods', async importOriginal => {
       }
       return state.registry
     }),
-    putUnlockMethods: vi.fn(async ({ record }: { record: UnlockRecord }) => {
-      state.calls.push('putUnlockMethods')
-      state.puts.push(record)
-    }),
+    updateUnlockMethods: vi.fn(
+      async ({
+        mutate
+      }: {
+        mutate: (
+          current: UnlockRecord | null
+        ) => UnlockRecord | null | Promise<UnlockRecord | null>
+      }) => {
+        if (state.registryFails) {
+          throw new Error('registry unreadable')
+        }
+        const current = state.registry as UnlockRecord | null
+        const next = await mutate(current)
+        if (next === null) {
+          return current
+        }
+        state.calls.push('putUnlockMethods')
+        state.puts.push(next)
+        return next
+      }
+    ),
     refreshStandingDelegationFields: vi.fn(async () => {}),
     revokeUnlockMethod: vi.fn(async () => {
       state.calls.push('revokeUnlockMethod')
@@ -433,7 +450,7 @@ const {
   deleteUnlockMethodArtifacts,
   enrollPasskey,
   getUnlockMethods,
-  putUnlockMethods,
+  updateUnlockMethods,
   upsertPassphraseUnlockMethod
 } = await import('@/session/unlockMethods')
 const { changePassphrase } = await import('@/session/keyring')
@@ -949,7 +966,7 @@ describe('changeAccountPassphrase', () => {
     // standing configuration it must name depends on how the retirement ended.
     expect(
       vi.mocked(rotateOffUnlockCredential).mock.invocationCallOrder[0]
-    ).toBeLessThan(vi.mocked(putUnlockMethods).mock.invocationCallOrder[0])
+    ).toBeLessThan(vi.mocked(updateUnlockMethods).mock.invocationCallOrder[0])
     expect(vi.mocked(upsertPassphraseUnlockMethod)).toHaveBeenCalledWith(
       expect.objectContaining({
         unlockSpaceId: 'space-new',
@@ -1091,7 +1108,7 @@ describe('changeAccountPassphrase', () => {
     // handed that credential's standing configuration beside the record's own ladder seed.
     expect(state.calls).toEqual([])
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
   })
 
   it('refuses a same-string change before anything is written', async () => {
@@ -1206,7 +1223,7 @@ describe('changeAccountPassphrase', () => {
     })
     expect(rotation).toBe('skipped')
     expect(registry).toBeNull()
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
   })
 
   it('reports a bare entry whose credential is not in the document as skipped', async () => {
@@ -1253,7 +1270,7 @@ describe('changeAccountPassphrase', () => {
     expect(rotation).toBe('skipped')
     expect(registry).toBeNull()
     expect(
-      vi.mocked(getUnlockMethods).mock.invocationCallOrder[0]
+      vi.mocked(updateUnlockMethods).mock.invocationCallOrder[0]
     ).toBeGreaterThan(
       vi.mocked(rotateOffUnlockCredential).mock.invocationCallOrder[0]
     )
@@ -1389,7 +1406,7 @@ describe('addAccountPasskey', () => {
     ])
     // The stored record is the source of truth, handle included.
     expect(record.userHandle).toBe('FRESHHANDLEFRESHHANDLE')
-    expect(vi.mocked(getUnlockMethods)).toHaveBeenCalled()
+    expect(vi.mocked(updateUnlockMethods)).toHaveBeenCalled()
   })
 
   it('registers under the page-held handle and excludes its passkeys', async () => {
@@ -1501,9 +1518,11 @@ describe('renameAccountPasskey', () => {
       true
     )
     expect(
-      record.methods.find(method => method.credentialId === 'Y3JlZC1vbGQ')
-        ?.label
-    ).toBe('Yubikey')
+      record.methods.find(
+        method =>
+          method.type === 'passkey' && method.credentialId === 'Y3JlZC1vbGQ'
+      )
+    ).toMatchObject({ label: 'Yubikey' })
     expect(lastPut()).toEqual(record)
   })
 
@@ -1515,7 +1534,7 @@ describe('renameAccountPasskey', () => {
       label: 'Yubikey'
     })
     expect(record).toEqual(state.registry)
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
   })
 
   it('refuses when no registry has been written at all', async () => {
@@ -1527,7 +1546,7 @@ describe('renameAccountPasskey', () => {
         label: 'Yubikey'
       })
     ).rejects.toThrow('no unlock-methods registry')
-    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
   })
 })
 

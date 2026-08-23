@@ -71,6 +71,11 @@ export async function rewrapUnlockRegistryToUserKey({
     })
     return true
   } catch (err) {
+    // A RecordEnvelopeDecryptError here can mean the record is not sealed to
+    // `from` -- including the lost-CAS-race case where a retry's fresh base
+    // was already re-sealed forward by another writer. Either way the loop
+    // never wrote a record it could not open, so reporting false (and keeping
+    // the session on the pre-rotation keys) is the safe reading.
     console.warn(
       'Could not re-wrap the unlock-methods registry to the rotated user key:',
       err
