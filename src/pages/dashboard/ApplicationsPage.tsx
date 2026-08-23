@@ -201,19 +201,16 @@ export function ApplicationsPage() {
     setRevoking(true)
     setRevokeError(false)
     try {
-      const { grantsState, revoked } = await revokeAgent({
+      const { revoked } = await revokeAgent({
         session,
-        agent: revokeAgentTarget,
-        signingKeys
+        agent: revokeAgentTarget
       })
       setRevokeAgentTarget(null)
       showToast({
         message:
-          grantsState === 'orphaned'
-            ? t('applications.revokeAgentSuccessOrphaned')
-            : revoked > 0
-              ? t('applications.revokeAgentSuccess')
-              : t('applications.revokeAgentSuccessLegacy')
+          revoked > 0
+            ? t('applications.revokeAgentSuccess')
+            : t('applications.revokeAgentSuccessLegacy')
       })
       await reload()
     } catch (err) {
@@ -465,13 +462,6 @@ export function ApplicationsPage() {
           })
         }
         agent
-        orphaned={
-          !!revokeAgentTarget &&
-          deriveGrantsState({
-            grants: revokeAgentTarget.grants,
-            currentSigningKeys: signingKeys
-          }) === 'orphaned'
-        }
         revoking={revoking}
         error={revokeError}
         onCancel={() => setRevokeAgentTarget(null)}

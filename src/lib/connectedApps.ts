@@ -654,15 +654,70 @@ function allGrantsExpired({
 }
 
 /**
+ * Whether an activity is an agent-grant Revoke: the row
+ * {@link revokeAgentAccess} writes. Scoped exactly like the agent Login side
+ * -- the interaction-URL origin marker, no `appConnect` member -- and carrying
+ * a grantee `controller`, so an app revocation (or any other Revoke that
+ * happens to name a controller) can never hide an agent row.
+ *
+ * @param options {object}
+ * @param options.doc {{ type?: string[]; object?: unknown }}
+ * @returns {boolean}
+ */
+function isAgentRevoke({
+  doc
+}: {
+  doc: { type?: string[]; object?: unknown }
+}): boolean {
+  return (
+    Array.isArray(doc.type) &&
+    doc.type.includes('Revoke') &&
+    loginOrigin(doc.object) === EXTERNAL_REQUEST_ORIGIN &&
+    loginAppName(doc.object) === undefined &&
+    stringField(doc.object, 'controller') !== undefined
+  )
+}
+
+/**
+ * Whether a Revoke hides a Login in the agent join. Deliberately explicit
+ * about the missing stamps: a Login carrying no `created` is never hidden (its
+ * age is unknowable, and hiding a row silently loses a revocable grant), and a
+ * Revoke carrying none never hides. The comparison stays `>=` -- the Revoke
+ * writer stamps a forward floor above the Login it retires, so a tie can only
+ * be someone else's stamp, and a tie there means the revocation is at least as
+ * new as the grant.
+ *
+ * @param options {object}
+ * @param [options.loginCreated] {string}
+ * @param [options.revokeCreated] {string}
+ * @returns {boolean}
+ */
+function revokeHidesLogin({
+  loginCreated,
+  revokeCreated
+}: {
+  loginCreated?: string
+  revokeCreated?: string
+}): boolean {
+  if (!loginCreated || !revokeCreated) {
+    return false
+  }
+  return revokeCreated >= loginCreated
+}
+
+/**
  * Lists the agents holding storage grants answered from an interaction-URL
  * request, one row per grantee did:key.
  *
  * The join is over the activity history alone (there is no credential to hang
- * a row off): the latest agent-grant Login per controller supplies the name,
- * the grants, and the granted date, and a Revoke activity naming the same
- * controller with a timestamp at or after that Login hides the row. A later
- * re-grant writes a newer Login and lists again. A row whose every recorded
- * grant has already expired is dropped -- nothing is left to revoke.
+ * a row off): every agent-grant Login for a controller that a matching Revoke
+ * does not hide contributes its grants, deduplicated by capability id, and
+ * `grantedAt` is the newest of those Logins. The union is what the row counts,
+ * expires, and checks signers against -- one controller can hold live grants
+ * from several requests, and the revocation scans every Login too, so a
+ * latest-Login-only view would under-report what is about to be revoked. A row
+ * whose every recorded grant has already expired is dropped -- nothing is left
+ * to revoke. A later re-grant writes a newer Login and lists again.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
@@ -676,7 +731,7 @@ export async function listConnectedAgents({
   const history = await storage.listHistoryItems()
   type HistoryItem = (typeof history)[number]
 
-  const latestLoginByController = new Map<string, HistoryItem>()
+  const loginsByController = new Map<string, HistoryItem[]>()
   const latestRevokeByController = new Map<string, string>()
   for (const item of history) {
     const { doc } = item
@@ -685,20 +740,22 @@ export async function listConnectedAgents({
       if (!controller) {
         continue
       }
-      const current = latestLoginByController.get(controller)
-      if (!current || (current.doc.created ?? '') < (doc.created ?? '')) {
-        latestLoginByController.set(controller, item)
+      const existing = loginsByController.get(controller)
+      if (existing) {
+        existing.push(item)
+      } else {
+        loginsByController.set(controller, [item])
       }
       continue
     }
-    if (!Array.isArray(doc.type) || !doc.type.includes('Revoke')) {
+    if (!isAgentRevoke({ doc })) {
       continue
     }
     const controller = stringField(doc.object, 'controller')
-    if (!controller) {
+    const created = doc.created
+    if (!controller || !created) {
       continue
     }
-    const created = doc.created ?? ''
     if ((latestRevokeByController.get(controller) ?? '') < created) {
       latestRevokeByController.set(controller, created)
     }
@@ -706,23 +763,48 @@ export async function listConnectedAgents({
 
   const now = Date.now()
   const agents: ConnectedAgent[] = []
-  for (const [controller, item] of latestLoginByController) {
-    const granted = item.doc.created ?? ''
-    const revoked = latestRevokeByController.get(controller)
-    if (revoked !== undefined && revoked >= granted) {
+  for (const [controller, logins] of loginsByController) {
+    const revokeCreated = latestRevokeByController.get(controller)
+    const live = logins.filter(
+      ({ doc }) =>
+        !revokeHidesLogin({ loginCreated: doc.created, revokeCreated })
+    )
+    if (live.length === 0) {
       continue
     }
-    const grants = loginGrants(item.doc.object)
+
+    // The union of every live Login's grants, deduplicated by capability id:
+    // one controller can hold grants from several requests, and the newest
+    // request is not necessarily the one with the longest-lived grants.
+    const grants: AppGrant[] = []
+    const seen = new Set<string>()
+    for (const { doc } of live) {
+      for (const grant of loginGrants(doc.object)) {
+        if (grant.id && seen.has(grant.id)) {
+          continue
+        }
+        if (grant.id) {
+          seen.add(grant.id)
+        }
+        grants.push(grant)
+      }
+    }
     if (allGrantsExpired({ grants, now })) {
       continue
     }
-    const name = loginAgentName(item.doc.object)
+
+    // The newest live Login supplies the display members and the granted
+    // stamp; the grants above are the union across all of them.
+    const latest = live.reduce((newest, item) =>
+      (newest.doc.created ?? '') < (item.doc.created ?? '') ? item : newest
+    )
+    const name = loginAgentName(latest.doc.object)
     agents.push({
       controller,
       ...(name !== undefined && { name }),
       origin: EXTERNAL_REQUEST_ORIGIN,
       grants,
-      grantedAt: item.doc.created
+      grantedAt: latest.doc.created
     })
   }
 
@@ -739,34 +821,38 @@ export async function listConnectedAgents({
  * only ever granted the collection classes the interaction-URL allowlist
  * admits, and it is never an epoch recipient.
  *
- * An `orphaned` agent (see {@link AppGrantsState}) skips the revocation POSTs
- * entirely: its grants already stopped verifying when the signing client's
- * verification method left the account document. The revocation is still
- * recorded, which is what takes the row out of the listing.
+ * Unlike the app path, an agent revocation ALWAYS posts the revocations, even
+ * for a row the listing marks orphaned. An orphaned marking means only that no
+ * recorded signer is in the account document now, which does not make an agent
+ * grant dead: a grant delegated from a transient session is signed by an annex
+ * key the account document never lists and chains under the generation
+ * delegation, so it keeps verifying until that delegation's own TTL. A grant
+ * whose chain genuinely is dead comes back as a `ValidationError` and counts
+ * into `skipped`, which is the honest way to learn it.
+ *
+ * The recorded Revoke is stamped with a forward floor -- one millisecond past
+ * the row's newest Login when this clock is behind it -- so the listing's
+ * hide-on-revoke join cannot be defeated by skew between the client that
+ * granted and the client that revokes.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
  * @param options.user {User}   the session user (activity actor)
  * @param options.agent {ConnectedAgent}
- * @param [options.grantsState] {AppGrantsState}   the derived grant state
- *   (default `unknown`, which revokes like `active`)
  * @returns {Promise<{ revoked: number; skipped: number }>}   the grant outcome
  */
 export async function revokeAgentAccess({
   storage,
   user,
-  agent,
-  grantsState = 'unknown'
+  agent
 }: {
   storage: StorageManager
   user: User
   agent: ConnectedAgent
-  grantsState?: AppGrantsState
 }): Promise<{ revoked: number; skipped: number }> {
-  const outcome =
-    grantsState === 'orphaned'
-      ? { revoked: 0, skipped: 0, revokedIds: [] as string[] }
-      : await storage.revokeAgentGrants({ controller: agent.controller })
+  const outcome = await storage.revokeAgentGrants({
+    controller: agent.controller
+  })
   await storage.addHistoryAgentRevoke({
     user,
     origin: agent.origin,
@@ -774,7 +860,26 @@ export async function revokeAgentAccess({
     zcaps: outcome.revokedIds.map(id => ({ id })),
     ...(agent.name !== undefined && { actor: { name: agent.name } }),
     revoked: outcome.revoked,
-    skipped: outcome.skipped
+    skipped: outcome.skipped,
+    created: revokeStampAfter({ grantedAt: agent.grantedAt })
   })
   return { revoked: outcome.revoked, skipped: outcome.skipped }
+}
+
+/**
+ * The `created` stamp for an agent Revoke: now, floored to one millisecond
+ * past the Login it retires when this client's clock is behind the client that
+ * granted. Both stamps are wall-clock from possibly different machines, and
+ * the listing hides a Login only for a Revoke at or after it, so without the
+ * floor a slow clock would write a revocation the listing ignores.
+ *
+ * @param options {object}
+ * @param [options.grantedAt] {string}   the row's newest Login `created`
+ * @returns {string}   an ISO stamp
+ */
+function revokeStampAfter({ grantedAt }: { grantedAt?: string }): string {
+  const now = Date.now()
+  const granted = grantedAt ? new Date(grantedAt).getTime() : Number.NaN
+  const at = Number.isFinite(granted) ? Math.max(now, granted + 1) : now
+  return new Date(at).toISOString()
 }

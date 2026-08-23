@@ -390,10 +390,8 @@
     "revokeAgent": "Revocar acceso del agente",
     "revokeAgentTitle": "¿Revocar el acceso del agente?",
     "revokeAgentConfirm": "Al revocar el acceso se anulan los permisos de almacenamiento concedidos a {{name}}, de modo que ya no podrá leer ni escribir en las colecciones que se le dieron, aunque es posible que aún conserve copias de los datos que ya obtuvo. El agente tendrá que volver a solicitar acceso. Esta acción no se puede deshacer.",
-    "revokeAgentConfirmOrphaned": "El acceso de almacenamiento concedido a {{name}} ya dejó de funcionar cuando se desconectó el monedero que lo concedió. Revocarlo ahora solo lo quita de esta lista, y es posible que aún conserve copias de los datos que ya obtuvo. Esta acción no se puede deshacer.",
     "revokeAgentSuccess": "Acceso del agente revocado.",
     "revokeAgentSuccessLegacy": "Agente eliminado. El acceso restante caducará por sí solo.",
-    "revokeAgentSuccessOrphaned": "Agente eliminado. Su acceso de almacenamiento ya había terminado cuando se desconectó su monedero.",
     "revokeAgentFailed": "No se pudo revocar el acceso del agente. Inténtelo de nuevo."
   },
   "dashboard": {

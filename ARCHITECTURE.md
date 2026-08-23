@@ -1321,6 +1321,17 @@ which remain meaningful. The check is best-effort: no verified document
 this session (a guest, or the log unreachable) degrades to listing without
 the marker, never to failing the page.
 
+The same panel's agent rows (see "The interaction-URL request page" above)
+run the identical signer check against `currentAccountSigningKeys`, over
+the recorded grant's `controller` instead of an app-key subject, so an
+agent whose signing client has been disconnected shows as orphaned too.
+The marker is display-only for agent rows: revoking one always POSTs the
+recorded revocations, because a grant delegated from a transient session
+is signed by an annex key the document never lists yet chains under a
+generation delegation that stays alive until its own TTL, so "signer gone"
+does not mean "chain dead" there. A dead chain comes back as a skipped
+revocation.
+
 ## Storage model (local-first)
 
 The local `BrowserStore` (RxDB over Dexie/IndexedDB) is always the **active
@@ -1707,9 +1718,21 @@ once the grants are resolved, the first point a target's class is known).
 Widening the allowlist is a documented decision, not a code change. A
 failed exchange POST-back leaves the grant recorded and offers the
 composed response for manual delivery; a decline abandons the exchange,
-which expires on its own. Grants answered here are not yet listed or
-revocable from any surface (the consent panel says so), bounded by their
-TTL until the Applications page grows a row for them.
+which expires on its own. Grants answered here are listed and revocable
+from the Applications page, as agent rows keyed by the grant's `controller`
+did:key (`listConnectedAgents` in `src/lib/connectedApps.ts`). A row is
+titled by the request's self-declared `agent.name` when it sent one, else
+by the grantee key's fingerprint. Its grants are the union over every
+agent Login for that controller newer than the latest matching Revoke
+activity (one carrying the same origin marker, no `appConnect`, and the
+controller in `object.controller`), since a later request can add a grant
+without retiring an earlier one; a row whose every grant has expired is
+dropped. Revoking an agent row POSTs every recorded capability's
+revocation, regardless of the orphaned marker, and records the Revoke with
+its `created` floored to the latest Login's stamp plus one millisecond so a
+fast-clocked terminal cannot leave the row standing; there is no app key
+to delete and no collection epoch to rotate, since an agent is never a
+key-epoch recipient.
 
 A grant delegated from a transient session chains under the session's
 generation delegation (`profile.invocationCapability`) rather than the
@@ -2013,9 +2036,11 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   the wallet for scoped, expiring, revocable grants through a standalone
   `AuthorizationCapabilityQuery`, with itself as `controller`. An agent is a
   zcap grantee, the same slot a BYOE app occupies; it is not a wallet
-  client and holds neither the user key nor the unlock credential. A future
-  CLI-class wallet is a wallet client and is not called an agent. Avoid:
-  transient client (the annex inventory), agent client, bot.
+  client and holds neither the user key nor the unlock credential. An
+  agent's grants are listed and revoked on the Applications page, keyed by
+  its did:key, beside the app-key rows. A future CLI-class wallet is a
+  wallet client and is not called an agent. Avoid: transient client (the
+  annex inventory), agent client, bot.
 - **`writerId`** — an unkeyed, clearable, unrecoverable attribution label
   saying which writing agent produced a revision. Its only jobs are history
   attribution and breaking last-write-wins ties; it is minted locally

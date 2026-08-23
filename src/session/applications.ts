@@ -8,7 +8,6 @@
 import { currentAccountSigningKeys } from '@/session/clients'
 import {
   deriveAppGrantsState,
-  deriveGrantsState,
   listConnectedAgents,
   listConnectedApps,
   revokeAgentAccess,
@@ -97,37 +96,29 @@ export async function revokeApplication({
 }
 
 /**
- * Revokes one connected agent's storage grants. The grant state is derived
- * first, against the same verified key set the listing marked the row with: an
- * orphaned agent's grants already stopped verifying with its signing client's
- * revocation, so the revocation POSTs are skipped while the revocation is
- * still recorded (which is what takes the row out of the listing).
+ * Revokes one connected agent's storage grants. Unlike the app path this takes
+ * no grant state and never skips the revocation POSTs: an agent grant
+ * delegated from a transient session is signed by an annex key the account
+ * document never lists yet keeps verifying under the generation delegation, so
+ * the listing's orphaned marking is not evidence that the chain is dead. A
+ * genuinely dead chain comes back from the server as a skipped no-op.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.agent {ConnectedAgent}
- * @param [options.signingKeys] {Set<string>}   the account's current signing
- *   keys, or undefined when the check was unavailable
- * @returns {Promise<{ grantsState: AppGrantsState, revoked: number }>}
+ * @returns {Promise<{ revoked: number }>}
  */
 export async function revokeAgent({
   session,
-  agent,
-  signingKeys
+  agent
 }: {
   session: Session
   agent: ConnectedAgent
-  signingKeys?: Set<string>
-}): Promise<{ grantsState: AppGrantsState; revoked: number }> {
-  const grantsState = deriveGrantsState({
-    grants: agent.grants,
-    currentSigningKeys: signingKeys
-  })
+}): Promise<{ revoked: number }> {
   const outcome = await revokeAgentAccess({
     storage: session.storage,
     user: session.user,
-    agent,
-    grantsState
+    agent
   })
-  return { grantsState, revoked: outcome.revoked }
+  return { revoked: outcome.revoked }
 }

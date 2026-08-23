@@ -6,7 +6,9 @@
  *
  * The same dialog confirms revoking a connected AGENT (`agent`), whose copy
  * speaks only of the storage grants: an agent holds no app key to delete and
- * is no collection's epoch recipient, so nothing is rotated.
+ * is no collection's epoch recipient, so nothing is rotated. It has no
+ * orphaned wording, because an agent revocation never skips the revocation
+ * POSTs -- an orphaned marking there is not evidence that the grant is dead.
  */
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
@@ -25,7 +27,8 @@ import { useTranslation } from 'react-i18next'
  * @param options.appName {string}   the app's (or agent's) display name
  * @param [options.agent] {boolean}   whether the row is an agent rather than
  *   an App Connect application
- * @param options.orphaned {boolean}   whether the grants are orphaned
+ * @param [options.orphaned] {boolean}   whether the app's grants are orphaned
+ *   (read on the app path only)
  * @param options.revoking {boolean}   whether a revocation is in flight
  * @param options.error {boolean}   whether the last attempt failed
  * @param options.onCancel {Function}
@@ -36,7 +39,7 @@ export function RevokeAppDialog({
   open,
   appName,
   agent = false,
-  orphaned,
+  orphaned = false,
   revoking,
   error,
   onCancel,
@@ -45,7 +48,7 @@ export function RevokeAppDialog({
   open: boolean
   appName: string
   agent?: boolean
-  orphaned: boolean
+  orphaned?: boolean
   revoking: boolean
   error: boolean
   onCancel: () => void
@@ -71,9 +74,7 @@ export function RevokeAppDialog({
         <DialogContentText>
           {t(
             agent
-              ? orphaned
-                ? 'applications.revokeAgentConfirmOrphaned'
-                : 'applications.revokeAgentConfirm'
+              ? 'applications.revokeAgentConfirm'
               : orphaned
                 ? 'applications.revokeConfirmOrphaned'
                 : 'applications.revokeConfirm',

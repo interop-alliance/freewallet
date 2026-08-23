@@ -2597,6 +2597,9 @@ export class StorageManager {
    * @param [options.actor] {{ name: string }}   the agent's self-declared name
    * @param [options.revoked] {number}   how many grants were revoked
    * @param [options.skipped] {number}   how many grants needed no revocation
+   * @param [options.created] {string}   the `created` stamp, when the caller
+   *   needs a specific one (the agent revocation floors it past the Login it
+   *   retires, so a clock behind the granting client still hides the row)
    * @returns {Promise<void>}
    */
   async addHistoryAgentRevoke({
@@ -2606,7 +2609,8 @@ export class StorageManager {
     zcaps,
     actor,
     revoked,
-    skipped
+    skipped,
+    created
   }: {
     user: User
     origin: string
@@ -2615,6 +2619,7 @@ export class StorageManager {
     actor?: { name: string }
     revoked?: number
     skipped?: number
+    created?: string
   }) {
     await this.#recordActivity(id =>
       buildHistoryAgentRevoke({
@@ -2625,7 +2630,8 @@ export class StorageManager {
         actor,
         revoked,
         skipped,
-        id
+        id,
+        created
       })
     )
   }

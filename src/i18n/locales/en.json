@@ -390,10 +390,8 @@
     "revokeAgent": "Revoke Agent Access",
     "revokeAgentTitle": "Revoke agent access?",
     "revokeAgentConfirm": "Revoking access revokes the storage access {{name}} was granted, so it can no longer read or write the collections it was given. It may still hold copies of data it already fetched. The agent will have to ask for access again. This cannot be undone.",
-    "revokeAgentConfirmOrphaned": "The storage access {{name}} was granted already stopped working when the wallet that granted it was disconnected. Revoking now removes it from this list. It may still hold copies of data it already fetched. This cannot be undone.",
     "revokeAgentSuccess": "Agent access revoked.",
     "revokeAgentSuccessLegacy": "Agent removed. Its remaining access will expire on its own.",
-    "revokeAgentSuccessOrphaned": "Agent removed. Its storage access had already ended when its wallet was disconnected.",
     "revokeAgentFailed": "Could not revoke agent access. Please try again."
   },
   "dashboard": {

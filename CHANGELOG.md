@@ -13,6 +13,19 @@
   1 to 64 characters, no control characters) refuses the request as
   malformed before consent, as does any other classification failure on
   this entry point (previously a generic processing failure). en + es.
+- The Applications page now lists and revokes standalone agent grants: the
+  storage access answered from the interaction-URL request page, keyed by
+  the grantee's did:key, titled by its self-declared name when it sent one
+  or by its key fingerprint otherwise, and marked with an "Agent" chip. An
+  agent row whose signing client has since been disconnected shows as
+  orphaned, the same as an app row, but its revocation still POSTs every
+  recorded capability's revocation (a transient session's grant chains
+  under a live generation delegation). The Revoke activity is stamped no
+  earlier than the grant's Login plus one millisecond, so clock skew cannot
+  leave the row standing; there is no app key to delete and no collection
+  epoch to rotate, since an agent is never an epoch recipient. A row's
+  grants are the union of its Logins since the last Revoke, and it is
+  dropped once every grant has expired. en + es.
 
 ### Fixed
 
