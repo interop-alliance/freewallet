@@ -214,6 +214,27 @@ describe('precheckExternalRequest', () => {
     }
   })
 
+  it('refuses a request with no capability query as nothing requested', () => {
+    const request = {
+      query: [{ type: 'QueryByExample', credentialQuery: [{ example: {} }] }]
+    } as unknown as IVPRDetails
+    expect(
+      refusalOf(() =>
+        precheckExternalRequest({ request, exchangeUrl: EXCHANGE_URL })
+      )
+    ).toBe('nothingRequested')
+  })
+
+  it('maps a null reply body to malformed, not unreachable', async () => {
+    const nullBody = vi.fn(async () => new Response('null'))
+    await expect(
+      openExternalRequest({
+        url: INTERACTION_URL,
+        fetch: nullBody as unknown as typeof globalThis.fetch
+      })
+    ).rejects.toMatchObject({ refusal: 'malformedRequest' })
+  })
+
   it('refuses a domain on any request', () => {
     expect(
       refusalOf(() =>

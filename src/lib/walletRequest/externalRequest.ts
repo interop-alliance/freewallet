@@ -70,6 +70,7 @@ export type ExternalRequestRefusal =
   | 'gone'
   | 'unreachable'
   | 'malformedRequest'
+  | 'nothingRequested'
   | 'didAuth'
   | 'domain'
   | 'appConnect'
@@ -149,15 +150,25 @@ export function interactionUrlFromSearch(search: string): string | null {
  */
 export async function openExternalRequest({
   url,
-  fetch
+  fetch = globalThis.fetch
 }: {
   url: string
   fetch?: FetchLike
 }): Promise<{ exchangeUrl: string; request: IVPRDetails }> {
+  // A rejected fetch is the one network signal; it is tagged here so it
+  // cannot be confused with the helpers' own TypeErrors over a reply they
+  // could not read (a `null` JSON body, say), which are malformed replies.
+  const tagged: FetchLike = async (input, init) => {
+    try {
+      return await fetch(input, init)
+    } catch (err) {
+      throw new ExchangeNetworkError({ cause: err })
+    }
+  }
   try {
     const { exchangeUrl, request } = await openInteractionRequest({
       url,
-      ...(fetch ? { fetch } : {})
+      fetch: tagged
     })
     return { exchangeUrl, request: request as IVPRDetails }
   } catch (err) {
@@ -169,12 +180,23 @@ export async function openExternalRequest({
     ) {
       throw new ExternalRequestRefusedError('gone', { cause: err })
     }
-    // `fetch` rejects with a TypeError on a network failure; every other
-    // failure is the helper's own, over a reply it could not read.
-    if (err instanceof TypeError) {
-      throw new ExternalRequestRefusedError('unreachable', { cause: err })
+    if (err instanceof ExchangeNetworkError) {
+      throw new ExternalRequestRefusedError('unreachable', {
+        cause: err.cause
+      })
     }
     throw new ExternalRequestRefusedError('malformedRequest', { cause: err })
+  }
+}
+
+/**
+ * A fetch that rejected before any reply arrived, as distinct from a reply
+ * the helpers could not read.
+ */
+class ExchangeNetworkError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('The exchange server could not be reached.', options)
+    this.name = 'ExchangeNetworkError'
   }
 }
 
@@ -215,6 +237,12 @@ export function precheckExternalRequest({
   }
   if (request.domain) {
     throw new ExternalRequestRefusedError('domain')
+  }
+  // Storage access is the only thing this entry point answers: a request
+  // with no capability query (credentials only, say) would render an empty
+  // consent screen with nothing to approve.
+  if (profile.zcapRequests.length === 0) {
+    throw new ExternalRequestRefusedError('nothingRequested')
   }
   const endpoint = presentationEndpointFor({
     request: request as ISpecVPRDetails,

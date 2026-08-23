@@ -782,6 +782,8 @@
       "gone": "This request could not be opened: it has expired, or the link is wrong.",
       "unreachable": "Could not reach the server this request lives on. Please try again.",
       "malformedRequest": "This link did not lead to a request this wallet can read.",
+      "nothingRequested": "This request asks for no storage access, which is the only thing that can be granted from a link.",
+      "nothingGranted": "Nothing could be granted: every requested collection became unavailable before approval. Nothing was sent.",
       "didAuth": "This request asks you to authenticate, which is only possible from a website. It cannot be answered from a link.",
       "domain": "This request is bound to a website domain, which cannot be checked from a link.",
       "appConnect": "This is an app connection request. Apps connect from their own website, not from a link.",

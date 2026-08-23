@@ -57,7 +57,7 @@ url>` (`src/pages/external/ExternalRequestPage.tsx`): a request arriving
 - The pure half of that entry point, `src/lib/walletRequest/externalRequest.ts`,
   carries the refusal matrix, each cell with its own copy: an invalid deep
   link; an exchange that is gone (a 404 on either fetch, worded as
-  expired-or-wrong-link), unreachable, or answering with no readable VPR; a
+  expired-or-wrong-link), unreachable, or answering with no readable VPR; a request with no capability query; a
   `DIDAuthentication` query in either spelling, a `domain`, or an
   `AppConnectQuery` (no attested origin exists here); a VPR-named
   presentation endpoint on another origin than the exchange (the consent

@@ -782,6 +782,8 @@
       "gone": "No se pudo abrir esta solicitud: ha caducado o el enlace es incorrecto.",
       "unreachable": "No se pudo conectar con el servidor donde reside esta solicitud. Inténtelo de nuevo.",
       "malformedRequest": "Este enlace no condujo a una solicitud que esta billetera pueda leer.",
+      "nothingRequested": "Esta solicitud no pide acceso al almacenamiento, que es lo único que se puede conceder desde un enlace.",
+      "nothingGranted": "No se pudo conceder nada: todas las colecciones solicitadas dejaron de estar disponibles antes de la aprobación. No se envió nada.",
       "didAuth": "Esta solicitud le pide autenticarse, lo que solo es posible desde un sitio web. No se puede responder desde un enlace.",
       "domain": "Esta solicitud está vinculada a un dominio web, que no se puede comprobar desde un enlace.",
       "appConnect": "Esta es una solicitud de conexión de aplicación. Las aplicaciones se conectan desde su propio sitio web, no desde un enlace.",

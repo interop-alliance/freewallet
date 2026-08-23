@@ -37,6 +37,10 @@ import { useAuthStore } from '@/stores/authStore'
 import { loginWithPassphrase } from '@/session/initSession'
 import { loginErrorKey } from '@/session/loginErrorKey'
 import { recordWalletLogin } from '@/session/walletLoginActivity'
+import { backfillPassphraseUnlockMethod } from '@/session/unlockMethods'
+import { checkRecoveryHealth } from '@/session/recovery'
+import { registerWallet } from '@/lib/registerWallet'
+import { showToast } from '@/stores/toastStore'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { chapiStyles } from '@/styles/appStyles'
 import type { Session } from '@/types/auth'
@@ -83,6 +87,7 @@ type BlockReason =
   | ExternalRequestRefusal
   | 'zcapUnavailable'
   | 'processFailed'
+  | 'nothingGranted'
   | 'exchangeFailed'
 
 const RP_ZCAP_TTL_DAYS = Math.round(RP_ZCAP_TTL_MS / (24 * 60 * 60 * 1000))
@@ -229,27 +234,59 @@ export function ExternalRequestPage() {
     if (!profile) {
       return
     }
+    let loggedIn: Session
     try {
-      const { session: loggedIn, userExists } = await loginWithPassphrase({
-        passphrase
-      })
-      if (!loggedIn) {
+      const result = await loginWithPassphrase({ passphrase })
+      if (!result.session) {
         setLoginError(
           t(
-            userExists
+            result.userExists
               ? 'auth.errors.clientNotEnrolled'
               : 'auth.errors.profileNotFound'
           )
         )
         return
       }
+      loggedIn = result.session
       await loggedIn.storageReady
-      adoptSession(loggedIn)
-      recordWalletLogin({ session: loggedIn })
-      setSession(loggedIn)
-      await prepareConsent({ loggedIn, requestProfile: profile })
     } catch (err) {
       setLoginError(t(loginErrorKey({ err, label: 'External request login' })))
+      return
+    }
+    // The session is adopted app-wide, so the post-login steps `/login` runs
+    // follow it here too: the CHAPI handler registration (otherwise never
+    // installed for this session), the unlock-methods backfill, the recovery
+    // health check, and the could-not-remember warning. All best-effort.
+    adoptSession(loggedIn)
+    recordWalletLogin({ session: loggedIn })
+    void registerWallet()
+    if (loggedIn.userKeyPersistFailed) {
+      showToast({
+        message: t('auth.login.rememberBrowserWarning'),
+        severity: 'warning'
+      })
+    }
+    void backfillPassphraseUnlockMethod({ session: loggedIn }).catch(err =>
+      console.warn('Could not backfill the unlock-methods registry:', err)
+    )
+    void checkRecoveryHealth({ session: loggedIn })
+      .then(flags => {
+        if (flags.length > 0) {
+          showToast({
+            message: t('auth.login.recoveryHealthWarning'),
+            severity: 'warning'
+          })
+        }
+      })
+      .catch(err => console.warn('Recovery health check failed:', err))
+    setSession(loggedIn)
+    try {
+      await prepareConsent({ loggedIn, requestProfile: profile })
+    } catch (err) {
+      // The login form is gone by now, so a failed preparation is a page
+      // block, not a login error.
+      console.error('External request preparation failed:', err)
+      block('processFailed')
     }
   }
 
@@ -265,7 +302,7 @@ export function ExternalRequestPage() {
     }
     setPageState('responding')
     try {
-      await composeAndDeliverResponse({
+      const response = await composeAndDeliverResponse({
         request,
         session,
         profile,
@@ -276,6 +313,13 @@ export function ExternalRequestPage() {
         selectedVCs: [],
         exchangeUrl
       })
+      // An empty compose (every grant turned unsatisfiable at delegation
+      // time -- a collection created by another client since consent, say)
+      // POSTs nothing, so it must not read as delivered.
+      if (!response.verifiablePresentation) {
+        block('nothingGranted')
+        return
+      }
       setPageState('delivered')
     } catch (err) {
       if (err instanceof WalletResponseFailure) {

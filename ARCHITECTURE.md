@@ -1681,7 +1681,7 @@ renders, in the pure module `src/lib/walletRequest/externalRequest.ts`,
 each refusal with its own copy: a deep link that is not an interaction URL
 (a bare exchange URL included); an exchange that is gone (a 404 on either
 fetch, worded as expired-or-wrong-link since the server answers the same
-for both), unreachable, or answering with no readable VPR; a
+for both), unreachable, or answering with no readable VPR; a request asking for no storage access; a
 `DIDAuthentication` query in either spelling and a `domain` on any
 request (freewallet requires a `domain` for DID Auth and there is no
 origin to match it against); an `AppConnectQuery` (the App Connect path
