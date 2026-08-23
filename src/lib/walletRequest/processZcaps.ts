@@ -78,6 +78,8 @@
 import { generateZcapUri } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
 import { APP_CONNECTIONS_COLLECTION } from '@interop/wallet-core/space'
+import { clampGrantExpires } from '@interop/wallet-core/clientAnnex'
+import { zcapExpiring } from '@interop/wallet-core/webvh'
 import {
   RP_ZCAP_TTL_MS,
   RP_ZCAP_WRITE_TTL_MS,
@@ -338,6 +340,27 @@ export class ZcapUnavailableError extends Error {
   constructor(message = 'This wallet has no remote storage to delegate.') {
     super(message)
     this.name = 'ZcapUnavailableError'
+  }
+}
+
+/**
+ * Thrown when a transient session's generation delegation -- the parent every
+ * grant it mints chains under -- is expired, inside its renewal window, or
+ * carries no parseable expiry. A grant clamped under such a parent would
+ * either verify nowhere or lapse within days, so the mint refuses outright.
+ * The renew-precedes-mint stage (renewing the delegation before the first
+ * grant) is the eventual answer; it cannot run from a transient session
+ * until the transient profile carries its ladder members, so this refusal
+ * stands in for it. `composeAndDeliverResponse` maps it, like any unmapped
+ * error, onto the generic `processFailed` reason -- acceptable for now.
+ */
+export class GenerationDelegationStaleError extends Error {
+  constructor() {
+    super(
+      'The generation delegation this session holds is expired or inside its ' +
+        'renewal window; refusing to mint a grant under it.'
+    )
+    this.name = 'GenerationDelegationStaleError'
   }
 }
 
@@ -890,7 +913,46 @@ export async function processZcaps({
   )
   const spaceRootCapability = await generateZcapUri({ url: spaceUrl })
   const now = Date.now()
-  const { zcapClient } = session.profile
+  const { zcapClient, invocationCapability } = session.profile
+  // A transient session holds its Space authority as a delegated zcap (the
+  // generation delegation), so its grants chain under THAT, signed by the
+  // annex key the delegation names -- a grant delegated off the root by a
+  // key the account document never lists would verify nowhere. A durable
+  // session delegates off the root as before.
+  const parentCapability = invocationCapability ?? spaceRootCapability
+  if (
+    invocationCapability &&
+    zcapExpiring({
+      // A delegated zcap always carries `expires`; the union type's root half
+      // does not, and a root could never sit here.
+      expires:
+        'expires' in invocationCapability
+          ? invocationCapability.expires
+          : undefined,
+      now
+    })
+  ) {
+    throw new GenerationDelegationStaleError()
+  }
+
+  /**
+   * A grant's expiry for a requested TTL: the full TTL under the root, and
+   * under a generation delegation the TTL clamped to the parent's own
+   * `expires` (the library refuses a child outliving its parent).
+   *
+   * @param ttlMs {number}
+   * @returns {Date}
+   */
+  function grantExpires(ttlMs: number): Date {
+    if (invocationCapability) {
+      return clampGrantExpires({
+        ttlMs,
+        delegation: invocationCapability,
+        now
+      })
+    }
+    return new Date(now + ttlMs)
+  }
 
   /**
    * The grantee's X25519 recipient key, derived from the did:key the wallet is
@@ -982,7 +1044,7 @@ export async function processZcaps({
         collectionId: target.collectionId,
         recipient,
         controller: descriptor.controller!,
-        expires: new Date(now + shareTtlMs),
+        expires: grantExpires(shareTtlMs),
         app
       })
       zcaps.push(zcap as IZcap)
@@ -1000,9 +1062,9 @@ export async function processZcaps({
     }
     // Write grants live for the shorter write TTL; read-only grants for the
     // longer read TTL.
-    const expires = new Date(now + (write ? writeTtlMs : ttlMs))
+    const expires = grantExpires(write ? writeTtlMs : ttlMs)
     const zcap = await zcapClient.delegate({
-      capability: spaceRootCapability,
+      capability: parentCapability,
       invocationTarget: target.invocationTarget,
       controller: descriptor.controller,
       allowedActions,

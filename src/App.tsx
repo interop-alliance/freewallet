@@ -50,6 +50,10 @@ const WalletStorePage = lazyNamed(
   () => import('@/pages/chapi/WalletStorePage'),
   'WalletStorePage'
 )
+const ExternalRequestPage = lazyNamed(
+  () => import('@/pages/external/ExternalRequestPage'),
+  'ExternalRequestPage'
+)
 const DashboardPage = lazyNamed(
   () => import('@/pages/dashboard/DashboardPage'),
   'DashboardPage'
@@ -137,6 +141,10 @@ function App() {
         {/* CHAPI wallet UI -- no ProtectedRoute, runs in a CHAPI-managed popup */}
         <Route path="/wallet/get" element={<WalletGetPage />} />
         <Route path="/wallet/store" element={<WalletStorePage />} />
+        {/* Requests arriving from outside the app (a CLI agent's interaction
+            URL), answered without CHAPI; outside ProtectedRoute like the
+            popups, with its own in-page login. */}
+        <Route path="/external/request" element={<ExternalRequestPage />} />
 
         <Route element={<ProtectedRoute />}>
           <Route path="/dashboard" element={<DashboardPage />} />

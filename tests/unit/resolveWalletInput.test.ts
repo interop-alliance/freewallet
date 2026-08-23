@@ -29,8 +29,26 @@ describe('resolveWalletInput', () => {
   it('resolves raw credential JSON through the credentials branch', async () => {
     const resolved = await resolveWalletInput(JSON.stringify(credential))
 
-    expect(resolved).toHaveLength(1)
-    expect(resolved[0].issuer).toBe('did:key:z6MkIssuer')
+    expect(resolved.kind).toBe('credentials')
+    if (resolved.kind !== 'credentials') {
+      throw new Error('unreachable')
+    }
+    expect(resolved.credentials).toHaveLength(1)
+    expect(resolved.credentials[0].issuer).toBe('did:key:z6MkIssuer')
+  })
+
+  it('hands an interaction URL back for the request page, unfetched', async () => {
+    const url =
+      'https://was.example/workflows/ephemeral/exchanges/abc/protocols?iuv=1'
+
+    expect(await resolveWalletInput(` ${url} `)).toEqual({
+      kind: 'interaction-url',
+      url
+    })
+    expect(await resolveWalletInput(`interaction:${url}`)).toEqual({
+      kind: 'interaction-url',
+      url: `interaction:${url}`
+    })
   })
 
   it('recognizes a connect code instead of failing it as malformed JSON', async () => {

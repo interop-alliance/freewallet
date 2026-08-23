@@ -30,15 +30,22 @@ type WalletResponseFailureReason =
  * A response that was refused before anything reached the relying party. When
  * `reason` is `processFailed` after a failed history write, nothing has been
  * delivered: the already-signed delegations stay inert rather than
- * unrevocable.
+ * unrevocable. When `reason` is `exchangeFailed`, the Login activity is
+ * already recorded and the composed response rides on `response`, so a page
+ * with no other channel to the requester can offer it for manual delivery.
  */
 export class WalletResponseFailure extends Error {
   reason: WalletResponseFailureReason
+  response?: WalletResponse
 
-  constructor(reason: WalletResponseFailureReason, options?: ErrorOptions) {
+  constructor(
+    reason: WalletResponseFailureReason,
+    options?: ErrorOptions & { response?: WalletResponse }
+  ) {
     super(`Could not respond to the request: ${reason}`, options)
     this.name = 'WalletResponseFailure'
     this.reason = reason
+    this.response = options?.response
   }
 }
 
@@ -238,7 +245,10 @@ export async function composeAndDeliverResponse({
       })
     } catch (err) {
       console.error('Could not deliver the presentation to the exchange:', err)
-      throw new WalletResponseFailure('exchangeFailed', { cause: err })
+      throw new WalletResponseFailure('exchangeFailed', {
+        cause: err,
+        response
+      })
     }
   }
 

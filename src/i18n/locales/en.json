@@ -765,6 +765,33 @@
       "storedSuccess_one": "Credential stored successfully."
     }
   },
+  "externalRequest": {
+    "title": "Storage access request",
+    "requestedBy": "Requested by",
+    "requesterNote": "This request did not come from a website. It identifies itself only by this key, so check it against what the requesting program shows you.",
+    "deliveryLabel": "Your answer will be sent to:",
+    "preparing": "Checking the request...",
+    "responding": "Granting access...",
+    "delivered": "Access granted. You can return to the program that asked and close this page.",
+    "approve": "Grant access",
+    "noRevokeNote": "(this grant cannot be revoked from the wallet yet; it expires on its own)",
+    "exchangeVisibility": "Anyone holding this request link can read the answer once it is sent.",
+    "manualDelivery": "The answer could not be delivered, but the grant was recorded. You can copy it and hand it to the requesting program yourself.",
+    "refusals": {
+      "invalidLink": "This link is not a request this wallet can open.",
+      "gone": "This request could not be opened: it has expired, or the link is wrong.",
+      "unreachable": "Could not reach the server this request lives on. Please try again.",
+      "malformedRequest": "This link did not lead to a request this wallet can read.",
+      "didAuth": "This request asks you to authenticate, which is only possible from a website. It cannot be answered from a link.",
+      "domain": "This request is bound to a website domain, which cannot be checked from a link.",
+      "appConnect": "This is an app connection request. Apps connect from their own website, not from a link.",
+      "foreignDelivery": "This request would send your answer somewhere other than where it came from, so it was refused.",
+      "barredGrant": "This request asks for access this wallet does not grant from a link: only collections created for the requester can be granted here, not shared wallet collections or your whole storage Space.",
+      "zcapUnavailable": "This request needs remote storage, which this wallet isn't configured with.",
+      "processFailed": "Something went wrong preparing the answer. Please try again.",
+      "exchangeFailed": "Could not deliver the answer to the server this request lives on."
+    }
+  },
   "verification": {
     "panelTitle": "Credential verification and validation",
     "verifyingCredential": "Verifying credential...",

@@ -11,6 +11,7 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialJsonUploadPanel } from '@/components/CredentialJsonFileUpload'
 import { resolveCredentialsFromJsonFiles } from '@/lib/resolveCredentialJsonFiles'
 import { resolveWalletInput } from '@/lib/resolveWalletInput'
+import { externalRequestPath } from '@/lib/walletRequest/externalRequest'
 import { resolveCredentialsInputErrorMessage } from '@/lib/resolveCredentialsInputErrorMessage'
 import { dashboardStyles } from '@/styles/appStyles'
 
@@ -32,8 +33,16 @@ export function AddCredentialPage() {
 
     setLoading(true)
     try {
-      const credentials = await resolveWalletInput(trimmed)
-      navigate('/accept-credentials', { state: { credentials } })
+      const outcome = await resolveWalletInput(trimmed)
+      if (outcome.kind === 'interaction-url') {
+        // A request arriving from outside the app: the request page opens
+        // the exchange behind it, the same page the CLI's deep link lands on.
+        navigate(externalRequestPath({ url: outcome.url }))
+        return
+      }
+      navigate('/accept-credentials', {
+        state: { credentials: outcome.credentials }
+      })
     } catch (err: unknown) {
       setError(resolveCredentialsInputErrorMessage(err, t, { trimmed }))
     } finally {

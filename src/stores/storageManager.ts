@@ -67,6 +67,7 @@ import {
   type DidWebKeyMapV2
 } from '@interop/wallet-core/webvh'
 import { ensureAccountGenesis } from '@interop/wallet-core/genesis'
+import { clampGrantExpires } from '@interop/wallet-core/clientAnnex'
 import { promoteKeystoreController, rebindKeystoreAgent } from '@/lib/kms'
 import { accountRosterStore } from '@/session/rosterStore'
 import { mintRecordEncryption } from '@interop/wallet-core/keyring'
@@ -3048,13 +3049,23 @@ export class StorageManager {
 
     // Pull axis: delegate a read-only (GET/HEAD) zcap on the collection URL to
     // the grantee, rooted at the Space root capability (targets outside the
-    // Space are unsatisfiable by construction).
+    // Space are unsatisfiable by construction) -- or, in a transient session,
+    // chained under the generation delegation the session's authority rides,
+    // with the expiry clamped to the delegation's own.
     const spaceUrl = remote.spaceUrl
     const spaceRootCapability = await generateZcapUri({ url: spaceUrl })
     const collectionUrl = `${spaceUrl}/${collectionId}`
-    const expiresAt = expires ?? new Date(Date.now() + RP_ZCAP_TTL_MS)
+    const now = Date.now()
+    const requestedExpires = expires ?? new Date(now + RP_ZCAP_TTL_MS)
+    const expiresAt = profile.invocationCapability
+      ? clampGrantExpires({
+          ttlMs: requestedExpires.getTime() - now,
+          delegation: profile.invocationCapability,
+          now
+        })
+      : requestedExpires
     const zcap = (await zcapClient.delegate({
-      capability: spaceRootCapability,
+      capability: profile.invocationCapability ?? spaceRootCapability,
       invocationTarget: collectionUrl,
       controller,
       allowedActions: ['GET', 'HEAD'],

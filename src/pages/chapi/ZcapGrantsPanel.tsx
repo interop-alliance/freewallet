@@ -81,7 +81,8 @@ export function ZcapGrantsPanel({
   writeTtlDays,
   shareTtlDays,
   walletMintedRecipient = false,
-  heading
+  heading,
+  revokeNote
 }: {
   grants: ResolvedGrant[]
   ttlDays: number
@@ -95,6 +96,10 @@ export function ZcapGrantsPanel({
   // Overrides the default "Storage access" section heading (App Connect uses
   // app-centric phrasing).
   heading?: string
+  // Overrides the "(you will be able to revoke access ...)" note on an
+  // ordinary grant row: the request page's agent grants are not yet listed
+  // by any revocation surface, and the row must not promise one.
+  revokeNote?: string
 }) {
   const { t } = useTranslation()
 
@@ -260,11 +265,9 @@ export function ZcapGrantsPanel({
                     : t('chapi.get.zcapExpiry', {
                         days: write ? writeTtlDays : ttlDays
                       })}{' '}
-                  {t(
-                    share
-                      ? 'chapi.get.zcapShareRevokeNote'
-                      : 'chapi.get.zcapRevokeNote'
-                  )}
+                  {share
+                    ? t('chapi.get.zcapShareRevokeNote')
+                    : (revokeNote ?? t('chapi.get.zcapRevokeNote'))}
                 </Typography>
               </>
             ) : (

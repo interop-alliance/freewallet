@@ -165,10 +165,51 @@ describe('composeAndDeliverResponse', () => {
     )
   })
 
-  it('reports a failed exchange delivery as such', async () => {
+  it('reports a failed exchange delivery as such, carrying the composed response', async () => {
     state.deliverThrows = true
-    await expect(
-      respond({ exchangeUrl: 'https://verifier.example/exchange/1' })
-    ).rejects.toMatchObject({ reason: 'exchangeFailed' })
+    const failure = await respond({
+      exchangeUrl: 'https://verifier.example/exchange/1'
+    }).catch((err: unknown) => err)
+    expect(failure).toBeInstanceOf(WalletResponseFailure)
+    const typed = failure as InstanceType<typeof WalletResponseFailure>
+    expect(typed.reason).toBe('exchangeFailed')
+    // The Login activity is already recorded, so the page with no other
+    // channel to the requester can offer the response for manual delivery.
+    expect(typed.response?.verifiablePresentation).toEqual({
+      type: 'VerifiablePresentation'
+    })
+    expect(state.calls).toEqual([
+      'processRequest',
+      'addHistoryLogin',
+      'deliverPresentation'
+    ])
+  })
+
+  it('records the origin-less request page marker verbatim as the activity origin', async () => {
+    const { EXTERNAL_REQUEST_ORIGIN } =
+      await import('@/lib/walletRequest/externalRequest')
+    state.zcaps = [{ id: 'urn:zcap:1', invocationTarget: 'https://was/x' }]
+    const session = makeSession()
+    const grantProfile = {
+      didAuth: false,
+      vcQueries: [],
+      zcapRequests: [{ referenceId: 'web' }],
+      appConnect: null
+    } as unknown as typeof profile
+
+    await composeAndDeliverResponse({
+      request: { query: [] } as unknown as Parameters<
+        typeof composeAndDeliverResponse
+      >[0]['request'],
+      session,
+      profile: grantProfile,
+      requestOrigin: EXTERNAL_REQUEST_ORIGIN,
+      selectedVCs: [],
+      exchangeUrl: 'https://was.example/workflows/ephemeral/exchanges/1'
+    })
+
+    expect(session.storage.addHistoryLogin).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: 'n/a (API request)' })
+    )
   })
 })

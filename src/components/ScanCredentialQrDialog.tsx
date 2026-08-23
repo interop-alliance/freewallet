@@ -12,8 +12,10 @@ import {
 } from '@mui/material'
 import QrScanner from 'qr-scanner'
 import { useTranslation } from 'react-i18next'
-import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import { resolveWalletInput } from '@/lib/resolveWalletInput'
+import {
+  resolveWalletInput,
+  type WalletInputOutcome
+} from '@/lib/resolveWalletInput'
 import { resolveCredentialsInputErrorMessage } from '@/lib/resolveCredentialsInputErrorMessage'
 import {
   scanCredentialQrStyles,
@@ -23,14 +25,15 @@ import {
 export function ScanCredentialQrDialog({
   open,
   onClose,
-  onCredentialsReady
+  onResolved
 }: {
   open: boolean
   onClose: () => void
   /**
-   * Same acceptance flow as Add Credential (review screen before storing).
+   * Same routing as Add Credential: credentials go to the review screen
+   * before storing, an interaction URL to the request page.
    */
-  onCredentialsReady: (credentials: IVerifiableCredential[]) => void
+  onResolved: (outcome: WalletInputOutcome) => void
 }) {
   const { t } = useTranslation()
   const scannerRef = useRef<QrScanner | null>(null)
@@ -63,8 +66,7 @@ export function ScanCredentialQrDialog({
       const data = typeof result === 'string' ? result : result.data
       try {
         sc.stop()
-        const credentials = await resolveWalletInput(data)
-        onCredentialsReady(credentials)
+        onResolved(await resolveWalletInput(data))
       } catch (err) {
         setDecodeError(
           resolveCredentialsInputErrorMessage(err, t, { trimmed: data })
@@ -72,7 +74,7 @@ export function ScanCredentialQrDialog({
         sc.start().catch(() => {})
       }
     },
-    [onCredentialsReady, t]
+    [onResolved, t]
   )
 
   const handleClose = useCallback(() => {

@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- A grant delegated from a transient session chains under the session's
+  generation delegation (`profile.invocationCapability`) instead of the
+  Space root, so the grantee receives a capability the server verifies
+  (root, generation delegation, grantee); each such grant's `expires` is
+  clamped to the parent's with wallet-core's `clampGrantExpires`. A
+  generation delegation that is expired or inside the renewal window refuses
+  the approval with the new `GenerationDelegationStaleError` rather than
+  minting a silently short grant; the blocking renewal stage is a follow-up
+  once the transient profile carries its ladder members. Durable sessions
+  delegate from the root as before. The share delegation in
+  `StorageManager.shareCollection` gets the same parent and clamp.
 - The shared wipe enumeration (`snapshotWipeTargets`) now always includes
   the session's own login credential's unlock Space (`profile.unlockMethod`
   and `profile.standingUnlock`) beside the unlock-methods registry's
@@ -29,6 +40,47 @@
 
 ### Added
 
+- A request page for interaction URLs, `/external/request?url=<interaction
+url>` (`src/pages/external/ExternalRequestPage.tsx`): a request arriving
+  from outside the app (a CLI agent's `di was request-grant` link by deep
+  link, or the same URL pasted into Add Credential or scanned from a
+  terminal QR) is answered without a CHAPI popup. The page opens the
+  exchange behind the URL with wallet-core's `openInteractionRequest`,
+  classifies the VPR with the existing `classifyRequest`, renders the
+  storage-access consent panel (the grantee DID as the requester, the
+  `reason` strings, and the host the answer will be sent to), delegates
+  through the existing grant engine, and POSTs the unsigned zcap-only
+  presentation back through `composeAndDeliverResponse`. A live session is
+  used directly; otherwise the page runs the ordinary login in place. The
+  Login activity records the grant under the fixed origin marker
+  `n/a (API request)`.
+- The pure half of that entry point, `src/lib/walletRequest/externalRequest.ts`,
+  carries the refusal matrix, each cell with its own copy: an invalid deep
+  link; an exchange that is gone (a 404 on either fetch, worded as
+  expired-or-wrong-link), unreachable, or answering with no readable VPR; a
+  `DIDAuthentication` query in either spelling, a `domain`, or an
+  `AppConnectQuery` (no attested origin exists here); a VPR-named
+  presentation endpoint on another origin than the exchange (the consent
+  panel names the resolved delivery host); and any grant class outside the
+  allowlist -- only `#public-collection` and `#private-collection` targets
+  (plain collection URLs resolving to those classes included) are granted
+  from a link, so a share, a whole-Space read, or a protected-collection
+  read is refused before consent. A failed exchange POST-back keeps the
+  composed response on `WalletResponseFailure.response`, which the page
+  offers for manual delivery (the activity is already recorded).
+- `resolveWalletInput` returns a typed outcome (`{ kind: 'credentials' }`
+  or `{ kind: 'interaction-url' }`) instead of a credential array, and the
+  Add Credential box and the QR scanner route an interaction URL to the
+  request page; a bare exchange URL still falls to the credential fetch and
+  fails with the URL-fetch message (the CLI prints the `?iuv=1` form).
+- `ZcapGrantsPanel` takes a `revokeNote` override, which the request page
+  uses to state that a grant answered from a link cannot yet be revoked
+  from the wallet and expires on its own.
+- `loginErrorKey` moves out of `LoginPage` into `src/session/loginErrorKey.ts`,
+  shared with the request page's in-page login.
+- Decision record `decisions/0004-agents-are-grantees.md`: an agent is a
+  zcap grantee holding its own did:key, never a wallet client.
+
 - A local sign-in (passphrase, passkey, completing the connect-this-browser
   flow, or the login that ends a recovery) records a `wallet-activity` Login
   entry built by wallet-core's `addHistoryWalletLogin` ("Logged in to
@@ -42,6 +94,7 @@
 - The `json-canonicalize` resolution override (pinning 2.0.0 around the broken
   2.0.1 publish) is lifted now that 3.0.0 ships intact. 2.0.0 stays in the
   lockfile only through `@interop/did-method-webvh` until its 5.5.1 publish.
+- Bump @interop/vh-resource-log to ^0.4.0
 
 ### Added
 

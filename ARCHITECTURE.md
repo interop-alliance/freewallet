@@ -12,6 +12,8 @@ vars) see [AGENTS.md](AGENTS.md).
 src/pages/          Route-level React components (one file per page)
   auth/             Login, Signup, GuestLogin, Logout
   chapi/            CHAPI popup pages (WalletGetPage, WalletStorePage)
+  external/         Requests arriving from outside the app without CHAPI
+                    (ExternalRequestPage, the interaction-URL door)
   dashboard/        Authenticated dashboard pages
 src/components/     Shared React components
   credentialDetails/  Credential detail sub-components
@@ -28,6 +30,9 @@ src/lib/            Pure business logic (no React)
   walletRequest/    VPR classification + response assembly for CHAPI requests
     respond.ts      Compose, persist the Login activity, then deliver (the
                     CHAPI `get` approval sequence)
+    externalRequest.ts  The interaction-URL entry point's pure half: the
+                    deep-link parser, the exchange opening, and the
+                    pre-consent refusal matrix
 src/lib/sync/       Collection-agnostic WAS replication adapter (RxDB-based)
 src/stores/         Global state
   authStore.ts      Zustand store — holds the live Session object
@@ -1647,6 +1652,65 @@ revocation and the epoch cascade" for the asymmetry): the revoked app keeps
 the ability to compute blinded terms, while the query endpoint itself stays
 behind the revoked pull grant.
 
+## The interaction-URL request page (`/external/request`)
+
+A request can also arrive from outside the app, with no CHAPI popup and no
+attested requesting origin: an agent's `di was request-grant` prints an
+interaction URL (`<exchange>/protocols?iuv=1`) plus the wallet deep link
+`/external/request?url=<percent-encoded interaction URL>`, and the same
+URL can be pasted into Add Credential or scanned from a terminal QR
+(`resolveWalletInput` returns it as a typed `interaction-url` outcome and
+both callers route to the page). The page
+(`src/pages/external/ExternalRequestPage.tsx`) is the `WalletGetPage`
+shape minus CHAPI: it opens the exchange with wallet-core's
+`openInteractionRequest`, classifies the VPR with the shared
+`classifyRequest`, renders the storage-access consent panel, delegates
+through the ordinary grant engine, and POSTs the unsigned zcap-only
+presentation back through `composeAndDeliverResponse` with the exchange
+URL. A session already live in the app is used directly; otherwise the
+page runs the ordinary login in place (the same durability decision
+`/login` makes, a transient session by default on a non-remembered
+browser) and adopts it app-wide. The Login activity records the grant
+under the fixed origin marker `n/a (API request)`, which is what the
+Applications page will key agent rows on.
+
+The entry point is stricter than the popup, because the only requester
+signal is the grantee DID and request-supplied `reason` text, both chosen
+by whoever wrote the link. Everything it refuses is decided before consent
+renders, in the pure module `src/lib/walletRequest/externalRequest.ts`,
+each refusal with its own copy: a deep link that is not an interaction URL
+(a bare exchange URL included); an exchange that is gone (a 404 on either
+fetch, worded as expired-or-wrong-link since the server answers the same
+for both), unreachable, or answering with no readable VPR; a
+`DIDAuthentication` query in either spelling and a `domain` on any
+request (freewallet requires a `domain` for DID Auth and there is no
+origin to match it against); an `AppConnectQuery` (the App Connect path
+stays CHAPI-only); a VPR-named presentation endpoint
+(`interact.service`) on another origin than the exchange, since delivery
+prefers that endpoint and the consent panel names the resolved delivery
+host; and any grant class outside the allowlist. Only
+`#public-collection` and `#private-collection` targets (plain collection
+URLs resolving to those classes included) are granted from a link: a
+share would hand the grantee decryption of the user's own encrypted
+collections, and a whole-Space or protected-collection read covers the
+plaintext `public-credentials`, so those are refused (`barredGrants`, run
+once the grants are resolved, the first point a target's class is known).
+Widening the allowlist is a documented decision, not a code change. A
+failed exchange POST-back leaves the grant recorded and offers the
+composed response for manual delivery; a decline abandons the exchange,
+which expires on its own. Grants answered here are not yet listed or
+revocable from any surface (the consent panel says so), bounded by their
+TTL until the Applications page grows a row for them.
+
+A grant delegated from a transient session chains under the session's
+generation delegation (`profile.invocationCapability`) rather than the
+Space root -- the root would be signed by an annex key the account document
+never lists -- with its `expires` clamped to the parent's. A generation
+delegation that is expired or inside its renewal window refuses the
+approval (`GenerationDelegationStaleError`) instead of minting a silently
+short grant; the blocking renewal stage is a follow-up once the transient
+profile carries the ladder members a ladder-signed replacement needs.
+
 ## Sharing a wallet collection (`https://w3id.org/byoe#shared-wallet-collection`)
 
 The collections above are ones an app created. **Sharing** is the other
@@ -1778,6 +1842,7 @@ Security notes:
 | `/logout`                                | `LogoutPage`             | Clears session                       |
 | `/wallet/get`                            | `WalletGetPage`          | CHAPI popup — share a VC             |
 | `/wallet/store`                          | `WalletStorePage`        | CHAPI popup — accept a VC            |
+| `/external/request`                      | `ExternalRequestPage`    | Interaction-URL request (no CHAPI)   |
 | `/dashboard`                             | `DashboardPage`          | VC list (protected)                  |
 | `/credential/:cid`                       | `CredentialDetailPage`   | VC detail + verify (protected)       |
 | `/add-credential`                        | `AddCredentialPage`      | Manual VC import (protected)         |

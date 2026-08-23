@@ -765,6 +765,33 @@
       "storedSuccess_one": "Credencial almacenada correctamente."
     }
   },
+  "externalRequest": {
+    "title": "Solicitud de acceso al almacenamiento",
+    "requestedBy": "Solicitado por",
+    "requesterNote": "Esta solicitud no proviene de un sitio web. Se identifica solo con esta clave, así que compárela con lo que muestra el programa solicitante.",
+    "deliveryLabel": "Su respuesta se enviará a:",
+    "preparing": "Comprobando la solicitud...",
+    "responding": "Concediendo acceso...",
+    "delivered": "Acceso concedido. Puede volver al programa que lo solicitó y cerrar esta página.",
+    "approve": "Conceder acceso",
+    "noRevokeNote": "(este permiso aún no se puede revocar desde la billetera; caduca por sí solo)",
+    "exchangeVisibility": "Cualquiera que tenga este enlace de solicitud podrá leer la respuesta una vez enviada.",
+    "manualDelivery": "No se pudo entregar la respuesta, pero el permiso quedó registrado. Puede copiarla y entregarla usted mismo al programa solicitante.",
+    "refusals": {
+      "invalidLink": "Este enlace no es una solicitud que esta billetera pueda abrir.",
+      "gone": "No se pudo abrir esta solicitud: ha caducado o el enlace es incorrecto.",
+      "unreachable": "No se pudo conectar con el servidor donde reside esta solicitud. Inténtelo de nuevo.",
+      "malformedRequest": "Este enlace no condujo a una solicitud que esta billetera pueda leer.",
+      "didAuth": "Esta solicitud le pide autenticarse, lo que solo es posible desde un sitio web. No se puede responder desde un enlace.",
+      "domain": "Esta solicitud está vinculada a un dominio web, que no se puede comprobar desde un enlace.",
+      "appConnect": "Esta es una solicitud de conexión de aplicación. Las aplicaciones se conectan desde su propio sitio web, no desde un enlace.",
+      "foreignDelivery": "Esta solicitud enviaría su respuesta a un lugar distinto de donde proviene, por lo que fue rechazada.",
+      "barredGrant": "Esta solicitud pide un acceso que esta billetera no concede desde un enlace: aquí solo se pueden conceder colecciones creadas para el solicitante, no colecciones compartidas de la billetera ni todo su espacio de almacenamiento.",
+      "zcapUnavailable": "Esta solicitud necesita almacenamiento remoto, con el que esta billetera no está configurada.",
+      "processFailed": "Algo salió mal al preparar la respuesta. Inténtelo de nuevo.",
+      "exchangeFailed": "No se pudo entregar la respuesta al servidor donde reside esta solicitud."
+    }
+  },
   "verification": {
     "panelTitle": "Verificación y validación de la credencial",
     "verifyingCredential": "Verificando credencial...",

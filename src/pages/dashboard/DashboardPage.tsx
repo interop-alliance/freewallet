@@ -14,7 +14,6 @@ import {
 import { Link as RouterLink, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { FuseOptionKey } from 'fuse.js'
-import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { syncController } from '@/stores/syncController'
@@ -26,6 +25,8 @@ import { CredentialCard } from '@/components/CredentialCard'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { SearchField } from '@/components/SearchField'
 import { ScanCredentialQrDialog } from '@/components/ScanCredentialQrDialog'
+import type { WalletInputOutcome } from '@/lib/resolveWalletInput'
+import { externalRequestPath } from '@/lib/walletRequest/externalRequest'
 import type { StoredCredential } from '@/types/credential'
 
 // Declared outside the component so this array is the same object on every
@@ -71,10 +72,16 @@ export function DashboardPage() {
     results: searchedCredentials
   } = useSearch({ items: credentials, keys: CREDENTIAL_SEARCH_KEYS })
 
-  const handleQrCredentialsReady = useCallback(
-    (resolved: IVerifiableCredential[]) => {
+  const handleQrResolved = useCallback(
+    (outcome: WalletInputOutcome) => {
       setScanQrOpen(false)
-      navigate('/accept-credentials', { state: { credentials: resolved } })
+      if (outcome.kind === 'interaction-url') {
+        navigate(externalRequestPath({ url: outcome.url }))
+        return
+      }
+      navigate('/accept-credentials', {
+        state: { credentials: outcome.credentials }
+      })
     },
     [navigate]
   )
@@ -211,7 +218,7 @@ export function DashboardPage() {
       <ScanCredentialQrDialog
         open={scanQrOpen}
         onClose={() => setScanQrOpen(false)}
-        onCredentialsReady={handleQrCredentialsReady}
+        onResolved={handleQrResolved}
       />
 
       {loadError && (
