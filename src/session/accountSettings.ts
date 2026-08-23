@@ -14,6 +14,7 @@ import {
   isWebvhDid,
   rotateWebvhUpdateKey
 } from '@interop/wallet-core/webvh'
+import { ladderRung } from '@interop/wallet-core/clientAnnex'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { PASSKEY_KDF } from '@/app.config'
 import {
@@ -26,9 +27,11 @@ import {
   changePassphrase,
   deleteKeyring,
   deriveUnlockCredential,
+  unlockKeyAgreementMembers,
   unlockManagementGrantee,
   verifyPassphrase,
-  WrongPassphraseError
+  WrongPassphraseError,
+  type UnlockCredential
 } from '@/session/keyring'
 import {
   adoptPassphraseRebind,
@@ -53,11 +56,18 @@ import {
   isDurableSession
 } from '@/session/persistence'
 import { pointedClientAnnexReach } from '@/session/annexReach'
-import { enrolledClientContext } from '@/session/enrolledContext'
+import {
+  enrolledClientContext,
+  type EnrolledClientContext
+} from '@/session/enrolledContext'
+import { documentListsCredential } from '@/session/pendingRetirement'
 import { executeLocalWipe, snapshotWipeTargets } from '@/session/wipe'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
-import { invalidateVerifiedLog } from '@/session/verifiedLog'
+import {
+  invalidateVerifiedLog,
+  verifiedAccountLog
+} from '@/session/verifiedLog'
 import { findLoginCredential, loginHandleOf } from '@/lib/loginCredential'
 import type { Session } from '@/types/auth'
 
@@ -131,7 +141,7 @@ export async function loadUnlockRegistry({
  * 'failed'`): the change itself cannot be rolled back, and a torn retirement
  * converges at the next login's completion sweep.
  *
- * Four guards keep the retirement honest. The old credential's standing configuration (its
+ * Five guards keep the retirement honest. The old credential's standing configuration (its
  * registry standing members) is read BEFORE anything is written, and a read
  * that fails refuses the whole change: the entry would end up naming the new
  * passphrase's multibases, leaving the leaked credential standing
@@ -159,12 +169,30 @@ export async function loadUnlockRegistry({
  * that still names the credential left standing -- the next passphrase
  * login's repair (`repairTornPassphraseRetirement`) retires it.
  *
+ * The fifth guard covers a BARE entry: one carrying no identity members at
+ * all, which the retirement would read as "nothing standing to retire".
+ * That reading is only true when the credential really has no document
+ * inventory. When the typed old credential IS standing in the account
+ * document, reporting the change clean would be a silent failure on the one
+ * remedy for a leaked passphrase -- its commitment, its roster wrap, and its
+ * latent self-enrollment authority would all survive with nothing naming
+ * them. So the document is consulted for a bare entry, and a bare entry over
+ * a standing credential ends as `rotation: 'unretired'`, with the entry
+ * rebuilt from what the change itself holds -- but only where the next
+ * login's repair can reach it, which takes a standing-layout record for the
+ * NEW credential. A change whose standing establishment did not run leaves
+ * the entry naming the new credential and says so, rather than writing a
+ * pending shape nothing will ever mend. A document read that fails is
+ * treated as unknown: the change still lands, and the outcome is still not
+ * reported clean.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @param options.oldPassphrase {string}
  * @param options.newPassphrase {string}
  * @returns {Promise<{ oldPassphraseRetired: boolean, unlockSpaceId: string,
- *   manageCapability?: IZcap, rotation: 'rotated' | 'skipped' | 'failed',
+ *   manageCapability?: IZcap,
+ *   rotation: 'rotated' | 'skipped' | 'failed' | 'unretired',
  *   registry: UnlockMethodsRecord | null }>}
  * @throws {WrongPassphraseError}   the current passphrase did not verify
  * @throws {SamePassphraseError}   the new passphrase is the current one
@@ -183,7 +211,7 @@ export async function changeAccountPassphrase({
   oldPassphraseRetired: boolean
   unlockSpaceId: string
   manageCapability?: IZcap
-  rotation: 'rotated' | 'skipped' | 'failed'
+  rotation: 'rotated' | 'skipped' | 'failed' | 'unretired'
   registry: UnlockMethodsRecord | null
 }> {
   assertAccountCeremonyAllowed({
@@ -201,9 +229,10 @@ export async function changeAccountPassphrase({
   // that cannot run a retirement at all (no WAS, a guest, an unpromoted
   // account) has nothing to read; otherwise an unreadable registry refuses
   // the change up front, while nothing has been written yet.
-  const oldStanding = enrolledClientContext({ session })
+  const context = enrolledClientContext({ session })
+  const { fields: oldStanding, registryAbsent } = context
     ? await standingConfiguration({ session })
-    : {}
+    : { fields: {} as StandingUnlockFields, registryAbsent: false }
   // The keyring record is bound under the ACCOUNT controller (the first
   // client's did:key) -- on an enrolled second client it differs from this
   // client's `user.id`, so verification must match against it.
@@ -238,6 +267,18 @@ export async function changeAccountPassphrase({
   ) {
     throw new SamePassphraseError()
   }
+  // The bare-entry guard. An entry with no identity members names nothing,
+  // so the retirement below would skip and the change would report clean --
+  // true only when the credential has no document inventory either. The
+  // document is the only thing that can tell the two apart.
+  const bareCredential =
+    context && oldStanding.keyAgreementKeyMultibase === undefined
+      ? await documentStateOfCredential({
+          session,
+          context,
+          credential: oldCredential
+        })
+      : 'absent'
   const {
     oldPassphraseRetired,
     unlockSpaceId,
@@ -290,46 +331,63 @@ export async function changeAccountPassphrase({
   // adopts the fresh key. Reported, never thrown -- the passphrase change has
   // already landed and cannot roll back, and a torn retirement is finished by
   // the login-time completion sweep.
-  let rotation: 'rotated' | 'skipped' | 'failed' = 'skipped'
+  let rotation: 'rotated' | 'skipped' | 'failed' | 'unretired' = 'skipped'
   // Whether the retirement's document edit landed. It is proven by the
   // ceremony having reached the stage that fires this, never inferred from
   // the throw.
   let inventoryRemoved = false
-  try {
-    const outcome = await rotateOffUnlockCredential({
-      onInventoryRemoved: () => {
-        inventoryRemoved = true
-      },
-      session,
-      method: {
-        type: 'passphrase',
-        ...oldStanding,
-        // The old record's ladder seed, captured by the rebind before the old
-        // unlock Space was deleted: the retirement's ladder attribution then
-        // holds every rung a priori rather than walking from the recorded one.
-        ...(oldLadderSeed ? { ladderSeed: oldLadderSeed } : {})
-      },
-      // The new credential's seed survives the retirement; the annex
-      // strike-or-swap stage signs (or re-mints the generation) with it,
-      // never with the retired seed.
-      ...(newLadderSeed ? { survivingLadderSeed: newLadderSeed } : {}),
-      verb: 'changing the passphrase'
-    })
-    if (outcome?.rotated && outcome.userKey) {
-      rotation = 'rotated'
-      // The retirement re-sealed the registry to the fresh key in band and
-      // swapped the session onto it, so this returns on its id guard; it
-      // retries the re-seal only when that in-band step failed and left the
-      // session on the pre-rotation keys.
-      await adoptRotatedUserKey({
+  if (bareCredential !== 'absent') {
+    // Bare entry, standing (or unverifiable) credential: there is nothing to
+    // retire BY, since the retirement names its subject through the entry's
+    // members. Reported as `unretired` rather than skipped -- the old
+    // passphrase may still unlock the wallet, which is the opposite of what
+    // this ceremony promises.
+    console.warn(
+      'The registry named no inventory for the old passphrase while it ' +
+        (bareCredential === 'standing'
+          ? 'still stands in the account document'
+          : 'could not be checked against the account document') +
+        '; it was not retired.'
+    )
+    rotation = 'unretired'
+  } else {
+    try {
+      const outcome = await rotateOffUnlockCredential({
+        onInventoryRemoved: () => {
+          inventoryRemoved = true
+        },
         session,
-        spaceId: rotationSpaceId({ session }),
-        userKey: outcome.userKey
+        method: {
+          type: 'passphrase',
+          ...oldStanding,
+          // The old record's ladder seed, captured by the rebind before the
+          // old unlock Space was deleted: the retirement's ladder attribution
+          // then holds every rung a priori rather than walking from the
+          // recorded one.
+          ...(oldLadderSeed ? { ladderSeed: oldLadderSeed } : {})
+        },
+        // The new credential's seed survives the retirement; the annex
+        // strike-or-swap stage signs (or re-mints the generation) with it,
+        // never with the retired seed.
+        ...(newLadderSeed ? { survivingLadderSeed: newLadderSeed } : {}),
+        verb: 'changing the passphrase'
       })
+      if (outcome?.rotated && outcome.userKey) {
+        rotation = 'rotated'
+        // The retirement re-sealed the registry to the fresh key in band and
+        // swapped the session onto it, so this returns on its id guard; it
+        // retries the re-seal only when that in-band step failed and left the
+        // session on the pre-rotation keys.
+        await adoptRotatedUserKey({
+          session,
+          spaceId: rotationSpaceId({ session }),
+          userKey: outcome.userKey
+        })
+      }
+    } catch (err) {
+      console.error('Could not retire the old passphrase credential:', err)
+      rotation = 'failed'
     }
-  } catch (err) {
-    console.error('Could not retire the old passphrase credential:', err)
-    rotation = 'failed'
   }
   // The registry write, last. A retirement that succeeded, that had nothing
   // to retire, or that died after its document edit landed, records the NEW
@@ -342,9 +400,42 @@ export async function changeAccountPassphrase({
   // drops an entry's carried standing fields when the unlock Space changes.
   const retirementFailedAtTheEdit = rotation === 'failed' && !inventoryRemoved
   let standing: StandingUnlockFields | undefined = established?.standingFields
+  // Whether this run must mint a registry to write into. Only the pending
+  // shape below needs one: it is the single state whose whole point is
+  // leaving something durable that names the old credential.
+  let mintRegistry = false
   if (retirementFailedAtTheEdit) {
     standing =
       Object.keys(oldStanding).length > 0 ? { ...oldStanding } : undefined
+  } else if (rotation === 'unretired' && established) {
+    // The bare entry, filled in from the credential this change holds. The
+    // shape is deliberately the failed-at-the-edit one -- the new unlock
+    // Space naming the OLD credential's members -- because that is exactly
+    // what the next passphrase login's torn-retirement repair detects and
+    // retires. Rebuilding it here is what gives the credential left standing
+    // a mender, instead of leaving it standing unnamed forever.
+    //
+    // The rule the condition states: the pending shape may be written only
+    // where its mender is reachable. That repair runs from a login with the
+    // NEW passphrase, and only a standing-layout record can carry that login
+    // as far as the repair -- so it is written only when the standing
+    // establishment above actually ran.
+    standing = await standingFieldsOfCredential({
+      credential: oldCredential,
+      ladderSeed: oldLadderSeed
+    })
+    mintRegistry = registryAbsent
+  } else if (rotation === 'unretired') {
+    // No standing establishment, so no reachable mender: the entry keeps
+    // naming the new credential (the normal path's `established?.standingFields`,
+    // undefined here, which leaves the upsert's carry rule in charge). The
+    // old credential stays standing with nothing naming it, which is the
+    // honest state -- writing the pending shape would only strand the entry.
+    console.warn(
+      'The new passphrase has no standing configuration, so the ' +
+        'unretired old credential is left unnamed in the registry; it ' +
+        'stays standing in the account document.'
+    )
   }
   // The standing establishment re-minted the management zcap with PUT (the
   // bind's is the narrow GET/DELETE one); the entry records the wide one, so
@@ -353,7 +444,13 @@ export async function changeAccountPassphrase({
     session,
     unlockSpaceId,
     manageCapability: established?.manageCapability ?? manageCapability,
-    standing
+    standing,
+    // A registry that was absent when this change started has no entry for
+    // the deferred write to update, so the one state that needs a durable
+    // name for the old credential -- the pending shape above -- mints the
+    // record instead of no-oping. Every other path keeps the absent
+    // registry absent (the backfill's business).
+    createIfMissing: mintRegistry
   })
   return {
     oldPassphraseRetired,
@@ -405,16 +502,22 @@ export class PendingPassphraseRetirementError extends Error {
  * the caller refuses the change instead of overwriting the entry it could not
  * read.
  *
+ * `registryAbsent` reports the third state the fields alone cannot: no
+ * registry record at all, as against a record whose passphrase entry is
+ * absent or bare. A caller that must leave something naming the old
+ * credential has to mint the record in that case, since the deferred write
+ * below reads the registry again and would find nothing to update.
+ *
  * @param options {object}
  * @param options.session {Session}
- * @returns {Promise<StandingUnlockFields>}
+ * @returns {Promise<{ fields: StandingUnlockFields, registryAbsent: boolean }>}
  * @throws {Error}   the registry could not be read
  */
 async function standingConfiguration({
   session
 }: {
   session: Session
-}): Promise<StandingUnlockFields> {
+}): Promise<{ fields: StandingUnlockFields; registryAbsent: boolean }> {
   let record: UnlockMethodsRecord | null
   try {
     record = await getUnlockMethods({ session })
@@ -425,11 +528,12 @@ async function standingConfiguration({
       { cause: err }
     )
   }
+  const registryAbsent = !record
   const entry = record?.methods.find(
     (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
   )
   if (!entry) {
-    return {}
+    return { fields: {}, registryAbsent }
   }
   // Everything the entry holds beside its non-standing members IS its
   // standing configuration, so the set carries across without restating the
@@ -441,7 +545,100 @@ async function standingConfiguration({
     manageCapability: _manageCapability,
     ...standingMembers
   } = entry
-  return standingMembers
+  return { fields: standingMembers, registryAbsent }
+}
+
+/**
+ * Whether the typed old credential's `keyAgreement` inventory is still in the
+ * account document. Asked only for a BARE registry entry, where the registry
+ * itself cannot say whether there is anything to retire.
+ *
+ * A read that fails resolves to `'unknown'` rather than throwing: the change
+ * must not be thrown away over a document fetch, but it must not be reported
+ * clean either, so the caller treats unknown exactly like standing.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.context {EnrolledClientContext}
+ * @param options.credential {UnlockCredential}   the typed old passphrase
+ * @returns {Promise<'standing' | 'absent' | 'unknown'>}
+ */
+async function documentStateOfCredential({
+  session,
+  context,
+  credential
+}: {
+  session: Session
+  context: EnrolledClientContext
+  credential: UnlockCredential
+}): Promise<'standing' | 'absent' | 'unknown'> {
+  const keyAgreementKeyMultibase = credential.standing.keyAgreementKeyMultibase
+  if (!keyAgreementKeyMultibase) {
+    return 'absent'
+  }
+  try {
+    const { doc } = await verifiedAccountLog({
+      profile: session.profile,
+      pointer: context.pointer
+    })
+    const listed = await documentListsCredential({
+      doc,
+      did: context.pointer.did,
+      keyAgreementKeyMultibase
+    })
+    return listed ? 'standing' : 'absent'
+  } catch (err) {
+    console.warn(
+      'Could not check the account document for the old passphrase; ' +
+        'treating it as still standing:',
+      err
+    )
+    return 'unknown'
+  }
+}
+
+/**
+ * The standing fields of a credential held in hand, for the registry entry a
+ * bare-entry change leaves behind: the roster kid, the `keyAgreement`
+ * multibase, and the client did all come from the credential's own
+ * derivation, and `updateKeyMultibase` is ladder rung 0 of the seed the
+ * rebind captured.
+ *
+ * Without that seed the entry cannot record an update key, and the
+ * torn-retirement repair skips an entry missing one -- so the absence is
+ * logged where it happens.
+ *
+ * @param options {object}
+ * @param options.credential {UnlockCredential}
+ * @param [options.ladderSeed] {Uint8Array}   the old record's ladder seed
+ * @returns {Promise<StandingUnlockFields>}
+ */
+async function standingFieldsOfCredential({
+  credential,
+  ladderSeed
+}: {
+  credential: UnlockCredential
+  ladderSeed?: Uint8Array
+}): Promise<StandingUnlockFields> {
+  const rung0 = ladderSeed
+    ? await ladderRung({ ladderSeed, index: 0 })
+    : undefined
+  if (!rung0) {
+    console.warn(
+      "The old passphrase's ladder seed is not in hand, so its registry " +
+        'entry records no update key and the login-time repair will not ' +
+        'retire it.'
+    )
+  }
+  const { recipientKid, keyAgreementKeyMultibase, clientDid } =
+    credential.standing
+  return {
+    ...(recipientKid ? { rosterKid: recipientKid } : {}),
+    ...(keyAgreementKeyMultibase ? { keyAgreementKeyMultibase } : {}),
+    ...(clientDid ? { unlockClientDid: clientDid } : {}),
+    ...(rung0 ? { updateKeyMultibase: rung0.keyMultibase } : {}),
+    ...unlockKeyAgreementMembers({ unlock: credential.unlock })
+  }
 }
 
 /**
@@ -470,6 +667,8 @@ function rotationSpaceId({ session }: { session: Session }): string {
  * @param [options.manageCapability] {IZcap}
  * @param [options.standing] {StandingUnlockFields}   the standing configuration the entry
  *   must name; absent leaves the upsert's carry rule in charge
+ * @param [options.createIfMissing] {boolean}   mint a fresh registry when
+ *   none has been written yet, instead of resolving null; default false
  * @returns {Promise<UnlockMethodsRecord | null>}   the updated registry, or
  *   null when there was nothing to update (or the update failed)
  */
@@ -477,15 +676,19 @@ async function recordPassphraseEntry({
   session,
   unlockSpaceId,
   manageCapability,
-  standing
+  standing,
+  createIfMissing = false
 }: {
   session: Session
   unlockSpaceId: string
   manageCapability?: IZcap
   standing?: StandingUnlockFields
+  createIfMissing?: boolean
 }): Promise<UnlockMethodsRecord | null> {
   try {
-    const current = await getUnlockMethods({ session })
+    const current =
+      (await getUnlockMethods({ session })) ??
+      (createIfMissing ? emptyUnlockMethodsRegistry() : null)
     if (!current) {
       return null
     }

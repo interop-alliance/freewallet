@@ -38,7 +38,11 @@
  *   entry (`PendingRetirementForgetError`): a passphrase change torn before
  *   its retirement landed is mended only by the torn-retirement repair,
  *   which needs a durable enrolled login -- the very thing this ceremony
- *   ends forever.
+ *   ends forever. It refuses just as early when the registry does not cover
+ *   every standing credential the account document publishes
+ *   (`UnrecordedCredentialForgetError`): the re-mint pass walks the
+ *   registry, so an unrecorded credential's bridge would rot at the removal
+ *   entry with no login left to heal it.
  *
  * - **The no-unlock-material grade** (`forgetBrowserWalletData`, run from
  *   the login page's refusal states): nothing can be derived or signed, so
@@ -82,7 +86,10 @@ import type {
 } from '@interop/wallet-core/clientAnnex'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import { getUnlockKeyringWithCapability } from '@interop/wallet-core/keyring'
-import { unlockRecordSealedTo } from '@interop/wallet-core/unlock'
+import {
+  unlockKeyVmId,
+  unlockRecordSealedTo
+} from '@interop/wallet-core/unlock'
 import {
   userKeyRosterDescriptorStore,
   userKeyRosterLogSigner
@@ -94,8 +101,12 @@ import {
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import {
   accountLogPinId,
+  clientKeyAgreementController,
   clientSigningKeyMultibase,
   isWebvhDid,
+  keyAgreementCommitment,
+  relationIds,
+  resolvedKeyAgreementMethods,
   updateKeyMultibase,
   verifyAccountLog
 } from '@interop/wallet-core/webvh'
@@ -125,12 +136,16 @@ import {
   getUnlockMethods,
   managementZcapClient,
   refreshStandingDelegationFields,
-  type PassphraseUnlockMethod
+  type PassphraseUnlockMethod,
+  type UnlockMethod
 } from '@/session/unlockMethods'
 import { pointedClientAnnexReach } from '@/session/annexReach'
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import { cascadeCollections } from '@/session/userKeyCascade'
-import { invalidateVerifiedLog } from '@/session/verifiedLog'
+import {
+  invalidateVerifiedLog,
+  verifiedAccountLog
+} from '@/session/verifiedLog'
 import {
   executeLocalWipe,
   snapshotWipeTargets,
@@ -189,6 +204,30 @@ export class PendingRetirementForgetError extends Error {
 }
 
 /**
+ * Thrown by the last-client transition when the account document publishes a
+ * standing credential's `keyAgreement` entry that no unlock-methods registry
+ * entry names. Every walk the transition and the client-less account after
+ * it perform is registry-driven -- the other methods' record re-mint, the
+ * removal entry's latent-hash vouching, the recovery health sweep -- so an
+ * unrecorded credential's bridge delegation would rot un-re-minted at the
+ * removal entry and its self-enrollment would brick silently, on an account
+ * no durable login will ever heal again. Matched on `name` by the settings
+ * surface.
+ */
+export class UnrecordedCredentialForgetError extends Error {
+  unrecorded: number
+  constructor({ unrecorded }: { unrecorded: number }) {
+    super(
+      `This browser cannot be forgotten yet: ${unrecorded} sign-in ` +
+        "method(s) on this account are not recorded in the wallet's " +
+        'sign-in registry.'
+    )
+    this.name = 'UnrecordedCredentialForgetError'
+    this.unrecorded = unrecorded
+  }
+}
+
+/**
  * What a completed forget reports: which ceremony ran (`lastClient: false`
  * is the ordinary forget, `true` the last-client transition) with that
  * ceremony's own result, plus the local wipe's failed-stage names and the
@@ -226,7 +265,9 @@ export type ForgetOutcome = ForgetCeremonyOutcome & {
  * the next run resumes).
  *
  * Refusals before anything runs: a pending-shaped passphrase registry entry
- * on the transition (`PendingRetirementForgetError`), a transient session
+ * on the transition (`PendingRetirementForgetError`), a registry on the
+ * transition that does not name every standing credential the account
+ * document publishes (`UnrecordedCredentialForgetError`), a transient session
  * (`StepUpRequiredError`
  * via the shared ceremony gate) and a session whose login did not carry the
  * credential's standing members (the bridge delegation and ladder seed; the
@@ -332,6 +373,11 @@ export async function forgetThisBrowser({
   // durable logins on this account forever.
   if (lastClient) {
     await assertNoPendingPassphraseEntry({ session, pointer, registry })
+    await assertRegistryCoversStandingCredentials({
+      session,
+      pointer,
+      registry
+    })
   }
 
   // The annex Space id, for the wipe's pin-slot enumeration. Best-effort.
@@ -1073,4 +1119,146 @@ async function assertNoPendingPassphraseEntry({
       throw new PendingRetirementForgetError()
     }
   }
+}
+
+/**
+ * Refuses the last-client transition when the unlock-methods registry does
+ * not cover every standing credential the account document publishes
+ * ({@link UnrecordedCredentialForgetError}).
+ *
+ * A credential's `keyAgreement` entry is the document's whole record of it.
+ * Every walk from here on is registry-driven: the other methods' record
+ * re-mint, the removal entry's latent-hash vouching, and the recovery health
+ * sweep all read the registry, so a credential no entry names keeps a bridge
+ * delegation the removal entry rots and gets no replacement -- and on the
+ * client-less account this ceremony produces, no durable login will ever run
+ * the repairs that would notice.
+ *
+ * The credential entries are the `keyAgreement` methods that carry no client
+ * controller marker: an enrolled client's method is published under
+ * `controller: did:key:<its signing multibase>`, so filtering by the markers
+ * the document's `capabilityInvocation` relation implies leaves exactly the
+ * unlock credentials' entries (a ladder VM holds no key-agreement relation,
+ * and the KMS convenience key is published under `authentication` alone).
+ * Coverage is computed per registry entry from its recorded key-agreement
+ * multibase, in BOTH published forms -- the verbatim id a passkey or
+ * recovery code publishes under, and the commitment id a passphrase
+ * publishes under -- since either form covers the entry it belongs to.
+ *
+ * A registry that read as absent covers nothing, so a document publishing
+ * any credential entry refuses here.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.pointer {AccountPointer}
+ * @param options.registry {UnlockMethodsRecord | null}
+ * @returns {Promise<void>}
+ */
+async function assertRegistryCoversStandingCredentials({
+  session,
+  pointer,
+  registry
+}: {
+  session: Session
+  pointer: { did: string; spaceId: string; host: string }
+  registry: { methods?: unknown[] } | null
+}): Promise<void> {
+  const { doc } = await verifiedAccountLog({
+    profile: session.profile,
+    pointer
+  })
+  const credentialVmIds = credentialKeyAgreementVmIds({
+    doc,
+    did: pointer.did
+  })
+  if (credentialVmIds.length === 0) {
+    return
+  }
+  const covered = new Set<string>()
+  const multibases = ((registry?.methods ?? []) as UnlockMethod[]).flatMap(
+    method =>
+      typeof method?.keyAgreementKeyMultibase === 'string'
+        ? [method.keyAgreementKeyMultibase]
+        : []
+  )
+  for (const keyAgreementKeyMultibase of multibases) {
+    covered.add(
+      unlockKeyVmId({
+        did: pointer.did,
+        keyAgreement: { publicKeyMultibase: keyAgreementKeyMultibase }
+      })
+    )
+    covered.add(
+      unlockKeyVmId({
+        did: pointer.did,
+        keyAgreement: {
+          commitment: await keyAgreementCommitment({ keyAgreementKeyMultibase })
+        }
+      })
+    )
+  }
+  const unrecorded = credentialVmIds.filter(vmId => !covered.has(vmId))
+  if (unrecorded.length > 0) {
+    console.warn(
+      'The last-client forget refused: the unlock-methods registry does ' +
+        'not name these credential key-agreement methods:',
+      unrecorded
+    )
+    throw new UnrecordedCredentialForgetError({
+      unrecorded: unrecorded.length
+    })
+  }
+}
+
+/**
+ * The verification-method ids of the standing credentials' `keyAgreement`
+ * entries in a verified account document: every resolved key-agreement
+ * method whose `controller` is not an enrolled client's marker (the did:key
+ * of a signing key the document lists under `capabilityInvocation`). A
+ * method carrying no id of its own is named by the id its published key
+ * material implies, the form {@link unlockKeyVmId} builds.
+ *
+ * @param options {object}
+ * @param options.doc {object}   the verified account document
+ * @param options.did {string}   the account's did:webvh
+ * @returns {string[]}
+ */
+function credentialKeyAgreementVmIds({
+  doc,
+  did
+}: {
+  doc: object
+  did: string
+}): string[] {
+  const invocation = (
+    doc as { capabilityInvocation?: Array<string | { id?: string }> }
+  ).capabilityInvocation
+  const markers = new Set(
+    relationIds(invocation).map(id =>
+      clientKeyAgreementController({
+        signingKeyMultibase: id.slice(id.lastIndexOf('#') + 1)
+      })
+    )
+  )
+  const vmIds: string[] = []
+  for (const method of resolvedKeyAgreementMethods({ doc })) {
+    if (method.controller && markers.has(method.controller)) {
+      continue
+    }
+    const fragment = method.publicKeyMultibase ?? method.publicKeyCommitment
+    const vmId =
+      method.id ??
+      (fragment
+        ? unlockKeyVmId({
+            did,
+            keyAgreement: method.publicKeyMultibase
+              ? { publicKeyMultibase: method.publicKeyMultibase }
+              : { commitment: method.publicKeyCommitment! }
+          })
+        : undefined)
+    if (vmId) {
+      vmIds.push(vmId)
+    }
+  }
+  return [...new Set(vmIds)]
 }

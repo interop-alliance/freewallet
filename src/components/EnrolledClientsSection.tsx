@@ -239,7 +239,12 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
    * The transition also refuses up front, name-stably
    * (`PendingRetirementForgetError`), when a passphrase change on the
    * account was torn before its retirement landed: only a durable login can
-   * finish that change, and the transition ends durable logins forever.
+   * finish that change, and the transition ends durable logins forever. Its
+   * sibling refusal (`UnrecordedCredentialForgetError`) fires when the
+   * account document publishes a sign-in method the unlock-methods registry
+   * does not name: every walk after the transition is registry-driven, so
+   * that method's bridge would rot unrepaired. The copy asks for a login
+   * with that method from a connected browser, which records it again.
    * The transition's other name-stable refusal, `RecordRemintFailedError`,
    * is a retryable stop, not a failure: another sign-in method's record
    * could not be re-sealed, so the removal entry was withheld and this
@@ -299,6 +304,12 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       } else if (name === 'PendingRetirementForgetError') {
         console.warn('The last-client forget refused a pending change:', err)
         setForgetErrorKey('settings.forget.pendingRetirement')
+      } else if (name === 'UnrecordedCredentialForgetError') {
+        console.warn(
+          'The last-client forget refused an unrecorded sign-in method:',
+          err
+        )
+        setForgetErrorKey('settings.forget.unrecordedCredential')
       } else if (name === 'RecordRemintFailedError') {
         console.warn('The last-client forget withheld the removal:', err)
         const failed = (err as { failed?: Array<{ label: string }> }).failed

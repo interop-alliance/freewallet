@@ -103,6 +103,7 @@
     "changingPassphrase": "Cambiando...",
     "passphraseChanged": "Frase de contraseña cambiada. La frase de contraseña anterior ya no desbloquea esta billetera.",
     "passphraseChangedNotRetired": "Frase de contraseña cambiada. La frase de contraseña anterior no se pudo retirar por completo -- puede que aún desbloquee esta billetera.",
+    "passphraseChangedUnretired": "Se cambió la frase de contraseña, pero la anterior NO se retiró -- puede que aún desbloquee esta billetera. Inicie sesión de nuevo con su nueva frase de contraseña para terminar de retirarla.",
     "passphraseChangedRotated": "Frase de contraseña cambiada y la anterior retirada. Se rotaron las claves de contenido de la cuenta, así que la frase anterior ya no puede leer nada nuevo.",
     "passphraseChangedRotationPending": "Se cambió su frase de contraseña, pero el retiro de la anterior no terminó. Se reanuda automáticamente la próxima vez que inicie sesión con su frase de contraseña.",
     "passphraseLeakHint": "Si cree que su frase de contraseña pudo filtrarse, cámbiela aquí. El cambio también rota las claves de contenido de la cuenta, así que la frase anterior no puede leer nada escrito después. Los datos que un atacante ya descargó siguen siendo legibles para él.",
@@ -183,6 +184,7 @@
       "lastClientProgress": "Olvidando este navegador: recifrando la cuenta, volviendo a anclarla a sus credenciales de acceso y registrando la eliminación. Mantenga esta pestaña abierta.",
       "recordsUnreachable": "Olvidar este navegador se detuvo antes de la eliminación: los registros de acceso de {{methods}} no se pudieron actualizar, y este es el último navegador que puede actualizarlos. No se perdió nada y este navegador sigue conectado: inténtelo de nuevo; continúa donde se detuvo.",
       "pendingRetirement": "Este navegador todavía no se puede olvidar: un cambio de contraseña en esta cuenta no terminó, y este navegador es el único que puede terminarlo. Vuelva a iniciar sesión con la contraseña actual para completar el cambio y luego inténtelo de nuevo.",
+      "unrecordedCredential": "Este navegador todavía no se puede olvidar: un método de inicio de sesión de esta cuenta no está registrado en el registro de métodos de la cartera. Inicie sesión con ese método (contraseña o clave de acceso) desde un navegador conectado para que vuelva a registrarse y luego inténtelo de nuevo.",
       "lastClientNow": "Este navegador es ahora el único conectado a la cuenta, así que olvidarlo es la transición descrita arriba. Confirme de nuevo para continuar.",
       "failed": "Olvidar este navegador no terminó. No se perdió nada: inténtelo de nuevo; continúa donde se detuvo."
     },

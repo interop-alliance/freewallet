@@ -29,6 +29,32 @@
 
 ### Fixed
 
+- The login-time repair now also rebuilds a bare or absent passphrase
+  registry entry from the login credential's own record, but only when the
+  entry names no credential or names the login credential itself with no
+  recorded update key. An entry naming another credential with no recorded
+  update key is left alone, since rebuilding it could un-name a credential
+  that is still standing. A passkey login runs the same rebuild for its own
+  bare-but-present entry, restoring it from the account document's verbatim
+  key-agreement key; an entry that was never written is not created, since
+  that needs the WebAuthn credential id a login does not carry. Both are
+  also the full migration for accounts an earlier defect left with bare
+  entries; no separate migration step is needed.
+- A passphrase change over a bare entry whose old credential still stands
+  in the document (or whose document could not be read) no longer reports
+  a clean run: it reports that the old passphrase was NOT retired. When
+  the new credential's own standing setup ran, the change records the old
+  credential's members on the new entry -- minting the registry first if
+  none existed -- so the next passphrase login's repair can retire it.
+  When that setup did not run, the entry instead names only the new
+  credential, and the old one is left unnamed and still standing (en +
+  es).
+- The last-client transition now refuses up front, with the name-stable
+  `UnrecordedCredentialForgetError` (en + es copy on the transition
+  dialog), when the account document lists a sign-in credential the
+  unlock-methods registry does not name -- every walk after the transition
+  is registry-driven, and such a credential's bridge would otherwise rot
+  un-re-minted.
 - The last-client transition refuses up front on a pending-shaped passphrase
   registry entry -- one whose recorded unlock key-agreement key does not
   match the credential the record at its unlock Space is sealed to, the

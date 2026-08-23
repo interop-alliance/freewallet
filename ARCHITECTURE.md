@@ -290,6 +290,20 @@ striking the other's ladder. Registry writes matched by unlock Space id
 carry the acting credential's key-agreement multibase for the same reason,
 and a mismatch writes nothing.
 
+A BARE entry -- one carrying no identity members at all -- gets its own
+outcome. A bare entry normally means the credential has no document
+inventory to retire, so the change would report clean. When the typed old
+credential is still standing in the document (or the document could not be
+checked), that reading would be a silent failure on the leaked-credential
+remedy, so the change reports `rotation: 'unretired'` instead of clean.
+The entry is written in the same shape a retirement torn at the document
+edit leaves -- the new unlock Space naming the OLD credential's members,
+minting the registry first if none existed -- but only when the new
+credential's own standing setup ran, since the repair below needs a
+standing-layout record to reach it. When that setup did not run, the entry
+instead names only the new credential, and the old one is left unnamed and
+still standing.
+
 The next passphrase login's torn-retirement repair
 (`repairTornPassphraseRetirement` in `src/session/pendingRetirement.ts`)
 clears it: an entry naming a
@@ -301,6 +315,24 @@ Space delete failed logs in after a change that completed elsewhere. When
 the named credential is already out of the document -- the retirement landed
 and only the registry write was lost -- only the entry is rewritten, and the
 roster and cascade residue is the ordinary login sweep's.
+
+The same repair also mends a BARE (or absent) passphrase entry, but only
+when it names no credential at all, or names the login credential itself
+with no recorded update key: in both cases nothing else is put at risk, so
+the entry is rebuilt from the login credential's keyring hit. An entry
+naming ANOTHER credential with no recorded update key is left alone -- the
+repair has no rung to attribute that credential's ladder by, and rebuilding
+it could un-name a credential still standing. This is also the whole
+migration for accounts an earlier shipped defect damaged this way -- there
+is no separate migration code.
+
+A passkey login runs the sibling of this repair, `rebuildBarePasskeyEntry`,
+on its own entry: a present-but-bare entry, matched by unlock Space, is
+rebuilt from the keyring hit once the account document publishes that
+passkey's `keyAgreement` key verbatim. An entry that was never written is
+left alone -- rebuilding it needs the WebAuthn credential id a login does
+not carry, so that case stays the add-a-passkey ceremony's own registry
+write to make.
 
 A registry left sealed to a superseded user key -- a rotation whose in-band
 re-seal above was itself torn, or one run by a client from before that
@@ -582,7 +614,17 @@ also what a superseded passphrase's own login sees on a healthy account):
 that
 state's only mender is the torn-retirement repair, which needs a durable
 enrolled login, and the transition ends durable logins on the account
-forever. Readers settle a re-minted record's
+forever. The transition refuses just as early when the unlock-methods
+registry does not name every standing credential the account document
+publishes (`UnrecordedCredentialForgetError`): coverage is checked by
+comparing each document `keyAgreement` entry that carries no enrolled-client
+controller marker against the registry entries' recorded key-agreement
+multibase, in both published forms -- the verbatim id a passkey or recovery
+code publishes and the commitment id a passphrase publishes. Every walk the
+transition and the client-less account after it perform is
+registry-driven, so a credential no entry names would keep a bridge
+delegation the removal entry rots with no replacement, on an account no
+durable login will ever heal again. Readers settle a re-minted record's
 proof against `currentAccountRecordSigners` (the enrolled clients' signing
 keys plus the ladder VMs the document lists), since on a client-less
 account the ladder VM is the only record signer left. The removal entry
@@ -1961,7 +2003,7 @@ finished (see Tear mending in the Glossary).
 | Recovery-code revocation                | Settings > Recovery codes                     | `src/session/recovery.ts`                    | `/recovery`                 | re-run; cascade-completion sweep                                                                             |
 | Unlock-credential rotation              | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts`          | `/unlock`                   | torn-retirement repair at the next passphrase login; login sweep; re-seal repair for a torn registry re-seal |
 | Forget ceremony                         | Settings > Connected wallets, own row         | `src/session/forget.ts`                      | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next login                                             |
-| Last-client transition                  | same row, `lastClient` confirm                | `src/session/forget.ts`                      | `/clientAnnex`              | re-run; the record re-mint refusal is a retryable stop; refused outright on a pending passphrase entry       |
+| Last-client transition                  | same row, `lastClient` confirm                | `src/session/forget.ts`                      | `/clientAnnex`              | re-run; the record re-mint refusal is a retryable stop; refused outright on a pending passphrase entry or a standing credential the registry does not name |
 | Update-key rotation                     | Settings                                      | `src/session/accountSettings.ts`             | `/webvh`                    | re-run (persist-before-publish)                                                                              |
 | Account deletion                        | Settings                                      | `src/session/accountSettings.ts` + `wipe.ts` | app-side phase order        | re-run; a wipe failure after the unlock-method walk is accepted                                              |
 | Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies    | `src/session/wipe.ts`                        | app-side                    | re-probe verification; the `unverified` report                                                               |

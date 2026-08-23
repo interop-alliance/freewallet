@@ -170,10 +170,12 @@ export function SettingsPage() {
     boolean | null
   >(null)
   // How the old credential's retirement went, for the success copy: the
-  // content keys rotated, there was nothing standing to retire, or the
-  // rotation did not finish (the login-time sweep resumes it).
+  // content keys rotated, there was nothing standing to retire, the rotation
+  // did not finish (the login-time sweep resumes it), or the old credential
+  // is still standing and was not retired at all (the next passphrase login's
+  // repair finishes it).
   const [passphraseRotation, setPassphraseRotation] = useState<
-    'rotated' | 'skipped' | 'failed'
+    'rotated' | 'skipped' | 'failed' | 'unretired'
   >('skipped')
   const [passphraseChangeError, setPassphraseChangeError] = useState<
     'incorrect' | 'same' | 'pending' | 'failed' | null
@@ -784,6 +786,10 @@ export function SettingsPage() {
                     (passphraseRotation === 'failed' ? (
                       <Alert severity="warning">
                         {t('settings.passphraseChangedRotationPending')}
+                      </Alert>
+                    ) : passphraseRotation === 'unretired' ? (
+                      <Alert severity="warning">
+                        {t('settings.passphraseChangedUnretired')}
                       </Alert>
                     ) : (
                       <Typography variant="body2" color="success.main">

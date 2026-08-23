@@ -88,7 +88,10 @@ import {
   refreshStandingDelegationFields
 } from '@/session/unlockMethods'
 import { repairStaleUnlockRegistrySeal } from '@/session/registryReseal'
-import { repairTornPassphraseRetirement } from '@/session/pendingRetirement'
+import {
+  rebuildBarePasskeyEntry,
+  repairTornPassphraseRetirement
+} from '@/session/pendingRetirement'
 import {
   primeVerifiedAccountLog,
   verifiedAccountLog
@@ -1004,9 +1007,24 @@ async function sessionFromKeyringHit({
     })
   }
 
-  // FW-298's bare-entry repair goes here, between the torn-retirement repair
-  // and the backfill: it settles a registry entry's standing identity, which
-  // the backfill's refresh write must not run ahead of.
+  // The passkey half of the bare-entry rebuild, in the same slot and for the
+  // same reason: it settles a registry entry's standing identity, which the
+  // backfill's refresh write must not run ahead of. A passkey login is the
+  // only thing that can mend its own entry -- the torn-retirement repair
+  // above is a passphrase's. Best-effort behind provisioning.
+  if (session.storageReady && !remoteDirectStorage) {
+    session.storageReady = session.storageReady.then(async () => {
+      try {
+        await rebuildBarePasskeyEntry({ session, found })
+      } catch (err) {
+        console.warn(
+          'Could not rebuild the bare passkey unlock-method entry; the ' +
+            'next login retries:',
+          err
+        )
+      }
+    })
+  }
 
   // The registry backfill: the passphrase entry's unlock Space and
   // management zcap, recorded from this full session without a second

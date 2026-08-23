@@ -37,6 +37,16 @@ const state = vi.hoisted(() => ({
   // otherwise (a mismatch is a pending retirement).
   newKeyAgreementKeyMultibase: 'z6LSNewPassphraseKak',
   oldKeyAgreementKeyMultibase: 'z6LSOldPassphraseKak',
+  // Whether the account document still lists the typed OLD credential -- what
+  // the bare-entry guard consults when the registry names no inventory.
+  oldCredentialInDocument: false,
+  // The old record's ladder seed, as the rebind hands it back (absent unless
+  // a test says otherwise).
+  oldLadderSeed: undefined as Uint8Array | undefined,
+  // Whether the new passphrase's standing establishment ran. When it did not,
+  // the record is not standing-layout, so no login can reach the pending
+  // shape's repair.
+  standingEstablished: true,
   // Whether a failing retirement fires `onInventoryRemoved` first (its document
   // edit landed and it died afterwards) or not (it failed at the edit).
   inventoryRemovedBeforeFailure: false,
@@ -73,6 +83,7 @@ interface UnlockRecord {
 
 const FRESH_USER_KEY = { id: 'did:key:z6LSFreshUserKey' }
 const NEW_LADDER_SEED = new Uint8Array(32).fill(7)
+const OLD_LADDER_SEED = new Uint8Array(32).fill(3)
 
 vi.mock('@/session/credentialRotation', () => ({
   rotateOffUnlockCredential: vi.fn(
@@ -107,6 +118,9 @@ vi.mock('@/session/standingUnlock', () => ({
   establishPassphraseStanding: vi.fn(
     async ({ recordInRegistry }: { recordInRegistry?: boolean }) => {
       state.calls.push('establishPassphraseStanding')
+      if (!state.standingEstablished) {
+        return {}
+      }
       return {
         ladderSeed: NEW_LADDER_SEED,
         // A caller that took the registry write over gets the members the
@@ -161,20 +175,38 @@ vi.mock('@/session/keyring', () => ({
         id: 'urn:zcap:narrow',
         allowedAction: ['GET', 'DELETE']
       },
-      persistClientKeys: async () => {}
+      persistClientKeys: async () => {},
+      ...(state.oldLadderSeed ? { oldLadderSeed: state.oldLadderSeed } : {})
     }
   }),
   bindPassphrase: vi.fn(async () => ({ unlockSpaceId: 'space-bound' })),
   bindUnlockSecret: vi.fn(async () => ({ unlockSpaceId: 'space-bound' })),
   deriveUnlockCredential: vi.fn(async ({ secret }: { secret: string }) => ({
-    unlock: {},
+    unlock: { secret },
     standing: {
       keyAgreementKeyMultibase:
         secret === 'old'
           ? state.oldKeyAgreementKeyMultibase
-          : state.newKeyAgreementKeyMultibase
+          : state.newKeyAgreementKeyMultibase,
+      recipientKid:
+        secret === 'old'
+          ? 'did:key:zOldPassphraseClient#z6LSOldPassphraseKak'
+          : 'did:key:zNewPassphraseClient#z6LSNewPassphraseKak',
+      clientDid:
+        secret === 'old'
+          ? 'did:key:zOldPassphraseClient'
+          : 'did:key:zNewPassphraseClient'
     }
   })),
+  unlockKeyAgreementMembers: vi.fn(
+    ({ unlock }: { unlock: { secret?: string } }) =>
+      unlock.secret === 'old'
+        ? {
+            unlockKeyAgreementKeyId: 'did:key:zOldUnlock#z6LSOldUnlockKak',
+            unlockKeyAgreementKeyMultibase: 'z6LSOldUnlockKak'
+          }
+        : {}
+  ),
   unlockManagementGrantee: vi.fn(() => 'did:key:grantee')
 }))
 
@@ -325,9 +357,22 @@ vi.mock('@/lib/loginCredential', () => ({
   loginHandleOf: vi.fn(() => '')
 }))
 
+vi.mock('@/session/pendingRetirement', () => ({
+  documentListsCredential: vi.fn(async () => state.oldCredentialInDocument)
+}))
+
 vi.mock('@/session/enrolledContext', () => ({
   enrolledClientContext: vi.fn(() =>
-    state.enrolled ? { controller: 'did:key:zAccount' } : null
+    state.enrolled
+      ? {
+          controller: 'did:key:zAccount',
+          pointer: {
+            did: 'did:webvh:account',
+            spaceId: 'space-123',
+            host: 'https://was.example.test'
+          }
+        }
+      : null
   ),
   requireEnrolledClientContext: vi.fn(() => ({
     controller: 'did:key:zAccount'
@@ -529,6 +574,9 @@ beforeEach(() => {
   state.enrolled = true
   state.newKeyAgreementKeyMultibase = 'z6LSNewPassphraseKak'
   state.oldKeyAgreementKeyMultibase = 'z6LSOldPassphraseKak'
+  state.oldCredentialInDocument = false
+  state.oldLadderSeed = undefined
+  state.standingEstablished = true
   state.inventoryRemovedBeforeFailure = false
   state.puts = []
   state.boundUnlockSpaceId = 'space-bound'
@@ -1057,6 +1105,137 @@ describe('changeAccountPassphrase', () => {
     ).rejects.toThrow(SamePassphraseError)
     expect(state.calls).toEqual([])
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+  })
+
+  it('refuses to report clean when a bare entry hides a standing credential', async () => {
+    // The registry names no inventory at all, but the typed old credential's
+    // commitment is right there in the account document: nothing would name
+    // it after this change, so the outcome is not clean.
+    state.registry = { version: 1, userHandle: 'AAAA', methods: [] }
+    state.oldCredentialInDocument = true
+    state.oldLadderSeed = OLD_LADDER_SEED
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { rotation } = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    expect(rotation).toBe('unretired')
+    // There is nothing to retire BY: the retirement names its subject through
+    // the entry's members, and the entry has none.
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+    // The entry is rebuilt in the shape the login-time repair detects: the
+    // NEW unlock Space naming the OLD credential's members.
+    expect(vi.mocked(upsertPassphraseUnlockMethod)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        unlockSpaceId: 'space-new',
+        standing: {
+          rosterKid: 'did:key:zOldPassphraseClient#z6LSOldPassphraseKak',
+          keyAgreementKeyMultibase: 'z6LSOldPassphraseKak',
+          unlockClientDid: 'did:key:zOldPassphraseClient',
+          updateKeyMultibase: expect.stringMatching(/^z/),
+          unlockKeyAgreementKeyId: 'did:key:zOldUnlock#z6LSOldUnlockKak',
+          unlockKeyAgreementKeyMultibase: 'z6LSOldUnlockKak'
+        }
+      })
+    )
+    warn.mockRestore()
+  })
+
+  it('leaves the entry naming the new credential when nothing established', async () => {
+    // The pending shape may be written only where its mender is reachable:
+    // that repair runs from a NEW-passphrase login, which takes a
+    // standing-layout record. Without one the old credential stays standing
+    // and unnamed, and the outcome says so.
+    state.registry = { version: 1, userHandle: 'AAAA', methods: [] }
+    state.oldCredentialInDocument = true
+    state.oldLadderSeed = OLD_LADDER_SEED
+    state.standingEstablished = false
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { rotation } = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    expect(rotation).toBe('unretired')
+    expect(vi.mocked(upsertPassphraseUnlockMethod)).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        standing: expect.anything()
+      })
+    )
+    warn.mockRestore()
+  })
+
+  it('mints a registry for the pending entry when none was written', async () => {
+    // A registry absent at the start has no entry for the deferred write to
+    // update, so the one state that needs a durable name for the old
+    // credential mints the record rather than no-oping.
+    state.registry = null
+    state.oldCredentialInDocument = true
+    state.oldLadderSeed = OLD_LADDER_SEED
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { rotation, registry } = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    expect(rotation).toBe('unretired')
+    expect(registry).not.toBeNull()
+    expect(lastPut()).toEqual(registry)
+    expect(
+      (registry as unknown as UnlockRecord).methods.find(
+        method => method.type === 'passphrase'
+      )
+    ).toEqual(
+      expect.objectContaining({
+        unlockSpaceId: 'space-new',
+        keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+      })
+    )
+    warn.mockRestore()
+  })
+
+  it('keeps an absent registry absent on every other path', async () => {
+    // The mint is the pending shape's alone: an ordinary change over an
+    // absent registry still writes nothing.
+    state.registry = null
+    const { rotation, registry } = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    expect(rotation).toBe('skipped')
+    expect(registry).toBeNull()
+    expect(vi.mocked(putUnlockMethods)).not.toHaveBeenCalled()
+  })
+
+  it('reports a bare entry whose credential is not in the document as skipped', async () => {
+    state.registry = { version: 1, userHandle: 'AAAA', methods: [] }
+    state.oldCredentialInDocument = false
+    const { rotation } = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    // Nothing standing, nothing to retire: the ordinary skip.
+    expect(rotation).toBe('skipped')
+    expect(vi.mocked(rotateOffUnlockCredential)).toHaveBeenCalled()
+  })
+
+  it('does not report clean when the document cannot be read for a bare entry', async () => {
+    state.registry = { version: 1, userHandle: 'AAAA', methods: [] }
+    state.accountLogFails = true
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { rotation } = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    // Unknown is treated exactly like standing: the change lands, the outcome
+    // is not clean.
+    expect(rotation).toBe('unretired')
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 
   it('does not read the old standing configuration when the session cannot retire at all', async () => {

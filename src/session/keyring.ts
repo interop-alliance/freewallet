@@ -398,14 +398,19 @@ async function saveClientKeys({
  * The unlock credential's key-agreement members, spread-ready: the key's id
  * and its multibase, each present only when the derived key carries it. The
  * cast is the one place the unlock identity's untyped key-agreement key is
- * read for these two members, shared by both bind paths.
+ * read for these two members, shared by the bind paths and by the registry
+ * entry a bare-entry passphrase change rebuilds.
  *
  * @param options {object}
  * @param options.unlock {UnlockIdentity}
  * @returns {{ unlockKeyAgreementKeyId?: string,
  *   unlockKeyAgreementKeyMultibase?: string }}
  */
-function unlockKeyAgreementMembers({ unlock }: { unlock: UnlockIdentity }): {
+export function unlockKeyAgreementMembers({
+  unlock
+}: {
+  unlock: UnlockIdentity
+}): {
   unlockKeyAgreementKeyId?: string
   unlockKeyAgreementKeyMultibase?: string
 } {

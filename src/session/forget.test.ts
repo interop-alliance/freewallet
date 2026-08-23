@@ -10,6 +10,7 @@
  * ordering both share.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { base58 } from '@scure/base'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import {
   assertClientStillEnrolled,
@@ -33,7 +34,7 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => {
     updateKeyMultibase: vi.fn(async () => 'zForgottenUpdate')
   }
 })
-const { accountLogPinId, verifyAccountLog } =
+const { accountLogPinId, keyAgreementCommitment, verifyAccountLog } =
   await import('@interop/wallet-core/webvh')
 
 vi.mock('@interop/did-method-webvh', async importOriginal => {
@@ -918,6 +919,131 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     ).rejects.toThrow(/unlock-methods registry/)
     expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
     expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
+  })
+
+  /**
+   * A valid X25519 multikey, so the real `keyAgreementCommitment` (which
+   * decodes the key before hashing it) can run over a registry entry's
+   * recorded multibase.
+   *
+   * @param options {object}
+   * @param options.fill {number}   the key bytes' fill value
+   * @returns {string}
+   */
+  function keyMultibase({ fill }: { fill: number }): string {
+    return `z${base58.encode(
+      new Uint8Array([0xec, 0x01, ...new Uint8Array(32).fill(fill)])
+    )}`
+  }
+
+  it('refuses the transition when the document publishes a credential no registry entry names', async () => {
+    const { session } = fakeSession()
+    vi.mocked(verifiedAccountLog).mockResolvedValue({
+      doc: {
+        capabilityInvocation: [`${pointer.did}#zClientA`],
+        keyAgreement: [
+          {
+            id: `${pointer.did}#zPasskeyKak`,
+            controller: pointer.did,
+            publicKeyMultibase: 'zPasskeyKak'
+          }
+        ]
+      }
+    } as never)
+    // The registry's only entry records no key-agreement key at all, so it
+    // covers nothing.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(
+      forgetThisBrowser({ session, lastClient: true })
+    ).rejects.toMatchObject({ name: 'UnrecordedCredentialForgetError' })
+    warn.mockRestore()
+    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
+  })
+
+  it('runs the transition when every credential entry is covered, in either published form', async () => {
+    const { session } = fakeSession()
+    const passphraseKak = keyMultibase({ fill: 7 })
+    const passkeyKak = keyMultibase({ fill: 9 })
+    vi.mocked(verifiedAccountLog).mockResolvedValue({
+      doc: {
+        capabilityInvocation: [`${pointer.did}#zClientA`],
+        keyAgreement: [
+          {
+            // The passphrase's commitment entry.
+            id: `${pointer.did}#${await keyAgreementCommitment({
+              keyAgreementKeyMultibase: passphraseKak
+            })}`,
+            controller: pointer.did,
+            publicKeyCommitment: await keyAgreementCommitment({
+              keyAgreementKeyMultibase: passphraseKak
+            })
+          },
+          {
+            // The passkey's verbatim entry.
+            id: `${pointer.did}#${passkeyKak}`,
+            controller: pointer.did,
+            publicKeyMultibase: passkeyKak
+          }
+        ]
+      }
+    } as never)
+    vi.mocked(getUnlockMethods).mockResolvedValue({
+      methods: [
+        {
+          type: 'passphrase',
+          unlockSpaceId: 'unlock-1',
+          keyAgreementKeyMultibase: passphraseKak
+        },
+        {
+          type: 'passkey',
+          unlockSpaceId: 'unlock-2',
+          keyAgreementKeyMultibase: passkeyKak
+        }
+      ]
+    } as never)
+    await forgetThisBrowser({ session, lastClient: true })
+    expect(vi.mocked(forgetLastDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledTimes(1)
+  })
+
+  it("never counts an enrolled client's key-agreement method as uncovered", async () => {
+    const { session } = fakeSession()
+    vi.mocked(verifiedAccountLog).mockResolvedValue({
+      doc: {
+        capabilityInvocation: [`${pointer.did}#zClientA`],
+        keyAgreement: [
+          {
+            id: `${pointer.did}#zClientKak`,
+            // The controller marker: this browser's own signing did:key.
+            controller: 'did:key:zClientA',
+            publicKeyMultibase: 'zClientKak'
+          }
+        ]
+      }
+    } as never)
+    await forgetThisBrowser({ session, lastClient: true })
+    expect(vi.mocked(forgetLastDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not check registry coverage for the ordinary forget', async () => {
+    const { session } = fakeSession()
+    vi.mocked(verifiedAccountLog).mockResolvedValue({
+      doc: {
+        capabilityInvocation: [`${pointer.did}#zClientA`],
+        keyAgreement: [
+          {
+            id: `${pointer.did}#zPasskeyKak`,
+            controller: pointer.did,
+            publicKeyMultibase: 'zPasskeyKak'
+          }
+        ]
+      }
+    } as never)
+    await forgetThisBrowser({ session })
+    expect(vi.mocked(forgetDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledTimes(1)
   })
 
   it('re-binds the login credential record from the transition onBeforeRemoval seam', async () => {
