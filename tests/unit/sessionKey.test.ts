@@ -25,8 +25,10 @@ import {
   savePasskeySafetyNotice,
   saveKeyringCache,
   saveUserKeyEpochPin,
+  sessionDatabaseExists,
   sessionLogPinStore
 } from '@/lib/sessionKey'
+import { createFakeSessionIdb } from './fakeSessionIdb'
 
 /**
  * A minimal in-memory `IDBFactory` sufficient for the session-store helpers
@@ -40,9 +42,11 @@ function createFakeIdb(): IDBFactory {
   let initialized = false
   type Request = {
     onsuccess?: () => void
-    onupgradeneeded?: () => void
+    onupgradeneeded?: (event: { oldVersion: number }) => void
     onerror?: () => void
+    transaction?: { abort: () => void }
     result?: unknown
+    error?: unknown
   }
   function run(fn: () => unknown): Request {
     const request: Request = {}
@@ -91,11 +95,24 @@ function createFakeIdb(): IDBFactory {
   return {
     open() {
       const request: Request = {}
+      let aborted = false
+      request.transaction = {
+        abort() {
+          aborted = true
+        }
+      }
       queueMicrotask(() => {
         request.result = makeDb()
         if (!initialized) {
+          // A versionless open of an absent database still upgrades from
+          // version 0; aborting that transaction leaves nothing created.
+          request.onupgradeneeded?.({ oldVersion: 0 })
+          if (aborted) {
+            request.error = { name: 'AbortError' }
+            request.onerror?.()
+            return
+          }
           initialized = true
-          request.onupgradeneeded?.()
         }
         request.onsuccess?.()
       })
@@ -471,6 +488,34 @@ describe('passkey-safety notice helpers', () => {
   })
 })
 
+describe('sessionDatabaseExists (the two-tier create-nothing probe)', () => {
+  it('answers from the enumeration API where the engine has it', async () => {
+    const { idb, databaseNames } = createFakeSessionIdb()
+    await expect(sessionDatabaseExists({ idb })).resolves.toBe(false)
+    databaseNames.add('freewallet-session')
+    await expect(sessionDatabaseExists({ idb })).resolves.toBe(true)
+  })
+
+  it('falls back to the versionless open, creating nothing when absent', async () => {
+    const { idb, databaseNames } = createFakeSessionIdb({ enumerable: false })
+    await expect(sessionDatabaseExists({ idb })).resolves.toBe(false)
+    // The versionchange transaction was aborted, so the probe left no
+    // database behind -- the whole point of the fallback.
+    expect(databaseNames.has('freewallet-session')).toBe(false)
+  })
+
+  it('reports an existing database through the fallback', async () => {
+    const { idb, databaseNames } = createFakeSessionIdb({ enumerable: false })
+    await saveClientKeyRecord({
+      spaceId: 'unlock-space-1',
+      record: { wrapped: true },
+      idb
+    })
+    expect(databaseNames.has('freewallet-session')).toBe(true)
+    await expect(sessionDatabaseExists({ idb })).resolves.toBe(true)
+  })
+})
+
 describe('hasClientKeyRecord (the create-nothing probe)', () => {
   /**
    * Wraps the in-memory fake with a `databases()` enumeration so the probe's
@@ -518,6 +563,29 @@ describe('hasClientKeyRecord (the create-nothing probe)', () => {
     // credential holds no record: still false.
     await expect(
       hasClientKeyRecord({ spaceId: 'unlock-space-2', idb })
+    ).resolves.toBe(false)
+  })
+
+  it('answers from the versionless probe when the factory cannot be enumerated', async () => {
+    const { idb, open } = probeIdb()
+    // An engine whose factory carries no `databases()` falls back to the
+    // versionless open, which still tells an existing database from an
+    // absent one -- so a browser that IS remembered is not silently
+    // downgraded to the transient session.
+    const blind = { open } as unknown as IDBFactory
+    await expect(
+      hasClientKeyRecord({ spaceId: 'unlock-space-1', idb: blind })
+    ).resolves.toBe(false)
+    await saveClientKeyRecord({
+      spaceId: 'unlock-space-1',
+      record: { wrapped: true },
+      idb
+    })
+    await expect(
+      hasClientKeyRecord({ spaceId: 'unlock-space-1', idb: blind })
+    ).resolves.toBe(true)
+    await expect(
+      hasClientKeyRecord({ spaceId: 'unlock-space-2', idb: blind })
     ).resolves.toBe(false)
   })
 })

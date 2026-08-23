@@ -12,6 +12,20 @@
   client-key record, keyring cache, and freshness pin in place while
   reporting a clean wipe. The failed read is now passed as `registryUnread`
   and reported as the `unlock-methods-registry` stage on the wipe outcome.
+- `forgetBrowserWalletData` and `executeLocalWipe` no longer require
+  `indexedDB.databases()` to run their deletes: the session database and
+  replica databases are removed by known name (replica prefixes recovered
+  from localStorage traces when they are not), and what could not be
+  discovered or confirmed is reported on a new `unverified` result array
+  instead of read as a clean wipe. `hasForgettableBrowserData` returns true
+  rather than "nothing to delete" when IndexedDB exists but cannot be
+  enumerated, and `sessionDatabaseExists` (behind `hasClientKeyRecord` and
+  the wipe's trio gate) falls back to a create-nothing versionless open
+  when `databases()` is absent, so a login on such a browser routes
+  correctly instead of throwing. The unverified outcome is surfaced on the
+  login page's forget toast, on `ForgetOutcome.wipeUnverified` and
+  `BrowserForgottenError.wipeUnverified`, and as account deletion's new
+  `'deleted-unverified'` result with its own settings-page alert.
 
 ### Added
 

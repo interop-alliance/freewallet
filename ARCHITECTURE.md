@@ -454,7 +454,12 @@ forensically recoverable (the plaintext `public-credentials` rows
 included), the CHAPI popup's partitioned third-party buckets are
 unreachable from any top-level wipe, and the mediator-origin (authn.io)
 handler-registration bit records that a wallet was used on the terminal --
-only clearing the browser profile removes those.
+only clearing the browser profile removes those. `indexedDB.databases()` is a
+discovery and verification aid, never the gate on deleting: the session
+database and the replica databases go by known name whether or not the
+engine can enumerate, and a deletion the executor could not confirm -- or a
+replica prefix `databases()` alone would have named -- is reported on the
+outcome's `unverified` list rather than folded into a clean wipe.
 
 **The forget affordance** (`src/session/forget.ts`) removes this browser
 from an account, in two grades split by whether the unlock credential is in
@@ -692,7 +697,10 @@ keyring login entry points run a post-KDF durability decision
 configured, a browser holding this credential's client-key record proceeds
 durable exactly as before (the record probe is create-nothing --
 `hasClientKeyRecord` checks `indexedDB.databases()` before opening -- and
-the ratchet is silent for now), while a browser holding none defaults to
+the ratchet is silent for now; on an engine with no `databases()` the
+probe falls back to a versionless open whose `versionchange` transaction
+is aborted on `oldVersion === 0`, so it still creates nothing and still
+answers honestly). A browser holding none defaults to
 the transient composition. An explicit `rememberBrowser` input forces
 either side: `true` is the programmatic durable entry (the standing
 self-enrollment; the signup probe and the recovery tail pass it, and e2e

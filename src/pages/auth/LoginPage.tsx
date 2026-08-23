@@ -142,6 +142,10 @@ function loginErrorKey({
   // removed from the account (a forget torn before its wipe, or a disconnect
   // from another client) and the local residue has just been cleared.
   if (errorName(err) === 'BrowserForgottenError') {
+    // Both wipe reports ride the error: what failed, and what was deleted
+    // without confirmation on a browser that cannot enumerate its
+    // databases. The user-facing copy is the same either way (the account
+    // is gone from here); the distinction is for the log.
     console.warn(`${label}: this browser was forgotten:`, err)
     return 'auth.errors.browserForgotten'
   }
@@ -408,14 +412,22 @@ export function LoginPage() {
     }
     setForgetBusy(true)
     try {
-      const { failed } = await forgetBrowserWalletData()
+      const { failed, unverified } = await forgetBrowserWalletData()
       setForgetState(null)
       setErrorKey(null)
+      // Three outcomes, in decreasing order of certainty about what is
+      // gone: something could not be deleted, something was deleted but
+      // could not be confirmed (this browser cannot enumerate its
+      // databases), or a clean wipe.
+      const messageKey =
+        failed.length > 0
+          ? 'auth.forget.incomplete'
+          : unverified.length > 0
+            ? 'auth.forget.unverified'
+            : 'auth.forget.done'
       showToast({
-        message: t(
-          failed.length > 0 ? 'auth.forget.incomplete' : 'auth.forget.done'
-        ),
-        severity: failed.length > 0 ? 'warning' : 'success'
+        message: t(messageKey),
+        severity: messageKey === 'auth.forget.done' ? 'success' : 'warning'
       })
     } catch (err) {
       console.error('Forgetting the wallet data on this browser failed:', err)

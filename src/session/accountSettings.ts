@@ -870,10 +870,15 @@ export async function rotateAccountUpdateKey({
 
 /**
  * How an account-deletion attempt ended: the passphrase did not verify, the
- * ceremony failed before anything was wiped, or the account is gone and the
- * caller should now clear the session and leave the app.
+ * ceremony failed before anything was wiped, the account is gone and the
+ * caller should now clear the session and leave the app, or the account is
+ * gone but this browser could not CONFIRM its local replica is deleted (it
+ * cannot enumerate its databases). The last is not a failure -- the remote
+ * account really is deleted -- and not a plain success either, so it stays
+ * its own outcome for the caller's copy.
  */
-export type AccountDeletionResult = 'wrong-passphrase' | 'failed' | 'deleted'
+export type AccountDeletionResult =
+  'wrong-passphrase' | 'failed' | 'deleted' | 'deleted-unverified'
 
 /**
  * Deletes the account, in the order that keeps a failure recoverable:
@@ -906,7 +911,9 @@ export type AccountDeletionResult = 'wrong-passphrase' | 'failed' | 'deleted'
  * targets snapshotted at (a2): every unlock method's local trio, the pins
  * (annex slots by prefix), the Space-keyed bookkeeping, the
  * unlock-methods cache, the replica databases, and the per-account
- * localStorage families -- a surviving replica is the one fatal stage.
+ * localStorage families -- a surviving replica is the one fatal stage, and
+ * a replica delete that could not be confirmed ends as
+ * `'deleted-unverified'` rather than as a clean deletion.
  *
  * (d) clearing the session and (e) leaving for the landing page stay with the
  * caller, which owns the app shell.
@@ -1072,13 +1079,16 @@ export async function deleteAccount({
   // and the per-account localStorage families. A surviving replica keeps the
   // old fatal semantics (the local data is still there, so do not log out);
   // every other stage failure is hygiene residue on an account already gone.
-  const { failed } = await executeLocalWipe({
+  const { failed, unverified } = await executeLocalWipe({
     targets,
     storage: session.storage ?? undefined,
     idb
   })
   if (failed.includes('replica')) {
     return 'failed'
+  }
+  if (unverified.includes('replica')) {
+    return 'deleted-unverified'
   }
   return 'deleted'
 }

@@ -19,6 +19,7 @@ import {
   hasForgettableBrowserData
 } from '@/session/forget'
 import type { KeyringFetchResult } from '@/session/keyring'
+import { BrowserStore } from '@/stores/browserStore'
 import type { Session } from '@/types/auth'
 
 vi.mock('@interop/wallet-core/webvh', async importOriginal => {
@@ -173,19 +174,34 @@ const WIPE_TARGETS = { clientDid: 'did:key:zClientA' }
 /**
  * A fake IDBFactory-shaped global: `databases()` serves the live name list
  * and `deleteDatabase` removes the name and fires `onsuccess` (the
- * browserStore test suite's stub, deletion-success arm only).
+ * browserStore test suite's stub, deletion-success arm only). With
+ * `enumerable: false` the factory carries no `databases` member at all --
+ * the engine the whole no-enumeration path exists for.
  *
  * @param options {object}
  * @param options.names {string[]}
+ * @param [options.enumerable] {boolean}   whether the factory exposes
+ *   `databases()` (default true)
  * @returns {{ deleted: string[] }}
  */
-function stubIndexedDb({ names }: { names: string[] }): {
+function stubIndexedDb({
+  names,
+  enumerable = true
+}: {
+  names: string[]
+  enumerable?: boolean
+}): {
   deleted: string[]
 } {
   const current = new Set(names)
   const deleted: string[] = []
   vi.stubGlobal('indexedDB', {
-    databases: async () => [...current].map(name => ({ name, version: 1 })),
+    ...(enumerable
+      ? {
+          databases: async () =>
+            [...current].map(name => ({ name, version: 1 }))
+        }
+      : {}),
     deleteDatabase(name: string) {
       const request: { onsuccess?: () => void; onerror?: () => void } = {}
       queueMicrotask(() => {
@@ -275,6 +291,55 @@ describe('forgetBrowserWalletData (the no-unlock-material grade)', () => {
   it('reports forgettable data when the session database exists', async () => {
     stubIndexedDb({ names: ['freewallet-session'] })
     stubLocalStorage({ entries: {} })
+    expect(await hasForgettableBrowserData()).toBe(true)
+  })
+
+  it('deletes the session database and the derivable replicas without an enumeration API, reporting them unverified', async () => {
+    vi.stubGlobal(
+      'BroadcastChannel',
+      class {
+        postMessage() {}
+        close() {}
+      }
+    )
+    const { deleted } = stubIndexedDb({ names: [], enumerable: false })
+    // The replica wipe itself is the store's own contract (covered in the
+    // browserStore suite); here it stands in for the engine, reporting the
+    // delete it could not verify.
+    const wiped: string[] = []
+    const wipeStorage = vi
+      .spyOn(BrowserStore.prototype, 'wipeStorage')
+      .mockImplementation(async function (this: BrowserStore) {
+        wiped.push(this.dbPrefix)
+        return { verified: false }
+      })
+    const { keys } = stubLocalStorage({
+      entries: {
+        'freewallet:plaintext-migrated:abc-123': 'x',
+        'freewallet:collection-encryption:scope-a:col': 'x',
+        'fw-theme': 'dark'
+      }
+    })
+    const { failed, unverified } = await forgetBrowserWalletData()
+    wipeStorage.mockRestore()
+    // The replica prefix came from the migration marker, the one
+    // localStorage trace that names a replica without any enumeration.
+    expect(wiped).toEqual(['abc-123'])
+    // The known-name delete runs whatever the engine reports.
+    expect(deleted).toContain('freewallet-session')
+    expect(failed).toEqual([])
+    // The session database's delete could not be re-probed, the replica
+    // whose prefix the migration marker named could not be either, and no
+    // enumeration means other replicas may not have been discovered at all.
+    expect(unverified).toContain('session-db')
+    expect(unverified).toContain('replica-discovery')
+    expect(unverified).toContain('replica:abc-123')
+    expect(keys()).toEqual(['fw-theme'])
+  })
+
+  it('does not answer "nothing to delete" merely because the enumeration API is missing', async () => {
+    stubIndexedDb({ names: [], enumerable: false })
+    stubLocalStorage({ entries: { 'fw-theme': 'dark' } })
     expect(await hasForgettableBrowserData()).toBe(true)
   })
 })
@@ -459,7 +524,10 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     vi.mocked(forgetLastDurableClient).mockResolvedValue({
       installed: true
     } as never)
-    vi.mocked(executeLocalWipe).mockResolvedValue({ failed: [] })
+    vi.mocked(executeLocalWipe).mockResolvedValue({
+      failed: [],
+      unverified: []
+    })
   })
 
   it('runs the ordinary ceremony and wipes strictly after it', async () => {
@@ -471,13 +539,14 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     })
     vi.mocked(executeLocalWipe).mockImplementation(async () => {
       order.push('wipe')
-      return { failed: ['session-db'] }
+      return { failed: ['session-db'], unverified: [] }
     })
     const outcome = await forgetThisBrowser({ session })
     expect(outcome).toEqual({
       lastClient: false,
       ceremony: { rotated: true },
-      wipeFailed: ['session-db']
+      wipeFailed: ['session-db'],
+      wipeUnverified: []
     })
     expect(vi.mocked(forgetDurableClient)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
@@ -536,13 +605,14 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     })
     vi.mocked(executeLocalWipe).mockImplementation(async () => {
       order.push('wipe')
-      return { failed: [] }
+      return { failed: [], unverified: [] }
     })
     const outcome = await forgetThisBrowser({ session, lastClient: true })
     expect(outcome).toEqual({
       lastClient: true,
       ceremony: { installed: true },
-      wipeFailed: []
+      wipeFailed: [],
+      wipeUnverified: []
     })
     expect(vi.mocked(forgetDurableClient)).not.toHaveBeenCalled()
     expect(order).toEqual(['ceremony', 'wipe'])
@@ -605,12 +675,24 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     })
   })
 
+  it('threads an unverified wipe onto the outcome instead of reading clean', async () => {
+    const { session } = fakeSession()
+    vi.mocked(executeLocalWipe).mockResolvedValue({
+      failed: [],
+      unverified: ['replica']
+    })
+    const outcome = await forgetThisBrowser({ session })
+    expect(outcome.wipeFailed).toEqual([])
+    expect(outcome.wipeUnverified).toEqual(['replica'])
+  })
+
   it('still wipes the login credential trio and reports an unread registry', async () => {
     const { session } = fakeSession()
     vi.mocked(getUnlockMethods).mockRejectedValue(new Error('503'))
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.mocked(executeLocalWipe).mockResolvedValue({
-      failed: ['unlock-methods-registry']
+      failed: ['unlock-methods-registry'],
+      unverified: []
     })
     const outcome = await forgetThisBrowser({ session })
     warn.mockRestore()

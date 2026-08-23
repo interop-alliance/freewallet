@@ -46,6 +46,17 @@ const DESCRIPTOR_CACHE_PREFIX = 'freewallet:collection-encryption'
 const META_CACHE_PREFIX = 'freewallet:collection-meta'
 
 /**
+ * The two localStorage cache families' key prefixes, unscoped. Exported for
+ * the forget grade's replica discovery, which reads a local-mode scope
+ * (`<prefix>:local:<clientDid>:<collectionId>`) to recover the client
+ * did:key a replica prefix derives from.
+ */
+export const LOCAL_CACHE_FAMILY_PREFIXES = [
+  DESCRIPTOR_CACHE_PREFIX,
+  META_CACHE_PREFIX
+]
+
+/**
  * The cache for a collection's stored `/meta` value (the `custom` envelope
  * carrying the persisted blinded-index schema), beside the encryption
  * descriptor cache and under the same durability.

@@ -259,6 +259,14 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
         // by the next login's forgotten-browser detector.
         console.warn('The forget wipe left residue behind:', outcome.wipeFailed)
       }
+      if (outcome.wipeUnverified.length > 0) {
+        // Deleted, but not confirmed (this browser cannot enumerate its
+        // databases); the same detector settles it at the next login.
+        console.warn(
+          'The forget wipe could not confirm these stages:',
+          outcome.wipeUnverified
+        )
+      }
       if (outcome.lastClient && outcome.ceremony.unlockMethods) {
         // The other sign-in methods' record re-mint report: a `failed`
         // outcome never reaches here (it refuses the removal), so what is

@@ -1405,12 +1405,19 @@ export class StorageManager {
   /**
    * Wipes the local replica databases only (this client's prefix, with the
    * cross-tab teardown and verified completion the local store provides).
-   * The shared wipe enumeration's replica stage.
+   * The shared wipe enumeration's replica stage. The result carries the
+   * local store's own honesty about the deletion: `verified: false` when
+   * this browser cannot enumerate its databases, so nothing could be
+   * re-probed. A replica-less (transient) session has nothing to delete and
+   * is verified by construction.
    *
-   * @returns {Promise<void>}
+   * @returns {Promise<{ verified: boolean }>}
    */
-  async wipeLocalStorage() {
-    await this.#localStore?.wipeStorage()
+  async wipeLocalStorage(): Promise<{ verified: boolean }> {
+    if (!this.#localStore) {
+      return { verified: true }
+    }
+    return await this.#localStore.wipeStorage()
   }
 
   /**

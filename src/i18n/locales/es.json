@@ -43,6 +43,7 @@
     "deletePassphraseLabel": "Frase de contraseña",
     "deletePassphraseIncorrect": "Esa frase de contraseña es incorrecta.",
     "deleteError": "No se pudieron eliminar los datos de su cuenta. Inténtelo de nuevo.",
+    "deleteUnverified": "Su cuenta se eliminó, pero este navegador no pudo confirmar que sus datos locales de billetera hayan desaparecido. Cierre las demás pestañas y luego borre los datos del sitio en este navegador.",
     "about": "Acerca de",
     "version": "Freewallet versión {{version}}",
     "unpromotedAccount": "Esta cuenta no ha terminado de configurar su identidad publicada (un paso de configuración falló anteriormente). Las billeteras conectadas y los códigos de recuperación no estarán disponibles hasta que se complete; se reintenta automáticamente en cada inicio de sesión.",
@@ -242,6 +243,7 @@
       "confirm": "Olvidar datos de billetera",
       "done": "Se han olvidado todos los datos de billetera en este navegador.",
       "incomplete": "Los datos de billetera en este navegador se olvidaron, pero parte de ellos no se pudo eliminar (otra pestaña abierta puede estar reteniéndolos). Cierre las demás pestañas e inténtelo de nuevo.",
+      "unverified": "Los datos de billetera en este navegador se eliminaron, pero este navegador no pudo confirmar la eliminación.",
       "failed": "No se pudieron olvidar los datos de billetera en este navegador. Inténtelo de nuevo."
     },
     "login": {

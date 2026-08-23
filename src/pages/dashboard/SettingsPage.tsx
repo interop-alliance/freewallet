@@ -104,6 +104,7 @@ export function SettingsPage() {
   const logout = useAuthStore(state => state.logout)
   const { displayInfoBox } = useInfoBox()
   const [deleteError, setDeleteError] = useState(false)
+  const [deleteUnverified, setDeleteUnverified] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deletePassphrase, setDeletePassphrase] = useState('')
   const [deletePassphraseIncorrect, setDeletePassphraseIncorrect] =
@@ -549,6 +550,7 @@ export function SettingsPage() {
       return
     }
     setDeleteError(false)
+    setDeleteUnverified(false)
     setDeletePassphraseIncorrect(false)
     setDeleting(true)
     try {
@@ -566,6 +568,14 @@ export function SettingsPage() {
       }
       if (result === 'failed') {
         setDeleteError(true)
+        setDeleteDialogOpen(false)
+        return
+      }
+      if (result === 'deleted-unverified') {
+        // The account is gone, but this browser could not confirm its local
+        // replica is deleted. Staying put with the warning visible is the
+        // honest exit: the hard reload below would take the copy with it.
+        setDeleteUnverified(true)
         setDeleteDialogOpen(false)
         return
       }
@@ -616,6 +626,9 @@ export function SettingsPage() {
 
         {deleteError && (
           <Alert severity="error">{t('settings.deleteError')}</Alert>
+        )}
+        {deleteUnverified && (
+          <Alert severity="warning">{t('settings.deleteUnverified')}</Alert>
         )}
 
         <Divider />

@@ -158,17 +158,23 @@ export function snapshotWipeTargets({
  * names let a consumer decide what a failure means (account deletion treats
  * a surviving replica as fatal; everything else is hygiene residue).
  *
+ * A stage that ran but could not be CONFIRMED is neither a success nor a
+ * failure, and is reported separately (`unverified`): a browser without
+ * `indexedDB.databases()` cannot re-probe a replica delete. The delete is
+ * issued regardless -- skipping it would leave real data behind -- and the
+ * consumer states the unconfirmed outcome instead of claiming a clean wipe.
+ *
  * @param options {object}
  * @param options.targets {WipeTargets}
- * @param [options.storage] {{ wipeLocalStorage: () => Promise<void> }}   the
- *   session's StorageManager; absent, the replica stage is skipped
+ * @param [options.storage] {{ wipeLocalStorage: () => Promise<{ verified: boolean } | void> }}
+ *   the session's StorageManager; absent, the replica stage is skipped
  * @param [options.idb] {IDBFactory}   the session-database factory (the
  *   Storage Access seam: a popup-begun session supplies its unpartitioned
  *   factory here)
  * @param [options.clearWriter] {boolean}   whether to clear the global
  *   `writerId` (the forget grade; account deletion and the guest wipe leave
  *   the browser-global id in place)
- * @returns {Promise<{ failed: string[] }>}
+ * @returns {Promise<{ failed: string[], unverified: string[] }>}
  */
 export async function executeLocalWipe({
   targets,
@@ -177,11 +183,12 @@ export async function executeLocalWipe({
   clearWriter = false
 }: {
   targets: WipeTargets
-  storage?: { wipeLocalStorage: () => Promise<void> }
+  storage?: { wipeLocalStorage: () => Promise<{ verified: boolean } | void> }
   idb?: IDBFactory
   clearWriter?: boolean
-}): Promise<{ failed: string[] }> {
+}): Promise<{ failed: string[]; unverified: string[] }> {
   const failed: string[] = []
+  const unverified: string[] = []
   async function stage(name: string, run: () => Promise<void> | void) {
     try {
       await run()
@@ -200,7 +207,12 @@ export async function executeLocalWipe({
 
   // The replica databases first (cross-tab teardown rides inside).
   if (storage) {
-    await stage('replica', async () => await storage.wipeLocalStorage())
+    await stage('replica', async () => {
+      const result = await storage.wipeLocalStorage()
+      if (result && result.verified === false) {
+        unverified.push('replica')
+      }
+    })
   }
 
   // The session database's families -- guarded by a create-nothing probe, so
@@ -262,7 +274,7 @@ export async function executeLocalWipe({
       clearWriterId()
     })
   }
-  return { failed }
+  return { failed, unverified }
 }
 
 /**
@@ -274,13 +286,13 @@ export async function executeLocalWipe({
  *
  * @param options {object}
  * @param options.session {Session}
- * @returns {Promise<{ failed: string[] }>}
+ * @returns {Promise<{ failed: string[], unverified: string[] }>}
  */
 export async function wipeGuestState({
   session
 }: {
   session: Session
-}): Promise<{ failed: string[] }> {
+}): Promise<{ failed: string[]; unverified: string[] }> {
   return await executeLocalWipe({
     targets: snapshotWipeTargets({ session }),
     storage: session.storage ?? undefined

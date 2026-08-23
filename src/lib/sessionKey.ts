@@ -247,9 +247,11 @@ export async function saveClientKeyRecord({
  * WITHOUT durably creating the session database. Any read through
  * `openSessionDb` creates `freewallet-session` on a miss (the versioned open
  * runs `onupgradeneeded`), so the login durability routing -- which must decide
- * "remembered here?" while remaining free to leave no trace -- first checks
- * the database's existence via `indexedDB.databases()` and only opens one
- * that already exists (an open of an EXISTING database creates nothing).
+ * "remembered here?" while remaining free to leave no trace -- first runs the
+ * create-nothing existence probe (`sessionDatabaseExists`: the enumeration
+ * API, or a versionless open whose upgrade is aborted) and only opens a
+ * database that already exists (an open of an EXISTING database creates
+ * nothing).
  *
  * @param options {object}
  * @param options.spaceId {string}   the unlock Space id
@@ -1079,11 +1081,19 @@ export async function deletePasskeySafetyNotice({
 }
 
 /**
- * Whether the session database exists at all, WITHOUT durably creating it
- * (the `hasClientKeyRecord` probe pattern: `indexedDB.databases()` first,
- * since any versioned open creates the database on a miss). Used by the
- * shared wipe enumeration so a wipe on a browser that never held session
- * state does not create the very database it set out to remove.
+ * Whether the session database exists at all, WITHOUT durably creating it.
+ * The probe has two tiers, because any VERSIONED open creates the database
+ * on a miss: `indexedDB.databases()` answers directly where the engine has
+ * it, and where it does not, a VERSIONLESS `open(SESSION_DB_NAME)` answers
+ * the same question -- a versionless open of an absent database still fires
+ * `onupgradeneeded` (with `oldVersion === 0`), and aborting that
+ * versionchange transaction leaves nothing behind. Used by the login
+ * durability routing (`hasClientKeyRecord`) and by the shared wipe
+ * enumeration, so a wipe on a browser that never held session state does
+ * not create the very database it set out to remove.
+ *
+ * The abort surfaces as the request's `onerror` (an `AbortError`), which is
+ * this probe's "no" rather than a failure.
  *
  * @param options {object}
  * @param [options.idb] {IDBFactory}
@@ -1094,8 +1104,37 @@ export async function sessionDatabaseExists({
 }: {
   idb?: IDBFactory
 } = {}): Promise<boolean> {
-  const databases = await idb.databases()
-  return databases.some(db => db.name === SESSION_DB_NAME)
+  if (typeof idb?.databases === 'function') {
+    const databases = await idb.databases()
+    return databases.some(db => db.name === SESSION_DB_NAME)
+  }
+  return await new Promise<boolean>((resolve, reject) => {
+    // No version argument: an existing database opens at its own version
+    // (no upgrade), and an absent one is created at version 1 -- which the
+    // abort below undoes before anything is written.
+    const request = idb.open(SESSION_DB_NAME)
+    let absent = false
+    request.onupgradeneeded = event => {
+      if ((event as IDBVersionChangeEvent).oldVersion === 0) {
+        absent = true
+        request.transaction?.abort()
+      }
+    }
+    request.onsuccess = () => {
+      request.result.close()
+      resolve(true)
+    }
+    request.onerror = () => {
+      if (absent) {
+        resolve(false)
+        return
+      }
+      reject(request.error)
+    }
+    // A versionless open never blocks; if some engine says otherwise, an
+    // existing connection is itself the evidence the database exists.
+    request.onblocked = () => resolve(true)
+  })
 }
 
 /**

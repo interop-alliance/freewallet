@@ -28,6 +28,7 @@ import {
 } from '@interop/social-core'
 import {
   createRxDatabase,
+  removeRxDatabase,
   type RxCollection,
   type RxDatabase,
   type RxStorage
@@ -1949,16 +1950,27 @@ export class BrowserStore {
    * reports success on a deletion that is merely queued behind another open
    * connection.
    *
+   * `indexedDB.databases()` is not available on every engine, and the wipe
+   * does not depend on it for the deleting half: an open store is removed
+   * through RxDB either way, and a closed one is removed by name (RxDB
+   * knows its own Dexie naming). What the missing API costs is discovery
+   * and verification -- legacy databases carrying this prefix cannot be
+   * named, and nothing can be re-probed -- so the result reports
+   * `verified: false` and the caller states that honestly instead of
+   * claiming a clean wipe.
+   *
    * @see https://rxdb.info/rx-database.html#remove
-   * @returns {Promise<void>}
+   * @returns {Promise<{ verified: boolean }>}   whether the deletion was
+   *   confirmed by a post-delete probe
    */
-  async wipeStorage() {
+  async wipeStorage(): Promise<{ verified: boolean }> {
     this.#clearCaches()
     // Cross-tab teardown precedes the delete: a sibling tab's open
     // connection would otherwise leave every deletion queued indefinitely.
     this.#broadcastTeardown()
     this.#teardownChannel?.close()
     this.#teardownChannel = undefined
+    const wasOpen = this.db !== undefined
     if (this.db) {
       await this.db.remove()
       this.db = undefined
@@ -1967,6 +1979,23 @@ export class BrowserStore {
     }
     // Guarded: absent under the memory storage used in unit tests.
     if (typeof indexedDB !== 'undefined') {
+      if (typeof indexedDB.databases !== 'function') {
+        // No enumeration: delete what can be named, verify nothing. A store
+        // that was open has already been removed above; a closed one is
+        // removed by its RxDB database name.
+        if (!wasOpen) {
+          try {
+            await removeRxDatabase(`${this.dbPrefix}-wallet-db`, this.#storage)
+          } catch (err) {
+            console.warn(
+              `Could not remove the wallet database "${this.dbPrefix}" by ` +
+                'name (this browser cannot enumerate its databases):',
+              err
+            )
+          }
+        }
+        return { verified: false }
+      }
       const databases = await indexedDB.databases()
       await Promise.all(
         databases
@@ -1987,6 +2016,7 @@ export class BrowserStore {
         )
       }
     }
+    return { verified: true }
   }
 
   /**

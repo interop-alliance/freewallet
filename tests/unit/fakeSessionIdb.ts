@@ -8,9 +8,21 @@
  */
 
 /**
+ * The `open` shape models the real create-nothing probe: a versionless open
+ * of an absent database still fires `onupgradeneeded` with `oldVersion: 0`,
+ * and aborting that versionchange transaction leaves the database
+ * uncreated (the request then fails with an `AbortError`). With
+ * `enumerable: false` the factory carries no `databases()` at all -- the
+ * engine the fallback probe exists for.
+ *
+ * @param [options] {object}
+ * @param [options.enumerable] {boolean}   whether the factory exposes
+ *   `databases()` (default true)
  * @returns {{ idb: IDBFactory, sessionStore: Map<string, unknown>, databaseNames: Set<string> }}
  */
-export function createFakeSessionIdb(): {
+export function createFakeSessionIdb({
+  enumerable = true
+}: { enumerable?: boolean } = {}): {
   idb: IDBFactory
   sessionStore: Map<string, unknown>
   databaseNames: Set<string>
@@ -20,8 +32,10 @@ export function createFakeSessionIdb(): {
 
   type Request = {
     onsuccess?: () => void
-    onupgradeneeded?: () => void
+    onupgradeneeded?: (event: { oldVersion: number }) => void
     onerror?: () => void
+    onblocked?: () => void
+    transaction?: { abort: () => void }
     result?: unknown
     error?: unknown
   }
@@ -103,20 +117,35 @@ export function createFakeSessionIdb(): {
   const idb = {
     open(name: string) {
       const request: Request = {}
+      let aborted = false
+      request.transaction = {
+        abort() {
+          aborted = true
+        }
+      }
       queueMicrotask(() => {
         const fresh = !databaseNames.has(name)
-        databaseNames.add(name)
         request.result = makeDb(name)
         if (fresh) {
-          request.onupgradeneeded?.()
+          request.onupgradeneeded?.({ oldVersion: 0 })
+          if (aborted) {
+            request.error = { name: 'AbortError' }
+            request.onerror?.()
+            return
+          }
         }
+        databaseNames.add(name)
         request.onsuccess?.()
       })
       return request
     },
-    async databases() {
-      return [...databaseNames].map(name => ({ name, version: 1 }))
-    }
+    ...(enumerable
+      ? {
+          async databases() {
+            return [...databaseNames].map(name => ({ name, version: 1 }))
+          }
+        }
+      : {})
   } as unknown as IDBFactory
 
   // The single session object store, pre-wired so tests can seed and

@@ -95,13 +95,15 @@ import {
 import type { RevokedClientKeys } from '@interop/wallet-core/webvh'
 import { WAS_SERVER_URL } from '@/app.config'
 import type { Session, User } from '@/types/auth'
+import { deriveSpaceId } from '@interop/was-client/sync'
 import type { VerifiedAccountLog } from '@interop/wallet-core/clients'
 import { SESSION_DB_NAME, sessionLogPinStore } from '@/lib/sessionKey'
 import { clearWriterId } from '@/lib/writerId'
 import { BrowserStore, migrationMarkerKeys } from '@/stores/browserStore'
 import {
   assertAccountCeremonyAllowed,
-  deleteAllLocalCacheFamilies
+  deleteAllLocalCacheFamilies,
+  LOCAL_CACHE_FAMILY_PREFIXES
 } from '@/session/persistence'
 import { requireEnrolledClientContext } from '@/session/enrolledContext'
 import type { KeyringFetchResult } from '@/session/keyring'
@@ -138,26 +140,38 @@ import {
  */
 export class BrowserForgottenError extends Error {
   wipeFailed: string[]
-  constructor({ wipeFailed }: { wipeFailed: string[] }) {
+  wipeUnverified: string[]
+  constructor({
+    wipeFailed,
+    wipeUnverified
+  }: {
+    wipeFailed: string[]
+    wipeUnverified: string[]
+  }) {
     super(
       "This browser's wallet access was removed from the account; its " +
         'local wallet data has been cleared.'
     )
     this.name = 'BrowserForgottenError'
     this.wipeFailed = wipeFailed
+    this.wipeUnverified = wipeUnverified
   }
 }
 
 /**
  * What a completed forget reports: which ceremony ran (`lastClient: false`
  * is the ordinary forget, `true` the last-client transition) with that
- * ceremony's own result, plus the local wipe's failed-stage names (empty on
- * a clean wipe).
+ * ceremony's own result, plus the local wipe's failed-stage names and the
+ * names of the stages that ran without confirmation (both empty on a clean,
+ * verified wipe).
  */
 type ForgetCeremonyOutcome =
   | { lastClient: false; ceremony: DurableClientForgetResult }
   | { lastClient: true; ceremony: LastDurableClientForgetResult }
-export type ForgetOutcome = ForgetCeremonyOutcome & { wipeFailed: string[] }
+export type ForgetOutcome = ForgetCeremonyOutcome & {
+  wipeFailed: string[]
+  wipeUnverified: string[]
+}
 
 /**
  * Runs the forget for this browser, from a live durable session: snapshot
@@ -414,13 +428,13 @@ export async function forgetThisBrowser({
   // The local wipe runs strictly last -- it is what makes a torn run read as
   // "not forgotten" -- and clears the browser-global writerId (the forget
   // grade's one writerId consumer).
-  const { failed } = await executeLocalWipe({
+  const { failed, unverified } = await executeLocalWipe({
     targets,
     storage: session.storage ?? undefined,
     idb,
     clearWriter: true
   })
-  return { ...outcome, wipeFailed: failed }
+  return { ...outcome, wipeFailed: failed, wipeUnverified: unverified }
 }
 
 /**
@@ -698,18 +712,25 @@ export async function assertClientStillEnrolled({
     accountDid: pointer.did,
     accountSpaceId: pointer.spaceId,
     unlockSpaceIds: [found.unlockSpaceId],
+    // No registry read happens here (it needs account authority the hit
+    // does not carry), so the enumeration is narrowed by design rather than
+    // by a failed read.
+    registryUnread: false,
     cacheScopes: [pointer.spaceId, `local:${clientDid}`]
   }
   const { localStore } = await BrowserStore.initClient({
     user: { id: clientDid } as User
   })
-  const { failed } = await executeLocalWipe({
+  const { failed, unverified } = await executeLocalWipe({
     targets,
     storage: { wipeLocalStorage: () => localStore.wipeStorage() },
     idb,
     clearWriter: true
   })
-  throw new BrowserForgottenError({ wipeFailed: failed })
+  throw new BrowserForgottenError({
+    wipeFailed: failed,
+    wipeUnverified: unverified
+  })
 }
 
 /**
@@ -724,10 +745,22 @@ const REPLICA_DB_NAME_PATTERN = /-(?:wallet|credentials|sync)-db/
  * database, the session database, or any per-account localStorage family.
  * The never-remembered login surface renders "nothing to delete" on false.
  *
+ * A browser that has IndexedDB but no `indexedDB.databases()` cannot be
+ * asked what it holds, and an unanswerable question is not a "no": the
+ * localStorage evidence is consulted first, and failing that the answer is
+ * still true, since the storage that could not be enumerated may well hold
+ * a replica or the session database. The cost of the conservative answer is
+ * a destructive confirm on a browser that turns out to hold nothing (the
+ * wipe then reports the deletion as unconfirmed); the cost of the other
+ * answer would be telling a user their data is already gone when it is not.
+ *
  * @returns {Promise<boolean>}
  */
 export async function hasForgettableBrowserData(): Promise<boolean> {
-  if (typeof indexedDB !== 'undefined' && indexedDB.databases) {
+  const haveIndexedDb = typeof indexedDB !== 'undefined'
+  const canEnumerate =
+    haveIndexedDb && typeof indexedDB.databases === 'function'
+  if (canEnumerate) {
     const databases = await indexedDB.databases().catch(() => [])
     if (
       databases.some(
@@ -747,35 +780,51 @@ export async function hasForgettableBrowserData(): Promise<boolean> {
       }
     }
   }
-  return false
+  return haveIndexedDb && !canEnumerate
 }
 
 /**
  * The no-unlock-material forget grade: "forget all wallet data on this
  * browser". Whole-database and browser-scoped -- the `freewallet-session`
- * database and every replica database are deleted wholesale (each replica
- * prefix gets the cross-tab teardown and verified completion of the shared
- * replica wipe), every per-account localStorage family goes by prefix scan,
- * and the browser-global `writerId` is cleared. Global UI prefs stay.
+ * database and every replica database it can name are deleted wholesale
+ * (each replica prefix gets the cross-tab teardown and, where the engine
+ * allows it, the verified completion of the shared replica wipe), every
+ * per-account localStorage family goes by prefix scan, and the
+ * browser-global `writerId` is cleared. Global UI prefs stay.
  * No ceremony runs and nothing is signed or flagged anywhere: each
  * account's standing document client remains, stated in the calling
  * surface's copy.
  *
- * @returns {Promise<{ failed: string[] }>}   the stage names that failed
- *   (best-effort throughout, like the shared enumeration's executor)
+ * Enumeration (`indexedDB.databases()`) is a discovery and verification
+ * aid, never the gate on deleting: the session database has a known name,
+ * and replica prefixes that no enumeration reports are recovered from
+ * localStorage (see `derivableReplicaPrefixes`). Without the API the
+ * deletes still run, and what could not be confirmed -- or, for replicas,
+ * what could not even be discovered -- is reported on `unverified` rather
+ * than passed off as a clean wipe.
+ *
+ * @returns {Promise<{ failed: string[], unverified: string[] }>}   the
+ *   stage names that failed and the ones that ran unconfirmed (best-effort
+ *   throughout, like the shared enumeration's executor)
  */
 export async function forgetBrowserWalletData(): Promise<{
   failed: string[]
+  unverified: string[]
 }> {
   const failed: string[] = []
+  const unverified: string[] = []
+  const haveIndexedDb = typeof indexedDB !== 'undefined'
+  const canEnumerate =
+    haveIndexedDb && typeof indexedDB.databases === 'function'
 
   // Every replica database, by discovered prefix: a name like
   // `rxdb-dexie-<prefix>-wallet-db--...` yields its logical prefix, and the
   // per-prefix wipe carries the teardown broadcast and the verified
-  // completion.
-  if (typeof indexedDB !== 'undefined' && indexedDB.databases) {
+  // completion. The localStorage half of the discovery runs BEFORE the
+  // families below are deleted -- it reads the very keys they remove.
+  const prefixes = derivableReplicaPrefixes()
+  if (canEnumerate) {
     const databases = await indexedDB.databases().catch(() => [])
-    const prefixes = new Set<string>()
     for (const db of databases) {
       const name = db.name
       if (!name || !REPLICA_DB_NAME_PATTERN.test(name)) {
@@ -789,10 +838,19 @@ export async function forgetBrowserWalletData(): Promise<{
         prefixes.add(prefix)
       }
     }
+  } else if (haveIndexedDb) {
+    // A replica whose prefix left no localStorage trace cannot be named at
+    // all here; say so rather than let the report read as exhaustive.
+    unverified.push('replica-discovery')
+  }
+  if (haveIndexedDb) {
     for (const prefix of prefixes) {
       try {
         const store = new BrowserStore({ dbPrefix: prefix })
-        await store.wipeStorage()
+        const { verified } = await store.wipeStorage()
+        if (!verified) {
+          unverified.push(`replica:${prefix}`)
+        }
       } catch (err) {
         failed.push(`replica:${prefix}`)
         console.warn(`Could not delete the replica databases "${prefix}":`, err)
@@ -800,7 +858,8 @@ export async function forgetBrowserWalletData(): Promise<{
     }
 
     // The session database, wholesale (every account's trios, pins, and
-    // caches live inside it).
+    // caches live inside it) and by its known name, so it goes whatever the
+    // engine can enumerate.
     try {
       await new Promise<void>(resolve => {
         const request = indexedDB.deleteDatabase(SESSION_DB_NAME)
@@ -810,9 +869,13 @@ export async function forgetBrowserWalletData(): Promise<{
         // a moment, then let the verification below report honestly.
         setTimeout(resolve, 10_000)
       })
-      const remaining = await indexedDB.databases().catch(() => [])
-      if (remaining.some(db => db.name === SESSION_DB_NAME)) {
-        failed.push('session-db')
+      if (canEnumerate) {
+        const remaining = await indexedDB.databases().catch(() => [])
+        if (remaining.some(db => db.name === SESSION_DB_NAME)) {
+          failed.push('session-db')
+        }
+      } else {
+        unverified.push('session-db')
       }
     } catch (err) {
       failed.push('session-db')
@@ -825,11 +888,11 @@ export async function forgetBrowserWalletData(): Promise<{
   try {
     if (typeof localStorage !== 'undefined') {
       const emptyMarkers = migrationMarkerKeys('')
-      const prefixes = [emptyMarkers.plaintext, emptyMarkers.publicCids]
+      const markerPrefixes = [emptyMarkers.plaintext, emptyMarkers.publicCids]
       const keys: string[] = []
       for (let index = 0; index < localStorage.length; index++) {
         const key = localStorage.key(index)
-        if (key && prefixes.some(prefix => key.startsWith(prefix))) {
+        if (key && markerPrefixes.some(prefix => key.startsWith(prefix))) {
           keys.push(key)
         }
       }
@@ -846,5 +909,58 @@ export async function forgetBrowserWalletData(): Promise<{
     failed.push('writer-id')
     console.warn('Could not clear the writer id:', err)
   }
-  return { failed }
+  return { failed, unverified }
+}
+
+/**
+ * The replica database prefixes this browser can name without enumerating
+ * IndexedDB, recovered from the localStorage traces a replica leaves: the
+ * per-`dbPrefix` migration markers
+ * (`freewallet:<name>-migrated:<dbPrefix>`, written the first time a
+ * replica's collections open) carry the prefix verbatim, and a local-mode
+ * descriptor or meta cache key (`<family>:local:<clientDid>:<collectionId>`)
+ * carries the client did:key the prefix is derived from. Nothing else on
+ * this browser names a replica: the remote-mode cache scope is an account
+ * Space id, and the unlock-methods cache lives inside the session database.
+ * Must be called before the localStorage families are deleted.
+ *
+ * @returns {Set<string>}
+ */
+function derivableReplicaPrefixes(): Set<string> {
+  const prefixes = new Set<string>()
+  if (typeof localStorage === 'undefined') {
+    return prefixes
+  }
+  const emptyMarkers = migrationMarkerKeys('')
+  const markerPrefixes = [emptyMarkers.plaintext, emptyMarkers.publicCids]
+  const localScopePrefixes = LOCAL_CACHE_FAMILY_PREFIXES.map(
+    prefix => `${prefix}:local:`
+  )
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index)
+    if (!key) {
+      continue
+    }
+    for (const marker of markerPrefixes) {
+      if (key.startsWith(marker)) {
+        const prefix = key.slice(marker.length)
+        if (prefix) {
+          prefixes.add(prefix)
+        }
+      }
+    }
+    for (const scoped of localScopePrefixes) {
+      if (!key.startsWith(scoped)) {
+        continue
+      }
+      // `<clientDid>:<collectionId>`; a collection id carries no colon, so
+      // the last one separates the two.
+      const rest = key.slice(scoped.length)
+      const clientDid = rest.slice(0, rest.lastIndexOf(':'))
+      if (clientDid.startsWith('did:')) {
+        prefixes.add(deriveSpaceId(clientDid))
+      }
+    }
+  }
+  return prefixes
 }

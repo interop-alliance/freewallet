@@ -1856,6 +1856,33 @@ describe('wipeStorage (cross-tab teardown and verified completion)', () => {
     warn.mockRestore()
   })
 
+  it('deletes by name and reports the wipe unverified without an enumeration API', async () => {
+    vi.stubGlobal(
+      'BroadcastChannel',
+      class {
+        postMessage() {}
+        close() {}
+      }
+    )
+    const deleted: string[] = []
+    // A factory carrying no `databases` member: nothing can be discovered
+    // or re-probed, so the wipe removes the wallet database by name and
+    // says the deletion is unconfirmed rather than claiming a clean wipe.
+    vi.stubGlobal('indexedDB', {
+      deleteDatabase(name: string) {
+        deleted.push(name)
+        const request: { onsuccess?: () => void } = {}
+        queueMicrotask(() => request.onsuccess?.())
+        return request
+      }
+    })
+    const store = new BrowserStore({
+      dbPrefix: 'prefix-c',
+      storage: getRxStorageMemory()
+    })
+    await expect(store.wipeStorage()).resolves.toEqual({ verified: false })
+  })
+
   it('closes a sibling store when its prefix is torn down from another tab', async () => {
     // A registry-backed fake so one instance's postMessage reaches the
     // other instances' listeners, like the real channel across tabs.

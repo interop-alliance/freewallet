@@ -27,6 +27,7 @@ const state = vi.hoisted(() => ({
   artifactFailures: [] as string[],
   // What the shared wipe enumeration reports back to `deleteAccount`.
   localWipeFailed: [] as string[],
+  localWipeUnverified: [] as string[],
   // Whether the session resolves an enrolled-client context at all: a session
   // that cannot run a retirement never reads the registry.
   enrolled: true,
@@ -297,7 +298,10 @@ vi.mock('@/session/wipe', () => ({
   ),
   executeLocalWipe: vi.fn(async () => {
     state.calls.push('executeLocalWipe')
-    return { failed: state.localWipeFailed }
+    return {
+      failed: state.localWipeFailed,
+      unverified: state.localWipeUnverified
+    }
   })
 }))
 
@@ -450,6 +454,7 @@ beforeEach(() => {
   state.clientAnnexDeleteFails = false
   state.artifactFailures = []
   state.localWipeFailed = []
+  state.localWipeUnverified = []
   state.enrolled = true
   state.newKeyAgreementKeyMultibase = 'z6LSNewPassphraseKak'
   state.oldKeyAgreementKeyMultibase = 'z6LSOldPassphraseKak'
@@ -648,6 +653,17 @@ describe('deleteAccount', () => {
     // other stage failure is hygiene residue and stays 'deleted'.
     expect(result).toBe('failed')
     expect(state.calls).toContain('executeLocalWipe')
+  })
+
+  it('reports the deletion unconfirmed when the replica wipe could not be verified', async () => {
+    state.localWipeUnverified = ['replica']
+    const result = await deleteAccount({
+      session: makeSession(),
+      passphrase: 'correct horse battery staple'
+    })
+    // The account really is deleted, so this is not 'failed'; the local
+    // replica delete simply could not be confirmed on this browser.
+    expect(result).toBe('deleted-unverified')
   })
 
   it('treats a non-replica stage failure as hygiene residue', async () => {

@@ -343,6 +343,20 @@ describe('the shared wipe enumeration', () => {
     expect(targets.registryUnread).toBe(false)
   })
 
+  it('reports an unverified replica wipe without calling it clean', async () => {
+    const { idb } = createFakeSessionIdb()
+    await seedSessionDatabase(idb)
+    const session = sessionFixture()
+    const targets = snapshotWipeTargets({ session, registry })
+    const { failed, unverified } = await executeLocalWipe({
+      targets,
+      storage: { wipeLocalStorage: async () => ({ verified: false }) },
+      idb
+    })
+    expect(failed).toEqual([])
+    expect(unverified).toEqual(['replica'])
+  })
+
   it('keeps the writer id unless the consumer asks (deleteAccount, guest)', async () => {
     const { idb } = createFakeSessionIdb()
     await seedSessionDatabase(idb)
@@ -358,6 +372,19 @@ describe('the shared wipe enumeration', () => {
     const targets = snapshotWipeTargets({ session, registry })
     const { failed } = await executeLocalWipe({ targets, idb })
     expect(failed).toEqual([])
+    expect(databaseNames.has('freewallet-session')).toBe(false)
+  })
+
+  it('never creates the session database on an engine without databases()', async () => {
+    const { idb, databaseNames } = createFakeSessionIdb({ enumerable: false })
+    const session = sessionFixture()
+    const targets = snapshotWipeTargets({ session, registry })
+    const { failed, unverified } = await executeLocalWipe({ targets, idb })
+    expect(failed).toEqual([])
+    expect(unverified).toEqual([])
+    // The fallback probe answered "absent" without creating anything, so
+    // the trio deletes were skipped rather than run through a versioned
+    // open.
     expect(databaseNames.has('freewallet-session')).toBe(false)
   })
 

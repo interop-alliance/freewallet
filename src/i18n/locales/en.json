@@ -43,6 +43,7 @@
     "deletePassphraseLabel": "Passphrase",
     "deletePassphraseIncorrect": "That passphrase is incorrect.",
     "deleteError": "Could not delete your account data. Please try again.",
+    "deleteUnverified": "Your account was deleted, but this browser could not confirm that its local wallet data is gone. Close other tabs, then clear this browser's site data.",
     "about": "About",
     "version": "Freewallet version {{version}}",
     "unpromotedAccount": "This account has not finished setting up its published identity (a setup step failed earlier). Connected wallets and recovery codes are unavailable until it completes; it is retried automatically at each sign-in.",
@@ -242,6 +243,7 @@
       "confirm": "Forget wallet data",
       "done": "All wallet data on this browser has been forgotten.",
       "incomplete": "Wallet data on this browser was forgotten, but some of it could not be deleted (another open tab may be holding it). Close other tabs and try again.",
+      "unverified": "Wallet data on this browser was deleted, but this browser could not confirm the deletion.",
       "failed": "Could not forget the wallet data on this browser. Please try again."
     },
     "login": {
