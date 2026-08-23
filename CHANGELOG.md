@@ -40,6 +40,13 @@
 
 ### Added
 
+- An agent-grant e2e (`tests/e2e-was/agent-grant.spec.ts`): a fresh did:key
+  agent, played by was-client, stores a zcap-only VPR (one
+  `#public-collection` descriptor named `web`) on an ephemeral exchange,
+  the interaction-URL request page is driven through approval from a live
+  session and again from its own login in place, and the agent then invokes
+  the returned zcap to PUT `index.html` as `text/html` and reads it back
+  with an unauthenticated fetch.
 - A request page for interaction URLs, `/external/request?url=<interaction
 url>` (`src/pages/external/ExternalRequestPage.tsx`): a request arriving
   from outside the app (a CLI agent's `di was request-grant` link by deep
