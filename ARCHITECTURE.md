@@ -280,8 +280,9 @@ striking the other's ladder. Registry writes matched by unlock Space id
 carry the acting credential's key-agreement multibase for the same reason,
 and a mismatch writes nothing.
 
-The next passphrase login's completer (`finishPendingPassphraseRetirement`
-in `src/session/pendingRetirement.ts`) clears it: an entry naming a
+The next passphrase login's torn-retirement repair
+(`repairTornPassphraseRetirement` in `src/session/pendingRetirement.ts`)
+clears it: an entry naming a
 credential other than the one logging in, with the login credential itself
 standing in the account document. It retires the named credential and
 records its own standing configuration in the entry. The login-credential check keeps it
@@ -510,7 +511,7 @@ entry (the ceremony-tail license's inventory-changing version) but
 HTTP-invoked under the still-standing client -- the roster store is built
 here with the ladder VM's signer over the ceremony-supplied post-install
 log (`ladderSignedRosterStoreFor`), so the roster head stays signed by a key
-the post-removal document lists and needs no seal completer on an account
+the post-removal document lists and needs no seal repair on an account
 where no login sweep will ever run again; the collection fan-out; the
 forced replacement of the embedded generation delegation with a fresh
 ladder-signed one and the revocation, through this client's `WasClient`,
@@ -1079,12 +1080,12 @@ transient composition with zero local residue -- the locate step's
 chain-head pin rides in memory too. Two residues are stated. A tear inside
 the append itself leaves the spent code dead (its key left the document, so
 a re-run refuses it as spent) and the current epoch wrapped to the removed
-code alone; on a client-less account no login sweep runs, so the closing
-mechanism is a completer holding both the spent code (to unwrap the epoch)
+code alone; on a client-less account no login sweep runs, so the mender
+is a repair holding both the spent code (to unwrap the epoch)
 and the new passphrase (its record's ladder seed and sibling), running the
 same append anchored at the same entry under the ceremony-tail license's
 still-unused shot -- not built yet. And a rotation torn mid-fan-out on a
-client-less account has no completer yet; a stranded collection stays
+client-less account has no repair yet; a stranded collection stays
 keyed to the spent code until the next durable login or a spend re-run.
 
 Revoking a code from Settings is the issuance reversal and is REAL (the
@@ -1856,6 +1857,37 @@ Security notes:
 | `/settings`                              | `SettingsPage`           | Account settings (protected)         |
 | `/docs/:fileName`                        | `DocsPage`               | Renders `public/docs/*.md`           |
 
+## Ceremony inventory
+
+The account ceremonies in one place -- the set the design gate in AGENTS.md
+governs. The shared stage orders are canonical in wallet-core's
+ARCHITECTURE.md ("Ceremonies and cascades"); this table lists the
+freewallet-side wrappers and the app-only ceremonies, each row pointing at
+the module that drives it. The mender column names how a torn run gets
+finished (see Tear mending in the Glossary).
+
+| Ceremony                                | Entry point                          | Module                                    | Shared half            | Mender                                                            |
+| --------------------------------------- | ------------------------------------ | ----------------------------------------- | ---------------------- | ----------------------------------------------------------------- |
+| Account genesis (durable)               | signup; healed at every login        | `src/session/signup.ts`                   | `/genesis`             | re-run (every stage an ensure)                                    |
+| Credential-anchored genesis             | default signup, non-remembered browser | `src/session/credentialAnchoredGenesis.ts` | `/clientAnnex`       | re-run; the transient login's heal branch re-runs it              |
+| Self-enrollment at login                | durable login on a fresh browser     | login path in `src/session/initSession.ts` | `/clientAnnex`        | re-run; a phantom client is removed via Disconnect                |
+| Client enrollment (two-party)           | Settings > Connected wallets + login page | `src/components/EnrolledClientsSection.tsx` | `/enrollment`     | re-run with the same connect code                                 |
+| Client revocation + epoch cascade       | Settings > Connected wallets         | `src/session/revocation.ts`               | `/clients`             | re-run; cascade-completion sweep                                  |
+| Recovery-code issuance                  | Settings > Recovery codes            | `src/session/recovery.ts`                 | `/recovery`            | re-run (nothing binds until the confirm)                          |
+| Recovery spend (durable and transient)  | `/recover`                           | `src/session/recovery.ts`                 | `/recovery`, `/clientAnnex` | re-run; the transient variant's roster-append repair is not built yet |
+| Recovery-code revocation                | Settings > Recovery codes            | `src/session/recovery.ts`                 | `/recovery`            | re-run; cascade-completion sweep                                  |
+| Unlock-credential rotation              | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts` | `/unlock`            | torn-retirement repair at the next passphrase login; login sweep  |
+| Forget ceremony                         | Settings > Connected wallets, own row | `src/session/forget.ts`                  | `/clientAnnex`         | re-run (wipe last); forgotten-browser detector at the next login  |
+| Last-client transition                  | same row, `lastClient` confirm       | `src/session/forget.ts`                   | `/clientAnnex`         | re-run; the record re-mint refusal is a retryable stop            |
+| Update-key rotation                     | Settings                             | `src/session/accountSettings.ts`          | `/webvh`               | re-run (persist-before-publish)                                   |
+| Account deletion                        | Settings                             | `src/session/accountSettings.ts` + `wipe.ts` | app-side phase order | re-run; a wipe failure after the unlock-method walk is accepted   |
+| Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies | `src/session/wipe.ts`               | app-side               | re-probe verification; the `unverified` report                    |
+| Step-up ceremony                        | designed, not built                  | --                                        | --                     | --                                                                |
+
+The honest ledger of unbuilt menders, both on client-less accounts (where
+no login sweep will ever run): the transient recovery's roster-append
+repair, and a repair for a user-key rotation torn mid-fan-out.
+
 ## What lives elsewhere (do not reimplement here)
 
 Every `@interop/*` package is in-house (their checkouts sit beside this repo,
@@ -2094,6 +2126,30 @@ Containment hierarchy (remote mode): **Space ⊃ Collection ⊃ Resource**.
   and remediable by rotation, not prevented by a second-device gate. A
   mechanism "fails loudness" when it would let a credential exercise
   authority with no world-visible record.
+- **Ceremony** -- an ordered sequence of durable writes across the
+  account's systems (the account log, the roster, the unlock records,
+  collection epochs, local storage) whose stage order carries an invariant
+  -- persist-before-publish, document-edit-first,
+  decryption-material-before-authorization. Every stage detects its own
+  completion from durable state, and every tear point has a stated mender
+  (see Tear mending). The full list is the "Ceremony inventory" section;
+  the shared stage orders are canonical in wallet-core's ARCHITECTURE.md
+  ("Ceremonies and cascades"). Avoid: flow, workflow, wizard.
+- **Tear mending** -- the umbrella for how a ceremony interrupted mid-run
+  (a torn ceremony) gets finished. Three menders exist: a converging
+  re-run (the same ceremony retried; every stage detects its own
+  completion), a standing sweep (a background login-time pass, e.g. the
+  cascade-completion sweep), and a repair (below). A stated residue with
+  no mender is an open gap, not a documented limitation. Avoid: tear
+  closure.
+- **Repair** -- the mender of last resort: code waiting at the one entry
+  point where the authority a specific torn state needs reassembles,
+  detecting that state from durable state alone and finishing the
+  ceremony -- used exactly where neither a re-run nor a login sweep can
+  fire (the recurring case is a client-less account, where no durable
+  login ever runs a sweep). Always qualified by its torn state -- "the
+  torn-retirement repair", `repairTornPassphraseRetirement` -- never bare.
+  Avoid: completer, finisher, fixup.
 - **Client annex** (`clientAnnex`) — the transient-session counterpart of
   an enrolled client for the public-computer case: a did:webvh whose log
   lives in a capability-gated auxiliary Space beside the account Space,

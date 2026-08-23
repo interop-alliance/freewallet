@@ -84,7 +84,7 @@ import {
   pointedClientAnnexReach
 } from '@/session/annexReach'
 import { refreshStandingDelegationFields } from '@/session/unlockMethods'
-import { finishPendingPassphraseRetirement } from '@/session/pendingRetirement'
+import { repairTornPassphraseRetirement } from '@/session/pendingRetirement'
 import {
   primeVerifiedAccountLog,
   verifiedAccountLog
@@ -1059,7 +1059,7 @@ async function sessionFromKeyringHit({
     })
   }
 
-  // The pending-retirement completer: a passphrase change whose retirement
+  // The torn-retirement repair: a passphrase change whose retirement
   // failed at its document edit leaves the registry's passphrase entry
   // naming the OLD credential's standing configuration under the new unlock Space, and
   // nothing else can find that credential (the roster sweep only rotates
@@ -1070,7 +1070,7 @@ async function sessionFromKeyringHit({
   if (session.storageReady && !remoteDirectStorage) {
     session.storageReady = session.storageReady.then(async () => {
       try {
-        await finishPendingPassphraseRetirement({ session, found })
+        await repairTornPassphraseRetirement({ session, found })
       } catch (err) {
         console.warn(
           'Could not finish the pending passphrase retirement; the next ' +

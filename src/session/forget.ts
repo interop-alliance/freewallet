@@ -440,7 +440,7 @@ export async function forgetThisBrowser({
 /**
  * The last-client transition's roster store builder: appends SIGNED BY THE
  * LADDER VM (the key the post-removal document still lists, so the roster
- * head needs no seal completer on an account where no enrolled client's
+ * head needs no seal repair on an account where no enrolled client's
  * login sweep will ever run again), the controller view resolved from the
  * post-install log the ceremony supplies (the ceremony-tail license's
  * inventory-changing anchor), and the HTTP requests invoked under this

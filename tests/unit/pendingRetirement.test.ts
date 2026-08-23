@@ -92,7 +92,7 @@ import {
   putUnlockMethods,
   upsertPassphraseUnlockMethod
 } from '@/session/unlockMethods'
-import { finishPendingPassphraseRetirement } from '@/session/pendingRetirement'
+import { repairTornPassphraseRetirement } from '@/session/pendingRetirement'
 import type { KeyringFetchResult } from '@/session/keyring'
 import type { Session } from '@/types/auth'
 
@@ -186,9 +186,9 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('finishPendingPassphraseRetirement', () => {
+describe('repairTornPassphraseRetirement', () => {
   it('retires the named credential and records its own standing configuration', async () => {
-    await finishPendingPassphraseRetirement({
+    await repairTornPassphraseRetirement({
       session: makeSession(),
       found: makeFound()
     })
@@ -228,7 +228,7 @@ describe('finishPendingPassphraseRetirement', () => {
   it('keeps the stored management zcap when this login minted none', async () => {
     const found = makeFound()
     delete (found as { manageCapability?: unknown }).manageCapability
-    await finishPendingPassphraseRetirement({
+    await repairTornPassphraseRetirement({
       session: makeSession(),
       found
     })
@@ -244,7 +244,7 @@ describe('finishPendingPassphraseRetirement', () => {
     // lost: the roster and cascade residue is the ordinary login sweep's,
     // and a retirement here would swap the annex generation every login.
     state.namedCredentialStanding = false
-    await finishPendingPassphraseRetirement({
+    await repairTornPassphraseRetirement({
       session: makeSession(),
       found: makeFound()
     })
@@ -260,7 +260,7 @@ describe('finishPendingPassphraseRetirement', () => {
 
   it('skips an entry already naming the credential logging in', async () => {
     state.entry = entryFor({ keyAgreementKeyMultibase: MY_KAK })
-    await finishPendingPassphraseRetirement({
+    await repairTornPassphraseRetirement({
       session: makeSession(),
       found: makeFound()
     })
@@ -273,7 +273,7 @@ describe('finishPendingPassphraseRetirement', () => {
     // unlock Space delete failed, logging in after a change that completed.
     // Retiring the entry's credential there would strip the CURRENT one.
     state.loginCredentialStanding = false
-    await finishPendingPassphraseRetirement({
+    await repairTornPassphraseRetirement({
       session: makeSession(),
       found: makeFound()
     })
@@ -283,7 +283,7 @@ describe('finishPendingPassphraseRetirement', () => {
   })
 
   it('skips a passkey login', async () => {
-    await finishPendingPassphraseRetirement({
+    await repairTornPassphraseRetirement({
       session: makeSession('passkey'),
       found: makeFound()
     })
@@ -292,7 +292,7 @@ describe('finishPendingPassphraseRetirement', () => {
 
   it('skips a session that cannot act as an enrolled client', async () => {
     state.enrolled = false
-    await finishPendingPassphraseRetirement({
+    await repairTornPassphraseRetirement({
       session: makeSession(),
       found: makeFound()
     })
@@ -303,7 +303,7 @@ describe('finishPendingPassphraseRetirement', () => {
     state.rotationThrows = true
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     await expect(
-      finishPendingPassphraseRetirement({
+      repairTornPassphraseRetirement({
         session: makeSession(),
         found: makeFound()
       })

@@ -98,6 +98,12 @@ url>` (`src/pages/external/ExternalRequestPage.tsx`): a request arriving
 
 ### Changed
 
+- ARCHITECTURE.md defines the ceremony vocabulary: Glossary entries for
+  Ceremony, Tear mending (the umbrella: re-run, sweep, repair), and Repair,
+  plus a Ceremony inventory table listing every ceremony, its entry point,
+  module, shared half, and mender. `finishPendingPassphraseRetirement` is
+  renamed `repairTornPassphraseRetirement` to match, and prose "completer"
+  becomes "repair" throughout.
 - The `json-canonicalize` resolution override (pinning 2.0.0 around the broken
   2.0.1 publish) is lifted now that 3.0.0 ships intact. 2.0.0 stays in the
   lockfile only through `@interop/did-method-webvh` until its 5.5.1 publish.
@@ -209,7 +215,7 @@ url>` (`src/pages/external/ExternalRequestPage.tsx`): a request arriving
   residue of a last-client forget torn after its install entry), so the
   retired seed no longer signs log appends or account delegations. Through
   wallet-core's `removeUnlockKey`; the seedless removals (management
-  capability, the pending-retirement completer) leave it.
+  capability, the pending-retirement repair) leave it.
 - A passphrase change whose retirement fails at its document edit can now be
   finished. The registry's passphrase entry is written after the retirement
   reports, so an edit that never landed leaves the entry naming the new

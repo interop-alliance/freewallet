@@ -1,5 +1,5 @@
 /**
- * The login-time completer for a passphrase change whose retirement failed at
+ * The login-time repair for a passphrase change whose retirement failed at
  * its document edit.
  *
  * Changing a passphrase writes the registry's passphrase entry only after the
@@ -47,7 +47,7 @@ import {
  * @param options.found {KeyringFetchResult}   that credential's keyring hit
  * @returns {Promise<void>}
  */
-export async function finishPendingPassphraseRetirement({
+export async function repairTornPassphraseRetirement({
   session,
   found
 }: {
@@ -96,7 +96,7 @@ export async function finishPendingPassphraseRetirement({
   // means the retirement's document edit landed after all and only the
   // registry write was lost: the roster and cascade residue of such a run is
   // the ordinary login sweep's business, and re-running the retirement here
-  // would only swap the annex generation on every login (the completer holds
+  // would only swap the annex generation on every login (the repair holds
   // no retired ladder seed, so its annex stage cannot strike).
   const stillStanding = await documentListsCredential({
     doc,

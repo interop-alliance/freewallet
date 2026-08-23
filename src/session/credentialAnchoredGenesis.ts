@@ -438,7 +438,7 @@ export async function establishCredentialAnchoredAccount({
  * reports them on `failed` (a stage that could not run) and on
  * `epochs.failed` (a collection the fan-out could not epoch) rather than
  * throwing, and on a credential-anchored account no login-time sweep ever
- * finishes them -- the establishment re-run is the only completer, so the
+ * finishes them -- the establishment re-run is the only mender, so the
  * establishment must stop here for it to be reached.
  *
  * @param options {object}

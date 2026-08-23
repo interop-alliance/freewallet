@@ -1194,7 +1194,7 @@ async function unwrapPriorEpochUserKey({
  *    inside it is the stated residue: the spent code can no longer re-run
  *    (its key left the document), and no login sweep runs on a client-less
  *    account, so the current epoch stays wrapped to the removed code alone
- *    until a completer that holds both the spent code and the new
+ *    until a repair that holds both the spent code and the new
  *    passphrase runs the append anchored at the same entry.
  * 3. The epoch cascade and the registry update (spent entry out, replacement
  *    and new-passphrase entries in, re-sealed to the rotated user key) ride

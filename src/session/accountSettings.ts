@@ -135,7 +135,7 @@ export async function loadUnlockRegistry({
  * retirement would remove one credential's document inventory while striking
  * the other's ladder, and the post-edit roster would re-wrap to the
  * credential just left unnamed. A login with the passphrase clears it (the
- * login-time completer), and the change can then run. A
+ * login-time repair), and the change can then run. A
  * "change" whose new passphrase derives the same credential as the old one
  * is refused (`SamePassphraseError`) before anything is written: the
  * retirement would strip the standing configuration the establishment just re-published,
@@ -149,7 +149,7 @@ export async function loadUnlockRegistry({
  * collection cascade. A retirement that failed AT the edit records the OLD
  * credential's standing configuration under the new unlock Space, which is the one state
  * that still names the credential left standing -- the next passphrase
- * login's completer (`finishPendingPassphraseRetirement`) retires it.
+ * login's repair (`repairTornPassphraseRetirement`) retires it.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -325,7 +325,7 @@ export async function changeAccountPassphrase({
   // which leaves the upsert's carry rule in charge). A retirement that
   // failed AT the edit records the OLD credential's standing configuration instead: the
   // entry then names the new unlock Space but the old credential's
-  // multibases, which is the state the login-time completer detects and
+  // multibases, which is the state the login-time repair detects and
   // finishes. Restating it explicitly is what makes it survive -- the upsert
   // drops an entry's carried standing fields when the unlock Space changes.
   const retirementFailedAtTheEdit = rotation === 'failed' && !inventoryRemoved
@@ -369,7 +369,7 @@ export class SamePassphraseError extends Error {
  * The registry's passphrase entry names a credential the typed old
  * passphrase does not derive: an earlier change whose retirement did not
  * finish. Refused before anything is written -- a login with the passphrase
- * runs the completer, after which the change can proceed.
+ * runs the repair, after which the change can proceed.
  */
 export class PendingPassphraseRetirementError extends Error {
   constructor(
