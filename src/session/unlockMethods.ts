@@ -41,6 +41,7 @@ import {
   WAS_SERVER_URL
 } from '@/app.config'
 import type { Session } from '@/types/auth'
+import { isDurableSession } from '@/session/persistence'
 import {
   assertPasskeyPrf,
   registerPasskey,
@@ -1130,6 +1131,13 @@ function shouldAdoptFreshCapability({
  * registry when it can be read, so callers (the Settings passkeys section)
  * can use this as their load-plus-backfill entry point for any session.
  *
+ * A transient session makes no registry call at all and returns `null`
+ * immediately, before even a read: the registry is durable-session state,
+ * the transient handle's annex-signed root invocation could never have
+ * authorized it anyway, and threading the generation delegation into these
+ * helpers must not turn this into a registry clobber from a public
+ * terminal.
+ *
  * The registry is created only when `createIfMissing` is set (a fresh 16-byte
  * userHandle is minted): the lazy-creation points are first passkey
  * registration and first Settings render, so a plain login never materializes
@@ -1150,6 +1158,9 @@ export async function backfillPassphraseUnlockMethod({
   session: Session
   createIfMissing?: boolean
 }): Promise<UnlockMethodsRecord | null> {
+  if (!isDurableSession(session.profile.persistence)) {
+    return null
+  }
   const { unlockMethod, keyAgreementKey, keyResolver } = session.profile
   // The vault keys are needed to read (let alone write) the registry.
   if (!keyAgreementKey || !keyResolver) {

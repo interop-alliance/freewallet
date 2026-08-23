@@ -1686,6 +1686,10 @@ export async function updateRegistryAfterRecovery({
     console.warn('Could not update the unlock-methods registry:', err)
   }
   try {
+    // `backfillPassphraseUnlockMethod` itself is a no-op on a transient
+    // session; this call site is additionally reached only from the
+    // `remembered` (durable) branch of the recovery login, so the session
+    // here is always durable in practice.
     await backfillPassphraseUnlockMethod({ session })
   } catch (err) {
     console.warn('Could not backfill the unlock-methods registry:', err)

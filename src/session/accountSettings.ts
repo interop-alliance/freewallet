@@ -86,6 +86,10 @@ export async function readLoginHandle({
  * the caller can show a non-blocking load error while the rest of the section
  * keeps working.
  *
+ * A transient session makes no registry call at all: the registry is
+ * durable-session state, so this returns `null` immediately rather than
+ * calling the backfill or the plain read.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @returns {Promise<UnlockMethodsRecord | null>}
@@ -95,6 +99,9 @@ export async function loadUnlockRegistry({
 }: {
   session: Session
 }): Promise<UnlockMethodsRecord | null> {
+  if (!isDurableSession(session.profile.persistence)) {
+    return null
+  }
   try {
     return await backfillPassphraseUnlockMethod({
       session,

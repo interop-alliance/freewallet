@@ -39,6 +39,7 @@ import { loginErrorKey } from '@/session/loginErrorKey'
 import { recordWalletLogin } from '@/session/walletLoginActivity'
 import { backfillPassphraseUnlockMethod } from '@/session/unlockMethods'
 import { checkRecoveryHealth } from '@/session/recovery'
+import { isDurableSession } from '@/session/persistence'
 import { registerWallet } from '@/lib/registerWallet'
 import { showToast } from '@/stores/toastStore'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
@@ -266,9 +267,14 @@ export function ExternalRequestPage() {
         severity: 'warning'
       })
     }
-    void backfillPassphraseUnlockMethod({ session: loggedIn }).catch(err =>
-      console.warn('Could not backfill the unlock-methods registry:', err)
-    )
+    // Skipped outright on a transient session: the registry is
+    // durable-session state, and a transient handle's annex-signed root
+    // invocation could never have authorized it.
+    if (isDurableSession(loggedIn.profile.persistence)) {
+      void backfillPassphraseUnlockMethod({ session: loggedIn }).catch(err =>
+        console.warn('Could not backfill the unlock-methods registry:', err)
+      )
+    }
     void checkRecoveryHealth({ session: loggedIn })
       .then(flags => {
         if (flags.length > 0) {

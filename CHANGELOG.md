@@ -84,6 +84,12 @@
   login page's forget toast, on `ForgetOutcome.wipeUnverified` and
   `BrowserForgottenError.wipeUnverified`, and as account deletion's new
   `'deleted-unverified'` result with its own settings-page alert.
+- A transient session now makes no unlock-methods registry call at all --
+  `backfillPassphraseUnlockMethod` and `loadUnlockRegistry` return `null`
+  immediately, before even a read, instead of issuing one the server was
+  only ever going to refuse. The login backfill, the external-request
+  page's post-login adoption, and the Settings passkeys load all gate on
+  `isDurableSession`.
 
 ### Added
 
