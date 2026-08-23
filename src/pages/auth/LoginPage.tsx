@@ -23,9 +23,7 @@ import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { loginWithPassphrase, loginWithPasskey } from '@/session/initSession'
 import { loginErrorKey } from '@/session/loginErrorKey'
-import { backfillPassphraseUnlockMethod } from '@/session/unlockMethods'
 import { checkRecoveryHealth } from '@/session/recovery'
-import { isDurableSession } from '@/session/persistence'
 import { recordWalletLogin } from '@/session/walletLoginActivity'
 import { showToast } from '@/stores/toastStore'
 import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
@@ -167,18 +165,6 @@ export function LoginPage() {
           severity: 'warning'
         })
       }
-      // Backfill the passphrase entry in the unlock-methods registry (its
-      // unlock Space + management zcap) from this full session, without a
-      // second passphrase prompt. Fire-and-forget: it never blocks login, and
-      // an existing registry not yet materialized stays that way (no
-      // `createIfMissing`). Skipped outright on a transient session: the
-      // registry is durable-session state, and a transient handle's
-      // annex-signed root invocation could never have authorized it.
-      if (isDurableSession(session.profile.persistence)) {
-        void backfillPassphraseUnlockMethod({ session }).catch(err =>
-          console.warn('Could not backfill the unlock-methods registry:', err)
-        )
-      }
       // The login-time recovery health check: a recovery delegation signed by
       // a since-removed client rots silently and would brick recovery exactly
       // when it is needed, so nudge now rather than then.
@@ -259,9 +245,6 @@ export function LoginPage() {
       await session.storageReady
       login(session)
       recordWalletLogin({ session })
-      void backfillPassphraseUnlockMethod({ session }).catch(err =>
-        console.warn('Could not backfill the unlock-methods registry:', err)
-      )
       navigate('/dashboard', { replace: true })
     } catch (err) {
       if (err instanceof EnrollmentPendingError) {

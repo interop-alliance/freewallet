@@ -123,6 +123,7 @@
     "passkeyRetryConfirm": "Continue",
     "passkeyRetryCancel": "Cancel",
     "passkeyLoadError": "Could not load your passkeys. Some passkey actions may be unavailable.",
+    "passkeyRegistryStaleSeal": "Your list of unlock methods is sealed to an older key. It is repaired automatically at the next login from this browser.",
     "passkeyNameLabel": "Passkey name",
     "passkeyLabelSaved": "Passkey name saved.",
     "passkeyCreatedOn": "Added {{date}}",

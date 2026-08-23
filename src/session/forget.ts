@@ -120,7 +120,7 @@ import {
   refreshStandingDelegationFields
 } from '@/session/unlockMethods'
 import { pointedClientAnnexReach } from '@/session/annexReach'
-import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
+import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import { cascadeCollections } from '@/session/userKeyCascade'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import {
@@ -358,28 +358,24 @@ export async function forgetThisBrowser({
       descriptor: Parameters<
         typeof epochPins.saveFromDescriptor
       >[0]['descriptor']
-    }) => {
-      // Persisted so a run torn before the removal entry leaves this browser
-      // consistent for the resuming re-click: the pin never advances without
-      // the key that authenticated the roster it advanced to.
-      await epochPins.saveFromDescriptor({
-        accountDid: pointer.did,
-        epochId: latestEpochId,
-        descriptor
-      })
-      await session.profile.persistClientKeys?.({ userKey })
-      // The unlock-methods registry is sealed to the vault keys, so it is
-      // re-sealed to the rotated key (and the live session swapped onto it,
-      // so the later registry writes below read under the current key) while
-      // this client still invokes; the surviving readers -- other durable
-      // clients, transient logins -- would otherwise find it sealed to a
-      // retired generation.
-      await adoptRotatedUserKey({
+    }) =>
+      // The in-band adoption. The registry is sealed to the vault keys, so it
+      // is re-sealed to the rotated key -- first, while this browser's
+      // durable copy of the old one still exists -- and the live session
+      // swapped onto it, so the later registry writes below read under the
+      // current key; the surviving readers -- other durable clients,
+      // transient logins -- would otherwise find it sealed to a retired
+      // generation. The pin and the client-key record persist behind it, so a
+      // run torn before the removal entry leaves this browser consistent for
+      // the resuming re-click.
+      await adoptRotatedUserKeyInBand({
         session,
         spaceId: pointer.spaceId,
-        userKey
-      })
-    },
+        accountDid: pointer.did,
+        userKey,
+        latestEpochId,
+        descriptor
+      }),
     collections: cascadeCollections({ remoteStore })
   }
 

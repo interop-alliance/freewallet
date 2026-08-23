@@ -70,6 +70,21 @@ export async function wrapRecordEnvelope({
 }
 
 /**
+ * A stored envelope whose frame is well formed but which does not open under
+ * the supplied key -- the record is sealed to some other one. Covers both
+ * refusal points: the cipher build (the key is no recipient of the record's
+ * epoch) and the decrypt itself. Named separately from the frame refusals so
+ * a caller can tell "sealed to a key I do not hold" apart from "not a record
+ * of this kind or version".
+ */
+export class RecordEnvelopeDecryptError extends Error {
+  constructor(options?: { cause?: unknown }) {
+    super('The stored record did not decrypt under the supplied key.', options)
+    this.name = 'RecordEnvelopeDecryptError'
+  }
+}
+
+/**
  * Unwraps a stored `{ version, encryption, wrapped }` frame: validates the
  * frame (any other shape -- including the retired `{ version, wrapped }` form
  * with no descriptor -- is refused), rebuilds the record cipher over the
@@ -86,6 +101,8 @@ export async function wrapRecordEnvelope({
  * @param options.keyResolver {IKeyResolver}
  * @param options.label {string}   names the record kind in refusals
  * @returns {Promise<Json>}   the decrypted record body
+ * @throws {RecordEnvelopeDecryptError}   when the frame is well formed but
+ *   the body does not decrypt under the given key
  */
 export async function unwrapRecordEnvelope({
   record,
@@ -103,11 +120,20 @@ export async function unwrapRecordEnvelope({
   label: string
 }): Promise<Json> {
   const { encryption, wrapped } = parseRecordFrame({ record, label, version })
-  const cipher = await recordCipher({
-    keyAgreementKey,
-    keyResolver,
-    collectionId,
-    encryption
-  })
-  return cipher.decrypt({ envelope: wrapped as never })
+  // The frame is this record kind's, at this version; everything from here on
+  // is key work, and every way it can fail means the same thing to a caller:
+  // the envelope does not open under the key it was handed. That includes the
+  // cipher build, where a key that is no recipient of the record's own epoch
+  // refuses first.
+  try {
+    const cipher = await recordCipher({
+      keyAgreementKey,
+      keyResolver,
+      collectionId,
+      encryption
+    })
+    return await cipher.decrypt({ envelope: wrapped as never })
+  } catch (err) {
+    throw new RecordEnvelopeDecryptError({ cause: err })
+  }
 }

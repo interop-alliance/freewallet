@@ -49,7 +49,7 @@ import {
   checkUserKeyRosterAtLogin as sharedCheckUserKeyRosterAtLogin,
   convergeUserKeyRosterToAccount
 } from '@interop/wallet-core/clients'
-import { swapSessionVaultKeys } from '@/session/userKeyAdoption'
+import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import { sweepStrandedAppKeys } from '@/session/appKeySweep'
 import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
@@ -83,7 +83,11 @@ import {
   ensureGenerationDelegation,
   pointedClientAnnexReach
 } from '@/session/annexReach'
-import { refreshStandingDelegationFields } from '@/session/unlockMethods'
+import {
+  backfillPassphraseUnlockMethod,
+  refreshStandingDelegationFields
+} from '@/session/unlockMethods'
+import { repairStaleUnlockRegistrySeal } from '@/session/registryReseal'
 import { repairTornPassphraseRetirement } from '@/session/pendingRetirement'
 import {
   primeVerifiedAccountLog,
@@ -188,7 +192,10 @@ export async function initGuestSession() {
  *   login composition, together with the in-memory `persistence`; its
  *   presence also skips the KMS keystore and the login-time roster read (the
  *   standing-wrap read already happened)
- * @returns {Promise<{ session: Session, userExists: boolean }>}
+ * @returns {Promise<{ session: Session, userExists: boolean,
+ *   rosterRead: UserKeyRosterReadResult | null }>}   `rosterRead` is this
+ *   login's verified roster read, which the caller's registry re-seal repair
+ *   takes its escrowed user key generations from
  */
 export async function initSessionFromSeed({
   seed,
@@ -443,8 +450,7 @@ export async function initSessionFromSeed({
               userKey: loginUserKey,
               descriptor: loginDescriptor,
               clientKeyAgreementKey: keyAgreementKey,
-              persistence,
-              persistClientKeys
+              persistence
             })
           const result = await cascadeCollectionsToUserKey({
             remoteStore,
@@ -474,7 +480,7 @@ export async function initSessionFromSeed({
     }
   }
 
-  return { session, userExists }
+  return { session, userExists, rosterRead }
 }
 
 /**
@@ -502,8 +508,6 @@ export async function initSessionFromSeed({
  *   (identity) KAK -- its roster entry
  * @param options.persistence {SessionPersistence}   the session's persistence
  *   handle (the pins ride it)
- * @param [options.persistClientKeys] {function}   re-wraps this client's
- *   client-key record with the adopted user key
  * @returns {Promise<{ userKey: UserKey, rosterDescriptor: CollectionEncryption }>}
  *   the key and roster descriptor the collection fan-out should use
  */
@@ -513,8 +517,7 @@ async function convergeRosterToDocument({
   userKey,
   descriptor,
   clientKeyAgreementKey,
-  persistence,
-  persistClientKeys
+  persistence
 }: {
   session: Session
   pointer?: AccountPointer
@@ -522,7 +525,6 @@ async function convergeRosterToDocument({
   descriptor: CollectionEncryption
   clientKeyAgreementKey: IKeyAgreementKey
   persistence: SessionPersistence
-  persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
 }): Promise<{ userKey: UserKey; rosterDescriptor: CollectionEncryption }> {
   const { keyAgent } = session.profile
   if (!pointer || !isWebvhDid(pointer.did) || !WAS_SERVER_URL || !keyAgent) {
@@ -545,22 +547,27 @@ async function convergeRosterToDocument({
       clientKeyAgreementKey,
       pinnedEpochId: await persistence.epochPins.load({ accountDid }),
       accountLogPinStore: persistence.logPins,
-      // Adoption is app-side: persisted for the next login, pinned, and
-      // swapped into the live session -- all before the collection fan-out
-      // runs against it.
+      // Adoption is app-side and in band: the unlock-methods registry is
+      // re-sealed to the adopted key first (while this browser's durable
+      // copy of the pre-rotation one still exists), then the key is
+      // persisted for the next login, pinned, and swapped into the live
+      // session -- all before the collection fan-out runs against it. A
+      // failed re-seal leaves the session on the pre-rotation keys and no
+      // backstop runs here (the sweep has no post-ceremony adoption step);
+      // the next login's re-seal repair is the mender.
       onUserKeyAdopted: async ({
         userKey: adopted,
         latestEpochId,
         descriptor: read
-      }) => {
-        await persistence.epochPins.saveFromDescriptor({
+      }) =>
+        await adoptRotatedUserKeyInBand({
+          session,
+          spaceId: pointer.spaceId,
           accountDid,
-          epochId: latestEpochId,
+          userKey: adopted,
+          latestEpochId,
           descriptor: read
         })
-        await persistClientKeys?.({ userKey: adopted })
-        await swapSessionVaultKeys({ session, userKey: adopted })
-      }
     })
   return { userKey: convergedUserKey, rosterDescriptor: convergedDescriptor }
 }
@@ -861,7 +868,7 @@ async function sessionFromKeyringHit({
   const clientKeys = found.clientKeys ?? enrolled!.clientKeys
   const persistClientKeys =
     enrolled?.persistClientKeys ?? found.persistClientKeys
-  const { session, userExists } = await initSessionFromSeed({
+  const { session, userExists, rosterRead } = await initSessionFromSeed({
     seed: clientKeys.clientSeed,
     userKey: clientKeys.userKey,
     webvhUpdateKeys: clientKeys.webvhUpdateKeys,
@@ -936,6 +943,89 @@ async function sessionFromKeyringHit({
     }
   }
 
+  // Every registry pass below is chained behind the login's user key sweep,
+  // not merely behind provisioning: the sweep's roster convergence may
+  // rotate the user key and re-seal the registry to the fresh one, and a
+  // registry read-modify-write racing that re-seal would rewrite the record
+  // under the pre-rotation keys and undo it within one login. The sweep
+  // promise never rejects (it resolves null on failure), so this only
+  // orders the two, and a session with no sweep chains behind nothing.
+  if (session.storageReady) {
+    session.storageReady = session.storageReady.then(
+      async () => void (await session.userKeySweep)
+    )
+  }
+
+  // The re-seal repair: an unlock-methods registry left sealed to a
+  // superseded user key generation (a rotation whose in-band re-seal was
+  // lost) is re-opened from this login's roster escrow and re-sealed to the
+  // current key. First in the chain, because every registry writer below
+  // reads the record: a stale seal would make each of them warn and skip on
+  // a registry this same login can mend. Gated on the login's roster read
+  // having succeeded -- that read is where the superseded generations come
+  // from. Best-effort behind provisioning.
+  if (session.storageReady && !remoteDirectStorage && rosterRead) {
+    const loginRosterRead = rosterRead
+    session.storageReady = session.storageReady.then(async () => {
+      try {
+        await repairStaleUnlockRegistrySeal({
+          session,
+          rosterRead: loginRosterRead
+        })
+      } catch (err) {
+        console.warn(
+          'Could not repair the unlock-methods registry seal; the next ' +
+            'login retries:',
+          err
+        )
+      }
+    })
+  }
+
+  // The torn-retirement repair: a passphrase change whose retirement
+  // failed at its document edit leaves the registry's passphrase entry
+  // naming the OLD credential's standing configuration under the new unlock Space, and
+  // nothing else can find that credential (the roster sweep only rotates
+  // away recipients the document does not back). This login retires it and
+  // records its own standing configuration. Ordered ahead of the ladder-rung refresh below,
+  // which would otherwise overwrite the entry's recorded rung -- the very
+  // anchor the retirement attributes by. Best-effort behind provisioning.
+  if (session.storageReady && !remoteDirectStorage) {
+    session.storageReady = session.storageReady.then(async () => {
+      try {
+        await repairTornPassphraseRetirement({ session, found })
+      } catch (err) {
+        console.warn(
+          'Could not finish the pending passphrase retirement; the next ' +
+            'login retries:',
+          err
+        )
+      }
+    })
+  }
+
+  // FW-298's bare-entry repair goes here, between the torn-retirement repair
+  // and the backfill: it settles a registry entry's standing identity, which
+  // the backfill's refresh write must not run ahead of.
+
+  // The registry backfill: the passphrase entry's unlock Space and
+  // management zcap, recorded from this full session without a second
+  // passphrase prompt. It covers the passkey login too (the shared tail),
+  // and runs after the two repairs above, whose writes settle which
+  // credential the entry names -- the backfill only refreshes fields on it.
+  // An existing registry not yet materialized stays that way (no
+  // `createIfMissing`). The remote-direct popup is excluded, as it always
+  // was; a transient session has no `storageReady` and so no backfill, which
+  // is the durable-only rule the registry lives under.
+  if (session.storageReady && !remoteDirectStorage) {
+    session.storageReady = session.storageReady.then(async () => {
+      try {
+        await backfillPassphraseUnlockMethod({ session })
+      } catch (err) {
+        console.warn('Could not backfill the unlock-methods registry:', err)
+      }
+    })
+  }
   // The standing-delegation self-refresh: a standing credential's own login
   // re-mints its bridge delegation -- and the annex-Space sibling, where
   // the record carries one -- when either is stale on either axis: expired
@@ -1053,28 +1143,6 @@ async function sessionFromKeyringHit({
         console.warn(
           'Could not refresh the expiring standing delegations; the ' +
             'next login retries:',
-          err
-        )
-      }
-    })
-  }
-
-  // The torn-retirement repair: a passphrase change whose retirement
-  // failed at its document edit leaves the registry's passphrase entry
-  // naming the OLD credential's standing configuration under the new unlock Space, and
-  // nothing else can find that credential (the roster sweep only rotates
-  // away recipients the document does not back). This login retires it and
-  // records its own standing configuration. Ordered ahead of the ladder-rung refresh below,
-  // which would otherwise overwrite the entry's recorded rung -- the very
-  // anchor the retirement attributes by. Best-effort behind provisioning.
-  if (session.storageReady && !remoteDirectStorage) {
-    session.storageReady = session.storageReady.then(async () => {
-      try {
-        await repairTornPassphraseRetirement({ session, found })
-      } catch (err) {
-        console.warn(
-          'Could not finish the pending passphrase retirement; the next ' +
-            'login retries:',
           err
         )
       }

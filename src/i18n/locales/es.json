@@ -123,6 +123,7 @@
     "passkeyRetryConfirm": "Continuar",
     "passkeyRetryCancel": "Cancelar",
     "passkeyLoadError": "No se pudieron cargar sus llaves de acceso. Es posible que algunas acciones no estén disponibles.",
+    "passkeyRegistryStaleSeal": "Su lista de métodos de desbloqueo está sellada con una clave anterior. Se repara automáticamente en el próximo inicio de sesión desde este navegador.",
     "passkeyNameLabel": "Nombre de la llave de acceso",
     "passkeyLabelSaved": "Nombre de la llave de acceso guardado.",
     "passkeyCreatedOn": "Agregada el {{date}}",

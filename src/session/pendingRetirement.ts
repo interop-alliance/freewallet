@@ -120,6 +120,10 @@ export async function repairTornPassphraseRetirement({
       verb: 'finishing a passphrase change'
     })
     if (outcome?.rotated && outcome.userKey) {
+      // Already adopted in band by the retirement's roster tail, so this
+      // returns on its id guard; it retries the registry re-seal only when
+      // that in-band step failed and left the session on the pre-rotation
+      // keys.
       await adoptRotatedUserKey({
         session,
         spaceId:
@@ -128,8 +132,9 @@ export async function repairTornPassphraseRetirement({
       })
     }
   }
-  // The entry now records the login credential's own standing configuration. The registry is
-  // re-read because the adoption above re-sealed it to the rotated user key.
+  // The entry now records the login credential's own standing configuration.
+  // The registry is re-read because the retirement re-sealed it to the
+  // rotated user key (in band, or on the retry above).
   const current = await getUnlockMethods({ session })
   if (!current) {
     return

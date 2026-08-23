@@ -358,6 +358,41 @@ describe('the preconditions gate', () => {
   })
 })
 
+describe('the cascade, torn in the collection fan-out', () => {
+  it('has already re-sealed the registry when the fan-out dies', async () => {
+    // The tear FW-296 closes: the cascade's roster tail adopted the fresh
+    // user key -- which persists it into this browser's client-key record,
+    // destroying the durable copy of the old one -- and then the collection
+    // fan-out died. The registry must already be sealed to the fresh key by
+    // then, or nothing anywhere could ever open it again.
+    vi.mocked(revokeAccountClient).mockImplementation(async options => {
+      state.calls.push('revokeAccountClient')
+      await options.onUserKeyAdopted?.({
+        userKey: FRESH_USER_KEY,
+        latestEpochId: FRESH_USER_KEY.id,
+        descriptor: ROSTER_DESCRIPTOR as never
+      })
+      throw new Error('the tab closed during the collection fan-out')
+    })
+
+    await expect(
+      revokeEnrolledClient({ session: sessionWith(), client: REVOKED })
+    ).rejects.toThrow('the tab closed')
+
+    expect(state.calls).toEqual([
+      'loadUserKeyEpochPin',
+      'revokeAccountClient',
+      'rewrapUnlockMethodsRecord',
+      'savePinFromDescriptor',
+      'persistClientKeys',
+      'adoptRotatedVaultKeys'
+    ])
+    expect(state.calls.indexOf('rewrapUnlockMethodsRecord')).toBeLessThan(
+      state.calls.indexOf('persistClientKeys')
+    )
+  })
+})
+
 describe('the cascade, rotated path', () => {
   it('runs the wallet-side stages in dependency order and reports the outcome', async () => {
     const session = sessionWith()
@@ -370,12 +405,16 @@ describe('the cascade, rotated path', () => {
     expect(state.calls).toEqual([
       'loadUserKeyEpochPin',
       'revokeAccountClient',
+      // The in-band adoption: the registry re-seal runs BEFORE this
+      // browser's durable copy of the pre-rotation key dies, so a run torn
+      // in the collection fan-out below leaves a registry the next login
+      // can still open.
+      'rewrapUnlockMethodsRecord',
       'savePinFromDescriptor',
       'persistClientKeys',
+      'adoptRotatedVaultKeys',
       'cascadeCollections',
       'remintRecoveryDelegations',
-      'rewrapUnlockMethodsRecord',
-      'adoptRotatedVaultKeys',
       'addHistoryClientRevoked'
     ])
     expect(outcome).toEqual({

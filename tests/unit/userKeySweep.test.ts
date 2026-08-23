@@ -25,6 +25,15 @@ vi.mock('@/app.config', async importOriginal => ({
   }
 }))
 
+// The sweep's in-band adoption re-seals the unlock-methods registry before
+// it swaps the session onto the converged key, and only swaps when that
+// re-seal reports success. This account has no registry written yet, which
+// makes the re-seal the no-op it should be here.
+vi.mock('@/stores/wasRemoteStore', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/stores/wasRemoteStore')>()),
+  getUnlockMethodsRecord: vi.fn(async () => null)
+}))
+
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
   userKeyRosterDescriptorStore: vi.fn(() => ({ isFakeRosterStore: true })),

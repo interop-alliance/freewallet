@@ -27,6 +27,7 @@ import { WrongPassphraseError } from '@/session/keyring'
 import {
   canRevokeWithoutCeremony,
   getUnlockMethods,
+  UnlockRegistryStaleSealError,
   type PasskeyUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
@@ -243,6 +244,11 @@ export function SettingsPage() {
     useState<UnlockMethodsRecord | null>(null)
   const [registryLoaded, setRegistryLoaded] = useState(false)
   const [registryLoadError, setRegistryLoadError] = useState(false)
+  // The stale-seal state is its own load error: the registry is there and
+  // intact, only sealed to a superseded user key, and the next login's
+  // re-seal repair mends it -- so it gets copy that says so rather than the
+  // generic "could not load".
+  const [registryStaleSeal, setRegistryStaleSeal] = useState(false)
   // Inline passkey-label editing: one row edits at a time, keyed by the
   // passkey's credentialId.
   const [editingCredentialId, setEditingCredentialId] = useState<string | null>(
@@ -465,12 +471,17 @@ export function SettingsPage() {
           setUnlockRegistry(record)
           setRegistryLoaded(true)
           setRegistryLoadError(false)
+          setRegistryStaleSeal(false)
         }
       } catch (err) {
         console.error('Could not load the unlock methods:', err)
         if (!cancelled) {
           setRegistryLoaded(true)
           setRegistryLoadError(true)
+          setRegistryStaleSeal(
+            err instanceof UnlockRegistryStaleSealError ||
+              (err as { name?: string }).name === 'UnlockRegistryStaleSealError'
+          )
         }
       }
     }
@@ -820,7 +831,9 @@ export function SettingsPage() {
                 <Stack sx={{ gap: 2, mt: 1, alignItems: 'flex-start' }}>
                   {registryLoadError && (
                     <Alert severity="warning" sx={{ alignSelf: 'stretch' }}>
-                      {t('settings.passkeyLoadError')}
+                      {registryStaleSeal
+                        ? t('settings.passkeyRegistryStaleSeal')
+                        : t('settings.passkeyLoadError')}
                     </Alert>
                   )}
                   {passkeyEntries.length > 0 && (

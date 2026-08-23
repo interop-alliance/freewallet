@@ -160,7 +160,7 @@ import {
   verifiedAccountLog
 } from '@/session/verifiedLog'
 import {
-  adoptRotatedUserKey,
+  adoptRotatedUserKeyInBand,
   rewrapUnlockRegistryToUserKey
 } from '@/session/userKeyAdoption'
 import {
@@ -1013,6 +1013,24 @@ export async function recoverAccountWithCode({
     idb
   })
 
+  // Re-seal the unlock-methods registry to the rotated user key: its record is a
+  // single-recipient envelope to the vault KAK, and the post-login registry
+  // update (`recordRecoveryOutcome`) runs on the new-user key session. Ahead
+  // of the collection cascade below, which is the long stage a torn visit
+  // dies in: the spent code is the only holder of the pre-rotation key left,
+  // so a re-seal deferred past it would strand the registry. Best-effort: a
+  // failure leaves the registry sealed to the old user key, which the next
+  // login's re-seal repair mends from the roster escrow.
+  if (oldUserKey.id !== newUserKey.id) {
+    await rewrapUnlockRegistryToUserKey({
+      storageServerUrl: pointer.host,
+      zcapClient: newZcapClient,
+      spaceId: pointer.spaceId,
+      from: userKeyVaultKeys({ userKey: oldUserKey }),
+      to: userKeyVaultKeys({ userKey: newUserKey })
+    })
+  }
+
   // The epoch cascade: every encrypted collection takes a fresh epoch naming
   // the rotated user key, the spent code's generation retired, history escrowed --
   // so new writes are sealed away from the spent code, not just future
@@ -1025,21 +1043,6 @@ export async function recoverAccountWithCode({
     clientKeyAgreementKey: newClientAgents.keyAgreementKey,
     userKey: newUserKey
   })
-
-  // Re-seal the unlock-methods registry to the rotated user key: its record is a
-  // single-recipient envelope to the vault KAK, and the post-login registry
-  // update (`recordRecoveryOutcome`) runs on the new-user key session. Best-effort:
-  // a failure leaves the registry sealed to the old user key, which the post-login
-  // update then surfaces as a warning.
-  if (oldUserKey.id !== newUserKey.id) {
-    await rewrapUnlockRegistryToUserKey({
-      storageServerUrl: pointer.host,
-      zcapClient: newZcapClient,
-      spaceId: pointer.spaceId,
-      from: userKeyVaultKeys({ userKey: oldUserKey }),
-      to: userKeyVaultKeys({ userKey: newUserKey })
-    })
-  }
 
   // Retire the spent code's unlock Space -- a typed code is a spent
   // credential. Best-effort: its inventory is already out of the document and
@@ -1776,47 +1779,44 @@ export async function revokeRecoveryCode({
     clientKeyAgreementKey,
     pinnedEpochId: await epochPins.load({ accountDid: pointer.did })
   })
-  let rotatedUserKey: UserKey | undefined
   if (read) {
-    await epochPins.saveFromDescriptor({
-      accountDid: pointer.did,
-      epochId: read.latestEpochId,
-      descriptor: read.descriptor
-    })
     if (read.rotated) {
-      // Persist the rotated user key for the next login, then re-epoch every
-      // encrypted collection onto it (best-effort per collection; the
-      // completion sweep backstops a partial run).
-      rotatedUserKey = read.userKey
-      await session.profile.persistClientKeys?.({ userKey: read.userKey })
+      // The in-band adoption: the registry is re-sealed to the rotated key
+      // while this browser's durable copy of the old one still exists, the
+      // key and the epoch pin persist, and the live session swaps onto both
+      // -- all before the long collection fan-out below, so a tab death in
+      // it cannot strand the registry. Then re-epoch every encrypted
+      // collection (best-effort per collection; the completion sweep
+      // backstops a partial run).
+      await adoptRotatedUserKeyInBand({
+        session,
+        spaceId: pointer.spaceId,
+        accountDid: pointer.did,
+        userKey: read.userKey,
+        latestEpochId: read.latestEpochId,
+        descriptor: read.descriptor
+      })
       await cascadeCollectionsToUserKey({
         remoteStore,
         rosterDescriptor: read.descriptor,
         clientKeyAgreementKey,
         userKey: read.userKey
       })
+    } else {
+      await epochPins.saveFromDescriptor({
+        accountDid: pointer.did,
+        epochId: read.latestEpochId,
+        descriptor: read.descriptor
+      })
     }
   }
 
   // 3. The unlock Space and the registry entry -- the shared tap-free
   // revocation path (the entry's management zcap, invoked with this
-  // client's did:key). Still under the OLD vault keys, so the registry
-  // reads/writes decrypt the stored record.
+  // client's did:key). Under the ROTATED vault keys: the adoption above
+  // re-sealed the stored record to them and swapped the live session onto
+  // them, so these reads and writes decrypt and re-seal under one key.
   await revokeUnlockMethod({ session, entry, idb })
-
-  // 4. Re-seal the registry to the rotated user key (step 3's write went out
-  // under the old vault KAK), then adopt the rotation in the live session:
-  // profile vault keys swapped and the storage ciphers rebuilt, so this
-  // session keeps reading and writing the re-epoch'd collections without a
-  // re-login. Best-effort: a failed re-seal leaves the registry sealed to
-  // the old user key, which the next login surfaces as a warning.
-  if (rotatedUserKey) {
-    await adoptRotatedUserKey({
-      session,
-      spaceId: pointer.spaceId,
-      userKey: rotatedUserKey
-    })
-  }
 }
 
 /**

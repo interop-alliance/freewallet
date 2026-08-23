@@ -863,7 +863,13 @@ describe('the ladder-seed settlement (the login seed with no retired seed in han
       reason: 'no-ladder-seed'
     })
     expect(ceremonyLadderSeed).toBeUndefined()
-    expect(warn).toHaveBeenCalledOnce()
+    // The attribution warn specifically: the in-band adoption warns too on
+    // this fixture's storage-less session.
+    expect(
+      warn.mock.calls.filter(call =>
+        String(call[0]).includes('ladder could not be placed')
+      )
+    ).toHaveLength(1)
     warn.mockRestore()
   })
 

@@ -792,6 +792,30 @@ url>` (`src/pages/external/ExternalRequestPage.tsx`): a request arriving
   it previously needed a key-agreement secret the re-mint does not hold
   and silently skipped every entry. The wrap calls drop the now-dead key
   resolver argument.
+- Every user-key rotation ceremony now re-seals the unlock-methods registry
+  inside its roster tail, before the rotated key is persisted into the
+  client-key record and before the collection fan-out runs
+  (`adoptRotatedUserKeyInBand`). A tab death mid-ceremony no longer strands
+  the registry sealed to a key no durable copy holds. The login-time
+  convergence rotation gained the same duty; it previously skipped the
+  re-seal outright. A failed re-seal leaves the session on the pre-rotation
+  vault keys rather than moving it onto a key the stored record is not
+  sealed to; the ceremony's post-run `adoptRotatedUserKey` retries the
+  re-seal from those keys.
+- A login-time repair mends a registry left sealed to a superseded user key
+  generation: on a login whose roster read succeeded, a registry that fails
+  to decrypt under the current vault keys is re-opened with a prior
+  generation unwrapped from the roster escrow and re-sealed to the current
+  key (`repairStaleUnlockRegistrySeal`).
+- The login-time registry passes -- the re-seal repair, the torn-retirement
+  repair, the backfill, the standing-delegation refresh, and the rung
+  refresh -- now run in that order on one promise chain behind storage
+  provisioning and the login's user key sweep, instead of the backfill
+  firing separately from the login pages and the sweep's own re-seal racing
+  them.
+- Settings names a registry left sealed to a superseded key with its own
+  copy instead of the generic "could not load" message
+  (`UnlockRegistryStaleSealError`). en + es.
 
 ## 0.38.0 - 2026-08-14
 

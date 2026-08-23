@@ -66,6 +66,7 @@ import {
 } from '@/session/credentialRotation'
 import { userKeyVaultKeys, type UserKey } from '@interop/wallet-core/keys'
 import {
+  RecordEnvelopeDecryptError,
   unwrapRecordEnvelope,
   wrapRecordEnvelope
 } from '@/session/recordEnvelope'
@@ -322,6 +323,25 @@ async function unwrapRecord({
 }
 
 /**
+ * The stored registry exists but does not decrypt under this session's vault
+ * keys -- it is still sealed to a superseded user key generation, the residue
+ * of a rotation whose re-seal was lost. Distinct from every other refusal:
+ * a frame or version refusal says the record is not one this client reads,
+ * while this one says the record is ours and the key is not. The login-time
+ * re-seal repair (`src/session/registryReseal.ts`) mends it from the roster
+ * escrow; Settings names the state meanwhile.
+ */
+export class UnlockRegistryStaleSealError extends Error {
+  constructor(options?: { cause?: unknown }) {
+    super(
+      'The unlock-methods registry is sealed to a superseded user key.',
+      options
+    )
+    this.name = 'UnlockRegistryStaleSealError'
+  }
+}
+
+/**
  * A fresh, empty unlock-methods registry: one wallet-wide user handle and no
  * methods yet. The registry's shape is minted here alone, so every path that
  * writes it first (a passkey enrollment, a recovery-code issuance, a
@@ -346,9 +366,17 @@ export function emptyUnlockMethodsRegistry(): UnlockMethodsRecord {
  * a hit, and drops the cache on a 404-shaped miss. A remote read failure
  * rethrows. With no WAS server the cache is the only copy.
  *
+ * A served record that does not decrypt under this session's vault keys is a
+ * stale seal, not a missing registry: it throws
+ * `UnlockRegistryStaleSealError` rather than resolving `null`, so no caller
+ * can mistake it for "no methods registered" and clobber the record. Every
+ * other refusal (a frame or version mismatch) rethrows unchanged -- a
+ * version bump is not a seal problem.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @returns {Promise<UnlockMethodsRecord | null>}
+ * @throws {UnlockRegistryStaleSealError}
  */
 export async function getUnlockMethods({
   session
@@ -386,7 +414,15 @@ export async function getUnlockMethods({
     await unlockMethodsCache.delete({ controller })
     return null
   }
-  const parsed = await unwrapRecord({ record, keyAgreementKey, keyResolver })
+  let parsed: UnlockMethodsRecord
+  try {
+    parsed = await unwrapRecord({ record, keyAgreementKey, keyResolver })
+  } catch (err) {
+    if (err instanceof RecordEnvelopeDecryptError) {
+      throw new UnlockRegistryStaleSealError({ cause: err })
+    }
+    throw err
+  }
   await unlockMethodsCache.save({ controller, record })
   return parsed
 }
@@ -743,8 +779,10 @@ export async function revokeUnlockMethod({
   // A standing passphrase or passkey is retired for real: its document
   // inventory out, the user key rotated off its roster wrap, every encrypted
   // collection re-epoch'd. Run BEFORE the Space delete and the registry drop
-  // below, which still go out under the pre-rotation vault keys. A
-  // recovery-code entry has already rotated in its own ceremony.
+  // below, which then go out under the ROTATED vault keys: the retirement
+  // adopts the fresh key in band (re-sealing the stored record to it and
+  // swapping the live session onto it), so the drop reads and re-seals under
+  // one key. A recovery-code entry has already rotated in its own ceremony.
   const rotation =
     entry.type === 'passphrase' || entry.type === 'passkey'
       ? await rotateOffUnlockCredential({ session, method: entry, verb })

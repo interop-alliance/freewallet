@@ -256,10 +256,20 @@ removed. The stage is best-effort and reports itself on the outcome's
 roster-and-cascade tail the client revocation runs --
 the user key rotates off the credential's wrap (pairing-free convergence
 onto the post-edit document) and every encrypted collection re-epochs onto
-the fresh key. The callers then tear down the registry entry and the old
-unlock Space under the pre-rotation vault keys and adopt the rotated key in
-place (`adoptRotatedUserKey`: registry re-seal, profile vault keys, storage
-ciphers), the `revokeRecoveryCode` ordering. The document-removal-first
+the fresh key. Inside that tail's `onUserKeyAdopted` step the unlock-methods
+registry is re-sealed to the rotated key in band, before the rotated key
+persists into the client-key record (`adoptRotatedUserKeyInBand` in
+`src/session/userKeyAdoption.ts`) -- the re-seal needs this browser's
+durable copy of the OLD key, and persisting the rotated one is what destroys
+it on a single-client account, so a run torn anywhere after this step still
+leaves a registry the surviving keys open. The callers then tear down the
+registry entry and the old unlock Space, now under the ROTATED vault keys,
+and adopt the rotated key into the live session's storage ciphers
+(`adoptRotatedUserKey`, which returns on its id guard once the tail has
+re-sealed and swapped, and retries the re-seal in the one case the tail
+leaves open -- a failed re-seal, where the session deliberately stays on
+the pre-rotation keys rather than meeting a stale seal on its own
+teardown writes), the `revokeRecoveryCode` ordering. The document-removal-first
 order is load-bearing: a run torn anywhere after it leaves the roster
 keying a recipient the document no longer backs, exactly what the
 login-time sweep detects and finishes. The honest limitation is the
@@ -291,6 +301,29 @@ Space delete failed logs in after a change that completed elsewhere. When
 the named credential is already out of the document -- the retirement landed
 and only the registry write was lost -- only the entry is rewritten, and the
 roster and cascade residue is the ordinary login sweep's.
+
+A registry left sealed to a superseded user key -- a rotation whose in-band
+re-seal above was itself torn, or one run by a client from before that
+duty existed -- gets its own login-time repair
+(`repairStaleUnlockRegistrySeal` in `src/session/registryReseal.ts`): a
+served record that fails to decrypt under the current vault keys throws
+`UnlockRegistryStaleSealError` rather than reading as absent, and the repair
+tries each prior user key generation the roster still escrows, newest
+first, until one opens the record, then re-seals it to the current key.
+Best-effort and read-only when nothing is stale: a registry that opens
+under the current key costs one read. Settings shows the state with its own
+copy rather than the generic load error while it stands.
+
+At login the two repairs above, the registry backfill, the
+standing-delegation self-refresh, and the ladder-rung refresh all run on
+one ordered promise chain behind storage provisioning AND behind the
+login's user key sweep, with the re-seal repair first -- every registry
+writer downstream reads the record, and a stale seal would make each of
+them warn and skip on a registry this same login can mend. The sweep is in
+the chain because its roster convergence may rotate the key and re-seal
+the registry: a registry read-modify-write racing that re-seal would
+rewrite the record under the pre-rotation keys and undo it within one
+login.
 
 The `Session` object is stored in the Zustand
 `authStore`; it is **in-memory only** (the passphrase is never persisted), so
@@ -1910,7 +1943,7 @@ finished (see Tear mending in the Glossary).
 | Recovery-code issuance                  | Settings > Recovery codes            | `src/session/recovery.ts`                 | `/recovery`            | re-run (nothing binds until the confirm)                          |
 | Recovery spend (durable and transient)  | `/recover`                           | `src/session/recovery.ts`                 | `/recovery`, `/clientAnnex` | re-run; the transient variant's roster-append repair is not built yet |
 | Recovery-code revocation                | Settings > Recovery codes            | `src/session/recovery.ts`                 | `/recovery`            | re-run; cascade-completion sweep                                  |
-| Unlock-credential rotation              | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts` | `/unlock`            | torn-retirement repair at the next passphrase login; login sweep  |
+| Unlock-credential rotation              | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts` | `/unlock`            | torn-retirement repair at the next passphrase login; login sweep; re-seal repair for a torn registry re-seal |
 | Forget ceremony                         | Settings > Connected wallets, own row | `src/session/forget.ts`                  | `/clientAnnex`         | re-run (wipe last); forgotten-browser detector at the next login  |
 | Last-client transition                  | same row, `lastClient` confirm       | `src/session/forget.ts`                   | `/clientAnnex`         | re-run; the record re-mint refusal is a retryable stop            |
 | Update-key rotation                     | Settings                             | `src/session/accountSettings.ts`          | `/webvh`               | re-run (persist-before-publish)                                   |

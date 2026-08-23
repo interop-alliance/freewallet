@@ -317,6 +317,10 @@ export async function changeAccountPassphrase({
     })
     if (outcome?.rotated && outcome.userKey) {
       rotation = 'rotated'
+      // The retirement re-sealed the registry to the fresh key in band and
+      // swapped the session onto it, so this returns on its id guard; it
+      // retries the re-seal only when that in-band step failed and left the
+      // session on the pre-rotation keys.
       await adoptRotatedUserKey({
         session,
         spaceId: rotationSpaceId({ session }),
@@ -732,9 +736,12 @@ export async function removeAccountPasskey({
   const outcome = canRevokeWithoutCeremony(entry)
     ? await revokeUnlockMethod({ session, entry, verb })
     : await revokeUnlockMethodByCeremony({ session, entry, verb })
-  // The registry teardown above ran under the pre-rotation vault keys, so the
-  // live session adopts the fresh key only now (the adoption re-seals the
-  // registry to it). Internally best-effort.
+  // The retirement adopted the fresh key in band -- re-sealing the registry
+  // to it before the teardown above, which therefore ran under the same keys
+  // as the record. This call returns on its id guard when that landed, and
+  // retries the re-seal (then swaps) when it did not, which is the one case
+  // that leaves the session on the pre-rotation keys. Internally
+  // best-effort.
   if (outcome?.rotated && outcome.userKey) {
     await adoptRotatedUserKey({
       session,

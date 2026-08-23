@@ -138,9 +138,9 @@ vi.mock('@/session/userKeyCascade', () => ({
 }))
 
 vi.mock('@/session/userKeyAdoption', () => ({
-  adoptRotatedUserKey: vi.fn()
+  adoptRotatedUserKeyInBand: vi.fn()
 }))
-const { adoptRotatedUserKey } = await import('@/session/userKeyAdoption')
+const { adoptRotatedUserKeyInBand } = await import('@/session/userKeyAdoption')
 
 vi.mock('@/session/verifiedLog', () => ({
   invalidateVerifiedLog: vi.fn(),
@@ -778,8 +778,8 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     expect(options.logId).toBe(accountLogPinId({ spaceId: pointer.spaceId }))
   })
 
-  it('persists the epoch pin, the client keys, and the live session on a rotation', async () => {
-    const { session, saveFromDescriptor, persistClientKeys } = fakeSession()
+  it('adopts a rotation in band (re-seal, pin, client keys, session)', async () => {
+    const { session } = fakeSession()
     await forgetThisBrowser({ session })
     const { onUserKeyAdopted } =
       vi.mocked(forgetDurableClient).mock.calls[0]![0]
@@ -790,16 +790,16 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       latestEpochId: 'epoch-2',
       descriptor: descriptor as never
     })
-    expect(saveFromDescriptor).toHaveBeenCalledWith({
-      accountDid: pointer.did,
-      epochId: 'epoch-2',
-      descriptor
-    })
-    expect(persistClientKeys).toHaveBeenCalledWith({ userKey })
-    expect(vi.mocked(adoptRotatedUserKey)).toHaveBeenCalledWith({
+    // The whole adoption is the in-band helper's: the registry re-seal runs
+    // ahead of the client-key record write inside it, so the callback here
+    // does nothing else.
+    expect(vi.mocked(adoptRotatedUserKeyInBand)).toHaveBeenCalledWith({
       session,
       spaceId: pointer.spaceId,
-      userKey
+      accountDid: pointer.did,
+      userKey,
+      latestEpochId: 'epoch-2',
+      descriptor
     })
   })
 })

@@ -34,7 +34,10 @@ import { sessionRosterStore } from '@/session/rosterStore'
 import { getUnlockMethods } from '@/session/unlockMethods'
 import type { UnlockMethodsRecord } from '@/session/unlockMethods'
 import { requireEnrolledClientContext } from '@/session/enrolledContext'
-import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
+import {
+  adoptRotatedUserKey,
+  adoptRotatedUserKeyInBand
+} from '@/session/userKeyAdoption'
 import {
   recoveryEntriesOf,
   remintRecoveryDelegations
@@ -178,16 +181,18 @@ export async function revokeEnrolledClient({
     ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
     clientKeyAgreementKey,
     pinnedEpochId,
-    onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) => {
-      // The user key and the epoch pin persist together: the pin must never advance
-      // without the key that authenticated the roster it advanced to.
-      await epochPins.saveFromDescriptor({
+    onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) =>
+      // The in-band adoption: the registry is re-sealed to the rotated key
+      // BEFORE this browser's durable copy of the old one dies, so a tab
+      // death during the collection fan-out below cannot strand it.
+      await adoptRotatedUserKeyInBand({
+        session,
+        spaceId: pointer.spaceId,
         accountDid: pointer.did,
-        epochId: latestEpochId,
+        userKey,
+        latestEpochId,
         descriptor
-      })
-      await session.profile.persistClientKeys?.({ userKey })
-    },
+      }),
     collections: cascadeCollections({ remoteStore }),
     remintRecoveryDelegations: async ({ document }) =>
       await remintRecoveryDelegations({
@@ -197,6 +202,11 @@ export async function revokeEnrolledClient({
       }),
     remintGenerationDelegation: async ({ document }) =>
       await remintGenerationDelegation({ session, document }),
+    // The re-seal retry. On the ordinary path the in-band callback above
+    // already re-sealed and swapped, and this returns on its id guard. It
+    // does real work in exactly one case: an in-band re-seal that failed
+    // left the session on the pre-rotation keys, and this retries the
+    // re-seal from them before swapping.
     onRotationAdopted: async ({ userKey }) =>
       await adoptRotatedUserKey({ session, spaceId: pointer.spaceId, userKey })
   }).finally(() => invalidateVerifiedLog({ profile: session.profile }))

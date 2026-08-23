@@ -16,10 +16,12 @@
  * backs -- exactly the state the login-time completion sweep detects and
  * finishes -- so a torn ceremony converges rather than stranding the account.
  *
- * The caller adopts the rotated key in the live session
- * (`adoptRotatedUserKey`) rather than this module: both call sites sequence
- * their own registry teardown under the OLD vault keys first, so the adoption
- * has to run after they are done, not inside the ceremony.
+ * The rotated key is adopted in band, inside the roster tail's
+ * `onUserKeyAdopted`: the unlock-methods registry is re-sealed to it while
+ * this browser's durable copy of the pre-rotation key still exists, and the
+ * live session swaps onto it in the same step, so the callers' registry
+ * teardown writes afterwards go out under the key the record now carries.
+ * Their post-ceremony `adoptRotatedUserKey` call is then a no-op.
  *
  * The honest limitation is the cascade's: ciphertext the credential's holder
  * already fetched stays readable to them, and old epochs stay open to the
@@ -44,6 +46,7 @@ import type { Session } from '@/types/auth'
 import { clientAnnexReachFor } from '@/session/annexReach'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import { sessionRosterStore } from '@/session/rosterStore'
+import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import {
   cascadeCollections,
   type UserKeyCascadeResult
@@ -182,16 +185,20 @@ export async function rotateOffUnlockCredential({
     ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
     clientKeyAgreementKey,
     pinnedEpochId,
-    onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) => {
-      // The user key and the epoch pin persist together: the pin must never
-      // advance without the key that authenticated the roster it advanced to.
-      await epochPins.saveFromDescriptor({
+    onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) =>
+      // The in-band adoption: the registry is re-sealed to the rotated key
+      // BEFORE this browser's durable copy of the old one dies, so a tab
+      // death during the collection fan-out below cannot strand it. The live
+      // session swaps onto the key too, so the caller's registry teardown
+      // writes go out under the key the record is now sealed to.
+      await adoptRotatedUserKeyInBand({
+        session,
+        spaceId: pointer.spaceId,
         accountDid: pointer.did,
-        epochId: latestEpochId,
+        userKey,
+        latestEpochId,
         descriptor
-      })
-      await session.profile.persistClientKeys?.({ userKey })
-    },
+      }),
     collections: cascadeCollections({ remoteStore }),
     retireClientAnnexInventory: async ({ document }) => {
       // The document edit has landed: this closure runs only once
