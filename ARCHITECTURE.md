@@ -346,16 +346,32 @@ Best-effort and read-only when nothing is stale: a registry that opens
 under the current key costs one read. Settings shows the state with its own
 copy rather than the generic load error while it stands.
 
-At login the two repairs above, the registry backfill, the
-standing-delegation self-refresh, and the ladder-rung refresh all run on
-one ordered promise chain behind storage provisioning AND behind the
-login's user key sweep, with the re-seal repair first -- every registry
-writer downstream reads the record, and a stale seal would make each of
-them warn and skip on a registry this same login can mend. The sweep is in
-the chain because its roster convergence may rotate the key and re-seal
-the registry: a registry read-modify-write racing that re-seal would
-rewrite the record under the pre-rotation keys and undo it within one
-login. Every registry PUT is also a compare-and-swap on the ETag of the
+At login, the user key sweep, the re-seal repair, the torn-retirement
+repair, the bare-passkey rebuild, the registry
+backfill, the standing-delegation self-refresh, the ladder-rung refresh,
+the did:webvh pointer heal, and the generation-delegation self-heal all run
+on one ordered promise chain (the annex GC sweep forks off its tail), with
+the re-seal repair first among the registry passes -- every registry writer downstream reads the
+record, and a stale seal would make each of them warn and skip on a
+registry this same login can mend. The sweep is early in the chain because
+its roster convergence may rotate the key and re-seal the registry: a
+registry read-modify-write racing that re-seal would rewrite the record
+under the pre-rotation keys and undo it within one login.
+
+Navigation to the dashboard waits only on storage provisioning
+(`session.storageReady`); the chain above runs after navigation, on a
+separate `session.registryReady` promise that never rejects -- a stage
+that fails is logged and skipped rather than surfacing to the login page.
+A Settings-entered ceremony that writes the unlock-methods registry --
+passphrase change, passphrase or passkey add, rename, or remove, account
+deletion, client disconnect, the forget ceremony, recovery-code issuance
+and revocation -- awaits `session.registryReady` at its own entry rather
+than racing the chain's writes; so does update-key rotation, which writes
+the same client-key record the sweep's adoption stage writes, and so do
+the Settings registry load and the recovery-codes health check. When
+storage provisioning itself fails the session is abandoned by the login
+page and the chain never runs, but `registryReady` still settles. Every
+registry PUT is also a compare-and-swap on the ETag of the
 fresh read it was based on, with a bounded re-read retry on a lost race --
 so a concurrent writer the ordered chain cannot serialize (another tab,
 another client) conflicts and re-applies on the fresh record instead of
@@ -752,7 +768,11 @@ client-key record, under the unlock layer), so there is no refresh-survival:
 reloading the browser drops
 the session and the user logs in again. The vault is
 therefore always unlocked while a session exists (the KAK is present) and
-simply gone once it ends; there is no "locked vault" state.
+simply gone once it ends; there is no "locked vault" state. What gates
+navigation to the dashboard is storage provisioning alone
+(`session.storageReady`); the login-time registry passes -- the user key
+sweep, its repairs, the registry backfill, and the self-heals -- run
+afterward on `session.registryReady` (see "Session & auth flow").
 
 **The durability seam** (`src/session/persistence.ts`): what a session may write
 to LOCAL durable storage is decided once, at login, by the typed
@@ -1323,9 +1343,17 @@ the server still gates the query endpoint on the pull grant, and the
 content keys rotate as described above.
 
 The standing backstop is the **cascade-completion sweep**: session creation
-re-runs stages 2 and 3 in the background on every login whose roster read
-succeeded, chained behind collection provisioning and exposed as
-`session.userKeySweep` (best-effort -- a failed sweep never fails the login).
+re-runs stages 2 and 3 on every login whose roster read succeeded, chained
+behind collection provisioning as the first stage of the login-time promise
+chain exposed as `session.registryReady` (best-effort -- a failed sweep is
+logged and skipped, never fails the login). That chain runs after the
+dashboard has already rendered (see "Session & auth flow"), so a write made
+in the navigation window before the sweep finishes -- a Login activity, an
+import -- can seal under an epoch a disconnect's rotation has not yet
+caught up to, readable by a client the revoke already removed from the
+document. The window predates the release that briefly closed it by folding the
+chain into what navigation awaited; whether to hold such writes until
+the sweep completes is an open decision, tracked separately.
 The roster stage runs first (`convergeUserKeyRosterToDocument`): a cascade torn
 between its document edit and its rotation leaves the roster wrapping the
 CURRENT key to a recipient the locally verified document no longer keys --

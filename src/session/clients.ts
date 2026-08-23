@@ -200,6 +200,10 @@ export async function disconnectAccountClient({
   client: AccountClientView
 }): Promise<RevocationOutcome> {
   const { remoteStore } = requireClientListing(session)
+  // Wait out the login-time registry passes rather than racing their
+  // read-modify-writes (the cascade re-wraps the registry); on a settled
+  // session the chain resolved long ago.
+  await session.registryReady
   const outcome = await revokeEnrolledClient({
     session,
     client: revokedClientKeysFor({ client }),

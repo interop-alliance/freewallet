@@ -355,6 +355,8 @@ export function WalletGetPage() {
       // them and a provisioning failure surfaces here rather than as an
       // unhandled rejection. In a pathological half-provisioned state the
       // concurrent read can surface an error here -- an accepted trade-off.
+      // The background chain (on `session.registryReady`, just the user-key
+      // sweep fold in remote-direct mode) is deliberately not waited on.
       await loggedIn.storage.ready()
       const [, stored] = await Promise.all([
         loggedIn.storageReady,

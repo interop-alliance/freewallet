@@ -295,6 +295,11 @@ export async function forgetThisBrowser({
     persistence: session.profile.persistence,
     ceremony: 'Forgetting this browser'
   })
+  // Wait out the login-time registry passes rather than racing their
+  // read-modify-writes (the ceremony re-seals the registry and, on the
+  // last-client transition, re-mints every entry); on a settled session
+  // the chain resolved long ago.
+  await session.registryReady
   const { remoteStore, pointer, clientWebvhKeys, keyAgent } =
     requireEnrolledClientContext({ session, action: 'Forgetting this browser' })
   const standing = session.profile.standingUnlock

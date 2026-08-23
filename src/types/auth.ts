@@ -209,10 +209,24 @@ export interface Session {
   // the session-creation seam (`initSessionFromSeed`). It is fired -- not awaited
   // -- inside session creation, so hot post-login reads (the CHAPI popup's
   // credential list) can run concurrently with provisioning; callers that need
-  // provisioning finished `await session.storageReady`. Absent on the
-  // new-wallet flows (signup, guest), whose provisioning is owned by
-  // `provisionNewWallet` in a deliberate order.
+  // provisioning finished `await session.storageReady`. This is storage
+  // provisioning ALONE: the login pages may navigate once it resolves, and
+  // the login-time registry passes run after it on `registryReady` below.
+  // Absent on the new-wallet flows (signup, guest), whose provisioning is
+  // owned by `provisionNewWallet` in a deliberate order.
   storageReady?: Promise<void>
+  // The login-time pass chain: the user-key sweep fold, then the re-seal
+  // repair, the torn-retirement repair, the bare-passkey rebuild, the
+  // registry backfill, the standing-delegation refresh, the ladder-rung
+  // refresh, the did:webvh pointer heal, and the generation-delegation
+  // self-heal -- serialized in that order (the single total order among
+  // the registry writers) behind storage provisioning. Never rejects
+  // (every stage is best-effort). Navigation does not wait on it; tests
+  // and the Settings-entered ceremonies that write the unlock-methods
+  // registry await it so they cannot race the passes' read-modify-writes.
+  // Absent on transient, guest, and new-wallet sessions; on a
+  // remote-direct popup it carries only the sweep fold.
+  registryReady?: Promise<void>
   // The cascade-completion sweep fired by session creation when the login's
   // roster read succeeded and a remote store is attached: re-runs the
   // collection fan-out of the user key cascade (staleness detected from durable

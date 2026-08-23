@@ -182,13 +182,18 @@ export function RecoverPage() {
       login(session)
       recordWalletLogin({ session })
       if (remembered) {
-        // Fire-and-forget: the sequencing the registry updates need lives in
-        // `updateRegistryAfterRecovery`, and every half is best-effort. The
-        // passphrase still in hand lets it promote the fresh credential to
-        // the standing configuration (self-enrolling on the next fresh browser).
-        // The transient variant already updated the registry inside the
-        // ceremony (a transient session cannot write it later).
-        void updateRegistryAfterRecovery({ session, outcome, passphrase })
+        // Fire-and-forget behind the login-time registry chain
+        // (`session.registryReady`), so the update cannot race the chain's
+        // read-modify-writes: the sequencing the registry updates need
+        // lives in `updateRegistryAfterRecovery`, and every half is
+        // best-effort. The passphrase still in hand lets it promote the
+        // fresh credential to the standing configuration (self-enrolling
+        // on the next fresh browser). The transient variant already
+        // updated the registry inside the ceremony (a transient session
+        // cannot write it later).
+        void (session.registryReady ?? Promise.resolve()).then(() =>
+          updateRegistryAfterRecovery({ session, outcome, passphrase })
+        )
       }
       navigate('/dashboard', { replace: true })
     } catch (err) {

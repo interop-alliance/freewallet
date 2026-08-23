@@ -1,5 +1,25 @@
 # History
 
+## 0.40.0 - TBD
+
+### Changed
+
+- Login now navigates to the dashboard as soon as storage provisioning is
+  ready, instead of waiting on the full login-time registry pass chain (the
+  user key sweep, the re-seal and torn-retirement repairs, the bare-passkey
+  rebuild, the registry backfill, the standing-delegation and ladder-rung
+  self-refreshes, the did:webvh pointer heal, and the generation-delegation
+  self-heal). That chain now runs in the same order after navigation,
+  tracked by a new `session.registryReady` promise that never rejects.
+- Settings ceremonies that write the unlock-methods registry (passphrase
+  change, passphrase/passkey add, rename, and remove, account deletion,
+  client disconnect, the forget ceremony, recovery-code issuance and
+  revocation) and the update-key rotation now await `session.registryReady`
+  at entry, so they wait out the login-time passes instead of racing them.
+  The Settings registry load and recovery-codes health check do the same.
+- Measured effect at 100ms of per-request server latency: login-to-dashboard
+  time drops from about 4.4s to about 3.4s.
+
 ## 0.39.1 - TBD
 
 ### Changed

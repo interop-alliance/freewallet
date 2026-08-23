@@ -218,6 +218,9 @@ export async function changeAccountPassphrase({
     persistence: session.profile.persistence,
     ceremony: 'Changing the passphrase'
   })
+  // Wait out the login-time registry passes rather than racing their
+  // read-modify-writes; on a settled session the chain resolved long ago.
+  await session.registryReady
   const profile = session.profile
   const clientSeed = profile.clientSeed
   if (!clientSeed) {
@@ -755,6 +758,9 @@ export async function addAccountPasskey({
     persistence: session.profile.persistence,
     ceremony: 'Adding a passkey'
   })
+  // Wait out the login-time registry passes rather than racing their
+  // read-modify-writes; on a settled session the chain resolved long ago.
+  await session.registryReady
   const profile = session.profile
   const clientSeed = profile.clientSeed
   if (!clientSeed) {
@@ -889,6 +895,9 @@ export async function renameAccountPasskey({
   entry: PasskeyUnlockMethod
   label: string
 }): Promise<UnlockMethodsRecord> {
+  // Wait out the login-time registry passes rather than racing their
+  // read-modify-writes; on a settled session the chain resolved long ago.
+  await session.registryReady
   const record = await updateUnlockMethods({
     session,
     mutate: current => {
@@ -945,6 +954,9 @@ export async function removeAccountPasskey({
     persistence: session.profile.persistence,
     ceremony: 'Removing a passkey'
   })
+  // Wait out the login-time registry passes rather than racing their
+  // read-modify-writes; on a settled session the chain resolved long ago.
+  await session.registryReady
   const verb = 'removing a passkey'
   const outcome = canRevokeWithoutCeremony(entry)
     ? await revokeUnlockMethod({ session, entry, verb })
@@ -995,6 +1007,9 @@ export async function addAccountPassphrase({
     persistence: session.profile.persistence,
     ceremony: 'Adding a passphrase'
   })
+  // Wait out the login-time registry passes rather than racing their
+  // read-modify-writes; on a settled session the chain resolved long ago.
+  await session.registryReady
   const clientSeed = session.profile.clientSeed
   if (!clientSeed) {
     throw new Error('Adding a passphrase needs this client key set.')
@@ -1109,6 +1124,13 @@ export async function rotateAccountUpdateKey({
     persistence: session.profile.persistence,
     ceremony: 'Update-key rotation'
   })
+  // Not a registry writer, but a client-key-record writer: the rotation's
+  // `persistClientKeys({ webvhUpdateKeys })` load-merge-saves the same
+  // record the chain's head stage writes (the sweep's user-key adoption
+  // persist), and an interleaved save can strand `webvhUpdateKeys` behind
+  // the published log entry -- an unmendable state. Wait out the chain; on
+  // a settled session it resolved long ago.
+  await session.registryReady
   const remoteStore = session.storage.remoteStore
   const updateKeys = session.profile.clientWebvhKeys
   const persistClientKeys = session.profile.persistClientKeys
@@ -1208,6 +1230,10 @@ export async function deleteAccount({
     persistence: session.profile.persistence,
     ceremony: 'Deleting the account'
   })
+  // Wait out the login-time registry passes rather than racing their
+  // read-modify-writes (deletion walks the registry); on a settled session
+  // the chain resolved long ago, and a guest session carries no chain.
+  await session.registryReady
   const isGuest = !!session.isGuest
   // One derivation for both unlock-layer steps below (the confirmation and
   // the retirement), rather than running the 600k-iteration KDF twice.

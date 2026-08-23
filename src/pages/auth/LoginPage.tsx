@@ -153,6 +153,9 @@ export function LoginPage() {
       }
       // Session creation fired `ensureUserCollections` as `session.storageReady`;
       // wait for the collections to be provisioned/opened before proceeding.
+      // The login-time registry passes run AFTER navigation, serialized on
+      // `session.registryReady` -- navigation deliberately does not wait on
+      // them (FW-300).
       await session.storageReady
       login(session)
       recordWalletLogin({ session })
@@ -336,6 +339,9 @@ export function LoginPage() {
       }
       // Session creation fired `ensureUserCollections` as `session.storageReady`;
       // wait for the collections to be provisioned/opened before proceeding.
+      // The login-time registry passes run AFTER navigation, serialized on
+      // `session.registryReady` -- navigation deliberately does not wait on
+      // them (FW-300).
       await session.storageReady
       login(session)
       recordWalletLogin({ session })

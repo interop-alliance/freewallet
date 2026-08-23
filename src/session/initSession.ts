@@ -946,15 +946,24 @@ async function sessionFromKeyringHit({
     }
   }
 
-  // Every registry pass below is chained behind the login's user key sweep,
-  // not merely behind provisioning: the sweep's roster convergence may
-  // rotate the user key and re-seal the registry to the fresh one, and a
-  // registry read-modify-write racing that re-seal would rewrite the record
-  // under the pre-rotation keys and undo it within one login. The sweep
-  // promise never rejects (it resolves null on failure), so this only
-  // orders the two, and a session with no sweep chains behind nothing.
+  // Every registry pass below rides `session.registryReady` -- one ordered
+  // promise chain seeded behind storage provisioning, kept OFF
+  // `session.storageReady` so the login pages can navigate as soon as the
+  // collections are provisioned while the single total order among the
+  // registry writers is preserved (FW-300). The chain starts by folding in
+  // the login's user key sweep, not merely provisioning: the sweep's roster
+  // convergence may rotate the user key and re-seal the registry to the
+  // fresh one, and a registry read-modify-write racing that re-seal would
+  // rewrite the record under the pre-rotation keys and undo it within one
+  // login. The seed propagates a provisioning rejection, so every stage is
+  // skipped when provisioning itself failed -- the login page surfaces that
+  // failure and the session is abandoned, and none of the chain's registry,
+  // bridge, or promotion writes are wanted on it. The trailing catch after
+  // the last append keeps `registryReady` settling for its awaiters. The
+  // sweep promise never rejects (it resolves null on failure), so the fold
+  // only orders the two, and a session with no sweep chains behind nothing.
   if (session.storageReady) {
-    session.storageReady = session.storageReady.then(
+    session.registryReady = session.storageReady.then(
       async () => void (await session.userKeySweep)
     )
   }
@@ -967,9 +976,9 @@ async function sessionFromKeyringHit({
   // a registry this same login can mend. Gated on the login's roster read
   // having succeeded -- that read is where the superseded generations come
   // from. Best-effort behind provisioning.
-  if (session.storageReady && !remoteDirectStorage && rosterRead) {
+  if (session.registryReady && !remoteDirectStorage && rosterRead) {
     const loginRosterRead = rosterRead
-    session.storageReady = session.storageReady.then(async () => {
+    session.registryReady = session.registryReady.then(async () => {
       try {
         await repairStaleUnlockRegistrySeal({
           session,
@@ -993,8 +1002,8 @@ async function sessionFromKeyringHit({
   // records its own standing configuration. Ordered ahead of the ladder-rung refresh below,
   // which would otherwise overwrite the entry's recorded rung -- the very
   // anchor the retirement attributes by. Best-effort behind provisioning.
-  if (session.storageReady && !remoteDirectStorage) {
-    session.storageReady = session.storageReady.then(async () => {
+  if (session.registryReady && !remoteDirectStorage) {
+    session.registryReady = session.registryReady.then(async () => {
       try {
         await repairTornPassphraseRetirement({ session, found })
       } catch (err) {
@@ -1012,8 +1021,8 @@ async function sessionFromKeyringHit({
   // backfill's refresh write must not run ahead of. A passkey login is the
   // only thing that can mend its own entry -- the torn-retirement repair
   // above is a passphrase's. Best-effort behind provisioning.
-  if (session.storageReady && !remoteDirectStorage) {
-    session.storageReady = session.storageReady.then(async () => {
+  if (session.registryReady && !remoteDirectStorage) {
+    session.registryReady = session.registryReady.then(async () => {
       try {
         await rebuildBarePasskeyEntry({ session, found })
       } catch (err) {
@@ -1033,10 +1042,10 @@ async function sessionFromKeyringHit({
   // credential the entry names -- the backfill only refreshes fields on it.
   // An existing registry not yet materialized stays that way (no
   // `createIfMissing`). The remote-direct popup is excluded, as it always
-  // was; a transient session has no `storageReady` and so no backfill, which
-  // is the durable-only rule the registry lives under.
-  if (session.storageReady && !remoteDirectStorage) {
-    session.storageReady = session.storageReady.then(async () => {
+  // was; a transient session has no `registryReady` and so no backfill,
+  // which is the durable-only rule the registry lives under.
+  if (session.registryReady && !remoteDirectStorage) {
+    session.registryReady = session.registryReady.then(async () => {
       try {
         await backfillPassphraseUnlockMethod({ session })
       } catch (err) {
@@ -1063,13 +1072,13 @@ async function sessionFromKeyringHit({
   const standingKeyAgreementKeyMultibase =
     found.standingClient?.keyAgreementKeyMultibase
   if (
-    session.storageReady &&
+    session.registryReady &&
     rebindStandingRecord &&
     standingDelegation &&
     standingClientDid
   ) {
     const unlockSpaceId = found.unlockSpaceId
-    session.storageReady = session.storageReady.then(async () => {
+    session.registryReady = session.registryReady.then(async () => {
       try {
         const pointer = session.profile.accountPointer
         if (!pointer || !isWebvhDid(pointer.did)) {
@@ -1179,9 +1188,9 @@ async function sessionFromKeyringHit({
   // a stale rung only makes that attribution fail closed later, never
   // silently misattribute.
   const enrolledLadderSeed = enrolled ? ladderSeed : undefined
-  if (session.storageReady && enrolledLadderSeed) {
+  if (session.registryReady && enrolledLadderSeed) {
     const unlockSpaceId = found.unlockSpaceId
-    session.storageReady = session.storageReady.then(async () => {
+    session.registryReady = session.registryReady.then(async () => {
       try {
         const pointer = session.profile.accountPointer
         if (!pointer || !isWebvhDid(pointer.did)) {
@@ -1228,13 +1237,13 @@ async function sessionFromKeyringHit({
   // warns and the next login retries from durable state.
   const persistAccountPointer = found.persistAccountPointer
   if (
-    session.storageReady &&
+    session.registryReady &&
     persistAccountPointer &&
     found.pointer &&
     !isWebvhDid(found.pointer.did)
   ) {
     const staleServerPointer = found.pointer
-    session.storageReady = session.storageReady.then(async () => {
+    session.registryReady = session.registryReady.then(async () => {
       const did = session.profile.didWebvh?.did
       if (!did || !isWebvhDid(did)) {
         return
@@ -1265,8 +1274,8 @@ async function sessionFromKeyringHit({
   // annex rung 0; a healthy delegation is one no-op read. Best-effort: a
   // rung the generation does not commit (a credential bound mid-generation)
   // skips quietly, everything else warns and the next login retries.
-  if (session.storageReady && !remoteDirectStorage && ladderSeed) {
-    session.storageReady = session.storageReady.then(async () => {
+  if (session.registryReady && !remoteDirectStorage && ladderSeed) {
+    session.registryReady = session.registryReady.then(async () => {
       try {
         const pointer = session.profile.accountPointer
         if (!pointer || !isWebvhDid(pointer.did)) {
@@ -1302,15 +1311,15 @@ async function sessionFromKeyringHit({
   // The annex GC sweep: the quarterly generation swap (when due and the
   // pointed generation is GC-quiet) plus the collect fan-out over every
   // non-pointed `gen-` collection -- revoke, digest, delete. Chained behind
-  // the storageReady tail (so a sibling re-mint above lands first),
-  // durable-only for free (`storageReady` only exists then), and strictly
+  // the registryReady tail (so a sibling re-mint above lands first),
+  // durable-only for free (`registryReady` only exists then), and strictly
   // best-effort like the sweeps beside it: a failed pass never fails the
   // login, and the next durable login resumes from durable state alone. The
   // remote-direct popup deliberately does not run it: a popup visit is a
   // constrained, latency-sensitive context, and the next top-level durable
   // login sweeps the same durable state.
-  if (session.storageReady && !remoteDirectStorage) {
-    session.clientAnnexGcSweep = session.storageReady
+  if (session.registryReady && !remoteDirectStorage) {
+    session.clientAnnexGcSweep = session.registryReady
       .catch(() => {})
       .then(() =>
         sweepClientAnnexGenerations({
@@ -1322,6 +1331,15 @@ async function sessionFromKeyringHit({
         console.warn('The annex GC sweep failed:', err)
         return null
       })
+  }
+
+  // Settle the chain for its awaiters: a provisioning rejection skipped
+  // every stage above (the rejection propagated through their `.then`s),
+  // and this catch keeps `registryReady` itself from rejecting, so a gated
+  // ceremony on an abandoned session resolves instead of hanging on an
+  // unsettled rejection.
+  if (session.registryReady) {
+    session.registryReady = session.registryReady.catch(() => {})
   }
   return { session, userExists }
 }

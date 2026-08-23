@@ -52,6 +52,14 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
     let cancelled = false
 
     async function initialLoad() {
+      // Wait out the login-time registry passes first: reading mid-chain
+      // could report a stale-seal or mid-repair registry as "no recovery
+      // codes" (the listing swallows read failures) and skip the health
+      // check for the whole visit.
+      await session.registryReady
+      if (cancelled) {
+        return
+      }
       const loaded = await listRecoveryCodeEntries({ session })
       if (cancelled) {
         return

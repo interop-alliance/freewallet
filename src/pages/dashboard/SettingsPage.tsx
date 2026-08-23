@@ -468,6 +468,14 @@ export function SettingsPage() {
         return
       }
       try {
+        // Wait out the login-time registry passes first: reading mid-chain
+        // could render a stale-seal error the in-flight re-seal repair is
+        // about to mend (and hand ceremonies a registry view the passes are
+        // still rewriting).
+        await session.registryReady
+        if (cancelled) {
+          return
+        }
         const record = await loadUnlockRegistry({ session })
         if (!cancelled) {
           setUnlockRegistry(record)

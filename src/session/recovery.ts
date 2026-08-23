@@ -458,6 +458,9 @@ export async function issueRecoveryCode({
     persistence: session.profile.persistence,
     ceremony: 'Issuing a recovery code'
   })
+  // Wait out the login-time registry passes rather than racing their
+  // read-modify-writes; on a settled session the chain resolved long ago.
+  await session.registryReady
   const {
     remoteStore,
     pointer,
@@ -1747,6 +1750,9 @@ export async function revokeRecoveryCode({
     persistence: session.profile.persistence,
     ceremony: 'Revoking a recovery code'
   })
+  // Wait out the login-time registry passes rather than racing their
+  // read-modify-writes; on a settled session the chain resolved long ago.
+  await session.registryReady
   const { epochPins } = session.profile.persistence
   const { remoteStore, pointer, clientWebvhKeys, clientKeyAgreementKey } =
     requireEnrolledClientContext({
@@ -2036,6 +2042,9 @@ export async function checkRecoveryHealth({
   session: Session
   entries?: RecoveryCodeUnlockMethod[]
 }): Promise<RecoveryHealthFlag[]> {
+  // Read-only, but wait out the login-time registry passes anyway: a read
+  // mid-chain would flag entries the refresh passes are about to mend.
+  await session.registryReady
   const remoteStore = session.storage.remoteStore
   const pointer = session.profile.accountPointer
   if (!remoteStore || !pointer || !isWebvhDid(pointer.did)) {

@@ -235,7 +235,8 @@ export function WalletStorePage() {
     try {
       // Session creation fired `ensureUserCollections` as `session.storageReady`;
       // wait for the collections to be provisioned/opened before storing into
-      // them.
+      // them. The popup's background chain (on `session.registryReady`, just
+      // the user-key sweep fold in remote-direct mode) is not waited on.
       await popupSession.storageReady
       setSession(popupSession)
       if (pendingDIDAuth) {
