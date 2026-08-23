@@ -634,7 +634,10 @@ identity, embeds the ladder-VM-signed generation delegation, flips the
 auxiliary Space's controller, appends the `#DelegatedClients` pointer as a
 second rung-0-signed account-log entry, re-binds the record (full pointer,
 ladder-VM-signed bridge and sibling, management zcap to the account DID),
-writes the unlock-methods registry in the last root-invocation window, and
+writes the unlock-methods registry in the last root-invocation window
+(read-first: the entry is upserted into an existing registry, and a
+refused read skips the write rather than starting from an empty one,
+since the heal re-run below fires the same hook), and
 promotes the Space controller last. The visit then enters through the
 ordinary transient composition, so a credential-anchored signup ends in a
 transient session with zero local residue. The whole establishment is an

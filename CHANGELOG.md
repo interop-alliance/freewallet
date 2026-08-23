@@ -29,6 +29,16 @@
 
 ### Fixed
 
+- Both signup registry writes are read-first. The credential-anchored
+  signup's pre-promotion hook reads the unlock-methods registry
+  (`getUnlockMethodsWithClient`) and upserts the passphrase entry into it,
+  starting from an empty registry only on a true absent; a thrown read
+  skips the write with a warning rather than failing the establishment or
+  clobbering from an empty base (the transient login's heal branch re-runs
+  the establishment end to end, and the re-fired hook used to re-mint the
+  user handle and drop every other entry). The passkey signup's registry
+  mint gets the same shape through the new `upsertPasskeyUnlockMethod`: an
+  existing registry keeps its user handle and entries.
 - A grant delegated from a transient session chains under the session's
   generation delegation (`profile.invocationCapability`) instead of the
   Space root, so the grantee receives a capability the server verifies

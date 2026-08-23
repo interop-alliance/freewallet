@@ -958,6 +958,35 @@ export function upsertPassphraseUnlockMethod({
 }
 
 /**
+ * Upserts a passkey entry into the registry, matched on its `credentialId`:
+ * an entry for the same authenticator credential is replaced in place, and a
+ * new one is appended. Everything else in the record -- the user handle and
+ * the other entries -- is carried forward untouched, which is what lets a
+ * re-run mint (the passkey signup's) land on an existing registry without
+ * clobbering it.
+ *
+ * @param options {object}
+ * @param options.record {UnlockMethodsRecord}   the registry to update
+ * @param options.entry {PasskeyUnlockMethod}   the passkey entry
+ * @returns {UnlockMethodsRecord}   the updated registry
+ */
+export function upsertPasskeyUnlockMethod({
+  record,
+  entry
+}: {
+  record: UnlockMethodsRecord
+  entry: PasskeyUnlockMethod
+}): UnlockMethodsRecord {
+  const exists = record.methods.some(method => isSameMethod(method, entry))
+  const methods = exists
+    ? record.methods.map(method =>
+        isSameMethod(method, entry) ? entry : method
+      )
+    : [...record.methods, entry]
+  return { ...record, methods }
+}
+
+/**
  * The zcap's `allowedAction` set as a string array, or `null` for a
  * capability carrying no `allowedAction` at all -- which permits every action
  * and so is wider than any concrete set. A zcap carries the member as a bare
