@@ -6,6 +6,14 @@
  * current-key-set rule already killed those grants). Clicking a row opens the
  * app detail page; a button on the row revokes access. Revoking removes the
  * app-key credential and records the revocation.
+ *
+ * The same list carries the connected AGENTS: grantees that answered an
+ * interaction-URL request rather than an App Connect popup. An agent row is
+ * marked with an Agent chip and titled by the self-declared name the request
+ * carried (or by the grantee key when it named none), and it is not clickable
+ * -- there is no app key and no detail page behind it. Revoking one revokes
+ * its recorded storage grants and records the revocation, which is what takes
+ * the row out of the listing.
  */
 import { useEffect, useState } from 'react'
 import { Link as RouterLink, useNavigate } from 'react-router'
@@ -28,8 +36,45 @@ import { RevokeAppDialog } from '@/components/RevokeAppDialog'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { dashboardStyles } from '@/styles/appStyles'
-import { listApplicationsView, revokeApplication } from '@/session/applications'
-import { deriveAppGrantsState, type ConnectedApp } from '@/lib/connectedApps'
+import {
+  listApplicationsView,
+  revokeAgent,
+  revokeApplication
+} from '@/session/applications'
+import {
+  deriveAppGrantsState,
+  deriveGrantsState,
+  type AppGrant,
+  type ConnectedAgent,
+  type ConnectedApp
+} from '@/lib/connectedApps'
+
+/**
+ * The soonest still-future expiry among a row's recorded grants, so the row
+ * can say when its access lapses on its own. Undefined when no grant records a
+ * parseable future expiry.
+ *
+ * @param options {object}
+ * @param options.grants {AppGrant[]}
+ * @returns {string | undefined}   the ISO stamp, verbatim
+ */
+function nearestExpiry({ grants }: { grants: AppGrant[] }): string | undefined {
+  const now = Date.now()
+  let soonest: { iso: string; at: number } | undefined
+  for (const grant of grants) {
+    if (!grant.expires) {
+      continue
+    }
+    const at = new Date(grant.expires).getTime()
+    if (!Number.isFinite(at) || at <= now) {
+      continue
+    }
+    if (!soonest || at < soonest.at) {
+      soonest = { iso: grant.expires, at }
+    }
+  }
+  return soonest?.iso
+}
 
 export function ApplicationsPage() {
   const { t, i18n } = useTranslation()
@@ -37,12 +82,15 @@ export function ApplicationsPage() {
   const session = useAuthStore(state => state.session)
 
   const [apps, setApps] = useState<ConnectedApp[]>([])
+  const [agents, setAgents] = useState<ConnectedAgent[]>([])
   // The enrolled clients' signing keys from the verified account log, for the
   // per-app grant-state check; undefined when the check is unavailable.
   const [signingKeys, setSigningKeys] = useState<Set<string> | undefined>()
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<ConnectedApp | null>(null)
+  const [revokeAgentTarget, setRevokeAgentTarget] =
+    useState<ConnectedAgent | null>(null)
   const [revoking, setRevoking] = useState(false)
   const [revokeError, setRevokeError] = useState(false)
   // Rows the app-key scan had to skip: undecryptable envelopes (purgeable
@@ -59,11 +107,14 @@ export function ApplicationsPage() {
         return
       }
       try {
-        const { apps: listed, signingKeys: keys } = await listApplicationsView({
-          session
-        })
+        const {
+          apps: listed,
+          agents: listedAgents,
+          signingKeys: keys
+        } = await listApplicationsView({ session })
         if (!cancelled) {
           setApps(listed)
+          setAgents(listedAgents)
           setSigningKeys(keys)
           setUndecryptableAppKeys(session.storage.undecryptableAppKeys)
           setNoEpochKeyAppKeys(session.storage.noEpochKeyAppKeys)
@@ -112,21 +163,61 @@ export function ApplicationsPage() {
               ? t('applications.revokeSuccess')
               : t('applications.revokeSuccessLegacy')
       })
-      try {
-        const { apps: listed, signingKeys: keys } = await listApplicationsView({
-          session
-        })
-        setApps(listed)
-        setSigningKeys(keys)
-        setUndecryptableAppKeys(session.storage.undecryptableAppKeys)
-        setNoEpochKeyAppKeys(session.storage.noEpochKeyAppKeys)
-        setLoadError(false)
-      } catch (err) {
-        console.error('Could not reload connected applications:', err)
-        setLoadError(true)
-      }
+      await reload()
     } catch (err) {
       console.error('Could not revoke app access:', err)
+      setRevokeError(true)
+    } finally {
+      setRevoking(false)
+    }
+  }
+
+  async function reload() {
+    if (!session) {
+      return
+    }
+    try {
+      const {
+        apps: listed,
+        agents: listedAgents,
+        signingKeys: keys
+      } = await listApplicationsView({ session })
+      setApps(listed)
+      setAgents(listedAgents)
+      setSigningKeys(keys)
+      setUndecryptableAppKeys(session.storage.undecryptableAppKeys)
+      setNoEpochKeyAppKeys(session.storage.noEpochKeyAppKeys)
+      setLoadError(false)
+    } catch (err) {
+      console.error('Could not reload connected applications:', err)
+      setLoadError(true)
+    }
+  }
+
+  async function handleRevokeAgent() {
+    if (!revokeAgentTarget || !session) {
+      return
+    }
+    setRevoking(true)
+    setRevokeError(false)
+    try {
+      const { grantsState, revoked } = await revokeAgent({
+        session,
+        agent: revokeAgentTarget,
+        signingKeys
+      })
+      setRevokeAgentTarget(null)
+      showToast({
+        message:
+          grantsState === 'orphaned'
+            ? t('applications.revokeAgentSuccessOrphaned')
+            : revoked > 0
+              ? t('applications.revokeAgentSuccess')
+              : t('applications.revokeAgentSuccessLegacy')
+      })
+      await reload()
+    } catch (err) {
+      console.error('Could not revoke agent access:', err)
       setRevokeError(true)
     } finally {
       setRevoking(false)
@@ -185,7 +276,7 @@ export function ApplicationsPage() {
               })}
             </Alert>
           )}
-          {apps.length === 0 ? (
+          {apps.length === 0 && agents.length === 0 ? (
             <Typography color="text.secondary">
               {t('applications.empty')}
             </Typography>
@@ -260,6 +351,99 @@ export function ApplicationsPage() {
                   </Stack>
                 </ListItem>
               ))}
+              {agents.map(agent => {
+                const orphaned =
+                  deriveGrantsState({
+                    grants: agent.grants,
+                    currentSigningKeys: signingKeys
+                  }) === 'orphaned'
+                const fingerprint = t('settings.clients.keyFingerprint', {
+                  did: agent.controller
+                })
+                const expires = nearestExpiry({ grants: agent.grants })
+                return (
+                  <ListItem
+                    key={agent.controller}
+                    disablePadding
+                    sx={dashboardStyles.applicationsAppCard}
+                  >
+                    <Stack sx={{ gap: 0.5, minWidth: 0, p: 0.5 }}>
+                      <Stack
+                        direction="row"
+                        sx={{ gap: 1, alignItems: 'center', flexWrap: 'wrap' }}
+                      >
+                        <Typography
+                          variant="subtitle1"
+                          sx={{ fontWeight: 'bold', wordBreak: 'break-all' }}
+                        >
+                          {agent.name ?? fingerprint}
+                        </Typography>
+                        <Chip
+                          size="small"
+                          label={t('applications.agentChip')}
+                        />
+                        {orphaned && (
+                          <Chip
+                            size="small"
+                            color="warning"
+                            label={t('applications.orphanedChip')}
+                          />
+                        )}
+                      </Stack>
+                      {agent.name !== undefined && (
+                        <>
+                          <Typography
+                            variant="body2"
+                            sx={dashboardStyles.sharedRecipientDid}
+                          >
+                            {fingerprint}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {t('applications.agentNameNote')}
+                          </Typography>
+                        </>
+                      )}
+                      <Typography variant="body2" color="text.secondary">
+                        {t('applications.agentGrants', {
+                          count: agent.grants.length
+                        })}
+                        {expires
+                          ? ` -- ${t('applications.grantExpires', {
+                              date: formatDate({
+                                isoDate: expires,
+                                locale: i18n.language
+                              })
+                            })}`
+                          : ''}
+                      </Typography>
+                    </Stack>
+                    <Stack sx={dashboardStyles.applicationsAppMeta}>
+                      <Typography variant="body2" color="text.secondary">
+                        {agent.grantedAt
+                          ? t('applications.agentGrantedOn', {
+                              date: formatDate({
+                                isoDate: agent.grantedAt,
+                                locale: i18n.language
+                              })
+                            })
+                          : t('applications.agentGrantedDateUnknown')}
+                      </Typography>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        color="error"
+                        sx={{ borderRadius: 2 }}
+                        onClick={() => {
+                          setRevokeError(false)
+                          setRevokeAgentTarget(agent)
+                        }}
+                      >
+                        {t('applications.revokeAgent')}
+                      </Button>
+                    </Stack>
+                  </ListItem>
+                )
+              })}
             </List>
           )}
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
@@ -271,6 +455,28 @@ export function ApplicationsPage() {
           </Typography>
         </Stack>
       )}
+
+      <RevokeAppDialog
+        open={revokeAgentTarget !== null}
+        appName={
+          revokeAgentTarget?.name ??
+          t('settings.clients.keyFingerprint', {
+            did: revokeAgentTarget?.controller ?? ''
+          })
+        }
+        agent
+        orphaned={
+          !!revokeAgentTarget &&
+          deriveGrantsState({
+            grants: revokeAgentTarget.grants,
+            currentSigningKeys: signingKeys
+          }) === 'orphaned'
+        }
+        revoking={revoking}
+        error={revokeError}
+        onCancel={() => setRevokeAgentTarget(null)}
+        onConfirm={handleRevokeAgent}
+      />
 
       <RevokeAppDialog
         open={revokeTarget !== null}

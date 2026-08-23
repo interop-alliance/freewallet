@@ -26,6 +26,15 @@
  * app-key credential and records the revocation. The honest ceiling stands:
  * ciphertext the app already fetched stays readable to it -- rotation
  * protects only prospective writes.
+ *
+ * The same page lists connected AGENTS: grantees that answered an
+ * interaction-URL request rather than an App Connect popup, so they hold no
+ * app key and no attested origin. `listConnectedAgents` joins those rows out
+ * of the activity history alone -- the latest agent-grant Login per grantee
+ * did:key, hidden again by a Revoke activity naming the same controller --
+ * and `revokeAgentAccess` retires one: the recorded capabilities are revoked
+ * and the revocation recorded, with no app key to delete and no epoch to
+ * rotate.
  */
 import type { StorageManager } from '@/stores/storageManager'
 import type { User } from '@/types/auth'
@@ -36,6 +45,7 @@ import {
   presentsAsAppKey
 } from '@interop/wallet-core/request'
 import { subjectId } from '@/lib/vcShape'
+import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
 
 /**
  * One storage capability an app was granted, summarized as recorded on the
@@ -263,10 +273,32 @@ export function deriveAppGrantsState({
   app: ConnectedApp
   currentSigningKeys?: Set<string>
 }): AppGrantsState {
+  return deriveGrantsState({ grants: app.grants, currentSigningKeys })
+}
+
+/**
+ * The grant-state check itself, over a bare grant list -- shared by the app
+ * rows ({@link deriveAppGrantsState}) and the agent rows, which have no
+ * app-key credential to hang the grants off.
+ *
+ * @param options {object}
+ * @param options.grants {AppGrant[]}
+ * @param [options.currentSigningKeys] {Set<string>}   the enrolled clients'
+ *   signing-key multibases, or undefined when no verified document is
+ *   available this session
+ * @returns {AppGrantsState}
+ */
+export function deriveGrantsState({
+  grants,
+  currentSigningKeys
+}: {
+  grants: AppGrant[]
+  currentSigningKeys?: Set<string>
+}): AppGrantsState {
   if (!currentSigningKeys) {
     return 'unknown'
   }
-  const signers = app.grants
+  const signers = grants
     .map(grant => grant.signerKeyId)
     .filter((keyId): keyId is string => !!keyId)
   if (signers.length === 0) {
@@ -488,4 +520,261 @@ export async function revokeAppAccess({
     skipped: outcome.skipped
   })
   return outcome
+}
+
+/**
+ * A connected agent: a grantee that answered an interaction-URL request
+ * rather than an App Connect popup, so it has no app-key credential and no
+ * origin of its own. Its identity is the grantee did:key its grants were
+ * delegated to.
+ */
+export interface ConnectedAgent {
+  /**
+   * The grantee did:key the grants were delegated to; identifies the agent
+   * for revocation.
+   */
+  controller: string
+  /**
+   * The self-declared display name the request carried, when it named one.
+   * Display-only: the requester chose it, and nothing verifies it.
+   */
+  name?: string
+  /**
+   * The origin marker the grant was recorded under (`EXTERNAL_REQUEST_ORIGIN`
+   * -- there is no attested requesting origin on this path).
+   */
+  origin: string
+  /**
+   * The storage grants recorded on the latest matching request.
+   */
+  grants: AppGrant[]
+  /**
+   * When the latest matching request was granted.
+   */
+  grantedAt?: string
+}
+
+/**
+ * The self-declared agent name a Login activity recorded (`object.actor.name`),
+ * when present.
+ *
+ * @param object {unknown}   the activity's `object` member
+ * @returns {string | undefined}
+ */
+function loginAgentName(object: unknown): string | undefined {
+  if (!object || typeof object !== 'object') {
+    return undefined
+  }
+  return stringField((object as { actor?: unknown }).actor, 'name')
+}
+
+/**
+ * The grantee did:key a Login activity's recorded grants were delegated to:
+ * the `controller` of the first recorded full capability. One request page
+ * approval delegates every grant to the same controller, so the first one
+ * names the agent.
+ *
+ * @param object {unknown}   the activity's `object` member
+ * @returns {string | undefined}
+ */
+function loginGrantController(object: unknown): string | undefined {
+  if (!object || typeof object !== 'object') {
+    return undefined
+  }
+  const { zcaps } = object as { zcaps?: unknown }
+  if (!Array.isArray(zcaps)) {
+    return undefined
+  }
+  for (const entry of zcaps) {
+    const { zcap } = (entry ?? {}) as { zcap?: unknown }
+    if (!zcap || typeof zcap !== 'object') {
+      continue
+    }
+    const { controller } = zcap as { controller?: unknown }
+    const named = Array.isArray(controller) ? controller[0] : controller
+    if (typeof named === 'string' && named) {
+      return named
+    }
+  }
+  return undefined
+}
+
+/**
+ * Whether an activity is an agent-grant Login: a `Login` recorded under the
+ * interaction-URL origin marker, carrying no `appConnect` member (which would
+ * make it an App Connect connect) and at least one recorded full capability
+ * (without one there is nothing to list or revoke).
+ *
+ * @param options {object}
+ * @param options.doc {{ type?: string[]; object?: unknown }}
+ * @returns {boolean}
+ */
+export function isAgentGrantLogin({
+  doc
+}: {
+  doc: { type?: string[]; object?: unknown }
+}): boolean {
+  return (
+    Array.isArray(doc.type) &&
+    doc.type.includes('Login') &&
+    loginOrigin(doc.object) === EXTERNAL_REQUEST_ORIGIN &&
+    loginAppName(doc.object) === undefined &&
+    loginGrantController(doc.object) !== undefined
+  )
+}
+
+/**
+ * Whether every recorded grant of an agent row has already expired -- there is
+ * nothing left to revoke, so the row is dropped from the listing. A grant with
+ * no recorded expiry (or an unparseable one) counts as still live, so a row is
+ * never hidden on a missing stamp.
+ *
+ * @param options {object}
+ * @param options.grants {AppGrant[]}
+ * @param options.now {number}
+ * @returns {boolean}
+ */
+function allGrantsExpired({
+  grants,
+  now
+}: {
+  grants: AppGrant[]
+  now: number
+}): boolean {
+  if (grants.length === 0) {
+    return true
+  }
+  return grants.every(grant => {
+    if (!grant.expires) {
+      return false
+    }
+    const expiresAt = new Date(grant.expires).getTime()
+    return Number.isFinite(expiresAt) && expiresAt <= now
+  })
+}
+
+/**
+ * Lists the agents holding storage grants answered from an interaction-URL
+ * request, one row per grantee did:key.
+ *
+ * The join is over the activity history alone (there is no credential to hang
+ * a row off): the latest agent-grant Login per controller supplies the name,
+ * the grants, and the granted date, and a Revoke activity naming the same
+ * controller with a timestamp at or after that Login hides the row. A later
+ * re-grant writes a newer Login and lists again. A row whose every recorded
+ * grant has already expired is dropped -- nothing is left to revoke.
+ *
+ * @param options {object}
+ * @param options.storage {StorageManager}
+ * @returns {Promise<ConnectedAgent[]>}   sorted latest-granted first
+ */
+export async function listConnectedAgents({
+  storage
+}: {
+  storage: StorageManager
+}): Promise<ConnectedAgent[]> {
+  const history = await storage.listHistoryItems()
+  type HistoryItem = (typeof history)[number]
+
+  const latestLoginByController = new Map<string, HistoryItem>()
+  const latestRevokeByController = new Map<string, string>()
+  for (const item of history) {
+    const { doc } = item
+    if (isAgentGrantLogin({ doc })) {
+      const controller = loginGrantController(doc.object)
+      if (!controller) {
+        continue
+      }
+      const current = latestLoginByController.get(controller)
+      if (!current || (current.doc.created ?? '') < (doc.created ?? '')) {
+        latestLoginByController.set(controller, item)
+      }
+      continue
+    }
+    if (!Array.isArray(doc.type) || !doc.type.includes('Revoke')) {
+      continue
+    }
+    const controller = stringField(doc.object, 'controller')
+    if (!controller) {
+      continue
+    }
+    const created = doc.created ?? ''
+    if ((latestRevokeByController.get(controller) ?? '') < created) {
+      latestRevokeByController.set(controller, created)
+    }
+  }
+
+  const now = Date.now()
+  const agents: ConnectedAgent[] = []
+  for (const [controller, item] of latestLoginByController) {
+    const granted = item.doc.created ?? ''
+    const revoked = latestRevokeByController.get(controller)
+    if (revoked !== undefined && revoked >= granted) {
+      continue
+    }
+    const grants = loginGrants(item.doc.object)
+    if (allGrantsExpired({ grants, now })) {
+      continue
+    }
+    const name = loginAgentName(item.doc.object)
+    agents.push({
+      controller,
+      ...(name !== undefined && { name }),
+      origin: EXTERNAL_REQUEST_ORIGIN,
+      grants,
+      grantedAt: item.doc.created
+    })
+  }
+
+  return agents.sort((first, second) =>
+    (second.grantedAt ?? '').localeCompare(first.grantedAt ?? '')
+  )
+}
+
+/**
+ * Revokes a connected agent's storage grants: the recorded capabilities are
+ * revoked on the WAS server first, and only if that succeeds is the revocation
+ * recorded -- a network failure therefore leaves the row listed, so the user
+ * can retry. There is no app key to delete and no epoch rotation: an agent is
+ * only ever granted the collection classes the interaction-URL allowlist
+ * admits, and it is never an epoch recipient.
+ *
+ * An `orphaned` agent (see {@link AppGrantsState}) skips the revocation POSTs
+ * entirely: its grants already stopped verifying when the signing client's
+ * verification method left the account document. The revocation is still
+ * recorded, which is what takes the row out of the listing.
+ *
+ * @param options {object}
+ * @param options.storage {StorageManager}
+ * @param options.user {User}   the session user (activity actor)
+ * @param options.agent {ConnectedAgent}
+ * @param [options.grantsState] {AppGrantsState}   the derived grant state
+ *   (default `unknown`, which revokes like `active`)
+ * @returns {Promise<{ revoked: number; skipped: number }>}   the grant outcome
+ */
+export async function revokeAgentAccess({
+  storage,
+  user,
+  agent,
+  grantsState = 'unknown'
+}: {
+  storage: StorageManager
+  user: User
+  agent: ConnectedAgent
+  grantsState?: AppGrantsState
+}): Promise<{ revoked: number; skipped: number }> {
+  const outcome =
+    grantsState === 'orphaned'
+      ? { revoked: 0, skipped: 0, revokedIds: [] as string[] }
+      : await storage.revokeAgentGrants({ controller: agent.controller })
+  await storage.addHistoryAgentRevoke({
+    user,
+    origin: agent.origin,
+    controller: agent.controller,
+    zcaps: outcome.revokedIds.map(id => ({ id })),
+    ...(agent.name !== undefined && { actor: { name: agent.name } }),
+    revoked: outcome.revoked,
+    skipped: outcome.skipped
+  })
+  return { revoked: outcome.revoked, skipped: outcome.skipped }
 }

@@ -380,7 +380,21 @@
     "revokeSuccess": "App access revoked.",
     "revokeSuccessLegacy": "App removed. Its remaining access will expire on its own.",
     "revokeSuccessOrphaned": "App removed. Its storage access had already ended when its wallet was disconnected.",
-    "revokeFailed": "Could not revoke app access. Please try again."
+    "revokeFailed": "Could not revoke app access. Please try again.",
+    "agentChip": "Agent",
+    "agentNameNote": "That name is self-declared and unverified.",
+    "agentGrantedOn": "Access granted {{date}}",
+    "agentGrantedDateUnknown": "Grant date unknown",
+    "agentGrants_one": "{{count}} storage grant",
+    "agentGrants_other": "{{count}} storage grants",
+    "revokeAgent": "Revoke Agent Access",
+    "revokeAgentTitle": "Revoke agent access?",
+    "revokeAgentConfirm": "Revoking access revokes the storage access {{name}} was granted, so it can no longer read or write the collections it was given. It may still hold copies of data it already fetched. The agent will have to ask for access again. This cannot be undone.",
+    "revokeAgentConfirmOrphaned": "The storage access {{name}} was granted already stopped working when the wallet that granted it was disconnected. Revoking now removes it from this list. It may still hold copies of data it already fetched. This cannot be undone.",
+    "revokeAgentSuccess": "Agent access revoked.",
+    "revokeAgentSuccessLegacy": "Agent removed. Its remaining access will expire on its own.",
+    "revokeAgentSuccessOrphaned": "Agent removed. Its storage access had already ended when its wallet was disconnected.",
+    "revokeAgentFailed": "Could not revoke agent access. Please try again."
   },
   "dashboard": {
     "title": "Freewallet Dashboard",
@@ -776,7 +790,7 @@
     "responding": "Granting access...",
     "delivered": "Access granted. You can return to the program that asked and close this page.",
     "approve": "Grant access",
-    "noRevokeNote": "(this grant cannot be revoked from the wallet yet; it expires on its own)",
+    "noRevokeNote": "(this grant can be reviewed and revoked on the Applications page)",
     "exchangeVisibility": "Anyone holding this request link can read the answer once it is sent.",
     "manualDelivery": "The answer could not be delivered, but the grant was recorded. You can copy it and hand it to the requesting program yourself.",
     "refusals": {

@@ -380,7 +380,21 @@
     "revokeSuccess": "Acceso de la aplicación revocado.",
     "revokeSuccessLegacy": "Aplicación eliminada. Su acceso restante vencerá por sí solo.",
     "revokeSuccessOrphaned": "Aplicación eliminada. Su acceso de almacenamiento ya había terminado cuando se desconectó su monedero.",
-    "revokeFailed": "No se pudo revocar el acceso de la aplicación. Inténtelo de nuevo."
+    "revokeFailed": "No se pudo revocar el acceso de la aplicación. Inténtelo de nuevo.",
+    "agentChip": "Agente",
+    "agentNameNote": "Ese nombre lo declara el propio solicitante y no está verificado.",
+    "agentGrantedOn": "Acceso concedido el {{date}}",
+    "agentGrantedDateUnknown": "Fecha de concesión desconocida",
+    "agentGrants_one": "{{count}} permiso de almacenamiento",
+    "agentGrants_other": "{{count}} permisos de almacenamiento",
+    "revokeAgent": "Revocar acceso del agente",
+    "revokeAgentTitle": "¿Revocar el acceso del agente?",
+    "revokeAgentConfirm": "Al revocar el acceso se anulan los permisos de almacenamiento concedidos a {{name}}, de modo que ya no podrá leer ni escribir en las colecciones que se le dieron, aunque es posible que aún conserve copias de los datos que ya obtuvo. El agente tendrá que volver a solicitar acceso. Esta acción no se puede deshacer.",
+    "revokeAgentConfirmOrphaned": "El acceso de almacenamiento concedido a {{name}} ya dejó de funcionar cuando se desconectó el monedero que lo concedió. Revocarlo ahora solo lo quita de esta lista, y es posible que aún conserve copias de los datos que ya obtuvo. Esta acción no se puede deshacer.",
+    "revokeAgentSuccess": "Acceso del agente revocado.",
+    "revokeAgentSuccessLegacy": "Agente eliminado. El acceso restante caducará por sí solo.",
+    "revokeAgentSuccessOrphaned": "Agente eliminado. Su acceso de almacenamiento ya había terminado cuando se desconectó su monedero.",
+    "revokeAgentFailed": "No se pudo revocar el acceso del agente. Inténtelo de nuevo."
   },
   "dashboard": {
     "title": "Panel de Freewallet",
@@ -776,7 +790,7 @@
     "responding": "Concediendo acceso...",
     "delivered": "Acceso concedido. Puede volver al programa que lo solicitó y cerrar esta página.",
     "approve": "Conceder acceso",
-    "noRevokeNote": "(este permiso aún no se puede revocar desde la billetera; caduca por sí solo)",
+    "noRevokeNote": "(este permiso se puede revisar y revocar en la página de Aplicaciones)",
     "exchangeVisibility": "Cualquiera que tenga este enlace de solicitud podrá leer la respuesta una vez enviada.",
     "manualDelivery": "No se pudo entregar la respuesta, pero el permiso quedó registrado. Puede copiarla y entregarla usted mismo al programa solicitante.",
     "refusals": {

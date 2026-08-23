@@ -110,6 +110,7 @@ import {
 } from '@/stores/remoteDirectStore'
 import { UnknownEpochError } from '@interop/was-client/edv'
 import { KeyUnwrapError } from '@interop/was-client'
+import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
 import { uuidv7 } from 'uuidv7'
 import {
   ACTIVITY_TYPE,
@@ -122,6 +123,7 @@ import {
   addHistoryLogin as buildHistoryLogin,
   addHistoryWalletLogin as buildHistoryWalletLogin,
   addHistoryAppRevoke as buildHistoryAppRevoke,
+  addHistoryAgentRevoke as buildHistoryAgentRevoke,
   addHistoryClientRevoked as buildHistoryClientRevoked,
   addHistoryGenerationCollected as buildHistoryGenerationCollected,
   type WalletActivity
@@ -2581,6 +2583,54 @@ export class StorageManager {
   }
 
   /**
+   * Records (in the `wallet-activity` collection) a Revoke activity for an
+   * agent grant: the user revoked the storage grants answered from an
+   * interaction-URL request. The recorded controller is the grantee did:key
+   * the Applications listing joins its agent rows on, so writing this row is
+   * what takes the agent out of the listing.
+   *
+   * @param options {object}
+   * @param options.user {User}
+   * @param options.origin {string}   the recorded origin marker
+   * @param options.controller {string}   the grantee did:key
+   * @param [options.zcaps] {Array<{ id: string }>}   the revoked capability ids
+   * @param [options.actor] {{ name: string }}   the agent's self-declared name
+   * @param [options.revoked] {number}   how many grants were revoked
+   * @param [options.skipped] {number}   how many grants needed no revocation
+   * @returns {Promise<void>}
+   */
+  async addHistoryAgentRevoke({
+    user,
+    origin,
+    controller,
+    zcaps,
+    actor,
+    revoked,
+    skipped
+  }: {
+    user: User
+    origin: string
+    controller: string
+    zcaps?: Array<{ id: string }>
+    actor?: { name: string }
+    revoked?: number
+    skipped?: number
+  }) {
+    await this.#recordActivity(id =>
+      buildHistoryAgentRevoke({
+        user,
+        origin,
+        controller,
+        zcaps,
+        actor,
+        revoked,
+        skipped,
+        id
+      })
+    )
+  }
+
+  /**
    * Records (in the `wallet-activity` collection) a ClientRevoke activity: an
    * enrolled wallet client was disconnected -- the revocation cascade's audit
    * record.
@@ -2661,18 +2711,46 @@ export class StorageManager {
     // Scan the history once and pass it through, so the grant lookup does not
     // re-await and re-scan it. A caller that already holds the history (the
     // revoke orchestration, which drives several of these) passes it in.
-    const { zcaps, skipped: nonRevocable } = this.#recordedAppGrantZcaps({
-      origin,
-      subjectDid,
+    const { zcaps, skipped: nonRevocable } = this.#recordedGrantZcaps({
+      matches: object => object.origin === origin && !!object.appConnect,
+      controller: subjectDid,
       items: items ?? (await this.listHistoryItems())
     })
+    const outcome = await this.#revokeZcaps({ zcaps })
+    return {
+      revoked: outcome.revoked,
+      skipped: outcome.skipped + nonRevocable
+    }
+  }
+
+  /**
+   * Revokes a set of recorded capabilities on the WAS server, one POST each.
+   * A capability the server no longer considers revocable (already revoked,
+   * expired, or foreign) counts into `skipped` rather than failing the run;
+   * anything else propagates. `revokedIds` names the capabilities whose
+   * revocation actually went through, which is what an agent revocation
+   * records as its audit trail.
+   *
+   * @param options {object}
+   * @param options.zcaps {IDelegatedZcap[]}
+   * @returns {Promise<{ revoked: number; skipped: number; revokedIds: string[] }>}
+   */
+  async #revokeZcaps({ zcaps }: { zcaps: IDelegatedZcap[] }): Promise<{
+    revoked: number
+    skipped: number
+    revokedIds: string[]
+  }> {
+    const remote = this.#remoteStore
+    if (!remote) {
+      return { revoked: 0, skipped: 0, revokedIds: [] }
+    }
     const space = remote.spaceHandle()
-    let revoked = 0
-    let skipped = nonRevocable
+    const revokedIds: string[] = []
+    let skipped = 0
     for (const zcap of zcaps) {
       try {
         await space.revoke(zcap)
-        revoked += 1
+        revokedIds.push(zcap.id)
       } catch (err) {
         if (err instanceof ValidationError) {
           // Already revoked, expired, or foreign -- treat as a no-op.
@@ -2682,7 +2760,43 @@ export class StorageManager {
         throw err
       }
     }
-    return { revoked, skipped }
+    return { revoked: revokedIds.length, skipped, revokedIds }
+  }
+
+  /**
+   * Revokes the storage grants recorded for a connected agent: the
+   * capabilities delegated to `controller` on the interaction-URL request
+   * page's Login activities. There is no app key and no epoch roster involved
+   * -- an agent is a grantee only.
+   *
+   * @param options {object}
+   * @param options.controller {string}   the grantee did:key
+   * @param [options.items] {Array<{ id: string; doc: WalletActivity }>}   a
+   *   pre-fetched history scan, when the caller already holds one
+   * @returns {Promise<{ revoked: number; skipped: number; revokedIds: string[] }>}
+   */
+  async revokeAgentGrants({
+    controller,
+    items
+  }: {
+    controller: string
+    items?: Array<{ id: string; doc: WalletActivity }>
+  }): Promise<{ revoked: number; skipped: number; revokedIds: string[] }> {
+    if (!this.#remoteStore) {
+      return { revoked: 0, skipped: 0, revokedIds: [] }
+    }
+    const { zcaps, skipped: nonRevocable } = this.#recordedGrantZcaps({
+      matches: object =>
+        object.origin === EXTERNAL_REQUEST_ORIGIN && !object.appConnect,
+      controller,
+      items: items ?? (await this.listHistoryItems())
+    })
+    const outcome = await this.#revokeZcaps({ zcaps })
+    return {
+      revoked: outcome.revoked,
+      skipped: outcome.skipped + nonRevocable,
+      revokedIds: outcome.revokedIds
+    }
   }
 
   /**
@@ -2767,9 +2881,9 @@ export class StorageManager {
     }
     const ownerKid = this.#vaultKeys.keyAgreementKey.id
     const spaceUrl = remote.spaceUrl
-    const { zcaps } = this.#recordedAppGrantZcaps({
-      origin,
-      subjectDid,
+    const { zcaps } = this.#recordedGrantZcaps({
+      matches: object => object.origin === origin && !!object.appConnect,
+      controller: subjectDid,
       items: items ?? (await this.listHistoryItems())
     })
 
@@ -2836,27 +2950,34 @@ export class StorageManager {
   }
 
   /**
-   * The full delegated zcaps recorded for a connected app, scanned from the
-   * App Connect `Login` history activities: those on a Login for `origin` whose
-   * recorded `zcap` was delegated to `subjectDid` and has not already expired.
-   * Deduplicated by capability id. `skipped` counts the entries that carry no
-   * revocable capability (legacy summary-only records, a different controller,
-   * or an already-expired grant).
+   * The full delegated zcaps recorded for one grantee, scanned from the
+   * `Login` history activities `matches` accepts: those whose recorded `zcap`
+   * was delegated to `controller` and has not already expired. Deduplicated by
+   * capability id. `skipped` counts the entries that carry no revocable
+   * capability (legacy summary-only records, a different controller, or an
+   * already-expired grant). The predicate is what tells the two grantee kinds
+   * apart: an App Connect app (an origin plus an `appConnect` member) and an
+   * agent (the interaction-URL origin marker and no `appConnect`).
    *
    * @param options {object}
-   * @param options.origin {string}
-   * @param options.subjectDid {string}
+   * @param options.matches {Function}   the Login-object predicate
+   * @param options.controller {string}   the grantee the grants were
+   *   delegated to
    * @param options.items {Array<{ id: string; doc: WalletActivity }>}   the
    *   pre-fetched history, so this need not re-scan it
    * @returns {{ zcaps: IDelegatedZcap[]; skipped: number }}
    */
-  #recordedAppGrantZcaps({
-    origin,
-    subjectDid,
+  #recordedGrantZcaps({
+    matches,
+    controller,
     items
   }: {
-    origin: string
-    subjectDid: string
+    matches: (object: {
+      origin?: string
+      appConnect?: unknown
+      zcaps?: unknown
+    }) => boolean
+    controller: string
     items: Array<{ id: string; doc: WalletActivity }>
   }): { zcaps: IDelegatedZcap[]; skipped: number } {
     const zcaps: IDelegatedZcap[] = []
@@ -2869,7 +2990,7 @@ export class StorageManager {
       }
       const object = doc.object as
         { origin?: string; appConnect?: unknown; zcaps?: unknown } | undefined
-      if (!object || object.origin !== origin || !object.appConnect) {
+      if (!object || !matches(object)) {
         continue
       }
       if (!Array.isArray(object.zcaps)) {
@@ -2884,11 +3005,11 @@ export class StorageManager {
           skipped += 1
           continue
         }
-        // Only revoke capabilities delegated to this app's key.
+        // Only revoke capabilities delegated to this grantee's key.
         const controllers = Array.isArray(zcap.controller)
           ? zcap.controller
           : [zcap.controller]
-        if (!controllers.includes(subjectDid)) {
+        if (!controllers.includes(controller)) {
           skipped += 1
           continue
         }

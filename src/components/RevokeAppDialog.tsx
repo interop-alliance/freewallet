@@ -3,6 +3,10 @@
  * the Applications list and the application detail page. An orphaned app (one
  * whose recorded grants were all signed by a since-disconnected wallet client)
  * gets its own wording, since its grants already stopped verifying.
+ *
+ * The same dialog confirms revoking a connected AGENT (`agent`), whose copy
+ * speaks only of the storage grants: an agent holds no app key to delete and
+ * is no collection's epoch recipient, so nothing is rotated.
  */
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
@@ -18,8 +22,10 @@ import { useTranslation } from 'react-i18next'
  *
  * @param options {object}
  * @param options.open {boolean}
- * @param options.appName {string}   the app's display name
- * @param options.orphaned {boolean}   whether the app's grants are orphaned
+ * @param options.appName {string}   the app's (or agent's) display name
+ * @param [options.agent] {boolean}   whether the row is an agent rather than
+ *   an App Connect application
+ * @param options.orphaned {boolean}   whether the grants are orphaned
  * @param options.revoking {boolean}   whether a revocation is in flight
  * @param options.error {boolean}   whether the last attempt failed
  * @param options.onCancel {Function}
@@ -29,6 +35,7 @@ import { useTranslation } from 'react-i18next'
 export function RevokeAppDialog({
   open,
   appName,
+  agent = false,
   orphaned,
   revoking,
   error,
@@ -37,6 +44,7 @@ export function RevokeAppDialog({
 }: {
   open: boolean
   appName: string
+  agent?: boolean
   orphaned: boolean
   revoking: boolean
   error: boolean
@@ -54,16 +62,31 @@ export function RevokeAppDialog({
         }
       }}
     >
-      <DialogTitle>{t('applications.revokeTitle')}</DialogTitle>
+      <DialogTitle>
+        {t(
+          agent ? 'applications.revokeAgentTitle' : 'applications.revokeTitle'
+        )}
+      </DialogTitle>
       <DialogContent>
         <DialogContentText>
-          {orphaned
-            ? t('applications.revokeConfirmOrphaned', { name: appName })
-            : t('applications.revokeConfirm', { name: appName })}
+          {t(
+            agent
+              ? orphaned
+                ? 'applications.revokeAgentConfirmOrphaned'
+                : 'applications.revokeAgentConfirm'
+              : orphaned
+                ? 'applications.revokeConfirmOrphaned'
+                : 'applications.revokeConfirm',
+            { name: appName }
+          )}
         </DialogContentText>
         {error && (
           <Alert severity="error" sx={{ mt: 2 }}>
-            {t('applications.revokeFailed')}
+            {t(
+              agent
+                ? 'applications.revokeAgentFailed'
+                : 'applications.revokeFailed'
+            )}
           </Alert>
         )}
       </DialogContent>
