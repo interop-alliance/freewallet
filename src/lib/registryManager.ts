@@ -9,6 +9,9 @@ import {
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
 import { KNOWN_REGISTRIES_URL, KnownDidRegistries } from '@/app.config'
 import { corsProxyFetch } from './corsProxy'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:registries')
 
 const EMPTY_RESULT: LookupResult = {
   matchingIssuers: [],
@@ -67,7 +70,7 @@ async function ensureClient(): Promise<RegistryClient> {
   try {
     registries = await loadRegistries()
   } catch (err) {
-    console.warn('Using fallback KnownDidRegistries:', err)
+    log.warn('Using fallback KnownDidRegistries', { err })
     const fallbackClient = new RegistryClient()
     fallbackClient.use({ registries: KnownDidRegistries })
     return fallbackClient

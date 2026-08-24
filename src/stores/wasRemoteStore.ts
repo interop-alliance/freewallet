@@ -67,6 +67,9 @@ import {
   ensureWalletSpaceEpochs,
   type UserKey
 } from '@interop/wallet-core/keys'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:storage:remote')
 
 /**
  * Map from logical collection name to its WAS base URL.
@@ -556,7 +559,7 @@ export class WASRemoteStore {
         await collection.setPublic()
       }
     } catch (err) {
-      console.error(`Error provisioning collection "${id}":`, err)
+      log.error('Error provisioning collection', { id, err })
       throw new Error(
         `Error provisioning collection "${id}" in space "${this.spaceId}".`,
         { cause: err }
@@ -595,7 +598,7 @@ export class WASRemoteStore {
     try {
       current = await collection.describe()
     } catch (err) {
-      console.error(`Error describing collection "${id}":`, err)
+      log.error('Error describing collection', { id, err })
       throw new Error(
         `Error describing collection "${id}" in space "${this.spaceId}".`,
         { cause: err }
@@ -614,7 +617,7 @@ export class WASRemoteStore {
           force: true
         })
       } catch (err) {
-        console.error(`Error declaring collection "${id}" encrypted:`, err)
+        log.error('Error declaring collection encrypted', { id, err })
         throw new Error(
           `Error declaring collection "${id}" encrypted in space ` +
             `"${this.spaceId}".`,
@@ -638,7 +641,7 @@ export class WASRemoteStore {
     try {
       await this.#space().collection(id).delete()
     } catch (err) {
-      console.error(`Error deleting collection "${id}":`, err)
+      log.error('Error deleting collection', { id, err })
       throw new Error(
         `Error deleting collection "${id}" in space "${this.spaceId}".`,
         { cause: err }
@@ -707,7 +710,7 @@ export class WASRemoteStore {
         collection.isPublic()
       ])
     } catch (err) {
-      console.error('Error listing collection resources:', err)
+      log.error('Error listing collection resources', { err })
       throw new Error('Failed to list remote storage collection resources.', {
         cause: err
       })
@@ -827,7 +830,7 @@ export class WASRemoteStore {
     try {
       listing = await this.#space().collections()
     } catch (err) {
-      console.error('Error listing collections:', err)
+      log.error('Error listing collections', { err })
       throw new Error('Failed to list remote storage collections.', {
         cause: err
       })
@@ -873,10 +876,10 @@ export class WASRemoteStore {
     try {
       listing = await this.#space().collection(collectionId).list()
     } catch (err) {
-      console.error(
-        `Error listing synced resources for "${collectionId}":`,
+      log.error('Error listing synced resources for collection', {
+        collectionId,
         err
-      )
+      })
       throw new Error(
         `Failed to list resources in collection "${collectionId}".`,
         { cause: err }
@@ -1019,10 +1022,10 @@ export class WASRemoteStore {
     try {
       await this.#space().delete()
     } catch (err) {
-      console.error('Error deleting space:', err)
+      log.error('Error deleting space', { err })
       throw new Error('Failed to delete remote space.', { cause: err })
     }
-    console.log('Remote space deleted.')
+    log.info('Remote space deleted')
   }
 
   async getSpaceQuotas(): Promise<SpaceQuotaReport | null> {
@@ -1041,7 +1044,7 @@ export class WASRemoteStore {
         return null
       }
 
-      console.error('Error fetching space quotas:', err)
+      log.error('Error fetching space quotas', { err })
       throw new Error('Failed to fetch storage quotas.', { cause: err })
     }
   }
@@ -1059,7 +1062,7 @@ export class WASRemoteStore {
         capability: this.#capability
       })
     } catch (err) {
-      console.error('Error exporting space:', err)
+      log.error('Error exporting space', { err })
       throw new Error('Failed to export remote space.', { cause: err })
     }
 
@@ -1079,7 +1082,7 @@ export class WASRemoteStore {
     try {
       return await this.#space().import(bytes)
     } catch (err) {
-      console.error('Error importing space:', err)
+      log.error('Error importing space', { err })
       throw new Error('Failed to import remote space.', { cause: err })
     }
   }

@@ -7,6 +7,9 @@ import { docsStyles } from '@/styles/appStyles'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { SERVER_URL } from '@/app.config'
 import { useTranslation } from 'react-i18next'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:docs')
 
 export function DocContent({ fileName }: { fileName: string }) {
   const { t } = useTranslation()
@@ -30,7 +33,7 @@ export function DocContent({ fileName }: { fileName: string }) {
         }
         setContent(await res.text())
       } catch (err) {
-        console.error(err)
+        log.error('Could not load doc content', { err, fileName })
         setNotFound(true)
       }
     }

@@ -55,6 +55,9 @@ import {
   invalidateVerifiedLog,
   verifiedAccountLog
 } from '@/session/verifiedLog'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:rotation')
 
 /**
  * What a completed retirement reports: whether the roster actually rotated on
@@ -335,10 +338,9 @@ async function retireClientAnnexInventoryStage({
     })
     return { action: 'swapped' }
   } catch (err) {
-    console.warn(
-      "Could not retire the credential's annex inventory; the retired " +
-        'rung stands until the next generation swap:',
-      err
+    log.warn(
+      "Could not retire the credential's annex inventory; the retired rung stands until the next generation swap",
+      { err }
     )
     return { action: 'skipped', reason: 'failed' }
   }
@@ -453,10 +455,9 @@ async function loginLadderStanding({
     })
     attributed = await attributeLadderRung({ ladderSeed, published })
   } catch (err) {
-    console.warn(
-      "The login credential's ladder could not be placed in the account " +
-        'log; the retirement anchors no annex generation on it:',
-      err
+    log.warn(
+      "The login credential's ladder could not be placed in the account log; the retirement anchors no annex generation on it",
+      { err }
     )
     return 'unsettled'
   }

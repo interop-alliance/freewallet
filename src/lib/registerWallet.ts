@@ -1,6 +1,9 @@
 import { loadOnce } from 'credential-handler-polyfill'
 import { installHandler } from 'web-credential-handler'
 import { DEPLOY_URL, MEDIATOR_BASE } from '@/app.config'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:chapi:register')
 
 /**
  * The native WebAuthn `create()`, bound to its container before the CHAPI
@@ -56,7 +59,7 @@ async function queryHandlerPermission(): Promise<string> {
  */
 export async function registerWallet(): Promise<void> {
   const mediatedWalletUrl = MEDIATOR_BASE + encodeURIComponent(DEPLOY_URL)
-  console.log(`Registering wallet at ${mediatedWalletUrl}...`)
+  log.debug('Registering wallet with the mediator', { mediatedWalletUrl })
   try {
     await loadOnce(mediatedWalletUrl)
     if (nativeCredentialsCreate) {
@@ -66,12 +69,12 @@ export async function registerWallet(): Promise<void> {
       navigator.credentials.create = nativeCredentialsCreate
     }
     if ((await queryHandlerPermission()) === 'granted') {
-      console.log('Wallet already registered with browser.')
+      log.info('Wallet already registered with browser')
       return
     }
     await installHandler()
-    console.log('Wallet registered with browser.')
+    log.info('Wallet registered with browser')
   } catch (err) {
-    console.error('Wallet registration failed:', err)
+    log.error('Wallet registration failed', { err })
   }
 }

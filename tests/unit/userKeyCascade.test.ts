@@ -192,8 +192,11 @@ describe('cascadeCollectionsToUserKey', () => {
     })
     expect(result).toBe(driverResult)
     expect(warn).toHaveBeenCalledWith(
-      'Could not rotate collection "app-notes" onto the current user key:',
-      driverResult.failed[0]!.error
+      '[%s] %s',
+      'fw:session:cascade',
+      'Could not rotate collection onto the current user key',
+      driverResult.failed[0]!.error,
+      { collectionId: 'app-notes' }
     )
     warn.mockRestore()
   })

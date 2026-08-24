@@ -55,6 +55,9 @@ import {
   getCollectionDisplayName,
   getResourceDisplayName
 } from '@/components/storage/displayUtils'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:storage')
 
 export function CollectionContentsPage() {
   const { t } = useTranslation()
@@ -146,8 +149,8 @@ export function CollectionContentsPage() {
           return
         }
         setResources(items)
-      } catch (error) {
-        console.error('Failed to load collection contents:', error)
+      } catch (err) {
+        log.error('Failed to load collection contents', { err })
         if (!cancelled) {
           setErrorKey('storage.resourcesLoadError')
           setResources([])
@@ -194,7 +197,7 @@ export function CollectionContentsPage() {
         setDecryptedData(decrypted ?? null)
         setResourceView(decrypted !== undefined ? 'decrypted' : 'envelope')
       } catch (err) {
-        console.error('Failed to load resource:', err)
+        log.error('Failed to load resource', { err })
         setResourceError(t('storage.resourceLoadError'))
         setResourcePayload(null)
       } finally {
@@ -266,7 +269,7 @@ export function CollectionContentsPage() {
       showToast({ message: t('storage.collectionDeleted') })
       navigate('/storage')
     } catch (err) {
-      console.error('Failed to delete collection:', err)
+      log.error('Failed to delete collection', { err })
       setDeleteCollectionError(true)
       setDeletingCollection(false)
       return

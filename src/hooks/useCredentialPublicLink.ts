@@ -6,6 +6,9 @@ import { cidFrom } from '@interop/was-client/sync'
 import type { Session } from '@/types/auth'
 import type { CredentialShareActions } from '@/types/credentialActions'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:publiclink')
 
 /**
  * Drives a credential's public-link (sharing) state. Sharing is
@@ -36,7 +39,7 @@ export function useCredentialPublicLink({
     try {
       return cidFrom({ doc: credential })
     } catch (err: unknown) {
-      console.error('Error computing credential cid:', err)
+      log.error('Error computing credential cid', { err })
       return null
     }
   }, [credential])
@@ -51,7 +54,7 @@ export function useCredentialPublicLink({
         setIsShared(shared)
       })
       .catch((err: unknown) => {
-        console.error('Error checking public link status:', err)
+        log.error('Error checking public link status', { err })
       })
   }, [canShare, cid, session])
 
@@ -71,7 +74,7 @@ export function useCredentialPublicLink({
       })
       showToast({ message: t('credential.publicLinkCreated') })
     } catch (err) {
-      console.error('Error creating public link:', err)
+      log.error('Error creating public link', { err })
       setError(true)
     } finally {
       setBusy(false)
@@ -94,7 +97,7 @@ export function useCredentialPublicLink({
       })
       showToast({ message: t('credential.publicLinkRemoved') })
     } catch (err) {
-      console.error('Error removing public link:', err)
+      log.error('Error removing public link', { err })
       setError(true)
     } finally {
       setBusy(false)

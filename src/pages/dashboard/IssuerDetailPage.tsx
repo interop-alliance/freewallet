@@ -21,6 +21,9 @@ import {
 import { issuerDetailStyles as sx } from '@/styles/credentialStyles'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:issuer')
 
 function imageUriFrom(img?: string | { id?: string }): string | undefined {
   if (!img) {
@@ -223,7 +226,7 @@ export function IssuerDetailPage() {
         setVc(credential)
       })
       .catch((err: unknown) => {
-        console.error('Error loading credential:', err)
+        log.error('Error loading credential', { err })
         setLoadError(true)
       })
   }, [cid, session])

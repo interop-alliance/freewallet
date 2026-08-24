@@ -27,6 +27,9 @@ import { userKeyVaultKeys, type UserKey } from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import { rewrapUnlockMethodsRecord } from '@/session/unlockMethods'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:userkey')
 
 /**
  * Re-seals the unlock-methods registry from one set of vault keys to another,
@@ -76,9 +79,9 @@ export async function rewrapUnlockRegistryToUserKey({
     // was already re-sealed forward by another writer. Either way the loop
     // never wrote a record it could not open, so reporting false (and keeping
     // the session on the pre-rotation keys) is the safe reading.
-    console.warn(
-      'Could not re-wrap the unlock-methods registry to the rotated user key:',
-      err
+    log.warn(
+      'Could not re-wrap the unlock-methods registry to the rotated user key',
+      { err }
     )
     return false
   }
@@ -186,20 +189,17 @@ export async function adoptRotatedUserKeyInBand({
   })
   await session.profile.persistClientKeys?.({ userKey })
   if (!resealed) {
-    console.warn(
-      'The unlock-methods registry stayed sealed to the superseded user ' +
-        'key; this session keeps operating under it rather than meeting a ' +
-        'stale seal on every registry read.'
+    log.warn(
+      'The unlock-methods registry stayed sealed to the superseded user key; this session keeps operating under it rather than meeting a stale seal on every registry read'
     )
     return
   }
   try {
     await swapSessionVaultKeys({ session, userKey })
   } catch (err) {
-    console.warn(
-      'Could not rebuild the storage ciphers on the rotated user key; the next ' +
-        'login adopts it instead:',
-      err
+    log.warn(
+      'Could not rebuild the storage ciphers on the rotated user key; the next login adopts it instead',
+      { err }
     )
   }
 }
@@ -272,10 +272,9 @@ export async function adoptRotatedUserKey({
   try {
     await swapSessionVaultKeys({ session, userKey })
   } catch (err) {
-    console.warn(
-      'Could not rebuild the storage ciphers on the rotated user key; the next ' +
-        'login adopts it instead:',
-      err
+    log.warn(
+      'Could not rebuild the storage ciphers on the rotated user key; the next login adopts it instead',
+      { err }
     )
   }
 }

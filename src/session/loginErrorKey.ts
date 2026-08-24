@@ -12,6 +12,9 @@ import {
 } from '@/session/keyring'
 import { TransientLoginUnavailableError } from '@/session/transientLogin'
 import { isStorageUnreachable } from '@/lib/storageErrors'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:login')
 
 /**
  * The `name` of a thrown value, if it carries one.
@@ -55,39 +58,48 @@ export function loginErrorKey({
   // The authenticity refusal: the record's proof was not made by the key the
   // typed secret derives, so the storage host forged or tampered with it.
   if (err instanceof KeyringRecordForgedError) {
-    console.error(`${label} refused:`, err)
+    log.error('Login refused: keyring record forged', { label, err })
     return 'auth.errors.keyringForged'
   }
   // The replay refusal: a validly signed record, but older than the newest
   // this browser has accepted for the secret.
   if (err instanceof KeyringRecordRolledBackError) {
-    console.error(`${label} refused:`, err)
+    log.error('Login refused: keyring record rolled back', { label, err })
     return 'auth.errors.keyringRolledBack'
   }
   // The account-log continuity refusal: the served did:webvh log is a
   // rollback, a fork, or an identity switch against the chain head this
   // browser has pinned.
   if (errorName(err) === 'ResourceLogContinuityError') {
-    console.error(`${label} refused:`, err)
+    log.error('Login refused: account log continuity violation', {
+      label,
+      err
+    })
     return 'auth.errors.accountLogContinuity'
   }
   // The rollback refusal: the served key roster sits behind the epoch this
   // browser has already seen.
   if (errorName(err) === 'UserKeyRosterContinuityError') {
-    console.error(`${label} refused:`, err)
+    log.error('Login refused: user key roster continuity violation', {
+      label,
+      err
+    })
     return 'auth.errors.userKeyRosterContinuity'
   }
   // The served key roster failed authentication -- a fabricated or tampered
   // epoch configuration.
   if (errorName(err) === 'UserKeyRosterIntegrityError') {
-    console.error(`${label} refused:`, err)
+    log.error('Login refused: user key roster integrity violation', {
+      label,
+      err
+    })
     return 'auth.errors.userKeyRosterIntegrity'
   }
   // A torn enrollment: this browser's key is published for the account, but
   // the key roster holds no wrap for it, so the session cannot recover the
   // account key.
   if (errorName(err) === 'UserKeyRosterUnwrapError') {
-    console.error(`${label} failed:`, err)
+    log.error('Login failed: user key roster unwrap error', { label, err })
     return 'auth.errors.userKeyRosterUnwrap'
   }
   // The self-enrolling login's fail-closed attribution refusal: the
@@ -95,7 +107,7 @@ export function loginErrorKey({
   // revoked or retired credential), or more than one (an ambiguous state
   // self-enrollment must not guess through).
   if (errorName(err) === 'LadderAttributionError') {
-    console.error(`${label} refused:`, err)
+    log.error('Login refused: ladder attribution error', { label, err })
     return 'auth.errors.ladderAttribution'
   }
   // The finish-the-wipe detector's outcome: this browser's client entry was
@@ -106,13 +118,13 @@ export function loginErrorKey({
     // without confirmation on a browser that cannot enumerate its
     // databases. The user-facing copy is the same either way (the account
     // is gone from here); the distinction is for the log.
-    console.warn(`${label}: this browser was forgotten:`, err)
+    log.warn('Login: this browser was forgotten', { label, err })
     return 'auth.errors.browserForgotten'
   }
   // A keyring record was found but is corrupt -- not a server outage and not
   // a wrong passphrase; surface it with recovery guidance.
   if (err instanceof KeyringRecordUnusableError) {
-    console.error(`${label} failed:`, err)
+    log.error('Login failed: keyring record unusable', { label, err })
     return 'auth.errors.keyringUnusable'
   }
   // The transient login could not proceed here (a record without standing
@@ -121,9 +133,9 @@ export function loginErrorKey({
   // connecting this browser durably is the one remedy every reason shares;
   // honest per-reason copy is a follow-up concern.
   if (err instanceof TransientLoginUnavailableError) {
-    console.error(`${label} unavailable transiently:`, err)
+    log.error('Login unavailable transiently', { label, err })
     return 'auth.errors.clientNotEnrolled'
   }
-  console.error(`${label} failed:`, err)
+  log.error('Login failed', { label, err })
   return 'auth.errors.setupFailed'
 }

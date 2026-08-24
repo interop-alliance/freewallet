@@ -26,6 +26,9 @@ import type {
   CredentialDetailActions,
   CredentialShareActions
 } from '@/types/credentialActions'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:credential')
 
 /**
  * One credential action button: icon-only below `sm` (the label moving into a
@@ -174,7 +177,7 @@ function PublicLinkDisplay({ url }: { url: string }) {
   const isMedium = useMediaQuery(theme.breakpoints.down('md'))
   const { copied, copy } = useCopyToClipboard({
     onError: (err: unknown) => {
-      console.error('Could not copy public link:', err)
+      log.error('Could not copy public link', { err })
     }
   })
 

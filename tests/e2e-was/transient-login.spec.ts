@@ -101,6 +101,27 @@ test.describe.serial('transient login residue', () => {
     try {
       const baseline = await transientLogin(page, passphrase)
       await addCredentialViaPaste(page)
+      // The logging seam's durability invariant: the visit above ran the
+      // wired loggers (the dev ring buffer holds events), and exercising
+      // the dev handle's setFilter writes nothing durable -- the filter
+      // override is in-memory only, so the residue assertions below must
+      // still see an unchanged localStorage key set.
+      await page.evaluate(() => {
+        const handle = (
+          window as unknown as {
+            __fwLog?: {
+              snapshot: () => unknown[]
+              setFilter: (pattern: string | null) => void
+              clear: () => void
+            }
+          }
+        ).__fwLog
+        if (!handle) {
+          throw new Error('window.__fwLog is not installed in this dev build.')
+        }
+        handle.setFilter('fw:*')
+        handle.setFilter(null)
+      })
       await page.getByRole('button', { name: 'Log out' }).click()
       await expect(page).toHaveURL(/\/#?\/?$/)
       await expectNoStorageResidue({

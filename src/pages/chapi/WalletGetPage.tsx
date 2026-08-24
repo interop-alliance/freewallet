@@ -91,6 +91,9 @@ import { SiteProvidedText } from './SiteProvidedText'
 import { RequestSourcePanel } from './RequestSourcePanel'
 import { CHAPILoginForm } from './CHAPILoginForm'
 import { useTranslation } from 'react-i18next'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:chapi:get')
 
 type PageState =
   'initializing' | 'awaiting-login' | 'selecting' | 'blocked' | 'done'
@@ -259,7 +262,7 @@ export function WalletGetPage() {
         try {
           details = await startExchange({ exchangeUrl: exchange })
         } catch (err) {
-          console.error('Could not open the VC API exchange:', err)
+          log.error('Could not open the VC API exchange', { err })
           setBlockReason('exchangeFailed')
           setPageState('blocked')
           return
@@ -268,7 +271,7 @@ export function WalletGetPage() {
 
       const queries = details ? queriesOf(details) : []
       if (!details || queries.length === 0) {
-        console.error('CHAPI get event carries no readable request.', web)
+        log.error('CHAPI get event carries no readable request', { web })
         setBlockReason('malformedRequest')
         setPageState('blocked')
         return
@@ -308,7 +311,7 @@ export function WalletGetPage() {
     }
 
     init().catch((err: unknown) => {
-      console.error('CHAPI get initialization failed:', err)
+      log.error('CHAPI get initialization failed', { err })
       setBlockReason('malformedRequest')
       setPageState('blocked')
     })
@@ -528,7 +531,7 @@ export function WalletGetPage() {
       if (err instanceof WalletResponseFailure) {
         setBlockReason(err.reason)
       } else {
-        console.error('CHAPI request processing failed:', err)
+        log.error('CHAPI request processing failed', { err })
         setBlockReason('processFailed')
       }
       setPageState('blocked')

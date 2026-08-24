@@ -14,7 +14,8 @@
  *
  * @vitest-environment node
  */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type {
   IKeyAgreementKey,
@@ -1912,7 +1913,8 @@ describe('StorageManager blinded index writes', () => {
       collectionId: 'private-credentials',
       meta: { custom: { not: 'an envelope' } }
     })
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
 
     try {
       await storage.refreshEncryptedDescriptors()
@@ -1922,12 +1924,14 @@ describe('StorageManager blinded index writes', () => {
       expect(envelopes).toHaveLength(1)
       expect(indexedOf(envelopes[0])).toEqual([])
       expect(
-        warn.mock.calls.some(call =>
-          String(call[0]).includes('Could not install the index schema')
+        capture.events.some(
+          event =>
+            event.level === 'warn' &&
+            event.msg.includes('Could not install the index schema')
         )
       ).toBe(true)
     } finally {
-      warn.mockRestore()
+      removeSink()
     }
   })
 })

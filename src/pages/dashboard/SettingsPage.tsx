@@ -60,6 +60,9 @@ import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { DATE_FMT, KMS_SERVER_URL, PASSWORD_RULES } from '@/app.config'
 import { setLoginHandle } from '@/lib/loginCredential'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:settings')
 
 /**
  * A single label/value settings row: a fixed-width label column and a value
@@ -130,7 +133,7 @@ export function SettingsPage() {
           setSavedHandle(current)
         }
       } catch (err) {
-        console.error('Could not load the login handle:', err)
+        log.error('Could not load the login handle', { err })
       }
     }
     void loadHandle()
@@ -150,7 +153,7 @@ export function SettingsPage() {
       setSavedHandle(handle.trim())
       setHandleSaved(true)
     } catch (err) {
-      console.error('Could not save the login handle:', err)
+      log.error('Could not save the login handle', { err })
     } finally {
       setHandleSaving(false)
     }
@@ -218,7 +221,7 @@ export function SettingsPage() {
       } else if (err instanceof PendingPassphraseRetirementError) {
         setPassphraseChangeError('pending')
       } else {
-        console.error('Could not change the passphrase:', err)
+        log.error('Could not change the passphrase', { err })
         setPassphraseChangeError('failed')
       }
     } finally {
@@ -301,7 +304,7 @@ export function SettingsPage() {
       setRegistryLoaded(true)
       setRegistryLoadError(false)
     } catch (err) {
-      console.warn('Could not refresh the unlock methods:', err)
+      log.warn('Could not refresh the unlock methods', { err })
       setRegistryLoadError(true)
     }
   }
@@ -345,7 +348,7 @@ export function SettingsPage() {
       } else if (err instanceof PasskeyPrfUnsupportedError) {
         setPasskeyError('unsupported')
       } else {
-        console.error('Could not add a passkey:', err)
+        log.error('Could not add a passkey', { err })
         setPasskeyError('failed')
       }
     } finally {
@@ -374,7 +377,7 @@ export function SettingsPage() {
       showToast({ message: t('settings.passkeyLabelSaved') })
       await reloadRegistry()
     } catch (err) {
-      console.error('Could not rename the passkey:', err)
+      log.error('Could not rename the passkey', { err })
       setPasskeyError('failed')
     } finally {
       setLabelSaving(false)
@@ -409,7 +412,7 @@ export function SettingsPage() {
         setRemoveDialogOpen(false)
         setRemoveTarget(null)
       } else {
-        console.error('Could not remove the passkey:', err)
+        log.error('Could not remove the passkey', { err })
         setRemoveError(true)
       }
     } finally {
@@ -448,7 +451,7 @@ export function SettingsPage() {
       showToast({ message: t('settings.passphraseAdded') })
       await reloadRegistry()
     } catch (err) {
-      console.error('Could not add a passphrase:', err)
+      log.error('Could not add a passphrase', { err })
       setAddPassphraseError(true)
     } finally {
       setAddingPassphrase(false)
@@ -484,7 +487,7 @@ export function SettingsPage() {
           setRegistryStaleSeal(false)
         }
       } catch (err) {
-        console.error('Could not load the unlock methods:', err)
+        log.error('Could not load the unlock methods', { err })
         if (!cancelled) {
           setRegistryLoaded(true)
           setRegistryLoadError(true)
@@ -518,7 +521,7 @@ export function SettingsPage() {
     : undefined
   const { copied: copiedDidWebvh, copy: copyDidWebvh } = useCopyToClipboard({
     onError: (err: unknown) => {
-      console.error('Could not copy the did:webvh id:', err)
+      log.error('Could not copy the did:webvh id', { err })
     }
   })
   const [rotateDialogOpen, setRotateDialogOpen] = useState(false)
@@ -550,7 +553,7 @@ export function SettingsPage() {
       await rotateAccountUpdateKey({ session })
       setRotateDone(true)
     } catch (err) {
-      console.error('Could not rotate the did:webvh update key:', err)
+      log.error('Could not rotate the did:webvh update key', { err })
       setRotateError(true)
     } finally {
       setRotating(false)

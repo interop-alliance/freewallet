@@ -48,7 +48,11 @@ export default defineConfig({
       command: `pnpm exec vite --cors --host --port ${APP_PORT} --strictPort`,
       url: APP_URL,
       reuseExistingServer: false,
-      env: { VITE_WAS_SERVER_URL: WAS_URL }
+      env: {
+        VITE_WAS_SERVER_URL: WAS_URL,
+        // Keep the dev-log endpoint off the live dev session's file.
+        INTEROP_LOGGER_FILE: 'test-results/dev-logs/app.ndjson'
+      }
     }
   ]
 })

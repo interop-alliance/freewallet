@@ -34,6 +34,9 @@ import {
 } from '@/session/recovery'
 import { RecoveryCodeDisplay } from '@/components/RecoveryCodeDisplay'
 import { formatDate } from '@/lib/viewMappers/formatDate'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:recovery')
 
 export function RecoveryCodesSection({ session }: { session: Session }) {
   const { t, i18n } = useTranslation()
@@ -75,7 +78,7 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
             setHealthFlags(flags)
           }
         } catch (err) {
-          console.warn('Recovery health check failed:', err)
+          log.warn('Recovery health check failed', { err })
         }
       }
     }
@@ -117,7 +120,7 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
       setPendingCode(null)
       setEntries(await listRecoveryCodeEntries({ session }))
     } catch (err) {
-      console.error('Could not issue the recovery code:', err)
+      log.error('Could not issue the recovery code', { err })
       setErrorKey('settings.recovery.saveError')
     } finally {
       setIsSaving(false)
@@ -140,7 +143,7 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
         flags.filter(flag => flag.entry.recoveryKid !== entry.recoveryKid)
       )
     } catch (err) {
-      console.error('Could not revoke the recovery code:', err)
+      log.error('Could not revoke the recovery code', { err })
       setErrorKey('settings.recovery.revokeError')
     } finally {
       setRevokingKid(null)

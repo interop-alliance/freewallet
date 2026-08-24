@@ -224,8 +224,11 @@ describe('the credential-anchored signup hook -- read-first registry write', () 
     expect(state.writes.filter(write => write === 'client')).toHaveLength(1)
     expect(state.registry).toEqual(first)
     expect(warn).toHaveBeenCalledWith(
+      '[%s] %s',
+      'fw:session:signup',
       expect.stringContaining('skipping the passphrase entry'),
-      expect.any(Error)
+      expect.any(Error),
+      ''
     )
     warn.mockRestore()
   })
@@ -302,8 +305,11 @@ describe('the passkey signup -- read-first registry mint', () => {
     expect(state.writes.filter(write => write === 'session')).toHaveLength(1)
     expect(state.registry).toEqual(first)
     expect(warn).toHaveBeenCalledWith(
+      '[%s] %s',
+      'fw:session:signup',
       expect.stringContaining('Could not record the new passkey'),
-      expect.any(Error)
+      expect.any(Error),
+      ''
     )
     warn.mockRestore()
   })

@@ -33,6 +33,9 @@ import {
   rewrapUnlockMethodsRecord,
   UnlockRegistryStaleSealError
 } from '@/session/unlockMethods'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:reseal')
 
 /**
  * Detects and mends a stale-sealed unlock-methods registry.
@@ -129,11 +132,9 @@ export async function repairStaleUnlockRegistrySeal({
       // The record opened under this generation and the re-wrap or the PUT
       // failed. The registry is untouched and still stale-sealed; the next
       // login runs the same repair.
-      console.warn(
-        'The unlock-methods registry opened under a superseded user key but ' +
-          'could not be re-sealed to the current one; the next login ' +
-          'retries:',
-        err
+      log.warn(
+        'The unlock-methods registry opened under a superseded user key but could not be re-sealed to the current one; the next login retries',
+        { err }
       )
       return 'reseal-failed'
     }

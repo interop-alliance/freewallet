@@ -102,6 +102,9 @@ import type {
   PersistableClientKeys,
   UnlockCredential
 } from '@/session/keyring'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:init')
 
 /**
  * Creates a random guest session.
@@ -277,7 +280,7 @@ export async function initSessionFromSeed({
               }
             : {})
         }).catch(err => {
-          console.warn('KMS keystore provisioning failed:', err)
+          log.warn('KMS keystore provisioning failed', { err })
           return undefined
         })
       : Promise.resolve(undefined)
@@ -325,7 +328,7 @@ export async function initSessionFromSeed({
         await persistClientKeys?.({ userKey: rosterRead.userKey })
       } catch (err) {
         userKeyPersistFailed = true
-        console.warn('Could not persist the rotated user key:', err)
+        log.warn('Could not persist the rotated user key', { err })
       }
     }
   }
@@ -419,7 +422,7 @@ export async function initSessionFromSeed({
       .catch(() => {})
       .then(() => sweepStrandedAppKeys({ storage }))
       .catch((err): null => {
-        console.warn('The stranded app-key sweep failed:', err)
+        log.warn('The stranded app-key sweep failed', { err })
         return null
       })
 
@@ -477,7 +480,7 @@ export async function initSessionFromSeed({
           return result
         })
         .catch((err): null => {
-          console.warn('The user key cascade-completion sweep failed:', err)
+          log.warn('The user key cascade-completion sweep failed', { err })
           return null
         })
     }
@@ -663,7 +666,7 @@ async function checkUserKeyRosterAtLogin({
         })
       } catch (err) {
         persistFailed = true
-        console.warn('Could not persist the user key epoch pin:', err)
+        log.warn('Could not persist the user key epoch pin', { err })
       }
     }
   })
@@ -985,10 +988,9 @@ async function sessionFromKeyringHit({
           rosterRead: loginRosterRead
         })
       } catch (err) {
-        console.warn(
-          'Could not repair the unlock-methods registry seal; the next ' +
-            'login retries:',
-          err
+        log.warn(
+          'Could not repair the unlock-methods registry seal; the next login retries',
+          { err }
         )
       }
     })
@@ -1007,10 +1009,9 @@ async function sessionFromKeyringHit({
       try {
         await repairTornPassphraseRetirement({ session, found })
       } catch (err) {
-        console.warn(
-          'Could not finish the pending passphrase retirement; the next ' +
-            'login retries:',
-          err
+        log.warn(
+          'Could not finish the pending passphrase retirement; the next login retries',
+          { err }
         )
       }
     })
@@ -1026,10 +1027,9 @@ async function sessionFromKeyringHit({
       try {
         await rebuildBarePasskeyEntry({ session, found })
       } catch (err) {
-        console.warn(
-          'Could not rebuild the bare passkey unlock-method entry; the ' +
-            'next login retries:',
-          err
+        log.warn(
+          'Could not rebuild the bare passkey unlock-method entry; the next login retries',
+          { err }
         )
       }
     })
@@ -1049,7 +1049,7 @@ async function sessionFromKeyringHit({
       try {
         await backfillPassphraseUnlockMethod({ session })
       } catch (err) {
-        console.warn('Could not backfill the unlock-methods registry:', err)
+        log.warn('Could not backfill the unlock-methods registry', { err })
       }
     })
   }
@@ -1167,10 +1167,9 @@ async function sessionFromKeyringHit({
             : {})
         })
       } catch (err) {
-        console.warn(
-          'Could not refresh the expiring standing delegations; the ' +
-            'next login retries:',
-          err
+        log.warn(
+          'Could not refresh the expiring standing delegations; the next login retries',
+          { err }
         )
       }
     })
@@ -1217,10 +1216,9 @@ async function sessionFromKeyringHit({
           })
         }
       } catch (err) {
-        console.warn(
-          'Could not refresh the recorded ladder rung after self-enrolling; ' +
-            'a later disconnect attribution fails closed instead:',
-          err
+        log.warn(
+          'Could not refresh the recorded ladder rung after self-enrolling; a later disconnect attribution fails closed instead',
+          { err }
         )
       }
     })
@@ -1256,10 +1254,9 @@ async function sessionFromKeyringHit({
           profile: session.profile
         })
       } catch (err) {
-        console.warn(
-          'Could not backfill the did:webvh pointer and promote the ' +
-            'controller; the next login retries:',
-          err
+        log.warn(
+          'Could not backfill the did:webvh pointer and promote the controller; the next login retries',
+          { err }
         )
       }
     })
@@ -1300,9 +1297,9 @@ async function sessionFromKeyringHit({
         ) {
           return
         }
-        console.warn(
-          'Could not heal the generation delegation; the next login retries:',
-          err
+        log.warn(
+          'Could not heal the generation delegation; the next login retries',
+          { err }
         )
       }
     })
@@ -1328,7 +1325,7 @@ async function sessionFromKeyringHit({
         })
       )
       .catch((err): null => {
-        console.warn('The annex GC sweep failed:', err)
+        log.warn('The annex GC sweep failed', { err })
         return null
       })
   }

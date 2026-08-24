@@ -41,6 +41,9 @@ import { loginWithPassphrase } from '@/session/initSession'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import { requireEnrolledClientContext } from '@/session/enrolledContext'
 import type { Session } from '@/types/auth'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:enrollment')
 
 /**
  * ENROLLING CLIENT: approves a connect code the person has compared against
@@ -97,7 +100,7 @@ export async function approveEnrollment({
         label
       })
     } catch (err) {
-      console.warn("Could not save the new client's label:", err)
+      log.warn("Could not save the new client's label", { err })
     }
   }
   return approved

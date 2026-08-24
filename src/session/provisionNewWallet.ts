@@ -29,6 +29,9 @@ import { DEFAULT_CLIENT_LABEL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
 import { interopAllianceTeamContact } from '@/fixtures/defaultContacts'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:provision')
 
 /**
  * Provisions a freshly created wallet: collections, initial history, default
@@ -71,7 +74,7 @@ export async function provisionNewWallet({
         label: DEFAULT_CLIENT_LABEL
       })
     } catch (err) {
-      console.warn("Could not label this first client's wallet:", err)
+      log.warn("Could not label this first client's wallet", { err })
     }
   }
 
@@ -106,7 +109,7 @@ export async function provisionNewWallet({
       })
     ])
   } catch (err) {
-    console.warn('Could not seed the default contacts:', err)
+    log.warn('Could not seed the default contacts', { err })
   }
 
   // Seed the wallet with a welcome credential. `addCredential` records its own

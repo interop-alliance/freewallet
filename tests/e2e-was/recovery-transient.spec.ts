@@ -301,6 +301,10 @@ test.describe
         if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
           return
         }
+        // The dev-server NDJSON log sink is telemetry, not a wallet write.
+        if (new URL(request.url()).pathname === '/__interop-logger') {
+          return
+        }
         writes.push({ method, pathname: new URL(request.url()).pathname })
       })
       // The tear: the roster append itself fails. Reads of the roster log

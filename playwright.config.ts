@@ -31,7 +31,9 @@ export default defineConfig({
     env: {
       // Pin local (IndexedDB) mode; override any VITE_WAS_SERVER_URL leaked
       // from the surrounding shell or a separately-running dev server.
-      VITE_WAS_SERVER_URL: ''
+      VITE_WAS_SERVER_URL: '',
+      // Keep the dev-log endpoint off the live dev session's file.
+      INTEROP_LOGGER_FILE: 'test-results/dev-logs/app.ndjson'
     }
   }
 })

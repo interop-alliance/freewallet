@@ -16,6 +16,9 @@ import { initGuestSession } from '@/session/initSession'
 import { provisionNewWallet } from '@/session/provisionNewWallet'
 import { useAuthStore } from '@/stores/authStore'
 import { registerWallet } from '@/lib/registerWallet'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:guest')
 
 export function GuestLoginPage() {
   const { t } = useTranslation()
@@ -49,7 +52,7 @@ export function GuestLoginPage() {
       login(session)
       navigate('/dashboard')
     } catch (err) {
-      console.error('Error starting guest session:', err)
+      log.error('Error starting guest session', { err })
       setSetupError(true)
     } finally {
       setIsSubmitting(false)

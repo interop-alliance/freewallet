@@ -48,6 +48,9 @@ import {
 } from '@/session/userKeyCascade'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import { assertAccountCeremonyAllowed } from '@/session/persistence'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:revocation')
 
 export type { RevokedClientKeys } from '@interop/wallet-core/webvh'
 
@@ -82,9 +85,9 @@ async function unlockRegistry({
   try {
     return await getUnlockMethods({ session })
   } catch (err) {
-    console.warn(
-      'Could not read the unlock-methods registry for the revocation edit:',
-      err
+    log.warn(
+      'Could not read the unlock-methods registry for the revocation edit',
+      { err }
     )
     return null
   }
@@ -224,7 +227,7 @@ export async function revokeEnrolledClient({
       failed: result.collections.failed.length
     })
   } catch (err) {
-    console.warn('Could not record the client-revocation activity:', err)
+    log.warn('Could not record the client-revocation activity', { err })
   }
 
   return {
@@ -297,10 +300,9 @@ async function remintGenerationDelegation({
     })
     return { renewed }
   } catch (err) {
-    console.warn(
-      'Could not re-mint the generation delegation after the revocation; ' +
-        'the next login retries:',
-      err
+    log.warn(
+      'Could not re-mint the generation delegation after the revocation; the next login retries',
+      { err }
     )
     return { renewed: false, skipped: 'failed' }
   }

@@ -15,6 +15,9 @@ import { credentialDetailStyles } from '@/styles/credentialStyles'
 import type { StoredCredential } from '@/types/credential'
 import { isResumeCredential } from '@/lib/isResumeCredential'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:credential')
 
 export function CredentialDetailPage() {
   const { t } = useTranslation()
@@ -60,7 +63,7 @@ export function CredentialDetailPage() {
         setCredential({ cid, vc })
       })
       .catch((err: unknown) => {
-        console.error('Error loading credential:', err)
+        log.error('Error loading credential', { err })
         setLoadError(true)
       })
   }, [cid, session])

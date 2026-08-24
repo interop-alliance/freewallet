@@ -39,6 +39,9 @@ import { migrationMarkerKeys } from '@/stores/browserStore'
 import { deleteLocalCacheFamilies } from '@/session/persistence'
 import type { UnlockMethodsRecord } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:wipe')
 
 /**
  * Every durable local target the wipe deletes, derived up front. The members
@@ -194,7 +197,7 @@ export async function executeLocalWipe({
       await run()
     } catch (err) {
       failed.push(name)
-      console.warn(`Local wipe stage "${name}" failed:`, err)
+      log.warn('Local wipe stage failed', { stage: name, err })
     }
   }
 

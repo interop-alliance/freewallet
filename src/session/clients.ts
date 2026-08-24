@@ -44,6 +44,9 @@ import {
   type RevocationOutcome
 } from '@/session/revocation'
 import { verifiedAccountLog } from '@/session/verifiedLog'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:clients')
 
 export type { AccountClientView } from '@interop/wallet-core/clients'
 export {
@@ -215,7 +218,7 @@ export async function disconnectAccountClient({
       signingKeyMultibase: client.signingKeyMultibase
     })
   } catch (err) {
-    console.warn("Could not drop the disconnected client's label:", err)
+    log.warn("Could not drop the disconnected client's label", { err })
   }
   return outcome
 }

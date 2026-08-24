@@ -101,6 +101,9 @@ import {
   type StandingUnlockFields
 } from '@/session/unlockMethods'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:unlock')
 
 /**
  * The narrow store a credential's self-enrollment continuation writes
@@ -271,10 +274,9 @@ export async function establishStandingUnlock({
       })
     }
   } catch (err) {
-    console.warn(
-      'Could not mint the annex-Space sibling delegation; the record ' +
-        'binds without one:',
-      err
+    log.warn(
+      'Could not mint the annex-Space sibling delegation; the record binds without one',
+      { err }
     )
   }
 
@@ -302,13 +304,11 @@ export async function establishStandingUnlock({
         logId: reach.logId
       })
     } catch (err) {
-      console.warn(
+      log.warn(
         (err as { name?: string }).name === 'ClientAnnexRungUncommittedError'
-          ? "The login credential's rung is not committed in the pointed " +
-              'generation, so the bound credential waits for the next ' +
-              'generation swap:'
-          : "Could not commit the bound credential's annex rung:",
-        err
+          ? "The login credential's rung is not committed in the pointed generation; the bound credential waits for the next generation swap"
+          : "Could not commit the bound credential's annex rung",
+        { err }
       )
     }
   }
@@ -604,10 +604,9 @@ export async function selfEnrollStandingClient({
       idb
     })
   } catch (err) {
-    console.warn(
-      'The self-enrolled client could not pin the user key roster epoch; ' +
-        'the next login establishes it from the verified roster:',
-      err
+    log.warn(
+      'The self-enrolled client could not pin the user key roster epoch; the next login establishes it from the verified roster',
+      { err }
     )
   }
   const clientKeys: ClientKeyRecord = {
@@ -715,10 +714,9 @@ export async function establishPassphraseStanding({
       }
     }
   } catch (err) {
-    console.warn(
-      'Could not establish the passphrase as a standing credential; a fresh ' +
-        'browser will need the connect-another-wallet ceremony:',
-      err
+    log.warn(
+      'Could not establish the passphrase as a standing credential; a fresh browser will need the connect-another-wallet ceremony',
+      { err }
     )
     return {}
   }

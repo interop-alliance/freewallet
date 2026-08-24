@@ -54,6 +54,9 @@ import { KeyUnwrapError } from '@interop/was-client'
 import type { StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:storage:browser')
 
 /**
  * The per-`dbPrefix` localStorage marker keys of the one-time local
@@ -362,7 +365,9 @@ export class BrowserStore {
       }>
     this.db = db
     this.#listenForTeardown()
-    console.log('Initialized local wallet collections for user:', user.id)
+    log.info('Initialized local wallet collections for user', {
+      userId: user.id
+    })
   }
 
   /**
@@ -601,27 +606,20 @@ export class BrowserStore {
         if (err instanceof UnknownEpochError) {
           // Possibly-fresh data behind a stale descriptor: skip it (uncached) so a
           // descriptor refresh can pick it up, never purge it.
-          console.warn(
-            `Skipping unknown-epoch "${logicalKey}" row "${id}":`,
-            err
-          )
+          log.warn('Skipping unknown-epoch row', { logicalKey, id, err })
           unknownEpochRowIds.push(id)
         } else if (err instanceof KeyUnwrapError) {
           // This wallet is not a recipient of the row's key epoch. Real data,
           // permanently unreadable here: skip it (uncached) but never purge it,
           // and keep it out of the refresh signal -- a descriptor refresh cannot
           // grant a key.
-          console.warn(
-            `Skipping "${logicalKey}" row "${id}": this wallet is not a ` +
-              `recipient of its key epoch:`,
-            err
+          log.warn(
+            'Skipping row: this wallet is not a recipient of its key epoch',
+            { logicalKey, id, err }
           )
           noEpochKeyRowIds.push(id)
         } else {
-          console.warn(
-            `Skipping undecryptable "${logicalKey}" row "${id}":`,
-            err
-          )
+          log.warn('Skipping undecryptable row', { logicalKey, id, err })
           undecryptableRowIds.push(id)
         }
         continue
@@ -1460,7 +1458,7 @@ export class BrowserStore {
       try {
         raw = await cipher.decrypt({ envelope: data! })
       } catch (err) {
-        console.warn(`Skipping undecryptable "contacts" row "${id}":`, err)
+        log.warn('Skipping undecryptable contacts row', { id, err })
         return undefined
       }
     } else {
@@ -1671,7 +1669,7 @@ export class BrowserStore {
         contactId
       })
     } catch (err) {
-      console.warn(`Failed to index "contacts-history" row "${rowId}":`, err)
+      log.warn('Failed to index contacts-history row', { rowId, err })
     }
   }
 
@@ -1757,23 +1755,17 @@ export class BrowserStore {
         if (err instanceof UnknownEpochError) {
           // Possibly-fresh data behind a stale descriptor: skip it uncached and
           // unindexed so a descriptor refresh can pick it up on a later read.
-          console.warn(
-            `Skipping unknown-epoch "contactsHistory" row "${id}":`,
-            err
-          )
+          log.warn('Skipping unknown-epoch contactsHistory row', { id, err })
         } else if (err instanceof KeyUnwrapError) {
           // Not a recipient of this row's key epoch: skip it uncached and
           // unindexed, so a later key grant can still surface it.
-          console.warn(
-            `Skipping "contactsHistory" row "${id}": this wallet is not a ` +
-              `recipient of its key epoch:`,
-            err
+          log.warn(
+            'Skipping contactsHistory row: this wallet is not a recipient ' +
+              'of its key epoch',
+            { id, err }
           )
         } else {
-          console.warn(
-            `Skipping undecryptable "contactsHistory" row "${id}":`,
-            err
-          )
+          log.warn('Skipping undecryptable contactsHistory row', { id, err })
         }
         continue
       }
@@ -1987,10 +1979,10 @@ export class BrowserStore {
           try {
             await removeRxDatabase(`${this.dbPrefix}-wallet-db`, this.#storage)
           } catch (err) {
-            console.warn(
-              `Could not remove the wallet database "${this.dbPrefix}" by ` +
-                'name (this browser cannot enumerate its databases):',
-              err
+            log.warn(
+              'Could not remove the wallet database by name (this browser ' +
+                'cannot enumerate its databases)',
+              { dbPrefix: this.dbPrefix, err }
             )
           }
         }
@@ -2038,9 +2030,10 @@ export class BrowserStore {
     return new Promise<void>(resolve => {
       const request = indexedDB.deleteDatabase(name)
       const timeout = setTimeout(() => {
-        console.warn(
-          `Deletion of IndexedDB database "${name}" stayed blocked by ` +
-            'another open connection; giving up the wait.'
+        log.warn(
+          'Deletion of IndexedDB database stayed blocked by another open ' +
+            'connection; giving up the wait',
+          { name }
         )
         resolve()
       }, REPLICA_DELETE_TIMEOUT_MS)
@@ -2050,16 +2043,17 @@ export class BrowserStore {
       }
       request.onerror = () => {
         clearTimeout(timeout)
-        console.error(
-          `Failed to delete IndexedDB database "${name}":`,
-          request.error
-        )
+        log.error('Failed to delete IndexedDB database', {
+          name,
+          err: request.error
+        })
         resolve()
       }
       request.onblocked = () => {
-        console.warn(
-          `Deletion of IndexedDB database "${name}" is blocked by another ` +
-            'open connection (e.g. a second tab); waiting for it to close.'
+        log.warn(
+          'Deletion of IndexedDB database is blocked by another open ' +
+            'connection (e.g. a second tab); waiting for it to close',
+          { name }
         )
       }
     })

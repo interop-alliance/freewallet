@@ -32,6 +32,9 @@ import {
   type AppGrant,
   type ConnectedApp
 } from '@/lib/connectedApps'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:applications')
 
 /**
  * A human-readable label for a grant's `invocationTarget`: the last non-empty
@@ -90,7 +93,7 @@ export function ApplicationDetailPage() {
           setLoadedAt(Date.now())
         }
       } catch (err) {
-        console.error('Could not load the connected application:', err)
+        log.error('Could not load the connected application', { err })
       } finally {
         if (!cancelled) {
           setLoading(false)
@@ -129,7 +132,7 @@ export function ApplicationDetailPage() {
       })
       navigate('/applications')
     } catch (err) {
-      console.error('Could not revoke app access:', err)
+      log.error('Could not revoke app access', { err })
       setRevokeError(true)
       setRevoking(false)
     }

@@ -3,6 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { showToast } from '@/stores/toastStore'
 import { PublicCopyRetractionError } from '@/stores/storageManager'
 import type { Session } from '@/types/auth'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:delete')
 
 /**
  * Shared delete flow for credentials that may have a public link. When the
@@ -57,7 +60,7 @@ export function useCredentialDelete({
           user: session.user
         })
       } catch (err) {
-        console.error('Error deleting credential:', err)
+        log.error('Error deleting credential', { err })
         setDeleteError(
           err instanceof PublicCopyRetractionError
             ? t('credential.deletePublicRetractError')

@@ -8,6 +8,9 @@ import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import type { Json } from '@/lib/sync'
 import type { FetchedCollectionResource } from '@/lib/storageResource'
 import type { StorageManager } from '@/stores/storageManager'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:storage')
 
 /**
  * The clipboard hook as the storage browser configures it: a two-second
@@ -22,7 +25,7 @@ export function useResourceSourceCopy() {
     resetDelay: 2000,
     fallbackToExecCommand: true,
     onError: (err: unknown) => {
-      console.warn('Copy to clipboard failed:', err)
+      log.warn('Copy to clipboard failed', { err })
     }
   })
 }

@@ -66,6 +66,9 @@ import { ChapiInitializing } from '@/pages/chapi/ChapiInitializing'
 import { CHAPILoginForm } from '@/pages/chapi/CHAPILoginForm'
 import { RequestSourcePanel } from '@/pages/chapi/RequestSourcePanel'
 import { ZcapGrantsPanel } from '@/pages/chapi/ZcapGrantsPanel'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:request:page')
 
 type PageState =
   | 'opening'
@@ -212,11 +215,11 @@ export function ExternalRequestPage() {
 
     init().catch((err: unknown) => {
       if (err instanceof ExternalRequestRefusedError) {
-        console.warn('External request refused:', err)
+        log.warn('External request refused', { err })
         block(err.refusal)
         return
       }
-      console.error('External request initialization failed:', err)
+      log.error('External request initialization failed', { err })
       block('processFailed')
     })
     // Runs once, on the URL the page was opened with.
@@ -274,14 +277,14 @@ export function ExternalRequestPage() {
           })
         }
       })
-      .catch(err => console.warn('Recovery health check failed:', err))
+      .catch(err => log.warn('Recovery health check failed', { err }))
     setSession(loggedIn)
     try {
       await prepareConsent({ loggedIn, requestProfile: profile })
     } catch (err) {
       // The login form is gone by now, so a failed preparation is a page
       // block, not a login error.
-      console.error('External request preparation failed:', err)
+      log.error('External request preparation failed', { err })
       block('processFailed')
     }
   }
@@ -329,7 +332,7 @@ export function ExternalRequestPage() {
         )
         return
       }
-      console.error('External request processing failed:', err)
+      log.error('External request processing failed', { err })
       block('processFailed')
     }
   }

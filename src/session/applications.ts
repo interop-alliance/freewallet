@@ -17,6 +17,9 @@ import {
   type ConnectedApp
 } from '@/lib/connectedApps'
 import type { Session } from '@/types/auth'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:applications')
 
 /**
  * Lists the connected apps and agents together with the enrolled clients'
@@ -48,10 +51,9 @@ export async function listApplicationsView({
       try {
         return await currentAccountSigningKeys({ session })
       } catch (err) {
-        console.warn(
-          'Could not read the account key set for the app list:',
+        log.warn('Could not read the account key set for the app list', {
           err
-        )
+        })
         return undefined
       }
     })()

@@ -44,6 +44,9 @@ import type {
 } from '@interop/data-integrity-core'
 import type { CredentialDetailActions } from '@/types/credentialActions'
 import { useTranslation } from 'react-i18next'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:credential')
 
 export function CredentialDetail({
   vc,
@@ -63,7 +66,7 @@ export function CredentialDetail({
   const rawJson = useMemo(() => JSON.stringify(vc, null, 2), [vc])
   const { copied, copy: copyRawJson } = useCopyToClipboard({
     onError: (err: unknown) => {
-      console.error('Could not copy credential JSON:', err)
+      log.error('Could not copy credential JSON', { err })
     }
   })
   const evidenceList = useMemo(() => {

@@ -11,6 +11,9 @@ import { MdContentCopy } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
 import { formatRecoveryCode } from '@/session/recovery'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:recovery')
 
 export function RecoveryCodeDisplay({
   code,
@@ -24,7 +27,7 @@ export function RecoveryCodeDisplay({
   const { t } = useTranslation()
   const { copied, copy } = useCopyToClipboard({
     onError: (err: unknown) => {
-      console.error('Could not copy the recovery code:', err)
+      log.error('Could not copy the recovery code', { err })
     }
   })
   const formatted = formatRecoveryCode({ code })

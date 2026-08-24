@@ -37,6 +37,9 @@ import {
 } from '@/session/unlockMethods'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
 import type { Session } from '@/types/auth'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:signup')
 
 /**
  * This client's freshly minted key set for a brand-new account: the client
@@ -114,10 +117,9 @@ async function backfillPointerAndPromote({
       profile: session.profile
     })
   } catch (err) {
-    console.warn(
-      'Could not backfill the did:webvh and promote the controller:',
+    log.warn('Could not backfill the did:webvh and promote the controller', {
       err
-    )
+    })
   }
 }
 
@@ -196,11 +198,9 @@ async function signUpCredentialAnchoredWithPassphrase({
             })
         })
       } catch (err) {
-        console.warn(
-          'Could not update the unlock-methods registry at signup; ' +
-            'skipping the passphrase entry (re-recordable at the next ' +
-            'durable login):',
-          err
+        log.warn(
+          'Could not update the unlock-methods registry at signup; skipping the passphrase entry (re-recordable at the next durable login)',
+          { err }
         )
       }
     }
@@ -471,10 +471,9 @@ export async function signUpWithPasskey({
     }
     Object.assign(entry, established.standingFields)
   } catch (err) {
-    console.warn(
-      'Could not establish the passkey as a standing credential; a fresh ' +
-        'browser will need the connect-another-wallet ceremony:',
-      err
+    log.warn(
+      'Could not establish the passkey as a standing credential; a fresh browser will need the connect-another-wallet ceremony',
+      { err }
     )
   }
 
@@ -502,7 +501,7 @@ export async function signUpWithPasskey({
         })
     })
   } catch (err) {
-    console.warn('Could not record the new passkey in the registry:', err)
+    log.warn('Could not record the new passkey in the registry', { err })
   }
 
   // Mark this as a passkey-only account so the dashboard can prompt the
@@ -514,7 +513,7 @@ export async function signUpWithPasskey({
       backupState: registration.backupState
     })
   } catch (err) {
-    console.warn('Could not save the passkey-safety notice:', err)
+    log.warn('Could not save the passkey-safety notice', { err })
   }
 
   return { session }

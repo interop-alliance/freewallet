@@ -20,6 +20,9 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { contactFormStyles } from '@/styles/appStyles'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:contacts')
 
 /**
  * One editable phone / email row: the shared form row, with `label` and
@@ -106,7 +109,7 @@ export function ContactFormPage() {
         // the duplicate the user can still type in by hand.
         setDids(getDids(contact))
       } catch (err) {
-        console.error('Could not load contact:', err)
+        log.error('Could not load contact', { err })
         setNotFound(true)
       } finally {
         if (!cancelled) {
@@ -205,7 +208,7 @@ export function ContactFormPage() {
         navigate(`/contacts/${stored.id}`)
       }
     } catch (err) {
-      console.error('Could not save contact:', err)
+      log.error('Could not save contact', { err })
       setErrorMessage(t('contactForm.errors.saveFailed'))
     } finally {
       setSaving(false)

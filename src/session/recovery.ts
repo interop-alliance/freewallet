@@ -171,6 +171,9 @@ import {
 import { assertAccountCeremonyAllowed } from '@/session/persistence'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { mintSpaceId, WASRemoteStore } from '@/stores/wasRemoteStore'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:recovery')
 
 // Re-exported for the pages, so the UI layer keeps one recovery import.
 export {
@@ -934,7 +937,7 @@ export async function recoverAccountWithCode({
         contentType: 'application/did+json'
       })
     } catch (err) {
-      console.warn('Could not republish did.json after recovery:', err)
+      log.warn('Could not republish did.json after recovery', { err })
     }
   }
 
@@ -1061,7 +1064,7 @@ export async function recoverAccountWithCode({
     })
     await deleteUnlockLocalTrio({ spaceId: unlock.spaceId, idb })
   } catch (err) {
-    console.warn("Could not delete the spent code's unlock Space:", err)
+    log.warn("Could not delete the spent code's unlock Space", { err })
   }
 
   // The replacement code's record + delegation, minted by the NEW client
@@ -1610,10 +1613,9 @@ async function recoverAccountTransient({
       }
     })
   } catch (err) {
-    console.warn(
-      'Could not update the unlock-methods registry during recovery:',
+    log.warn('Could not update the unlock-methods registry during recovery', {
       err
-    )
+    })
   }
 
   // Retire the spent code's unlock Space -- a typed code is a spent
@@ -1625,7 +1627,7 @@ async function recoverAccountTransient({
       spaceId: unlock.spaceId
     })
   } catch (err) {
-    console.warn("Could not delete the spent code's unlock Space:", err)
+    log.warn("Could not delete the spent code's unlock Space", { err })
   }
 
   return {
@@ -1652,7 +1654,7 @@ export async function listRecoveryCodeEntries({
   try {
     return recoveryEntriesOf({ record: await getUnlockMethods({ session }) })
   } catch (err) {
-    console.warn('Could not load the recovery-code entries:', err)
+    log.warn('Could not load the recovery-code entries', { err })
     return []
   }
 }
@@ -1696,7 +1698,7 @@ export async function updateRegistryAfterRecovery({
       dropKids: [outcome.spentRecoveryKid]
     })
   } catch (err) {
-    console.warn('Could not update the unlock-methods registry:', err)
+    log.warn('Could not update the unlock-methods registry', { err })
   }
   try {
     // `backfillPassphraseUnlockMethod` itself is a no-op on a transient
@@ -1705,7 +1707,7 @@ export async function updateRegistryAfterRecovery({
     // here is always durable in practice.
     await backfillPassphraseUnlockMethod({ session })
   } catch (err) {
-    console.warn('Could not backfill the unlock-methods registry:', err)
+    log.warn('Could not backfill the unlock-methods registry', { err })
   }
   if (passphrase) {
     // Best-effort inside (a plain-layout record still logs in); runs after

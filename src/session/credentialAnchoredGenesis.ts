@@ -98,6 +98,9 @@ import type { TransientSessionPersistence } from '@/session/persistence'
 import { accountRosterStore } from '@/session/rosterStore'
 import type { StandingUnlockFields } from '@/session/unlockMethods'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:genesis')
 
 /**
  * What the establishment hands back for the callers' tails: the published
@@ -416,7 +419,7 @@ export async function establishCredentialAnchoredAccount({
         establishment
       })
     } catch (err) {
-      console.warn('The pre-promotion tail failed (continuing):', err)
+      log.warn('The pre-promotion tail failed (continuing)', { err })
     }
   }
 

@@ -40,6 +40,9 @@ import type { Session } from '@/types/auth'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { OnboardConsentPanel } from '@/components/OnboardConsentPanel'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:onboard')
 
 /**
  * Where the card is in the invite's life: creating the exchange, offering a
@@ -129,7 +132,7 @@ export function OnboardInviteCard({
         setDeadline(Date.now() + ONBOARDING_INVITE_TTL_MS)
         setPhase('live')
       } catch (err) {
-        console.error('Could not create the wallet onboarding invite:', err)
+        log.error('Could not create the wallet onboarding invite', { err })
         if (!cancelled) {
           setPhase('error')
         }
@@ -153,7 +156,7 @@ export function OnboardInviteCard({
           setConsent({ request: parsed.request, label: parsed.label })
           setPhase('received')
         } catch (err) {
-          console.warn("Could not read the other wallet's response:", err)
+          log.warn("Could not read the other wallet's response", { err })
           setPhase('invalid')
         }
       } catch (err) {
@@ -167,7 +170,7 @@ export function OnboardInviteCard({
           setPhase('expired')
           return
         }
-        console.error('Polling the wallet onboarding invite failed:', err)
+        log.error('Polling the wallet onboarding invite failed', { err })
         setPhase('error')
       }
     }

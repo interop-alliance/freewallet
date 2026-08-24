@@ -41,6 +41,9 @@ import { DATE_FMT, PASSWORD_RULES } from '@/app.config'
 import { registerWallet } from '@/lib/registerWallet'
 import { forcedRememberBrowser } from '@/lib/e2eSeams'
 import type { AuthLocationState } from '@/types/auth'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:signup')
 
 /**
  * The stepper labels, first entry chosen by the login method: the passkey
@@ -127,7 +130,7 @@ export function SignupPage() {
           // The WAS storage server is unreachable -- offer a guest-mode fallback.
           setErrorKey('auth.errors.storageUnreachable')
         } else {
-          console.error('Error completing signup:', err)
+          log.error('Error completing signup', { err })
           setErrorKey('auth.errors.setupFailed')
         }
       } finally {
@@ -157,7 +160,7 @@ export function SignupPage() {
       if (isStorageUnreachable(err)) {
         setErrorKey('auth.errors.storageUnreachable')
       } else {
-        console.error('Error completing signup:', err)
+        log.error('Error completing signup', { err })
         setErrorKey('auth.errors.setupFailed')
       }
     } finally {

@@ -33,6 +33,9 @@ import type {
   ResourceLogHeadPin,
   ResourceLogPinStore
 } from '@interop/vh-resource-log'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:key')
 
 /**
  * The session database's name -- the one durable IndexedDB database this
@@ -380,9 +383,8 @@ export async function saveKeyringFreshnessPin({
         const stored = freshnessPinFrom(read.result)
         const storedTime = stored ? Date.parse(stored) : Number.NaN
         if (!Number.isNaN(storedTime) && storedTime > Date.parse(createdAt)) {
-          console.warn(
-            'Refusing to move the keyring-freshness pin backward; keeping ' +
-              'the stored pin.',
+          log.warn(
+            'Refusing to move the keyring-freshness pin backward; keeping the stored pin',
             { storedCreatedAt: stored, createdAt }
           )
           resolve()
@@ -580,9 +582,8 @@ export async function saveUserKeyEpochPin({
             nextIndex === -1 ||
             nextIndex < storedIndex
           ) {
-            console.warn(
-              'Refusing to move the user key epoch pin backward (or off the ' +
-                'served epoch order); keeping the stored pin.',
+            log.warn(
+              'Refusing to move the user key epoch pin backward (or off the served epoch order); keeping the stored pin',
               { storedEpochId: stored, epochId }
             )
             resolve()

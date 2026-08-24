@@ -70,6 +70,9 @@ import {
 } from '@/session/verifiedLog'
 import { findLoginCredential, loginHandleOf } from '@/lib/loginCredential'
 import type { Session } from '@/types/auth'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:settings')
 
 /**
  * Reads the account's current login handle (the self-issued Login Credential's
@@ -118,7 +121,7 @@ export async function loadUnlockRegistry({
       createIfMissing: true
     })
   } catch (err) {
-    console.warn('Could not backfill the unlock methods; reading:', err)
+    log.warn('Could not backfill the unlock methods; reading', { err })
     return await getUnlockMethods({ session })
   }
 }
@@ -345,12 +348,9 @@ export async function changeAccountPassphrase({
     // members. Reported as `unretired` rather than skipped -- the old
     // passphrase may still unlock the wallet, which is the opposite of what
     // this ceremony promises.
-    console.warn(
-      'The registry named no inventory for the old passphrase while it ' +
-        (bareCredential === 'standing'
-          ? 'still stands in the account document'
-          : 'could not be checked against the account document') +
-        '; it was not retired.'
+    log.warn(
+      'The registry named no inventory for the old passphrase; it was not retired',
+      { bareCredential }
     )
     rotation = 'unretired'
   } else {
@@ -388,7 +388,7 @@ export async function changeAccountPassphrase({
         })
       }
     } catch (err) {
-      console.error('Could not retire the old passphrase credential:', err)
+      log.error('Could not retire the old passphrase credential', { err })
       rotation = 'failed'
     }
   }
@@ -434,10 +434,8 @@ export async function changeAccountPassphrase({
     // undefined here, which leaves the upsert's carry rule in charge). The
     // old credential stays standing with nothing naming it, which is the
     // honest state -- writing the pending shape would only strand the entry.
-    console.warn(
-      'The new passphrase has no standing configuration, so the ' +
-        'unretired old credential is left unnamed in the registry; it ' +
-        'stays standing in the account document.'
+    log.warn(
+      'The new passphrase has no standing configuration, so the unretired old credential is left unnamed in the registry; it stays standing in the account document'
     )
   }
   // The standing establishment re-minted the management zcap with PUT (the
@@ -591,10 +589,9 @@ async function documentStateOfCredential({
     })
     return listed ? 'standing' : 'absent'
   } catch (err) {
-    console.warn(
-      'Could not check the account document for the old passphrase; ' +
-        'treating it as still standing:',
-      err
+    log.warn(
+      'Could not check the account document for the old passphrase; treating it as still standing',
+      { err }
     )
     return 'unknown'
   }
@@ -627,10 +624,8 @@ async function standingFieldsOfCredential({
     ? await ladderRung({ ladderSeed, index: 0 })
     : undefined
   if (!rung0) {
-    console.warn(
-      "The old passphrase's ladder seed is not in hand, so its registry " +
-        'entry records no update key and the login-time repair will not ' +
-        'retire it.'
+    log.warn(
+      "The old passphrase's ladder seed is not in hand, so its registry entry records no update key and the login-time repair will not retire it"
     )
   }
   const { recipientKid, keyAgreementKeyMultibase, clientDid } =
@@ -709,7 +704,7 @@ async function recordPassphraseEntry({
       }
     })
   } catch (err) {
-    console.warn('Could not update the passphrase unlock-method entry:', err)
+    log.warn('Could not update the passphrase unlock-method entry', { err })
     return null
   }
 }
@@ -822,10 +817,9 @@ export async function addAccountPasskey({
     }
     Object.assign(entry, established.standingFields)
   } catch (err) {
-    console.warn(
-      'Could not establish the passkey as a standing credential; a fresh ' +
-        'browser will need the connect-another-wallet ceremony:',
-      err
+    log.warn(
+      'Could not establish the passkey as a standing credential; a fresh browser will need the connect-another-wallet ceremony',
+      { err }
     )
   }
 
@@ -851,7 +845,7 @@ export async function addAccountPasskey({
   } catch (err) {
     // The passkey is already bound and will log in; only the registry
     // listing entry failed to persist.
-    console.error('Could not record the new passkey in the registry:', err)
+    log.error('Could not record the new passkey in the registry', { err })
     return { record, recorded: false }
   }
   // The account now has a second unlock method, so the dashboard's
@@ -862,7 +856,7 @@ export async function addAccountPasskey({
         controller: session.user.id
       })
     } catch (err) {
-      console.warn('Could not clear the passkey-safety notice:', err)
+      log.warn('Could not clear the passkey-safety notice', { err })
     }
   }
   return { record, recorded: true }
@@ -1041,10 +1035,9 @@ export async function addAccountPassphrase({
     manageCapability = established.manageCapability
     standingFields = established.standingFields
   } catch (err) {
-    console.warn(
-      'Could not establish the passphrase as a standing credential; binding ' +
-        'it as a plain pointer record:',
-      err
+    log.warn(
+      'Could not establish the passphrase as a standing credential; binding it as a plain pointer record',
+      { err }
     )
     const bound = await bindPassphrase({
       clientSeed,
@@ -1089,7 +1082,7 @@ export async function addAccountPassphrase({
       controller: session.user.id
     })
   } catch (err) {
-    console.warn('Could not clear the passkey-safety notice:', err)
+    log.warn('Could not clear the passkey-safety notice', { err })
   }
   return record
 }
@@ -1257,7 +1250,7 @@ export async function deleteAccount({
       }
       // Any other failure (e.g. the remote is unreachable) is a generic
       // delete failure -- do not touch the user's data.
-      console.error('Could not verify the passphrase for deletion:', err)
+      log.error('Could not verify the passphrase for deletion', { err })
       return 'failed'
     }
   }
@@ -1280,10 +1273,9 @@ export async function deleteAccount({
       registry = await getUnlockMethods({ session })
     } catch (err) {
       registryUnread = true
-      console.warn(
-        'Could not read the unlock-methods registry for deletion; other ' +
-          "methods' unlock Spaces survive:",
-        err
+      log.warn(
+        "Could not read the unlock-methods registry for deletion; other methods' unlock Spaces survive",
+        { err }
       )
     }
     try {
@@ -1295,10 +1287,9 @@ export async function deleteAccount({
         }
       }
     } catch (err) {
-      console.warn(
-        'Could not locate the auxiliary annex Space for deletion:',
+      log.warn('Could not locate the auxiliary annex Space for deletion', {
         err
-      )
+      })
     }
 
     // (b0) The registry walk: every unlock method's unlock Space (holding
@@ -1310,10 +1301,10 @@ export async function deleteAccount({
       try {
         await deleteUnlockMethodArtifacts({ session, entry, idb })
       } catch (err) {
-        console.warn(
-          `Could not delete the ${entry.type} unlock method's artifacts:`,
+        log.warn("Could not delete an unlock method's artifacts", {
+          methodType: entry.type,
           err
-        )
+        })
       }
     }
 
@@ -1328,10 +1319,9 @@ export async function deleteAccount({
       try {
         await clientAnnex.was.space(clientAnnex.spaceId).delete()
       } catch (err) {
-        console.warn(
-          'Could not tear down the auxiliary annex Space; it survives ' +
-            'as a typed orphan:',
-          err
+        log.warn(
+          'Could not tear down the auxiliary annex Space; it survives as a typed orphan',
+          { err }
         )
       }
     }
@@ -1347,10 +1337,10 @@ export async function deleteAccount({
   // (b) Wipe the remote data Space. On failure keep the old semantics:
   // surface the error, do not log out (the data is still there).
   try {
-    console.log('Wiping user data...')
+    log.info('Wiping remote user data')
     await session.storage?.wipeRemoteStorage()
   } catch (err) {
-    console.error('Error wiping user data:', err)
+    log.error('Error wiping user data', { err })
     return 'failed'
   }
   // (c) Retire the passphrase keyring only after a successful wipe -- if the
@@ -1365,12 +1355,10 @@ export async function deleteAccount({
         idb
       })
       if (!unlockSpaceDeleted) {
-        console.warn(
-          'Could not delete the unlock Space during account deletion.'
-        )
+        log.warn('Could not delete the unlock Space during account deletion')
       }
     } catch (err) {
-      console.warn('Could not retire the passphrase keyring:', err)
+      log.warn('Could not retire the passphrase keyring', { err })
     }
   }
   // The local half: the shared wipe enumeration, for guests and full

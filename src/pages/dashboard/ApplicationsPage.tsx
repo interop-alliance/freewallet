@@ -48,6 +48,9 @@ import {
   type ConnectedAgent,
   type ConnectedApp
 } from '@/lib/connectedApps'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:applications')
 
 /**
  * The soonest still-future expiry among a row's recorded grants, so the row
@@ -121,7 +124,7 @@ export function ApplicationsPage() {
           setLoadError(false)
         }
       } catch (err) {
-        console.error('Could not load connected applications:', err)
+        log.error('Could not load connected applications', { err })
         if (!cancelled) {
           setLoadError(true)
         }
@@ -165,7 +168,7 @@ export function ApplicationsPage() {
       })
       await reload()
     } catch (err) {
-      console.error('Could not revoke app access:', err)
+      log.error('Could not revoke app access', { err })
       setRevokeError(true)
     } finally {
       setRevoking(false)
@@ -189,7 +192,7 @@ export function ApplicationsPage() {
       setNoEpochKeyAppKeys(session.storage.noEpochKeyAppKeys)
       setLoadError(false)
     } catch (err) {
-      console.error('Could not reload connected applications:', err)
+      log.error('Could not reload connected applications', { err })
       setLoadError(true)
     }
   }
@@ -214,7 +217,7 @@ export function ApplicationsPage() {
       })
       await reload()
     } catch (err) {
-      console.error('Could not revoke agent access:', err)
+      log.error('Could not revoke agent access', { err })
       setRevokeError(true)
     } finally {
       setRevoking(false)
@@ -234,7 +237,7 @@ export function ApplicationsPage() {
         })
       })
     } catch (err) {
-      console.error('Could not remove unreadable app connections:', err)
+      log.error('Could not remove unreadable app connections', { err })
       setLoadError(true)
     }
   }

@@ -867,7 +867,7 @@ describe('the ladder-seed settlement (the login seed with no retired seed in han
     // this fixture's storage-less session.
     expect(
       warn.mock.calls.filter(call =>
-        String(call[0]).includes('ladder could not be placed')
+        String(call[2]).includes('ladder could not be placed')
       )
     ).toHaveLength(1)
     warn.mockRestore()

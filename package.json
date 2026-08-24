@@ -37,6 +37,7 @@
     "@interop/ed25519-verification-key": "^8.0.4",
     "@interop/ezcap": "^7.4.3",
     "@interop/http-client": "^1.0.5",
+    "@interop/logger": "^0.1.0",
     "@interop/security-document-loader": "^10.0.4",
     "@interop/social-core": "^0.8.1",
     "@interop/storage-core": "^0.9.1",

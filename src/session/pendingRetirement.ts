@@ -55,6 +55,9 @@ import {
   type PassphraseUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:retirement')
 
 /**
  * Finishes a pending passphrase retirement, if this login's registry shows
@@ -115,10 +118,8 @@ export async function repairTornPassphraseRetirement({
     // retirement attributes the credential's ladder by that rung, so this
     // repair cannot run it -- and rebuilding the entry from the login
     // credential would silently un-name a credential that may still stand.
-    console.warn(
-      "The registry's passphrase entry names another credential but " +
-        'records no update key; the repair cannot attribute it, so the ' +
-        'entry is left as it stands.'
+    log.warn(
+      "The registry's passphrase entry names another credential but records no update key; the repair cannot attribute it, so the entry is left as it stands"
     )
     return
   }
@@ -152,13 +153,9 @@ export async function repairTornPassphraseRetirement({
     did: context.pointer.did,
     keyAgreementKeyMultibase: entry.keyAgreementKeyMultibase
   })
-  console.warn(
-    'Finishing a passphrase change that was torn at its retirement; ' +
-      (stillStanding
-        ? 'retiring the credential the registry still names.'
-        : 'the credential is already out of the document, recording this ' +
-          "credential's standing configuration.")
-  )
+  log.warn('Finishing a passphrase change that was torn at its retirement', {
+    stillStanding
+  })
   if (stillStanding) {
     // The entry's own ladder seed is unknown here (only its holder derives
     // it), so the annex stage signs with this login credential's seed,
@@ -252,9 +249,8 @@ async function rebuildBareEntry({
   ) {
     return
   }
-  console.warn(
-    "The registry's passphrase entry is bare; rebuilding it from the " +
-      'credential logging in.'
+  log.warn(
+    "The registry's passphrase entry is bare; rebuilding it from the credential logging in"
   )
   const standing = await standingFieldsOfKeyringHit({ found })
   await updateUnlockMethods({
@@ -332,9 +328,8 @@ export async function rebuildBarePasskeyEntry({
   ) {
     return
   }
-  console.warn(
-    "The registry's entry for the passkey logging in is bare; rebuilding " +
-      'it from that credential.'
+  log.warn(
+    "The registry's entry for the passkey logging in is bare; rebuilding it from that credential"
   )
   const rebuilt = {
     ...entry,

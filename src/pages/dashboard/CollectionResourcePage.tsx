@@ -39,6 +39,9 @@ import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
 import { cidFrom } from '@interop/was-client/sync'
 import { downloadBlob } from '@/lib/downloadBlob'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:storage')
 
 /**
  * The resource preview shell shared by this page's two branches (a Verifiable
@@ -177,7 +180,7 @@ export function CollectionResourcePage() {
     try {
       return cidFrom({ doc: vc as object })
     } catch (err: unknown) {
-      console.error('Error computing credential CID:', err)
+      log.error('Error computing credential CID', { err })
       return null
     }
   }, [vc])
@@ -277,7 +280,7 @@ export function CollectionResourcePage() {
         setEnvelopeText(null)
         setErrorKey('storage.resourceNotViewable')
       } catch (err) {
-        console.error('Failed to load collection resource:', err)
+        log.error('Failed to load collection resource', { err })
         if (!cancelled) {
           setErrorKey('storage.resourceLoadError')
         }

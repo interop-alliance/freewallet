@@ -24,6 +24,9 @@ import type { ImportSpaceSummary } from '@/stores/storageManager'
 import { parseImportTarFile } from '@/lib/import'
 import { listSharedCollections, type CollectionShare } from '@/session/shares'
 import { SYNCED_COLLECTIONS } from '@/app.config'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:storage')
 
 /**
  * Visually-hidden style for the file input wrapped by the import Button
@@ -90,7 +93,7 @@ export const StoragePage = () => {
       const quota = quotaViewFromReport(report)
       setQuotaStatus(quota ? { kind: 'ready', quota } : { kind: 'unavailable' })
     } catch (error) {
-      console.error('Failed to load storage quota:', error)
+      log.error('Failed to load storage quota', { err: error })
       setQuotaStatus({ kind: 'error' })
     }
   }, [hasRemoteStorage, session])
@@ -125,10 +128,10 @@ export const StoragePage = () => {
               })
               return { ...collection, totalItems: items.length }
             } catch (err) {
-              console.warn(
-                `Failed to count resources for collection "${collection.id}":`,
+              log.warn('Failed to count resources for collection', {
+                collectionId: collection.id,
                 err
-              )
+              })
               return collection
             }
           })
@@ -138,7 +141,7 @@ export const StoragePage = () => {
         }
         setCollections(withCounts)
       } catch (error) {
-        console.error('Failed to list storage collections:', error)
+        log.error('Failed to list storage collections', { err: error })
         if (!cancelled) {
           setCollectionsError(t('storage.collectionsLoadError'))
           setCollections([])
@@ -184,7 +187,7 @@ export const StoragePage = () => {
           setSharesByCollection(record)
         }
       } catch (err) {
-        console.error('Could not load the collection shares:', err)
+        log.error('Could not load the collection shares', { err })
         if (!cancelled) {
           setSharesByCollection({})
         }
@@ -234,7 +237,7 @@ export const StoragePage = () => {
       if ((error as DOMException).name === 'AbortError') {
         return
       }
-      console.error('Failed to export space:', error)
+      log.error('Failed to export space', { err: error })
       showToast({ message: t('storage.exportError'), severity: 'error' })
     } finally {
       setIsExporting(false)
@@ -299,7 +302,7 @@ export const StoragePage = () => {
         })
       }
     } catch (error) {
-      console.error('Failed to import space:', error)
+      log.error('Failed to import space', { err: error })
       showToast({ message: t('storage.importError'), severity: 'error' })
     } finally {
       setIsImporting(false)

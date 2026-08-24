@@ -233,6 +233,7 @@ beforeEach(() => {
   // on a controllable promise back to its recording default.
   vi.mocked(repairStaleUnlockRegistrySeal).mockImplementation(async () => {
     state.events.push('reseal')
+    return 'ok'
   })
   vi.mocked(routeUnlockLogin).mockImplementation((async ({
     credential
@@ -251,10 +252,10 @@ describe('the FW-300 storageReady / registryReady split', () => {
     let releaseReseal!: () => void
     vi.mocked(repairStaleUnlockRegistrySeal).mockImplementation(
       () =>
-        new Promise<void>(resolve => {
+        new Promise<'ok'>(resolve => {
           releaseReseal = () => {
             state.events.push('reseal')
-            resolve()
+            resolve('ok')
           }
         })
     )
@@ -303,8 +304,6 @@ describe('the FW-300 storageReady / registryReady split', () => {
     await expect(session!.registryReady).resolves.toBeUndefined()
     expect(repairStaleUnlockRegistrySeal).not.toHaveBeenCalled()
     expect(backfillPassphraseUnlockMethod).not.toHaveBeenCalled()
-    await expect(session!.storageReady).rejects.toThrow(
-      'provisioning exploded'
-    )
+    await expect(session!.storageReady).rejects.toThrow('provisioning exploded')
   })
 })

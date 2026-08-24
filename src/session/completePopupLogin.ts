@@ -14,6 +14,9 @@ import type { Session } from '@/types/auth'
 import { loginWithPassphrase } from '@/session/initSession'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { requestUnpartitionedIdb } from '@/lib/storageAccess'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:popup')
 
 /**
  * Maps a popup login/storage failure to its `chapi.*` message key -- the
@@ -29,7 +32,7 @@ export function mapPopupLoginError(err: unknown): string {
   if (isStorageUnreachable(err)) {
     return 'chapi.storageUnreachable'
   }
-  console.error('CHAPI login failed:', err)
+  log.error('CHAPI login failed', { err })
   return 'chapi.loginFailed'
 }
 

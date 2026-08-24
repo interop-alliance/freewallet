@@ -72,6 +72,9 @@ import {
   wrapRecordEnvelope
 } from '@/session/recordEnvelope'
 import { deleteUnlockLocalTrio } from '@/lib/sessionKey'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:methods')
 import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
 import {
   ensureUnlockMethodsCollection,
@@ -400,7 +403,7 @@ export async function getUnlockMethods({
         keyResolver
       })
     } catch (err) {
-      console.warn('Discarding an unusable cached unlock-methods record:', err)
+      log.warn('Discarding an unusable cached unlock-methods record', { err })
       await unlockMethodsCache.delete({ controller })
       return null
     }
@@ -593,10 +596,9 @@ export async function updateUnlockMethods({
           keyResolver
         })
       } catch (err) {
-        console.warn(
-          'Discarding an unusable cached unlock-methods record:',
+        log.warn('Discarding an unusable cached unlock-methods record', {
           err
-        )
+        })
         await unlockMethodsCache.delete({ controller })
       }
     }
@@ -1421,9 +1423,9 @@ function shouldAdoptFreshCapability({
   const covers = capabilityCoversStored({ stored, fresh })
   if (expiring) {
     if (!covers) {
-      console.error(
-        `Refreshing the ${label} entry's expiring management zcap with one ` +
-          "that does not cover the stored one's actions."
+      log.error(
+        "Refreshing the entry's expiring management zcap with one that does not cover the stored one's actions",
+        { label }
       )
     }
     return true
@@ -1463,7 +1465,7 @@ function shouldAdoptFreshCapability({
  * registration and first Settings render, so a plain login never materializes
  * it. Writes only when something changed, and returns the resulting record (or
  * `null` when none exists and none was created). Errors are the caller's to
- * handle (call sites fire-and-forget with a `console.warn`).
+ * handle (call sites fire-and-forget with a `log.warn`).
  *
  * @param options {object}
  * @param options.session {Session}

@@ -128,6 +128,9 @@ import {
   addHistoryGenerationCollected as buildHistoryGenerationCollected,
   type WalletActivity
 } from '@interop/wallet-core/space'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:storage:manager')
 
 // The `wallet-activity` wire shape now lives in `@interop/wallet-core/space`
 // (shared with Freewallet mobile). Re-exported here so existing importers keep
@@ -199,14 +202,16 @@ async function decryptEnvelope({
       return { value: undefined, unknownEpoch: true }
     }
     if (err instanceof KeyUnwrapError) {
-      console.warn(
-        `This wallet is not a recipient of the key epoch of a resource from ` +
-          `${source}:`,
-        err
+      log.warn(
+        'This wallet is not a recipient of the key epoch of a resource',
+        {
+          source,
+          err
+        }
       )
       return { value: undefined, unknownEpoch: false }
     }
-    console.warn(`Could not decrypt resource envelope from ${source}:`, err)
+    log.warn('Could not decrypt resource envelope', { source, err })
     return { value: undefined, unknownEpoch: false }
   }
 }
@@ -270,10 +275,9 @@ function warnDescriptorFetchError(
   err: unknown,
   { collectionId }: { collectionId: string }
 ): void {
-  console.warn(
-    `Could not fetch the encryption descriptor for collection "${collectionId}"; ` +
-      'falling back to the cached copy.',
-    err
+  log.warn(
+    'Could not fetch the encryption descriptor for collection; falling back to the cached copy',
+    { collectionId, err }
   )
 }
 
@@ -315,10 +319,9 @@ async function acquireCollectionMetas({
         }
         return undefined
       } catch (err) {
-        console.warn(
-          `Could not fetch the stored metadata for collection ` +
-            `"${collectionId}"; falling back to the cached copy.`,
-          err
+        log.warn(
+          'Could not fetch the stored metadata for collection; falling back to the cached copy',
+          { collectionId, err }
         )
       }
       const cached = await cache?.readMeta({ collectionId })
@@ -691,11 +694,10 @@ export class StorageManager {
     try {
       await cipher.applyMeta(meta)
     } catch (err) {
-      console.warn(
-        `Could not install the index schema for collection ` +
-          `"${collectionId}"; writes will carry no blinded index entries ` +
-          'until the metadata refreshes.',
-        err
+      log.warn(
+        'Could not install the index schema for collection; writes will ' +
+          'carry no blinded index entries until the metadata refreshes',
+        { collectionId, err }
       )
     }
   }
@@ -880,7 +882,7 @@ export class StorageManager {
     // replica. This keeps guest mode usable as a fallback even when the
     // configured WAS server is unreachable.
     const storageServerUrl = isGuest ? undefined : WAS_SERVER_URL
-    console.log('Initializing storage clients:', { storageServerUrl })
+    log.info('Initializing storage clients', { storageServerUrl })
 
     const { keyAgreementKey, keyResolver, persistence } = profile
     if (!keyAgreementKey || !keyResolver) {
@@ -1140,7 +1142,7 @@ export class StorageManager {
           user
         })
       } catch (err) {
-        console.warn('Could not record the credential-created activity:', err)
+        log.warn('Could not record the credential-created activity', { err })
       }
     }
   }
@@ -1610,10 +1612,9 @@ export class StorageManager {
             try {
               descriptor = await remote.collectionEncryption({ collectionId })
             } catch (err) {
-              console.warn(
-                `Could not fetch the encryption descriptor for app collection ` +
-                  `"${collectionId}":`,
-                err
+              log.warn(
+                'Could not fetch the encryption descriptor for app collection',
+                { collectionId, err }
               )
             }
           }
@@ -1642,11 +1643,10 @@ export class StorageManager {
               meta
             })
           } catch (err) {
-            console.warn(
-              `Could not fetch the stored metadata for app collection ` +
-                `"${collectionId}":`,
+            log.warn('Could not fetch the stored metadata for app collection', {
+              collectionId,
               err
-            )
+            })
           }
           cipher = built
           this.#appCiphers[collectionId] = cipher
@@ -1873,7 +1873,7 @@ export class StorageManager {
           controller?: string
         } | null
       } catch (err) {
-        console.warn('Could not confirm the promoted Space controller:', err)
+        log.warn('Could not confirm the promoted Space controller', { err })
         return
       }
       if (description?.controller === did) {
@@ -1955,7 +1955,7 @@ export class StorageManager {
         capabilityAgent: webvhCapabilityAgent({ keyAgent, did })
       })
     })().catch(err => {
-      console.warn('Keystore controller promotion failed:', err)
+      log.warn('Keystore controller promotion failed', { err })
     })
   }
 
@@ -2000,7 +2000,7 @@ export class StorageManager {
         try {
           await this.ensurePromotedController({ profile })
         } catch (err) {
-          console.warn('Space controller promotion failed:', err)
+          log.warn('Space controller promotion failed', { err })
         }
       }
       const remoteStore = this.#remoteStore
@@ -2120,10 +2120,9 @@ export class StorageManager {
                   idb
                 })
               } catch (err) {
-                console.warn(
-                  'Could not record the published account DID locally:',
+                log.warn('Could not record the published account DID locally', {
                   err
-                )
+                })
               }
             },
             rosterStoreFor: ({ did }) =>
@@ -2145,11 +2144,13 @@ export class StorageManager {
           // itself, and each resumes on the next login.
           for (const { stage, error } of result.failed) {
             if (stage === 'didWebKeys') {
-              console.warn('did:web provisioning failed:', error)
+              log.warn('did:web provisioning failed', { err: error })
             } else if (stage === 'roster') {
-              console.warn('user key roster provisioning failed:', error)
+              log.warn('User key roster provisioning failed', { err: error })
             } else {
-              console.warn('Collection key-epoch provisioning failed:', error)
+              log.warn('Collection key-epoch provisioning failed', {
+                err: error
+              })
             }
           }
           // Pin only an epoch this session already holds the key for: the
@@ -2206,9 +2207,9 @@ export class StorageManager {
               'ResourceLogContinuityError' &&
             (err as { reason?: unknown }).reason !== 'rollback'
           ) {
-            console.error('did:webvh provisioning refused:', err)
+            log.error('did:webvh provisioning refused', { err })
           } else {
-            console.warn('did:webvh provisioning failed:', err)
+            log.warn('did:webvh provisioning failed', { err })
           }
         }
       } else {
@@ -2232,14 +2233,14 @@ export class StorageManager {
             await remoteStore.ensureSpaceEpochs({ userKey: profile.userKey })
             await refreshDescriptorsWithoutEpochs()
           } catch (err) {
-            console.warn('Collection key-epoch provisioning failed:', err)
+            log.warn('Collection key-epoch provisioning failed', { err })
           }
         }
         if (profile?.keystoreAgent) {
           try {
             await provideDidWebKeys()
           } catch (err) {
-            console.warn('did:web provisioning failed:', err)
+            log.warn('did:web provisioning failed', { err })
           }
         }
       }
@@ -2944,10 +2945,12 @@ export class StorageManager {
         }
         rotated += 1
       } catch (err) {
-        console.warn(
-          `Could not rotate the epoch for app collection "${collectionId}" ` +
-            'during revocation:',
-          err
+        log.warn(
+          'Could not rotate the epoch for app collection during revocation',
+          {
+            collectionId,
+            err
+          }
         )
         failed += 1
       }
@@ -3614,7 +3617,7 @@ export class StorageManager {
         }
       })
     } catch (err) {
-      console.warn(`Could not record the contact-${action} revision:`, err)
+      log.warn('Could not record the contact revision', { action, err })
     }
   }
 

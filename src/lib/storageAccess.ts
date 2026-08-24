@@ -12,6 +12,9 @@
  * handle extension resolve without a handle, and the popup stays
  * remote-direct in its degraded not-enrolled state rather than erroring.
  */
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:storage:access')
 
 /**
  * Requests unpartitioned IndexedDB through the Storage Access API handle
@@ -41,7 +44,7 @@ export async function requestUnpartitionedIdb(): Promise<
   } catch (err) {
     // Denied, unsupported argument shape, or no prior top-level interaction
     // with the wallet origin: all land in the partitioned fallback.
-    console.warn('Unpartitioned storage access was not granted:', err)
+    log.warn('Unpartitioned storage access was not granted', { err })
     return undefined
   }
 }

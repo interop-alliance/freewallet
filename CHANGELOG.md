@@ -1,5 +1,22 @@
 # History
 
+## 0.41.0 - TBD
+
+### Added
+
+- Adopted `@interop/logger` for structured, namespaced, leveled logging.
+  Every `console.warn`/`console.error`/`console.log` call site in the app
+  now goes through a namespaced logger (`fw:session:*`, `fw:storage:*`,
+  `fw:sync:*`, `fw:chapi:*`, `fw:request:*`, `fw:ui:*`, and so on), and
+  wallet-core's own logger is wired to the same sink at app bootstrap.
+- Dev builds post log records as NDJSON to a dev-server endpoint, which
+  writes them to a gitignored `.dev-logs/app.ndjson` (rotated to
+  `app.prev.ndjson` on server start) and exposes a ring buffer at
+  `window.__fwLog` (`snapshot`, `setFilter`, `clear`) for interactive
+  filtering. Production builds make no request to the endpoint.
+- The debug-level filter is read once, lazily, from the `interop:logger`
+  localStorage key; nothing in the app writes that key.
+
 ## 0.40.0 - TBD
 
 ### Changed

@@ -17,6 +17,9 @@ import type {
 } from './types'
 import { ZcapUnavailableError } from './processZcaps'
 import { AppKeysUnreadableError } from './appConnect'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:request:respond')
 
 /**
  * Why a response could not be produced or delivered. Mirrors the popup's block
@@ -197,7 +200,7 @@ export async function composeAndDeliverResponse({
     if (err instanceof AppKeysUnreadableError) {
       throw new WalletResponseFailure('appKeysUnreadable', { cause: err })
     }
-    console.error('CHAPI request processing failed:', err)
+    log.error('CHAPI request processing failed', { err })
     throw new WalletResponseFailure('processFailed', { cause: err })
   }
   const grantedZcaps = response.zcaps ?? []
@@ -218,7 +221,7 @@ export async function composeAndDeliverResponse({
       appConnectResult: response.appConnect
     })
   } catch (err) {
-    console.error('Could not record the login history entry:', err)
+    log.error('Could not record the login history entry', { err })
     if (grantedZcaps.length > 0) {
       // Fail closed: nothing is delivered, so the already-signed delegations
       // stay inert rather than unrevocable. (Conversely, a history write that
@@ -247,7 +250,7 @@ export async function composeAndDeliverResponse({
         verifiablePresentation: response.verifiablePresentation
       })
     } catch (err) {
-      console.error('Could not deliver the presentation to the exchange:', err)
+      log.error('Could not deliver the presentation to the exchange', { err })
       throw new WalletResponseFailure('exchangeFailed', {
         cause: err,
         response

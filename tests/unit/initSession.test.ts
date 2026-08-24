@@ -261,8 +261,11 @@ describe('initSessionFromSeed', () => {
 
       expect(session.profile.keystoreAgent).toBeUndefined()
       expect(warnSpy).toHaveBeenCalledWith(
-        'KMS keystore provisioning failed:',
-        expect.any(Error)
+        '[%s] %s',
+        'fw:session:init',
+        'KMS keystore provisioning failed',
+        expect.any(Error),
+        ''
       )
     })
 

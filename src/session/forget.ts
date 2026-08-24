@@ -142,6 +142,9 @@ import {
 import { pointedClientAnnexReach } from '@/session/annexReach'
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import { cascadeCollections } from '@/session/userKeyCascade'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:forget')
 import {
   invalidateVerifiedLog,
   verifiedAccountLog
@@ -350,10 +353,9 @@ export async function forgetThisBrowser({
           { cause: err }
         )
       }
-      console.warn(
-        'Could not read the unlock-methods registry for the forget ' +
-          'ceremony:',
-        err
+      log.warn(
+        'Could not read the unlock-methods registry for the forget ceremony',
+        { err }
       )
       registryUnread = true
       return null
@@ -393,10 +395,9 @@ export async function forgetThisBrowser({
       clientAnnexSpaceId = reach.spaceId
     }
   } catch (err) {
-    console.warn(
-      'Could not resolve the annex Space id for the forget wipe:',
+    log.warn('Could not resolve the annex Space id for the forget wipe', {
       err
-    )
+    })
   }
 
   // Snapshot-first: every wipe target derives from the live session BEFORE
@@ -940,7 +941,7 @@ export async function forgetBrowserWalletData(): Promise<{
         }
       } catch (err) {
         failed.push(`replica:${prefix}`)
-        console.warn(`Could not delete the replica databases "${prefix}":`, err)
+        log.warn('Could not delete the replica databases', { prefix, err })
       }
     }
 
@@ -966,7 +967,7 @@ export async function forgetBrowserWalletData(): Promise<{
       }
     } catch (err) {
       failed.push('session-db')
-      console.warn('Could not delete the session database:', err)
+      log.warn('Could not delete the session database', { err })
     }
   }
 
@@ -988,13 +989,13 @@ export async function forgetBrowserWalletData(): Promise<{
     deleteAllLocalCacheFamilies()
   } catch (err) {
     failed.push('cache-families')
-    console.warn('Could not delete the localStorage families:', err)
+    log.warn('Could not delete the localStorage families', { err })
   }
   try {
     clearWriterId()
   } catch (err) {
     failed.push('writer-id')
-    console.warn('Could not clear the writer id:', err)
+    log.warn('Could not clear the writer id', { err })
   }
   return { failed, unverified }
 }
@@ -1204,10 +1205,9 @@ async function assertRegistryCoversStandingCredentials({
   }
   const unrecorded = credentialVmIds.filter(vmId => !covered.has(vmId))
   if (unrecorded.length > 0) {
-    console.warn(
-      'The last-client forget refused: the unlock-methods registry does ' +
-        'not name these credential key-agreement methods:',
-      unrecorded
+    log.warn(
+      'The last-client forget refused: the unlock-methods registry does not name these credential key-agreement methods',
+      { unrecorded }
     )
     throw new UnrecordedCredentialForgetError({
       unrecorded: unrecorded.length

@@ -38,6 +38,9 @@ import {
   type HistoryTab
 } from '@/lib/historyActivity'
 import { useSearch } from '@/hooks/useSearch'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:history')
 
 type HistoryItem = { id: string; doc: WalletActivity }
 
@@ -149,7 +152,7 @@ export function HistoryPage() {
         // Only used to decide which titles link, so a failed read degrades to
         // plain-text titles rather than failing the whole page.
         session.storage.listCredentials().catch(err => {
-          console.error('Could not load credentials:', err)
+          log.error('Could not load credentials', { err })
           return []
         })
       ])

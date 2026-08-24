@@ -27,6 +27,9 @@ import {
 import type { CascadeCollections } from '@interop/wallet-core/clients'
 import { ENCRYPTED_STANDARD_COLLECTIONS } from '@/app.config'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:cascade')
 
 export type { UserKeyCascadeResult } from '@interop/wallet-core/keys'
 
@@ -63,10 +66,9 @@ async function listedCollections({
       }
     }
   } catch (err) {
-    console.warn(
-      'Could not list remote collections for the user key cascade; rotating the ' +
-        'standard collections only:',
-      err
+    log.warn(
+      'Could not list remote collections for the user key cascade; rotating the standard collections only',
+      { err }
     )
     return { listed: false, ids, encrypted }
   }
@@ -165,10 +167,10 @@ export async function cascadeCollectionsToUserKey({
     userKey
   })
   for (const { collectionId, error } of result.failed) {
-    console.warn(
-      `Could not rotate collection "${collectionId}" onto the current user key:`,
-      error
-    )
+    log.warn('Could not rotate collection onto the current user key', {
+      collectionId,
+      err: error
+    })
   }
   return result
 }

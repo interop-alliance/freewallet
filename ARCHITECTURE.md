@@ -795,6 +795,15 @@ so they ride a sibling seam (`src/lib/prefsStorage.ts`): while a transient
 session is live, pref writes land in an in-memory overlay that shadows
 reads; reads still fall through to localStorage, which writes nothing.
 
+The logging seam is a third arrangement, module-global rather than
+session-scoped: `src/lib/log.ts` wires `@interop/logger`'s namespaced
+loggers at bootstrap and rides neither the durability handle nor the prefs
+overlay. It touches localStorage in exactly one way, guarded by the
+package -- a single lazy read of the `interop:logger` debug filter key at
+the first debug-level dispatch. No code path in the seam writes durable
+state, so a transient session picks up whatever filter the browser
+already carried and stays residue-free either way.
+
 **Replica-less, capability-bound storage.** A transient session constructs
 no `BrowserStore` at all -- the versioned RxDB open alone durably creates
 the per-user database -- so `StorageManager.initStorageClients` builds it

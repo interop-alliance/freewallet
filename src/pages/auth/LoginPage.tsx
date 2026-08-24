@@ -45,6 +45,9 @@ import { registerWallet } from '@/lib/registerWallet'
 import { forcedRememberBrowser } from '@/lib/e2eSeams'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import type { AuthLocationState } from '@/types/auth'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:login')
 
 /**
  * The refusal states that offer the forget affordance: the keyring
@@ -100,7 +103,7 @@ export function LoginPage() {
   const [forgetBusy, setForgetBusy] = useState(false)
   const { copied: codeCopied, copy: copyCode } = useCopyToClipboard({
     onError: (err: unknown) => {
-      console.error('Could not copy the connect code:', err)
+      log.error('Could not copy the connect code', { err })
     }
   })
 
@@ -180,7 +183,7 @@ export function LoginPage() {
             })
           }
         })
-        .catch(err => console.warn('Recovery health check failed:', err))
+        .catch(err => log.warn('Recovery health check failed', { err }))
       navigate('/dashboard', { replace: true })
     } catch (err) {
       const key = loginErrorKey({ err, label: 'Login' })
@@ -217,7 +220,7 @@ export function LoginPage() {
       const minted = await mintEnrollmentRequest()
       setEnrollment({ passphrase: notEnrolledPassphrase, ...minted })
     } catch (err) {
-      console.error('Could not start connecting this browser:', err)
+      log.error('Could not start connecting this browser', { err })
       setEnrollErrorKey('auth.enroll.failed')
     } finally {
       setEnrollBusy(false)
@@ -253,7 +256,7 @@ export function LoginPage() {
       if (err instanceof EnrollmentPendingError) {
         setEnrollErrorKey('auth.enroll.pending')
       } else {
-        console.error('Connecting this browser failed:', err)
+        log.error('Connecting this browser failed', { err })
         setEnrollErrorKey('auth.enroll.failed')
       }
     } finally {
@@ -300,7 +303,7 @@ export function LoginPage() {
         severity: messageKey === 'auth.forget.done' ? 'success' : 'warning'
       })
     } catch (err) {
-      console.error('Forgetting the wallet data on this browser failed:', err)
+      log.error('Forgetting the wallet data on this browser failed', { err })
       showToast({ message: t('auth.forget.failed'), severity: 'error' })
     } finally {
       setForgetBusy(false)

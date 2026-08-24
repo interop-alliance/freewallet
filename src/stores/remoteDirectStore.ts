@@ -43,6 +43,9 @@ import type { StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:storage:direct')
 
 /**
  * The storage operations `StorageManager` routes uniformly through one selected
@@ -286,28 +289,28 @@ export class RemoteDirectStore implements SyncedCollectionStore {
         if (err instanceof UnknownEpochError) {
           // Possibly-fresh data behind a stale descriptor: skip it so a descriptor
           // refresh can pick it up, never purge it.
-          console.warn(
-            `Skipping unknown-epoch remote "${logicalKey}" resource ` +
-              `"${resourceId}":`,
+          log.warn('Skipping unknown-epoch remote resource', {
+            logicalKey,
+            resourceId,
             err
-          )
+          })
           unknownEpoch += 1
         } else if (err instanceof KeyUnwrapError) {
           // This wallet is not a recipient of the resource's key epoch: skip it,
           // but never purge it -- a purge here would delete it from the server.
-          console.warn(
-            `Skipping remote "${logicalKey}" resource "${resourceId}": ` +
-              `this wallet is not a recipient of its key epoch:`,
-            err
+          log.warn(
+            'Skipping remote resource: this wallet is not a recipient of its ' +
+              'key epoch',
+            { logicalKey, resourceId, err }
           )
           noEpochKey += 1
         } else {
           // One undecryptable remote row must not brick the whole popup list.
-          console.warn(
-            `Skipping undecryptable remote "${logicalKey}" resource ` +
-              `"${resourceId}":`,
+          log.warn('Skipping undecryptable remote resource', {
+            logicalKey,
+            resourceId,
             err
-          )
+          })
           undecryptableRowIds.push(resourceId)
         }
         continue
@@ -647,18 +650,17 @@ export class RemoteDirectStore implements SyncedCollectionStore {
         if (err instanceof KeyUnwrapError) {
           // Not a recipient of this resource's key epoch: skip it, and keep it
           // out of the refresh signal -- a descriptor refresh cannot help.
-          console.warn(
-            `Skipping remote wallet-activity resource "${resourceId}": this ` +
-              `wallet is not a recipient of its key epoch:`,
-            err
+          log.warn(
+            'Skipping remote wallet-activity resource: this wallet is not a ' +
+              'recipient of its key epoch',
+            { resourceId, err }
           )
           continue
         }
-        console.warn(
-          `Skipping undecryptable remote wallet-activity resource ` +
-            `"${resourceId}":`,
+        log.warn('Skipping undecryptable remote wallet-activity resource', {
+          resourceId,
           err
-        )
+        })
         continue
       }
       if (activity === undefined) {

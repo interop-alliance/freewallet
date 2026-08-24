@@ -21,6 +21,9 @@ import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { credentialCardStyles, dashboardStyles } from '@/styles/appStyles'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:accept')
 
 export function AcceptCredentialsPage() {
   const { t } = useTranslation()
@@ -81,7 +84,7 @@ export function AcceptCredentialsPage() {
       )
       const appKeysSkipped = uniqueCredentials.length - storable.length
       for (const credential of storable) {
-        console.log('Storing credential:', credentialTitle(credential))
+        log.debug('Storing credential', { title: credentialTitle(credential) })
         // addCredential records the credential-created history entry itself,
         // gated on an actual insert.
         await session.storage.addCredential({
@@ -108,7 +111,7 @@ export function AcceptCredentialsPage() {
       })
       navigate('/dashboard')
     } catch (err) {
-      console.error('Error storing credentials:', err)
+      log.error('Error storing credentials', { err })
       setStoreError(
         err instanceof AppKeyRefusedError
           ? t('common.appKeyRefused')

@@ -130,6 +130,9 @@ import {
   saveKeyringFreshnessPin,
   sessionLogPinStore
 } from '@/lib/sessionKey'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:keyring')
 
 /**
  * The version stamped on the stored `{ version, encryption, wrapped }`
@@ -549,7 +552,7 @@ async function loadClientKeys({
   try {
     return await unwrapClientKeys({ record, unlock })
   } catch (err) {
-    console.warn('Discarding an unusable client-key record:', err)
+    log.warn('Discarding an unusable client-key record', { err })
     await deleteClientKeyRecord({ spaceId: unlock.spaceId, idb })
     return undefined
   }
@@ -960,7 +963,7 @@ async function readCachedRecord({
       idb
     })
   } catch (err) {
-    console.warn('Discarding an unusable cached keyring record:', err)
+    log.warn('Discarding an unusable cached keyring record', { err })
     await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
     return null
   }
@@ -1976,7 +1979,7 @@ async function retireUnlockIdentity({
         spaceId: unlock.spaceId
       })
     } catch (err) {
-      console.warn(warning, err)
+      log.warn(warning, { err })
       unlockSpaceDeleted = false
     }
   }
@@ -2020,7 +2023,7 @@ export async function deleteUnlockMethod({
 }): Promise<{ unlockSpaceDeleted: boolean }> {
   const unlockSpaceDeleted = await retireUnlockIdentity({
     unlock: credential?.unlock ?? (await deriveUnlockIdentity({ secret, kdf })),
-    warning: 'Could not delete the unlock Space:',
+    warning: 'Could not delete the unlock Space',
     idb
   })
 
@@ -2210,7 +2213,7 @@ export async function changePassphrase({
   if (newPassphrase !== oldPassphrase) {
     oldSpaceDeleted = await retireUnlockIdentity({
       unlock: oldUnlock,
-      warning: 'Could not delete the old unlock Space:',
+      warning: 'Could not delete the old unlock Space',
       idb
     })
   }

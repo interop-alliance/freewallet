@@ -28,6 +28,9 @@ import { ScanCredentialQrDialog } from '@/components/ScanCredentialQrDialog'
 import type { WalletInputOutcome } from '@/lib/resolveWalletInput'
 import { externalRequestPath } from '@/lib/walletRequest/externalRequest'
 import type { StoredCredential } from '@/types/credential'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:dashboard')
 
 // Declared outside the component so this array is the same object on every
 // render; useSearch's index is memoized on it, so a fresh array each render
@@ -115,7 +118,7 @@ export function DashboardPage() {
         await loadCredentials(() => cancelled)
       } catch (err) {
         // A failed read must not leave the page spinning forever.
-        console.error('Could not load credentials:', err)
+        log.error('Could not load credentials', { err })
         if (!cancelled) {
           setLoadError(true)
         }
@@ -147,7 +150,7 @@ export function DashboardPage() {
           setPasskeySafetyNotice(notice)
         }
       } catch (err) {
-        console.error('Could not load the passkey-safety notice:', err)
+        log.error('Could not load the passkey-safety notice', { err })
       }
     }
     void loadNotice()
@@ -164,7 +167,7 @@ export function DashboardPage() {
       syncController.reSync()
       await loadCredentials()
     } catch (err) {
-      console.error('Could not refresh credentials:', err)
+      log.error('Could not refresh credentials', { err })
       setLoadError(true)
     } finally {
       // Always release the Sync button, even on a failed refresh.
@@ -184,7 +187,7 @@ export function DashboardPage() {
         message: t('dashboard.undecryptableRemoved', { count: removed })
       })
     } catch (err) {
-      console.error('Could not remove undecryptable credentials:', err)
+      log.error('Could not remove undecryptable credentials', { err })
       setLoadError(true)
     }
   }

@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import path from 'node:path'
 import { execSync } from 'node:child_process'
+import { interopLoggerPlugin } from '@interop/logger/vite'
 
 const appVersion = execSync('git describe --tags --always --dirty').toString().trim()
 
@@ -46,7 +47,14 @@ export default defineConfig({
       '@zxcvbn-ts/language-es-es'
     ]
   },
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Dev-server NDJSON log endpoint (POST /__interop-logger ->
+    // .dev-logs/app.ndjson, rotated on start). The e2e configs start their
+    // own vite servers in this cwd and point INTEROP_LOGGER_FILE at a
+    // scratch path so they never reset a live dev session's file.
+    interopLoggerPlugin({ file: process.env.INTEROP_LOGGER_FILE })
+  ],
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src')

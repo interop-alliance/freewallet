@@ -22,6 +22,9 @@ import { showToast } from '@/stores/toastStore'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { formatDateTime } from '@/lib/viewMappers/formatDate'
 import { storageStyles } from '@/styles/appStyles'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:contacts')
 
 const ACTION_COLOR: Record<
   ContactRevisionPayload['action'],
@@ -73,7 +76,7 @@ export function ContactHistoryPage() {
           setRevisions(items)
         }
       } catch (err) {
-        console.error('Could not load contact history:', err)
+        log.error('Could not load contact history', { err })
       } finally {
         if (!cancelled) {
           setLoading(false)
@@ -110,7 +113,7 @@ export function ContactHistoryPage() {
         action: 'restore'
       })
     } catch (err) {
-      console.error('Could not restore this contact version:', err)
+      log.error('Could not restore this contact version', { err })
       setRestoreError(true)
       setRestoring(false)
       return

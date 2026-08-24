@@ -50,6 +50,9 @@ import { forgetThisBrowser } from '@/session/forget'
 import { OnboardInviteCard } from '@/components/OnboardInviteCard'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { showToast } from '@/stores/toastStore'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:clients')
 
 /**
  * Whether a connect-code parse failure is the canonicality refusal -- a code
@@ -120,7 +123,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       setClients(listed)
       setLoadError(false)
     } catch (err) {
-      console.warn('Could not list the enrolled wallet clients:', err)
+      log.warn('Could not list the enrolled wallet clients', { err })
       setLoadError(true)
     }
   }, [session])
@@ -145,7 +148,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
           }
           return
         } catch (err) {
-          console.warn('Could not list the enrolled wallet clients:', err)
+          log.warn('Could not list the enrolled wallet clients', { err })
           if (!cancelled) {
             setLoadError(true)
           }
@@ -179,7 +182,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       showToast({ message: t('settings.clients.labelSaved') })
       await loadClients()
     } catch (err) {
-      console.error('Could not rename the wallet client:', err)
+      log.error('Could not rename the wallet client', { err })
       showToast({ message: t('settings.clients.labelSaveFailed') })
     } finally {
       setLabelSaving(false)
@@ -218,7 +221,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       }
       await loadClients()
     } catch (err) {
-      console.error('Could not disconnect the wallet client:', err)
+      log.error('Could not disconnect the wallet client', { err })
       setDisconnectError(true)
     } finally {
       setDisconnecting(false)
@@ -266,15 +269,16 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       if (outcome.wipeFailed.length > 0) {
         // Residue is self-healing: a surviving replica or trio is finished
         // by the next login's forgotten-browser detector.
-        console.warn('The forget wipe left residue behind:', outcome.wipeFailed)
+        log.warn('The forget wipe left residue behind', {
+          wipeFailed: outcome.wipeFailed
+        })
       }
       if (outcome.wipeUnverified.length > 0) {
         // Deleted, but not confirmed (this browser cannot enumerate its
         // databases); the same detector settles it at the next login.
-        console.warn(
-          'The forget wipe could not confirm these stages:',
-          outcome.wipeUnverified
-        )
+        log.warn('The forget wipe could not confirm these stages', {
+          wipeUnverified: outcome.wipeUnverified
+        })
       }
       if (outcome.lastClient && outcome.ceremony.unlockMethods) {
         // The other sign-in methods' record re-mint report: a `failed`
@@ -285,10 +289,9 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
           entry => entry.outcome === 'incomplete-entry'
         )
         if (skipped.length > 0) {
-          console.warn(
-            'The last-client forget skipped sign-in records predating the ' +
-              're-mint fields:',
-            skipped.map(entry => entry.label)
+          log.warn(
+            'The last-client forget skipped sign-in records predating the re-mint fields',
+            { labels: skipped.map(entry => entry.label) }
           )
         }
       }
@@ -302,23 +305,23 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
         setForgetLastClient(true)
         setForgetErrorKey('settings.forget.lastClientNow')
       } else if (name === 'PendingRetirementForgetError') {
-        console.warn('The last-client forget refused a pending change:', err)
+        log.warn('The last-client forget refused a pending change', { err })
         setForgetErrorKey('settings.forget.pendingRetirement')
       } else if (name === 'UnrecordedCredentialForgetError') {
-        console.warn(
-          'The last-client forget refused an unrecorded sign-in method:',
-          err
+        log.warn(
+          'The last-client forget refused an unrecorded sign-in method',
+          { err }
         )
         setForgetErrorKey('settings.forget.unrecordedCredential')
       } else if (name === 'RecordRemintFailedError') {
-        console.warn('The last-client forget withheld the removal:', err)
+        log.warn('The last-client forget withheld the removal', { err })
         const failed = (err as { failed?: Array<{ label: string }> }).failed
         setForgetErrorValues({
           methods: (failed ?? []).map(outcome => outcome.label).join(', ')
         })
         setForgetErrorKey('settings.forget.recordsUnreachable')
       } else {
-        console.error('Could not forget this browser:', err)
+        log.error('Could not forget this browser', { err })
         setForgetErrorKey('settings.forget.failed')
       }
     } finally {
@@ -383,7 +386,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       setEnrollCodeErrorKey(null)
       await loadClients()
     } catch (err) {
-      console.error('Enrolling the new wallet client failed:', err)
+      log.error('Enrolling the new wallet client failed', { err })
       setEnrollError(true)
     } finally {
       setEnrolling(false)

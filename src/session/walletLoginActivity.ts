@@ -6,6 +6,9 @@
  * the recovery page's tail.
  */
 import type { Session } from '@/types/auth'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:activity')
 
 /**
  * Fire-and-forget: the entry is an audit trail, so a failed write is logged
@@ -17,5 +20,5 @@ import type { Session } from '@/types/auth'
 export function recordWalletLogin({ session }: { session: Session }) {
   void session.storage
     .addHistoryWalletLogin({ user: session.user })
-    .catch(err => console.warn('Could not record the wallet login:', err))
+    .catch(err => log.warn('Could not record the wallet login', { err }))
 }

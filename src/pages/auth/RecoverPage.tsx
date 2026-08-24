@@ -31,6 +31,9 @@ import {
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { forcedRememberBrowser } from '@/lib/e2eSeams'
 import { RecoveryCodeDisplay } from '@/components/RecoveryCodeDisplay'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:recover')
 
 /**
  * The recovery-code recover page (`/recover`, public) -- the "lost my only
@@ -118,7 +121,7 @@ export function RecoverPage() {
       setCode(typed)
       setStep('passphrase')
     } catch (err) {
-      console.warn('Recovery code check failed:', err)
+      log.warn('Recovery code check failed', { err })
       setErrorKey(errorKeyFor(err))
     } finally {
       setBusy(false)
@@ -146,7 +149,7 @@ export function RecoverPage() {
       setOutcome(recovered)
       setStep('done')
     } catch (err) {
-      console.error('Recovery failed:', err)
+      log.error('Recovery failed', { err })
       setErrorKey(errorKeyFor(err))
     } finally {
       setBusy(false)
@@ -197,7 +200,7 @@ export function RecoverPage() {
       }
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      console.error('Recovery login failed:', err)
+      log.error('Recovery login failed', { err })
       setErrorKey('auth.recover.errors.loginFailed')
     } finally {
       setBusy(false)

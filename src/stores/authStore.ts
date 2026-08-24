@@ -3,6 +3,9 @@ import type { Session } from '@/types/auth'
 import { isDurableSession } from '@/session/persistence'
 import { setTransientPrefs } from '@/lib/prefsStorage'
 import { syncController } from '@/stores/syncController'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:store')
 
 /**
  * E2E test seam. Space export / import (and the collection delete a round-trip
@@ -98,7 +101,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         try {
           await previous.storage.close()
         } catch (err) {
-          console.warn('Could not close the replaced session storage:', err)
+          log.warn('Could not close the replaced session storage', { err })
         }
       }
       await syncController.restart({ session })

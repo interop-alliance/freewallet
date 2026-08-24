@@ -46,6 +46,9 @@ import {
 import { isSelfIssued, subjectId } from '@/lib/vcShape'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type { StorageManager } from '@/stores/storageManager'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:session:appkeys')
 
 /**
  * Whether a stored credential is an app key stranded in
@@ -148,9 +151,9 @@ export async function sweepStrandedAppKeys({
           items
         })
         if (rotation.failed > 0) {
-          console.warn(
-            `Could not rotate every collection off the stranded app key ` +
-              `"${cid}"; leaving it in place to retry at the next login.`
+          log.warn(
+            'Could not rotate every collection off the stranded app key; leaving it in place to retry at the next login',
+            { cid }
           )
           continue
         }
@@ -164,7 +167,7 @@ export async function sweepStrandedAppKeys({
       await storage.deleteCredential({ cid, consultRemote: true })
       deleted += 1
     } catch (err) {
-      console.warn(`Could not delete the stranded app key "${cid}":`, err)
+      log.warn('Could not delete the stranded app key', { cid, err })
     }
   }
 
@@ -204,10 +207,9 @@ async function retractOrphanPublicAppKeys({
       skipCids: privateCids
     })
   } catch (err) {
-    console.warn(
-      'Could not list the public credential copies; leaving any orphaned ' +
-        'app-key copy for the next login:',
-      err
+    log.warn(
+      'Could not list the public credential copies; leaving any orphaned app-key copy for the next login',
+      { err }
     )
     return 0
   }
@@ -229,9 +231,9 @@ async function retractOrphanPublicAppKeys({
           items: history
         })
         if (rotation.failed > 0) {
-          console.warn(
-            `Could not rotate every collection off the orphaned public app ` +
-              `key "${cid}"; leaving it in place to retry at the next login.`
+          log.warn(
+            'Could not rotate every collection off the orphaned public app key; leaving it in place to retry at the next login',
+            { cid }
           )
           continue
         }
@@ -240,10 +242,7 @@ async function retractOrphanPublicAppKeys({
       await storage.retractPublicCopy({ cid, consultRemote: true })
       retracted += 1
     } catch (err) {
-      console.warn(
-        `Could not retract the orphaned public app key "${cid}":`,
-        err
-      )
+      log.warn('Could not retract the orphaned public app key', { cid, err })
     }
   }
   return retracted

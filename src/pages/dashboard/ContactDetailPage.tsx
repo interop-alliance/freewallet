@@ -26,6 +26,9 @@ import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { contactDetailStyles, storageStyles } from '@/styles/appStyles'
 import { getDids, initialsFor, type ContactData } from '@interop/social-core'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:contacts')
 
 function FieldSection({
   label,
@@ -193,7 +196,7 @@ export function ContactDetailPage() {
           setContact(stored?.contact ?? null)
         }
       } catch (err) {
-        console.error('Could not load contact:', err)
+        log.error('Could not load contact', { err })
       } finally {
         if (!cancelled) {
           setLoading(false)
@@ -220,7 +223,7 @@ export function ContactDetailPage() {
     try {
       await session.storage.deleteContact({ id: contactId })
     } catch (err) {
-      console.error('Error deleting contact:', err)
+      log.error('Error deleting contact', { err })
       setDeleteError(true)
       setDeleting(false)
       setDeleteDialogOpen(false)

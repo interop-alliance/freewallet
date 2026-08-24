@@ -27,6 +27,9 @@ import { useSearch } from '@/hooks/useSearch'
 import { flattenSearchValues } from '@/lib/searchValues'
 import { dashboardStyles } from '@/styles/appStyles'
 import type { StoredContact } from '@/types/contact'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:contacts')
 
 // Plumbing fields a person would never search for -- record identifiers, the
 // starred flag (which would otherwise be indexed as the words 'true'/'false'),
@@ -101,7 +104,7 @@ export function ContactsPage() {
       try {
         await loadContacts(() => cancelled)
       } catch (err) {
-        console.error('Could not load contacts:', err)
+        log.error('Could not load contacts', { err })
         if (!cancelled) {
           setLoadError(true)
         }
@@ -126,7 +129,7 @@ export function ContactsPage() {
       syncController.reSync()
       await loadContacts()
     } catch (err) {
-      console.error('Could not refresh contacts:', err)
+      log.error('Could not refresh contacts', { err })
       setLoadError(true)
     } finally {
       // Always release the Sync button, even on a failed refresh.

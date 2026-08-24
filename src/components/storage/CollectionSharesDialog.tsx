@@ -34,6 +34,9 @@ import { removeCollectionShare, type CollectionShare } from '@/session/shares'
 import { showToast } from '@/stores/toastStore'
 import { dashboardStyles, storageStyles } from '@/styles/appStyles'
 import type { Session } from '@/types/auth'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:storage')
 
 /**
  * A connected app reader's label: its name paired with its origin ("Text
@@ -114,7 +117,7 @@ export function CollectionSharesDialog({
       showToast({ message: t('storage.sharedRemoved') })
       onRemoved()
     } catch (err) {
-      console.error('Could not remove collection access:', err)
+      log.error('Could not remove collection access', { err })
       setRemoveError(true)
     } finally {
       setRemoving(false)

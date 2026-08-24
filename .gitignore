@@ -36,3 +36,6 @@ public/js/
 
 # Environment variables
 .env
+
+# Dev-server NDJSON log sink (@interop/logger vite plugin)
+.dev-logs/

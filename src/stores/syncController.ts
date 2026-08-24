@@ -39,6 +39,9 @@ import type { SyncCheckpoint, SyncedDoc, WasSyncPort } from '@/lib/sync'
 import { createWasSyncPort } from '@interop/was-client/sync'
 import { useSyncStatusStore } from '@/stores/syncStatusStore'
 import type { Session } from '@/types/auth'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:sync:controller')
 
 /**
  * The subset of an RxJS `Subscription` we hold (rxjs is only a transitive dep,
@@ -193,7 +196,7 @@ class SyncController {
             setStatus(id, active ? 'syncing' : 'synced')
           }),
           state.error$.subscribe(err => {
-            console.error(`Sync error for "${id}":`, err)
+            log.error('Sync error for collection', { id, err })
             setStatus(id, 'error')
           })
         ]
@@ -218,7 +221,7 @@ class SyncController {
         }, WAS_SYNC_POLL_MS)
       }
     } catch (err) {
-      console.error('Failed to start sync controller:', err)
+      log.error('Failed to start sync controller', { err })
       // Tear down any partial state cleanly. Call the internal `#stop()`
       // directly rather than the queueing `stop()`: we already hold the queue,
       // so enqueuing here would deadlock on our own in-flight task.
@@ -263,7 +266,7 @@ class SyncController {
       try {
         await state.cancel()
       } catch (err) {
-        console.error('Error cancelling replication:', err)
+        log.error('Error cancelling replication', { err })
       }
     }
     this.#replications = []

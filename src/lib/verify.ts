@@ -19,6 +19,9 @@ import type {
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { registryManager } from '@/lib/registryManager'
 import type { VerifyCredentialPayload } from '@/types/credential'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:verify')
 
 const issuerDetailsSuite = createIssuerDetailsSuite({
   lookupDid: (did: string) => registryManager.lookupDid(did)
@@ -65,7 +68,7 @@ export async function verifyCredential(
 
     return mapCoreResultToLegacyPayload(core)
   } catch (err) {
-    console.warn(err)
+    log.warn('Credential verification threw', { err })
     return createFatalErrorResult(
       credential,
       CredentialErrorTypes.CouldNotBeVerified

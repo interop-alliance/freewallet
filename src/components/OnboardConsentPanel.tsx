@@ -22,6 +22,9 @@ import {
 } from '@interop/wallet-core/enrollment'
 import type { Session } from '@/types/auth'
 import { approveEnrollment } from '@/lib/enrollment'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:onboard')
 
 export function OnboardConsentPanel({
   session,
@@ -53,7 +56,7 @@ export function OnboardConsentPanel({
       await approveEnrollment({ request: consent.request, session, label })
       onApproved()
     } catch (err) {
-      console.error('Onboarding the new wallet client failed:', err)
+      log.error('Onboarding the new wallet client failed', { err })
       setApproveError(true)
     } finally {
       setApproving(false)
