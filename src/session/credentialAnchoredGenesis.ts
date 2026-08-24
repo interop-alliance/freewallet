@@ -98,7 +98,7 @@ import type { TransientSessionPersistence } from '@/session/persistence'
 import { accountRosterStore } from '@/session/rosterStore'
 import type { StandingUnlockFields } from '@/session/unlockMethods'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
-import { createLogger } from '@/lib/log'
+import { createLogger, stageTimer } from '@/lib/log'
 
 const log = createLogger('fw:session:genesis')
 
@@ -172,6 +172,10 @@ export async function establishCredentialAnchoredAccount({
       'The credential-anchored establishment requires a configured WAS server.'
     )
   }
+  const mark = stageTimer({
+    log,
+    ceremony: 'credential-anchored-establishment'
+  })
   const host = pointer.host
   const spaceId = pointer.spaceId
   const { standing } = credential
@@ -207,6 +211,7 @@ export async function establishCredentialAnchoredAccount({
     priorCreatedAt,
     credential
   })
+  mark('interim-bridge-and-first-bind')
 
   // The roster store the genesis (and the recovery read below) drive: signed
   // log appends under the LADDER VM's key -- the ceremony-tail license's
@@ -243,6 +248,9 @@ export async function establishCredentialAnchoredAccount({
     accountLogPinStore: persistence.logPins,
     promoteController: false
   })
+  // Space provisioning, did:web keys, the did:webvh genesis entry, the
+  // roster, and the collection epochs, all inside the shared ceremony.
+  mark('genesis')
   const did = genesis.did
   const fullPointer: AccountPointer = { spaceId, host, did }
   // The ceremony collects its roster and epoch failures instead of
@@ -283,6 +291,7 @@ export async function establishCredentialAnchoredAccount({
       userKey
     })
     assertGenesisLanded({ failed: [], epochs })
+    mark('heal-adopted-roster-epochs')
   }
 
   // 3. The annex generation, so the very next login can enroll a
@@ -294,6 +303,7 @@ export async function establishCredentialAnchoredAccount({
     host,
     pinStore: persistence.logPins
   })
+  mark('verify-account-log')
   const ladderZcap = await ladderVmZcapClient({ accountDid: did, ladderSeed })
   let clientAnnexDid = delegatedClientsPointer({ doc: verified.doc })
   const rung0 = await ladderRung({ ladderSeed, index: 0 })
@@ -307,6 +317,7 @@ export async function establishCredentialAnchoredAccount({
       controller: bootstrapAgent.id,
       ladderSeed
     })
+    mark('annex-generation-mint')
     // The delegation embeds while the auxiliary Space still answers to the
     // bootstrap did:key; the controller flip follows, then the pointer.
     await ensureGenerationDelegationCurrent({
@@ -326,9 +337,11 @@ export async function establishCredentialAnchoredAccount({
         }),
       expectedDid: minted.did
     })
+    mark('generation-delegation')
     await bootstrapWas
       .space(clientAnnexSpaceId)
       .configure({ controller: did, force: true })
+    mark('annex-controller-flip')
     // The second rung-0-signed account-log entry: the ratified
     // `#DelegatedClients` service pointer, under the ladder's own update
     // authority (rung 0 active, rung 1 staged).
@@ -340,6 +353,7 @@ export async function establishCredentialAnchoredAccount({
       pinStore: persistence.logPins,
       logId: accountLogPinId({ spaceId })
     })
+    mark('delegated-clients-pointer')
     clientAnnexDid = minted.did
   }
   const clientAnnex = clientAnnexDidParts({ did: clientAnnexDid })
@@ -370,6 +384,7 @@ export async function establishCredentialAnchoredAccount({
     priorCreatedAt: firstBind.createdAt,
     credential
   })
+  mark('bridge-sibling-rebind')
 
   const delegationKeyId = delegationProofKeyId(bridge)
   const delegatedClientsKeyId = delegationProofKeyId(sibling)
@@ -421,6 +436,7 @@ export async function establishCredentialAnchoredAccount({
     } catch (err) {
       log.warn('The pre-promotion tail failed (continuing)', { err })
     }
+    mark('pre-promotion-tail')
   }
 
   // 6. The promotion, last: from here on the ladder's authority is exactly
@@ -432,6 +448,7 @@ export async function establishCredentialAnchoredAccount({
     spaceId,
     did
   })
+  mark('promotion')
 
   return establishment
 }

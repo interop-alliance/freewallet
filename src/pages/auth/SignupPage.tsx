@@ -107,6 +107,9 @@ export function SignupPage() {
     }
     setIsSubmitting(true)
     setErrorKey(null)
+    // Timing mark: paired with the dashboard's mount mark to measure how
+    // long a signup takes end to end.
+    log.info('Signup submitted', { method, at: new Date().toISOString() })
 
     if (method === 'passkey') {
       try {

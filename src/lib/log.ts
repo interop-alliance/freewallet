@@ -23,9 +23,43 @@ import {
   ringBufferSink,
   setFilter
 } from '@interop/logger'
+import type { Logger } from '@interop/logger'
 import { setLogger } from '@interop/wallet-core'
 
 export { createLogger }
+
+/**
+ * A per-stage stopwatch for a ceremony: each `mark(stage)` logs one info
+ * event carrying the stage name, the milliseconds since the previous mark
+ * (or since the timer was created), and the running total. Filter on
+ * `event: 'Stage timing'` to pull a ceremony's whole profile out of the
+ * ring buffer or the NDJSON file.
+ *
+ * @param options {object}
+ * @param options.log {Logger}   the calling module's namespaced logger
+ * @param options.ceremony {string}   a label naming the timed sequence
+ * @returns {(stage: string) => void}
+ */
+export function stageTimer({
+  log,
+  ceremony
+}: {
+  log: Logger
+  ceremony: string
+}): (stage: string) => void {
+  const startedAt = performance.now()
+  let previous = startedAt
+  return function mark(stage: string): void {
+    const now = performance.now()
+    log.info('Stage timing', {
+      ceremony,
+      stage,
+      ms: Math.round(now - previous),
+      totalMs: Math.round(now - startedAt)
+    })
+    previous = now
+  }
+}
 
 /**
  * HMR re-evaluates this module with a fresh module scope, so the

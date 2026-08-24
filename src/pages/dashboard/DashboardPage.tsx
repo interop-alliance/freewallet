@@ -107,6 +107,12 @@ export function DashboardPage() {
     [session]
   )
 
+  // Timing mark: paired with the signup and login submit marks to measure
+  // how long reaching the dashboard takes.
+  useEffect(() => {
+    log.info('Dashboard rendered', { at: new Date().toISOString() })
+  }, [])
+
   useEffect(() => {
     let cancelled = false
 

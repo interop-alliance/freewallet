@@ -37,7 +37,7 @@ import {
 } from '@/session/unlockMethods'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
 import type { Session } from '@/types/auth'
-import { createLogger } from '@/lib/log'
+import { createLogger, stageTimer } from '@/lib/log'
 
 const log = createLogger('fw:session:signup')
 
@@ -149,15 +149,18 @@ async function signUpCredentialAnchoredWithPassphrase({
   email?: string
 }): Promise<{ session?: Session; userExists: boolean }> {
   const persistence = transientSessionPersistence()
+  const mark = stageTimer({ log, ceremony: 'credential-anchored-signup' })
   // One 600k-iteration derivation for the whole signup.
   const credential = await deriveUnlockCredential({
     secret: passphrase,
     kdf: KEYRING_KDF
   })
+  mark('kdf')
   const probe = await fetchTransientKeyring({
     credential,
     accountLogPinStore: persistence.logPins
   })
+  mark('existing-account-probe')
   if (probe) {
     return { userExists: true }
   }
@@ -206,12 +209,15 @@ async function signUpCredentialAnchoredWithPassphrase({
     }
   })
 
+  mark('establishment')
+
   // Enter the account exactly as any later public-terminal login would: the
   // ordinary transient composition over the record just established.
   const found = await fetchTransientKeyring({
     credential,
     accountLogPinStore: persistence.logPins
   })
+  mark('record-refetch')
   if (!found) {
     throw new Error(
       'The freshly established unlock record could not be fetched back.'
@@ -223,6 +229,7 @@ async function signUpCredentialAnchoredWithPassphrase({
     email,
     persistence
   })
+  mark('transient-session')
   return { session, userExists: false }
 }
 
