@@ -252,7 +252,9 @@ export function ExternalRequestPage() {
       loggedIn = result.session
       await loggedIn.storageReady
     } catch (err) {
-      setLoginError(t(loginErrorKey({ err, label: 'External request login' })))
+      setLoginError(
+        t(loginErrorKey({ err, label: 'External request login' }).key)
+      )
       return
     }
     // The session is adopted app-wide, so the post-login steps `/login` runs

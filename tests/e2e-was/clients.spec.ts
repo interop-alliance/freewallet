@@ -195,9 +195,17 @@ test.describe('The Settings connected-wallets surface', () => {
     const terminal = await coldClientPage(browser)
     try {
       // Client 2 (cold): the ordinary login form, deliberately without the
-      // remember seam. The passphrase locates the account, the transient
-      // route cannot serve it, and the page offers "Connect this browser".
+      // remember seam. The passphrase locates the account and the transient
+      // route refuses (no annex generation yet); a transient refusal no
+      // longer offers "Connect this browser" (no second-client remedy), so
+      // the enrollee card is opened through the non-production connect-offer
+      // seam until the login form grows its own connect entry.
       await enrollee.goto('/#/login')
+      await enrollee.evaluate(() => {
+        ;(
+          window as unknown as { __E2E_OFFER_CONNECT_CARD__?: boolean }
+        ).__E2E_OFFER_CONNECT_CARD__ = true
+      })
       await fillSettled(enrollee.locator('input[type="password"]'), passphrase)
       await enrollee
         .getByRole('button', { name: 'Log in', exact: true })

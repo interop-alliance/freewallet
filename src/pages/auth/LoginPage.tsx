@@ -42,7 +42,7 @@ import {
   passkeySupported
 } from '@/lib/passkey'
 import { registerWallet } from '@/lib/registerWallet'
-import { forcedRememberBrowser } from '@/lib/e2eSeams'
+import { forcedConnectOffer, forcedRememberBrowser } from '@/lib/e2eSeams'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import type { AuthLocationState } from '@/types/auth'
 import { createLogger } from '@/lib/log'
@@ -122,6 +122,7 @@ export function LoginPage() {
     setIsSubmitting(true)
     setErrorKey(null)
     setForgetState(null)
+    setNotEnrolledPassphrase(null)
     // Hoisted out of the try: the torn-enrollment catch arm below offers the
     // connect-this-browser flow, which needs the passphrase that located the
     // account.
@@ -186,14 +187,17 @@ export function LoginPage() {
         .catch(err => log.warn('Recovery health check failed', { err }))
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      const key = loginErrorKey({ err, label: 'Login' })
+      const { key, transientReason } = loginErrorKey({ err, label: 'Login' })
       setErrorKey(key)
-      // A torn enrollment, or a transient login the account's state cannot
-      // serve: connecting this browser mints a fresh key set and redoes the
-      // wrap, so offer that flow.
+      // A torn enrollment (the durable path's own two-client state):
+      // connecting this browser mints a fresh key set and redoes the wrap,
+      // so offer that flow. A transient-login refusal opens the card for no
+      // reason at all -- a remedy that presupposes a second client is no
+      // remedy there -- except through the non-production e2e seam the
+      // two-party ceremony specs use.
       if (
         (key === 'auth.errors.userKeyRosterUnwrap' ||
-          key === 'auth.errors.clientNotEnrolled') &&
+          (transientReason !== undefined && forcedConnectOffer())) &&
         passphrase
       ) {
         setNotEnrolledPassphrase(passphrase)
@@ -321,6 +325,7 @@ export function LoginPage() {
     setIsPasskeySubmitting(true)
     setErrorKey(null)
     setForgetState(null)
+    setNotEnrolledPassphrase(null)
     try {
       const { session, userExists } = await loginWithPasskey(
         forcedRememberBrowser() ? { rememberBrowser: true } : {}
@@ -359,7 +364,7 @@ export function LoginPage() {
         // The connect-this-browser flow starts from a passphrase, so a torn
         // enrollment only surfaces its message here; the passphrase handler
         // offers the flow itself.
-        setErrorKey(loginErrorKey({ err, label: 'Passkey login' }))
+        setErrorKey(loginErrorKey({ err, label: 'Passkey login' }).key)
       }
     } finally {
       setIsPasskeySubmitting(false)
@@ -373,6 +378,67 @@ export function LoginPage() {
         <Typography variant="h4" component="h1" sx={authStyles.title}>
           {t('auth.login.heading')}
         </Typography>
+
+        {/* Connect-this-browser (enrollment) card: full-width above the
+            login and passkey cards. */}
+        {enrollment && (
+          <Card sx={authStyles.enrollCard} variant="outlined">
+            <CardContent sx={authStyles.authCardContent}>
+              <Stack sx={{ gap: 2 }}>
+                <Typography variant="h5" component="h2">
+                  {t('auth.enroll.heading')}
+                </Typography>
+                <Typography variant="body2">
+                  {t('auth.enroll.explain')}
+                </Typography>
+                <TextField
+                  label={t('auth.enroll.codeLabel')}
+                  value={enrollment.code}
+                  multiline
+                  minRows={3}
+                  slotProps={{
+                    input: { readOnly: true },
+                    htmlInput: { 'data-testid': 'enroll-connect-code' }
+                  }}
+                />
+                <Button
+                  variant="outlined"
+                  onClick={() => void copyCode(enrollment.code)}
+                >
+                  {codeCopied ? t('common.copied') : t('auth.enroll.copyCode')}
+                </Button>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ wordBreak: 'break-all' }}
+                >
+                  {t('auth.enroll.fingerprint', {
+                    did: enrollment.clientDid
+                  })}
+                </Typography>
+                {enrollErrorKey && (
+                  <Alert
+                    severity={
+                      enrollErrorKey === 'auth.enroll.pending'
+                        ? 'info'
+                        : 'error'
+                    }
+                  >
+                    {t(enrollErrorKey)}
+                  </Alert>
+                )}
+                <Button
+                  variant="contained"
+                  onClick={handleCompleteEnrollment}
+                  loading={enrollBusy}
+                  sx={authStyles.enrollCompleteButton}
+                >
+                  {t('auth.enroll.completeButton')}
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
 
         <Box sx={authStyles.cardsRow}>
           {/* Log in card */}
@@ -433,19 +499,16 @@ export function LoginPage() {
                   </Button>
                 )}
 
-                {(errorKey === 'auth.errors.clientNotEnrolled' ||
-                  errorKey === 'auth.errors.userKeyRosterUnwrap') &&
-                  notEnrolledPassphrase &&
-                  !enrollment && (
-                    <Button
-                      variant="outlined"
-                      onClick={handleStartEnrollment}
-                      loading={enrollBusy}
-                      sx={authStyles.actionButton}
-                    >
-                      {t('auth.enroll.connectButton')}
-                    </Button>
-                  )}
+                {notEnrolledPassphrase && !enrollment && (
+                  <Button
+                    variant="outlined"
+                    onClick={handleStartEnrollment}
+                    loading={enrollBusy}
+                    sx={authStyles.actionButton}
+                  >
+                    {t('auth.enroll.connectButton')}
+                  </Button>
+                )}
 
                 <Typography
                   variant="h5"
@@ -501,68 +564,6 @@ export function LoginPage() {
               </Box>
             </CardContent>
           </Card>
-
-          {/* Connect-this-browser (enrollment) card */}
-          {enrollment && (
-            <Card sx={authStyles.authCard} variant="outlined">
-              <CardContent sx={authStyles.authCardContent}>
-                <Stack sx={{ gap: 2 }}>
-                  <Typography variant="h5" component="h2">
-                    {t('auth.enroll.heading')}
-                  </Typography>
-                  <Typography variant="body2">
-                    {t('auth.enroll.explain')}
-                  </Typography>
-                  <TextField
-                    label={t('auth.enroll.codeLabel')}
-                    value={enrollment.code}
-                    multiline
-                    minRows={3}
-                    slotProps={{
-                      input: { readOnly: true },
-                      htmlInput: { 'data-testid': 'enroll-connect-code' }
-                    }}
-                  />
-                  <Button
-                    variant="outlined"
-                    onClick={() => void copyCode(enrollment.code)}
-                  >
-                    {codeCopied
-                      ? t('common.copied')
-                      : t('auth.enroll.copyCode')}
-                  </Button>
-                  <Typography
-                    variant="body2"
-                    color="text.secondary"
-                    sx={{ wordBreak: 'break-all' }}
-                  >
-                    {t('auth.enroll.fingerprint', {
-                      did: enrollment.clientDid
-                    })}
-                  </Typography>
-                  {enrollErrorKey && (
-                    <Alert
-                      severity={
-                        enrollErrorKey === 'auth.enroll.pending'
-                          ? 'info'
-                          : 'error'
-                      }
-                    >
-                      {t(enrollErrorKey)}
-                    </Alert>
-                  )}
-                  <Button
-                    variant="contained"
-                    onClick={handleCompleteEnrollment}
-                    loading={enrollBusy}
-                    sx={authStyles.actionButton}
-                  >
-                    {t('auth.enroll.completeButton')}
-                  </Button>
-                </Stack>
-              </CardContent>
-            </Card>
-          )}
 
           {/* Passkey card */}
           {passkeySupported() && (

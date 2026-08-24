@@ -22,3 +22,25 @@ export function forcedRememberBrowser(): boolean {
       .__E2E_REMEMBER_BROWSER__
   )
 }
+
+/**
+ * Whether a test has forced the connect-this-browser card open. In
+ * production the card opens only for the durable path's own two-client
+ * states (a torn enrollment's roster-unwrap failure, or a no-WAS plain
+ * pointer record) -- never for a transient-login refusal, which offers no
+ * second-client remedy. The two-party enrollment e2e still needs the
+ * enrollee's card from a cold browser on a WAS deployment, so until the
+ * login form grows its own connect entry it opens the card through this
+ * flag. Always `false` in production builds.
+ *
+ * @returns {boolean}
+ */
+export function forcedConnectOffer(): boolean {
+  if (import.meta.env.MODE === 'production') {
+    return false
+  }
+  return Boolean(
+    (window as unknown as { __E2E_OFFER_CONNECT_CARD__?: boolean })
+      .__E2E_OFFER_CONNECT_CARD__
+  )
+}

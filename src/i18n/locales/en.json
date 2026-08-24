@@ -223,6 +223,8 @@
       "profileNotFound": "This profile does not exist, please sign up.",
       "profileExists": "This profile already exists, please log in.",
       "setupFailed": "Could not finish setting up your wallet. Please try again.",
+      "transientSetupIncomplete": "Your account was found, but part of its setup did not finish. Log in again to retry the remaining setup steps.",
+      "transientUnavailable": "Your account was found, but it is not reachable from a new browser right now.",
       "keyringUnusable": "Your account was found, but its stored login record could not be read. If this keeps happening, change your passphrase from a device where you are still logged in to write a fresh record.",
       "clientNotEnrolled": "Your account was found, but this browser does not hold its keys yet. Use \"Connect this browser\" below to enroll it from a browser where your wallet is already set up.",
       "keyringForged": "The storage server returned a login record that is not authentic -- it was not written by your passphrase, so it has been forged or tampered with. Sign-in was stopped and nothing was changed. Contact your storage provider, and use a recovery code to reach your account from a trusted server.",

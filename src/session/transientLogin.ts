@@ -78,7 +78,7 @@ import type { Session } from '@/types/auth'
 
 /**
  * Why a transient login cannot proceed. Typed reasons, no copy: the login
- * page maps them (for now, onto the existing not-enrolled guidance).
+ * page maps each onto its own refusal copy (`loginErrorKey`).
  *
  * - `no-was-server`: transient login presupposes a remote WAS server.
  * - `remote-direct`: the partitioned CHAPI popup keeps its own storage variant.

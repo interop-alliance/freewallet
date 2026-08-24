@@ -44,6 +44,25 @@ export const authStyles = {
     flex: 1,
     maxWidth: 420
   },
+  /**
+   * The connect-this-browser (enrollment) card: full-width above the
+   * login and passkey cards, spanning the same width as the cards row.
+   */
+  enrollCard: {
+    width: '100%',
+    maxWidth: 900,
+    alignSelf: 'center'
+  },
+  /**
+   * The enrollment card's finish-connecting button: sized to its label
+   * (the fixed-width `actionButton` overflows on the longer copy).
+   */
+  enrollCompleteButton: {
+    minWidth: 180,
+    py: 1,
+    px: 3,
+    alignSelf: 'center'
+  },
   authCardContent: {
     display: 'flex',
     flexDirection: 'column',

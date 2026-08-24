@@ -4,6 +4,17 @@
 
 ### Changed
 
+- Each transient-login refusal now gets its own login-page copy instead of
+  the interim not-enrolled guidance: a failed heal says setup did not
+  finish and a retry re-runs it; the annex-generation family states the
+  refusal honestly and offers no remedy. No refusal names a second client
+  as the way out: the connect-this-browser card no longer opens for any
+  transient refusal, only for the durable path's own two-client states.
+  `loginErrorKey` returns a typed outcome (the key plus the transient
+  reason) so the page gates the card on it.
+- The connect-this-browser card renders full-width above the passphrase
+  and passkey cards, and its finish-connecting button sizes to its label
+  instead of overflowing.
 - Adding a passphrase from Settings no longer falls back to a plain pointer
   bind when the standing-credential establishment fails; the ceremony fails
   instead. A plain bind left a passphrase with no roster wrap and no

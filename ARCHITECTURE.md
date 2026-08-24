@@ -803,8 +803,9 @@ every login-time sweep. Every unavailable state -- a record without standing
 authority or the sibling, an unpromoted account, no live generation or
 embedded delegation, no roster -- refuses with a typed
 `TransientLoginUnavailableError` before any ceremony byte is written (the
-login page maps it onto the not-enrolled guidance for now); network errors
-rethrow unchanged so a flap stays distinguishable from a lapse.
+login page renders per-reason refusal copy, and no reason opens the
+connect-this-browser card); network errors rethrow unchanged so a flap
+stays distinguishable from a lapse.
 
 Two of those refusals carry a heal first, for the tears a torn
 credential-anchored signup can leave. A standing record whose pointer names no
