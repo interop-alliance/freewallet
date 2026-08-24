@@ -1,6 +1,6 @@
 # History
 
-## 0.41.0 - TBD
+## 0.39.0 - 2026-08-24
 
 ### Added
 
@@ -16,8 +16,6 @@
   filtering. Production builds make no request to the endpoint.
 - The debug-level filter is read once, lazily, from the `interop:logger`
   localStorage key; nothing in the app writes that key.
-
-## 0.40.0 - TBD
 
 ### Changed
 
@@ -37,8 +35,6 @@
 - Measured effect at 100ms of per-request server latency: login-to-dashboard
   time drops from about 4.4s to about 3.4s.
 
-## 0.39.1 - TBD
-
 ### Changed
 
 - Every unlock-methods registry write is now a compare-and-swap: the PUT
@@ -49,8 +45,6 @@
   undo another tab's rotation re-seal) and the lost-update window between
   two concurrent registry writers. The bare last-write-wins registry write
   is gone; all writers go through the shared read-modify-write wrapper.
-
-## 0.39.0 - TBD
 
 ### Added
 
