@@ -83,7 +83,7 @@ import type { Session } from '@/types/auth'
  * - `no-was-server`: transient login presupposes a remote WAS server.
  * - `remote-direct`: the partitioned CHAPI popup keeps its own storage variant.
  * - `no-standing`: the unlock record carries no standing authority (a plain
- *   pointer record -- pre-promotion, or bound before standing credentials).
+ *   pointer record: a durable signup torn before promotion).
  * - `no-delegated-clients`: a standing record without the annex-Space
  *   sibling delegation (a recovery-code record, or one minted before the
  *   sibling existed).

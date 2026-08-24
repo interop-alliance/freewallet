@@ -23,7 +23,6 @@ import {
 } from '@/session/standingUnlock'
 import type { StandingUnlockFields } from '@/session/unlockMethods'
 import {
-  bindPassphrase,
   changePassphrase,
   deleteKeyring,
   deriveUnlockCredential,
@@ -1004,57 +1003,21 @@ export async function addAccountPassphrase({
   // Wait out the login-time registry passes rather than racing their
   // read-modify-writes; on a settled session the chain resolved long ago.
   await session.registryReady
-  const clientSeed = session.profile.clientSeed
-  if (!clientSeed) {
-    throw new Error('Adding a passphrase needs this client key set.')
-  }
-  // Bind under the ACCOUNT controller -- the first client's did:key,
-  // which differs from this client's `user.id` on an enrolled second
-  // client. Management is delegated to the account identity (the
-  // did:webvh on a promoted account), so any enrolled client can later
-  // revoke this method.
-  //
-  // On a promoted account the bind runs as the full standing-configuration
-  // ceremony (roster wrap, commitment document entry, bridge delegation,
-  // standing-layout record), so a fresh browser can later self-enroll with
-  // the passphrase alone. An unpromoted (or no-WAS) account falls back to
-  // the plain pointer bind.
-  const accountController = session.profile.accountController ?? session.user.id
-  let unlockSpaceId: string
-  let manageCapability: IZcap | undefined
-  let standingFields: StandingUnlockFields | undefined
-  try {
-    const established = await establishStandingUnlock({
+  // The bind runs as the full standing-configuration ceremony (roster wrap,
+  // commitment document entry, bridge delegation, standing-layout record)
+  // under the ACCOUNT controller, with management delegated to the account
+  // identity so any enrolled client can later revoke this method. A failure
+  // fails the ceremony: a plain pointer bind would leave a passphrase with
+  // no roster wrap and no self-enrollment authority, which nothing but a
+  // fresh browser's refused login would ever surface.
+  const { unlockSpaceId, manageCapability, standingFields } =
+    await establishStandingUnlock({
       session,
       secret: passphrase,
       kdf: KEYRING_KDF,
       lowEntropy: true,
       email: session.user.email
     })
-    unlockSpaceId = established.unlockSpaceId
-    manageCapability = established.manageCapability
-    standingFields = established.standingFields
-  } catch (err) {
-    log.warn(
-      'Could not establish the passphrase as a standing credential; binding it as a plain pointer record',
-      { err }
-    )
-    const bound = await bindPassphrase({
-      clientSeed,
-      controller: accountController,
-      passphrase,
-      email: session.user.email,
-      userKey: session.profile.userKey,
-      webvhUpdateKeys: session.profile.clientWebvhKeys,
-      pointer: session.profile.accountPointer,
-      delegateManagementTo: unlockManagementGrantee({
-        pointer: session.profile.accountPointer,
-        controller: accountController
-      })
-    })
-    unlockSpaceId = bound.unlockSpaceId
-    manageCapability = bound.manageCapability
-  }
   // The merge base is a fresh read, never the page-held record: a concurrent
   // write must not be reverted here. The upsert also makes a second run of
   // this ceremony replace the single passphrase entry instead of appending a
@@ -1065,14 +1028,8 @@ export async function addAccountPassphrase({
       upsertPassphraseUnlockMethod({
         record: current ?? emptyUnlockMethodsRegistry(),
         unlockSpaceId,
-        // The plain-bind fallback mints no capability;
-        // `keepAbsentManageCapability` stays false so no
-        // `manageCapability: undefined` key is stored.
         manageCapability,
-        // The plain-bind fallback establishes no standing configuration
-        // either. Its entry names a freshly bound unlock Space, so the
-        // upsert's carry rule has nothing stale to carry forward.
-        ...(standingFields ? { standing: standingFields } : {})
+        standing: standingFields
       })
   }))!
   // The account now has a passphrase backup, so the passkey-only safety

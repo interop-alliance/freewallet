@@ -328,7 +328,7 @@ export function LoginPage() {
       if (!session && userExists) {
         // The passkey located the account, but this browser holds no client
         // key set for it and its record carries no standing authority (a
-        // pre-FW-154 bind). A standing passkey self-enrolls inside the login
+        // plain pointer record). A standing passkey self-enrolls inside the login
         // call -- a platform-synced passkey on a fresh machine logs straight
         // in -- so this fallback only fires for a plain pointer record.
         setErrorKey('auth.errors.clientNotEnrolled')

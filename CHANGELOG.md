@@ -1,5 +1,15 @@
 # History
 
+## 0.40.0 - TBD
+
+### Changed
+
+- Adding a passphrase from Settings no longer falls back to a plain pointer
+  bind when the standing-credential establishment fails; the ceremony fails
+  instead. A plain bind left a passphrase with no roster wrap and no
+  self-enrollment authority, surfaced only by a fresh browser's refused
+  login.
+
 ## 0.39.0 - 2026-08-24
 
 ### Added
