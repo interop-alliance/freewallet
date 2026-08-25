@@ -72,11 +72,14 @@
 - The dashboard shows a "No credentials yet." empty state when the
   credential list is empty, instead of an empty grid.
 
-### Fixed
+### Removed
 
-- CHAPI wallet registration falls back to the page's own origin when
-  `VITE_DEPLOY_URL` is unset, instead of registering the mediator URL
-  `...?origin=undefined`.
+- The `VITE_SERVER_URL` and `VITE_DEPLOY_URL` environment variables. Both
+  denoted the app's own public URL; CHAPI wallet registration now uses the
+  page's own origin (registration is same-origin, and an unset
+  `VITE_DEPLOY_URL` used to register the literal mediator URL
+  `...?origin=undefined`), and the docs page fetches its markdown relative
+  to the serving origin.
 
 ## 0.40.0 - TBD
 

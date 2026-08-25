@@ -1,6 +1,6 @@
 import { loadOnce } from 'credential-handler-polyfill'
 import { installHandler } from 'web-credential-handler'
-import { DEPLOY_URL, MEDIATOR_BASE } from '@/app.config'
+import { MEDIATOR_BASE } from '@/app.config'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:chapi:register')
@@ -58,11 +58,10 @@ async function queryHandlerPermission(): Promise<string> {
  * install the handler when the origin has not already been granted.
  */
 export async function registerWallet(): Promise<void> {
-  // The mediator origin must match where the handler pages are served from,
-  // so the page's own origin is the correct default when no deploy URL is
-  // configured.
-  const walletOrigin = DEPLOY_URL || window.location.origin
-  const mediatedWalletUrl = MEDIATOR_BASE + encodeURIComponent(walletOrigin)
+  // Handler registration is same-origin, so the mediator origin is always
+  // the page's own origin.
+  const mediatedWalletUrl =
+    MEDIATOR_BASE + encodeURIComponent(window.location.origin)
   log.debug('Registering wallet with the mediator', { mediatedWalletUrl })
   try {
     await loadOnce(mediatedWalletUrl)

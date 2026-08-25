@@ -18,10 +18,6 @@ import {
 
 const env = import.meta.env
 
-// This app's own origin, used for CHAPI wallet registration.
-export const SERVER_URL = env.VITE_SERVER_URL || 'http://localhost:5173'
-// Public deploy URL registered with the CHAPI mediator (authn.io).
-export const DEPLOY_URL = env.VITE_DEPLOY_URL
 // Remote WAS server URL. When set, a remote WAS Space is available as a sync
 // target: the sync controller replicates the local RxDB collections to it in
 // the background. (Guest sessions never sync.)
