@@ -383,6 +383,7 @@ to the account's did:webvh alongside the Space's (the same
 `promoteKeystoreController` sequence, non-fatal). No server-held key is ever
 an update key or an encryption-roster recipient. Provisioning failure is
 non-fatal (logged; the settings page shows the state).
+
 ## The did:webvh identity (per-client keys, promoted controller)
 
 The account's stable id is a `did:webvh` whose hash-chained log lives as
@@ -546,7 +547,16 @@ key present) still
 present while the cleanly verified account document no longer lists this
 client's verification method finishes the wipe from what the keyring hit
 alone derives and surfaces "this browser's access was removed", never raw
-authorization errors; nothing about the detection is persisted. A
+authorization errors; nothing about the detection is persisted. The detector
+is reached only past a record-to-account cross-check, pointer-based like
+the resume's: an enrolled-shape record whose stamped `pointerDid` names a
+DIFFERENT account than the unlock record points at is stale residue, not a
+forgotten browser -- a prior account under a reused passphrase whose
+account is gone server-side, so no wipe ever touched this browser. The
+stale wipe clears what the record alone derives (the dead account's
+replica, caches, and pins, and the credential's whole local trio, the
+record included) and the login re-routes once as a record-less browser, so
+it never reaches the detector at all. A
 pending-shape record is spared for the resume instead (`decisions/0007`),
 whose published-then-removed branch hands the removal case back to the same
 wipe. The ceremony needs the standing members the login stamped on the profile
@@ -653,6 +663,7 @@ the pointer backfill and the promotion PUT). From then on the server
 resolves the controller by reading and fully verifying the log out of its
 own storage (SCID-pinned, hash chain, prerotation, update-key signatures)
 and authorizes by the **current-key-set rule** (see Glossary).
+
 ## Account genesis (`@interop/wallet-core/genesis`)
 
 Shared with the mobile wallet: `mintAccountKeySet` mints the whole key set
@@ -781,7 +792,11 @@ capability.
 keyring login entry points run a post-KDF durability decision
 (`routeUnlockLogin` in `src/session/transientLogin.ts`): with a WAS server
 configured, a browser holding this credential's client-key record proceeds
-durable; one holding none defaults to the transient composition. The record
+durable; one holding none defaults to the transient composition. A record
+whose stamped `pointerDid` names a different account than the unlock
+record points at is stale residue of a prior account under a reused
+passphrase; its residue is wiped and the login re-routes once as if the
+browser held none. The record
 probe is create-nothing: `hasClientKeyRecord` checks `indexedDB.databases()`
 before opening, and on an engine with no `databases()` falls back to a
 versionless open whose `versionchange` transaction is aborted on
@@ -916,6 +931,7 @@ at rotation time, a recipient resolver backed by the locally verified
 did:webvh document: a roster entry with no `keyAgreement` verification method
 marked for that client is dropped and never receives a wrap, so a
 server-injected entry sits ignored.
+
 ## The client enrollment ceremony (`@interop/wallet-core/enrollment`)
 
 Connecting a second wallet client (a fresh browser profile) to an existing
@@ -1198,6 +1214,7 @@ the cascade walks every registry entry recording one, and a standing
 credential's own login refreshes its bridge inside the renewal window or
 when its signing key has left the account document (the signer-rot axis a
 self-enrollment's ladder-VM removal makes routine).
+
 ## Client revocation and the epoch cascade
 
 Disconnecting an enrolled wallet client from the account. The cascade is
@@ -1401,6 +1418,7 @@ recorded revocations, because a grant delegated from a transient session
 is signed by an annex key the document never lists yet chains under a
 generation delegation alive until its own TTL, so "signer gone" does not
 mean "chain dead" there. A dead chain comes back as a skipped revocation.
+
 ## Storage model (local-first)
 
 The local `BrowserStore` (RxDB over Dexie/IndexedDB) is always the **active
@@ -1714,6 +1732,7 @@ ciphertext it already fetched stays readable to it. The blinded-index key is
 not rotated on revoke (see "Client revocation and the epoch cascade" for the
 asymmetry): the revoked app keeps the ability to compute blinded terms,
 while the query endpoint stays behind the revoked pull grant.
+
 ## The interaction-URL request page (`/external/request`)
 
 A request can also arrive from outside the app, with no CHAPI popup and no
@@ -1903,31 +1922,32 @@ Security notes:
   an enforced invariant: **a grantee DID SHOULD NOT be shared across
   users.** Either way the recipient key derives from the named controller,
   so a request can never pair controller DID A with recipient key B.
+
 ## Route map
 
-| Path | Component | Notes |
-| --- | --- | --- |
-| `/` | `LandingPage` | Public landing / wallet registration |
-| `/login` | `LoginPage` | Passphrase login |
-| `/signup` | `SignupPage` | New account creation |
-| `/recover` | `RecoverPage` | Recovery-code account recovery |
-| `/guest-login` | `GuestLoginPage` | Ephemeral guest session |
-| `/logout` | `LogoutPage` | Clears session |
-| `/wallet/get` | `WalletGetPage` | CHAPI popup -- share a VC |
-| `/wallet/store` | `WalletStorePage` | CHAPI popup -- accept a VC |
-| `/external/request` | `ExternalRequestPage` | Interaction-URL request (no CHAPI) |
-| `/dashboard` | `DashboardPage` | VC list (protected) |
-| `/credential/:cid` | `CredentialDetailPage` | VC detail + verify (protected) |
-| `/add-credential` | `AddCredentialPage` | Manual VC import (protected) |
-| `/accept-credentials` | `AcceptCredentialsPage` | URL / QR import flow (protected) |
-| `/contacts` | `ContactsPage` | Contact list (protected, stub data) |
-| `/contacts/:contactId` | `ContactDetailPage` | Contact detail (protected) |
-| `/storage` | `StoragePage` | WAS collection browser (protected) |
-| `/storage/collections/:id` | `CollectionContentsPage` | Collection resources (protected) |
-| `/storage/collections/:id/resources/:id` | `CollectionResourcePage` | Resource viewer (protected) |
-| `/history` | `HistoryPage` | Wallet activity log (protected) |
-| `/settings` | `SettingsPage` | Account settings (protected) |
-| `/docs/:fileName` | `DocsPage` | Renders `public/docs/*.md` |
+| Path                                     | Component                | Notes                                |
+| ---------------------------------------- | ------------------------ | ------------------------------------ |
+| `/`                                      | `LandingPage`            | Public landing / wallet registration |
+| `/login`                                 | `LoginPage`              | Passphrase login                     |
+| `/signup`                                | `SignupPage`             | New account creation                 |
+| `/recover`                               | `RecoverPage`            | Recovery-code account recovery       |
+| `/guest-login`                           | `GuestLoginPage`         | Ephemeral guest session              |
+| `/logout`                                | `LogoutPage`             | Clears session                       |
+| `/wallet/get`                            | `WalletGetPage`          | CHAPI popup -- share a VC            |
+| `/wallet/store`                          | `WalletStorePage`        | CHAPI popup -- accept a VC           |
+| `/external/request`                      | `ExternalRequestPage`    | Interaction-URL request (no CHAPI)   |
+| `/dashboard`                             | `DashboardPage`          | VC list (protected)                  |
+| `/credential/:cid`                       | `CredentialDetailPage`   | VC detail + verify (protected)       |
+| `/add-credential`                        | `AddCredentialPage`      | Manual VC import (protected)         |
+| `/accept-credentials`                    | `AcceptCredentialsPage`  | URL / QR import flow (protected)     |
+| `/contacts`                              | `ContactsPage`           | Contact list (protected, stub data)  |
+| `/contacts/:contactId`                   | `ContactDetailPage`      | Contact detail (protected)           |
+| `/storage`                               | `StoragePage`            | WAS collection browser (protected)   |
+| `/storage/collections/:id`               | `CollectionContentsPage` | Collection resources (protected)     |
+| `/storage/collections/:id/resources/:id` | `CollectionResourcePage` | Resource viewer (protected)          |
+| `/history`                               | `HistoryPage`            | Wallet activity log (protected)      |
+| `/settings`                              | `SettingsPage`           | Account settings (protected)         |
+| `/docs/:fileName`                        | `DocsPage`               | Renders `public/docs/*.md`           |
 
 ## Ceremony inventory
 
@@ -1938,23 +1958,23 @@ freewallet-side wrappers and the app-only ceremonies, each row pointing at
 the module that drives it. The mender column names how a torn run gets
 finished (see Tear mending in the Glossary).
 
-| Ceremony | Entry point | Module | Shared half | Mender |
-| --- | --- | --- | --- | --- |
-| Account genesis (durable) | signup; healed at every login | `src/session/signup.ts` | `/genesis` | re-run (every stage an ensure) |
-| Credential-anchored genesis | default signup, non-remembered browser | `src/session/credentialAnchoredGenesis.ts` | `/clientAnnex` | re-run; the transient login's heal branch re-runs it |
-| Self-enrollment at login | durable login on a fresh browser | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex` | pending record persisted pre-pivot; the next login's resume finishes it |
-| Client enrollment (two-party) | Settings > Connected wallets + login page | `src/components/EnrolledClientsSection.tsx` | `/enrollment` | re-run with the same connect code |
-| Client revocation + epoch cascade | Settings > Connected wallets | `src/session/revocation.ts` | `/clients` | re-run; cascade-completion sweep |
-| Recovery-code issuance | Settings > Recovery codes | `src/session/recovery.ts` | `/recovery` | re-run (nothing binds until the confirm) |
-| Recovery spend (durable and transient) | `/recover` | `src/session/recovery.ts` | `/recovery`, `/clientAnnex` | durable: pending record pre-pivot + spend resume; transient: re-run, open gaps (below) |
-| Recovery-code revocation | Settings > Recovery codes | `src/session/recovery.ts` | `/recovery` | re-run; cascade-completion sweep |
-| Unlock-credential rotation | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts` | `/unlock` | torn-retirement repair at next passphrase login; login sweep; re-seal repair |
-| Forget ceremony | Settings > Connected wallets, own row | `src/session/forget.ts` | `/clientAnnex` | re-run (wipe last); forgotten-browser detector at the next login |
-| Last-client transition | same row, `lastClient` confirm | `src/session/forget.ts` | `/clientAnnex` | re-run; the re-mint refusal is a retryable stop; refused outright on a pending passphrase entry or an unrecorded standing credential |
-| Update-key rotation | Settings | `src/session/accountSettings.ts` | `/webvh` | re-run (persist-before-publish) |
-| Account deletion | Settings | `src/session/accountSettings.ts` + `wipe.ts` | app-side phase order | re-run; a wipe failure after the unlock-method walk is accepted |
-| Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies | `src/session/wipe.ts` | app-side | re-probe verification; the `unverified` report |
-| Step-up ceremony | designed, not built | --- | --- | --- |
+| Ceremony                                | Entry point                                   | Module                                                            | Shared half                 | Mender                                                                                                                               |
+| --------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Account genesis (durable)               | signup; healed at every login                 | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                                                                       |
+| Credential-anchored genesis             | default signup, non-remembered browser        | `src/session/credentialAnchoredGenesis.ts`                        | `/clientAnnex`              | re-run; the transient login's heal branch re-runs it                                                                                 |
+| Self-enrollment at login                | durable login on a fresh browser              | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex`              | pending record persisted pre-pivot; the next login's resume finishes it                                                              |
+| Client enrollment (two-party)           | Settings > Connected wallets + login page     | `src/components/EnrolledClientsSection.tsx`                       | `/enrollment`               | re-run with the same connect code                                                                                                    |
+| Client revocation + epoch cascade       | Settings > Connected wallets                  | `src/session/revocation.ts`                                       | `/clients`                  | re-run; cascade-completion sweep                                                                                                     |
+| Recovery-code issuance                  | Settings > Recovery codes                     | `src/session/recovery.ts`                                         | `/recovery`                 | re-run (nothing binds until the confirm)                                                                                             |
+| Recovery spend (durable and transient)  | `/recover`                                    | `src/session/recovery.ts`                                         | `/recovery`, `/clientAnnex` | durable: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)                                               |
+| Recovery-code revocation                | Settings > Recovery codes                     | `src/session/recovery.ts`                                         | `/recovery`                 | re-run; cascade-completion sweep                                                                                                     |
+| Unlock-credential rotation              | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts`                               | `/unlock`                   | torn-retirement repair at next passphrase login; login sweep; re-seal repair                                                         |
+| Forget ceremony                         | Settings > Connected wallets, own row         | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next login                                                                     |
+| Last-client transition                  | same row, `lastClient` confirm                | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run; the re-mint refusal is a retryable stop; refused outright on a pending passphrase entry or an unrecorded standing credential |
+| Update-key rotation                     | Settings                                      | `src/session/accountSettings.ts`                                  | `/webvh`                    | re-run (persist-before-publish)                                                                                                      |
+| Account deletion                        | Settings                                      | `src/session/accountSettings.ts` + `wipe.ts`                      | app-side phase order        | re-run; a wipe failure after the unlock-method walk is accepted                                                                      |
+| Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies    | `src/session/wipe.ts`                                             | app-side                    | re-probe verification; the `unverified` report                                                                                       |
+| Step-up ceremony                        | designed, not built                           | ---                                                               | ---                         | ---                                                                                                                                  |
 
 The open gaps (stated residues with no mender yet; see Tear mending in
 the Glossary). Two are unbuilt repairs on client-less accounts, where no
@@ -2276,6 +2296,7 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
 - **DCC Known Registries** -- a public JSON registry of trusted issuer DIDs
   fetched from GitHub (`KNOWN_REGISTRIES_URL` in `app.config.ts`) and used
   during credential verification.
+
 ## ZCap Structure
 
 A zcap answers "**who** can do **what**, **with** which resource, **given** what

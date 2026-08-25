@@ -45,6 +45,15 @@ vi.mock('@/session/pendingEnrollment', async importOriginal => ({
   resumePendingEnrollment: vi.fn()
 }))
 
+// A full factory (no importOriginal): `initSession.ts` imports
+// `assertClientStillEnrolled` and `wipeStaleClientResidue` from this module,
+// and loading the original would drag in network / IndexedDB code the way
+// the mock-cycle gotcha describes for the other full-factory mocks above.
+vi.mock('@/session/forget', () => ({
+  assertClientStillEnrolled: vi.fn(async () => undefined),
+  wipeStaleClientResidue: vi.fn(async () => ({ failed: [], unverified: [] }))
+}))
+
 import { StorageManager } from '@/stores/storageManager'
 import {
   canSelfEnroll,
@@ -70,6 +79,10 @@ import { loginWithPassphrase } from '@/session/initSession'
 import { ensureKeystore } from '@/lib/kms'
 import { mintUserKey } from '@interop/wallet-core/keys'
 import { epochKeyIdFor } from '@interop/was-client/edv'
+import {
+  assertClientStillEnrolled,
+  wipeStaleClientResidue
+} from '@/session/forget'
 
 const PASSPHRASE = 'correct horse battery staple'
 const POINTER: AccountPointer = {
@@ -131,6 +144,13 @@ beforeEach(() => {
   vi.mocked(isPendingKeyringHit).mockReset()
   vi.mocked(isPendingKeyringHit).mockReturnValue(false)
   vi.mocked(resumePendingEnrollment).mockReset()
+  vi.mocked(wipeStaleClientResidue).mockReset()
+  vi.mocked(wipeStaleClientResidue).mockResolvedValue({
+    failed: [],
+    unverified: []
+  })
+  vi.mocked(assertClientStillEnrolled).mockReset()
+  vi.mocked(assertClientStillEnrolled).mockResolvedValue(undefined as never)
 })
 
 afterEach(() => {
@@ -276,6 +296,12 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
   })
 
   it('throws on a controller / identity mismatch (corrupt record)', async () => {
+    // The record carries no `pointerDid` at all (and no `pointer` on the
+    // hit either), so the pointer-based stale check never fires: the login
+    // flows straight past it and past the (mocked) forgotten-browser
+    // detector to the late bound-controller check, which finds the
+    // unwrapped controller does not match the derived identity and refuses
+    // in a single pass -- no wipe, no retry.
     vi.mocked(fetchKeyring).mockResolvedValue({
       controller: 'did:key:z6MkWrongControllerForThisSeed',
       clientKeys: { clientSeed: randomSeed() },
@@ -286,6 +312,176 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
     await expect(
       loginWithPassphrase({ passphrase: PASSPHRASE })
     ).rejects.toThrow(KeyringRecordUnusableError)
+    expect(wipeStaleClientResidue).not.toHaveBeenCalled()
+    expect(routeUnlockLogin).toHaveBeenCalledOnce()
+  })
+})
+
+describe('loginWithPassphrase -- stale client-key record from another account', () => {
+  // The pointer-based discriminator: `clientKeys.pointerDid` names a
+  // different account than the unlock record's own `pointer.did`
+  // (`POINTER.did`). `clientKeys.controller` is carried along too (a real
+  // stale record still has one), but it is not the discriminator, so its
+  // value is not what triggers the check below.
+  const STALE_POINTER_DID =
+    'did:webvh:QmOldScid:was.example.test:space:old-space:id'
+
+  it('wipes the stale record and re-routes as a record-less browser (transient)', async () => {
+    const staleHit = {
+      controller: 'did:key:z6MkNewAccountController',
+      pointer: POINTER,
+      clientKeys: {
+        clientSeed: randomSeed(),
+        userKey: await mintUserKey(),
+        controller: 'did:key:z6MkOldAccountController',
+        pointerDid: STALE_POINTER_DID
+      },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    }
+    vi.mocked(fetchKeyring).mockResolvedValue(staleHit as never)
+    vi.mocked(routeUnlockLogin).mockReset()
+    vi.mocked(routeUnlockLogin).mockResolvedValueOnce({ durability: 'durable' })
+    const persistence = transientSessionPersistence()
+    const transientCredential = {
+      unlock: { spaceId: 'unlock-space-test' },
+      standing: {}
+    } as never
+    vi.mocked(routeUnlockLogin).mockResolvedValueOnce({
+      durability: 'transient',
+      credential: transientCredential,
+      persistence
+    })
+    const transientFound = {
+      controller: 'did:key:z6MkNewAccountController',
+      unlockSpaceId: 'unlock-space-test'
+    }
+    vi.mocked(fetchTransientKeyring).mockResolvedValue(transientFound as never)
+    const transientResult = {
+      session: { isTransient: true } as never,
+      userExists: true
+    }
+    vi.mocked(transientSessionFromKeyringHit).mockResolvedValue(
+      transientResult as never
+    )
+
+    const result = await loginWithPassphrase({ passphrase: PASSPHRASE })
+
+    expect(wipeStaleClientResidue).toHaveBeenCalledTimes(1)
+    expect(wipeStaleClientResidue).toHaveBeenCalledWith(
+      expect.objectContaining({ found: staleHit })
+    )
+    expect(routeUnlockLogin).toHaveBeenCalledTimes(2)
+    expect(transientSessionFromKeyringHit).toHaveBeenCalledOnce()
+    expect(result).toBe(transientResult)
+  })
+
+  it('the detector never fires on a record bound to another account', async () => {
+    const staleHit = {
+      controller: 'did:key:z6MkNewAccountController',
+      pointer: POINTER,
+      clientKeys: {
+        clientSeed: randomSeed(),
+        userKey: await mintUserKey(),
+        controller: 'did:key:z6MkOldAccountController',
+        pointerDid: STALE_POINTER_DID
+      },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    }
+    vi.mocked(fetchKeyring).mockResolvedValue(staleHit as never)
+    vi.mocked(routeUnlockLogin).mockReset()
+    vi.mocked(routeUnlockLogin).mockResolvedValueOnce({ durability: 'durable' })
+    vi.mocked(routeUnlockLogin).mockResolvedValueOnce({
+      durability: 'transient',
+      credential: {
+        unlock: { spaceId: 'unlock-space-test' },
+        standing: {}
+      } as never,
+      persistence: transientSessionPersistence()
+    })
+    vi.mocked(fetchTransientKeyring).mockResolvedValue({
+      controller: 'did:key:z6MkNewAccountController',
+      unlockSpaceId: 'unlock-space-test'
+    } as never)
+    vi.mocked(transientSessionFromKeyringHit).mockResolvedValue({
+      session: { isTransient: true } as never,
+      userExists: true
+    } as never)
+
+    await loginWithPassphrase({ passphrase: PASSPHRASE })
+
+    expect(assertClientStillEnrolled).not.toHaveBeenCalled()
+  })
+
+  it('self-enrolls on the retry under rememberBrowser: true', async () => {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    const staleHit = {
+      controller,
+      pointer: POINTER,
+      clientKeys: {
+        clientSeed: randomSeed(),
+        userKey: await mintUserKey(),
+        controller: 'did:key:z6MkOldAccountController',
+        pointerDid: STALE_POINTER_DID
+      },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    }
+    const notEnrolledHit = {
+      controller,
+      pointer: POINTER,
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString(),
+      standing: { delegation: {}, ladderSeed: randomSeed() }
+    }
+    vi.mocked(fetchKeyring)
+      .mockResolvedValueOnce(staleHit as never)
+      .mockResolvedValueOnce(notEnrolledHit as never)
+    vi.mocked(routeUnlockLogin).mockReset()
+    vi.mocked(routeUnlockLogin).mockResolvedValue({ durability: 'durable' })
+    vi.mocked(canSelfEnroll).mockReturnValue(true)
+    const persist = vi.fn(async () => {})
+    vi.mocked(selfEnrollStandingClient).mockResolvedValue({
+      clientKeys: { clientSeed, controller },
+      persistClientKeys: persist
+    } as never)
+
+    const { session } = await loginWithPassphrase({
+      passphrase: PASSPHRASE,
+      rememberBrowser: true
+    })
+
+    expect(wipeStaleClientResidue).toHaveBeenCalledOnce()
+    expect(selfEnrollStandingClient).toHaveBeenCalledOnce()
+    expect(session).not.toBeNull()
+    expect(session!.user.id).toBe(controller)
+  })
+
+  it('a second stale signal surfaces KeyringRecordUnusableError', async () => {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    const staleHit = {
+      controller,
+      pointer: POINTER,
+      clientKeys: {
+        clientSeed: randomSeed(),
+        userKey: await mintUserKey(),
+        controller: 'did:key:z6MkOldAccountController',
+        pointerDid: STALE_POINTER_DID
+      },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    }
+    vi.mocked(fetchKeyring).mockResolvedValue(staleHit as never)
+    vi.mocked(routeUnlockLogin).mockReset()
+    vi.mocked(routeUnlockLogin).mockResolvedValue({ durability: 'durable' })
+
+    await expect(
+      loginWithPassphrase({ passphrase: PASSPHRASE })
+    ).rejects.toThrow(KeyringRecordUnusableError)
+    expect(wipeStaleClientResidue).toHaveBeenCalledTimes(2)
   })
 })
 

@@ -17,7 +17,8 @@ import {
   BrowserForgottenError,
   forgetBrowserWalletData,
   forgetThisBrowser,
-  hasForgettableBrowserData
+  hasForgettableBrowserData,
+  wipeStaleClientResidue
 } from '@/session/forget'
 import type { KeyringFetchResult } from '@/session/keyring'
 import { BrowserStore } from '@/stores/browserStore'
@@ -458,6 +459,48 @@ describe('assertClientStillEnrolled (the forgotten-browser detector)', () => {
       })
     ).resolves.toBeUndefined()
     expect(vi.mocked(verifyAccountLog)).not.toHaveBeenCalled()
+  })
+})
+
+describe('wipeStaleClientResidue', () => {
+  it('derives its wipe targets from the record and never clears writerId', async () => {
+    const clientSeed = new Uint8Array(32).fill(11)
+    const agents = await agentsFromSeed({ seed: clientSeed })
+    const { deriveSpaceId } = await import('@interop/was-client/sync')
+    const dbPrefix = deriveSpaceId(agents.keyAgent.id)
+    const staleAccountDid = 'did:webvh:scid-old:example.com:space:old-space:id'
+    const { deleted } = stubIndexedDb({ names: [`${dbPrefix}-wallet-db`] })
+    stubLocalStorage({ entries: {} })
+
+    const found = {
+      controller: 'did:key:zNewAccountController',
+      unlockSpaceId: 'unlock-stale',
+      pointer: {
+        did: 'did:webvh:scid-new:example.com:space:new-space:id',
+        spaceId: 'new-space',
+        host: 'https://storage.example'
+      },
+      clientKeys: {
+        clientSeed,
+        controller: 'did:key:zOldAccountController',
+        pointerDid: staleAccountDid
+      }
+    } as unknown as KeyringFetchResult
+
+    await wipeStaleClientResidue({ found })
+
+    expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targets: expect.objectContaining({
+          clientDid: agents.keyAgent.id,
+          accountDid: staleAccountDid,
+          accountSpaceId: 'old-space',
+          unlockSpaceIds: ['unlock-stale']
+        }),
+        clearWriter: false
+      })
+    )
+    expect(deleted).toContain(`${dbPrefix}-wallet-db`)
   })
 })
 

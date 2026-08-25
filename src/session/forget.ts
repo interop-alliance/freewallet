@@ -834,29 +834,130 @@ export async function finishForgottenBrowserWipe({
   idb?: IDBFactory
 }): Promise<never> {
   const pointer = found.pointer!
-  const targets: WipeTargets = {
+  const { failed, unverified } = await wipeClientResidue({
     clientDid,
     accountDid: pointer.did,
     accountSpaceId: pointer.spaceId,
-    unlockSpaceIds: [found.unlockSpaceId],
-    // No registry read happens here (it needs account authority the hit
-    // does not carry), so the enumeration is narrowed by design rather than
-    // by a failed read.
-    registryUnread: false,
-    cacheScopes: [pointer.spaceId, `local:${clientDid}`]
-  }
-  const { localStore } = await BrowserStore.initClient({
-    user: { id: clientDid } as User
-  })
-  const { failed, unverified } = await executeLocalWipe({
-    targets,
-    storage: { wipeLocalStorage: () => localStore.wipeStorage() },
+    unlockSpaceId: found.unlockSpaceId,
     idb,
     clearWriter: true
   })
   throw new BrowserForgottenError({
     wipeFailed: failed,
     wipeUnverified: unverified
+  })
+}
+
+/**
+ * The wipe body the record-triggered login wipes share: builds the
+ * client-keyed targets (replica prefix, cache scopes), the account's pin
+ * targets, and the credential's local trio, and runs the shared executor.
+ * No registry read happens on either caller (it needs account authority the
+ * hit does not carry), so the enumeration is narrowed by design rather than
+ * by a failed read.
+ *
+ * @param options {object}
+ * @param options.clientDid {string}
+ * @param [options.accountDid] {string}
+ * @param [options.accountSpaceId] {string}
+ * @param options.unlockSpaceId {string}
+ * @param [options.idb] {IDBFactory}
+ * @param [options.clearWriter] {boolean}
+ * @returns {Promise<{ failed: string[], unverified: string[] }>}
+ */
+async function wipeClientResidue({
+  clientDid,
+  accountDid,
+  accountSpaceId,
+  unlockSpaceId,
+  idb,
+  clearWriter = false
+}: {
+  clientDid: string
+  accountDid?: string
+  accountSpaceId?: string
+  unlockSpaceId: string
+  idb?: IDBFactory
+  clearWriter?: boolean
+}): Promise<{ failed: string[]; unverified: string[] }> {
+  const targets: WipeTargets = {
+    clientDid,
+    ...(accountDid ? { accountDid } : {}),
+    ...(accountSpaceId ? { accountSpaceId } : {}),
+    unlockSpaceIds: [unlockSpaceId],
+    registryUnread: false,
+    cacheScopes: [
+      ...(accountSpaceId ? [accountSpaceId] : []),
+      `local:${clientDid}`
+    ]
+  }
+  const { localStore } = await BrowserStore.initClient({
+    user: { id: clientDid } as User
+  })
+  return executeLocalWipe({
+    targets,
+    storage: { wipeLocalStorage: () => localStore.wipeStorage() },
+    idb,
+    clearWriter
+  })
+}
+
+/**
+ * Recovers the Space id a did:webvh account id embeds
+ * (`did:webvh:<scid>:<host>:space:<spaceId>:<collection>`, the host segment
+ * percent-encoded so it carries no `:`); undefined when the id does not
+ * follow that shape.
+ *
+ * @param did {string}
+ * @returns {string | undefined}
+ */
+function spaceIdOfWebvhDid(did: string): string | undefined {
+  const segments = did.split(':')
+  return segments[0] === 'did' &&
+    segments[1] === 'webvh' &&
+    segments[4] === 'space'
+    ? segments[5]
+    : undefined
+}
+
+/**
+ * The stale-record wipe: the login found a client-key record whose stamped
+ * `pointerDid` names a DIFFERENT account than the unlock record points at --
+ * the residue of a prior account under a reused passphrase, gone server-side,
+ * so no wipe ever ran on this browser. Every target derives from the record
+ * itself (snapshot-first, before anything is deleted): the stale client's
+ * did:key keys the replica database and the cache families, the record's
+ * `pointerDid` keys the dead account's pins (its Space id recovered from the
+ * did itself), and the unlock Space id keys the whole local trio -- deleting
+ * the trio is what deletes the record, so the wipe is also the record's
+ * deleter, and it clears the keyring cache and freshness pin the durable
+ * fetch wrote moments earlier. Best-effort: the caller re-routes on whatever
+ * this reports, and a record the trio stage could not delete surfaces on the
+ * next pass as the loud unusable-record refusal.
+ *
+ * @param options {object}
+ * @param options.found {KeyringFetchResult}   a hit carrying `clientKeys`
+ *   whose `pointerDid` mismatches the hit's pointer
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<{ failed: string[], unverified: string[] }>}
+ */
+export async function wipeStaleClientResidue({
+  found,
+  idb
+}: {
+  found: KeyringFetchResult
+  idb?: IDBFactory
+}): Promise<{ failed: string[]; unverified: string[] }> {
+  const clientKeys = found.clientKeys!
+  const { keyAgent } = await agentsFromSeed({ seed: clientKeys.clientSeed })
+  const accountDid = clientKeys.pointerDid
+  const accountSpaceId = accountDid ? spaceIdOfWebvhDid(accountDid) : undefined
+  return wipeClientResidue({
+    clientDid: keyAgent.id,
+    ...(accountDid ? { accountDid } : {}),
+    ...(accountSpaceId ? { accountSpaceId } : {}),
+    unlockSpaceId: found.unlockSpaceId,
+    idb
   })
 }
 

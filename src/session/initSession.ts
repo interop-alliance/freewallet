@@ -79,7 +79,10 @@ import {
   resumePendingEnrollment
 } from '@/session/pendingEnrollment'
 import type { RecoverySpendPrompt } from '@/session/recovery'
-import { assertClientStillEnrolled } from '@/session/forget'
+import {
+  assertClientStillEnrolled,
+  wipeStaleClientResidue
+} from '@/session/forget'
 import {
   delegateLogWrite,
   delegationProofKeyId,
@@ -111,6 +114,24 @@ import type {
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:init')
+
+/**
+ * Internal control-flow signal, thrown by `sessionFromKeyringHit` when the
+ * keyring hit carried an enrolled-shape client-key record whose stamped
+ * `pointerDid` names a DIFFERENT account than the unlock record points at --
+ * stale residue of a prior account under a reused passphrase (the prior
+ * account gone server-side, so no wipe ever ran on this browser). The
+ * record's residue, the record itself included, has already been wiped when
+ * this throws (`wipeStaleClientResidue`); the login entry points catch it
+ * and re-route once as a record-less browser (transient by default). It
+ * stays module-internal and is not surfaced to the login page.
+ */
+class StaleClientKeyRecordError extends Error {
+  constructor() {
+    super('The client-key record is bound to a different account.')
+    this.name = 'StaleClientKeyRecordError'
+  }
+}
 
 /**
  * Creates a random guest session.
@@ -695,12 +716,13 @@ async function checkUserKeyRosterAtLogin({
  *
  * - **Enrolled hit**: the keyring record was found AND this client holds a
  *   key set under the passphrase's unlock method; the session is built from
- *   the local client seed (`initSessionFromSeed`). The record's controller is
- *   sanity-checked against the derived did:key -- a mismatch means a corrupt
- *   record (or a foreign key set) and throws `KeyringRecordUnusableError`
- *   rather than proceeding under the wrong identity (the same error
- *   `fetchKeyring` throws for a record that fails to unwrap, so callers
- *   surface one "keyring record unusable" state). Returns
+ *   the local client seed (`initSessionFromSeed`). The record's stamped
+ *   `pointerDid` is cross-checked against the unlock record's pointer
+ *   FIRST: a record bound to a different account is stale residue (a prior
+ *   account under this reused passphrase, gone server-side), so its local
+ *   residue is wiped and the login re-routes once as a record-less browser
+ *   instead of feeding the forgotten-browser detector a client that was
+ *   never part of this account. Returns
  *   `{ session, userExists }` -- a hit whose data Space
  *   is missing legitimately reports `userExists: false` (a half-finished
  *   signup), and the caller sends it to signup, which rebinds.
@@ -761,57 +783,86 @@ export async function loginWithPassphrase({
   credential?: UnlockCredential
   rememberBrowser?: boolean
 }): Promise<{ session: Session | null; userExists: boolean }> {
-  const routed = await routeUnlockLogin({
-    secret: passphrase,
-    kdf: KEYRING_KDF,
-    credential,
-    idb,
-    remoteDirectStorage,
-    rememberBrowser
-  })
-  if (routed.durability === 'transient') {
-    const found = await fetchTransientKeyring({
-      credential: routed.credential,
-      accountLogPinStore: routed.persistence.logPins
+  // One bounded retry around the routing: a stale client-key record (bound
+  // to a different account than the unlock record points at) is wiped
+  // inside `sessionFromKeyringHit`, and the login re-routes as a
+  // record-less browser -- transient by default, self-enrolling under
+  // `rememberBrowser: true`. A credential the routing derived (the probed
+  // default path) is carried across the retry so the KDF does not re-run
+  // there; the explicit-durability arms derive inside `fetchKeyring` as
+  // before.
+  let derived = credential
+  for (let staleRetries = 0; ; staleRetries++) {
+    const routed = await routeUnlockLogin({
+      secret: passphrase,
+      kdf: KEYRING_KDF,
+      credential: derived,
+      idb,
+      remoteDirectStorage,
+      rememberBrowser
     })
+    if (routed.durability === 'transient') {
+      const found = await fetchTransientKeyring({
+        credential: routed.credential,
+        accountLogPinStore: routed.persistence.logPins
+      })
+      if (!found) {
+        return { session: null, userExists: false }
+      }
+      return transientSessionFromKeyringHit({
+        found,
+        type: 'passphrase',
+        email,
+        persistence: routed.persistence,
+        credential: routed.credential
+      })
+    }
+    derived = routed.credential ?? derived
+
+    const found = await fetchKeyring({
+      passphrase,
+      idb,
+      mintManageCapability: true,
+      ...(derived ? { credential: derived } : {})
+    })
+
     if (!found) {
       return { session: null, userExists: false }
     }
-    return transientSessionFromKeyringHit({
-      found,
-      type: 'passphrase',
-      email,
-      persistence: routed.persistence,
-      credential: routed.credential
-    })
+
+    try {
+      return await sessionFromKeyringHit({
+        found,
+        type: 'passphrase',
+        email,
+        remoteDirectStorage,
+        provisionStorage,
+        idb
+      })
+    } catch (err) {
+      if (!(err instanceof StaleClientKeyRecordError)) {
+        throw err
+      }
+      if (staleRetries > 0) {
+        // The record was wiped on the first pass, so a second stale signal
+        // can only be a persistence fault; surface the standard unusable
+        // refusal rather than looping.
+        throw new KeyringRecordUnusableError({ cause: err })
+      }
+    }
   }
-
-  const found = await fetchKeyring({
-    passphrase,
-    idb,
-    mintManageCapability: true,
-    ...(routed.credential ? { credential: routed.credential } : {})
-  })
-
-  if (!found) {
-    return { session: null, userExists: false }
-  }
-
-  return sessionFromKeyringHit({
-    found,
-    type: 'passphrase',
-    email,
-    remoteDirectStorage,
-    provisionStorage,
-    idb
-  })
 }
 
 /**
  * Shared tail of the keyring login paths: builds the session from a keyring
- * hit's local client key set and sanity-checks the recovered controller
- * against the derived did:key. A mismatch means a corrupt record (or a
- * foreign key set) and throws `KeyringRecordUnusableError` rather than
+ * hit's local client key set. An enrolled-shape record whose stamped
+ * `pointerDid` names another account than the unlock record points at is
+ * wiped as stale residue and signalled back to the entry points with the
+ * module-internal `StaleClientKeyRecordError` (they re-route once as a
+ * record-less browser); the check runs before the forgotten-browser
+ * detector, so a record from another account cannot read as "forgotten"
+ * here. A controller mismatch still throws `KeyringRecordUnusableError` --
+ * the loud corrupt-record refusal -- rather than
  * proceeding under the wrong identity. A hit with no `clientKeys` -- a fresh
  * browser that located the account but is not enrolled -- returns
  * `{ session: null, userExists: true }` without touching storage. The session
@@ -881,6 +932,37 @@ async function sessionFromKeyringHit({
     // not fall through to a fail-open session either.
     throw new PendingEnrollmentError({ reason: 'popup' })
   }
+  // The record-to-account cross-check, BEFORE the forgotten-browser detector
+  // below. The account-identity test is POINTER-based, matching the pending
+  // arm's discard: the record's stamped `pointerDid` against the DID the
+  // (signed, MAC-authenticated, freshness-pinned) unlock record now points
+  // at. The record's `controller` is deliberately NOT the discriminator --
+  // it is an identity label that legitimately varies (see the routing note
+  // in `keyring.ts`), and the loud unusable-record refusal below stays its
+  // check. A mismatching `pointerDid` is stale residue: a prior account
+  // under this reused passphrase, gone server-side, so no wipe ever ran on
+  // this browser. It is not this account's remembered browser, and without
+  // this check the detector would misread it as "forgotten" (the stale
+  // client's verification method is absent from the pointed account's
+  // document) and wipe with the wrong copy. The stale wipe clears what the
+  // record alone derives -- the dead account's replica, caches, and pins,
+  // and the credential's whole local trio, the record included (keeping the
+  // record would route every later login durable onto the same dead end) --
+  // and the entry points catch the typed signal and re-route once as a
+  // record-less browser. A pending-shape record is the resume's to route
+  // (its `pointerDid` discard branch covers the foreign-account case).
+  if (found.clientKeys && !pendingResume) {
+    const recordPointerDid = found.clientKeys.pointerDid
+    const pointedDid = found.pointer?.did
+    if (recordPointerDid && pointedDid && recordPointerDid !== pointedDid) {
+      log.warn(
+        'Stale client-key record: bound to a different account than the unlock record points at; wiping its residue and treating this browser as not remembered',
+        { unlockSpaceId: found.unlockSpaceId }
+      )
+      await wipeStaleClientResidue({ found, idb })
+      throw new StaleClientKeyRecordError()
+    }
+  }
   // The finish-the-wipe detector: a userKey-holding client-key record whose
   // verification method is gone from the cleanly verified account document
   // means this browser was forgotten (or disconnected) with the local wipe
@@ -929,9 +1011,10 @@ async function sessionFromKeyringHit({
   // The local key set must have been bound for THIS account: an enrolled
   // client's record carries the controller it was bound under; a legacy
   // record (pre-enrollment) was necessarily written by the first client,
-  // whose own did:key is the controller. Either way a mismatch means the
-  // keyring record was swapped for another account's (or the key set is
-  // foreign) -- refuse rather than proceed under the wrong identity.
+  // whose own did:key is the controller. The pointer-based stale check
+  // above already re-routed a record whose `pointerDid` names another
+  // account, so a mismatch here means a corrupt record (or a foreign key
+  // set) -- refused loudly rather than proceeding under the wrong identity.
   const boundController = clientKeys.controller ?? session.user.id
   if (boundController !== found.controller) {
     // A corrupt record under the correct unlock Space: the session is
@@ -1427,45 +1510,62 @@ export async function loginWithPasskey({
 } = {}): Promise<{ session: Session | null; userExists: boolean }> {
   const { prfOutput } = await assertPasskeyPrf({ signal })
 
-  const routed = await routeUnlockLogin({
-    secret: prfOutput,
-    kdf: PASSKEY_KDF,
-    idb,
-    remoteDirectStorage,
-    rememberBrowser
-  })
-  if (routed.durability === 'transient') {
-    const found = await fetchTransientKeyring({
-      credential: routed.credential,
-      accountLogPinStore: routed.persistence.logPins
+  // The same bounded stale-record retry as the passphrase path: the retry
+  // re-routes with the already-derived credential, so the one WebAuthn tap
+  // above is never repeated.
+  let derived: UnlockCredential | undefined
+  for (let staleRetries = 0; ; staleRetries++) {
+    const routed = await routeUnlockLogin({
+      secret: prfOutput,
+      kdf: PASSKEY_KDF,
+      credential: derived,
+      idb,
+      remoteDirectStorage,
+      rememberBrowser
+    })
+    if (routed.durability === 'transient') {
+      const found = await fetchTransientKeyring({
+        credential: routed.credential,
+        accountLogPinStore: routed.persistence.logPins
+      })
+      if (!found) {
+        return { session: null, userExists: false }
+      }
+      return transientSessionFromKeyringHit({
+        found,
+        type: 'passkey',
+        persistence: routed.persistence,
+        credential: routed.credential
+      })
+    }
+    derived = routed.credential ?? derived
+
+    const found = await fetchKeyring({
+      secret: prfOutput,
+      kdf: PASSKEY_KDF,
+      idb,
+      mintManageCapability: true,
+      ...(derived ? { credential: derived } : {})
     })
     if (!found) {
       return { session: null, userExists: false }
     }
-    return transientSessionFromKeyringHit({
-      found,
-      type: 'passkey',
-      persistence: routed.persistence,
-      credential: routed.credential
-    })
-  }
 
-  const found = await fetchKeyring({
-    secret: prfOutput,
-    kdf: PASSKEY_KDF,
-    idb,
-    mintManageCapability: true,
-    ...(routed.credential ? { credential: routed.credential } : {})
-  })
-  if (!found) {
-    return { session: null, userExists: false }
+    try {
+      return await sessionFromKeyringHit({
+        found,
+        type: 'passkey',
+        remoteDirectStorage,
+        provisionStorage,
+        idb
+      })
+    } catch (err) {
+      if (!(err instanceof StaleClientKeyRecordError)) {
+        throw err
+      }
+      if (staleRetries > 0) {
+        throw new KeyringRecordUnusableError({ cause: err })
+      }
+    }
   }
-
-  return sessionFromKeyringHit({
-    found,
-    type: 'passkey',
-    remoteDirectStorage,
-    provisionStorage,
-    idb
-  })
 }

@@ -72,6 +72,17 @@
 - The dashboard shows a "No credentials yet." empty state when the
   credential list is empty, instead of an empty grid.
 
+### Fixed
+
+- A durable login no longer misreads a stale client-key record from a prior
+  account (a reused passphrase whose old account is gone server-side) as a
+  forgotten browser. The record's stamped `pointerDid` is now cross-checked
+  against the unlock record's pointer before the forgotten-browser detector
+  runs; a mismatch wipes the stale record's residue (the dead account's
+  replica, caches, and pins, and the credential's local trio) and re-routes
+  the login once as a not-remembered browser, instead of wiping the pointed
+  account's state and throwing `BrowserForgottenError`.
+
 ### Removed
 
 - The `VITE_SERVER_URL` and `VITE_DEPLOY_URL` environment variables. Both
