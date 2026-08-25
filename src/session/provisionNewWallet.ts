@@ -116,3 +116,82 @@ export async function provisionNewWallet({
   // credential-created history entry, so this must not log one separately.
   await storage.addCredential({ credential: welcomeCredential, user })
 }
+
+/**
+ * How long the signup tail waits for the welcome seed before proceeding
+ * without it: the seed sits on the signup's critical path, and a hung
+ * request (a captive portal, a stalled server) never rejects, so it must
+ * not be able to hang the spinner on an already-established account.
+ */
+const SEED_WELCOME_TIMEOUT_MS = 15_000
+
+/**
+ * Best-effort welcome-content seeding for the credential-anchored signup
+ * tail: the welcome credential and the two new-account history records,
+ * written through the session's own storage (the replica-less remote-direct
+ * variant a transient session carries). The two contact seeds wait for
+ * FW-210's remote-direct contact operations, and there is no first-client
+ * label to write because a credential-anchored account has no durable
+ * client. The whole function is best-effort: the account is fully
+ * established before it runs, so a torn seed costs only cosmetic content --
+ * a failure is logged and never rethrown, and a seed still pending after
+ * `SEED_WELCOME_TIMEOUT_MS` is stepped past the same way. This helper is
+ * not an ensure (the history writes mint fresh ids per call, with no
+ * completion detection), so it must stay on this one never-re-entered call
+ * site and must not migrate into `establishCredentialAnchoredAccount` or
+ * any heal/re-run path.
+ *
+ * @param options {object}
+ * @param options.session {Session}   the composed transient session
+ * @returns {Promise<void>}
+ */
+export async function seedWelcomeContent({
+  session
+}: {
+  session: Session
+}): Promise<void> {
+  const { storage, user } = session
+  // Attribute the seeds to the account's own identity: on a transient
+  // session `user.id` is the per-visit ephemeral key (GC'd with its annex
+  // generation, never an account identity), and `accountController` is the
+  // record's bound controller -- on a credential-anchored account the ladder
+  // VM's bootstrap did:key, retired at the first self-enrollment. The
+  // account pointer's did:webvh is the identity that outlives both.
+  const seedUser = {
+    ...user,
+    id:
+      session.profile.accountPointer?.did ??
+      session.profile.accountController ??
+      user.id
+  }
+  // The catch stays attached to the seeding promise itself, so a rejection
+  // arriving after the timeout has won cannot become unhandled.
+  const seeding = (async () => {
+    // The two records are independent, so they are written together.
+    await Promise.all([
+      storage.addHistoryNewAccount({ user: seedUser }),
+      storage.addHistorySpaceCreated({ user: seedUser })
+    ])
+    // `addCredential` records its own credential-created history entry, so
+    // this must not log one separately.
+    await storage.addCredential({
+      credential: welcomeCredential,
+      user: seedUser
+    })
+  })().catch(err => {
+    log.warn('Could not seed the welcome content', { err })
+  })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = await Promise.race([
+    seeding.then(() => false),
+    new Promise<boolean>(resolve => {
+      timer = setTimeout(() => resolve(true), SEED_WELCOME_TIMEOUT_MS)
+    })
+  ])
+  clearTimeout(timer)
+  if (timedOut) {
+    log.warn('Could not seed the welcome content: timed out', {
+      timeoutMs: SEED_WELCOME_TIMEOUT_MS
+    })
+  }
+}

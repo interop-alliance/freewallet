@@ -411,6 +411,8 @@
     "addCredential": "Añadir credencial",
     "credentialsHeading": "Credenciales",
     "searchPlaceholder": "Buscar credenciales...",
+    "empty": "Todavía no hay credenciales.",
+    "seedingWelcome": "Generando credenciales de bienvenida...",
     "noResults": "Ninguna credencial coincide con su búsqueda.",
     "loadError": "No se pudieron cargar sus credenciales. Inténtelo de nuevo.",
     "undecryptable_one": "No se pudo descifrar {{count}} credencial. Puede estar dañada o guardada con otra frase de contraseña.",

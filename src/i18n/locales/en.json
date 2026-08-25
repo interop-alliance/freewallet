@@ -411,6 +411,8 @@
     "addCredential": "Add Credential",
     "credentialsHeading": "Credentials",
     "searchPlaceholder": "Search credentials...",
+    "empty": "No credentials yet.",
+    "seedingWelcome": "Generating welcome credentials...",
     "noResults": "No credentials match your search.",
     "loadError": "Could not load your credentials. Please try again.",
     "undecryptable_one": "{{count}} credential could not be decrypted. It may be corrupted or saved under a different passphrase.",

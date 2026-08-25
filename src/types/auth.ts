@@ -249,6 +249,12 @@ export interface Session {
   // resolves wallet-core's per-pass report, or `null` when the session
   // cannot run it or the pass itself failed (it never rejects).
   clientAnnexGcSweep?: Promise<ClientAnnexGcReport | null>
+  // Settles when the credential-anchored signup's best-effort
+  // welcome-content seeding finishes (success, failure, or timeout -- it
+  // never rejects); the dashboard shows a "generating welcome credentials"
+  // indicator and reloads the list when it settles. Absent on every other
+  // session kind.
+  welcomeSeedReady?: Promise<void>
   // Set when the login's roster read adopted a rotated user key (or advanced
   // the epoch pin) but the durable local copy -- the client-key record or the
   // epoch pin -- could not be written. The session itself is fine (it runs on

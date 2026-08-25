@@ -68,6 +68,12 @@ export function DashboardPage() {
     backupState: boolean
     createdAt: string
   } | null>(null)
+  // The credential-anchored signup seeds its welcome content behind the
+  // dashboard navigation; while its promise is pending an indicator shows in
+  // place of the empty state, and the list reloads when it settles.
+  const [seeding, setSeeding] = useState(() =>
+    Boolean(session?.welcomeSeedReady)
+  )
 
   const {
     query,
@@ -137,6 +143,38 @@ export function DashboardPage() {
     initialLoad()
 
     // clean up effect
+    return () => {
+      cancelled = true
+    }
+  }, [session, loadCredentials])
+
+  useEffect(() => {
+    const seedReady = session?.welcomeSeedReady
+    if (!seedReady) {
+      return
+    }
+    let cancelled = false
+    async function awaitWelcomeSeed() {
+      // Never rejects: the seeding helper is best-effort throughout.
+      await seedReady
+      if (cancelled) {
+        return
+      }
+      try {
+        await loadCredentials(() => cancelled)
+      } catch (err) {
+        // The initial load's error handling owns the loadError banner; a
+        // failed reload here just leaves the current (empty) list standing.
+        log.error('Could not reload credentials after the welcome seed', {
+          err
+        })
+      } finally {
+        if (!cancelled) {
+          setSeeding(false)
+        }
+      }
+    }
+    void awaitWelcomeSeed()
     return () => {
       cancelled = true
     }
@@ -318,6 +356,22 @@ export function DashboardPage() {
         )}
         {loading ? (
           <LoadingSpinner />
+        ) : seeding && credentials.length === 0 ? (
+          <Box sx={{ mt: 3 }}>
+            <LoadingSpinner />
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              align="center"
+              sx={{ mt: 1 }}
+            >
+              {t('dashboard.seedingWelcome')}
+            </Typography>
+          </Box>
+        ) : credentials.length === 0 && !loadError ? (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 3 }}>
+            {t('dashboard.empty')}
+          </Typography>
         ) : searchedCredentials.length === 0 && credentials.length > 0 ? (
           <Typography color="text.secondary" sx={{ mt: 3 }}>
             {t('dashboard.noResults')}

@@ -53,6 +53,12 @@ test.describe.serial('credential-anchored signup', () => {
       })
       passphrase = user.passphrase
 
+      // The signup tail seeded the welcome content through the transient
+      // session's own storage.
+      await expect(
+        page.getByRole('link', { name: 'Your First Credential' })
+      ).toBeVisible({ timeout: 15_000 })
+
       // The transient session works: a credential stores over the
       // replica-less remote-direct variant.
       await addCredentialViaPaste(page)

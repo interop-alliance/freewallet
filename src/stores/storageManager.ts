@@ -960,6 +960,15 @@ export class StorageManager {
         storage: rxStorage,
         ciphers
       }))
+    } else if (remoteStore) {
+      // A replica-less session serves every synced-collection operation
+      // remote-direct, and its preconditions guarantee a promoted account
+      // the account-genesis ceremony already provisioned -- so bind the
+      // collection map here (pure, no network) without provisioning twice.
+      // A durable session's map stays bound by `ensureUserCollections` at
+      // the right time: its first signup runs before provisioning, where
+      // an unbound map is a real signal.
+      remoteStore.bindCollectionMap()
     }
     let userExists = localStore ? await localStore.userExists() : false
     if (remoteStore) {

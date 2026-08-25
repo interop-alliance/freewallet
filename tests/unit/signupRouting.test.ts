@@ -53,7 +53,8 @@ vi.mock('@/session/transientLogin', () => ({
 }))
 
 vi.mock('@/session/provisionNewWallet', () => ({
-  provisionNewWallet: vi.fn()
+  provisionNewWallet: vi.fn(),
+  seedWelcomeContent: vi.fn(async () => {})
 }))
 
 vi.mock('@/session/standingUnlock', () => ({
@@ -80,6 +81,7 @@ import {
 import { loginWithPassphrase } from '@/session/initSession'
 import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
 import { transientSessionFromKeyringHit } from '@/session/transientLogin'
+import { seedWelcomeContent } from '@/session/provisionNewWallet'
 import { signUpWithPassphrase } from '@/session/signup'
 
 afterEach(() => {
@@ -114,6 +116,14 @@ describe('signUpWithPassphrase -- durability routing', () => {
     expect(transientSessionFromKeyringHit).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'passphrase' })
     )
+    // The tail kicks off the welcome seeding without awaiting it, stamping
+    // the (never-rejecting) promise on the session for the dashboard's
+    // indicator.
+    expect(seedWelcomeContent).toHaveBeenCalledWith({
+      session: result.session
+    })
+    expect(result.session!.welcomeSeedReady).toBeInstanceOf(Promise)
+    await expect(result.session!.welcomeSeedReady).resolves.toBeUndefined()
   })
 
   it('reports an existing account from the create-nothing probe alone', async () => {

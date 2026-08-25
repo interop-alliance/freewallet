@@ -83,7 +83,8 @@ vi.mock('@/session/transientLogin', () => ({
 }))
 
 vi.mock('@/session/provisionNewWallet', () => ({
-  provisionNewWallet: vi.fn()
+  provisionNewWallet: vi.fn(),
+  seedWelcomeContent: vi.fn(async () => {})
 }))
 
 vi.mock('@/session/standingUnlock', () => ({

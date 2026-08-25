@@ -22,7 +22,10 @@ import {
 import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
 import { transientSessionPersistence } from '@/session/persistence'
 import { transientSessionFromKeyringHit } from '@/session/transientLogin'
-import { provisionNewWallet } from '@/session/provisionNewWallet'
+import {
+  provisionNewWallet,
+  seedWelcomeContent
+} from '@/session/provisionNewWallet'
 import {
   establishPassphraseStanding,
   establishStandingUnlock
@@ -230,6 +233,12 @@ async function signUpCredentialAnchoredWithPassphrase({
     persistence
   })
   mark('transient-session')
+  // Kick off the welcome-content seeding without awaiting it: the signup is
+  // already long, so the seed runs behind the dashboard navigation, tracked
+  // by `welcomeSeedReady` (the dashboard shows an indicator until it
+  // settles). Best-effort throughout: the helper swallows failures and
+  // bounds its own duration, so the promise never rejects.
+  session.welcomeSeedReady = seedWelcomeContent({ session })
   return { session, userExists: false }
 }
 

@@ -251,6 +251,9 @@ function makeFakeRemote(): {
   const remoteStore = {
     spaceId,
     spaceUrl: `https://was.example/space/${spaceId}`,
+    // The replica-less init arm binds the collection map on construction;
+    // this fake resolves collections by logical key, so the bind is a no-op.
+    bindCollectionMap() {},
     async collectionEncryption({ collectionId }: { collectionId: string }) {
       return descriptors[collectionId]
     },

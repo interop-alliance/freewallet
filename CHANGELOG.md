@@ -60,6 +60,17 @@
   sites (the add/change-method establishment, the recovery-spend tail, and
   the spend resume's backfill), so a served prefix of the log is refused
   instead of getting a commitment entry built on it.
+- The credential-anchored (default) signup now seeds the welcome credential
+  and the two new-account history records, attributed to the account's
+  did:webvh. The seeding runs off the signup's critical path: the visit
+  lands on the dashboard immediately, which shows a "Generating welcome
+  credentials..." indicator until the seed settles (best-effort and
+  time-bounded -- a failed or timed-out seed is logged, never fails the
+  signup, and leaves the empty state). A replica-less session now binds the
+  remote collection map at storage-client construction, since the
+  account-genesis ceremony already provisioned the Space.
+- The dashboard shows a "No credentials yet." empty state when the
+  credential list is empty, instead of an empty grid.
 
 ## 0.40.0 - TBD
 

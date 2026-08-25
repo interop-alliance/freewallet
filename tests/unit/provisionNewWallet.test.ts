@@ -8,11 +8,15 @@
  * created-history (which `StorageManager.addCredential` records internally).
  */
 import { describe, expect, it, vi } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
 import type { Session } from '@/types/auth'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
 import { selfContact } from '@interop/social-core'
 import { interopAllianceTeamContact } from '@/fixtures/defaultContacts'
-import { provisionNewWallet } from '@/session/provisionNewWallet'
+import {
+  provisionNewWallet,
+  seedWelcomeContent
+} from '@/session/provisionNewWallet'
 
 /**
  * A session stub whose storage records the provisioning calls, plus a shared
@@ -131,5 +135,102 @@ describe('provisionNewWallet', () => {
     )
     // A failure at the first step stops the sequence.
     expect(storage.addHistoryNewAccount).not.toHaveBeenCalled()
+  })
+})
+
+describe('seedWelcomeContent', () => {
+  it('seeds the two history records and the welcome credential', async () => {
+    const { session, storage, user, order } = sessionStub()
+    // The seeds must be attributed to the account pointer's did:webvh --
+    // never to the per-visit ephemeral `user.id`, and not to the record's
+    // bound controller either (on a credential-anchored account that is the
+    // ladder VM's bootstrap did:key, retired at the first self-enrollment).
+    ;(
+      session.profile as unknown as {
+        accountController?: string
+        accountPointer?: { did?: string }
+      }
+    ).accountController = 'did:key:z6MkBootstrapLadderVm'
+    ;(
+      session.profile as unknown as { accountPointer?: { did?: string } }
+    ).accountPointer = {
+      did: 'did:webvh:QmScid:was.example.test:space:s1:id'
+    }
+    const seedUser = {
+      ...user,
+      id: 'did:webvh:QmScid:was.example.test:space:s1:id'
+    }
+
+    await seedWelcomeContent({ session })
+
+    expect(storage.addHistoryNewAccount).toHaveBeenCalledWith({
+      user: seedUser
+    })
+    expect(storage.addHistorySpaceCreated).toHaveBeenCalledWith({
+      user: seedUser
+    })
+    expect(storage.addCredential).toHaveBeenCalledWith({
+      credential: welcomeCredential,
+      user: seedUser
+    })
+    // The seed writes nothing else: no collections ensure, no contacts, and
+    // no separate credential-created history (addCredential owns it).
+    expect(storage.ensureUserCollections).not.toHaveBeenCalled()
+    expect(storage.addContact).not.toHaveBeenCalled()
+    expect(order).toEqual([
+      'addHistoryNewAccount',
+      'addHistorySpaceCreated',
+      'addCredential'
+    ])
+  })
+
+  it('resolves and warns on a storage failure (best-effort)', async () => {
+    const capture = captureSink()
+    addSink(capture.sink)
+    const { session, storage } = sessionStub()
+    vi.mocked(storage.addCredential).mockRejectedValueOnce(
+      new Error('remote unreachable')
+    )
+
+    await expect(seedWelcomeContent({ session })).resolves.toBeUndefined()
+
+    expect(
+      capture.events.some(
+        event => event.msg === 'Could not seed the welcome content'
+      )
+    ).toBe(true)
+  })
+
+  it('falls back to the ephemeral user id with no account controller', async () => {
+    const { session, storage, user } = sessionStub()
+
+    await seedWelcomeContent({ session })
+
+    expect(storage.addHistoryNewAccount).toHaveBeenCalledWith({ user })
+  })
+
+  it('resolves and warns when the seeding hangs past the timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      const capture = captureSink()
+      addSink(capture.sink)
+      const { session, storage } = sessionStub()
+      // A hung request: never resolves, never rejects.
+      vi.mocked(storage.addCredential).mockImplementationOnce(
+        () => new Promise(() => {})
+      )
+
+      const pending = seedWelcomeContent({ session })
+      await vi.advanceTimersByTimeAsync(15_000)
+      await expect(pending).resolves.toBeUndefined()
+
+      expect(
+        capture.events.some(
+          event => event.msg === 'Could not seed the welcome content: timed out'
+        )
+      ).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
