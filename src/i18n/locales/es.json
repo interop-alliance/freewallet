@@ -237,7 +237,11 @@
       "ladderAttribution": "Se encontró su cuenta, pero no se pudo confirmar la vigencia de este método de inicio de sesión en la cuenta: puede haber sido eliminado, o el historial publicado de la cuenta está en un estado inesperado. El inicio de sesión se detuvo y no se cambió nada. Inicie sesión desde un navegador donde su billetera ya esté configurada, o use un código de recuperación.",
       "passkeyNoAccount": "No se encontró ninguna billetera para esta llave de acceso. Inicie sesión con su frase de contraseña y luego agregue esta llave de acceso desde Configuración.",
       "passkeyPrfUnsupported": "Esta llave de acceso o este navegador no puede desbloquear Freewallet. Pruebe con otra llave de acceso o inicie sesión con su frase de contraseña.",
-      "browserForgotten": "El acceso de este navegador a la billetera fue eliminado de la cuenta, y sus datos locales restantes acaban de borrarse. Inicie sesión de nuevo para reconectar este navegador."
+      "browserForgotten": "El acceso de este navegador a la billetera fue eliminado de la cuenta, y sus datos locales restantes acaban de borrarse. Inicie sesión de nuevo para reconectar este navegador.",
+      "pendingEnrollment": "Este navegador tiene una conexión de billetera a medio terminar que no pudo completarse esta vez. Nada cambió: inicie sesión de nuevo para reintentar completarla.",
+      "pendingEnrollmentDiscarded": "Este navegador tenía una conexión de billetera a medio terminar que ya no puede completarse, así que fue descartada. Inicie sesión de nuevo para continuar como un navegador nuevo.",
+      "pendingRecoveryResume": "Este navegador tiene una recuperación de cuenta a medio terminar. Vaya a la página de recuperación e ingrese el mismo código de recuperación para completarla.",
+      "selfEnrollmentSkew": "Este navegador se conectó, pero los componentes de software de la billetera no coinciden y el inicio de sesión no pudo completarse de forma segura. Recargue o actualice la aplicación e inicie sesión de nuevo."
     },
     "forget": {
       "button": "Olvidar los datos de billetera en este navegador",

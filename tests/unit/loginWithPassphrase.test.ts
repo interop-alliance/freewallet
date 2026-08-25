@@ -37,12 +37,24 @@ vi.mock('@/session/standingUnlock', () => ({
   canSelfEnroll: vi.fn(() => false),
   selfEnrollStandingClient: vi.fn()
 }))
+// A full factory like the ones above, with a real (constructible) error
+// class: the popup guard constructs it, and the mapping matches instanceof.
+vi.mock('@/session/pendingEnrollment', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/pendingEnrollment')>()),
+  isPendingKeyringHit: vi.fn(() => false),
+  resumePendingEnrollment: vi.fn()
+}))
 
 import { StorageManager } from '@/stores/storageManager'
 import {
   canSelfEnroll,
   selfEnrollStandingClient
 } from '@/session/standingUnlock'
+import {
+  isPendingKeyringHit,
+  PendingEnrollmentError,
+  resumePendingEnrollment
+} from '@/session/pendingEnrollment'
 import {
   fetchKeyring,
   fetchTransientKeyring,
@@ -116,6 +128,9 @@ beforeEach(() => {
   vi.mocked(canSelfEnroll).mockReset()
   vi.mocked(canSelfEnroll).mockReturnValue(false)
   vi.mocked(selfEnrollStandingClient).mockReset()
+  vi.mocked(isPendingKeyringHit).mockReset()
+  vi.mocked(isPendingKeyringHit).mockReturnValue(false)
+  vi.mocked(resumePendingEnrollment).mockReset()
 })
 
 afterEach(() => {
@@ -369,6 +384,73 @@ describe('loginWithPassphrase -- self-enrolling standing credential', () => {
     expect(session).toBeNull()
     expect(userExists).toBe(true)
     expect(selfEnrollStandingClient).not.toHaveBeenCalled()
+  })
+})
+
+describe('loginWithPassphrase -- pending-record resume routing (FW-280)', () => {
+  it('routes a pending-shape record to the resume, not the detector, and builds the session from its result', async () => {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller,
+      pointer: POINTER,
+      clientKeys: { clientSeed, controller },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    } as never)
+    vi.mocked(isPendingKeyringHit).mockReturnValue(true)
+    const userKey = await mintUserKey()
+    const persist = vi.fn(async () => {})
+    vi.mocked(resumePendingEnrollment).mockResolvedValue({
+      clientKeys: { clientSeed, userKey, controller },
+      persistClientKeys: persist
+    } as never)
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+
+    expect(resumePendingEnrollment).toHaveBeenCalledOnce()
+    expect(session).not.toBeNull()
+    expect(session!.user.id).toBe(controller)
+    expect(session!.profile.userKey).toBe(userKey)
+    expect(session!.profile.persistClientKeys).toBe(persist)
+  })
+
+  it('fails closed when the resume throws: no session is ever built over the pending record', async () => {
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller: 'did:key:z6MkDataControllerForTests',
+      pointer: POINTER,
+      clientKeys: { clientSeed: randomSeed() },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    } as never)
+    vi.mocked(isPendingKeyringHit).mockReturnValue(true)
+    vi.mocked(resumePendingEnrollment).mockRejectedValue(
+      new PendingEnrollmentError({ reason: 'resume-failed' })
+    )
+
+    await expect(
+      loginWithPassphrase({ passphrase: PASSPHRASE })
+    ).rejects.toMatchObject({ name: 'PendingEnrollmentError' })
+    // Fail-closed: session construction (seed-derived vault keys) was never
+    // reached with a userKey-less record on a promoted account.
+    expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
+  })
+
+  it('guards the remote-direct popup: a pending record refuses instead of resuming there', async () => {
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller: 'did:key:z6MkDataControllerForTests',
+      pointer: POINTER,
+      clientKeys: { clientSeed: randomSeed() },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    } as never)
+    vi.mocked(isPendingKeyringHit).mockReturnValue(true)
+
+    await expect(
+      loginWithPassphrase({ passphrase: PASSPHRASE, remoteDirectStorage: true })
+    ).rejects.toMatchObject({ name: 'PendingEnrollmentError', reason: 'popup' })
+    expect(resumePendingEnrollment).not.toHaveBeenCalled()
+    expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
   })
 })
 

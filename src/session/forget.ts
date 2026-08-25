@@ -57,12 +57,16 @@
  *   the Connected wallets disconnect from a logged-in client.
  *
  * The login-time detector (`assertClientStillEnrolled`) maps the
- * removal-published-but-wipe-torn state -- a local client-key record present
- * while this client's verification method is gone from the verified account
- * document (a forget torn before its wipe, or a disconnect run from another
- * client) -- to finish-the-wipe plus a typed `BrowserForgottenError`, never
- * raw authorization errors. Nothing about the detection is persisted; it is
- * recomputed from durable state at each login.
+ * removal-published-but-wipe-torn state -- an ENROLLED-shape local client-key
+ * record present while this client's verification method is gone from the
+ * verified account document (a forget torn before its wipe, or a disconnect
+ * run from another client) -- to finish-the-wipe plus a typed
+ * `BrowserForgottenError`, never raw authorization errors. A pending-shape
+ * record (a self-enrollment's persist-before-publish residue) is spared and
+ * routed to the resume instead (freewallet `decisions/0007`), whose
+ * published-then-removed branch hands the genuine removal case back to the
+ * same wipe. Nothing about the detection is persisted; it is recomputed from
+ * durable state at each login.
  *
  * The honest limits are the wipe seam's and the cascade's: deleted IndexedDB
  * data stays forensically recoverable, the partitioned CHAPI popup buckets
@@ -763,6 +767,15 @@ export async function assertClientStillEnrolled({
   if (!clientKeys || !pointer || !isWebvhDid(pointer.did)) {
     return undefined
   }
+  // The trigger is deliberately narrowed to records holding a user key: a
+  // PENDING record (`userKey` absent -- a self-enrollment's
+  // persist-before-publish residue) is the resume's to route. Its VM may
+  // never have been published, and wiping it would destroy the resume's only
+  // key set; the resume's own published-then-removed branch hands the
+  // genuine removal case back to this wipe (`finishForgottenBrowserWipe`).
+  if (!clientKeys.userKey) {
+    return undefined
+  }
   let verified: VerifiedAccountLog
   let clientDid: string
   let signingKeyMultibase: string
@@ -792,9 +805,35 @@ export async function assertClientStillEnrolled({
   if (methods.some(method => method.id === vmId)) {
     return verified
   }
-  // The removal entry landed; finish the wipe from what the hit alone can
-  // derive (this credential's trio, this client's replica and cache
-  // families, the account's pins).
+  return finishForgottenBrowserWipe({ found, clientDid, idb })
+}
+
+/**
+ * The detector's finish-the-wipe tail: the removal entry landed for this
+ * client, so the local residue is wiped from what the hit alone can derive
+ * (this credential's trio, this client's replica and cache families, the
+ * account's pins) and the typed `BrowserForgottenError` surfaces the state.
+ * Exported for the pending-record resume, whose published-then-removed branch
+ * is the same removal case reached through a pending-shape record.
+ *
+ * @param options {object}
+ * @param options.found {KeyringFetchResult}   a hit carrying `clientKeys` and
+ *   a promoted pointer
+ * @param options.clientDid {string}   this client's did:key, derived from the
+ *   record's seed
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<never>}   always throws `BrowserForgottenError`
+ */
+export async function finishForgottenBrowserWipe({
+  found,
+  clientDid,
+  idb
+}: {
+  found: KeyringFetchResult
+  clientDid: string
+  idb?: IDBFactory
+}): Promise<never> {
+  const pointer = found.pointer!
   const targets: WipeTargets = {
     clientDid,
     accountDid: pointer.did,

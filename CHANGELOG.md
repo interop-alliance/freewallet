@@ -4,6 +4,29 @@
 
 ### Changed
 
+- Self-enrollment at login is now persist-before-publish end to end: the
+  required `onCommitted` seam writes a PENDING-shape client-key record
+  (seeds, controller, `pointerDid`, and a `pending` group carrying the
+  ceremony discriminator and built-on head) before the add entry publishes
+  the client, and the completion fills the user key and clears `pending`
+  before the epoch pin. A tab death after the add entry no longer strands
+  a phantom client removable only through Disconnect.
+- Login routing over the client-key record is three-way, keyed on `userKey`
+  presence: a record holding a user key runs the detector and the ordinary
+  login, a pending record (`userKey` absent) runs the new
+  pending-enrollment resume (`src/session/pendingEnrollment.ts` --
+  complete, seeded re-run, forgotten-browser wipe, or discard, decided
+  from the verified log history with discard last), and a record-less
+  browser self-enrolls as before. The pending arm is fail-closed with its
+  own login copy; a served log behind the recorded head, or one the resume
+  could not fetch, surfaces as the storage-unreachable state; a build-skew
+  refusal (a stale wallet-core body that cannot state its persist hook
+  fired) persists the key set first and gets its own copy.
+- The forgotten-browser detector's trigger narrows to userKey-holding
+  records; pending records are the resume's, whose published-then-removed
+  branch hands the genuine removal back to the same wipe. The binds now
+  record the account's `pointerDid` in the client-key record as the
+  resume's record-to-account cross-check.
 - Each transient-login refusal now gets its own login-page copy instead of
   the interim not-enrolled guidance: a failed heal says setup did not
   finish and a retry re-runs it; the annex-generation family states the
@@ -20,6 +43,12 @@
   instead. A plain bind left a passphrase with no roster wrap and no
   self-enrollment authority, surfaced only by a fresh browser's refused
   login.
+- Docs: the Glossary's Ceremony and Tear-mending entries name the
+  derivability rule (canonical in wallet-core's
+  `decisions/0010-post-pivot-derivability-rule.md`): every ceremony write
+  sits before the pivot and stays inert until it lands, or after it and is
+  re-derivable from the pivot entry plus durable state. New or changed
+  ceremonies are checked against the rule per write at the design gate.
 
 ## 0.39.0 - 2026-08-24
 

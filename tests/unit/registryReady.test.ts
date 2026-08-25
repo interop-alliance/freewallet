@@ -193,7 +193,15 @@ async function arrangeEnrolledLogin() {
   vi.mocked(fetchKeyring).mockResolvedValue({
     controller,
     pointer: POINTER,
-    clientKeys: { clientSeed, userKey },
+    // The ENROLLED shape: a record missing any of the four members would
+    // route into the pending-record resume instead of the ordinary login.
+    clientKeys: {
+      clientSeed,
+      userKey,
+      webvhUpdateKeys: { updateSeed: randomSeed(), stagedSeed: randomSeed() },
+      controller,
+      pointerDid: POINTER.did
+    },
     unlockSpaceId: 'unlock-space-test',
     createdAt: new Date().toISOString()
   } as never)

@@ -131,7 +131,11 @@ export class TransientLoginUnavailableError extends Error {
  * this credential's client-key record. Honoring it would mean either a
  * dual-durability fork (`decisions/0001` forbids one) or a destructive wipe, so
  * the routing refuses; the remember-this-browser UX turns this refusal into
- * a loud coerce-and-notify.
+ * a loud coerce-and-notify. A PENDING-shape record counts as remembered too
+ * (the probe cannot tell the shapes apart, and the durable route's resume is
+ * that record's one mender); the resume's discard outcome deletes a
+ * provably worthless pending record, so the NEXT attempt probes record-less
+ * and this refusal stops firing.
  */
 export class AlreadyRememberedError extends Error {
   constructor() {

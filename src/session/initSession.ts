@@ -73,6 +73,11 @@ import {
   canSelfEnroll,
   selfEnrollStandingClient
 } from '@/session/standingUnlock'
+import {
+  isPendingKeyringHit,
+  PendingEnrollmentError,
+  resumePendingEnrollment
+} from '@/session/pendingEnrollment'
 import { assertClientStillEnrolled } from '@/session/forget'
 import {
   delegateLogWrite,
@@ -842,6 +847,16 @@ async function sessionFromKeyringHit({
   provisionStorage?: boolean
   idb?: IDBFactory
 }): Promise<{ session: Session | null; userExists: boolean }> {
+  // The three-way record routing, keyed on `userKey` presence: a record
+  // holding a user key proceeds through the detector and the ordinary login;
+  // a PENDING record (`userKey` absent -- a self-enrollment's
+  // persist-before-publish residue) routes to the resume; an absent record
+  // self-enrolls when the credential can. The pending arm is fail-closed: a
+  // pending record
+  // never reaches session construction outside the resume -- nothing
+  // downstream refuses a userKey-less record, it would run on seed-derived
+  // vault keys with every encrypted collection failing closed silently.
+  const pendingResume = isPendingKeyringHit({ found })
   if (!found.clientKeys) {
     // The account was located (the keyring record exists) but this client
     // holds no key set for it -- a fresh browser. When the record carries
@@ -859,19 +874,31 @@ async function sessionFromKeyringHit({
       return { session: null, userExists: true }
     }
   }
-  // The finish-the-wipe detector: a client-key record whose verification
-  // method is gone from the cleanly verified account document means this
-  // browser was forgotten (or disconnected) with the local wipe torn or
-  // never run -- the residue is wiped here and the typed refusal surfaces
-  // the state, instead of the raw authorization errors the dead key would
-  // hit downstream. Skips itself on any verification failure.
-  const detectorLog = found.clientKeys
-    ? await assertClientStillEnrolled({ found, idb })
-    : undefined
-  const enrolled = found.clientKeys
-    ? undefined
-    : await selfEnrollStandingClient({ found, idb })
-  const clientKeys = found.clientKeys ?? enrolled!.clientKeys
+  if (pendingResume && remoteDirectStorage) {
+    // The pending arm's own popup guard: a partitioned popup visit never
+    // resumes a ceremony (mirroring the record-less branch above), and must
+    // not fall through to a fail-open session either.
+    throw new PendingEnrollmentError({ reason: 'popup' })
+  }
+  // The finish-the-wipe detector: a userKey-holding client-key record whose
+  // verification method is gone from the cleanly verified account document
+  // means this browser was forgotten (or disconnected) with the local wipe
+  // torn or never run -- the residue is wiped here and the typed refusal
+  // surfaces the state, instead of the raw authorization errors the dead key
+  // would hit downstream. Skips itself on any verification failure. A
+  // pending-shape record is the resume's to route (its own
+  // published-then-removed branch hands the genuine removal back to the same
+  // wipe).
+  const detectorLog =
+    found.clientKeys && !pendingResume
+      ? await assertClientStillEnrolled({ found, idb })
+      : undefined
+  const enrolled = !found.clientKeys
+    ? await selfEnrollStandingClient({ found, idb })
+    : pendingResume
+      ? await resumePendingEnrollment({ found, idb })
+      : undefined
+  const clientKeys = enrolled?.clientKeys ?? found.clientKeys!
   const persistClientKeys =
     enrolled?.persistClientKeys ?? found.persistClientKeys
   const { session, userExists, rosterRead } = await initSessionFromSeed({

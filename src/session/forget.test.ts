@@ -375,7 +375,18 @@ describe('assertClientStillEnrolled (the forgotten-browser detector)', () => {
       controller: 'did:key:zClientA',
       unlockSpaceId: 'unlock-1',
       pointer,
-      clientKeys: { clientSeed, controller: 'did:key:zClientA' }
+      // The ENROLLED shape: the narrowed trigger fires only on records
+      // carrying all four members (a pending record is the resume's).
+      clientKeys: {
+        clientSeed,
+        controller: 'did:key:zClientA',
+        userKey: { id: 'did:key:zUserKey', secret: new Uint8Array(32) },
+        webvhUpdateKeys: {
+          updateSeed: new Uint8Array(32).fill(3),
+          stagedSeed: new Uint8Array(32).fill(4)
+        },
+        pointerDid: pointer.did
+      }
     } as unknown as KeyringFetchResult
   }
 

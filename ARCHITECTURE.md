@@ -24,15 +24,15 @@ src/lib/            Pure business logic (no React)
                     over the shared wallet-input classifier
   sessionKey.ts     freewallet-session IndexedDB caches (keyring, unlock
                     methods, pins, passkey-safety notices)
-  corsProxy.ts      The one CORS-proxy path (`VITE_CORS_PROXY_URL`), used by
-                    the pasted-URL credential fetch and the registries fetch
+  corsProxy.ts      The one CORS-proxy path (`VITE_CORS_PROXY_URL`): the
+                    pasted-URL credential fetch and the registries fetch
   viewMappers/      Transform raw credential data into display-ready values
   walletRequest/    VPR classification + response assembly for CHAPI requests
     respond.ts      Compose, persist the Login activity, then deliver (the
                     CHAPI `get` approval sequence)
     externalRequest.ts  The interaction-URL entry point's pure half: the
-                    deep-link parser, the exchange opening, and the
-                    pre-consent refusal matrix
+                    deep-link parser, exchange opening, and pre-consent
+                    refusal matrix
 src/lib/sync/       Collection-agnostic WAS replication adapter (RxDB-based)
 src/stores/         Global state
   authStore.ts      Zustand store -- holds the live Session object
@@ -40,17 +40,17 @@ src/stores/         Global state
   browserStore.ts   BrowserStore -- the local RxDB active replica
   wasRemoteStore.ts WASRemoteStore -- the remote WAS backend
   syncController.ts Background replication lifecycle (start/stop/reSync)
-  toastStore.ts     Transient success/info messages (`showToast`), rendered as a
-                    Snackbar by DashboardLayout. Global, not page-local state:
-                    an action often redirects (delete returns to the dashboard)
-                    before a local message could render.
+  toastStore.ts     Transient success/info messages (`showToast`), rendered
+                    by DashboardLayout as a Snackbar. Global, not
+                    page-local: an action often redirects (delete returns
+                    to the dashboard) before a local message could render.
 src/session/        Session bootstrap (initSession.ts) and the account
-                    ceremonies -- the ordered sequences the pages drive but do
-                    not own (React components keep rendering and confirmation
-                    callbacks only)
+                    ceremonies -- the ordered sequences pages drive but do
+                    not own (React components keep rendering and
+                    confirmation callbacks only)
   signup.ts         The two new-account provisioning sequences
-  accountSettings.ts  The Settings ceremonies (passphrase, passkeys, update-key
-                    rotation, account deletion's phase order)
+  accountSettings.ts  The Settings ceremonies (passphrase, passkeys,
+                    update-key rotation, account deletion's phase order)
   clients.ts        Enrolled-client listing + disconnect (a session-shaped
                     adapter over the shared clients surface)
   recovery.ts       Recovery-code issuance, spend, revocation
@@ -127,20 +127,24 @@ involved -- today through the programmatic `rememberBrowser: true` entry,
 since the DEFAULT login on a non-remembered browser is the transient session
 (see "Session persistence" below); the login-form choice is a planned
 follow-up. Two loud entries extend the world-readable log through the
-bridge (a reveal-and-commit entry signed by the ladder's current rung, then
-an add entry publishing the freshly minted client), and only then is the
-user key unwrapped from the credential's standing wrap. The minted key set
-is persisted into the local client-key record BEFORE the roster epoch pin
-is written: once the add entry lands the document lists the new client, so
-dying with the seeds unpersisted would leave a phantom client (listed,
-roster-wrapped, counted by the last-durable-client refusal, answered by no
-browser). A rejecting pin write (quota, a blocked IndexedDB upgrade) is
-therefore logged, not a login failure; the next login's roster read
-establishes the pin. The one open window is inside wallet-core's
-`selfEnrollClientCore`, between the add entry and its return, which has no
-persist hook; a phantom client stranded there shows as an unlabeled row in
-Settings > Connected wallets and is removed through its ordinary
-Disconnect. On a ladder-anchored account the add entry removes the ladder
+bridge: a reveal-and-commit entry signed by the ladder's current rung, then
+an add entry publishing the freshly minted client. Only then is the user
+key unwrapped from the credential's standing wrap. Between the two entries
+the required `onCommitted` seam writes the PENDING-shape client-key record
+(seeds, controller, `pointerDid`, the `pending` group, no user key), so the
+pivot never publishes a client only a live tab could re-derive; completion
+writes the enrolled shape before the epoch pin (a rejecting pin write is
+logged, not a login failure). A later login routes a pending record (the
+discriminator is user-key absence; `pointerDid` is the resume's account
+cross-check, not a routing member) to the
+resume (`src/session/pendingEnrollment.ts`), decided from the verified log
+history: a VM-listed record completes; a never-published one re-runs
+seeded with the recorded key set (a log behind the recorded head refuses,
+`BuiltOnHeadNotReachedError`); a published-then-removed one wipes (a
+revoked client is never re-published); an unresumable record is discarded
+and the browser routes record-less. The pending arm is fail-closed;
+transport failures keep the record. On a ladder-anchored account the add
+entry removes the ladder
 VM, so a still-unexpired bridge delegation (and `delegatedClients` sibling)
 it signed stops verifying; the same login's refresh block catches that --
 its predicate covers signer rot beside expiry (`delegationKeyInDocument`,
@@ -149,8 +153,7 @@ with the enrolled client's account key, and reseals the record. A durable
 login also self-heals a rotted embedded generation delegation the same way
 (`ensureGenerationDelegationCurrent` with the account-document axis, signed
 by the login credential's ladder seed carried in-memory on
-`profile.ladderSeed`). Detection replaces the old enrollment gate: takeover
-with a phished credential is visible in the log and remediable (see
+`profile.ladderSeed`). Detection replaces the old enrollment gate (see
 Loudness in the Glossary). The document carries a passphrase-derived
 `keyAgreement` key only as a hash commitment (`MultikeyCommitment`, which
 the roster's recipient resolver verifies the roster-carried key against);
@@ -164,25 +167,26 @@ and stays a degraded state.
 
 The unlock record is **signed** by the unlock identity's own Ed25519 key,
 and its proof is verified before the record is decrypted. That closes host
-forgery: the record's JWE is sealed to the unlock KAK, whose public half is
-derivable from the unlock did:key the server stores as the unlock Space's
-controller, so a malicious host could seal a record of its own that
-decrypts perfectly. The signing key derives from the typed secret, so it
-never reaches the host, and a client that has only ever typed the secret
-already holds the verification prior -- no bootstrap window. A record whose
-proof does not verify is refused (`KeyringRecordForgedError`). A standing
-record's account core (controller, pointer, ladder seed) is additionally
-authenticated by a MAC under a credential-derived key the host never holds
-(the recovery record's construction), verified before the pointer is
-trusted; that closes the redirect a re-mint-signed record would otherwise
-reopen (a cascade re-mint signs with an enrolled client's account key,
-settled against the account document at login). The unlock Space's request
-paths (the record fetch and rewrite, and the management delegation's
+forgery: the record's JWE is sealed to the unlock KAK, whose public half
+is derivable from the unlock did:key the server stores as the unlock
+Space's controller, so a malicious host could otherwise seal a record of
+its own that decrypts perfectly. The signing key derives from the typed
+secret, so it never reaches the host, and a client that has only ever
+typed the secret already holds the verification prior -- no bootstrap
+window. A record whose proof does not verify is refused
+(`KeyringRecordForgedError`). A standing record's account core
+(controller, pointer, ladder seed) is additionally authenticated by a MAC
+under a credential-derived key the host never holds (the recovery
+record's construction), verified before the pointer is trusted; that
+closes the redirect a re-mint-signed record would otherwise reopen (a
+cascade re-mint signs with an enrolled client's account key, settled
+against the account document at login). The unlock Space's request paths
+(the record fetch and rewrite, and the management delegation's
 `invocationTarget`) are built by was-client's paths helpers on both the
-delegation and the invocation side, so the bytes the server's
-`allowedTarget` check compares cannot drift -- load-bearing on a sub-path
-deployment, and doubly so since the record carries the recovery bridge (a
-broken target would break login itself).
+delegation and invocation side, so the bytes the server's `allowedTarget`
+check compares cannot drift -- load-bearing on a sub-path deployment, and
+doubly so since the record carries the recovery bridge (a broken target
+would break login itself).
 
 A signature cannot catch a REPLAY: a record the account has since moved off
 stays authentic forever. So each client keeps a **freshness pin** (plaintext
@@ -203,14 +207,14 @@ The bound on the whole construction: server-held material the unlock
 credential alone decrypts (the record, and the credential's standing wrap
 of the user key in the roster) is only as strong as that credential's
 entropy. Against a malicious storage host running an offline KDF grind,
-zcap scoping, TTLs, and revocation are worth nothing, so the custodian of
-the unlock credential must not be the storage host, and a wallet's security
-is limited by its weakest standing unlock method. Logging in from a public
-terminal is a core supported case (nothing need persist locally to reach
-the account), which is why the record must stay server-held and
-self-authenticating. Client revocation does not bound an attacker who holds
-the credential itself (they re-derive and self-enroll again); credential
-rotation is that remedy.
+zcap scoping, TTLs, and revocation are worth nothing, so the unlock
+credential's custodian must not be the storage host, and a wallet's
+security is limited by its weakest standing unlock method. Logging in
+from a public terminal is a core supported case (nothing need persist
+locally to reach the account), which is why the record must stay
+server-held and self-authenticating. Client revocation does not bound an
+attacker who holds the credential itself (they re-derive and self-enroll
+again); credential rotation is that remedy.
 
 **The unlock-credential rotation ceremony** is that remedy: changing a
 passphrase and removing a passkey both retire the old credential's standing
@@ -221,25 +225,25 @@ wrapped session-side by `rotateOffUnlockCredential`
 leaves first, in one log entry: its `keyAgreement` entry (commitment or
 verbatim) and its ladder's whole standing inventory, resolved from the log
 itself rather than from the registry's recorded bind-time rung. With the
-credential's ladder seed in hand (the passphrase change and the
-tap-confirmed passkey removal hold it), the entry also strikes the seed's
-ladder VM when one stands -- the residue of a last-client forget torn after
-its install entry. Then the credential's annex inventory (wallet-core's
+credential's ladder seed in hand (held by the passphrase change and the
+tap-confirmed passkey removal), the entry also strikes the seed's ladder VM
+when one stands -- the residue of a last-client forget torn after its
+install entry. Then the credential's annex inventory (wallet-core's
 `retireClientAnnexInventory` closure, between the document edit and the
 roster tail): a strike entry on the annex log drops the retired credential's
 revealed rung and standing hash when a distinct surviving credential's
 committed rung can sign it; otherwise (a self-strike, or no committed
-survivor) the whole generation is swapped onto a surviving credential's
-ladder (`swapClientAnnexGeneration`), the old generation left to orphan
-discovery. A passphrase change signs with the NEW credential's ladder seed
+survivor) the whole generation swaps onto a surviving credential's ladder
+(`swapClientAnnexGeneration`), the old generation left to orphan discovery.
+A passphrase change signs with the NEW credential's ladder seed
 (`survivingLadderSeed`). Which ladder the session's own login seed may fill
 is settled against the pre-edit log by the retired entry's recorded update
 key, not by seed comparison (vacuous with no retired seed in hand): the
 login seed is the retired ladder when that key is one of its rungs up to
-the attributed one, a survivor only when it provably is not, and neither
-when the log attributes it nothing -- so a swap can never anchor the fresh
-generation on the credential being removed. The stage is best-effort and
-reports itself on the outcome's `clientAnnex` member. Then the same
+the attributed one, a survivor only when it provably is not, else neither
+-- so a swap can never anchor the fresh generation on the credential being
+removed. The stage is best-effort, reported on the outcome's `clientAnnex`
+member. Then the same
 roster-and-cascade tail the client revocation runs: the user key rotates off
 the credential's wrap (pairing-free convergence onto the post-edit document)
 and every encrypted collection re-epochs onto the fresh key. Inside that
@@ -343,24 +347,24 @@ under the pre-rotation keys and undo it within one login.
 
 Navigation to the dashboard waits only on storage provisioning
 (`session.storageReady`); the chain above runs after navigation, on a
-separate `session.registryReady` promise that never rejects -- a stage that
-fails is logged and skipped rather than surfacing to the login page. A
+separate `session.registryReady` promise that never rejects -- a failed
+stage is logged and skipped rather than surfaced to the login page. A
 Settings-entered ceremony that writes the unlock-methods registry
 (passphrase change, passphrase or passkey add, rename, or remove, account
-deletion, client disconnect, the forget ceremony, recovery-code issuance and
-revocation) awaits `session.registryReady` at its own entry rather than
-racing the chain's writes; so does update-key rotation, which writes the
-same client-key record the sweep's adoption stage writes, and so do the
-Settings registry load and the recovery-codes health check. When storage
-provisioning itself fails the session is abandoned by the login page and
-the chain never runs, but `registryReady` still settles. Every registry PUT
-is also a compare-and-swap on the ETag of the fresh read it was based on,
-with a bounded re-read retry on a lost race, so a concurrent writer the
-ordered chain cannot serialize (another tab, another client) conflicts and
-re-applies on the fresh record instead of silently reverting it, and a
-stale tab's write cannot downgrade a rotation's re-seal. The guard covers
-honest concurrency only; against a tampering host the registry's bound is
-unchanged.
+deletion, client disconnect, the forget ceremony, recovery-code issuance
+and revocation) awaits `session.registryReady` at its own entry rather
+than racing the chain's writes; so does update-key rotation, which writes
+the same client-key record the sweep's adoption stage writes, and so do
+the Settings registry load and the recovery-codes health check. When
+storage provisioning itself fails the session is abandoned by the login
+page and the chain never runs, but `registryReady` still settles. Every
+registry PUT is also a compare-and-swap on the ETag of the fresh read it
+was based on, with a bounded re-read retry on a lost race, so a concurrent
+writer the ordered chain cannot serialize (another tab, another client)
+conflicts and re-applies on the fresh record instead of silently
+reverting it, and a stale tab's write cannot downgrade a rotation's
+re-seal. The guard covers honest concurrency only; the registry's bound is
+unchanged against a tampering host.
 
 The `Session` object is stored in the Zustand `authStore`; it is
 **in-memory only** (the passphrase is never persisted), so reloading the
@@ -404,23 +408,23 @@ only.
 **Update keys are client-held.** `updateKeys` carries one update key per
 enrolled client (apps never), derived from 32-byte seeds that live in the
 wrapped client-key record beside the client seed and the user key. The
-server therefore cannot extend the log, which makes it the one
-self-certifying artifact the server hosts. Prerotation stays on with a
-**carry-over commitment convention**: `nextKeyHashes` commits each client's
-staged key AND each active key's own hash, because the resolver re-checks
-every entry's re-stated `updateKeys` against the previous entry's
-commitments; without the active-key hashes no non-rotating entry (an
-enrollment commit, a document edit) could resolve. Rotation is per-client
-self-rotation (`rotateWebvhUpdateKey`: persist the rolled seeds into the
-client-key record BEFORE the log entry publishes, then finalize), swapping
-only the rotating client's own key. `keys.json`'s webvh block is `{ did }`
-only; key roles do not live server-side.
+server therefore cannot extend the log, making it the one self-certifying
+artifact the server hosts. Prerotation stays on with a **carry-over
+commitment convention**: `nextKeyHashes` commits each client's staged key
+AND each active key's own hash, because the resolver re-checks every
+entry's re-stated `updateKeys` against the previous entry's commitments;
+without the active-key hashes no non-rotating entry (an enrollment commit,
+a document edit) could resolve. Rotation is per-client self-rotation
+(`rotateWebvhUpdateKey`: persist the rolled seeds into the client-key
+record BEFORE the log entry publishes, then finalize), swapping only the
+rotating client's own key. `keys.json`'s webvh block is `{ did }` only; key
+roles do not live server-side.
 
 **Conditional publish.** Every ceremony publishes `did.jsonl` as a
 compare-and-swap on the ETag of the read its entry was built on, so
 concurrent clients never silently erase each other's entries; a lost race
 surfaces as wallet-core's typed `WebvhLogConflictError` and the ceremony
-re-runs itself on the new head (`withLogConflictRetry`). The shared
+re-runs on the new head (`withLogConflictRetry`). The shared
 `wasWebvhIdStore` carries the ETag and preconditions for every
 enrolled-client ceremony; the recovery continuation's delegated store
 (`delegatedLogStore` in `src/session/recovery.ts`) does the same over its
@@ -442,28 +446,28 @@ regressed. It rides the verified-log memo (`src/session/verifiedLog.ts`),
 the bare-parts roster store's controller resolution, the recovery flows'
 direct reads, and the enrollment completion's first contact; the login
 page renders the refusal (`auth.errors.accountLogContinuity`). A
-`rollback` is the one reason that may be nothing worse than replication
-lag: nothing rolled back is adopted, and a caller with a cached document
-view may carry on with it. Ceremony-path `did.jsonl` reads additionally
-check the resolved DID against the account pointer (`expectedDid` on the
-revocation cascade and the recovery ceremonies). This repo's own two
-log-publishing ceremonies, `ensureDidWebvh` (login-time provisioning) and
-`rotateWebvhUpdateKey` (the settings-page update-key rotation), read the
-log under the same pin store and the account's DID, so a truncated or
-substituted log is refused before an entry is built on it. Provisioning
-stays non-fatal (a hiccup must not fail login), but a non-`rollback`
-continuity refusal is logged as an error; later account-log reads in the
-same login hit the same pin and surface it to the user.
+`rollback` may be nothing worse than replication lag: nothing rolled back
+is adopted, and a caller with a cached document view may carry on with it.
+Ceremony-path `did.jsonl` reads additionally check the resolved DID
+against the account pointer (`expectedDid` on the revocation cascade and
+the recovery ceremonies). This repo's own two log-publishing ceremonies,
+`ensureDidWebvh` (login-time provisioning) and `rotateWebvhUpdateKey` (the
+settings-page update-key rotation), read the log under the same pin store
+and the account's DID, so a truncated or substituted log is refused
+before an entry is built on it. Provisioning stays non-fatal (a hiccup
+must not fail login), but a non-`rollback` continuity refusal is logged as
+an error; later account-log reads in the same login hit the same pin and
+surface it to the user.
 
 **The pin inventory.** The session database holds four durable continuity
 priors, in three shapes. The two chain-head pins (the account log's and
 the roster log's) live in ONE keyed store (`sessionLogPinStore` in
 `src/lib/sessionKey.ts`, implementing `@interop/vh-resource-log`'s keyed
-`ResourceLogPinStore`): `read` and `write` take a per-log slot key that
+`ResourceLogPinStore`): `read` and `write` take a per-log slot key
 wallet-core derives (`accountLogPinId` / `userKeyRosterPinId`, both
 `space/<spaceId>/<collection>/<resource>` under the hood), so one store
 serves every log and two logs can never clobber each other's pin. The slot
-key is host-free: a log served from a claimed new host lands in the SAME
+key is host-free: a log served from a claimed new host lands in the same
 slot and is checked against the pin already held. A mirror under a freshly
 minted Space id gets a fresh slot, but the did:webvh id embeds the Space
 id, so the mirror resolves to a DIFFERENT DID than the account pointer
@@ -472,20 +476,20 @@ names and every ceremony-path read refuses it (`expectedDid`, and
 by the account DID (it guards a chainless value, and the DID is the one
 identity a substituted pointer cannot change); the keyring-freshness pin by
 the unlock Space. Because the chain-head slot is Space-keyed, the genesis
-ceremony's log read runs under the same slot from first contact on, and
-the published DID is persisted locally keyed by the data Space id so a
-later pre-promotion heal login can state an `expectedDid` before the
-pointer has caught up. Account deletion clears all of it through the
-shared wipe enumeration (below) beside the keyring retirement. Before the
-account Space dies, deletion also walks the unlock-methods registry and
-deletes each entry's unlock Space and local trio best-effort
+ceremony's log read runs under the same slot from first contact, and the
+published DID persists locally keyed by the data Space id so a later
+pre-promotion heal login can state an `expectedDid` before the pointer has
+caught up. Account deletion clears all of it through the shared wipe
+enumeration (below) beside the keyring retirement. Before the account
+Space dies, deletion also walks the unlock-methods registry and deletes
+each entry's unlock Space and local trio best-effort
 (`deleteUnlockMethodArtifacts` in `src/session/unlockMethods.ts`, removing
 the dangling existence-oracle Spaces a probe could still find), then
 deletes the auxiliary annex Space in one `space.delete()`. Both run BEFORE
 the fatal wipe, because resolving the auxiliary Space's controller reads
 the account log out of the account Space; a wipe failure after them leaves
-other methods' logins already destroyed, accepted since the user's intent
-was deletion.
+other methods' logins already destroyed, accepted since the intent was
+deletion.
 
 **The shared wipe enumeration** (`src/session/wipe.ts`) is the one list of
 durable local state an account leaves on a browser and the one executor
@@ -495,32 +499,32 @@ designed onto the same seam). It is snapshot-first: every target derives
 from the live session before anything is deleted. The client-keyed families
 (the unlock-methods cache, the passkey-safety notice, the replica-database
 prefix, the local-mode cache scope) derive from this browser's own client
-did:key, never the account controller. Each unlock method's local trio
+did:key, not the account controller. Each unlock method's local trio
 derives from the registry walked across every method, always including the
 session's own login credential (`profile.unlockMethod` and the standing
 members' unlock Space id), so a registry read lost to a transient server
-error narrows the trio enumeration only to the other methods and is
+error narrows the trio enumeration to the other methods only and is
 reported on the wipe outcome (`unlock-methods-registry`) rather than
-leaving this browser's client-key record behind a wipe that reads as
-clean. The epoch pin derives from the account DID; the chain-head pin slots
-by Space-scoped prefix, which also clears every annex generation's slot
+leaving this browser's client-key record behind a wipe that reads clean.
+The epoch pin derives from the account DID; the chain-head pin slots by
+Space-scoped prefix, which also clears every annex generation's slot
 without needing the generation ids; then the Space-to-DID mapping and the
 per-account localStorage families (the descriptor and meta caches under
 both scope schemes, the migration markers). Cross-tab teardown precedes the
-replica delete (a broadcast asks sibling tabs to drop their open handles),
-and completion is verified by re-probing rather than resolved while
-blocked. Global UI prefs stay out; the global `writerId` is cleared only by
-the forget grade. Limits no enumeration reaches: deleted IndexedDB data
-remains forensically recoverable (the plaintext `public-credentials` rows
-included), the CHAPI popup's partitioned third-party buckets are
-unreachable from any top-level wipe, and the mediator-origin (authn.io)
-handler-registration bit records that a wallet was used on the terminal;
-only clearing the browser profile removes those. `indexedDB.databases()` is
-a discovery and verification aid, never the gate on deleting: the session
-database and the replica databases go by known name whether or not the
-engine can enumerate, and a deletion the executor could not confirm, or a
-replica prefix `databases()` alone would have named, is reported on the
-outcome's `unverified` list rather than folded into a clean wipe.
+replica delete (a broadcast asks sibling tabs to drop open handles), and
+completion is verified by re-probing rather than resolved while blocked.
+Global UI prefs stay out; the global `writerId` clears only on the forget
+grade. Limits no enumeration reaches: deleted IndexedDB data stays
+forensically recoverable (plaintext `public-credentials` rows included),
+the CHAPI popup's partitioned third-party buckets are unreachable from any
+top-level wipe, and the mediator-origin (authn.io) handler-registration bit
+records that a wallet was used on the terminal; only clearing the browser
+profile removes those. `indexedDB.databases()` is a discovery and
+verification aid, not the deletion gate: the session and replica databases
+go by known name whether or not the engine can enumerate, and a deletion
+the executor could not confirm, or a replica prefix `databases()` alone
+would have named, is reported on the outcome's `unverified` list rather
+than folded into a clean wipe.
 
 **The forget affordance** (`src/session/forget.ts`) removes this browser
 from an account, in two grades split by whether the unlock credential is in
@@ -537,12 +541,15 @@ document inventory out; only then does the local wipe run
 tear story: a run torn before the entry reads as "not forgotten" and a
 re-click resumes; the removal-published-but-wipe-torn direction is caught
 at the next login by the **forgotten-browser detector**
-(`assertClientStillEnrolled`): a client-key record still present while the
-cleanly verified account document no longer lists this client's
-verification method finishes the wipe from what the keyring hit alone
-derives and surfaces "this browser's access was removed", never raw
-authorization errors; nothing about the detection is persisted. The
-ceremony needs the standing members the login stamped on the profile
+(`assertClientStillEnrolled`): an enrolled client-key record (its user
+key present) still
+present while the cleanly verified account document no longer lists this
+client's verification method finishes the wipe from what the keyring hit
+alone derives and surfaces "this browser's access was removed", never raw
+authorization errors; nothing about the detection is persisted. A
+pending-shape record is spared for the resume instead (`decisions/0007`),
+whose published-then-removed branch hands the removal case back to the same
+wipe. The ceremony needs the standing members the login stamped on the profile
 (`profile.standingUnlock` beside `profile.ladderSeed`), re-seals the
 unlock-methods registry to the rotated user key while this client still
 invokes (its surviving readers would otherwise find it sealed to a retired
@@ -559,25 +566,25 @@ flips the dialog to that copy for a second confirm): wallet-core's
 client-less and ladder-anchored, the state a credential-anchored signup and
 a transient recovery produce (wallet-core decision 0004's 2026-08-21
 amendment). The ladder VM's install entry goes first, while the client's
-inventory stays (the both-present transitional state); then the roster
+inventory stays (the both-present transitional state); then: the roster
 rotation off this client's wrap, ladder-signed and anchored at the install
 entry (the ceremony-tail license's inventory-changing version) but
 HTTP-invoked under the still-standing client -- the roster store is built
 with the ladder VM's signer over the ceremony-supplied post-install log
 (`ladderSignedRosterStoreFor`), so the roster head stays signed by a key
 the post-removal document lists and needs no seal repair on an account
-where no login sweep will ever run again; the collection fan-out; the
-forced replacement of the embedded generation delegation with a fresh
+with no login sweep ever again; the collection fan-out; the forced
+replacement of the embedded generation delegation with a fresh
 ladder-signed one, and the revocation, through this client's `WasClient`,
 of every still-unexpired ladder-signed delegation the annex history
 embedded; the OTHER unlock methods' records (the standing passphrase and
 passkey credentials, the recovery codes) through the ceremony's
-`unlockMethods` reach (`unlockMethodsRemintReach`) -- the revocation
-cascade's re-mint pass (`remintEntriesOf`, shared with the cascade) walks
-every registry entry but the login credential's, signs each bridge and
-sibling with the ladder VM, re-seals each record through its management
-zcap (invoked under this still-standing client), and writes the refreshed
-fields back to the registry; then the login credential's own record
+`unlockMethods` reach (`unlockMethodsRemintReach`) -- the cascade's
+re-mint pass (`remintEntriesOf`, shared with the cascade) walks every
+registry entry but the login credential's, signs each bridge and sibling
+with the ladder VM, re-seals each record through its management zcap
+(invoked under this still-standing client), and writes the refreshed
+fields back; then the login credential's own record
 (`rebindLoginCredentialRecord`, the ceremony's required `onBeforeRemoval`
 seam, the one stage that reaches it): its bridge delegation and
 `delegatedClients` sibling are re-signed by the ladder VM and the record
@@ -603,19 +610,18 @@ too (`PendingRetirementForgetError`; the record itself is the detector,
 since an entry naming another credential is also what a superseded
 passphrase's own login sees on a healthy account): that state's only mender
 is the torn-retirement repair, which needs a durable enrolled login, and
-the transition ends durable logins on the account forever. So does a
-registry that does not name every standing credential the account document
-publishes (`UnrecordedCredentialForgetError`): each document `keyAgreement`
-entry carrying no enrolled-client controller marker is compared against the
-registry entries' recorded key-agreement multibase, in both published forms
-(the verbatim id a passkey or recovery code publishes, the commitment id a
-passphrase publishes). Every walk the transition and the client-less
-account after it perform is registry-driven, so an unnamed credential would
-keep a bridge delegation the removal entry rots with no replacement.
-Readers settle a re-minted record's proof against
-`currentAccountRecordSigners` (the enrolled clients' signing keys plus the
-ladder VMs the document lists), since on a client-less account the ladder
-VM is the only record signer left.
+the transition ends durable logins forever. So does a registry that does
+not name every standing credential the account document publishes
+(`UnrecordedCredentialForgetError`): each document `keyAgreement` entry
+carrying no enrolled-client controller marker is compared against the
+registry entries' recorded key-agreement multibase, in both published
+forms (the verbatim id a passkey or recovery code publishes, the
+commitment id a passphrase publishes). Every walk is registry-driven, so
+an unnamed credential would keep a bridge delegation the removal entry
+rots with no replacement. Readers settle a re-minted record's proof
+against `currentAccountRecordSigners` (the enrolled clients' signing keys
+plus the ladder VMs the document lists), since on a client-less account
+the ladder VM is the only record signer left.
 
 From the login page's authenticity and continuity refusals (reachable from
 passkey failures with no typed passphrase, reset between attempts) it is
@@ -646,10 +652,7 @@ session's signing to the promoted keyId and re-heals a signup torn between
 the pointer backfill and the promotion PUT). From then on the server
 resolves the controller by reading and fully verifying the log out of its
 own storage (SCID-pinned, hash chain, prerotation, update-key signatures)
-and authorizes by the **current-key-set rule**: an invocation or delegation
-verifies iff its verification method is in the resolved document now, so a
-delegation signed by a since-revoked client stops verifying the moment its
-VM leaves the document.
+and authorizes by the **current-key-set rule** (see Glossary).
 ## Account genesis (`@interop/wallet-core/genesis`)
 
 Shared with the mobile wallet: `mintAccountKeySet` mints the whole key set
@@ -682,22 +685,23 @@ server configured, the passphrase signup runs wallet-core's
 `establishCredentialAnchoredAccount` in
 `src/session/credentialAnchoredGenesis.ts`): no durable client is minted
 anywhere. The Space is bootstrapped under the LADDER VM's bare did:key
-(`ladderVmAgent`, re-derivable from the unlock record's ladder seed, so a tab
-death before promotion strands nothing). The one-entry ladder-anchored
+(`ladderVmAgent`, re-derivable from the unlock record's ladder seed, so a
+tab death before promotion strands nothing). The one-entry ladder-anchored
 did:webvh genesis is signed by ladder rung 0 (`updateKeys` = [rung 0],
-`nextKeyHashes` = [hash(rung 0), hash(rung 1)], `portable` unchanged) with the
-ladder VM and the credential's `keyAgreement` commitment folded in. The
+`nextKeyHashes` = [hash(rung 0), hash(rung 1)], `portable` unchanged) with
+the ladder VM and the credential's `keyAgreement` commitment folded in. The
 roster's epoch[0] wraps the user key to the credential's standing KAK with a
-ladder-signed entry proof (the ceremony-tail license's first-entry shape). The
-collection epochs are gated on the roster landing AND on its current epoch
-being the key the ceremony was handed (the user key exists only in the visit's
+ladder-signed entry proof (the ceremony-tail license's first-entry shape).
+The collection epochs gate on the roster landing AND on its current epoch
+being the key the ceremony was handed (the user key exists only in tab
 memory): a re-run that adopts an earlier run's roster skips the stage
 (`epochsSkipped`) and the heal branch installs the missing epochs under the
-roster's real key. There is no KMS stage; the keystore defers to the first
+roster's real key. There is no KMS stage; the keystore defers to first
 durable enrollment. The ordering rule is the transposed persist-before-publish
-invariant: the unlock record carrying the ladder seed (with an interim bridge
-delegated by the ladder's bare did:key) is durably written BEFORE the Space is
-created and before rung 0 publishes. After the genesis, the establishment
+invariant: the unlock record carrying the ladder seed (with an interim
+bridge delegated by the ladder's bare did:key) is durably written BEFORE
+the Space is created and before rung 0 publishes. After the genesis, the
+establishment
 mints the client annex generation under the same bootstrap identity, embeds
 the ladder-VM-signed generation delegation, flips the auxiliary Space's
 controller, appends the `#DelegatedClients` pointer as a second rung-0-signed
@@ -783,11 +787,13 @@ before opening, and on an engine with no `databases()` falls back to a
 versionless open whose `versionchange` transaction is aborted on
 `oldVersion === 0`; the ratchet is silent for now. An explicit
 `rememberBrowser` input forces either side: `true` is the programmatic
-durable entry (the standing
-self-enrollment; the signup probe and the recovery tail pass it, and e2e sets
-it through a non-production seam), and `false` on a remembered browser refuses
-(`AlreadyRememberedError`) rather than forking the durability decision. The
-composition (`transientSessionFromKeyringHit`): the transient unlock-record
+durable entry (the standing self-enrollment; the signup probe and the
+recovery tail pass it, and e2e sets it through a non-production seam), and
+`false` on a remembered browser refuses (`AlreadyRememberedError`) rather
+than forking the durability decision. A PENDING-shape record counts as
+remembered (the resume is its one mender); the resume's discard outcome
+deletes it, so the next attempt probes record-less again. The composition
+(`transientSessionFromKeyringHit`): the transient unlock-record
 fetch (`fetchTransientKeyring`, no durable operation), the account log
 verified under the visit's in-memory pins, a per-visit key minted in memory
 and enrolled into the client annex generation through the record's
@@ -808,23 +814,23 @@ connect-this-browser card); network errors rethrow unchanged so a flap
 stays distinguishable from a lapse.
 
 Two of those refusals carry a heal first, for the tears a torn
-credential-anchored signup can leave. A standing record whose pointer names no
-did:webvh can only be a credential-anchored establishment that died before its
-re-bind (durable-flow records gain their ladder seed only after promotion), so
-the composition re-runs `establishCredentialAnchoredAccount` and re-enters
-through the refreshed record; without the derived credential in hand (a test
-double), or when the re-run does not converge, the `unpromoted-account`
-refusal stands. A promoted account whose roster read comes back empty is the
-tear between genesis and epoch[0] (the user key died with the signup tab),
-healed here as the explicit carve-out from the sweeps-skipped rule: a fresh
-user key is minted, epoch[0] lands with a ladder-signed entry proof wrapped to
-the credential's standing KAK, and the collection epochs complete, every write
-invoked as the annex VM under the generation delegation (the `capability`
-option on `ensureWalletSpaceEpochs` and the roster store). Nothing encrypted
-predates the heal, so the fresh key orphans nothing. A roster read failing
-outright, rather than empty, retries once behind a bootstrap-signed promotion
-completion -- the one-request-wide tear between the record re-bind and the
-promotion.
+credential-anchored signup can leave. A standing record whose pointer names
+no did:webvh can only be a credential-anchored establishment that died
+before its re-bind (durable-flow records gain their ladder seed only after
+promotion), so the composition re-runs `establishCredentialAnchoredAccount`
+and re-enters through the refreshed record; without the derived credential
+in hand (a test double), or when the re-run does not converge, the
+`unpromoted-account` refusal stands. A promoted account whose roster read
+comes back empty is the tear between genesis and epoch[0] (the user key
+died with the signup tab), healed as the explicit carve-out from the
+sweeps-skipped rule: a fresh user key is minted, epoch[0] lands with a
+ladder-signed entry proof wrapped to the credential's standing KAK, and the
+collection epochs complete, every write invoked as the annex VM under the
+generation delegation (the `capability` option on `ensureWalletSpaceEpochs`
+and the roster store). Nothing encrypted predates the heal, so the fresh
+key orphans nothing. A roster read failing outright, rather than empty,
+retries once behind a bootstrap-signed promotion completion -- the
+one-request-wide tear between the record re-bind and the promotion.
 
 The handle also carries the durability refusals. Update-key rotation requires
 the durable variant outright (`DurableSessionRequiredError`): its subject is
@@ -934,35 +940,37 @@ The flow, quorum-of-one (any single enrolled client can enroll):
 1. **Enrollee** (login page, from the not-enrolled state): "Connect this
    browser" mints the key set (`mintEnrollmentRequest`) and shows the code.
    Nothing is durable yet.
-2. **Enrolling client** (Settings > Connect another wallet): pastes the code,
-   compares the fingerprint, approves (`approveEnrollment`). Push, not pull,
-   in the recovery-anchor order (decryption material before authorization):
-   the user key is wrapped to the new client's key-agreement key in
-   `key-map/user-key.jsonl` FIRST (`addUserKeyRosterRecipient`, escrow
-   semantics: every epoch, so pre-enrollment history decrypts), then the two
-   did:webvh log entries (`enrollWebvhClient`): a sparse **commit** entry
-   extending `nextKeyHashes` with the new client's update- and staged-key
-   hashes (prerotation demands the commitment land one entry early), then the
-   **add** entry publishing the new client's two verification methods and its
-   update key. No authorized-but-blind window exists at any point.
+2. **Enrolling client** (Settings > Connect another wallet): pastes the
+   code, compares the fingerprint, approves (`approveEnrollment`). Push,
+   not pull, in the recovery-anchor order (decryption material before
+   authorization): the user key wraps to the new client's key-agreement
+   key in `key-map/user-key.jsonl` FIRST (`addUserKeyRosterRecipient`,
+   escrow semantics: every epoch, so pre-enrollment history decrypts),
+   then the two did:webvh log entries (`enrollWebvhClient`): a sparse
+   **commit** entry extending `nextKeyHashes` with the new client's
+   update- and staged-key hashes (prerotation demands the commitment land
+   one entry early), then the **add** entry publishing the new client's
+   two verification methods and its update key. No authorized-but-blind
+   window exists at any point.
 3. **Enrollee** ("finish connecting"): verifies the enrollment from the
-   world-readable log (resolved locally, checked against the pointer's DID),
-   performs its first roster read signed with its just-published
-   `<did:webvh>#<multibase>` key, unwraps the user key, persists the key set
-   into the local client-key record under the passphrase's unlock layer
-   (stamping the account controller, so the login-time identity check binds
-   the record to the account), and logs in as an ordinary enrolled client.
+   world-readable log (resolved locally, checked against the pointer's
+   DID), performs its first roster read signed with its just-published
+   `<did:webvh>#<multibase>` key, unwraps the user key, persists the key
+   set into the local client-key record under the passphrase's unlock
+   layer (stamping the account controller, so the login-time identity
+   check binds the record to it), and logs in as an ordinary enrolled
+   client.
 
-**The connect code's keys must be canonical.** The enrolling client refuses a
-code whose key-agreement key is not the canonical X25519 twin of its signing
-key (`assertCanonicalEnrollmentKeys`, run inside the connect-code parse, so
-the refusal lands before anything is published). A client's key-agreement
-method is published under `controller: did:key:<its signing multibase>`, a
-claim every reader trusts to pair the two; without the check an enrollee
-could publish a key-agreement key nobody can pair with its signing key. The
-refusal reaches both approval surfaces: the paste dialog shows it under the
-code field, and a scanned onboarding response ends the invite with the
-generate-a-fresh-code copy.
+**The connect code's keys must be canonical.** The enrolling client refuses
+a code whose key-agreement key is not the canonical X25519 twin of its
+signing key (`assertCanonicalEnrollmentKeys`, run inside the connect-code
+parse, so the refusal lands before anything publishes). A client's
+key-agreement method publishes under `controller:
+did:key:<its signing multibase>`, a claim every reader trusts to pair the
+two; without the check an enrollee could publish a key-agreement key
+nobody can pair with its signing key. The refusal reaches both approval
+surfaces: the paste dialog under the code field, and a scanned onboarding
+response ending the invite with the generate-a-fresh-code copy.
 
 Every stage is idempotent and the ceremony is resumable from durable state
 alone; re-running with the same code converges. A tear after the roster
@@ -992,14 +1000,14 @@ leads with the fingerprint comparison (the mandatory trust anchor, since
 anyone holding the exchange URL could inject a response), states the
 full-peer consequence (an enrolled wallet reads and changes everything in
 the Space, connects apps, onboards or disconnects other wallets, issues and
-revokes recovery codes) and the disconnect ceiling, and prefills an
+revokes recovery codes) and the disconnect limitation, and prefills an
 editable label from the envelope's suggestion. Approval drives the same
-`approveEnrollment` + `setClientLabel` path as the paste dialog; the
-enrollee then completes the ceremony off the world-readable log as usual.
-The channel carries only the four public key multibases and the label; the
+`approveEnrollment` + `setClientLabel` path as the paste dialog, and the
+enrollee completes the ceremony off the world-readable log as usual. The
+channel carries only the four public key multibases and the label; the
 account pointer travels inside the stored request (the exchange URL is its
-confidentiality bound), and the user key still comes back through the
-wrap-set roster.
+confidentiality bound), and the user key comes back through the wrap-set
+roster.
 
 ## Recovery codes (`@interop/wallet-core/recovery`)
 
@@ -1034,54 +1042,63 @@ issuance it is MAC'd under a key derived from the code bytes (the storage
 host never holds it), the tag riding the record frame in the clear, and
 recovery verifies the tag BEFORE the pointer is trusted. This closes the
 host-forgery redirect: the record's JWE recipient is the code's unlock KAK,
-whose public half sits in the stored frame, so a malicious host can seal a
-record of its own pointing at an attacker-controlled account and sign it
-with that account's genuinely enrolled key; every signature-side check
-passes, and only the binding, which needs the code bytes, refuses it. The
-shell is the record's plaintext frame (controller, pointer, timestamp) plus
-its sealed `bridge` member (the pre-minted delegation, wrapped on its own so
-a re-mint can replace it) under the frame proof, whose signer is mixed:
-issuance signs with the code-derived unlock key (verified before decrypt);
-the revocation cascade's delegation re-mint signs with the re-minting
-client's account verification method, verified after decrypt against the
-did:webvh document of the account the code-authenticated pointer names. The
-re-mint reads the standing record through its management zcap and preserves
-the binding tag verbatim (it cannot recompute it and does not need to), so
-a re-mint can never move the record to another account; and since the tag
-covers the pointer's host, codes must be re-issued when the account migrates
-hosts. The record carries no email and the locate step shows none: a
-self-declared display string is exactly the deception payload a forged
-record could show as "this is your wallet", so `/recover` confirms only
-that the code located an account. The locate step keeps the module's error
-discipline: a network failure from the account-log fetch rethrows unchanged
-and surfaces as "could not check", and an account-log continuity refusal is
-never relabeled as a forged record. A `rollback` (possibly mere replication
-lag) reads as could-not-check; a fork or identity switch surfaces as its
-own continuity refusal.
+whose public half sits in the stored frame, so a malicious host could
+otherwise seal a record of its own pointing at an attacker-controlled
+account and sign it with that account's genuinely enrolled key; every
+signature-side check passes, and only the binding, which needs the code
+bytes, refuses it. The shell is the record's plaintext frame (controller,
+pointer, timestamp) plus its sealed `bridge` member (the pre-minted
+delegation, wrapped on its own so a re-mint can replace it) under the frame
+proof, whose signer is mixed: issuance signs with the code-derived unlock
+key (verified before decrypt); the revocation cascade's delegation re-mint
+signs with the re-minting client's account verification method, verified
+after decrypt against the did:webvh document the code-authenticated
+pointer names. The re-mint reads the standing record through its
+management zcap and preserves the binding tag verbatim (it cannot
+recompute it and does not need to), so a re-mint can never move the record
+to another account; since the tag covers the pointer's host, codes must be
+re-issued when the account migrates hosts. The record carries no email and
+the locate step shows none: a self-declared display string is exactly the
+deception payload a forged record could show as "this is your wallet", so
+`/recover` confirms only that the code located an account. The locate step
+keeps the module's error discipline: a network failure from the
+account-log fetch rethrows unchanged and surfaces as "could not check",
+and an account-log continuity refusal is never relabeled as a forged
+record. A `rollback` (possibly mere replication lag) reads as
+could-not-check; a fork or identity switch surfaces as its own continuity
+refusal.
 
 Issuance (Settings > Recovery codes, `issueRecoveryCode` in
-`src/session/recovery.ts`) runs in the recovery-anchor order, decryption
-material before authorization: roster wrap first (escrow: every epoch, so
+`src/session/recovery.ts`) runs in the recovery-anchor order: roster wrap
+first (escrow: every epoch, so
 recovery decrypts pre-issuance history), then the document entry (VM +
 commitment), then the delegation and unlock record, then a registry entry
 carrying public halves only. Nothing binds until the confirm-once dialog's
-"I saved this code".
+"I saved this code". The confirm gates the writes, not the tears: an
+issuance torn after its document entry leaves a code the user saved that
+locates no account (its unlock record never landed) plus a document
+`keyAgreement` entry and roster wrap nothing names. The login sweep
+rotates the orphan wrap away, but the registry-driven health check cannot
+see the code, so the saved code stays silently dead; the retire-and-
+reissue mender for the orphaned document entry is not built yet, and the
+last-client transition refuses while the entry stands.
 
-Recovery (`/recover`, `recoverAccountWithCode`): the typed code decrypts its
-unlock record, the log is fetched and locally verified against the pointer,
-and the delegation writes the self-enrolling continuation: a
+Recovery (`/recover`, `recoverAccountWithCode`): the typed code decrypts
+its unlock record, the log is fetched and locally verified against the
+pointer, and the delegation writes the self-enrolling continuation: a
 **reveal-and-commit** entry signed by the code's pre-committed update key
 (with prerotation active, an entry verifies against its own re-stated
-`updateKeys`, each hashing into the previous entry's `nextKeyHashes`, which
-is what lets a committed key reveal itself), then an **add-and-retire**
-entry. The continuation enrolls what the browser's durability decision
-would enroll at login. With `rememberBrowser` (the programmatic remember
-entry) a brand-new ordinary client key set is minted and the add-and-retire
-entry, signed by the new client's update key, brings the new client in (both
-VMs, all four signing relations, update authority), the spent code's VM,
-update key, and hash out, and a replacement code's inventory in. The user
-key is unwrapped from the code's standing wrap and **mandatorily rotated**
-off the spent code (recipients of the fresh epoch resolved from the
+`updateKeys`, each hashing into the previous entry's `nextKeyHashes` --
+what lets a committed key reveal itself), then an **add-and-retire** entry.
+The continuation enrolls what the browser's durability decision would
+enroll at login. With `rememberBrowser` (the programmatic remember entry)
+a brand-new ordinary client key set is minted and the add-and-retire
+entry, signed by the new client's update key, brings in the new client
+(both VMs, all four signing relations, update authority), retires the
+spent code's VM, update key, and hash, and adds a replacement code's
+inventory. The user key is unwrapped from the code's standing wrap and
+**mandatorily rotated** off the spent code (recipients of the fresh epoch
+resolved from the
 just-updated verified document); a replacement code is pushed hard (shown
 once, must be confirmed saved before login unlocks); the spent code's unlock
 Space is deleted (a typed code is a spent credential and thereafter fails
@@ -1115,52 +1132,50 @@ inside the same seam, written controller-tier while the auxiliary Space
 still answers to the bootstrap key (it exercises no authority there: the
 generation delegation it will invoke under is signed by a ladder VM the
 document does not list yet). The placement buys the window after the entry:
-the mandatory rotation, the ONE ladder-signed roster append the
-ceremony-tail license admits (`replaceUserKeyRosterRecipients`: the spent
-code retired, the fresh credential and the replacement code escrowed, the
-fresh epoch minted, in a single write anchored at the add-and-retire
-entry), is the first request after the entry, with no enrollment and no
-pre-read between the typed code dying in the document and the new
-credential gaining its wrap. The pre-rotation user key the registry update
-needs is unwrapped afterwards, from the superseded epoch's escrow to the
-fresh credential. The epoch cascade and the unlock-methods registry update
-(spent entry out, replacement and new-passphrase entries in, re-sealed to
-the rotated user key) ride the generation delegation, and the visit then
-enters through the ordinary transient composition with zero local residue
-(the locate step's chain-head pin rides in memory too). Two residues are
-stated. A tear inside the append itself leaves the spent code dead (its key
-left the document, so a re-run refuses it as spent) and the current epoch
-wrapped to the removed code alone; on a client-less account no login sweep
-runs, so the mender is a repair holding both the spent code (to unwrap the
-epoch) and the new passphrase (its record's ladder seed and sibling),
-running the same append anchored at the same entry under the ceremony-tail
-license's still-unused shot -- not built yet. And a rotation torn
-mid-fan-out on a client-less account has no repair yet; a stranded
-collection stays keyed to the spent code until the next durable login or a
-spend re-run.
+the mandatory rotation -- the ONE ladder-signed roster append the
+ceremony-tail license admits (`replaceUserKeyRosterRecipients`: spent code
+retired, fresh credential and replacement code escrowed, fresh epoch
+minted, one write anchored at the add-and-retire entry) -- is the first
+request after the entry, with no enrollment and no pre-read between the
+typed code dying in the document and the new credential gaining its wrap.
+The pre-rotation user key the registry update needs is unwrapped
+afterwards, from the superseded epoch's escrow to the fresh credential. The
+epoch cascade and the unlock-methods registry update (spent entry out,
+replacement and new-passphrase entries in, re-sealed to the rotated user
+key) ride the generation delegation, and the visit then enters through the
+ordinary transient composition with zero local residue (the locate step's
+chain-head pin rides in memory too). Two residues remain. A tear inside the
+append leaves the spent code dead (its key left the document, so a re-run
+refuses it as spent) and the current epoch wrapped to the removed code
+alone; on a client-less account no login sweep runs, so the mender is a
+repair holding both the spent code (to unwrap the epoch) and the new
+passphrase (its record's ladder seed and sibling), running the same append
+under the ceremony-tail license's still-unused shot -- not built yet. A
+rotation torn mid-fan-out on a client-less account has no repair yet
+either; a stranded collection stays keyed to the spent code until the next
+durable login or a spend re-run.
 
 Revoking a code from Settings is the issuance reversal and is REAL (the
 secret was only ever a pointer to the record): document entry out, user key
 rotated off the code's wrap and the collections re-epoch'd by the same
 cascade, unlock Space deleted, registry entry dropped; the live session
-adopts the rotated user key in place. A login-time health check watches for
-**delegation rot** (the stored delegation stops chaining the moment its
-signing client's verification method leaves the document, which would brick
-recovery exactly when it is needed) and for **delegation expiry**: the
-delegation's TTL is one year (NIST SP 800-57 cryptoperiod guidance), so the
-registry entry records its `expires`, and a delegation expired or inside
-the 30-day renewal window is flagged the same way. The check nudges
-regeneration; a client revocation re-mints the affected delegations as part
-of its cascade, and the same expiry predicate makes it refresh a near-lapse
-delegation too. The passes skip a pending-shaped entry (one whose record is
-sealed to a credential other than the one its identity members name, the
-residue of a passphrase change torn before its retirement) rather than
-sealing the half-retired credential a fresh bridge into the standing
+adopts the rotated user key in place. A login-time health check watches
+for **delegation rot** (the stored delegation stops chaining the moment
+its signing client's verification method leaves the document, which would
+brick recovery exactly when needed) and for **delegation expiry**: the
+delegation's TTL is one year (NIST SP 800-57 cryptoperiod guidance), so
+the registry entry records its `expires`, and a delegation expired or
+inside the 30-day renewal window is flagged the same way. The check
+nudges regeneration; a client revocation re-mints the affected delegations
+as part of its cascade, and the same expiry predicate makes it refresh a
+near-lapse delegation too. The passes skip a pending-shaped entry (one
+whose record is sealed to a credential other than the one its identity
+members name, the residue of a passphrase change torn before its
+retirement) rather than sealing a fresh bridge into a half-retired
 credential's record. The re-mint core (the staleness checks, the skip
 policy, the binding-carried-forward re-wrap) and the delegation builder
 live in `@interop/wallet-core/recovery`; `src/session/recovery.ts` binds
-them to the session's signers, the storage URL, and the unlock-methods
-registry.
+them to the session's signers, the storage URL, and the registry.
 
 Two standing boundary rules. First, the hash-commitment rule: **a
 low-entropy-derived public key is never published in the world-readable
@@ -1171,12 +1186,12 @@ oracle argument is in "Session & auth flow"). A high-entropy credential's
 key (a passkey PRF output, a recovery code) may publish verbatim. Second,
 the unlock-methods registry's additive `method` enum is the explicit seam
 for a later quorum recovery method (rejected for v1 as presupposing a
-contact roster most accounts lack). The re-mint machinery above also covers
-the standing passphrase/passkey credentials' bridge delegations: the
-cascade walks every registry entry recording one, and a standing
-credential's own login refreshes its bridge when it is inside the renewal
-window or when its signing key has left the account document (the
-signer-rot axis a self-enrollment's ladder-VM removal makes routine).
+contact roster most accounts lack). The re-mint machinery above also
+covers the standing passphrase/passkey credentials' bridge delegations:
+the cascade walks every registry entry recording one, and a standing
+credential's own login refreshes its bridge inside the renewal window or
+when its signing key has left the account document (the signer-rot axis a
+self-enrollment's ladder-VM removal makes routine).
 ## Client revocation and the epoch cascade
 
 Disconnecting an enrolled wallet client from the account. The cascade is
@@ -1191,60 +1206,58 @@ dependency order:
 1. **The document edit** (`revokeWebvhClient` in
    `@interop/wallet-core/webvh`): the revoked client's two verification
    methods (the key-agreement one found by its controller marker, never
-   re-derived), its update key, and both its standing `nextKeyHashes`
+   re-derived), its update key, and both standing `nextKeyHashes`
    commitments (the carry-over hash and the staged hash, the latter
-   recovered by log attribution, since an opaque committed hash left
-   behind would be a re-seizure credential via the reveal mechanism) leave
-   in one log entry. Under the current-key-set rule this one edit is the
-   revoked client's pull axis everywhere: its invocations, and every
-   delegation and app grant it ever signed, stop verifying at once. The
-   cascade makes no per-collection revoke calls; apps a revoked client had
-   connected reconnect through the ordinary App Connect flow.
+   recovered by log attribution -- an opaque committed hash left behind
+   would be a re-seizure credential via the reveal mechanism) leave in one
+   log entry. Under the current-key-set rule this one edit pulls the
+   revoked client's whole authority at once: its invocations, and every
+   delegation and app grant it ever signed, stop verifying. The cascade
+   makes no per-collection revoke calls; apps it had connected reconnect
+   through the ordinary App Connect flow.
 2. **The user key rotation** in the `key-map/user-key.jsonl` roster
    (`rotateUserKeyRoster`), recipients resolved from the just-updated
    verified document (the roster delivers, never sources, so the revoked
    client's entry is dropped even before the retire filter). An account
    with no roster yet stops here: the document edit landed, so the wallet
-   IS disconnected. The orchestrator itself enforces anchoring at the
-   post-edit head: it sets the roster store's controller floor
+   IS disconnected. The orchestrator enforces anchoring at the post-edit
+   head: it sets the roster store's controller floor
    (`setControllerFloor`) from the edit's own post-edit log before any
    roster-side work, so a stale cached controller view (the session's
    verified-log memo) can anchor neither the rotation nor the sealing
    append at a head predating the removal. The session hands over
-   wallet-core's sealable store unwrapped, which keeps that contract
-   reachable.
+   wallet-core's sealable store unwrapped, keeping that contract reachable.
 3. **The epoch cascade** (driven by wallet-core over the collections
    `src/session/userKeyCascade.ts` enumerates): every encrypted collection
-   (the encrypted standard collections plus every remotely listed
-   collection whose Description carries an encryption descriptor) is
-   re-epoch'd onto the fresh user key in parallel via was-client's
-   `replaceRecipient` (~2 requests per collection): the revoked user key
-   generations are retired from the epoch rosters and the fresh user key is
-   escrowed into every prior epoch, so every other replica keeps decrypting
-   across the rotation. A collection is stale exactly when its current
-   epoch names a non-current user key generation (durable state alone), and
-   a never-epoch'd collection gets the newest prior generation installed as
-   its first epoch (the user key is the epoch construction, so pre-epoch
-   envelopes ARE epoch-`oldUserKey` envelopes). A descriptor whose
-   `currentEpoch` names no epoch in its own `epochs` list is refused
-   fail-closed, matching the roster read's integrity refusal. Failures are
-   collected per collection into the fan-out's `failed` report; the rest
-   still rotate.
+   (standard plus any remotely listed collection whose Description carries
+   an encryption descriptor) is re-epoch'd onto the fresh user key in
+   parallel via was-client's `replaceRecipient` (~2 requests per
+   collection): the revoked user key generations retire from the epoch
+   rosters and the fresh user key escrows into every prior epoch, so every
+   other replica keeps decrypting across the rotation. A collection is
+   stale exactly when its current epoch names a non-current user key
+   generation (durable state alone), and a never-epoch'd collection gets
+   the newest prior generation installed as its first epoch (the user key
+   is the epoch construction, so pre-epoch envelopes ARE
+   epoch-`oldUserKey` envelopes). A descriptor whose `currentEpoch` names
+   no epoch in its own `epochs` list is refused fail-closed, matching the
+   roster read's integrity refusal. Failures collect per collection into
+   the fan-out's `failed` report; the rest still rotate.
 4. **The recovery re-PUTs** (`remintRecoveryDelegations`): recovery
    delegations the revoked client had signed stopped chaining at step 1;
    the revoking client re-mints them and re-PUTs the unlock records.
 5. **The generation-delegation re-mint** (the `remintGenerationDelegation`
    closure, module-level in `src/session/revocation.ts`): an embedded
-   generation delegation the revoked client had signed stopped chaining at
-   step 1 too, so the closure runs `ensureGenerationDelegationCurrent`
-   against the post-edit document (the stale-signer axis beside the expiry
-   one) and replaces the delegation in place -- same fragment, no
-   revocation POST, since the rotted chain no longer verifies anyway. It
-   signs with the login credential's ladder seed (`profile.ladderSeed`,
-   in-memory) and skips with a report (`outcome.generation`) when the seed
-   or a promoted pointer is absent; the mid-generation grant death that
-   remains is a stated consequence of an ordinary disconnect. The closure
-   runs in the no-roster early return as well.
+   generation delegation the revoked client had signed also stopped
+   chaining at step 1, so the closure runs `ensureGenerationDelegationCurrent`
+   against the post-edit document (the stale-signer axis beside expiry) and
+   replaces the delegation in place -- same fragment, no revocation POST,
+   since the rotted chain no longer verifies anyway. It signs with the
+   login credential's ladder seed (`profile.ladderSeed`, in-memory) and
+   skips with a report (`outcome.generation`) when the seed or a promoted
+   pointer is absent; the mid-generation grant death that remains is a
+   stated consequence of an ordinary disconnect. The closure runs in the
+   no-roster early return too.
 
 The revoking session then adopts the fresh user key in place (profile vault
 keys swapped, storage ciphers rebuilt via `adoptRotatedVaultKeys`, the
@@ -1258,15 +1271,15 @@ collections, so a mid-cascade crash strands nothing permanently. The
 limitation: ciphertext the revoked client already fetched stays readable to
 it, and old epochs open to keys it already held.
 
-One key survives every rotation: a collection's blinded-index HMAC key. It
-is minted with epoch[0] at provisioning and wrapped to each recipient on
-the `encryption` descriptor, but never rotates: blinded index tokens must
+One key survives every rotation: a collection's blinded-index HMAC key.
+Minted with epoch[0] at provisioning and wrapped to each recipient on the
+`encryption` descriptor, it never rotates: blinded index tokens must
 compare across the collection's whole history, and a fresh key would
 orphan every existing `indexed` entry. Recipient removal only drops the
 leaver's wrap, so a removed recipient keeps the blinding key and, colluding
-with the server, could confirm guessed attribute values indefinitely. That
-is a guessing oracle, not a read path: the server still gates the query
-endpoint on the pull grant, and the content keys rotate as above.
+with the server, could confirm guessed attribute values indefinitely -- a
+guessing oracle, not a read path: the server still gates the query endpoint
+on the pull grant, and the content keys rotate as above.
 
 The standing backstop is the **cascade-completion sweep**: session creation
 re-runs stages 2 and 3 on every login whose roster read succeeded, chained
@@ -1521,7 +1534,7 @@ predate it fail closed (the app surfaces an "update Freewallet" error)
 rather than degrading into a partial generic flow.
 
 The wire contract -- the `AppConnectQuery`, the app-key credential, the
-descriptor vocabulary and action ceilings, and the response presentation --
+descriptor vocabulary and action limitations, and the response presentation --
 is specified normatively in the **App Connect companion spec**
 (<https://github.com/interop-alliance/app-connect-spec>; local checkout
 `../app-connect-spec` -- read `spec.md` there instead of fetching the
@@ -1538,65 +1551,65 @@ generates 32 random bytes, derives the did:key via
 `CapabilityAgent.fromSeed({ seed, keyName: 'app-key' })` (the `keyName`
 string is load-bearing -- it must match was-react's derivation exactly),
 self-issues the credential (issuer == subject == seed-derived DID, seed
-base64url-no-pad in `credentialSubject.seed`), and saves it to the dedicated
-`app-connections` collection under the same consent -- no second popup. On a
-returning visit the stored credential is matched by the `AppKeyCredential`
-marker type AND `credentialSubject.appUrl === ` the request's serialized
-`appUrl` AND `credentialSubject.origin === ` the CHAPI requesting origin, so
-a phishing origin can neither recover nor be handed another origin's key,
-and two applications sharing an origin are kept apart by their `appUrl`s
-(the app-side origin check in was-react's `parseSeedCredential` stays as
-defense in depth).
+base64url-no-pad in `credentialSubject.seed`), and saves it to the
+dedicated `app-connections` collection under the same consent -- no second
+popup. On a returning visit the stored credential is matched by the
+`AppKeyCredential` marker type AND `credentialSubject.appUrl === ` the
+request's serialized `appUrl` AND `credentialSubject.origin === ` the
+CHAPI requesting origin, so a phishing origin can neither recover nor be
+handed another origin's key, and two applications sharing an origin stay
+apart by their `appUrl`s (the app-side origin check in was-react's
+`parseSeedCredential` stays as defense in depth).
 
 A match additionally requires that the credential's subject DID **re-derive
 from the seed the credential itself carries** (`appKeySeedBindsSubject`).
-Self-issuance is a weak signal (anyone can self-issue, and candidates are
-ranked on an `issuanceDate` the credential itself states), so without this a
+Self-issuance is a weak signal (anyone can self-issue, and candidates rank
+on an `issuanceDate` the credential itself states), so without this a
 credential planted through an import or injected into the Space directly
 would win the match and its DID would become the `controller` the wallet
 delegates to. The check is local and deterministic (the same
 `CapabilityAgent.fromSeed` call that minted it) and fails closed on an
 absent, non-base64url, or wrong-length seed. Binding authenticates internal
 consistency only, not provenance -- a fully attacker-generated credential
-(its own fresh seed, the victim app's `origin` and `appUrl`) binds perfectly
--- so the store-time refusal below, not the binding, is the door that keeps
-plants out. Candidates are ranked latest-first over the _instant_ each
-`issuanceDate` denotes rather than over the raw string, so a date's textual
-form (a numeric offset, differing fractional-second precision) cannot reopen
+(its own fresh seed, the victim app's `origin` and `appUrl`) binds
+perfectly -- so the store-time refusal below, not the binding, keeps
+plants out. Candidates rank latest-first over the _instant_ each
+`issuanceDate` denotes rather than the raw string, so a date's textual form
+(a numeric offset, differing fractional-second precision) cannot reopen
 the planted-credential path; an absent or unparseable date sorts last.
 
 **App keys live in their own collection.** Every app key is stored in
 `app-connections` -- a synced, EDV-encrypted, content-addressed collection
-like the credential replica, but structurally separate from it: the
-credential-wide surfaces (the dashboard list, credential detail, public-link
-creation, credential delete, collection shares) are scoped to
-`private-credentials` and can never reach a seed, with no filtering code.
-The collection is never shareable (`shareable: false` on its roster spec)
-and no grant may name it: a capability descriptor or URL naming the
-collection is unsatisfiable in grant resolution, not merely read-only. (A
-whole-Space read grant still covers its ciphertext, as for every private
-collection; the grantee is not an epoch recipient, so it decrypts nothing.)
-Match and consent-preview candidates come from
-`StorageManager.listAppKeys()`, so ordinary stored credentials never enter
-the match. That call reports what its scan had to skip: rows whose key epoch
-is still unknown after the one descriptor refresh, rows in a known epoch
-this session holds no wrap for, and envelopes that will not decrypt at all.
-A match scan that found nothing but skipped such rows refuses to mint, since
-"no match" there does not mean "never connected" and a fresh mint would
-orphan the app's prior identity. The refresh is spent at most once per
-collection per session and swallows a failed fetch, so an unknown-epoch row
-can still reach the match path, which is why it is reported rather than
-assumed resolved. Undecryptable rows are purgeable from the Applications
-page; the other two kinds are real data and are never purged. There is no
-migration from the old in-`private-credentials` placement and no legacy
-(pre-`appUrl`) re-issue path: an idempotent login-time sweep deletes
-stranded app-key rows from `private-credentials` (marker-typed or matching
-the old self-issued-with-origin shape), and an affected app reconnects
-through the ordinary flow as a first run -- its prior identity, and whatever
-it encrypted under it, is orphaned (the greenfield re-provision rule). The
-same sweep also retracts app-key public copies left with no private row
-behind them (a pre-upgrade app key kept through "keep public copy"), through
-the remote-aware retraction path under "Storage model".
+like the credential replica, but structurally separate: the credential-wide
+surfaces (the dashboard list, credential detail, public-link creation,
+credential delete, collection shares) are scoped to `private-credentials`
+and can never reach a seed, with no filtering code. The collection is never
+shareable (`shareable: false` on its roster spec) and no grant may name it:
+a capability descriptor or URL naming it is unsatisfiable in grant
+resolution, not merely read-only. (A whole-Space read grant still covers
+its ciphertext, as for every private collection; the grantee is not an
+epoch recipient, so it decrypts nothing.) Match and consent-preview
+candidates come from `StorageManager.listAppKeys()`, so ordinary stored
+credentials never enter the match. That call reports what its scan skipped:
+rows whose key epoch is still unknown after the one descriptor refresh,
+rows in a known epoch this session holds no wrap for, and envelopes that
+will not decrypt at all. A match scan that found nothing but skipped such
+rows refuses to mint, since "no match" does not mean "never connected" and
+a fresh mint would orphan the app's prior identity. The refresh is spent at
+most once per collection per session and swallows a failed fetch, so an
+unknown-epoch row can still reach the match path, hence reported rather
+than assumed resolved. Undecryptable rows are purgeable from the
+Applications page; the other two kinds are real data and stay unpurged.
+There is no migration from the old in-`private-credentials` placement and
+no legacy (pre-`appUrl`) re-issue path: an idempotent login-time sweep
+deletes stranded app-key rows from `private-credentials` (marker-typed or
+matching the old self-issued-with-origin shape), and an affected app
+reconnects through the ordinary flow as a first run -- its prior identity,
+and whatever it encrypted under it, is orphaned (the greenfield
+re-provision rule). The same sweep also retracts app-key public copies
+left with no private row behind them (a pre-upgrade app key kept through
+"keep public copy"), through the remote-aware retraction path under
+"Storage model".
 
 **Externally arriving app keys are refused at store time, unconditionally.**
 Every minted app key carries the marker type `AppKeyCredential`
@@ -1605,28 +1618,28 @@ defined in the static inline `@context`), which turns "presents as an app
 key" into a term check rather than a shape heuristic. The `type` array of a
 planted credential is attacker-controlled like everything else in it, so the
 marker is a **self-declaration, not evidence**; the store-time rule cannot
-be "binds, so it stores" (a planted credential can bind, see above) and is
-instead: app keys are wallet-minted, never imported.
+be "binds, so it stores" (a planted credential can bind too, see above).
+App keys are wallet-minted; an imported one is refused outright.
 `StorageManager.addCredential` -- the one door every externally supplied
 credential goes through (the CHAPI store popup, the URL / QR / manual-paste
 import, the credentials half of a space import) -- refuses every marked
 credential, binding or not (`assertStorableAppKey`, `AppKeyRefusedError`).
 Refusing beats storing-and-ignoring: consumers of an app-key match do not
-each re-check provenance, and the wallet does not show the user a credential
-it will never act on. The marker is _required_ at match time rather than
-merely tolerated, so a credential can only reach the delegation path by
-carrying it -- exactly what the store-time refusal screens. The wallet's own
-mint path stores through its own door (`StorageManager.addMintedAppKey`,
-called only by `processAppConnect`, writing into `app-connections`), which
-asserts the mint invariants so it cannot be misused to store a foreign key.
-Two ingest paths sit outside the door: the background sync pull writes
-pulled rows into the local replica directly, but it replicates the account's
-own remote collections, which only the account's enrolled wallet clients can
+each re-check provenance, and the wallet does not show a credential it will
+never act on. The marker is _required_ at match time rather than merely
+tolerated, so a credential can only reach the delegation path by carrying
+it -- exactly what the store-time refusal screens. The wallet's own mint
+path stores through its own door (`StorageManager.addMintedAppKey`, called
+only by `processAppConnect`, writing into `app-connections`), which asserts
+the mint invariants so it cannot be misused to store a foreign key. Two
+ingest paths sit outside the door: the background sync pull writes pulled
+rows into the local replica directly, but it replicates the account's own
+remote collections, which only the account's enrolled wallet clients can
 write (`app-connections` is never grantable, and `private-credentials` is a
-protected collection -- RP and share grants on it are read-only) and each of
-those clients enforces the same refusal at its own door; and the space half
-of an import writes opaque resources into the user's own Space server-side.
-For both, the match-time binding remains the backstop.
+protected collection -- RP and share grants on it are read-only) and each
+of those clients enforces the same refusal at its own door; and the space
+half of an import writes opaque resources into the user's own Space
+server-side. For both, the match-time binding is the backstop.
 
 The credential's shape is identical for every application: the `type` array
 is the fixed two-entry `["VerifiableCredential", "AppKeyCredential"]`, and
@@ -1638,7 +1651,7 @@ Because the wallet delegates to the subject DID of the credential it just
 matched or minted, the request never needs to name a controller DID, which
 is what makes the flow single-round. Delegation reuses `resolveGrants` /
 `processZcaps` verbatim (descriptor resolution, provisioning, the
-per-target-class action ceilings, TTLs, protected-collection rules). The
+per-target-class action limitations, TTLs, protected-collection rules). The
 response VP embeds the credential, the `zcap` array, and a wallet-provided
 `appConnect: { firstRun }` member (a JSON-literal term in the VP
 `@context`), all before signing so the DIDAuth proof covers them
@@ -1653,13 +1666,13 @@ the wallet declares it EDV-encrypted and sets up a multi-recipient key-epoch
 roster in which **the user's vault KAK is always a recipient (recipient
 zero)** alongside the app's **identity KAK** -- the X25519 (Montgomery) twin
 of the `did:key` the wallet is delegating to, derived with the same
-`x25519RecipientFromDidKey` a share uses. There is one recipient-derivation
-rule in the system, for an app and a person alike, and the app seed never
-enters the grant path: the wallet derives the app's recipient key from a
-public identifier it already has, and the app derives the private half from
-its own controller key. Both read the collection; the WAS server only ever
-stores ciphertext. Provisioning is idempotent: the collection gets epoch[0]
-wrapped to the owner create-if-absent (`ensureIndexedFirstEpoch` from
+`x25519RecipientFromDidKey` a share uses. One recipient-derivation rule
+covers app and person alike, and the app seed never enters the grant path:
+the wallet derives the app's recipient key from a public identifier it
+already has, and the app derives the private half from its own controller
+key. Both read the collection; the WAS server only ever stores ciphertext.
+Provisioning is idempotent: the collection gets epoch[0] wrapped to the
+owner create-if-absent (`ensureIndexedFirstEpoch` from
 `@interop/wallet-core/keys`, adopting an existing roster rather than
 overwriting it), then a first connect or a reconnect after revoke escrows
 the app into every epoch (`addRecipient(app)`); already present -> no-op.
@@ -1671,21 +1684,19 @@ provisioned before blind-index support is adopted as-is and stays
 unindexable. The wallet's own writes carry the same blinded `indexed`
 entries a Collection-handle write does: each encrypted collection's doc
 cipher installs the persisted index schema from the collection's stored
-`/meta` (its `custom` is an opaque encrypted envelope, fetched without keys
-and decrypted by the cipher), cached beside the encryption descriptors and
-refetched on the same unknown-epoch descriptor refresh -- so an index
-declared mid-session reaches the ciphers at the next descriptor refresh or
-login. The wallet ensures the collection exists without clobbering an
-existing `encryption` descriptor, so an established epoch roster is never
-dropped. Public (`https://w3id.org/byoe#public-collection`) grants stay
-plaintext and world-readable; only private app collections are encrypted,
-and a public grant can only ever CREATE its collection -- one naming an
-existing non-public collection is unsatisfiable, so no consent approval can
-flip an established (encrypted or not) collection world-readable. The
-policy: **the user is always a recipient of an encrypted collection in their
-own Space**; any future exception (an app collection the user is
-deliberately not a recipient of) must be an explicit, separate consent
-surface, never a silent default.
+`/meta` (an opaque encrypted envelope, fetched without keys and decrypted
+by the cipher), cached beside the encryption descriptors and refetched on
+the same unknown-epoch refresh -- an index declared mid-session reaches the
+ciphers at the next refresh or login. The wallet ensures the collection
+exists without clobbering an existing `encryption` descriptor, so an
+established epoch roster is never dropped. Public
+(`https://w3id.org/byoe#public-collection`) grants stay plaintext and
+world-readable; only private app collections are encrypted, and a public
+grant can only ever CREATE its collection -- one naming an existing
+non-public collection is unsatisfiable, so no consent approval can flip an
+established collection world-readable. The policy: **the user is always a
+recipient of an encrypted collection in their own Space**; any future
+exception must be its own explicit consent surface, not a silent default.
 
 Because the user is recipient zero, the wallet decrypts these collections in
 the storage browser as an ordinary recipient with its vault KAK,
@@ -1730,31 +1741,31 @@ signals are the grantee DID and request-supplied text (the `reason` and
 the agent name), all chosen by whoever wrote the link. Every refusal is
 decided before consent renders, in the pure module
 `src/lib/walletRequest/externalRequest.ts`, each with its own copy: a deep
-link that is not an interaction URL (a bare exchange URL included); an
-exchange that is gone (a 404 on either fetch, worded as
-expired-or-wrong-link since the server answers the same for both),
-unreachable, or answering with no readable VPR; a request asking for no
-storage access; a `DIDAuthentication` query in either spelling and a
-`domain` on any request (freewallet requires a `domain` for DID Auth and
-there is no origin to match it against); an `AppConnectQuery` (App Connect
-stays CHAPI-only); a VPR-named presentation endpoint (`interact.service`)
-on another origin than the exchange, since delivery prefers that endpoint
-and the consent panel names the resolved delivery host; and any grant
-class outside the allowlist. Only `#public-collection` and
-`#private-collection` targets (plain collection URLs resolving to those
-classes included) are granted from a link: a share would hand the grantee
-decryption of the user's own encrypted collections, and a whole-Space or
-protected-collection read covers the plaintext `public-credentials`
-(`barredGrants`, run once the grants are resolved, the first point a
-target's class is known). Widening the allowlist is a documented decision,
-not a code change. A failed exchange POST-back leaves the grant recorded
-and offers the composed response for manual delivery; a decline abandons
-the exchange, which expires on its own.
+link that is not an interaction URL (a bare exchange URL included); a gone
+exchange (a 404 on either fetch, worded as expired-or-wrong-link since the
+server answers the same for both), unreachable, or answering with no
+readable VPR; a request asking for no storage access; a
+`DIDAuthentication` query in either form and a `domain` on any request
+(freewallet requires a `domain` for DID Auth and there is no origin to
+match it against); an `AppConnectQuery` (App Connect stays CHAPI-only); a
+VPR-named presentation endpoint (`interact.service`) on another origin
+than the exchange, since delivery prefers that endpoint and the consent
+panel names the resolved delivery host; and any grant class outside the
+allowlist. Only `#public-collection` and `#private-collection` targets
+(plain collection URLs resolving to those classes included) are granted
+from a link: a share would hand the grantee decryption of the user's own
+encrypted collections, and a whole-Space or protected-collection read
+covers the plaintext `public-credentials` (`barredGrants`, run once the
+grants are resolved, the first point a target's class is known). Widening
+the allowlist is a documented decision, not a code change. A failed
+exchange POST-back leaves the grant recorded and offers the composed
+response for manual delivery; a decline abandons the exchange, which
+expires on its own.
 
 Grants answered here are listed and revocable from the Applications page,
 as agent rows keyed by the grant's `controller` did:key
 (`listConnectedAgents` in `src/lib/connectedApps.ts`). A row is titled by
-the request's `agent.name` when it sent one, else by the grantee key's
+the request's `agent.name` when sent, else by the grantee key's
 fingerprint. Its grants are the union over every agent Login for that
 controller newer than the latest matching Revoke activity (same origin
 marker, no `appConnect`, the controller in `object.controller`), since a
@@ -1763,8 +1774,8 @@ every grant has expired is dropped. Revoking an agent row POSTs every
 recorded capability's revocation, regardless of the orphaned marker, and
 records the Revoke with its `created` floored to the latest Login's stamp
 plus one millisecond so a fast-clocked terminal cannot leave the row
-standing. There is no app key to delete and no collection epoch to rotate,
-since an agent is never a key-epoch recipient.
+standing. There is no app key to delete and no collection epoch to
+rotate: an agent is never a key-epoch recipient.
 
 A grant delegated from a transient session chains under the session's
 generation delegation (`profile.invocationCapability`) rather than the
@@ -1807,25 +1818,26 @@ so a request can never pair controller DID A with recipient key B. A
 controller with no Ed25519 twin (a did:web, an X25519 did:key) makes the
 grant unsatisfiable.
 
-**Consent states the ceiling before approval.** The share row on the consent
-screen is visually distinct from every other grant and says three things: the
-grant is read _and_ decrypt; it covers the collection's contents from the
-moment of approval, not only future writes; and removing access later stops
-future reads but cannot take back what has already been read. The second
-holds without a hedge because every encrypted collection carries epoch[0]
-from provisioning (wrapped to the user key, recipient zero), so a share is
-always an `addRecipient` that escrows the grantee into every existing epoch
--- no rotation, and no envelope sits outside an epoch the grantee now holds.
-An epoch-less descriptor is refused fail-closed rather than seeded lazily at
-share time (it can only mean an unprovisioned or torn collection), so no
-single-recipient residue exists that a reader could fetch but not decrypt.
-Removal is the shares dialog behind a collection row's "Shared" chip in the
-Storage collection list (`unshareCollection`), not expiry -- the share TTL
-(`SHARE_ZCAP_TTL_MS`) is long, because expiry would end the pull axis while
-leaving the grantee in the key roster. A share also escrows the grantee into
-the collection's blinded-index HMAC key when the descriptor carries one;
-removal drops that wrap but never rotates the key (see "Client revocation
-and the epoch cascade" for why, and what a removed grantee keeps).
+**Consent states the limitations before approval.** The share row on the
+consent screen is visually distinct from every other grant and says three
+things: the grant is read _and_ decrypt; it covers the collection's
+contents from the moment of approval, not only future writes; and removing
+access later stops future reads but cannot take back what has already been
+read. The second holds without a hedge because every encrypted collection
+carries epoch[0] from provisioning (wrapped to the user key, recipient
+zero), so a share is always an `addRecipient` that escrows the grantee into
+every existing epoch -- no rotation, and no envelope sits outside an epoch
+the grantee now holds. An epoch-less descriptor is refused fail-closed
+rather than seeded lazily at share time (it can only mean an unprovisioned
+or torn collection), so no single-recipient residue exists that a reader
+could fetch but not decrypt. Removal is the shares dialog behind a
+collection row's "Shared" chip in the Storage collection list
+(`unshareCollection`), not expiry -- the share TTL (`SHARE_ZCAP_TTL_MS`) is
+long, because expiry would end the pull axis while leaving the grantee in
+the key roster. A share also escrows the grantee into the collection's
+blinded-index HMAC key when the descriptor carries one; removal drops that
+wrap but never rotates the key (see "Client revocation and the epoch
+cascade" for why, and what a removed grantee keeps).
 
 **The grantee's half lives in `@interop/was-react`.** An app declares the
 wallet-owned collections it wants in `WasAppConfig.sharedCollections`, which
@@ -1848,18 +1860,18 @@ Security notes:
   `parseSeedCredential`.
 - **Grant scope**: unchanged from the generic capability-query model; the
   requested actions are normalized against the closed WAS action vocabulary
-  and intersected with the ceiling for the target's class (whole Space,
-  protected collection, and share read-only; public collections and
-  app-provisioned private collections the full vocabulary), and the consent
+  and intersected with the limitation for the target's class (whole Space,
+  protected collection, and share read-only; the full vocabulary for public
+  collections and app-provisioned private collections), and the consent
   screen shows exactly what `resolveGrants` resolved. A grant left with no
-  permitted action is unsatisfiable, never delegated empty. Resolution also
-  consults the existing collections' state (a snapshot fetched from the
-  Space, once for the consent preview and fresh again at delegation time,
-  then kept current as the delegation loop provisions, so duplicate names
-  within one request resolve against what the request itself created). A
-  public collection is only ever created public, never converted (see "App
-  Connect"): the idempotent re-grant on an already-public collection
-  delegates without re-provisioning, and any target naming an
+  permitted action is unsatisfiable; it is not delegated empty. Resolution
+  also consults the existing collections' state (a snapshot fetched from
+  the Space, once for the consent preview and fresh again at delegation
+  time, then kept current as the delegation loop provisions, so duplicate
+  names within one request resolve against what the request itself
+  created). A public collection is only ever created public, not converted
+  (see "App Connect"): the idempotent re-grant on an already-public
+  collection delegates without re-provisioning, and any target naming an
   already-public collection is classed public-collection and skips
   provisioning whether it arrives as a `#public-collection` descriptor, a
   `#private-collection` descriptor, or a plain URL string.
@@ -1870,23 +1882,21 @@ Security notes:
   `app-connections` collection, so the app's DID -- and the X25519 recipient
   key derived from it -- is scoped to the **(user, origin, `appUrl`)**
   triple. The same app connected by two users gets two unrelated DIDs:
-  independent randomness per user rather than a derivation over (app,
-  user), so there is no cross-user linkability between an app's DIDs and
-  compromising one user's app key reveals nothing about another's, where a
-  shared-root KDF would break every user at once. "Encrypted to the app's
-  key" throughout this document therefore means _that user's_ instance of
-  the app.
+  independent randomness per user, not a derivation over (app, user), so
+  there is no cross-user linkability and compromising one user's app key
+  reveals nothing about another's, where a shared-root KDF would break
+  every user at once. "Encrypted to the app's key" throughout this document
+  therefore means _that user's_ instance of the app.
 
   This holds on the App Connect path, where the wallet mints the key and
   fills `controller` itself. A standalone `AuthorizationCapabilityQuery`
   names its own `controller`, so an app taking that route could supply one
-  static DID for every user, and each user's collection would then wrap its
-  (still distinct) epoch secret to one app-held key. The wallet cannot
-  detect this (it only ever sees one user's view), so it is an ecosystem
-  expectation of app authors, not an enforced invariant: **a grantee DID
-  SHOULD NOT be shared across users.** Either way the recipient key is
-  derived from the named controller, so a request can never pair controller
-  DID A with recipient key B.
+  static DID for every user, wrapping each user's (still distinct) epoch
+  secret to one app-held key. The wallet cannot detect this (it sees only
+  one user's view), so it is an ecosystem expectation of app authors, not
+  an enforced invariant: **a grantee DID SHOULD NOT be shared across
+  users.** Either way the recipient key derives from the named controller,
+  so a request can never pair controller DID A with recipient key B.
 ## Route map
 
 | Path | Component | Notes |
@@ -1926,23 +1936,29 @@ finished (see Tear mending in the Glossary).
 | --- | --- | --- | --- | --- |
 | Account genesis (durable) | signup; healed at every login | `src/session/signup.ts` | `/genesis` | re-run (every stage an ensure) |
 | Credential-anchored genesis | default signup, non-remembered browser | `src/session/credentialAnchoredGenesis.ts` | `/clientAnnex` | re-run; the transient login's heal branch re-runs it |
-| Self-enrollment at login | durable login on a fresh browser | login path in `src/session/initSession.ts` | `/clientAnnex` | re-run; a phantom client is removed via Disconnect |
+| Self-enrollment at login | durable login on a fresh browser | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex` | pending record persisted pre-pivot; the next login's resume finishes it |
 | Client enrollment (two-party) | Settings > Connected wallets + login page | `src/components/EnrolledClientsSection.tsx` | `/enrollment` | re-run with the same connect code |
 | Client revocation + epoch cascade | Settings > Connected wallets | `src/session/revocation.ts` | `/clients` | re-run; cascade-completion sweep |
 | Recovery-code issuance | Settings > Recovery codes | `src/session/recovery.ts` | `/recovery` | re-run (nothing binds until the confirm) |
-| Recovery spend (durable and transient) | `/recover` | `src/session/recovery.ts` | `/recovery`, `/clientAnnex` | re-run; the transient variant's roster-append repair is not built yet |
+| Recovery spend (durable and transient) | `/recover` | `src/session/recovery.ts` | `/recovery`, `/clientAnnex` | re-run; open gaps in both variants (below) |
 | Recovery-code revocation | Settings > Recovery codes | `src/session/recovery.ts` | `/recovery` | re-run; cascade-completion sweep |
-| Unlock-credential rotation | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts` | `/unlock` | torn-retirement repair at the next passphrase login; login sweep; re-seal repair for a torn registry re-seal |
+| Unlock-credential rotation | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts` | `/unlock` | torn-retirement repair at next passphrase login; login sweep; re-seal repair |
 | Forget ceremony | Settings > Connected wallets, own row | `src/session/forget.ts` | `/clientAnnex` | re-run (wipe last); forgotten-browser detector at the next login |
-| Last-client transition | same row, `lastClient` confirm | `src/session/forget.ts` | `/clientAnnex` | re-run; the record re-mint refusal is a retryable stop; refused outright on a pending passphrase entry or a standing credential the registry does not name |
+| Last-client transition | same row, `lastClient` confirm | `src/session/forget.ts` | `/clientAnnex` | re-run; the re-mint refusal is a retryable stop; refused outright on a pending passphrase entry or an unrecorded standing credential |
 | Update-key rotation | Settings | `src/session/accountSettings.ts` | `/webvh` | re-run (persist-before-publish) |
 | Account deletion | Settings | `src/session/accountSettings.ts` + `wipe.ts` | app-side phase order | re-run; a wipe failure after the unlock-method walk is accepted |
 | Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies | `src/session/wipe.ts` | app-side | re-probe verification; the `unverified` report |
 | Step-up ceremony | designed, not built | --- | --- | --- |
 
-The honest ledger of unbuilt menders, both on client-less accounts (where
-no login sweep will ever run): the transient recovery's roster-append
-repair, and a repair for a user-key rotation torn mid-fan-out.
+The open gaps (stated residues with no mender yet; see Tear mending in
+the Glossary). Two are unbuilt repairs on client-less accounts, where no
+login sweep will ever run: the transient recovery's roster-append repair,
+and one for a user-key rotation torn mid-fan-out. The third is the
+durable spend's pre-persist window: the add-and-retire entry lands before
+the new client's key set or the replacement code's record persists
+anywhere, so a tab death there on an account with no other durable client
+strands the account. The fix is reordering onto the transient variant's
+persist-before-publish seam.
 
 ## What lives elsewhere (do not reimplement here)
 
@@ -1954,28 +1970,26 @@ app-side. The map of the shared wallet layer is
 layers and dependency direction, the key hierarchy, the ceremonies and
 cascades, and the permanent wire-level constants.
 
-- **`@interop/wallet-core`** -- the correctness-critical logic shared with the
-  DCW mobile wallet, imported by subpath. The sections above name them where
-  they surface; the full set used here: `/webvh` (the did:webvh log and the
-  document halves of the ceremonies), `/clientAnnex` (the client annex: the
-  ladder, the annex log and its GC, and the ladder-anchored ceremonies --
-  credential-anchored genesis, self-enrollment, transient recovery; the
-  verify-side halves stay in the base subpaths), `/keys`
-  (+ `/keys/clientKeyRecord`; the
-  user key, its wrap-set roster, the client-key record codec, client labels),
-  `/keyring` (the unlock layer), `/genesis` (the account-genesis key mint and
-  ceremony), `/enrollment`, `/recovery`, `/clients`
-  (listing, disconnect policy, the revocation cascade orchestrator, the
-  login-time roster policy), `/descriptors`, `/identity`, `/space` (collection
-  layout, activity builders, `was-link`), `/request` (classification,
-  matching, VP composition, exchanges, and the App Connect app-key
-  credential), `/display`, `/resourceLog` (the wallet-domain residue of the
-  resource-log client side: the did:webvh controller adapter
-  `webvhResourceLogController` and the ceremony-tail license), and `/sync`
-  (only the
-  contacts LWW conflict resolution -- freewallet keeps its own RxDB
-  replication driver in `src/lib/sync/`, over the wire contract from
-  `@interop/was-client/sync`).
+- **`@interop/wallet-core`** -- the correctness-critical logic shared with
+  the DCW mobile wallet, imported by subpath. The sections above name them
+  where they surface; the full set used here: `/webvh` (the did:webvh log
+  and the document halves of the ceremonies), `/clientAnnex` (the client
+  annex: the ladder, the annex log and its GC, and the ladder-anchored
+  ceremonies -- credential-anchored genesis, self-enrollment, transient
+  recovery; the verify-side halves stay in the base subpaths), `/keys`
+  (+ `/keys/clientKeyRecord`; the user key, its wrap-set roster, the
+  client-key record codec, client labels), `/keyring` (the unlock layer),
+  `/genesis` (the account-genesis key mint and ceremony), `/enrollment`,
+  `/recovery`, `/clients` (listing, disconnect policy, the revocation
+  cascade orchestrator, the login-time roster policy), `/descriptors`,
+  `/identity`, `/space` (collection layout, activity builders, `was-link`),
+  `/request` (classification, matching, VP composition, exchanges, and the
+  App Connect app-key credential), `/display`, `/resourceLog` (the
+  wallet-domain residue of the resource-log client side: the did:webvh
+  controller adapter `webvhResourceLogController` and the ceremony-tail
+  license), and `/sync` (contacts LWW conflict resolution only --
+  freewallet keeps its own RxDB replication driver in `src/lib/sync/`,
+  over the wire contract from `@interop/was-client/sync`).
 - **`@interop/vh-resource-log`** -- the Resource Log Profile's generic client
   side: chain verification, the chain-head pin port (`ResourceLogPinStore`,
   `ResourceLogHeadPin`, `memoryResourceLogPinStore`) and its host-free slot
@@ -2130,18 +2144,17 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   derived from a standing credential's random ladder seed. Each rung is
   committed ahead of use as a hash in `nextKeyHashes` (the method's
   prerotation), and a rung reveals itself when the credential self-enrolls
-  (a reveal-and-commit log entry signed by the current rung). It is how a
+  (a reveal-and-commit log entry signed by the current rung) -- how a
   credential extends the log with no durable client key in hand. The
   **ladder VM** is the verification method derived from the ladder
   (published under `assertionMethod` and `capabilityDelegation`; no
-  invocation relation) that anchors an account while it has zero enrolled
-  clients: installed by the credential-anchored genesis, the transient
-  recovery, and the last-client forget transition; it signs the roster's
-  entry proofs, the generation delegation, and the unlock records'
-  re-minted bridges on such an account, and is struck from the document
-  when its credential retires. Its bare did:key (`ladderVmAgent`) is the
-  bootstrap identity the credential-anchored genesis creates the Space
-  under.
+  invocation relation) that anchors an account with zero enrolled clients:
+  installed by the credential-anchored genesis, the transient recovery, and
+  the last-client forget transition; it signs the roster's entry proofs,
+  the generation delegation, and the unlock records' re-minted bridges on
+  such an account, and is struck from the document when its credential
+  retires. Its bare did:key (`ladderVmAgent`) is the bootstrap identity the
+  credential-anchored genesis creates the Space under.
 - **Roster** -- three related uses. The **enrolled-client roster** is the
   did:webvh document itself (each client's verification methods). The
   **user key wrap-set roster** (`key-map/user-key.jsonl`) is the
@@ -2173,23 +2186,34 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   persist-before-publish, document-edit-first,
   decryption-material-before-authorization. Every stage detects its own
   completion from durable state, and every tear point has a stated mender
-  (see Tear mending). The full list is the "Ceremony inventory" section;
-  the shared stage orders are canonical in wallet-core's ARCHITECTURE.md
-  ("Ceremonies and cascades"). Avoid: flow, workflow, wizard.
+  (see Tear mending). Every ceremony has a **pivot**: the first durable
+  write past which backward recovery is impossible. The derivability rule
+  governs both sides of it -- a write sits before the pivot and stays
+  inert until the pivot lands, or after it and is re-derivable from the
+  pivot entry plus durable state alone (canonical in wallet-core's
+  `decisions/0010-post-pivot-derivability-rule.md`, checked per-write at
+  the design gate for every new or changed ceremony). The full list is the
+  "Ceremony inventory" section; the shared stage orders are canonical in
+  wallet-core's ARCHITECTURE.md ("Ceremonies and cascades"). Avoid: flow,
+  workflow, wizard.
 - **Tear mending** -- the umbrella for how a ceremony interrupted mid-run
   (a torn ceremony) gets finished. Three menders exist: a converging re-run
   (the same ceremony retried; every stage detects its own completion), a
   standing sweep (a background login-time pass, e.g. the
-  cascade-completion sweep), and a repair (below). A stated residue with no
-  mender is an open gap, not a documented limitation. Avoid: tear closure.
+  cascade-completion sweep), and a repair (below). The derivability rule
+  makes these menders sufficient: a post-pivot write is by construction
+  re-derivable, so a re-run, sweep, or repair can always roll it forward
+  from durable state. A write that fails the rule is a defect with its own
+  work item, not a documented limitation. A stated residue with no mender
+  is an open gap. Avoid: tear closure.
 - **Repair** -- the mender of last resort: code waiting at the one entry
-  point where the authority a specific torn state needs reassembles,
-  detecting that state from durable state alone and finishing the
-  ceremony. Used where neither a re-run nor a login sweep can fire (the
-  recurring case is a client-less account, where no durable login ever
-  runs a sweep). Always qualified by its torn state ("the torn-retirement
-  repair", `repairTornPassphraseRetirement`), never bare. Avoid: completer,
-  finisher, fixup.
+  point where the authority a torn state needs reassembles, detecting that
+  state from durable state alone and finishing the ceremony. Used where
+  neither a re-run nor a login sweep can fire (typically a client-less
+  account, where no durable login ever runs a sweep). Always qualified by
+  its torn state ("the torn-retirement repair",
+  `repairTornPassphraseRetirement`), never bare. Avoid: completer, finisher,
+  fixup.
 - **Client annex** (`clientAnnex`) -- the transient-session counterpart of
   an enrolled client for the public-computer case: a did:webvh whose log
   lives in a capability-gated auxiliary Space beside the account Space,

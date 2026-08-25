@@ -13,6 +13,14 @@ import {
   TransientLoginUnavailableError,
   type TransientLoginUnavailableReason
 } from '@/session/transientLogin'
+import {
+  PendingEnrollmentDiscardedError,
+  PendingEnrollmentError,
+  PendingResumeLogUnavailableError
+} from '@/session/pendingEnrollment'
+import { SelfEnrollmentSkewError } from '@/session/standingUnlock'
+import enLocale from '@/i18n/locales/en.json'
+import esLocale from '@/i18n/locales/es.json'
 
 function keyFor(reason: TransientLoginUnavailableReason) {
   return loginErrorKey({
@@ -75,6 +83,74 @@ describe('loginErrorKey', () => {
     ]
     for (const reason of reasons) {
       expect(keyFor(reason).key).not.toBe('auth.errors.clientNotEnrolled')
+    }
+  })
+})
+
+describe('loginErrorKey -- the pending-enrollment outcomes (FW-280)', () => {
+  it('maps the fail-closed pending refusal onto its own copy', () => {
+    const outcome = loginErrorKey({
+      err: new PendingEnrollmentError({ reason: 'resume-failed' }),
+      label: 'Login'
+    })
+    expect(outcome.key).toBe('auth.errors.pendingEnrollment')
+  })
+
+  it("maps a spend-written record's refusal onto the go-to-/recover copy", () => {
+    const outcome = loginErrorKey({
+      err: new PendingEnrollmentError({ reason: 'recovery-spend' }),
+      label: 'Login'
+    })
+    expect(outcome.key).toBe('auth.errors.pendingRecoveryResume')
+  })
+
+  it('maps the discard onto its own dropped-connection copy', () => {
+    const outcome = loginErrorKey({
+      err: new PendingEnrollmentDiscardedError(),
+      label: 'Login'
+    })
+    expect(outcome.key).toBe('auth.errors.pendingEnrollmentDiscarded')
+  })
+
+  it('maps a lagging served log (BuiltOnHeadNotReachedError) onto the transport state', () => {
+    const err = new Error('behind the recorded head')
+    err.name = 'BuiltOnHeadNotReachedError'
+    const outcome = loginErrorKey({ err, label: 'Login' })
+    expect(outcome.key).toBe('auth.errors.storageUnreachable')
+  })
+
+  it('maps an unfetchable account log during the resume onto the transport state', () => {
+    const outcome = loginErrorKey({
+      err: new PendingResumeLogUnavailableError({
+        cause: new TypeError('Failed to fetch')
+      }),
+      label: 'Login'
+    })
+    expect(outcome.key).toBe('auth.errors.storageUnreachable')
+  })
+
+  it('maps the build-skew refusal onto its own copy', () => {
+    const outcome = loginErrorKey({
+      err: new SelfEnrollmentSkewError(),
+      label: 'Login'
+    })
+    expect(outcome.key).toBe('auth.errors.selfEnrollmentSkew')
+  })
+
+  it('carries every new key in both locales', () => {
+    const locales = [enLocale, esLocale] as Array<{
+      auth: { errors: Record<string, string> }
+    }>
+    for (const locale of locales) {
+      for (const key of [
+        'pendingEnrollment',
+        'pendingEnrollmentDiscarded',
+        'pendingRecoveryResume',
+        'selfEnrollmentSkew'
+      ]) {
+        expect(typeof locale.auth.errors[key]).toBe('string')
+        expect(locale.auth.errors[key]!.length).toBeGreaterThan(0)
+      }
     }
   })
 })

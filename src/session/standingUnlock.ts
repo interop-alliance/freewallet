@@ -45,7 +45,8 @@ import {
   accountLogPinId,
   delegatedWebvhLogStore,
   didKeyZcapClient,
-  isWebvhDid
+  isWebvhDid,
+  type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
 import {
   commitClientAnnexRung,
@@ -529,55 +530,97 @@ export function canSelfEnroll({
 }
 
 /**
+ * Thrown when wallet-core's self-enrollment core returned without stating
+ * whether the persist hook fired (`committed` absent from the return) -- a
+ * build skew: a stale hook-less wallet-core body running under new app code
+ * would silently reinstate the publish-then-persist phantom window, so the
+ * run is refused instead of trusted. The returned key set is persisted
+ * before the refusal (a stale core has already published the client), so
+ * the browser IS connected and the next login proceeds enrolled.
+ */
+export class SelfEnrollmentSkewError extends Error {
+  constructor() {
+    super(
+      'The self-enrollment core did not state whether the persist hook ' +
+        'fired; refusing a possibly hook-less run (stale wallet-core build).'
+    )
+    this.name = 'SelfEnrollmentSkewError'
+  }
+}
+
+/**
  * Self-enrolls this fresh browser as an ordinary enrolled client, from
  * nothing but the credential's keyring hit: runs wallet-core's composed
  * continuation (the reveal-and-commit and add log entries through the
  * record's bridge delegation, the first roster read through the credential's
- * standing wrap, and the new client's own roster escrow), persists the
- * freshly minted key set under the credential's unlock identity, and only
- * then pins the roster epoch -- so this login, and every later one,
- * proceeds as an ordinary enrolled client. Loud by construction: the
- * world-readable hash-chained log extends before a single byte is read.
+ * standing wrap, and the new client's own roster escrow), persists the key
+ * set under the credential's unlock identity, and only then pins the roster
+ * epoch -- so this login, and every later one, proceeds as an ordinary
+ * enrolled client. Loud by construction: the world-readable hash-chained log
+ * extends before a single byte is read.
  *
- * The persist runs before the pin on purpose: once the add entry has landed
- * the document lists the new client, so a login that fails past that point
- * with the seeds unpersisted leaves a phantom client (listed, counted by the
- * last-durable-client refusal, roster-wrapped, never usable), and a re-run
- * mints another. A rejecting pin write (quota, a blocked upgrade) is
- * therefore not a login failure once the key set is persisted: it is
- * logged and the login proceeds, and the next login's roster read
- * establishes the pin from the verified roster. What stays open is the
- * window inside wallet-core's `selfEnrollClientCore` between the add entry
- * and its return (the verification read and the roster escrow), which has
- * no persist hook: a tab closing there still strands a phantom client. It
- * is visible as an unlabeled row in Settings > Connected wallets with no
- * browser answering to it, and is removed through that row's ordinary
- * Disconnect (the revocation cascade).
+ * The persist order is persist-before-publish end to end. The REQUIRED
+ * `onCommitted` seam fires between the reveal entry and the add entry
+ * (inside the conflict retry, so it re-fires per attempt): the pending-shape
+ * client-key record -- seeds, controller, `pointerDid`, and the `pending`
+ * group (`ceremony: 'self-enrollment'`, the built-on head), no `userKey` --
+ * becomes durable BEFORE the pivot entry publishes the client, so a tab
+ * closing anywhere after the add entry leaves a record the next login's
+ * resume finishes rather than a phantom client only Disconnect could
+ * remove. After the core returns, the completion overwrites the record with
+ * the enrolled shape (the user key in, `pending` cleared), and only then
+ * the epoch pin is written (the FW-254 persist-before-pin order, kept for
+ * the completion). A rejecting pin write (quota, a blocked upgrade) is not
+ * a login failure once the key set is persisted: it is logged and the login
+ * proceeds, and the next login's roster read establishes the pin from the
+ * verified roster.
+ *
+ * With `resume`, the mint is skipped and the recorded key set replays: the
+ * core detects the standing entries from the log, publishes only what is
+ * missing, refuses a served log that never reached the recorded head
+ * (`BuiltOnHeadNotReachedError`), and converges on the same durable state a
+ * fresh run would -- never minting a second client. The pending record is
+ * completed on the RETURN, whatever `committed` says (a resume that met an
+ * already-complete continuation is a full success).
  *
  * @param options {object}
  * @param options.found {KeyringFetchResult}   a hit `canSelfEnroll` accepted
+ *   (fresh), or a pending-record hit the resume gate accepted (`resume`)
  * @param [options.idb] {IDBFactory}
+ * @param [options.resume] {object}   the pending record's replayed contents:
+ *   `{ clientSeed, webvhUpdateKeys, builtOnHead }`
  * @returns {Promise<object>}   the persisted key set and its persist closure
  */
 export async function selfEnrollStandingClient({
   found,
-  idb
+  idb,
+  resume
 }: {
   found: KeyringFetchResult
   idb?: IDBFactory
+  resume?: {
+    clientSeed: Uint8Array
+    webvhUpdateKeys: ClientWebvhUpdateKeys
+    builtOnHead: { scid: string; versionId: string }
+  }
 }): Promise<{
   clientKeys: ClientKeyRecord
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
 }> {
   const { standing, standingClient, pointer, enrollClientKeys } = found
-  if (
-    !standing?.ladderSeed ||
-    !standingClient ||
-    !pointer ||
-    !enrollClientKeys
-  ) {
+  if (!standing?.ladderSeed || !standingClient || !pointer) {
     throw new Error('This keyring hit cannot self-enroll a client.')
   }
+  if (!resume && !enrollClientKeys) {
+    throw new Error('This keyring hit cannot self-enroll a client.')
+  }
+  const recordPersister = found.persistClientKeys
+  if (resume && !recordPersister) {
+    throw new Error('This keyring hit cannot resume a pending enrollment.')
+  }
+  let hookFires = 0
+  let enrolledPersister:
+    ((changes: PersistableClientKeys) => Promise<void>) | undefined
   const result = await selfEnrollClientCore({
     pointer,
     ladderSeed: standing.ladderSeed,
@@ -589,14 +632,102 @@ export async function selfEnrollStandingClient({
     }),
     // A fresh browser normally has no pin yet -- this first contact is the
     // pin's trust-on-first-use establishment; later logins verify against it.
-    accountLogPinStore: sessionLogPinStore({ idb })
+    accountLogPinStore: sessionLogPinStore({ idb }),
+    ...(resume ? { resume } : {}),
+    // The persist-before-publish seam: the pending-shape record becomes
+    // durable on the head the add entry is about to be built on, before that
+    // entry publishes a client only this tab could re-derive. Idempotent per
+    // attempt (the conflict retry re-fires it); on a resume the seeds handed
+    // back are the record's own, so the write restates what already stands.
+    onCommitted: async ({ builtOnHead, clientSeed, webvhUpdateKeys }) => {
+      hookFires += 1
+      if (hookFires > 1) {
+        log.info('Self-enrollment persist hook re-fired on a conflict retry', {
+          attempt: hookFires
+        })
+      }
+      const pending = {
+        ceremony: 'self-enrollment' as const,
+        builtOnHead
+      }
+      if (resume && recordPersister) {
+        await recordPersister({ pending, pointerDid: pointer.did })
+        return
+      }
+      enrolledPersister = await enrollClientKeys!({
+        clientSeed,
+        webvhUpdateKeys,
+        controller: found.controller,
+        pointerDid: pointer.did,
+        pending
+      })
+    }
   })
-  const persistClientKeys = await enrollClientKeys({
-    clientSeed: result.clientSeed,
-    userKey: result.userKey,
-    webvhUpdateKeys: result.webvhUpdateKeys,
-    controller: found.controller
-  })
+  // The build-skew guard: a core that cannot say whether the hook fired is a
+  // stale hook-less build, and proceeding would silently reinstate the
+  // phantom window the seam closes. The returned key set is persisted FIRST:
+  // with a stale core both entries and the escrow already landed, so
+  // discarding the seeds here would strand a phantom client the document
+  // lists (and each retry would mint another).
+  if (typeof (result as { committed?: unknown }).committed !== 'boolean') {
+    try {
+      if (resume && recordPersister) {
+        await recordPersister({
+          userKey: result.userKey,
+          webvhUpdateKeys: result.webvhUpdateKeys,
+          pointerDid: result.did,
+          pending: null
+        })
+      } else {
+        await enrollClientKeys!({
+          clientSeed: result.clientSeed,
+          userKey: result.userKey,
+          webvhUpdateKeys: result.webvhUpdateKeys,
+          controller: found.controller,
+          pointerDid: result.did
+        })
+      }
+    } catch (err) {
+      log.error(
+        'The skew-refused self-enrollment could not persist its key set; the published client is answerable only through Disconnect',
+        { err }
+      )
+    }
+    throw new SelfEnrollmentSkewError()
+  }
+  // The completion, persisted BEFORE the pin: the enrolled shape -- the user
+  // key in, `pointerDid` stated, `pending` cleared. A resume writes through
+  // the record's own persist closure; a fresh run overwrites the pending
+  // record whole through the enroll path (which also covers a fresh run
+  // whose hook never fired because the continuation already stood).
+  let persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+  if (resume && recordPersister) {
+    await recordPersister({
+      userKey: result.userKey,
+      webvhUpdateKeys: result.webvhUpdateKeys,
+      pointerDid: result.did,
+      pending: null
+    })
+    persistClientKeys = recordPersister
+  } else {
+    persistClientKeys =
+      enrolledPersister ??
+      (await enrollClientKeys!({
+        clientSeed: result.clientSeed,
+        userKey: result.userKey,
+        webvhUpdateKeys: result.webvhUpdateKeys,
+        controller: found.controller,
+        pointerDid: result.did
+      }))
+    if (enrolledPersister) {
+      await persistClientKeys({
+        userKey: result.userKey,
+        webvhUpdateKeys: result.webvhUpdateKeys,
+        pointerDid: result.did,
+        pending: null
+      })
+    }
+  }
   try {
     await saveUserKeyEpochPin({
       accountDid: result.did,
@@ -613,7 +744,8 @@ export async function selfEnrollStandingClient({
     clientSeed: result.clientSeed,
     userKey: result.userKey,
     webvhUpdateKeys: result.webvhUpdateKeys,
-    controller: found.controller
+    controller: found.controller,
+    pointerDid: result.did
   }
   return { clientKeys, persistClientKeys }
 }

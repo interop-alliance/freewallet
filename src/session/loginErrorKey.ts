@@ -12,6 +12,12 @@ import {
 } from '@/session/keyring'
 import { TransientLoginUnavailableError } from '@/session/transientLogin'
 import type { TransientLoginUnavailableReason } from '@/session/transientLogin'
+import {
+  PendingEnrollmentDiscardedError,
+  PendingEnrollmentError,
+  PendingResumeLogUnavailableError
+} from '@/session/pendingEnrollment'
+import { SelfEnrollmentSkewError } from '@/session/standingUnlock'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { createLogger } from '@/lib/log'
 
@@ -57,6 +63,36 @@ export function loginErrorKey({
   // The WAS storage server is unreachable -- offer a guest-mode fallback.
   if (isStorageUnreachable(err)) {
     return { key: 'auth.errors.storageUnreachable' }
+  }
+  // A resumed self-enrollment was served an account log that has not reached
+  // the head its pending record was built on -- possibly nothing worse than
+  // replication lag, so it surfaces as the transport state: the record is
+  // kept and a later retry resumes.
+  if (errorName(err) === 'BuiltOnHeadNotReachedError') {
+    log.warn('Login deferred: the served log lags the recorded head', {
+      label,
+      err
+    })
+    return { key: 'auth.errors.storageUnreachable' }
+  }
+  // The resume's account-log read failed short of a refusal (a network
+  // failure or server fault the fetch surfaced as a plain error): no branch
+  // was decidable, the record is kept, and a later retry resumes -- the
+  // transport state, not the pending refusal.
+  if (err instanceof PendingResumeLogUnavailableError) {
+    log.warn('Login deferred: the account log could not be fetched', {
+      label,
+      err
+    })
+    return { key: 'auth.errors.storageUnreachable' }
+  }
+  // The build-skew refusal: the self-enrollment core could not state that
+  // its persist hook fired (a stale wallet-core build under new app code).
+  // The key set was persisted before the refusal, so the browser IS
+  // connected; the login is refused rather than trusted.
+  if (err instanceof SelfEnrollmentSkewError) {
+    log.error('Login refused: self-enrollment build skew', { label, err })
+    return { key: 'auth.errors.selfEnrollmentSkew' }
   }
   // The authenticity refusal: the record's proof was not made by the key the
   // typed secret derives, so the storage host forged or tampered with it.
@@ -123,6 +159,30 @@ export function loginErrorKey({
     // is gone from here); the distinction is for the log.
     log.warn('Login: this browser was forgotten', { label, err })
     return { key: 'auth.errors.browserForgotten' }
+  }
+  // The pending-record discard: a provably worthless pre-pivot key set was
+  // dropped, and the next login proceeds as a new browser (the transient
+  // default; `rememberBrowser: false` no longer refuses).
+  if (err instanceof PendingEnrollmentDiscardedError) {
+    log.warn('Login: pending wallet connection discarded', { label, err })
+    return { key: 'auth.errors.pendingEnrollmentDiscarded' }
+  }
+  // The pending-record fail-closed refusal: a resume that could not run (or
+  // threw) keeps the record and refuses the login rather than constructing a
+  // fail-open session over a userKey-less record. A spend-written record's
+  // seeded re-run gets its own copy, directing back to /recover.
+  if (err instanceof PendingEnrollmentError) {
+    log.error('Login refused: pending enrollment could not be resumed', {
+      label,
+      reason: err.reason,
+      err
+    })
+    return {
+      key:
+        err.reason === 'recovery-spend'
+          ? 'auth.errors.pendingRecoveryResume'
+          : 'auth.errors.pendingEnrollment'
+    }
   }
   // A keyring record was found but is corrupt -- not a server outage and not
   // a wrong passphrase; surface it with recovery guidance.

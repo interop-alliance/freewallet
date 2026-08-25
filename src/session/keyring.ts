@@ -84,6 +84,7 @@ import {
   decodeClientKeyRecord,
   encodeClientKeyRecord,
   type ClientKeyRecord,
+  type ClientKeyRecordPending,
   type UserKey
 } from '@interop/wallet-core/keys'
 import {
@@ -160,11 +161,16 @@ const CLIENT_KEYS_CIPHER_ID = 'client-keys'
 /**
  * The re-wrappable members of a client-key record -- what a live session may
  * change after login (a roster-rotated user key, rolled did:webvh update-key
- * seeds). The client seed itself is immutable for the record's lifetime.
+ * seeds, the account's did:webvh once known, and a ceremony's pending state).
+ * The client seed itself is immutable for the record's lifetime. `pending` is
+ * three-valued on the way in: absent leaves the stored member alone, a value
+ * replaces it, and `null` clears it -- the ceremony-completion write.
  */
 export interface PersistableClientKeys {
   userKey?: UserKey
   webvhUpdateKeys?: ClientWebvhUpdateKeys
+  pointerDid?: string
+  pending?: ClientKeyRecordPending | null
 }
 
 /**
@@ -212,12 +218,18 @@ export interface KeyringFetchResult extends KeyringRecordContents {
   standingClient?: StandingUnlockClient
   // Present when `clientKeys` is absent: persists a freshly self-enrolled
   // client's key set under this unlock identity and returns the
-  // `persistClientKeys` closure for the new record. In-memory only.
+  // `persistClientKeys` closure for the new record. The self-enrollment's
+  // persist hook writes the PENDING shape through it (seeds + controller +
+  // pointerDid + pending, no userKey) before the add entry publishes, and the
+  // post-return completion overwrites it with the enrolled shape. In-memory
+  // only.
   enrollClientKeys?: (keys: {
     clientSeed: Uint8Array
     userKey?: UserKey
     webvhUpdateKeys?: ClientWebvhUpdateKeys
     controller: string
+    pointerDid?: string
+    pending?: ClientKeyRecordPending
   }) => Promise<(changes: PersistableClientKeys) => Promise<void>>
   // Present beside `standing`: re-wraps and re-PUTs this unlock record with a
   // freshly minted bridge delegation (and, when supplied, a fresh
@@ -363,6 +375,12 @@ export async function delegateUnlockManagement({
  * @param [options.controller] {string}   the account controller this key set
  *   was bound for -- on an enrolled (non-first) client it differs from the
  *   client's own did:key
+ * @param [options.pointerDid] {string}   the account's did:webvh -- the
+ *   resume's record-to-account cross-check (routing keys on `userKey`
+ *   presence alone)
+ * @param [options.pending] {ClientKeyRecordPending}   a mid-flight ceremony's
+ *   pending state; a record missing `userKey` classifies pending at login
+ *   and routes to the resume rather than the detector
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
@@ -372,6 +390,8 @@ async function saveClientKeys({
   userKey,
   webvhUpdateKeys,
   controller,
+  pointerDid,
+  pending,
   idb
 }: {
   unlock: UnlockIdentity
@@ -379,13 +399,17 @@ async function saveClientKeys({
   userKey?: UserKey
   webvhUpdateKeys?: ClientWebvhUpdateKeys
   controller?: string
+  pointerDid?: string
+  pending?: ClientKeyRecordPending
   idb?: IDBFactory
 }): Promise<void> {
   const contents = encodeClientKeyRecord({
     clientSeed,
     ...(userKey ? { userKey } : {}),
     ...(webvhUpdateKeys ? { webvhUpdateKeys } : {}),
-    ...(controller ? { controller } : {})
+    ...(controller ? { controller } : {}),
+    ...(pointerDid ? { pointerDid } : {}),
+    ...(pending ? { pending } : {})
   })
   const record = await wrapRecordEnvelope({
     data: { ...contents },
@@ -455,12 +479,20 @@ function clientKeysPersister({
     if (!clientKeys) {
       return
     }
+    // `pending` is three-valued: absent keeps the stored member, a value
+    // replaces it, `null` clears it (the ceremony-completion write).
+    const pending =
+      changes.pending === null
+        ? undefined
+        : (changes.pending ?? clientKeys.pending)
     await saveClientKeys({
       unlock,
       clientSeed: clientKeys.clientSeed,
       userKey: changes.userKey ?? clientKeys.userKey,
       webvhUpdateKeys: changes.webvhUpdateKeys ?? clientKeys.webvhUpdateKeys,
       controller: clientKeys.controller,
+      pointerDid: changes.pointerDid ?? clientKeys.pointerDid,
+      ...(pending ? { pending } : {}),
       idb
     })
   }
@@ -1522,6 +1554,12 @@ export async function bindUnlockSecret({
     userKey,
     webvhUpdateKeys,
     controller,
+    // The account's did:webvh, when the pointer already names one. A
+    // pre-promotion bind writes none; the member is backfilled by the next
+    // record rewrite made with the promoted pointer in hand, and its absence
+    // has no routing consequence (the pending/enrolled router keys on
+    // `userKey` presence alone; `pointerDid` is the resume's cross-check).
+    ...(pointer && isWebvhDid(pointer.did) ? { pointerDid: pointer.did } : {}),
     idb
   })
   await saveKeyringFreshnessPin({ spaceId: unlock.spaceId, createdAt, idb })

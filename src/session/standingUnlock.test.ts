@@ -60,7 +60,9 @@ let order: string[] = []
  * The persist closure `enrollClientKeys` hands back, returned verbatim as
  * the call's `persistClientKeys`.
  */
-const persistClosure = vi.fn()
+const persistClosure = vi.fn(async () => {
+  order.push('persist')
+})
 
 /**
  * A minimal keyring hit carrying exactly what the self-enrollment reads:
@@ -96,7 +98,25 @@ function hit(): KeyringFetchResult {
 beforeEach(() => {
   vi.clearAllMocks()
   order = []
-  vi.mocked(selfEnrollClientCore).mockResolvedValue(CORE_RESULT as never)
+  // The core fires the required persist hook once (the pending write) and
+  // returns with `committed` stated, as the real ceremony does.
+  vi.mocked(selfEnrollClientCore).mockImplementation(
+    async (options: unknown) => {
+      const { onCommitted } = options as {
+        onCommitted: (committed: {
+          builtOnHead: { scid: string; versionId: string }
+          clientSeed: Uint8Array
+          webvhUpdateKeys: unknown
+        }) => Promise<void>
+      }
+      await onCommitted({
+        builtOnHead: { scid: 'scid-a', versionId: '2-head' },
+        clientSeed: CORE_RESULT.clientSeed,
+        webvhUpdateKeys: CORE_RESULT.webvhUpdateKeys
+      })
+      return { ...CORE_RESULT, committed: true } as never
+    }
+  )
   vi.mocked(saveUserKeyEpochPin).mockImplementation(async () => {
     order.push('pin')
   })
@@ -107,15 +127,28 @@ afterEach(() => {
 })
 
 describe('selfEnrollStandingClient', () => {
-  it('persists the freshly minted key set before pinning the roster epoch', async () => {
+  it('persists the pending shape in the hook and the enrolled shape before the pin', async () => {
     const found = hit()
     await selfEnrollStandingClient({ found })
-    expect(order).toEqual(['persist', 'pin'])
-    expect(found.enrollClientKeys).toHaveBeenCalledWith({
+    // Two persists: the hook's pending write (pre-pivot), the completion
+    // (enrolled shape), then the pin -- persist-before-pin preserved.
+    expect(order).toEqual(['persist', 'persist', 'pin'])
+    expect(found.enrollClientKeys).toHaveBeenNthCalledWith(1, {
       clientSeed: CORE_RESULT.clientSeed,
+      webvhUpdateKeys: CORE_RESULT.webvhUpdateKeys,
+      controller: found.controller,
+      pointerDid: found.pointer!.did,
+      pending: {
+        ceremony: 'self-enrollment',
+        builtOnHead: { scid: 'scid-a', versionId: '2-head' }
+      }
+    })
+    // The completion clears the pending group through the persist closure.
+    expect(persistClosure).toHaveBeenCalledWith({
       userKey: CORE_RESULT.userKey,
       webvhUpdateKeys: CORE_RESULT.webvhUpdateKeys,
-      controller: found.controller
+      pointerDid: CORE_RESULT.did,
+      pending: null
     })
     expect(vi.mocked(saveUserKeyEpochPin).mock.calls[0]![0]).toMatchObject({
       accountDid: CORE_RESULT.did,
@@ -130,12 +163,12 @@ describe('selfEnrollStandingClient', () => {
     )
     const found = hit()
     const outcome = await selfEnrollStandingClient({ found })
-    expect(found.enrollClientKeys).toHaveBeenCalledTimes(1)
     expect(outcome.clientKeys).toEqual({
       clientSeed: CORE_RESULT.clientSeed,
       userKey: CORE_RESULT.userKey,
       webvhUpdateKeys: CORE_RESULT.webvhUpdateKeys,
-      controller: found.controller
+      controller: found.controller,
+      pointerDid: CORE_RESULT.did
     })
     expect(outcome.persistClientKeys).toBe(persistClosure)
     expect(warn).toHaveBeenCalled()

@@ -237,7 +237,11 @@
       "ladderAttribution": "Your account was found, but this login method's standing on the account could not be confirmed -- it may have been removed, or the account's published history is in an unexpected state. Sign-in was stopped and nothing was changed. Log in from a browser where your wallet is already set up, or use a recovery code.",
       "passkeyNoAccount": "No wallet was found for this passkey. Log in with your passphrase, then add this passkey from Settings.",
       "passkeyPrfUnsupported": "This passkey or browser cannot unlock Freewallet. Try a different passkey or log in with your passphrase.",
-      "browserForgotten": "This browser's wallet access was removed from the account, and its leftover local wallet data has now been cleared. Log in again to reconnect this browser."
+      "browserForgotten": "This browser's wallet access was removed from the account, and its leftover local wallet data has now been cleared. Log in again to reconnect this browser.",
+      "pendingEnrollment": "This browser holds a partly finished wallet connection that could not be completed this time. Nothing was changed -- log in again to retry finishing it.",
+      "pendingEnrollmentDiscarded": "This browser held a partly finished wallet connection that can no longer be completed, so it was dropped. Log in again to continue as a new browser.",
+      "pendingRecoveryResume": "This browser holds a partly finished account recovery. Go to the recovery page and enter the same recovery code to finish it.",
+      "selfEnrollmentSkew": "This browser was connected, but the wallet's software components are out of step and the login could not finish safely. Reload or update the app, then log in again."
     },
     "forget": {
       "button": "Forget wallet data on this browser",

@@ -118,7 +118,10 @@ import {
   signRecordFrame,
   type AccountPointer
 } from '@interop/wallet-core/keyring'
-import { mintUserKey } from '@interop/wallet-core/keys'
+import {
+  isEnrolledClientKeyRecord,
+  mintUserKey
+} from '@interop/wallet-core/keys'
 import {
   standingClientFromUnlockSeed,
   wrapUnlockRecord
@@ -689,6 +692,84 @@ describe('the client key set under the unlock layer', () => {
     expect(Array.from(after!.clientKeys!.clientSeed)).toEqual(
       Array.from(clientSeed)
     )
+  })
+
+  it('writes pointerDid at bind, and the record satisfies the full enrolled guard (FW-280 shape regression)', async () => {
+    // Routing keys on `userKey` presence alone (question 2 as amended), but
+    // the bind must still produce a record the four-member guard accepts:
+    // `pointerDid` is the resume's record-to-account cross-check, and dcw's
+    // counterpart asserts the same full shape.
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'enrolled shape passphrase',
+      userKey: await mintUserKey(),
+      webvhUpdateKeys: { updateSeed: randomSeed(), stagedSeed: randomSeed() },
+      pointer: POINTER,
+      idb,
+      kdf: KDF
+    })
+    const found = await fetchKeyring({
+      passphrase: 'enrolled shape passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.clientKeys!.pointerDid).toBe(POINTER.did)
+    expect(isEnrolledClientKeyRecord(found!.clientKeys!)).toBe(true)
+  })
+
+  it('classifies a userKey-less record pending, and round-trips + clears the pending group', async () => {
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'pending shape passphrase',
+      webvhUpdateKeys: { updateSeed: randomSeed(), stagedSeed: randomSeed() },
+      pointer: POINTER,
+      idb,
+      kdf: KDF
+    })
+    let found = await fetchKeyring({
+      passphrase: 'pending shape passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(isEnrolledClientKeyRecord(found!.clientKeys!)).toBe(false)
+
+    // The persist hook's write: the pending group survives the persister's
+    // merge and reads back decoded.
+    const builtOnHead = { scid: 'QmScidForTests', versionId: '3-abc' }
+    await found!.persistClientKeys!({
+      pointerDid: POINTER.did,
+      pending: { ceremony: 'self-enrollment', builtOnHead }
+    })
+    found = await fetchKeyring({
+      passphrase: 'pending shape passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.clientKeys!.pending).toEqual({
+      ceremony: 'self-enrollment',
+      builtOnHead
+    })
+    expect(found!.clientKeys!.pointerDid).toBe(POINTER.did)
+    expect(isEnrolledClientKeyRecord(found!.clientKeys!)).toBe(false)
+
+    // The completion write: the user key in, `pending: null` clears the
+    // group, and the record classifies enrolled from then on.
+    await found!.persistClientKeys!({
+      userKey: await mintUserKey(),
+      pending: null
+    })
+    found = await fetchKeyring({
+      passphrase: 'pending shape passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.clientKeys!.pending).toBeUndefined()
+    expect(found!.clientKeys!.pointerDid).toBe(POINTER.did)
+    expect(isEnrolledClientKeyRecord(found!.clientKeys!)).toBe(true)
   })
 
   it('locates the account but reports no client keys on a fresh profile (not enrolled)', async () => {
