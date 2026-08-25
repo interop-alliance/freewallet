@@ -13,8 +13,9 @@
  * an ordinary durable client in place on the programmatic
  * `rememberBrowser: true` entry (loud log entries first, then the first
  * roster read through the credential's standing wrap); a plain pointer
- * record still surfaces the not-enrolled state and the
- * connect-another-wallet ceremony.
+ * record -- which only a no-WAS bind produces, since every WAS signup writes
+ * the standing layout before the Space exists -- still surfaces the
+ * not-enrolled state and the connect-another-wallet ceremony.
  */
 import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
@@ -60,10 +61,13 @@ import {
 } from '@/session/persistence'
 import { StorageManager } from '@/stores/storageManager'
 import {
+  deriveUnlockCredential,
   fetchKeyring,
   fetchTransientKeyring,
   KeyringRecordUnusableError
 } from '@/session/keyring'
+import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
+import { sessionLogPinStore } from '@/lib/sessionKey'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
   routeUnlockLogin,
@@ -701,6 +705,65 @@ async function checkUserKeyRosterAtLogin({
 }
 
 /**
+ * The durable resume of a remembered (or passkey) signup torn before the
+ * establishment's re-bind: a keyring hit whose record carries a ladder seed
+ * but whose pointer names no did:webvh yet. Runs the same heal the transient
+ * composition runs -- the credential-anchored establishment re-run from the
+ * record's own ladder seed (every stage an ensure; the published log, if
+ * any, adopted by ladder attribution), under the DURABLE pin store -- then
+ * re-fetches the keyring so the caller continues into the ordinary
+ * self-enrollment. One attempt only: a re-run that does not converge hands
+ * the original hit back and the existing routing stands. Reached only on the
+ * explicit `rememberBrowser: true` entry; the default durable login never
+ * runs it.
+ *
+ * @param options {object}
+ * @param options.found {KeyringFetchResult}   the torn hit (ladder seed
+ *   present, pointer not a did:webvh)
+ * @param options.credential {UnlockCredential}   the derived unlock
+ *   credential
+ * @param options.type {'passphrase' | 'passkey'}   sets `lowEntropy`
+ * @param [options.email] {string}
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<KeyringFetchResult>}   the refreshed hit, or the
+ *   original when the re-fetch missed
+ */
+async function healUnpromotedRememberedAccount({
+  found,
+  credential,
+  type,
+  email,
+  idb
+}: {
+  found: KeyringFetchResult
+  credential: UnlockCredential
+  type: 'passphrase' | 'passkey'
+  email?: string
+  idb?: IDBFactory
+}): Promise<KeyringFetchResult> {
+  const ladderSeed = found.standing?.ladderSeed
+  const pointer = found.pointer
+  if (!ladderSeed || !pointer) {
+    return found
+  }
+  await establishCredentialAnchoredAccount({
+    credential,
+    ladderSeed,
+    pointer,
+    lowEntropy: type === 'passphrase',
+    email: email ?? found.email,
+    priorCreatedAt: found.createdAt,
+    persistence: { logPins: sessionLogPinStore({ idb }) }
+  })
+  const refreshed = await fetchKeyring({
+    credential,
+    idb,
+    mintManageCapability: true
+  })
+  return refreshed ?? found
+}
+
+/**
  * Passphrase login (keyring v2). The keyring is the only login path: the
  * passphrase derives an unlock identity that locates the account and unwraps
  * this client's local key set.
@@ -729,9 +792,14 @@ async function checkUserKeyRosterAtLogin({
  * - **Located, not enrolled**: the keyring record was found (the account
  *   exists) but this client holds no key set -- a fresh browser. A standing
  *   record self-enrolls this browser right here and the login proceeds as an
- *   enrolled hit; only a plain pointer record (pre-promotion, no-WAS, or a
+ *   enrolled hit; only a plain pointer record (the no-WAS reduced path, or a
  *   remote-direct popup session) returns `{ session: null, userExists:
- *   true }`, and the caller surfaces the not-enrolled guidance.
+ *   true }`, and the caller surfaces the not-enrolled guidance. On the
+ *   explicit `rememberBrowser: true` entry, a standing record whose pointer
+ *   names no did:webvh yet (a remembered signup torn before the
+ *   establishment's re-bind) first runs the durable resume heal
+ *   (`healUnpromotedRememberedAccount`) and then self-enrolls from the
+ *   refreshed record.
  * - **Miss**: no keyring anywhere, so there is no account. Returns
  *   `{ session: null, userExists: false }` and the caller routes to signup.
  *
@@ -819,7 +887,7 @@ export async function loginWithPassphrase({
     }
     derived = routed.credential ?? derived
 
-    const found = await fetchKeyring({
+    let found = await fetchKeyring({
       passphrase,
       idb,
       mintManageCapability: true,
@@ -830,6 +898,30 @@ export async function loginWithPassphrase({
       return { session: null, userExists: false }
     }
 
+    // The durable resume entry: only under the explicit remember input, and
+    // only for a standing record whose pointer names no did:webvh (a
+    // remembered signup torn before its re-bind).
+    if (
+      rememberBrowser === true &&
+      found.standing?.ladderSeed &&
+      found.pointer &&
+      !isWebvhDid(found.pointer.did)
+    ) {
+      derived =
+        derived ??
+        (await deriveUnlockCredential({
+          secret: passphrase,
+          kdf: KEYRING_KDF
+        }))
+      found = await healUnpromotedRememberedAccount({
+        found,
+        credential: derived,
+        type: 'passphrase',
+        email,
+        idb
+      })
+    }
+
     try {
       return await sessionFromKeyringHit({
         found,
@@ -837,7 +929,14 @@ export async function loginWithPassphrase({
         email,
         remoteDirectStorage,
         provisionStorage,
-        idb
+        idb,
+        // For the torn-retirement repair's establish-first arm, which may
+        // need to make this credential standing before it can retire the
+        // one a residual pending-shaped entry names.
+        loginCredential: {
+          secret: passphrase,
+          ...(derived ? { derived } : {})
+        }
       })
     } catch (err) {
       if (!(err instanceof StaleClientKeyRecordError)) {
@@ -882,6 +981,10 @@ export async function loginWithPassphrase({
  * @param [options.provisionStorage] {boolean}
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the user key
  *   roster-epoch pin
+ * @param [options.loginCredential] {object}   the unlock secret this login
+ *   typed (and the derived credential, when the routing already ran the
+ *   KDF), threaded to the torn-retirement repair so its establish-first arm
+ *   can make the credential standing; passphrase logins only
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 async function sessionFromKeyringHit({
@@ -890,7 +993,8 @@ async function sessionFromKeyringHit({
   email,
   remoteDirectStorage = false,
   provisionStorage = true,
-  idb
+  idb,
+  loginCredential
 }: {
   found: KeyringFetchResult
   type: 'passphrase' | 'passkey'
@@ -898,6 +1002,7 @@ async function sessionFromKeyringHit({
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
   idb?: IDBFactory
+  loginCredential?: { secret: string | Uint8Array; derived?: UnlockCredential }
 }): Promise<{ session: Session | null; userExists: boolean }> {
   // The three-way record routing, keyed on `userKey` presence: a record
   // holding a user key proceeds through the detector and the ordinary login;
@@ -919,9 +1024,10 @@ async function sessionFromKeyringHit({
     // login proceeds enrolled. A remote-direct session (the partitioned
     // CHAPI popup) deliberately does not: its storage bucket is ephemeral,
     // and a durable client minted per popup visit would litter the account
-    // log. Without standing authority (a plain pointer record -- the
-    // pre-promotion or no-WAS reduced path) the caller surfaces the
-    // not-enrolled state and offers the connect-another-wallet ceremony.
+    // log. Without standing authority (a plain pointer record -- the no-WAS
+    // reduced path; every WAS signup writes the standing layout) the caller
+    // surfaces the not-enrolled state and offers the connect-another-wallet
+    // ceremony.
     if (remoteDirectStorage || !canSelfEnroll({ found })) {
       return { session: null, userExists: true }
     }
@@ -1128,7 +1234,11 @@ async function sessionFromKeyringHit({
   if (session.registryReady && !remoteDirectStorage) {
     session.registryReady = session.registryReady.then(async () => {
       try {
-        await repairTornPassphraseRetirement({ session, found })
+        await repairTornPassphraseRetirement({
+          session,
+          found,
+          ...(loginCredential ? { credential: loginCredential } : {})
+        })
       } catch (err) {
         log.warn(
           'Could not finish the pending passphrase retirement; the next login retries',
@@ -1493,6 +1603,10 @@ async function sessionFromKeyringHit({
  * @param [options.signal] {AbortSignal}   aborts the WebAuthn ceremony
  * @param [options.rememberBrowser] {boolean}   the explicit durability input,
  *   exactly as on `loginWithPassphrase`
+ * @param [options.credential] {UnlockCredential}   an already-derived unlock
+ *   credential for this passkey's PRF output, which SKIPS the PRF assertion
+ *   ceremony -- the passkey signup's login half passes it so one signup runs
+ *   one WebAuthn ceremony
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 export async function loginWithPasskey({
@@ -1500,23 +1614,28 @@ export async function loginWithPasskey({
   remoteDirectStorage = false,
   provisionStorage = true,
   signal,
-  rememberBrowser
+  rememberBrowser,
+  credential
 }: {
   idb?: IDBFactory
   remoteDirectStorage?: boolean
   provisionStorage?: boolean
   signal?: AbortSignal
   rememberBrowser?: boolean
+  credential?: UnlockCredential
 } = {}): Promise<{ session: Session | null; userExists: boolean }> {
-  const { prfOutput } = await assertPasskeyPrf({ signal })
+  let derived: UnlockCredential | undefined = credential
+  let prfOutput: Uint8Array | undefined
+  if (!derived) {
+    ;({ prfOutput } = await assertPasskeyPrf({ signal }))
+  }
 
   // The same bounded stale-record retry as the passphrase path: the retry
   // re-routes with the already-derived credential, so the one WebAuthn tap
   // above is never repeated.
-  let derived: UnlockCredential | undefined
   for (let staleRetries = 0; ; staleRetries++) {
     const routed = await routeUnlockLogin({
-      secret: prfOutput,
+      ...(prfOutput !== undefined ? { secret: prfOutput } : {}),
       kdf: PASSKEY_KDF,
       credential: derived,
       idb,
@@ -1540,8 +1659,8 @@ export async function loginWithPasskey({
     }
     derived = routed.credential ?? derived
 
-    const found = await fetchKeyring({
-      secret: prfOutput,
+    let found = await fetchKeyring({
+      ...(prfOutput !== undefined ? { secret: prfOutput } : {}),
       kdf: PASSKEY_KDF,
       idb,
       mintManageCapability: true,
@@ -1549,6 +1668,30 @@ export async function loginWithPasskey({
     })
     if (!found) {
       return { session: null, userExists: false }
+    }
+
+    // The durable resume entry, exactly as on the passphrase path: a
+    // standing record whose pointer names no did:webvh yet (a passkey
+    // signup torn before the establishment's re-bind) is healed and
+    // re-fetched before the self-enrollment.
+    if (
+      rememberBrowser === true &&
+      found.standing?.ladderSeed &&
+      found.pointer &&
+      !isWebvhDid(found.pointer.did)
+    ) {
+      derived =
+        derived ??
+        (await deriveUnlockCredential({
+          secret: prfOutput as Uint8Array,
+          kdf: PASSKEY_KDF
+        }))
+      found = await healUnpromotedRememberedAccount({
+        found,
+        credential: derived,
+        type: 'passkey',
+        idb
+      })
     }
 
     try {

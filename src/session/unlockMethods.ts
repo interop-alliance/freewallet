@@ -6,9 +6,10 @@
  * wallet can enumerate and manage its methods without re-deriving each unlock
  * identity.
  *
- * The record carries a single WebAuthn `userHandle` (minted at the first
- * passkey registration and reused for every later passkey, so authenticator
- * pickers show one account rather than N) and one entry per method. Its stored
+ * The record carries a single WebAuthn user id (`webAuthnUserId`, minted at
+ * the first passkey registration and reused for every later passkey, so
+ * authenticator pickers show one account rather than N) and one entry per
+ * method. Its stored
  * body is a JWE wrapped to the session's vault KAK (it names credential ids the
  * server must not read), stored as `{ version, encryption, wrapped }` -- the
  * same self-contained envelope shape the keyring record uses (the record seals
@@ -204,12 +205,13 @@ export type UnlockMethod =
   PassphraseUnlockMethod | PasskeyUnlockMethod | RecoveryCodeUnlockMethod
 
 /**
- * The version-1 unlock-methods registry record. `userHandle` is a base64url
- * (16-byte) WebAuthn user handle, one per wallet.
+ * The version-1 unlock-methods registry record. `webAuthnUserId` is a
+ * base64url (16-byte) WebAuthn user id (the ceremony-level `user.id`), one
+ * per wallet.
  */
 export interface UnlockMethodsRecord {
   version: 1
-  userHandle: string
+  webAuthnUserId: string
   methods: UnlockMethod[]
 }
 
@@ -275,7 +277,7 @@ async function wrapRecord({
  * `{ version, encryption, wrapped }` frame (a record with no `encryption`
  * descriptor -- the retired direct-to-KAK form -- is refused), decrypts the
  * payload, then sanity-checks the registry shape (its own `version`, a string
- * `userHandle`, an array of methods).
+ * `webAuthnUserId`, an array of methods).
  *
  * @param options {object}
  * @param options.record {unknown}   the stored `{ version, encryption,
@@ -302,7 +304,7 @@ async function unwrapRecord({
     label: 'unlock-methods'
   })) as {
     version?: unknown
-    userHandle?: unknown
+    webAuthnUserId?: unknown
     methods?: unknown
   }
 
@@ -313,15 +315,18 @@ async function unwrapRecord({
       )}".`
     )
   }
-  if (typeof plaintext.userHandle !== 'string' || !plaintext.userHandle) {
-    throw new Error('Unlock-methods record is missing a userHandle.')
+  if (
+    typeof plaintext.webAuthnUserId !== 'string' ||
+    !plaintext.webAuthnUserId
+  ) {
+    throw new Error('Unlock-methods record is missing a webAuthnUserId.')
   }
   if (!Array.isArray(plaintext.methods)) {
     throw new Error('Unlock-methods record is missing its methods list.')
   }
   return {
     version: 1,
-    userHandle: plaintext.userHandle,
+    webAuthnUserId: plaintext.webAuthnUserId,
     methods: plaintext.methods as UnlockMethod[]
   }
 }
@@ -346,17 +351,17 @@ export class UnlockRegistryStaleSealError extends Error {
 }
 
 /**
- * A fresh, empty unlock-methods registry: one wallet-wide user handle and no
- * methods yet. The registry's shape is minted here alone, so every path that
- * writes it first (a passkey enrollment, a recovery-code issuance, a
- * Settings backfill) agrees on it.
+ * A fresh, empty unlock-methods registry: one wallet-wide WebAuthn user id
+ * and no methods yet. The registry's shape is minted here alone, so every
+ * path that writes it first (a passkey enrollment, a recovery-code issuance,
+ * a Settings backfill) agrees on it.
  *
  * @returns {UnlockMethodsRecord}
  */
 export function emptyUnlockMethodsRegistry(): UnlockMethodsRecord {
   return {
     version: 1,
-    userHandle: base64urlnopad.encode(
+    webAuthnUserId: base64urlnopad.encode(
       crypto.getRandomValues(new Uint8Array(16))
     ),
     methods: []
@@ -1461,7 +1466,7 @@ function shouldAdoptFreshCapability({
  * terminal.
  *
  * The registry is created only when `createIfMissing` is set (a fresh 16-byte
- * userHandle is minted): the lazy-creation points are first passkey
+ * webAuthnUserId is minted): the lazy-creation points are first passkey
  * registration and first Settings render, so a plain login never materializes
  * it. Writes only when something changed, and returns the resulting record (or
  * `null` when none exists and none was created). Errors are the caller's to
@@ -1718,8 +1723,11 @@ export function adoptPassphraseRebind({
  * ceremony, binds this client's key set under the passkey's PRF-derived
  * unlock identity, and assembles the registry entry describing the passkey.
  * The caller is responsible for persisting the returned entry in the registry
- * (and, at signup, for provisioning the data Space first). Shared by the
- * signup and Settings "add a passkey" flows.
+ * (and, at signup, for provisioning the data Space first). The one caller is
+ * the no-WAS passkey signup, where no unlock Space exists and nothing can be
+ * standing; every WAS flow runs the standing establishment instead (the
+ * credential-anchored signup, and the Settings add-a-passkey ceremony's
+ * `registerPasskey` + `establishStandingUnlock` order).
  *
  * `delegateManagementTo` drives the entry's optional `manageCapability`: when
  * an account DID is given (and a WAS server is configured) the bind

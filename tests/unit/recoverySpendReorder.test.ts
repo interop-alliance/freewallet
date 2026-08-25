@@ -305,7 +305,9 @@ async function docPublishingCommitment({
     keyAgreementKeyMultibase: credential.standing.keyAgreementKeyMultibase
   })
   return {
-    keyAgreement: [unlockKeyVmId({ did: POINTER.did!, keyAgreement: { commitment } })]
+    keyAgreement: [
+      unlockKeyVmId({ did: POINTER.did!, keyAgreement: { commitment } })
+    ]
   }
 }
 
@@ -374,6 +376,8 @@ describe('the durable spend reorder -- the persist hook', () => {
       idb
     })
     expect(outcome.completeRecovery).toBeDefined()
+    // The tail's establishment landed, so the outcome reports it.
+    expect(outcome.standing).toBe('established')
 
     await outcome.completeRecovery!()
 
@@ -610,12 +614,16 @@ describe('the standing-establishment success gate', () => {
       new Error('document entry publish failed (simulated)')
     )
 
-    await recoverAccountWithCode({
+    const outcome = await recoverAccountWithCode({
       code,
       newPassphrase: NEW_PASSPHRASE,
       rememberBrowser: true,
       idb
     })
+
+    // The continuation succeeded and reports the standing truthfully:
+    // recovered, with the standing configuration pending.
+    expect(outcome.standing).toBe('pending')
 
     const written = state.registryRecord as {
       methods: Array<Record<string, unknown>>
@@ -633,8 +641,14 @@ describe('the standing-establishment success gate', () => {
     expect(found?.clientKeys?.pending?.ceremony).toBe('recovery-spend')
     state.rosterRecipients = ['everyone-already-escrowed']
 
-    await resumeRecoverySpend({ found: found as KeyringFetchResult, idb })
+    const resumed = await resumeRecoverySpend({
+      found: found as KeyringFetchResult,
+      idb
+    })
 
+    // The resume's backfill made the standing configuration real and its
+    // prompt reports so.
+    expect(resumed.recoverySpendPrompt?.standing).toBe('established')
     expect(state.calls).toContain('publishUnlockKey')
     const upgraded = (
       state.registryRecord as { methods: Array<Record<string, unknown>> }
@@ -649,8 +663,7 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
   // backfill computes a commitment over its key-agreement multibase), and
   // cached: one KDF run for the whole suite.
   let fixtureStanding:
-    | Awaited<ReturnType<typeof deriveUnlockCredential>>['standing']
-    | undefined
+    Awaited<ReturnType<typeof deriveUnlockCredential>>['standing'] | undefined
 
   /**
    * A keyring hit shaped like the one the pending router hands the resume:
@@ -711,8 +724,7 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
   it('completes the escrows from the unwrap key at the pivot-to-escrow kill point', async () => {
     const capture = captureSink()
     addSink(capture.sink)
-    const { found, spent, replacement, standingClient } =
-      await makeSpendFound()
+    const { found, spent, replacement, standingClient } = await makeSpendFound()
     const { idb } = createFakeSessionIdb()
     // The first roster read finds no wrap for the new client: the entry
     // landed, the escrows did not (the band the unwrap-key carrier closes).
@@ -790,8 +802,7 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
   })
 
   it('gates the record completion on the confirm and clears the carrier there', async () => {
-    const { found, persistClientKeys, standingClient } =
-      await makeSpendFound()
+    const { found, persistClientKeys, standingClient } = await makeSpendFound()
     const { idb } = createFakeSessionIdb()
     state.rosterRecipients = [
       'everyone-already-escrowed',
@@ -822,8 +833,10 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
     // commitment do not (the tail died before the establishment stages).
     state.rosterRecipients = ['everyone-already-escrowed']
 
-    await resumeRecoverySpend({ found, idb })
+    const result = await resumeRecoverySpend({ found, idb })
 
+    // The backfill finished both halves, so the prompt reports established.
+    expect(result.recoverySpendPrompt?.standing).toBe('established')
     // The wrap escrow ran, owned by this client's own key (which holds a
     // wrap in every epoch), and the document entry published.
     const standingEscrow = state.escrows.find(
@@ -842,9 +855,8 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
       standingClient.recipientKid
     ]
     // The commitment VM stands in the verified document.
-    const { keyAgreementCommitment } = await import(
-      '@interop/wallet-core/webvh'
-    )
+    const { keyAgreementCommitment } =
+      await import('@interop/wallet-core/webvh')
     const { unlockKeyVmId } = await import('@interop/wallet-core/unlock')
     const commitment = await keyAgreementCommitment({
       keyAgreementKeyMultibase: standingClient.keyAgreementKeyMultibase
@@ -882,7 +894,11 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
       new Error('document entry publish failed (simulated)')
     )
 
-    await resumeRecoverySpend({ found, idb })
+    const result = await resumeRecoverySpend({ found, idb })
+
+    // The failed backfill never fails the resume; the prompt reports the
+    // standing as still pending.
+    expect(result.recoverySpendPrompt?.standing).toBe('pending')
 
     const written = state.registryWrites.at(-1) as {
       methods: Array<Record<string, unknown>>

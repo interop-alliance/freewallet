@@ -30,6 +30,15 @@ vi.mock('@/session/transientLogin', () => ({
   transientSessionFromKeyringHit: vi.fn()
 }))
 vi.mock('@/lib/kms', () => ({ ensureKeystore: vi.fn() }))
+// A full factory: the durable resume heal is the only consumer here, and the
+// real module drags in the whole establishment stack.
+vi.mock('@/session/credentialAnchoredGenesis', () => ({
+  establishCredentialAnchoredAccount: vi.fn(async () => ({
+    did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
+    unlockSpaceId: 'unlock-space-test',
+    standingFields: {}
+  }))
+}))
 vi.mock('@/stores/storageManager', () => ({
   StorageManager: { initStorageClients: vi.fn() }
 }))
@@ -55,6 +64,7 @@ vi.mock('@/session/forget', () => ({
 }))
 
 import { StorageManager } from '@/stores/storageManager'
+import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
 import {
   canSelfEnroll,
   selfEnrollStandingClient
@@ -647,6 +657,100 @@ describe('loginWithPassphrase -- pending-record resume routing (FW-280)', () => 
     ).rejects.toMatchObject({ name: 'PendingEnrollmentError', reason: 'popup' })
     expect(resumePendingEnrollment).not.toHaveBeenCalled()
     expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
+  })
+})
+
+describe('loginWithPassphrase -- durable resume of a torn remembered signup', () => {
+  const CREDENTIAL = {
+    unlock: { spaceId: 'unlock-space-test' },
+    standing: {}
+  } as never
+  // A remembered signup torn before the establishment's re-bind: the record
+  // carries the ladder seed but the pointer names no did:webvh yet.
+  const TORN_POINTER: AccountPointer = {
+    spaceId: 'space-123',
+    host: 'https://was.example.test'
+  }
+
+  it('re-runs the establishment under rememberBrowser: true, then self-enrolls from the refreshed record', async () => {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    const ladderSeed = randomSeed()
+    const tornHit = {
+      controller,
+      pointer: TORN_POINTER,
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: '2026-08-25T00:00:00.000Z',
+      standing: { delegation: {}, ladderSeed }
+    }
+    const healedHit = {
+      controller,
+      pointer: POINTER,
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: '2026-08-25T00:00:01.000Z',
+      standing: { delegation: {}, ladderSeed }
+    }
+    vi.mocked(fetchKeyring)
+      .mockResolvedValueOnce(tornHit as never)
+      .mockResolvedValueOnce(healedHit as never)
+    vi.mocked(establishCredentialAnchoredAccount).mockResolvedValue({
+      did: POINTER.did,
+      unlockSpaceId: 'unlock-space-test',
+      standingFields: {}
+    } as never)
+    vi.mocked(canSelfEnroll).mockReturnValue(true)
+    const persist = vi.fn(async () => {})
+    vi.mocked(selfEnrollStandingClient).mockResolvedValue({
+      clientKeys: { clientSeed, controller },
+      persistClientKeys: persist
+    } as never)
+
+    const { session } = await loginWithPassphrase({
+      passphrase: PASSPHRASE,
+      credential: CREDENTIAL,
+      rememberBrowser: true
+    })
+
+    expect(establishCredentialAnchoredAccount).toHaveBeenCalledOnce()
+    expect(establishCredentialAnchoredAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credential: CREDENTIAL,
+        ladderSeed,
+        pointer: TORN_POINTER,
+        lowEntropy: true,
+        priorCreatedAt: tornHit.createdAt
+      })
+    )
+    // The keyring was re-fetched after the heal, and the self-enrollment ran
+    // over the refreshed (promoted) hit.
+    expect(fetchKeyring).toHaveBeenCalledTimes(2)
+    expect(selfEnrollStandingClient).toHaveBeenCalledWith(
+      expect.objectContaining({ found: healedHit })
+    )
+    expect(session).not.toBeNull()
+    expect(session!.user.id).toBe(controller)
+  })
+
+  it('never fires on the default (non-remembered) durable login', async () => {
+    const tornHit = {
+      controller: 'did:key:z6MkDataControllerForTests',
+      pointer: TORN_POINTER,
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: '2026-08-25T00:00:00.000Z',
+      standing: { delegation: {}, ladderSeed: randomSeed() }
+    }
+    vi.mocked(fetchKeyring).mockResolvedValue(tornHit as never)
+    vi.mocked(establishCredentialAnchoredAccount).mockClear()
+
+    const { session, userExists } = await loginWithPassphrase({
+      passphrase: PASSPHRASE,
+      credential: CREDENTIAL
+    })
+
+    expect(establishCredentialAnchoredAccount).not.toHaveBeenCalled()
+    // The existing routing stands: not enrolled, no session.
+    expect(session).toBeNull()
+    expect(userExists).toBe(true)
   })
 })
 

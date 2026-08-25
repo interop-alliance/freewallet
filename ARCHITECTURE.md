@@ -160,8 +160,9 @@ the roster's recipient resolver verifies the roster-carried key against);
 a passkey's PRF-derived key, being high-entropy, publishes verbatim (the
 hash-commitment rule under "Recovery codes"). The connect-another-wallet
 ceremony (see "The client enrollment ceremony" below) survives for records
-without standing authority (a pre-promotion or no-WAS bind) and as the
-future opt-in step-up approval policy; the storage-partitioned CHAPI popup
+without standing authority (a no-WAS bind) and for the rendezvous
+onboarding flow, and as the future opt-in step-up approval policy; the
+storage-partitioned CHAPI popup
 never self-enrolls (a durable client per popup visit would litter the log)
 and stays a degraded state.
 
@@ -267,10 +268,24 @@ ciphertext the credential's holder already fetched stays readable, and
 Settings says so -- the ceremony is the documented "I think my passphrase
 leaked" remedy there.
 
-A passphrase change writes the registry's passphrase entry only after the
-retirement has reported, because the entry's standing configuration depends
-on how the retirement ended. One that failed before its document edit landed
-leaves the entry naming the new unlock Space but the OLD credential's whole
+A passphrase change runs establish-first on a WAS account: the old
+passphrase is verified read-only, the NEW passphrase's whole standing
+establishment runs as the ceremony's first write, and only then are the
+old record and unlock Space torn down and the old credential's retirement
+run. A failed establishment fails the change outright with the old
+credential fully intact -- record, Space, and standing configuration all
+unchanged -- so the failure copy is true and a retry with the same new
+passphrase converges on the establishment's idempotent stages. No plain
+record is ever written for the new passphrase; the plain rebind survives
+only where nothing can be standing (no WAS, a guest, an unpromoted
+account). A change torn between the establishment and the teardown leaves
+BOTH passphrases live and standing, retired by a retry or by the next
+new-passphrase login's torn-retirement repair below.
+
+The registry's passphrase entry is written only after the retirement has
+reported, because the entry's standing configuration depends on how the
+retirement ended. One that failed before its document edit landed leaves
+the entry naming the new unlock Space but the OLD credential's whole
 standing configuration -- the one state that still names the credential
 left standing. While the entry stands pending, a second change from the same
 session is refused (`PendingPassphraseRetirementError`, when the entry
@@ -288,10 +303,8 @@ checked), that would be a silent failure on the leaked-credential remedy,
 so the change reports `rotation: 'unretired'` instead. The entry is written
 in the shape a retirement torn at the document edit leaves (the new unlock
 Space naming the OLD credential's members, minting the registry first if
-none existed), but only when the new credential's own standing setup ran,
-since the repair below needs a standing-layout record to reach it. When
-that setup did not run, the entry names only the new credential, and the
-old one is left unnamed and still standing.
+none existed); the establish-first order means this arm's entry always
+names a standing new credential.
 
 The next passphrase login's torn-retirement repair
 (`repairTornPassphraseRetirement` in `src/session/pendingRetirement.ts`)
@@ -653,13 +666,16 @@ deterministic unlock address is an accepted existence oracle for passphrase
 guessing (derive a candidate address, probe the server); the bound is KDF
 strength, not placement. The DID's embedded Space id need not equal a
 controlled Space's id: one did:webvh may control several Spaces on the
-host, a feature rather than a check to add. Provisioning creates the Space
-under the first client's did:key, publishes the log, and then, once the
-pointer durably names the did, PUTs the Space Description with
-`controller: <did:webvh>`, authorized by the stored did:key
-(`StorageManager.ensurePromotedController`, which also swaps the live
-session's signing to the promoted keyId and re-heals a signup torn between
-the pointer backfill and the promotion PUT). From then on the server
+host, a feature rather than a check to add. Every WAS signup now bootstraps
+the Space under the ladder VM's bare did:key inside the credential-anchored
+establishment (see "The credential-anchored variant" below), publishes the
+log, and PUTs the Space Description with `controller: <did:webvh>` as one of
+the establishment's own stages, before any durable client ever exists.
+`StorageManager.ensurePromotedController` remains the login-time healer: it
+swaps the live session's signing to the promoted keyId and re-runs the
+promotion PUT when a session finds it still missing. Only a no-WAS
+deployment's plain durable genesis still promotes on this login-time path
+from scratch. From then on the server
 resolves the controller by reading and fully verifying the log out of its
 own storage (SCID-pinned, hash chain, prerotation, update-key signatures)
 and authorizes by the **current-key-set rule** (see Glossary).
@@ -685,17 +701,37 @@ up is the one fatal stage: `AccountGenesisSpaceError` is rethrown and login
 fails.
 
 What stays in freewallet's own flow: the keyring bind before any data Space
-exists, the passphrase signup's `userExists` probe, the pointer backfill after
-the DID is published, and the controller promotion after it -- so the ceremony
-is called with `promoteController: false` and `ensurePromotedController`
-promotes and heals.
+exists. On a WAS deployment this path is now the no-WAS deployment's own
+plain durable signup and the login-time heal for any account this ceremony
+provisioned; every WAS signup instead runs the credential-anchored
+establishment below, whose genesis order already promotes the controller
+inline. `ensureAccountGenesis` is called with `promoteController: false`
+and `ensurePromotedController` promotes and heals on that reduced path. The
+durable passphrase signup's own `userExists` probe and its pointer-backfill
+step are gone: the credential-anchored establishment's create-nothing probe
+(`fetchTransientKeyring`) is the one signup-time existence check left on a
+WAS deployment.
 
-**The credential-anchored variant.** On a non-remembered browser with a WAS
-server configured, the passphrase signup runs wallet-core's
-`ensureCredentialAnchoredAccountGenesis` instead (through
+**The credential-anchored variant.** Every WAS signup -- passphrase or
+passkey, remembered or not -- now runs this establishment first, through
 `establishCredentialAnchoredAccount` in
-`src/session/credentialAnchoredGenesis.ts`): no durable client is minted
-anywhere. The Space is bootstrapped under the LADDER VM's bare did:key
+`src/session/credentialAnchoredGenesis.ts` (wallet-core's
+`ensureCredentialAnchoredAccountGenesis`): no durable client is minted by
+the establishment itself. A non-remembered browser then enters through the
+ordinary transient composition below. A `rememberBrowser: true` signup (the
+signup form's remember choice, or the e2e seam) instead follows the
+establishment with the ordinary durable login, whose self-enrollment makes
+this browser a durable client from the record the establishment just wrote
+-- two loud log entries on top of the establishment's own. The durable
+login's chain-head pin store is seeded by the establishment's own
+publication rather than trust-on-first-use, and the credential-anchored
+bind floors its record stamp over the caller's local keyring-freshness pin
+so a stale pin cannot make the login refuse its own signup's record as a
+rollback. A signup torn before the durable login's self-enrollment is
+resumed by a later `rememberBrowser: true` login attempt, which re-runs the
+establishment from the record's own ladder seed and then self-enrolls; see
+"The transient login" below for the same heal's non-remembered entry. The
+Space is bootstrapped under the LADDER VM's bare did:key
 (`ladderVmAgent`, re-derivable from the unlock record's ladder seed, so a
 tab death before promotion strands nothing). The one-entry ladder-anchored
 did:webvh genesis is signed by ladder rung 0 (`updateKeys` = [rung 0],
@@ -707,8 +743,16 @@ The collection epochs gate on the roster landing AND on its current epoch
 being the key the ceremony was handed (the user key exists only in tab
 memory): a re-run that adopts an earlier run's roster skips the stage
 (`epochsSkipped`) and the heal branch installs the missing epochs under the
-roster's real key. There is no KMS stage; the keystore defers to first
-durable enrollment. The ordering rule is the transposed persist-before-publish
+roster's real key. When `KMS_SERVER_URL` is set, the establishment also
+runs a KMS stage: the keystore is created under the ladder VM's bare
+did:key before the genesis, the did:web keys are minted and
+`keys.json`/`did.json` published under that same identity, the genesis
+entry carries the KMS `authentication` VM, and the keystore controller is
+promoted to the did:webvh in the establishment's existing promotion stage,
+mirroring the Space's. The stage is best-effort with a timeout: a failed
+or hung KMS leaves the account keystore-less, Settings shows the state,
+and a later keystore-creation pass heals it. The ordering rule is the
+transposed persist-before-publish
 invariant: the unlock record carrying the ladder seed (with an interim
 bridge delegated by the ladder's bare did:key) is durably written BEFORE
 the Space is created and before rung 0 publishes. After the genesis, the
@@ -725,11 +769,17 @@ promotes the Space controller last. The visit then enters through the ordinary
 transient composition, with zero local residue. The whole establishment is an
 ensure: a torn signup converges by re-running, the published log adopted by
 ladder attribution (`createDID` timestamps the genesis entry, so a naive
-re-create would mint a different SCID and never land). The
-`rememberBrowser: true` entry (the e2e seam today, the signup form's remember
-choice when it lands) and every no-WAS deployment keep the durable flow
-above; the passkey signup stays durable outright (registering a passkey is
-itself a durable ceremony).
+re-create would mint a different SCID and never land). This establishment
+now runs for every WAS signup; only a no-WAS deployment keeps the plain
+durable flow above (`ensureAccountGenesis` under `promoteController:
+false`). A `rememberBrowser: true` entry (the e2e seam today, the signup
+form's remember choice when it lands) continues past this establishment
+into the durable login's self-enrollment, described above. The passkey
+signup follows the identical fold under the WebAuthn PRF-derived
+credential -- WebAuthn `create` runs first, then this establishment, then
+the durable passkey login; registering a passkey is itself a durable
+ceremony, so the passkey flow was already durable outright, and it too
+begins here now.
 
 ## Session persistence
 
@@ -802,8 +852,9 @@ before opening, and on an engine with no `databases()` falls back to a
 versionless open whose `versionchange` transaction is aborted on
 `oldVersion === 0`; the ratchet is silent for now. An explicit
 `rememberBrowser` input forces either side: `true` is the programmatic
-durable entry (the standing self-enrollment; the signup probe and the
-recovery tail pass it, and e2e sets it through a non-production seam), and
+durable entry (the standing self-enrollment; a remembered signup's own
+login half, its durable resume, and the recovery tail all pass it, and
+e2e sets it through a non-production seam), and
 `false` on a remembered browser refuses (`AlreadyRememberedError`) rather
 than forking the durability decision. A PENDING-shape record counts as
 remembered (the resume is its one mender); the resume's discard outcome
@@ -831,11 +882,15 @@ stays distinguishable from a lapse.
 Two of those refusals carry a heal first, for the tears a torn
 credential-anchored signup can leave. A standing record whose pointer names
 no did:webvh can only be a credential-anchored establishment that died
-before its re-bind (durable-flow records gain their ladder seed only after
-promotion), so the composition re-runs `establishCredentialAnchoredAccount`
-and re-enters through the refreshed record; without the derived credential
-in hand (a test double), or when the re-run does not converge, the
-`unpromoted-account` refusal stands. A promoted account whose roster read
+before its re-bind, so the composition re-runs
+`establishCredentialAnchoredAccount` and re-enters through the refreshed
+record; without the derived credential in hand (a test double), or when the
+re-run does not converge, the `unpromoted-account` refusal stands. Every WAS
+signup runs this same establishment now, so the heal also mends a
+`rememberBrowser: true` signup torn before its durable login's
+self-enrollment: the non-remembered entry above and a fresh
+`rememberBrowser: true` login attempt both re-run the same establishment
+from the record's own ladder seed. A promoted account whose roster read
 comes back empty is the tear between genesis and epoch[0] (the user key
 died with the signup tab), healed as the explicit carve-out from the
 sweeps-skipped rule: a fresh user key is minted, epoch[0] lands with a
@@ -1958,23 +2013,23 @@ freewallet-side wrappers and the app-only ceremonies, each row pointing at
 the module that drives it. The mender column names how a torn run gets
 finished (see Tear mending in the Glossary).
 
-| Ceremony                                | Entry point                                   | Module                                                            | Shared half                 | Mender                                                                                                                               |
-| --------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Account genesis (durable)               | signup; healed at every login                 | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                                                                       |
-| Credential-anchored genesis             | default signup, non-remembered browser        | `src/session/credentialAnchoredGenesis.ts`                        | `/clientAnnex`              | re-run; the transient login's heal branch re-runs it                                                                                 |
-| Self-enrollment at login                | durable login on a fresh browser              | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex`              | pending record persisted pre-pivot; the next login's resume finishes it                                                              |
-| Client enrollment (two-party)           | Settings > Connected wallets + login page     | `src/components/EnrolledClientsSection.tsx`                       | `/enrollment`               | re-run with the same connect code                                                                                                    |
-| Client revocation + epoch cascade       | Settings > Connected wallets                  | `src/session/revocation.ts`                                       | `/clients`                  | re-run; cascade-completion sweep                                                                                                     |
-| Recovery-code issuance                  | Settings > Recovery codes                     | `src/session/recovery.ts`                                         | `/recovery`                 | re-run (nothing binds until the confirm)                                                                                             |
-| Recovery spend (durable and transient)  | `/recover`                                    | `src/session/recovery.ts`                                         | `/recovery`, `/clientAnnex` | durable: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)                                               |
-| Recovery-code revocation                | Settings > Recovery codes                     | `src/session/recovery.ts`                                         | `/recovery`                 | re-run; cascade-completion sweep                                                                                                     |
-| Unlock-credential rotation              | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts`                               | `/unlock`                   | torn-retirement repair at next passphrase login; login sweep; re-seal repair                                                         |
-| Forget ceremony                         | Settings > Connected wallets, own row         | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next login                                                                     |
-| Last-client transition                  | same row, `lastClient` confirm                | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run; the re-mint refusal is a retryable stop; refused outright on a pending passphrase entry or an unrecorded standing credential |
-| Update-key rotation                     | Settings                                      | `src/session/accountSettings.ts`                                  | `/webvh`                    | re-run (persist-before-publish)                                                                                                      |
-| Account deletion                        | Settings                                      | `src/session/accountSettings.ts` + `wipe.ts`                      | app-side phase order        | re-run; a wipe failure after the unlock-method walk is accepted                                                                      |
-| Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies    | `src/session/wipe.ts`                                             | app-side                    | re-probe verification; the `unverified` report                                                                                       |
-| Step-up ceremony                        | designed, not built                           | ---                                                               | ---                         | ---                                                                                                                                  |
+| Ceremony                                | Entry point                                                                                                              | Module                                                            | Shared half                 | Mender                                                                                                                                                                                                        |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Account genesis (durable)               | no-WAS signup; healed at every login                                                                                     | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                                                                                                                                                |
+| Credential-anchored genesis             | every WAS signup (default entry, non-remembered; the remembered and passkey flavors continue into self-enrollment below) | `src/session/credentialAnchoredGenesis.ts`                        | `/clientAnnex`              | re-run; the transient login's heal branch re-runs it, and mends a remembered signup torn before self-enrollment too                                                                                           |
+| Self-enrollment at login                | durable login on a fresh browser; also the second half of a remembered or passkey signup                                 | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex`              | pending record persisted pre-pivot; the next login's resume finishes it (a remembered signup's own resume entry included)                                                                                     |
+| Client enrollment (two-party)           | Settings > Connected wallets + login page                                                                                | `src/components/EnrolledClientsSection.tsx`                       | `/enrollment`               | re-run with the same connect code                                                                                                                                                                             |
+| Client revocation + epoch cascade       | Settings > Connected wallets                                                                                             | `src/session/revocation.ts`                                       | `/clients`                  | re-run; cascade-completion sweep                                                                                                                                                                              |
+| Recovery-code issuance                  | Settings > Recovery codes                                                                                                | `src/session/recovery.ts`                                         | `/recovery`                 | re-run (nothing binds until the confirm)                                                                                                                                                                      |
+| Recovery spend (durable and transient)  | `/recover`                                                                                                               | `src/session/recovery.ts`                                         | `/recovery`, `/clientAnnex` | durable: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)                                                                                                                        |
+| Recovery-code revocation                | Settings > Recovery codes                                                                                                | `src/session/recovery.ts`                                         | `/recovery`                 | re-run; cascade-completion sweep                                                                                                                                                                              |
+| Unlock-credential rotation              | Settings (passphrase change, passkey removal)                                                                            | `src/session/credentialRotation.ts`                               | `/unlock`                   | torn-retirement repair at next passphrase login; login sweep; re-seal repair; a passphrase change's failed establishment fails the change with the old credential intact (establish-first), mended by a retry |
+| Forget ceremony                         | Settings > Connected wallets, own row                                                                                    | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next login                                                                                                                                              |
+| Last-client transition                  | same row, `lastClient` confirm                                                                                           | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run; the re-mint refusal is a retryable stop; refused outright on a pending passphrase entry or an unrecorded standing credential                                                                          |
+| Update-key rotation                     | Settings                                                                                                                 | `src/session/accountSettings.ts`                                  | `/webvh`                    | re-run (persist-before-publish)                                                                                                                                                                               |
+| Account deletion                        | Settings                                                                                                                 | `src/session/accountSettings.ts` + `wipe.ts`                      | app-side phase order        | re-run; a wipe failure after the unlock-method walk is accepted                                                                                                                                               |
+| Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies                                                                               | `src/session/wipe.ts`                                             | app-side                    | re-probe verification; the `unverified` report                                                                                                                                                                |
+| Step-up ceremony                        | designed, not built                                                                                                      | ---                                                               | ---                         | ---                                                                                                                                                                                                           |
 
 The open gaps (stated residues with no mender yet; see Tear mending in
 the Glossary). Two are unbuilt repairs on client-less accounts, where no

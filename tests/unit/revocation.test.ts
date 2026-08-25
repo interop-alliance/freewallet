@@ -542,7 +542,7 @@ describe('the knownLatentHashes hand-off', () => {
   it("passes the recovery registry's update-key hashes to the edit", async () => {
     vi.mocked(getUnlockMethods).mockResolvedValue({
       version: 1,
-      userHandle: 'handle',
+      webAuthnUserId: 'handle',
       methods: [
         { type: 'recovery-code', updateKeyMultibase: 'z6MkCodeUpdate' },
         { type: 'passkey', credentialId: 'ignored' }

@@ -794,11 +794,20 @@ export async function locateRecoveryAccount({
  * "I saved this code" confirm, before the login, so the show-once code stays
  * re-displayable from the pending record's persisted bytes until the user
  * has confirmed saving it.
+ *
+ * `standing` reports the new passphrase's standing configuration truthfully:
+ * `'established'` when the ceremony tail landed both halves (the roster wrap
+ * and the document entry), `'pending'` when it did not. Pending means the
+ * account IS recovered and the new passphrase IS live; only its setup for
+ * logging in from other browsers is outstanding, and it completes at a later
+ * resume or durable-login mend. The continuation never fails for a pending
+ * standing.
  */
 export interface RecoveryOutcome {
   replacementCode: string
   replacementEntry: RecoveryCodeUnlockMethod
   spentRecoveryKid: string
+  standing: 'established' | 'pending'
   completeRecovery?: (options?: { currentUserKey?: UserKey }) => Promise<void>
 }
 
@@ -1506,6 +1515,7 @@ export async function recoverAccountWithCode({
     replacementCode,
     replacementEntry: replacementMethod,
     spentRecoveryKid: spent.recipientKid,
+    standing: standingEstablished ? 'established' : 'pending',
     completeRecovery
   }
 }
@@ -1579,6 +1589,12 @@ function docListsUnlockVm({
  */
 export interface RecoverySpendPrompt {
   replacementCode: string
+  // The credential's standing state, from the resume's own backfill:
+  // 'established' when both halves (roster wrap and document entry) are
+  // confirmed or completed, 'pending' when the backfill could not finish
+  // them. Pending never fails the resume; a later resume or durable-login
+  // mend completes it.
+  standing: 'established' | 'pending'
   // The confirm-gated completion. A caller with a live session passes its
   // CURRENT vault user key, so a sweep rotation during the show-once
   // display is not written back over by the closure's captured key.
@@ -1955,7 +1971,7 @@ export async function resumeRecoverySpend({
         // wrote it): the backfill above just made the standing
         // configuration real, so the entry now records it.
         log.info(
-          "Recovery-spend resume: upgrading the bare passphrase entry with the established standing configuration"
+          'Recovery-spend resume: upgrading the bare passphrase entry with the established standing configuration'
         )
         const standingFields = await standingFieldsOfKeyringHit({ found })
         await updateUnlockMethodsWithClient({
@@ -2027,6 +2043,7 @@ export async function resumeRecoverySpend({
       persistClientKeys,
       recoverySpendPrompt: {
         replacementCode: base58.encode(pending.replacementCode),
+        standing: standingEstablished ? 'established' : 'pending',
         complete
       }
     }
@@ -2564,7 +2581,11 @@ async function recoverAccountTransient({
   return {
     replacementCode,
     replacementEntry,
-    spentRecoveryKid: spent.recipientKid
+    spentRecoveryKid: spent.recipientKid,
+    // The transient variant establishes the credential's standing inside
+    // the add-and-retire entry and the mandatory rotation, both fatal on
+    // failure, so a returned outcome is always established.
+    standing: 'established'
   }
 }
 

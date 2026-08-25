@@ -24,7 +24,8 @@
  *    sibling and a later re-mint adds one once the pointer exists.
  * 4. The re-bind: the unlock record is rewritten in the standing layout
  *    (`wrapUnlockRecord` -- shell, bridge, sibling, ladder, binding MAC),
- *    superseding the plain pointer record of the pre-promotion bind.
+ *    superseding the credential's previous record (the plain layout
+ *    survives only on no-WAS deployments, where this ceremony never runs).
  *
  * The caller records the returned standing fields in the unlock-methods
  * registry entry, which is what lets the revocation cascade re-mint the
@@ -80,10 +81,7 @@ import {
 } from '@/session/keyring'
 import { saveUserKeyEpochPin, sessionLogPinStore } from '@/lib/sessionKey'
 import { WAS_SERVER_URL } from '@/app.config'
-import {
-  enrolledClientContext,
-  requireEnrolledClientContext
-} from '@/session/enrolledContext'
+import { requireEnrolledClientContext } from '@/session/enrolledContext'
 import {
   clientAnnexReachOf,
   ensureGenerationDelegation
@@ -93,12 +91,8 @@ import {
   invalidateVerifiedLog,
   verifiedAccountLog
 } from '@/session/verifiedLog'
-import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
-  emptyUnlockMethodsRegistry,
   refreshStandingDelegationFields,
-  updateUnlockMethods,
-  upsertPassphraseUnlockMethod,
   type StandingUnlockFields
 } from '@/session/unlockMethods'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
@@ -148,10 +142,12 @@ export function unlockLogStore({
  * escrow no-ops on a standing wrap, the document edit no-ops on a standing
  * entry, and the re-bind supersedes the previous record.
  *
- * Best-effort callers (the signup tail) catch and warn: a failed
- * establishment leaves the credential's record in the plain layout, which
- * logs in normally and falls back to the connect-another-wallet ceremony on
- * a fresh browser -- never a broken account.
+ * The callers are the Settings ceremonies (add-a-passkey,
+ * add-a-passphrase, the passphrase change); a WAS signup establishes
+ * through the credential-anchored establishment instead, before any Space
+ * exists. A failed establishment here leaves the credential's record in
+ * the plain layout -- a state the transient login cannot enter -- so a
+ * failure fails the surrounding ceremony rather than being swallowed.
  *
  * @param options {object}
  * @param options.session {Session}   a live enrolled session
@@ -167,6 +163,11 @@ export function unlockLogStore({
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for the secret, so the caller's bind and this ceremony run
  *   the KDF once
+ * @param [options.ladderSeed] {Uint8Array}   a caller-minted update-key
+ *   ladder seed; supplying one lets the caller clean up a torn establishment
+ *   by an actual retirement (it holds rung 0 and the attribution seed even
+ *   when this ceremony throws before returning). A fresh seed is minted when
+ *   absent
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<object>}   the new record's unlock Space id, management
  *   zcap, persist closure, and the standing fields the registry entry
@@ -179,6 +180,7 @@ export async function establishStandingUnlock({
   lowEntropy,
   email,
   credential: derived,
+  ladderSeed: mintedLadderSeed,
   idb
 }: {
   session: Session
@@ -187,6 +189,7 @@ export async function establishStandingUnlock({
   lowEntropy: boolean
   email?: string
   credential?: UnlockCredential
+  ladderSeed?: Uint8Array
   idb?: IDBFactory
 }): Promise<{
   unlockSpaceId: string
@@ -225,7 +228,7 @@ export async function establishStandingUnlock({
   // 2. The document entry: the keyAgreement publication (commitment for a
   // low-entropy credential, verbatim for a high-entropy one) and the hash of
   // ladder rung 0 in `nextKeyHashes`.
-  const ladderSeed = generateLadderSeed()
+  const ladderSeed = mintedLadderSeed ?? generateLadderSeed()
   const rung0 = await ladderRung({ ladderSeed, index: 0 })
   await publishUnlockKey({
     idStore: remoteStore.webvhIdStore(),
@@ -750,110 +753,6 @@ export async function selfEnrollStandingClient({
     pointerDid: result.did
   }
   return { clientKeys, persistClientKeys }
-}
-
-/**
- * The best-effort passphrase-shaped wrapper: runs `establishStandingUnlock`
- * for a passphrase (low-entropy, so its `keyAgreement` key publishes as a
- * hash commitment), adopts the new record's persist closure and unlock
- * method on the live session, and records the standing fields in the
- * registry's passphrase entry. Warns and returns on failure -- a
- * plain-layout record is a working login, never a broken account. Shared by
- * the passphrase signup tail, the Settings add-a-passphrase and
- * change-passphrase flows.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.passphrase {string}
- * @param [options.email] {string}   the account email, carried in the
- *   re-wrapped record
- * @param [options.credential] {UnlockCredential}   an already-derived
- *   credential for the passphrase
- * @param [options.idb] {IDBFactory}
- * @param [options.recordInRegistry] {boolean}   write the registry's
- *   passphrase entry here; default true. A passphrase change passes false:
- *   it writes the entry itself, after the old credential's retirement, so a
- *   retirement that fails before its document edit lands leaves the entry
- *   still naming the old credential
- * @returns {Promise<object>}   the established configuration's ladder seed (absent
- *   when the establishment skipped or failed -- a passphrase change threads
- *   it into the old credential's retirement as the surviving seed), and,
- *   when the establishment ran and the registry write was left to the
- *   caller, the members that entry needs
- */
-export async function establishPassphraseStanding({
-  session,
-  passphrase,
-  email,
-  credential,
-  idb,
-  recordInRegistry = true
-}: {
-  session: Session
-  passphrase: string
-  email?: string
-  credential?: UnlockCredential
-  idb?: IDBFactory
-  recordInRegistry?: boolean
-}): Promise<{
-  ladderSeed?: Uint8Array
-  established?: {
-    unlockSpaceId: string
-    manageCapability?: IZcap
-    standingFields: StandingUnlockFields
-  }
-}> {
-  // A session that cannot act as an enrolled client on a promoted account
-  // (a no-WAS deployment, a guest, an unpromoted account) has no standing configuration to
-  // establish; skip quietly rather than warn on every such signup.
-  if (!enrolledClientContext({ session })) {
-    return {}
-  }
-  try {
-    const established = await establishStandingUnlock({
-      session,
-      secret: passphrase,
-      kdf: KEYRING_KDF,
-      lowEntropy: true,
-      email,
-      credential,
-      idb
-    })
-    session.profile.persistClientKeys = established.persistClientKeys
-    session.profile.unlockMethod = {
-      type: 'passphrase',
-      unlockSpaceId: established.unlockSpaceId,
-      manageCapability: established.manageCapability
-    }
-    if (recordInRegistry) {
-      await updateUnlockMethods({
-        session,
-        mutate: current =>
-          upsertPassphraseUnlockMethod({
-            record: current ?? emptyUnlockMethodsRegistry(),
-            unlockSpaceId: established.unlockSpaceId,
-            manageCapability: established.manageCapability,
-            standing: established.standingFields
-          })
-      })
-    }
-    return {
-      ladderSeed: established.ladderSeed,
-      established: {
-        unlockSpaceId: established.unlockSpaceId,
-        ...(established.manageCapability
-          ? { manageCapability: established.manageCapability }
-          : {}),
-        standingFields: established.standingFields
-      }
-    }
-  } catch (err) {
-    log.warn(
-      'Could not establish the passphrase as a standing credential; a fresh browser will need the connect-another-wallet ceremony',
-      { err }
-    )
-    return {}
-  }
 }
 
 /**

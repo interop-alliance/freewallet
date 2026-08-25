@@ -30,7 +30,14 @@
  *    The ceremony collects its roster and epoch failures; the establishment
  *    treats them as fatal here, before anything names the DID, so the tear
  *    is the heal-able kind (a DID-less record) rather than a registry sealed
- *    under a key only this tab ever held.
+ *    under a key only this tab ever held. When a KMS is configured, the
+ *    ceremony's `provideDidWebKeys` thunk runs inside this stage (after the
+ *    Space exists, before the genesis entry): the keystore is created under
+ *    the ladder VM's bare did:key and the did:web keys minted and published
+ *    by that identity, so the genesis entry can carry the KMS
+ *    `authentication` VM. Best-effort: a failed thunk is the ceremony's
+ *    non-fatal `didWebKeys` stage (warned, the signup proceeds
+ *    keystore-less), healed by a later keystore-creation pass.
  * 3. The annex generation: minted under the bootstrap did:key, the
  *    generation delegation embedded (ladder-VM-signed) while the auxiliary
  *    Space is still bootstrap-controlled, the Space's controller flipped to
@@ -41,8 +48,14 @@
  *    DID -- durably written BEFORE promotion, so the next login signs under
  *    the promoted controller only once the record says to.
  * 5. The unlock-methods registry entry, written under the bootstrap did:key
- *    (the last window where a root invocation works). Best-effort.
- * 6. The Space-controller promotion onto the account DID, last.
+ *    (the last window where a root invocation works). Best-effort when the
+ *    hook chooses to be (the hook contract: a throw here fails the
+ *    establishment; a hook that must be best-effort swallows its own
+ *    failures).
+ * 6. The Space-controller promotion onto the account DID, last -- and,
+ *    when stage 2's KMS stage produced or found a keystore this run, the
+ *    keystore-controller promotion beside it (best-effort, mirroring the
+ *    Space's).
  *
  * The caller (the signup, or the transient login's unpromoted-account heal)
  * then enters the account through the ordinary transient composition.
@@ -58,7 +71,8 @@ import {
   didKeyZcapClient,
   keyAgreementCommitment,
   verifyAccountLog,
-  wasWebvhIdStore
+  wasWebvhIdStore,
+  type DidWebKeyMapV2
 } from '@interop/wallet-core/webvh'
 import {
   clientAnnexDidParts,
@@ -89,18 +103,35 @@ import {
 } from '@interop/wallet-core/recovery'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { ZcapClient } from '@interop/ezcap'
-import { WAS_SERVER_URL } from '@/app.config'
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
+import type { KeystoreAgent } from '@interop/webkms-client'
+import {
+  DID_KEYS_RESOURCE,
+  KEY_MAP_COLLECTION,
+  KMS_SERVER_URL,
+  WAS_SERVER_URL
+} from '@/app.config'
+import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
+import { ensureKeystore, promoteKeystoreController } from '@/lib/kms'
 import {
   bindCredentialAnchoredUnlockSecret,
   type UnlockCredential
 } from '@/session/keyring'
-import type { TransientSessionPersistence } from '@/session/persistence'
 import { accountRosterStore } from '@/session/rosterStore'
 import type { StandingUnlockFields } from '@/session/unlockMethods'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
 import { createLogger, stageTimer } from '@/lib/log'
 
 const log = createLogger('fw:session:genesis')
+
+/**
+ * The bound on the whole KMS stage (keystore ensure, did:web key mint,
+ * keys.json/did.json publication): a hung -- not throwing -- KMS sits between
+ * Space creation and the genesis entry, so it must not wedge the signup. On
+ * timeout the thunk throws and the genesis ceremony collects it as its
+ * non-fatal `didWebKeys` stage.
+ */
+const DID_WEB_KEYS_TIMEOUT_MS = 30_000
 
 /**
  * What the establishment hands back for the callers' tails: the published
@@ -131,12 +162,21 @@ export interface CredentialAnchoredEstablishment {
  * @param [options.email] {string}   carried inside the wrapped record
  * @param [options.priorCreatedAt] {string}   the previous bind's freshness
  *   stamp; the re-bind's stamp advances past it
- * @param options.persistence {TransientSessionPersistence}   the visit's
- *   in-memory handle (chain-head pins for every log read here)
+ * @param options.persistence {object}   the chain-head pin store for every
+ *   log read here (`logPins`): the transient visit's in-memory handle on the
+ *   default signup and the heal, or a durable handle when a remembered
+ *   caller wants its own publication to seed the browser's durable pin
+ * @param [options.freshnessPinFloor] {object}   present when the caller holds
+ *   durable state (the remembered and passkey signups): threaded into both
+ *   binds so their stamps additionally advance past the local
+ *   keyring-freshness pin (read-only; `idb` overrides the IndexedDB
+ *   factory). The transient callers omit it -- even the read durably
+ *   creates the session database
  * @param [options.beforePromotion] {Function}   runs after the re-bind and
  *   BEFORE the controller promotion -- the last window where a root
  *   invocation under the bootstrap did:key works (the signup's registry
- *   write). Best-effort: a throw is warned, never fatal
+ *   write). NOT swallowed here: a throw fails the establishment, so a
+ *   hook that must be best-effort swallows its own failures
  * @returns {Promise<CredentialAnchoredEstablishment>}
  * @throws {Error}   when the genesis's roster or epoch stage did not land
  *   (the underlying failure as `cause`); the record stays DID-less, so the
@@ -150,6 +190,7 @@ export async function establishCredentialAnchoredAccount({
   email,
   priorCreatedAt,
   persistence,
+  freshnessPinFloor,
   beforePromotion
 }: {
   credential: UnlockCredential
@@ -158,7 +199,8 @@ export async function establishCredentialAnchoredAccount({
   lowEntropy: boolean
   email?: string
   priorCreatedAt?: string
-  persistence: TransientSessionPersistence
+  persistence: { logPins: ResourceLogPinStore }
+  freshnessPinFloor?: { idb?: IDBFactory }
   beforePromotion?: (context: {
     was: WasClient
     zcapClient: ZcapClient
@@ -209,6 +251,7 @@ export async function establishCredentialAnchoredAccount({
     delegation: interimBridge,
     ladderSeed,
     priorCreatedAt,
+    ...(freshnessPinFloor ? { freshnessPinFloor } : {}),
     credential
   })
   mark('interim-bridge-and-first-bind')
@@ -228,6 +271,77 @@ export async function establishCredentialAnchoredAccount({
       pinStore: persistence.logPins
     })
 
+  // The KMS stage's thunk, when a KMS is configured: the ceremony calls it
+  // once the Space exists, before the genesis entry, so the entry can carry
+  // the KMS `authentication` VM. The keystore is created (or found,
+  // list-first) under the LADDER VM's bare did:key -- the bootstrap identity
+  // -- and the did:web keys are minted and keys.json/did.json published by
+  // that same identity; the keystore's controller is promoted to the account
+  // DID in stage 6 beside the Space's. The ensureDidWeb short-circuit on an
+  // existing keys.json keeps a heal re-run from generating keys twice, and
+  // its lazy keystore acquisition keeps that path off the KMS entirely. On a
+  // heal re-run of an ALREADY-PROMOTED account the bootstrap key is no
+  // longer the Space controller, so the keys.json read comes back empty (an
+  // unauthorized read looks like an absence) and the write is refused -- an
+  // expected, noisy, non-fatal `didWebKeys` failure, healed by a later
+  // keystore-creation pass. The whole thunk races a timeout: a hung KMS
+  // must not wedge the signup between Space creation and the genesis entry.
+  let keystoreAgent: KeystoreAgent | undefined
+  const kmsServerUrl = KMS_SERVER_URL
+  const provideDidWebKeys =
+    kmsServerUrl === undefined
+      ? undefined
+      : async (): Promise<DidWebKeyMapV2 | undefined> => {
+          const body = (async () => {
+            const keys = await ensureDidWeb({
+              provideKeystoreAgent: async () => {
+                keystoreAgent = await ensureKeystore({
+                  kmsServerUrl,
+                  keyAgent: bootstrapAgent,
+                  zcapClient: bootstrapZcap
+                })
+                return keystoreAgent
+              },
+              remoteStore: {
+                getKeyMap: async () => {
+                  const result = await bootstrapWas
+                    .space(spaceId)
+                    .collection(KEY_MAP_COLLECTION.id)
+                    .resource(DID_KEYS_RESOURCE)
+                    .get()
+                  return result === null ? undefined : result
+                },
+                webvhIdStore: () => idStore
+              },
+              did: didWebFromSpace({ wasServerUrl: host, spaceId })
+            })
+            mark('did-web-keys')
+            return keys as DidWebKeyMapV2
+          })()
+          // Keep a late rejection handled once the timeout has won the race.
+          body.catch(() => undefined)
+          let timer: ReturnType<typeof setTimeout> | undefined
+          try {
+            return await Promise.race([
+              body,
+              new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(
+                  () =>
+                    reject(
+                      new Error(
+                        'The did:web key provisioning timed out ' +
+                          `(${DID_WEB_KEYS_TIMEOUT_MS}ms).`
+                      )
+                    ),
+                  DID_WEB_KEYS_TIMEOUT_MS
+                )
+              })
+            ])
+          } finally {
+            clearTimeout(timer)
+          }
+        }
+
   // 2. The genesis ceremony under the bootstrap did:key. The candidate user
   // key seeds a fresh roster; an adopted (heal) roster keeps its own.
   const candidateUserKey = await mintUserKey()
@@ -245,12 +359,23 @@ export async function establishCredentialAnchoredAccount({
     idStore,
     rosterStoreFor,
     ...(pointer.did !== undefined ? { expectedDid: pointer.did } : {}),
+    ...(provideDidWebKeys ? { provideDidWebKeys } : {}),
     accountLogPinStore: persistence.logPins,
     promoteController: false
   })
   // Space provisioning, did:web keys, the did:webvh genesis entry, the
   // roster, and the collection epochs, all inside the shared ceremony.
   mark('genesis')
+  // The KMS stage stays best-effort: a failed (or timed-out) thunk is the
+  // ceremony's collected `didWebKeys` stage, warned here and never fatal --
+  // the signup proceeds keystore-less, Settings shows the state, and a later
+  // keystore-creation pass heals it. The landing check below deliberately
+  // ignores this stage.
+  for (const { stage, error } of genesis.failed) {
+    if (stage === 'didWebKeys') {
+      log.warn('did:web provisioning failed (continuing)', { err: error })
+    }
+  }
   const did = genesis.did
   const fullPointer: AccountPointer = { spaceId, host, did }
   // The ceremony collects its roster and epoch failures instead of
@@ -382,6 +507,7 @@ export async function establishCredentialAnchoredAccount({
     ladderSeed,
     delegateManagementTo: did,
     priorCreatedAt: firstBind.createdAt,
+    ...(freshnessPinFloor ? { freshnessPinFloor } : {}),
     credential
   })
   mark('bridge-sibling-rebind')
@@ -423,19 +549,17 @@ export async function establishCredentialAnchoredAccount({
 
   // 5. The caller's pre-promotion tail (the signup's registry write): the
   // last window where a root invocation under the bootstrap did:key works.
-  // Best-effort -- the account is complete without it.
+  // A throw here fails the establishment (some callers' registry writes
+  // must land in this window or the credential has no rebuild); a hook that
+  // must be best-effort swallows its own failures.
   if (beforePromotion) {
-    try {
-      await beforePromotion({
-        was: bootstrapWas,
-        zcapClient: bootstrapZcap,
-        did,
-        userKey,
-        establishment
-      })
-    } catch (err) {
-      log.warn('The pre-promotion tail failed (continuing)', { err })
-    }
+    await beforePromotion({
+      was: bootstrapWas,
+      zcapClient: bootstrapZcap,
+      did,
+      userKey,
+      establishment
+    })
     mark('pre-promotion-tail')
   }
 
@@ -450,6 +574,21 @@ export async function establishCredentialAnchoredAccount({
   })
   mark('promotion')
 
+  // The keystore half of the promotion, only when the KMS stage produced or
+  // found a keystore THIS run (a heal that short-circuited off an existing
+  // keys.json never bound one). Best-effort like every KMS touch here: the
+  // keystore's config still names the bootstrap did:key, whose KMS authority
+  // is independent of the Space controller, so a failed promotion is
+  // retryable and never fails the establishment.
+  if (keystoreAgent) {
+    try {
+      await promoteKeystoreController({ keystoreAgent, controller: did })
+      mark('keystore-promotion')
+    } catch (err) {
+      log.warn('Keystore controller promotion failed (continuing)', { err })
+    }
+  }
+
   return establishment
 }
 
@@ -459,7 +598,9 @@ export async function establishCredentialAnchoredAccount({
  * `epochs.failed` (a collection the fan-out could not epoch) rather than
  * throwing, and on a credential-anchored account no login-time sweep ever
  * finishes them -- the establishment re-run is the only mender, so the
- * establishment must stop here for it to be reached.
+ * establishment must stop here for it to be reached. A failed `didWebKeys`
+ * stage is deliberately NOT refused: the KMS stage is best-effort (warned at
+ * the call site), and a keystore-less account is complete.
  *
  * @param options {object}
  * @param options.failed {Array}   the ceremony's collected stage failures

@@ -35,6 +35,7 @@ import {
   addAccountPasskey,
   addAccountPassphrase,
   changeAccountPassphrase,
+  PasskeyNotEstablishedError,
   PendingPassphraseRetirementError,
   SamePassphraseError,
   deleteAccount,
@@ -176,7 +177,9 @@ export function SettingsPage() {
   // content keys rotated, there was nothing standing to retire, the rotation
   // did not finish (the login-time sweep resumes it), or the old credential
   // is still standing and was not retired at all (the next passphrase login's
-  // repair finishes it).
+  // repair finishes it). A failed standing establishment for the NEW
+  // passphrase throws instead (the change never touches the old credential),
+  // so it surfaces through `passphraseChangeError`, not here.
   const [passphraseRotation, setPassphraseRotation] = useState<
     'rotated' | 'skipped' | 'failed' | 'unretired'
   >('skipped')
@@ -237,7 +240,7 @@ export function SettingsPage() {
   const canAddPasskey = !!session?.profile?.clientSeed
   const [addingPasskey, setAddingPasskey] = useState(false)
   const [passkeyError, setPasskeyError] = useState<
-    'duplicate' | 'unsupported' | 'failed' | null
+    'duplicate' | 'unsupported' | 'notEstablished' | 'failed' | null
   >(null)
   // The unlock-methods registry: how this account can be unlocked (the
   // passphrase entry plus one entry per passkey). Loaded once the passkeys
@@ -326,14 +329,13 @@ export function SettingsPage() {
         `Freewallet ${new Date().toLocaleDateString(i18n.language, DATE_FMT)}`
       const { record, recorded } = await addAccountPasskey({
         session,
-        registry: unlockRegistry,
         locale: i18n.language,
         userName,
         promptForPrfRetry
       })
       if (!recorded) {
-        // The passkey is already bound and will log in; only the registry
-        // listing entry failed to persist.
+        // The passkey is standing and will log in; only the registry entry's
+        // completion failed to persist (its next login rebuilds it).
         setPasskeyError('failed')
         return
       }
@@ -347,6 +349,13 @@ export function SettingsPage() {
         setPasskeyError('duplicate')
       } else if (err instanceof PasskeyPrfUnsupportedError) {
         setPasskeyError('unsupported')
+      } else if (err instanceof PasskeyNotEstablishedError) {
+        // The passkey was created on the authenticator but could not be
+        // connected to the account; the copy states the authenticator
+        // residue and what a retry does.
+        log.error('Could not establish the added passkey', { err })
+        setPasskeyError('notEstablished')
+        await reloadRegistry()
       } else {
         log.error('Could not add a passkey', { err })
         setPasskeyError('failed')
@@ -997,7 +1006,9 @@ export function SettingsPage() {
                         ? t('settings.passkeyDuplicate')
                         : passkeyError === 'unsupported'
                           ? t('settings.passkeyPrfUnsupported')
-                          : t('settings.passkeyAddFailed')}
+                          : passkeyError === 'notEstablished'
+                            ? t('settings.passkeyNotEstablished')
+                            : t('settings.passkeyAddFailed')}
                     </Alert>
                   )}
                 </Stack>

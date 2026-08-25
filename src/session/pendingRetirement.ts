@@ -20,6 +20,22 @@
  * is the ordinary login sweep's. Best-effort throughout -- a failure leaves
  * the same detectable state for the login after it.
  *
+ * A pending-shaped entry whose login credential is itself NOT in the
+ * account document gets the establish-first arm: the login credential's
+ * standing configuration is established here (from the typed secret the
+ * login threads in), and only then does the retirement above run.
+ * Establish-first is load-bearing -- retiring the old credential while the
+ * new one is still plain would leave the account with no standing
+ * passphrase. The change ceremony itself no longer produces this state (it
+ * establishes the new credential before touching the old one and fails
+ * outright otherwise), so the arm covers residual field states only.
+ * The arm fires only when the entry sits at the LOGIN credential's own
+ * unlock Space while naming another credential's members. That address gate
+ * is what keeps the forbidden direction impossible: when an OLD passphrase
+ * (its unlock Space delete lost) logs in after a change that completed
+ * elsewhere, the entry sits at the NEW credential's unlock Space -- not the
+ * old login's address -- so the arm never fires there.
+ *
  * The same entry point mends the other damaged shape of that entry: a BARE
  * entry, one whose identity members are absent while the login credential's
  * standing configuration stands in the account document. Nothing names the
@@ -36,15 +52,19 @@
  */
 import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import { unlockKeyVmId } from '@interop/wallet-core/unlock'
+import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import type { Session } from '@/types/auth'
-import type { KeyringFetchResult } from '@/session/keyring'
+import type { KeyringFetchResult, UnlockCredential } from '@/session/keyring'
 import {
   enrolledClientContext,
   type EnrolledClientContext
 } from '@/session/enrolledContext'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
-import { standingFieldsOfKeyringHit } from '@/session/standingUnlock'
+import {
+  establishStandingUnlock,
+  standingFieldsOfKeyringHit
+} from '@/session/standingUnlock'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import {
   getUnlockMethods,
@@ -70,14 +90,20 @@ const log = createLogger('fw:session:retirement')
  * @param options.session {Session}   the live session of the passphrase
  *   logging in
  * @param options.found {KeyringFetchResult}   that credential's keyring hit
+ * @param [options.credential] {object}   the login credential the typed
+ *   passphrase derives -- the secret and, when the login already ran the
+ *   KDF, the derived bundle. Only the establish-first arm consumes it;
+ *   absent, that arm skips and every other shape mends as before
  * @returns {Promise<void>}
  */
 export async function repairTornPassphraseRetirement({
   session,
-  found
+  found,
+  credential
 }: {
   session: Session
   found: KeyringFetchResult
+  credential?: { secret: string | Uint8Array; derived?: UnlockCredential }
 }): Promise<void> {
   if (session.profile.unlockMethod?.type !== 'passphrase') {
     return
@@ -129,10 +155,12 @@ export async function repairTornPassphraseRetirement({
   // passphrase whose unlock Space delete failed, logging in after a change
   // that completed elsewhere: retiring the entry's credential there would
   // strip the account's CURRENT passphrase.
-  const { doc } = await verifiedAccountLog({
+  let { doc } = await verifiedAccountLog({
     profile: session.profile,
     pointer: context.pointer
   })
+  let established:
+    Awaited<ReturnType<typeof establishStandingUnlock>> | undefined
   if (
     !(await documentListsCredential({
       doc,
@@ -140,7 +168,57 @@ export async function repairTornPassphraseRetirement({
       keyAgreementKeyMultibase: mine
     }))
   ) {
-    return
+    // The establish-first arm: a residual field state where the entry sits
+    // at the login credential's own unlock Space naming another
+    // credential's members while the login credential is not in the
+    // document (the change ceremony no longer produces it -- it
+    // establishes the new credential before touching the old one). The
+    // address gate below is what
+    // keeps the forbidden direction impossible: an OLD passphrase logging in
+    // after a completed change finds the entry at the NEW credential's
+    // unlock Space, never its own, so it can never establish itself back
+    // into an account it was rotated off.
+    if (entry.unlockSpaceId !== found.unlockSpaceId || !credential) {
+      return
+    }
+    log.warn(
+      "Finishing a passphrase change whose standing establishment failed: establishing the login credential before the old one's retirement"
+    )
+    try {
+      // Establish-first is load-bearing: retiring the old credential while
+      // the login credential is still plain would leave the account with no
+      // standing passphrase.
+      established = await establishStandingUnlock({
+        session,
+        secret: credential.secret,
+        kdf: KEYRING_KDF,
+        lowEntropy: true,
+        email: session.user.email,
+        ...(credential.derived ? { credential: credential.derived } : {})
+      })
+    } catch (err) {
+      log.warn(
+        'Could not establish the login credential as standing; the pending retirement is left for the next passphrase login',
+        { err }
+      )
+      return
+    }
+    // The standing re-bind superseded this login's record: swap the live
+    // profile's persist closure, unlock method, and annex-writing seed onto
+    // it, as the change ceremony does on its own establishment.
+    session.profile.persistClientKeys = established.persistClientKeys
+    session.profile.unlockMethod = {
+      type: 'passphrase',
+      unlockSpaceId: established.unlockSpaceId,
+      manageCapability: established.manageCapability
+    }
+    session.profile.ladderSeed = established.ladderSeed
+    // The establishment extended the account log (and dropped the verified
+    // memo), so the still-standing check below reads the post-edit document.
+    ;({ doc } = await verifiedAccountLog({
+      profile: session.profile,
+      pointer: context.pointer
+    }))
   }
   // Whether the named credential's document inventory is still standing. Gone
   // means the retirement's document edit landed after all and only the
@@ -178,11 +256,14 @@ export async function repairTornPassphraseRetirement({
       })
     }
   }
-  // The entry now records the login credential's own standing configuration.
-  // The write's base is the wrapper's own fresh read, because the retirement
-  // re-sealed the registry to the rotated user key (in band, or on the retry
-  // above).
-  const standing = await standingFieldsOfKeyringHit({ found })
+  // The entry now records the login credential's own standing configuration
+  // -- straight off the establishment when the arm above ran (the keyring
+  // hit predates its re-bind), else rebuilt from the hit. The write's base
+  // is the wrapper's own fresh read, because the retirement re-sealed the
+  // registry to the rotated user key (in band, or on the retry above).
+  const standing = established
+    ? established.standingFields
+    : await standingFieldsOfKeyringHit({ found })
   await updateUnlockMethods({
     session,
     mutate: current => {
@@ -191,11 +272,14 @@ export async function repairTornPassphraseRetirement({
       }
       return upsertPassphraseUnlockMethod({
         record: current,
-        unlockSpaceId: found.unlockSpaceId,
+        unlockSpaceId: established?.unlockSpaceId ?? found.unlockSpaceId,
         // The entry's unlock Space is unchanged, so this is not a repoint: a
         // login whose management-zcap mint returned nothing must not clear
         // the one the entry already carries.
-        manageCapability: found.manageCapability ?? entry.manageCapability,
+        manageCapability:
+          established?.manageCapability ??
+          found.manageCapability ??
+          entry.manageCapability,
         standing
       })
     }

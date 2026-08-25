@@ -9,11 +9,12 @@
  *
  * The transient login needs an annex generation the account document
  * points at and an unlock record carrying the delegated-clients sibling.
- * This suite's fixture is deliberately the DURABLE signup plus the
- * non-production `__E2E_MINT_CLIENT_ANNEX_GENERATION__` seam -- the remembered
- * account whose credential later visits public terminals. The
- * credential-anchored signup path (which mints the generation with no seam
- * and no durable client) has its own residue suite in
+ * This suite's fixture is deliberately the DURABLE (remembered) signup --
+ * the remembered account whose credential later visits public terminals.
+ * The remembered signup rides the credential-anchored establishment, which
+ * itself mints the annex generation and the sibling-carrying standing
+ * record, so no fixture seam is needed. The credential-anchored signup path
+ * (no durable client anywhere) has its own residue suite in
  * `credential-anchored-signup.spec.ts`.
  */
 import { test, expect, type Browser, type Page } from '@playwright/test'
@@ -63,32 +64,14 @@ test.describe.serial('transient login residue', () => {
   let passphrase: string
 
   test.beforeAll(async ({ browser }, testInfo) => {
-    // The account fixture: a durable signup, then the annex generation
-    // and the sibling-carrying unlock record minted through the seam. The
-    // setup context is durable on purpose and simply discarded.
+    // The account fixture: a remembered signup, whose establishment half
+    // already mints the annex generation and the sibling-carrying unlock
+    // record. The setup context is durable on purpose and simply discarded.
     const context = await browser.newContext({ baseURL: APP_URL })
     try {
       const page = await context.newPage()
       const user = await signupViaWizard(page, testInfo)
       passphrase = user.passphrase
-      await page.evaluate(
-        async fixture => {
-          const seam = (
-            window as unknown as {
-              __E2E_MINT_CLIENT_ANNEX_GENERATION__?: (options: {
-                passphrase: string
-              }) => Promise<void>
-            }
-          ).__E2E_MINT_CLIENT_ANNEX_GENERATION__
-          if (!seam) {
-            throw new Error(
-              'The annex-generation fixture seam is not installed.'
-            )
-          }
-          await seam(fixture)
-        },
-        { passphrase: user.passphrase }
-      )
     } finally {
       await context.close()
     }

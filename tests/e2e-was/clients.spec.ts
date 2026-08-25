@@ -61,7 +61,9 @@ test.describe('The Settings connected-wallets surface', () => {
     await page.goto('/#/settings')
     await expect(page.getByText('Connected wallets')).toBeVisible()
     await expect(walletCards(page)).toHaveCount(1, { timeout: 30_000 })
-    await expect(page.getByText('This browser')).toBeVisible()
+    // Exact: the folded signup's durable session also renders the "Forget
+    // this browser" button, which a substring match would collide with.
+    await expect(page.getByText('This browser', { exact: true })).toBeVisible()
     await expect(
       page.getByText('it cannot be disconnected', { exact: false })
     ).toBeVisible()
@@ -185,21 +187,20 @@ test.describe('The Settings connected-wallets surface', () => {
   }, testInfo) => {
     test.slow()
 
-    // Client 1: a durable signup. No annex generation yet, so a cold
-    // browser's default (transient) login has nothing to enroll into --
-    // which is exactly the login-page state the two-party ceremony starts
-    // from.
+    // Client 1: a durable (remembered) signup. Its establishment half
+    // already mints the annex generation, so the shared unlock record
+    // carries the `delegatedClients` sibling from the start -- the record
+    // the enrollee's rebind must re-state whole.
     const { passphrase } = await signupViaWizard(page, testInfo)
 
     const enrollee = await coldClientPage(browser)
     const terminal = await coldClientPage(browser)
     try {
-      // Client 2 (cold): the ordinary login form, deliberately without the
-      // remember seam. The passphrase locates the account and the transient
-      // route refuses (no annex generation yet); a transient refusal no
-      // longer offers "Connect this browser" (no second-client remedy), so
-      // the enrollee card is opened through the non-production connect-offer
-      // seam until the login form grows its own connect entry.
+      // Client 2 (cold): a transient login would now simply succeed (the
+      // fold leaves every account with standing transient entry), so the
+      // enrollee card is opened through the non-production connect-offer
+      // seam, which turns the login submit into the planned
+      // connect-this-browser entry until the form grows its own.
       await enrollee.goto('/#/login')
       await enrollee.evaluate(() => {
         ;(
@@ -220,28 +221,6 @@ test.describe('The Settings connected-wallets surface', () => {
       await expect(codeField).toBeVisible({ timeout: 30_000 })
       const connectCode = (await codeField.inputValue()).trim()
       expect(connectCode.startsWith('freewallet-connect:')).toBe(true)
-
-      // Client 1 mints the annex generation (the non-production fixture
-      // seam) BEFORE the enrollee finishes: the shared unlock record now
-      // carries the `delegatedClients` sibling the rebind must preserve.
-      await page.evaluate(
-        async fixture => {
-          const seam = (
-            window as unknown as {
-              __E2E_MINT_CLIENT_ANNEX_GENERATION__?: (options: {
-                passphrase: string
-              }) => Promise<void>
-            }
-          ).__E2E_MINT_CLIENT_ANNEX_GENERATION__
-          if (!seam) {
-            throw new Error(
-              'The annex-generation fixture seam is not installed.'
-            )
-          }
-          await seam(fixture)
-        },
-        { passphrase }
-      )
 
       // Client 1 approves the pasted connect code (Settings > Connected
       // wallets > Connect another wallet, the paste half of the card).

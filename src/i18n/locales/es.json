@@ -118,6 +118,7 @@
     "passkeyDuplicate": "Ya existe una llave de acceso para esta billetera en este dispositivo.",
     "passkeyPrfUnsupported": "Esta llave de acceso o este navegador no puede desbloquear Freewallet. Pruebe con otra llave de acceso.",
     "passkeyAddFailed": "No se pudo agregar la llave de acceso. Inténtelo de nuevo.",
+    "passkeyNotEstablished": "La llave de acceso no se pudo conectar a su cuenta. Aun así se creó en el autenticador de su dispositivo, y la billetera no puede eliminarla de allí; no desbloqueará esta billetera. Si lo intenta de nuevo, se creará una segunda llave de acceso en el autenticador.",
     "passkeysRequiresFullSession": "Inicie sesión con su frase de contraseña para agregar una llave de acceso.",
     "passkeyRetryTitle": "Se necesita un toque más",
     "passkeyRetryMessage": "Su autenticador necesita una segunda solicitud para terminar de configurar esta llave de acceso. Continúe para confirmar.",
@@ -221,7 +222,7 @@
   "auth": {
     "errors": {
       "profileNotFound": "Este perfil no existe; regístrese.",
-      "profileExists": "Este perfil ya existe; inicie sesión.",
+      "profileExists": "Ya existe un perfil con esta frase de contraseña. Si su registro se interrumpió, inicie sesión con la misma frase (o llave de acceso) para terminar de configurarlo.",
       "setupFailed": "No se pudo terminar de configurar su billetera. Inténtelo de nuevo.",
       "transientSetupIncomplete": "Se encontró su cuenta, pero parte de su configuración no terminó. Inicie sesión de nuevo para reintentar los pasos restantes.",
       "transientUnavailable": "Se encontró su cuenta, pero por ahora no es accesible desde un navegador nuevo.",
@@ -327,6 +328,7 @@
       "newPassphraseLabel": "Nueva frase de contraseña",
       "submit": "Recuperar cartera",
       "recovered": "Tu cartera fue recuperada. Este navegador es ahora un cliente inscrito y el código que escribiste ya no funciona.",
+      "standingPending": "Tu nueva frase de contraseña funciona, pero todavía no está completamente configurada para iniciar sesión desde otros navegadores. Volver a iniciar sesión con ella desde este navegador, o repetir la recuperación, termina la configuración automáticamente.",
       "replacementExplain": "Este es tu NUEVO código de recuperación. Se muestra solo una vez: guárdalo en un lugar seguro antes de iniciar sesión. El código que escribiste ha sido retirado.",
       "copyCode": "Copiar el nuevo código de recuperación",
       "replacementSavedButton": "Guardé el nuevo código",

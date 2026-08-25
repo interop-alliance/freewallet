@@ -2028,12 +2028,13 @@ export class StorageManager {
         if (!profile?.keystoreAgent) {
           return undefined
         }
+        const keystoreAgent = profile.keystoreAgent
         const did = didWebFromSpace({
           wasServerUrl: remoteStore.storageServerUrl,
           spaceId: remoteStore.spaceId
         })
         const keys = await ensureDidWeb({
-          keystoreAgent: profile.keystoreAgent,
+          provideKeystoreAgent: async () => keystoreAgent,
           remoteStore,
           did
         })

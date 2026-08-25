@@ -33,7 +33,10 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 // not inherit the config's `use.baseURL`, so pass it explicitly.
 const APP_URL = 'http://localhost:5274'
 
-const RECOVERED_PASSPHRASE = 'Recovered-passphrase-77!'
+// Unique per run: the teaching server's FileSystem data survives across
+// local runs, and the recovery tail's standing establishment refuses a
+// passphrase whose unlock Space already exists (UnlockSpaceCollisionError).
+const RECOVERED_PASSPHRASE = `Recovered-passphrase-${Date.now()}-Aa1!`
 
 /**
  * Opens a fresh, cold browser context (empty IndexedDB and localStorage) to

@@ -122,6 +122,10 @@ export function SignupPage() {
           userName,
           promptForPrfRetry
         })
+        // Session creation fired `ensureUserCollections` as
+        // `session.storageReady`; wait for the collections before
+        // navigating, exactly like the login page does.
+        await session.storageReady
         login(session)
         navigate('/dashboard')
       } catch (err) {
@@ -156,6 +160,11 @@ export function SignupPage() {
           state: { authMessageKey: 'auth.errors.profileExists' }
         })
       }
+      // Session creation fired `ensureUserCollections` as
+      // `session.storageReady`; wait for the collections before navigating,
+      // exactly like the login page does. (A transient session carries no
+      // `storageReady` and falls straight through.)
+      await session.storageReady
       login(session)
       navigate('/dashboard')
     } catch (err) {

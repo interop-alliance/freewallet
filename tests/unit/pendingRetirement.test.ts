@@ -37,7 +37,8 @@ const state = vi.hoisted(() => ({
   // Whether it still lists the NAMED (pending) credential's: gone means the
   // torn run's document edit landed and only its registry write was lost.
   namedCredentialStanding: true,
-  rotationThrows: false
+  rotationThrows: false,
+  establishThrows: false
 }))
 
 vi.mock('@/session/enrolledContext', () => ({
@@ -70,7 +71,26 @@ vi.mock('@/session/standingUnlock', () => ({
   standingFieldsOfKeyringHit: vi.fn(async () => ({
     keyAgreementKeyMultibase: MY_KAK,
     updateKeyMultibase: 'z6MkMyRung0'
-  }))
+  })),
+  establishStandingUnlock: vi.fn(async () => {
+    state.calls.push('establishStandingUnlock')
+    if (state.establishThrows) {
+      throw new Error('publish failed')
+    }
+    // The establishment publishes the login credential's commitment entry,
+    // so the repair's post-establishment document read sees it standing.
+    state.loginCredentialStanding = true
+    return {
+      unlockSpaceId: 'unlock-space-new',
+      manageCapability: { id: 'urn:zcap:established-manage' },
+      persistClientKeys: vi.fn(async () => {}),
+      ladderSeed: new Uint8Array(32).fill(7),
+      standingFields: {
+        keyAgreementKeyMultibase: MY_KAK,
+        updateKeyMultibase: 'z6MkEstablishedRung0'
+      }
+    }
+  })
 }))
 
 vi.mock('@/session/verifiedLog', () => ({
@@ -90,7 +110,7 @@ vi.mock('@/session/unlockMethods', () => {
       ...(state.entry ? [state.entry] : []),
       ...state.passkeyEntries
     ]
-    return { version: 1, userHandle: 'handle', methods }
+    return { version: 1, webAuthnUserId: 'handle', methods }
   }
   return {
     getUnlockMethods: vi.fn(read),
@@ -127,6 +147,7 @@ import {
   upsertPassphraseUnlockMethod,
   upsertPasskeyUnlockMethod
 } from '@/session/unlockMethods'
+import { establishStandingUnlock } from '@/session/standingUnlock'
 import {
   rebuildBarePasskeyEntry,
   repairTornPassphraseRetirement
@@ -247,6 +268,7 @@ beforeEach(() => {
   state.loginCredentialStanding = true
   state.namedCredentialStanding = true
   state.rotationThrows = false
+  state.establishThrows = false
   vi.clearAllMocks()
 })
 
@@ -344,6 +366,102 @@ describe('repairTornPassphraseRetirement', () => {
     expect(state.calls).toEqual(['getUnlockMethods', 'verifiedAccountLog'])
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
     expect(state.calls).not.toContain('putUnlockMethods')
+  })
+
+  it('establishes the login credential first when the change withheld the retirement', async () => {
+    // The pending state: the entry sits at the LOGIN credential's own unlock
+    // Space naming the OLD credential's members, and the login credential is
+    // not in the document -- its establishment is exactly what failed when
+    // the change withheld the retirement.
+    state.loginCredentialStanding = false
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const session = makeSession()
+    await repairTornPassphraseRetirement({
+      session,
+      found: makeFound(),
+      credential: { secret: 'new-pass' }
+    })
+    expect(state.calls).toEqual([
+      'getUnlockMethods',
+      'verifiedAccountLog',
+      // Establish-first: the login credential becomes standing before the
+      // named credential is retired.
+      'establishStandingUnlock',
+      // The post-establishment re-read of the account document.
+      'verifiedAccountLog',
+      'rotateOffUnlockCredential',
+      'adoptRotatedUserKey',
+      'getUnlockMethods',
+      'putUnlockMethods'
+    ])
+    expect(vi.mocked(establishStandingUnlock)).toHaveBeenCalledWith(
+      expect.objectContaining({ secret: 'new-pass', lowEntropy: true })
+    )
+    // The session adopts the established record, as the change ceremony
+    // does on its own establishment.
+    expect(session.profile.unlockMethod).toEqual(
+      expect.objectContaining({
+        type: 'passphrase',
+        unlockSpaceId: 'unlock-space-new',
+        manageCapability: { id: 'urn:zcap:established-manage' }
+      })
+    )
+    expect(session.profile.persistClientKeys).toBeTypeOf('function')
+    expect(session.profile.ladderSeed).toBeInstanceOf(Uint8Array)
+    // The entry rewrite records the establishment's standing fields, not
+    // ones rebuilt from the pre-establishment keyring hit.
+    expect(vi.mocked(upsertPassphraseUnlockMethod)).toHaveBeenCalledWith({
+      record: expect.anything(),
+      unlockSpaceId: 'unlock-space-new',
+      manageCapability: { id: 'urn:zcap:established-manage' },
+      standing: {
+        keyAgreementKeyMultibase: MY_KAK,
+        updateKeyMultibase: 'z6MkEstablishedRung0'
+      }
+    })
+    warn.mockRestore()
+  })
+
+  it('never establishes toward an entry at another unlock Space', async () => {
+    // The forbidden direction: an OLD passphrase logging in after a change
+    // that completed elsewhere finds the entry at the NEW credential's
+    // unlock Space, not its own address, so the establish-first arm must
+    // not fire even with the secret in hand.
+    state.loginCredentialStanding = false
+    state.entry = {
+      ...entryFor({ keyAgreementKeyMultibase: OTHER_KAK }),
+      unlockSpaceId: 'unlock-space-other'
+    }
+    await repairTornPassphraseRetirement({
+      session: makeSession(),
+      found: makeFound(),
+      credential: { secret: 'old-pass' }
+    })
+    expect(state.calls).toEqual(['getUnlockMethods', 'verifiedAccountLog'])
+    expect(vi.mocked(establishStandingUnlock)).not.toHaveBeenCalled()
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
+  })
+
+  it('leaves the pending state untouched when the establishment fails again', async () => {
+    state.loginCredentialStanding = false
+    state.establishThrows = true
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(
+      repairTornPassphraseRetirement({
+        session: makeSession(),
+        found: makeFound(),
+        credential: { secret: 'new-pass' }
+      })
+    ).resolves.toBeUndefined()
+    expect(state.calls).toEqual([
+      'getUnlockMethods',
+      'verifiedAccountLog',
+      'establishStandingUnlock'
+    ])
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
+    warn.mockRestore()
   })
 
   it('rebuilds a bare entry when the login credential is standing', async () => {

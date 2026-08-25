@@ -1,12 +1,16 @@
 // @vitest-environment node
 /**
- * Unit tests for the standing-configuration establishment's passphrase wrapper
- * (`establishPassphraseStanding` in `src/session/standingUnlock.ts`): who
- * writes the unlock-methods registry entry. A passphrase change takes that
- * write over, so it can decide -- after the old credential's retirement has
- * reported -- which credential's standing configuration the entry must name.
+ * Unit tests for the standing-configuration establishment
+ * (`establishStandingUnlock` in `src/session/standingUnlock.ts`): it hands
+ * the registry-entry members back to its caller (the Settings ceremonies own
+ * the registry write, deciding after their own outcome which credential's
+ * standing configuration the entry names), and it honors a caller-minted
+ * ladder seed, so a ceremony can clean up a torn establishment by an actual
+ * retirement.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { KEYRING_KDF } from '@interop/wallet-core/keyring'
+import { ladderRung } from '@interop/wallet-core/clientAnnex'
 import { transientSessionPersistence } from '@/session/persistence'
 
 vi.mock('@/session/enrolledContext', () => ({
@@ -76,17 +80,17 @@ vi.mock('@/stores/wasRemoteStore', () => ({
 vi.mock('@/session/unlockMethods', () => ({
   emptyUnlockMethodsRegistry: vi.fn(() => ({
     version: 1,
-    userHandle: 'handle',
+    webAuthnUserId: 'handle',
     methods: []
   })),
   getUnlockMethods: vi.fn(async () => ({
     version: 1,
-    userHandle: 'handle',
+    webAuthnUserId: 'handle',
     methods: []
   })),
   updateUnlockMethods: vi.fn(
     async ({ mutate }: { mutate: (current: never) => unknown }) =>
-      mutate({ version: 1, userHandle: 'handle', methods: [] } as never)
+      mutate({ version: 1, webAuthnUserId: 'handle', methods: [] } as never)
   ),
   refreshStandingDelegationFields: vi.fn(async () => {}),
   upsertPassphraseUnlockMethod: vi.fn(({ record }) => record)
@@ -108,7 +112,7 @@ const CREDENTIAL = {
   }
 }
 
-const { establishPassphraseStanding } = await import('@/session/standingUnlock')
+const { establishStandingUnlock } = await import('@/session/standingUnlock')
 const { updateUnlockMethods } = await import('@/session/unlockMethods')
 
 function makeSession() {
@@ -122,38 +126,45 @@ function makeSession() {
       userKey: { id: 'did:key:zUserKey', secret: new Uint8Array(32) },
       persistence: transientSessionPersistence()
     }
-  } as unknown as Parameters<typeof establishPassphraseStanding>[0]['session']
+  } as unknown as Parameters<typeof establishStandingUnlock>[0]['session']
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('establishPassphraseStanding', () => {
-  it('writes the registry entry by default', async () => {
-    const { established } = await establishPassphraseStanding({
+describe('establishStandingUnlock', () => {
+  it('returns the entry members and never writes the registry itself', async () => {
+    const outcome = await establishStandingUnlock({
       session: makeSession(),
-      passphrase: 'new'
-    })
-    expect(vi.mocked(updateUnlockMethods)).toHaveBeenCalled()
-    expect(established?.unlockSpaceId).toBe('space-new')
-  })
-
-  it('hands the entry members back instead when the caller writes it', async () => {
-    const { established } = await establishPassphraseStanding({
-      session: makeSession(),
-      passphrase: 'new',
-      recordInRegistry: false
+      secret: 'new',
+      kdf: KEYRING_KDF,
+      lowEntropy: true
     })
     expect(vi.mocked(updateUnlockMethods)).not.toHaveBeenCalled()
-    expect(established?.unlockSpaceId).toBe('space-new')
-    expect(established?.manageCapability).toEqual({ id: 'urn:zcap:manage' })
-    expect(established?.standingFields).toEqual(
+    expect(outcome.unlockSpaceId).toBe('space-new')
+    expect(outcome.manageCapability).toEqual({ id: 'urn:zcap:manage' })
+    expect(outcome.standingFields).toEqual(
       expect.objectContaining({
         rosterKid: CREDENTIAL.standing.recipientKid,
         keyAgreementKeyMultibase: CREDENTIAL.standing.keyAgreementKeyMultibase,
         unlockClientDid: CREDENTIAL.standing.clientDid
       })
     )
+    expect(outcome.ladderSeed).toBeInstanceOf(Uint8Array)
+  })
+
+  it('uses a caller-minted ladder seed, so a torn run stays retirable by it', async () => {
+    const ladderSeed = new Uint8Array(32).fill(9)
+    const outcome = await establishStandingUnlock({
+      session: makeSession(),
+      secret: 'new',
+      kdf: KEYRING_KDF,
+      lowEntropy: true,
+      ladderSeed
+    })
+    expect(outcome.ladderSeed).toBe(ladderSeed)
+    const rung0 = await ladderRung({ ladderSeed, index: 0 })
+    expect(outcome.standingFields.updateKeyMultibase).toBe(rung0.keyMultibase)
   })
 })

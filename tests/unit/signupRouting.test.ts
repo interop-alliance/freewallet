@@ -1,12 +1,13 @@
 // @vitest-environment node
 /**
  * Unit tests for the signup durability routing (`src/session/signup.ts`): a
- * WAS-configured signup on a non-remembered browser runs CREDENTIAL-ANCHORED
- * (a ladder-anchored genesis, transient entry, a create-nothing probe),
- * while an explicit `rememberBrowser: true` runs the durable flow with its
- * self-enrolling probe. The heavy boundaries -- the establishment, the
- * transient composition, the keyring -- are mocked at the module seam; what
- * runs here is the routing and the probe-then-establish-then-enter wiring.
+ * WAS-configured signup ALWAYS runs the credential-anchored establishment --
+ * the non-remembered default then enters transiently, while an explicit
+ * `rememberBrowser: true` follows the establishment with the ordinary durable
+ * login (never the transient composition) and reports `userExists: false`.
+ * The heavy boundaries -- the establishment, the transient composition, the
+ * keyring, the login -- are mocked at the module seam; what runs here is the
+ * routing and the probe-then-establish-then-enter wiring.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -23,18 +24,17 @@ vi.mock('@/app.config', async importOriginal => ({
 
 vi.mock('@/session/keyring', () => ({
   bindPassphrase: vi.fn(),
-  bindUnlockSecret: vi.fn(),
   deriveUnlockCredential: vi.fn(async () => ({
     unlock: { spaceId: 'unlock-space-1' },
     standing: {}
   })),
-  fetchTransientKeyring: vi.fn(),
-  unlockManagementGrantee: vi.fn()
+  fetchTransientKeyring: vi.fn()
 }))
 
 vi.mock('@/session/initSession', () => ({
   initSessionFromSeed: vi.fn(),
-  loginWithPassphrase: vi.fn()
+  loginWithPassphrase: vi.fn(),
+  loginWithPasskey: vi.fn()
 }))
 
 vi.mock('@/session/credentialAnchoredGenesis', () => ({
@@ -57,21 +57,21 @@ vi.mock('@/session/provisionNewWallet', () => ({
   seedWelcomeContent: vi.fn(async () => {})
 }))
 
-vi.mock('@/session/standingUnlock', () => ({
-  establishPassphraseStanding: vi.fn(),
-  establishStandingUnlock: vi.fn()
-}))
-
 vi.mock('@/session/unlockMethods', () => ({
   emptyUnlockMethodsRegistry: vi.fn(() => ({
     version: 1,
-    userHandle: 'handle',
+    webAuthnUserId: 'handle',
     methods: []
   })),
   enrollPasskey: vi.fn(),
   updateUnlockMethods: vi.fn(),
   updateUnlockMethodsWithClient: vi.fn(),
-  upsertPassphraseUnlockMethod: vi.fn(({ record }) => record)
+  upsertPassphraseUnlockMethod: vi.fn(({ record }) => record),
+  upsertPasskeyUnlockMethod: vi.fn(({ record }) => record)
+}))
+
+vi.mock('@/lib/passkey', () => ({
+  registerPasskey: vi.fn()
 }))
 
 import {
@@ -113,6 +113,8 @@ describe('signUpWithPassphrase -- durability routing', () => {
     expect(establishCall.lowEntropy).toBe(true)
     expect(establishCall.pointer.host).toBe('https://was.example.test')
     expect(establishCall.ladderSeed).toHaveLength(32)
+    // The default caller holds no durable state, so no freshness-pin floor.
+    expect(establishCall.freshnessPinFloor).toBeUndefined()
     expect(transientSessionFromKeyringHit).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'passphrase' })
     )
@@ -138,10 +140,52 @@ describe('signUpWithPassphrase -- durability routing', () => {
     expect(transientSessionFromKeyringHit).not.toHaveBeenCalled()
   })
 
-  it('runs the durable flow on rememberBrowser: true', async () => {
+  it('rememberBrowser: true runs the establishment then the durable login', async () => {
+    // The create-nothing probe misses; the establishment runs; the durable
+    // login self-enrolls this browser.
+    vi.mocked(fetchTransientKeyring).mockResolvedValueOnce(null)
+    const durableSession = {
+      user: { id: 'did:key:z6MkFirstClient' },
+      profile: {},
+      storage: {},
+      isGuest: false
+    }
     vi.mocked(loginWithPassphrase).mockResolvedValue({
-      session: null,
+      session: durableSession,
       userExists: true
+    } as never)
+
+    const result = await signUpWithPassphrase({
+      passphrase: 'correct horse',
+      email: 'a@example.test',
+      rememberBrowser: true
+    })
+
+    // The establishment ran, under the durable seams (a freshness-pin floor
+    // is threaded so the login half cannot refuse the fresh record).
+    const establishCall = vi.mocked(establishCredentialAnchoredAccount).mock
+      .calls[0]![0]
+    expect(establishCall.lowEntropy).toBe(true)
+    expect(establishCall.freshnessPinFloor).toBeDefined()
+    // Then the ordinary durable login, with the derived credential.
+    expect(loginWithPassphrase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rememberBrowser: true,
+        credential: expect.anything()
+      })
+    )
+    // Never the transient composition: no per-visit annex client is minted.
+    expect(transientSessionFromKeyringHit).not.toHaveBeenCalled()
+    // The inner login's `userExists: true` (the account it just created)
+    // does not pass through.
+    expect(result.userExists).toBe(false)
+    expect(result.session).toBe(durableSession)
+    expect(seedWelcomeContent).toHaveBeenCalledWith({ session: durableSession })
+  })
+
+  it('rememberBrowser: true still reports an existing account from the probe', async () => {
+    vi.mocked(fetchTransientKeyring).mockResolvedValue({
+      unlockSpaceId: 'unlock-space-1'
     } as never)
 
     const result = await signUpWithPassphrase({
@@ -149,11 +193,9 @@ describe('signUpWithPassphrase -- durability routing', () => {
       rememberBrowser: true
     })
 
-    expect(result.userExists).toBe(true)
-    expect(loginWithPassphrase).toHaveBeenCalledWith(
-      expect.objectContaining({ rememberBrowser: true })
-    )
+    expect(result).toEqual({ userExists: true })
     expect(establishCredentialAnchoredAccount).not.toHaveBeenCalled()
+    expect(loginWithPassphrase).not.toHaveBeenCalled()
   })
 
   it('runs the durable flow with no WAS server configured', async () => {

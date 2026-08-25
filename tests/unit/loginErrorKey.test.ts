@@ -4,8 +4,7 @@
  * (`src/session/loginErrorKey.ts`): the typed outcome (the key beside the
  * transient refusal's reason), and the per-reason mapping of
  * `TransientLoginUnavailableError` -- the failed-heal pair, the
- * annex-generation family, the copy-less `no-standing` state, and the two
- * configuration refusals.
+ * annex-generation family, and the two configuration refusals.
  */
 import { describe, expect, it } from 'vitest'
 import { loginErrorKey } from '@/session/loginErrorKey'
@@ -60,10 +59,6 @@ describe('loginErrorKey', () => {
     }
   })
 
-  it('gives no-standing no copy of its own', () => {
-    expect(keyFor('no-standing').key).toBe('auth.errors.transientUnavailable')
-  })
-
   it('keeps the configuration refusals on the generic developer arm', () => {
     for (const reason of ['no-was-server', 'remote-direct'] as const) {
       expect(keyFor(reason).key).toBe('auth.errors.setupFailed')
@@ -74,7 +69,6 @@ describe('loginErrorKey', () => {
     const reasons: TransientLoginUnavailableReason[] = [
       'no-was-server',
       'remote-direct',
-      'no-standing',
       'no-delegated-clients',
       'unpromoted-account',
       'no-clientAnnex-generation',

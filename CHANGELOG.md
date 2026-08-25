@@ -1,5 +1,38 @@
 # History
 
+## 0.42.0 - TBD
+
+### Changed
+
+- Every WAS signup (passphrase or passkey, remembered or not) now runs the
+  credential-anchored establishment first, so the standing-layout unlock
+  record is durably written before the account's Space exists. A
+  remembered signup then runs the ordinary durable login, whose
+  self-enrollment makes the browser a durable client; a torn remembered
+  signup resumes at the next `rememberBrowser: true` login. Only a no-WAS
+  deployment keeps the old plain durable signup.
+- The credential-anchored establishment gained a KMS stage: when a KMS
+  server is configured, it creates the keystore under the ladder VM's
+  bare identity, mints the did:web keys, and promotes the keystore
+  controller alongside the Space's. Best-effort with a timeout; a failed
+  or hung stage leaves the account keystore-less.
+- `addAccountPasskey` and `changeAccountPassphrase` are standing-or-fail:
+  a failed standing establishment no longer leaves an unlock method
+  silently plain. `changeAccountPassphrase` runs establish-first on a WAS
+  account: the new passphrase's standing establishment is the ceremony's
+  first write, and a failure fails the change with the old passphrase
+  fully intact (record, Space, and standing configuration unchanged), so
+  no plain record is ever written for the new passphrase and a retry of
+  the same change converges.
+- The durable recovery spend's outcome now reports `standing: 'established'
+| 'pending'`, surfaced as a pending notice when the standing upgrade did
+  not complete inline.
+- The unlock-methods registry record's `userHandle` member is renamed
+  `webAuthnUserId`.
+- The `no-standing` transient-login refusal reason is removed; a record
+  without a ladder seed is now an invariant violation rather than a
+  user-facing refusal, since every WAS signup produces a standing record.
+
 ## 0.41.0 - TBD
 
 ### Changed

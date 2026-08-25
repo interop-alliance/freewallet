@@ -279,7 +279,7 @@ async function makeSession(idb?: IDBFactory): Promise<Session> {
 function sampleRecord(): UnlockMethodsRecord {
   return {
     version: 1,
-    userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+    webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
     methods: [
       {
         type: 'passkey',
@@ -534,7 +534,7 @@ describe('revokeUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [entry]
       }
     })
@@ -582,7 +582,7 @@ describe('revokeUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [entry]
       }
     })
@@ -612,7 +612,7 @@ describe('deleteUnlockMethodArtifacts', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [entry]
       }
     })
@@ -682,7 +682,7 @@ describe('the standing delegation scalar pairs (FW-194)', () => {
   it('carries the delegatedClients pair forward through a backfill upsert', async () => {
     const base: UnlockMethodsRecord = {
       version: 1,
-      userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+      webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
       methods: [
         {
           type: 'passphrase',
@@ -712,7 +712,7 @@ describe('the standing delegation scalar pairs (FW-194)', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [
           {
             type: 'passphrase',
@@ -752,7 +752,7 @@ describe('the standing delegation scalar pairs (FW-194)', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [
           {
             type: 'passphrase',
@@ -784,7 +784,7 @@ describe('the standing delegation scalar pairs (FW-194)', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [
           {
             type: 'passphrase',
@@ -831,7 +831,7 @@ describe('the credential rotation inside a revocation', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [entry]
       }
     })
@@ -876,7 +876,7 @@ describe('the credential rotation inside a revocation', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [entry]
       }
     })
@@ -894,7 +894,7 @@ describe('the credential rotation inside a revocation', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [entry]
       }
     })
@@ -1021,7 +1021,7 @@ describe('backfillPassphraseUnlockMethod', () => {
     })
 
     expect(result).not.toBeNull()
-    expect(result!.userHandle).toBeTruthy()
+    expect(result!.webAuthnUserId).toBeTruthy()
     expect(result!.methods).toHaveLength(1)
     expect(result!.methods[0]).toMatchObject({
       type: 'passphrase',
@@ -1065,7 +1065,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [existing]
       }
     })
@@ -1097,7 +1097,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [existing]
       }
     })
@@ -1123,7 +1123,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [
           {
             type: 'passphrase',
@@ -1157,7 +1157,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [
           passkeyEntry({
             manageCapability: capExpiringIn({ msFromNow: 1000 })
@@ -1188,7 +1188,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [passkeyEntry({ manageCapability: stored })]
       }
     })
@@ -1217,7 +1217,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [
           {
             type: 'passphrase',
@@ -1264,7 +1264,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [
           {
             type: 'passphrase',
@@ -1307,7 +1307,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [passkeyEntry({ manageCapability: stored })]
       }
     })
@@ -1339,7 +1339,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [
           {
             type: 'passphrase',
@@ -1382,7 +1382,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [
           {
             type: 'passphrase',
@@ -1419,7 +1419,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [
           passkeyEntry({
             manageCapability: capExpiringIn({
@@ -1459,7 +1459,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [
           {
             type: 'passphrase',
@@ -1499,7 +1499,7 @@ describe('backfillPassphraseUnlockMethod', () => {
       session,
       record: {
         version: 1,
-        userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
         methods: [
           passkeyEntry({
             manageCapability: capExpiringIn({
@@ -1743,7 +1743,7 @@ describe('the registry compare-and-swap (FW-299)', () => {
         session,
         mutate: current => ({
           ...(current as UnlockMethodsRecord),
-          userHandle: 'STALEWRITEHANDLEAAAAAA'
+          webAuthnUserId: 'STALEWRITEHANDLEAAAAAA'
         })
       })
     ).rejects.toBeInstanceOf(PreconditionFailedError)
@@ -1819,7 +1819,7 @@ describe('the registry compare-and-swap (FW-299)', () => {
         upsertPassphraseUnlockMethod({
           record: current ?? {
             version: 1,
-            userHandle: 'FRESHMINTEDHANDLEAAAAA',
+            webAuthnUserId: 'FRESHMINTEDHANDLEAAAAA',
             methods: []
           },
           unlockSpaceId: 'unlock-space-pp'
@@ -1830,7 +1830,7 @@ describe('the registry compare-and-swap (FW-299)', () => {
     // upserted into the existing record, whose handle and entries survive.
     const firstPut = vi.mocked(putUnlockMethodsRecord).mock.calls[0]![0]
     expect(firstPut.ifNoneMatch).toBe(true)
-    expect(result?.userHandle).toBe(other.userHandle)
+    expect(result?.webAuthnUserId).toBe(other.webAuthnUserId)
     expect(result?.methods.map(method => method.type).sort()).toEqual([
       'passkey',
       'passphrase'

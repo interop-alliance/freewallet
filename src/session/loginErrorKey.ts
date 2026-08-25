@@ -228,11 +228,6 @@ function transientRefusalKey(reason: TransientLoginUnavailableReason): string {
     case 'no-clientAnnex-generation':
     case 'no-generation-delegation':
       return 'auth.errors.transientUnavailable'
-    // A plain pointer record with no local key set: bricked, and the fix is
-    // upstream (making the state unreachable), so it gets no copy of its
-    // own and shares the honest refusal.
-    case 'no-standing':
-      return 'auth.errors.transientUnavailable'
     // The two configuration refusals (a `rememberBrowser: false` caller on
     // a no-WAS deployment or in the partitioned CHAPI popup). The login
     // form never produces them; the developer-facing string is the error's

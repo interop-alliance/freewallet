@@ -41,7 +41,10 @@ const APP_URL = 'http://localhost:5274'
 
 const REPLICA_DB_NAME_PATTERN = /-(?:wallet|credentials|sync)-db/
 
-const RECOVERED_PASSPHRASE = 'Recovered-after-forget-42!'
+// Unique per run: the teaching server's FileSystem data survives across
+// local runs, and the recovery tail's standing establishment refuses a
+// passphrase whose unlock Space already exists (UnlockSpaceCollisionError).
+const RECOVERED_PASSPHRASE = `Recovered-after-forget-${Date.now()}-Aa1!`
 
 /**
  * Opens a fresh, cold browser context (empty IndexedDB and localStorage) to

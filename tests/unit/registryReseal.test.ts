@@ -162,7 +162,7 @@ function swapVaultKeys({
 function sampleRecord(): UnlockMethodsRecord {
   return {
     version: 1,
-    userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+    webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
     methods: [
       {
         type: 'passphrase',

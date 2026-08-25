@@ -92,8 +92,16 @@ import {
   AlreadyRememberedError,
   routeUnlockLogin,
   TransientLoginUnavailableError,
+  type TransientLoginUnavailableReason,
   transientSessionFromKeyringHit
 } from '@/session/transientLogin'
+
+// Type-level guarantee that the plain-record state is not a typed refusal:
+// this line fails to compile if 'no-standing' rejoins the reason union.
+const noStandingIsNotAReason: 'no-standing' extends TransientLoginUnavailableReason
+  ? never
+  : true = true
+void noStandingIsNotAReason
 
 const KDF = { algorithm: 'PBKDF2', iterations: 1, version: 1 } as never
 const CREDENTIAL = {
@@ -290,10 +298,15 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
     throw new Error('expected a refusal')
   }
 
-  it('refuses a record without standing authority', async () => {
+  it('treats a record without standing authority as an invariant bug', async () => {
+    // A standing record is the only record a WAS signup produces, so a
+    // plain pointer record here is a producer bug, not a typed refusal:
+    // a plain Error, deliberately outside the reason union.
     const err = await refusalFor(makeFound({ standing: undefined }))
-    expect(err).toBeInstanceOf(TransientLoginUnavailableError)
-    expect((err as TransientLoginUnavailableError).reason).toBe('no-standing')
+    expect(err).not.toBeInstanceOf(TransientLoginUnavailableError)
+    expect((err as Error).name).toBe('Error')
+    expect((err as Error).message).toMatch(/Invariant violated/)
+    expect((err as Error).message).toMatch(/no standing authority/)
   })
 
   it('refuses a standing record without the delegatedClients sibling', async () => {

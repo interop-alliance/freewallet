@@ -65,9 +65,10 @@ export async function getKmsSignFunction({
  *
  * @param options {object}
  * @param options.kmsServerUrl {string} - KMS base URL (e.g. `<was>/kms`).
- * @param options.keyAgent {CapabilityAgent} - The session's root key agent;
- *   the keystore is created under its did:key on first login and its key
- *   signs every keystore invocation.
+ * @param options.keyAgent {ICapabilityAgent} - The creating identity's key
+ *   agent (the session's root key agent, or the credential-anchored
+ *   establishment's bootstrap did:key); the keystore is created under its
+ *   did:key on first contact and its key signs every keystore invocation.
  * @param options.zcapClient {ZcapClient} - The session's zcap client, used
  *   for the list-by-controller request (root zcap, action `read`). Must sign
  *   with a keyId the keystore's current controller resolves.
@@ -93,7 +94,7 @@ export async function ensureKeystore({
   fallbackZcapClient
 }: {
   kmsServerUrl: string
-  keyAgent: CapabilityAgent
+  keyAgent: ICapabilityAgent
   zcapClient: ZcapClient
   controller?: string
   capabilityAgent?: ICapabilityAgent

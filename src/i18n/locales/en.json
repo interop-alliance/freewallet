@@ -118,6 +118,7 @@
     "passkeyDuplicate": "A passkey for this wallet already exists on this device.",
     "passkeyPrfUnsupported": "This passkey or browser cannot unlock Freewallet. Try a different passkey.",
     "passkeyAddFailed": "Could not add the passkey. Please try again.",
+    "passkeyNotEstablished": "The passkey could not be connected to your account. It was still created on your device's authenticator, and the wallet cannot remove it from there -- it will not unlock this wallet. Retrying will create a second passkey on the authenticator.",
     "passkeysRequiresFullSession": "Log in with your passphrase to add a passkey.",
     "passkeyRetryTitle": "One more tap needed",
     "passkeyRetryMessage": "Your authenticator needs a second prompt to finish setting up this passkey. Continue to confirm.",
@@ -221,7 +222,7 @@
   "auth": {
     "errors": {
       "profileNotFound": "This profile does not exist, please sign up.",
-      "profileExists": "This profile already exists, please log in.",
+      "profileExists": "A profile with this passphrase already exists. If your signup was interrupted, logging in with the same passphrase (or passkey) finishes setting it up.",
       "setupFailed": "Could not finish setting up your wallet. Please try again.",
       "transientSetupIncomplete": "Your account was found, but part of its setup did not finish. Log in again to retry the remaining setup steps.",
       "transientUnavailable": "Your account was found, but it is not reachable from a new browser right now.",
@@ -327,6 +328,7 @@
       "newPassphraseLabel": "New passphrase",
       "submit": "Recover wallet",
       "recovered": "Your wallet was recovered. This browser is now an enrolled client, and the code you typed no longer works.",
+      "standingPending": "Your new passphrase works, but it is not yet fully set up for logging in from other browsers. Logging in again with it from this browser, or running recovery again, finishes the setup automatically.",
       "replacementExplain": "This is your NEW recovery code. It is shown only once -- save it somewhere safe before logging in. The code you typed has been retired.",
       "copyCode": "Copy the new recovery code",
       "replacementSavedButton": "I saved the new code",

@@ -14,22 +14,28 @@ import {
   isWebvhDid,
   rotateWebvhUpdateKey
 } from '@interop/wallet-core/webvh'
-import { ladderRung } from '@interop/wallet-core/clientAnnex'
-import { KEYRING_KDF } from '@interop/wallet-core/keyring'
-import { PASSKEY_KDF } from '@/app.config'
 import {
-  establishPassphraseStanding,
-  establishStandingUnlock
+  generateLadderSeed,
+  ladderRung
+} from '@interop/wallet-core/clientAnnex'
+import { KEYRING_KDF } from '@interop/wallet-core/keyring'
+import { DATE_FMT, PASSKEY_KDF } from '@/app.config'
+import { registerPasskey } from '@/lib/passkey'
+import {
+  establishStandingUnlock,
+  standingFieldsOfKeyringHit
 } from '@/session/standingUnlock'
 import type { StandingUnlockFields } from '@/session/unlockMethods'
 import {
   changePassphrase,
   deleteKeyring,
+  deleteUnlockMethod,
   deriveUnlockCredential,
+  fetchKeyring,
   unlockKeyAgreementMembers,
-  unlockManagementGrantee,
   verifyPassphrase,
   WrongPassphraseError,
+  type KeyringFetchResult,
   type UnlockCredential
 } from '@/session/keyring'
 import {
@@ -38,7 +44,6 @@ import {
   backfillPassphraseUnlockMethod,
   canRevokeWithoutCeremony,
   deleteUnlockMethodArtifacts,
-  enrollPasskey,
   getUnlockMethods,
   revokeUnlockMethod,
   updateUnlockMethods,
@@ -49,6 +54,7 @@ import {
   type PasskeyUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
+import { sessionRosterStore } from '@/session/rosterStore'
 import {
   assertAccountCeremonyAllowed,
   assertDurableSession,
@@ -126,14 +132,30 @@ export async function loadUnlockRegistry({
 }
 
 /**
- * Changes the account passphrase and adopts the rebind into the live session.
+ * Changes the account passphrase and adopts the new unlock identity into the
+ * live session.
  *
- * Ordering: the rebind retires the unlock identity this session logged in
- * under, so the live profile is swapped onto the new one immediately -- later
- * re-wraps (rolled update-key seeds, a rotated user key) must hit the new
- * client-key record. The registry's passphrase entry is written LAST, after
- * the retirement, and it is the retirement's outcome that decides what
- * standing configuration the entry names (see below).
+ * Ordering, establish-first: on a WAS account the NEW passphrase is made a
+ * standing credential BEFORE anything about the old one is touched. The old
+ * passphrase is verified read-only (capturing its record's ladder seed for
+ * the retirement's attribution), then `establishStandingUnlock` runs as the
+ * ceremony's first write: roster wrap, commitment document entry, bridge
+ * delegation, standing-layout record at the new unlock Space. Its failure
+ * FAILS the change with the old credential fully intact -- record, Space,
+ * standing configuration, all unchanged -- so "could not change your
+ * passphrase" is true and a retry with the same new passphrase converges
+ * (every establishment stage is idempotent). Only after the establishment
+ * does the old unlock identity go (its Space and local trio), and the live
+ * profile is swapped onto the new one -- later re-wraps (rolled update-key
+ * seeds, a rotated user key) must hit the new client-key record. The
+ * registry's passphrase entry is written LAST, after the retirement, and it
+ * is the retirement's outcome that decides what standing configuration the
+ * entry names (see below). A change torn between the establishment and the
+ * old credential's teardown leaves BOTH passphrases live and standing; the
+ * next new-passphrase login's torn-retirement repair (or a retry of the
+ * same change) retires the old one. A no-WAS (or guest, or unpromoted)
+ * session keeps the plain rebind-then-delete order instead: nothing can be
+ * standing there, so there is nothing to establish first.
  *
  * The old passphrase is then RETIRED for real (`rotateOffUnlockCredential`):
  * its document inventory leaves, the user key rotates off its roster wrap, and
@@ -180,13 +202,19 @@ export async function loadUnlockRegistry({
  * latent self-enrollment authority would all survive with nothing naming
  * them. So the document is consulted for a bare entry, and a bare entry over
  * a standing credential ends as `rotation: 'unretired'`, with the entry
- * rebuilt from what the change itself holds -- but only where the next
- * login's repair can reach it, which takes a standing-layout record for the
- * NEW credential. A change whose standing establishment did not run leaves
- * the entry naming the new credential and says so, rather than writing a
- * pending shape nothing will ever mend. A document read that fails is
+ * rebuilt from what the change itself holds in the shape the next
+ * login's repair detects. A document read that fails is
  * treated as unknown: the change still lands, and the outcome is still not
  * reported clean.
+ *
+ * The NEW passphrase's standing establishment is the ceremony's body, not a
+ * best-effort upgrade: its failure fails the whole change (the
+ * no-plain-bind-fallback rule), before the old credential is touched. The
+ * residue a torn establishment can leave (a roster wrap or document
+ * commitment for the new credential, with no record yet) is converged by
+ * retrying the same change; a user who abandons the new passphrase for a
+ * different one leaves that residue orphaned until the retry-shaped mender
+ * exists (roadmap FW-342).
  *
  * @param options {object}
  * @param options.session {Session}
@@ -200,6 +228,8 @@ export async function loadUnlockRegistry({
  * @throws {SamePassphraseError}   the new passphrase is the current one
  * @throws {PendingPassphraseRetirementError}   the registry still names an
  *   earlier passphrase whose retirement did not finish
+ * @throws {Error}   the new passphrase could not be established as a
+ *   standing credential; the old passphrase is unchanged
  */
 export async function changeAccountPassphrase({
   session,
@@ -228,7 +258,7 @@ export async function changeAccountPassphrase({
   if (!clientSeed) {
     throw new Error('Changing the passphrase needs this client key set.')
   }
-  // The OLD credential's standing configuration, captured before the rebind
+  // The OLD credential's standing configuration, captured before the change
   // replaces the registry entry with the new passphrase's -- the retirement
   // must hold the old multibases before the upsert destroys them. A session
   // that cannot run a retirement at all (no WAS, a guest, an unpromoted
@@ -242,7 +272,7 @@ export async function changeAccountPassphrase({
   // client's did:key) -- on an enrolled second client it differs from this
   // client's `user.id`, so verification must match against it.
   // One derivation each for the typed old and new passphrases, shared by the
-  // rebind, the pending-retirement guard, and the standing-configuration
+  // verification, the pending-retirement guard, and the standing-configuration
   // establishment below, so neither KDF runs twice.
   const [oldCredential, newCredential] = await Promise.all([
     deriveUnlockCredential({ secret: oldPassphrase, kdf: KEYRING_KDF }),
@@ -284,46 +314,116 @@ export async function changeAccountPassphrase({
           credential: oldCredential
         })
       : 'absent'
-  const {
-    oldPassphraseRetired,
-    unlockSpaceId,
-    manageCapability,
-    persistClientKeys,
-    oldLadderSeed
-  } = await changePassphrase({
-    clientSeed,
-    controller: profile.accountController ?? session.user.id,
-    oldPassphrase,
-    newPassphrase,
-    userKey: profile.userKey,
-    webvhUpdateKeys: profile.clientWebvhKeys,
-    newCredential,
-    oldCredential
-  })
-  // The rebind retired the unlock identity this session logged in under:
-  // swap the live profile onto the new one, so later re-wraps (rolled
-  // update-key seeds, a rotated user key) hit the new client-key record and the
-  // registry backfill never repoints at the deleted unlock Space.
-  adoptPassphraseRebind({
-    session,
-    unlockSpaceId,
-    manageCapability,
-    persistClientKeys
-  })
-  // Give the NEW passphrase the standing configuration (roster wrap, commitment
-  // document entry, bridge delegation, standing-layout record). Best-effort:
-  // a failure leaves the plain rebind above, which logs in normally.
-  const { ladderSeed: newLadderSeed, established } =
-    await establishPassphraseStanding({
+  // The two arms. On a WAS account (an enrolled context) the NEW passphrase
+  // is established standing FIRST, before the old unlock identity is
+  // touched; the plain rebind-then-delete order survives only where nothing
+  // can be standing (no WAS, a guest, an unpromoted account -- the same
+  // states with no retirement to run).
+  const controller = profile.accountController ?? session.user.id
+  let oldPassphraseRetired: boolean
+  let unlockSpaceId: string
+  let manageCapability: IZcap | undefined
+  let oldLadderSeed: Uint8Array | undefined
+  let newLadderSeed: Uint8Array | undefined
+  let established:
+    | {
+        unlockSpaceId: string
+        manageCapability?: IZcap
+        standingFields: StandingUnlockFields
+      }
+    | undefined
+  if (context) {
+    // Verify the old passphrase read-only -- nothing is written on a wrong
+    // one -- capturing its record's ladder seed, so the retirement below
+    // holds every rung a priori rather than walking from the recorded one.
+    ;({ ladderSeed: oldLadderSeed } = await verifyPassphrase({
+      controller,
+      passphrase: oldPassphrase,
+      credential: oldCredential
+    }))
+    // The establishment, first and fatal (roster wrap, commitment document
+    // entry, bridge delegation, standing-layout record at the new unlock
+    // Space): a failure leaves the old credential fully intact -- record,
+    // Space, standing configuration -- so the thrown "not changed" is true,
+    // and a retry with the same new passphrase converges on the
+    // establishment's idempotent stages.
+    let outcome: Awaited<ReturnType<typeof establishStandingUnlock>>
+    try {
+      outcome = await establishStandingUnlock({
+        session,
+        secret: newPassphrase,
+        kdf: KEYRING_KDF,
+        lowEntropy: true,
+        email: session.user.email,
+        credential: newCredential
+      })
+    } catch (err) {
+      log.error(
+        'Could not establish the new passphrase as a standing credential; the passphrase was not changed',
+        { err }
+      )
+      throw new Error(
+        'The new passphrase could not be established as a standing ' +
+          'credential; the passphrase was not changed.',
+        { cause: err }
+      )
+    }
+    // Swap the live profile onto the new unlock identity: later re-wraps
+    // (rolled update-key seeds, a rotated user key) must hit the new
+    // standing-layout record, and the registry backfill must never repoint
+    // the passphrase entry at the unlock Space deleted below.
+    adoptPassphraseRebind({
       session,
-      passphrase: newPassphrase,
-      email: session.user.email,
-      credential: newCredential,
-      // The registry entry is written below, once the retirement has
-      // reported: which credential's standing configuration it must name depends on how the
-      // retirement ended.
-      recordInRegistry: false
+      unlockSpaceId: outcome.unlockSpaceId,
+      manageCapability: outcome.manageCapability,
+      persistClientKeys: outcome.persistClientKeys
     })
+    newLadderSeed = outcome.ladderSeed
+    unlockSpaceId = outcome.unlockSpaceId
+    manageCapability = outcome.manageCapability
+    established = {
+      unlockSpaceId: outcome.unlockSpaceId,
+      ...(outcome.manageCapability
+        ? { manageCapability: outcome.manageCapability }
+        : {}),
+      standingFields: outcome.standingFields
+    }
+    // The old unlock identity's teardown: its Space (best-effort -- a failed
+    // delete leaves the old record able to locate the account only until
+    // the retirement below strips its standing) and its local trio. A
+    // change torn between the establishment and here leaves BOTH
+    // passphrases live; the next new-passphrase login's torn-retirement
+    // repair, or a retry of this change, retires the old one.
+    const deleted = await deleteKeyring({
+      passphrase: oldPassphrase,
+      credential: oldCredential
+    })
+    oldPassphraseRetired = deleted.unlockSpaceDeleted
+  } else {
+    const rebound = await changePassphrase({
+      clientSeed,
+      controller,
+      oldPassphrase,
+      newPassphrase,
+      userKey: profile.userKey,
+      webvhUpdateKeys: profile.clientWebvhKeys,
+      newCredential,
+      oldCredential
+    })
+    // The rebind retired the unlock identity this session logged in under:
+    // swap the live profile onto the new one, so later re-wraps hit the new
+    // client-key record.
+    adoptPassphraseRebind({
+      session,
+      unlockSpaceId: rebound.unlockSpaceId,
+      manageCapability: rebound.manageCapability,
+      persistClientKeys: rebound.persistClientKeys
+    })
+    oldPassphraseRetired = rebound.oldPassphraseRetired
+    unlockSpaceId = rebound.unlockSpaceId
+    manageCapability = rebound.manageCapability
+    oldLadderSeed = rebound.oldLadderSeed
+  }
   // The session's annex-writing seed follows the live credential: the
   // old passphrase's seed is being retired, so mid-session annex writes
   // (the revocation cascade's re-mint, a later rotation's strike) must sign
@@ -362,10 +462,10 @@ export async function changeAccountPassphrase({
         method: {
           type: 'passphrase',
           ...oldStanding,
-          // The old record's ladder seed, captured by the rebind before the
-          // old unlock Space was deleted: the retirement's ladder attribution
-          // then holds every rung a priori rather than walking from the
-          // recorded one.
+          // The old record's ladder seed, captured by the read-only
+          // verification before the old unlock Space was deleted: the
+          // retirement's ladder attribution then holds every rung a priori
+          // rather than walking from the recorded one.
           ...(oldLadderSeed ? { ladderSeed: oldLadderSeed } : {})
         },
         // The new credential's seed survives the retirement; the annex
@@ -402,40 +502,27 @@ export async function changeAccountPassphrase({
   // drops an entry's carried standing fields when the unlock Space changes.
   const retirementFailedAtTheEdit = rotation === 'failed' && !inventoryRemoved
   let standing: StandingUnlockFields | undefined = established?.standingFields
-  // Whether this run must mint a registry to write into. Only the pending
-  // shape below needs one: it is the single state whose whole point is
+  // Whether this run must mint a registry to write into. Only the rebuilt
+  // bare shape below needs one: it is the state whose whole point is
   // leaving something durable that names the old credential.
   let mintRegistry = false
   if (retirementFailedAtTheEdit) {
     standing =
       Object.keys(oldStanding).length > 0 ? { ...oldStanding } : undefined
-  } else if (rotation === 'unretired' && established) {
+  } else if (rotation === 'unretired') {
     // The bare entry, filled in from the credential this change holds. The
     // shape is deliberately the failed-at-the-edit one -- the new unlock
     // Space naming the OLD credential's members -- because that is exactly
     // what the next passphrase login's torn-retirement repair detects and
     // retires. Rebuilding it here is what gives the credential left standing
-    // a mender, instead of leaving it standing unnamed forever.
-    //
-    // The rule the condition states: the pending shape may be written only
-    // where its mender is reachable. That repair runs from a login with the
-    // NEW passphrase, and only a standing-layout record can carry that login
-    // as far as the repair -- so it is written only when the standing
-    // establishment above actually ran.
+    // a mender, instead of leaving it standing unnamed forever. That repair
+    // runs from a login with the NEW passphrase, whose standing-layout
+    // record the (fatal) establishment above just wrote.
     standing = await standingFieldsOfCredential({
       credential: oldCredential,
       ladderSeed: oldLadderSeed
     })
     mintRegistry = registryAbsent
-  } else if (rotation === 'unretired') {
-    // No standing establishment, so no reachable mender: the entry keeps
-    // naming the new credential (the normal path's `established?.standingFields`,
-    // undefined here, which leaves the upsert's carry rule in charge). The
-    // old credential stays standing with nothing naming it, which is the
-    // honest state -- writing the pending shape would only strand the entry.
-    log.warn(
-      'The new passphrase has no standing configuration, so the unretired old credential is left unnamed in the registry; it stays standing in the account document'
-    )
   }
   // The standing establishment re-minted the management zcap with PUT (the
   // bind's is the narrow GET/DELETE one); the entry records the wide one, so
@@ -447,8 +534,8 @@ export async function changeAccountPassphrase({
     standing,
     // A registry that was absent when this change started has no entry for
     // the deferred write to update, so the one state that needs a durable
-    // name for the old credential -- the pending shape above -- mints the
-    // record instead of no-oping. Every other path keeps the absent
+    // name for the old credential -- the rebuilt bare shape above -- mints
+    // the record instead of no-oping. Every other path keeps the absent
     // registry absent (the backfill's business).
     createIfMissing: mintRegistry
   })
@@ -709,41 +796,84 @@ async function recordPassphraseEntry({
 }
 
 /**
- * Runs the add-a-passkey ceremony and records the new method in the registry.
+ * Thrown when a freshly registered passkey could not be made a standing
+ * credential (and so was not connected to the account). The
+ * authenticator-side credential cannot be removed (WebAuthn has no delete
+ * API): it stays a resident credential registered under the account's user
+ * handle, and a retry registers a second one -- the Settings failure copy
+ * states that residue.
+ */
+export class PasskeyNotEstablishedError extends Error {
+  constructor(options?: { cause?: unknown }) {
+    super(
+      'The passkey could not be connected to this account. It was still ' +
+        "created on this device's authenticator and cannot be removed from " +
+        'it by the wallet; retrying will create a second one there.',
+      options
+    )
+    this.name = 'PasskeyNotEstablishedError'
+  }
+}
+
+/**
+ * Runs the add-a-passkey ceremony: registers the passkey, writes a BARE
+ * registry entry, establishes the passkey as a standing credential, and
+ * completes the entry with the standing members. There is no plain bind: a
+ * failed establishment fails the ceremony (the no-plain-bind-fallback rule).
  *
- * Ordering: the passkey is bound to this client's key set first, so a
- * registry write that fails still leaves a passkey that logs in -- reported
- * back as `recorded: false` rather than thrown, since the ceremony itself
- * succeeded. The passkey-safety notice is cleared only once the account
- * positively has a second unlock method.
+ * The order, entry-first with completion after:
  *
- * The registry is re-read immediately before the write and the new entry is
- * merged into that FRESH record, so a change another tab, another client, or
- * a login-time refresh landed since the page loaded is not reverted. The
- * page-held record seeds only the two inputs the WebAuthn ceremony needs
- * before the write exists: the wallet-wide user handle the passkey registers
- * under, and the exclude list of authenticators already holding one.
+ * 1. The registry is read FRESH before the WebAuthn ceremony. The
+ *    wallet-wide user handle and the exclude list of authenticators already
+ *    holding a passkey come from the stored record (a fresh 16-byte handle
+ *    is minted when none exists yet), and a read that fails refuses the
+ *    ceremony while nothing exists on the authenticator.
+ * 2. The BARE entry -- identity-free members only: type, label, creation
+ *    date, credential id, transports, backup flags, and the unlock Space id
+ *    -- is written before the establishment starts, durably persisting the
+ *    handle the passkey registered under. A torn establishment then leaves
+ *    exactly the present-but-bare shape `rebuildBarePasskeyEntry` mends;
+ *    writing the entry only afterwards would leave a credential the
+ *    registry never names, a state with no mender that blocks the
+ *    last-client transition and hides the unlock Space from account
+ *    deletion's registry walk. No key-agreement member and no standing
+ *    field rides the bare write: an early one would be a third partial
+ *    shape no existing repair mends.
+ * 3. The establishment (`establishStandingUnlock`) runs as the ceremony's
+ *    body: roster wrap, verbatim document entry (the PRF output is
+ *    high-entropy), bridge delegation, standing-layout record. Its failure
+ *    fails `addAccountPasskey` (`PasskeyNotEstablishedError`), after the
+ *    verify-then-act cleanup below.
+ * 4. On success the same entry is completed in place -- the key-agreement
+ *    multibase, the standing fields, and the establishment's wide
+ *    management zcap -- and the passkey-safety notice is cleared once the
+ *    account positively has a second unlock method. A completion write that
+ *    fails reports `recorded: false`; the bare shape it leaves is the one
+ *    this passkey's next login rebuilds.
+ *
+ * The cleanup is verify-then-act (see
+ * `recoverFailedPasskeyEstablishment`): re-fetch the record first, treat a
+ * standing record as a lost-response success, delete the unlock Space only
+ * when nothing was published, and clean a partial establishment by an
+ * actual retirement rather than by deleting the record.
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.registry {UnlockMethodsRecord | null}   the registry already
- *   in hand, used ONLY for the WebAuthn user handle and the exclude list; a
- *   fresh one is minted when none has been written yet
  * @param options.locale {string}   active i18n language code
  * @param options.userName {string}   WebAuthn user name for the ceremony
  * @param options.promptForPrfRetry {function}   resolves the user's choice
  *   when the authenticator needs a second (assertion) ceremony for the PRF
  * @returns {Promise<{ record: UnlockMethodsRecord, recorded: boolean }>}
+ * @throws {PasskeyNotEstablishedError}   the passkey could not be made a
+ *   standing credential; it is not connected to the account
  */
 export async function addAccountPasskey({
   session,
-  registry,
   locale,
   userName,
   promptForPrfRetry
 }: {
   session: Session
-  registry: UnlockMethodsRecord | null
   locale: string
   userName: string
   promptForPrfRetry: () => Promise<boolean>
@@ -760,76 +890,121 @@ export async function addAccountPasskey({
   if (!clientSeed) {
     throw new Error('Adding a passkey needs this client key set.')
   }
-  // Reuse the registry already loaded (it may already carry the backfilled
-  // passphrase entry) so the new passkey shares the one wallet-wide user
-  // handle and excludes any authenticator already holding a passkey for this
-  // wallet. Fall back to a fresh registry when none has been written yet.
-  const base = registry ?? emptyUnlockMethodsRegistry()
+  // 1. The fresh registry read, before anything touches the authenticator: a
+  // refused read fails here, with no residue anywhere.
+  const base =
+    (await getUnlockMethods({ session })) ?? emptyUnlockMethodsRegistry()
   const excludeCredentialIds = base.methods
     .filter(
       (method): method is PasskeyUnlockMethod => method.type === 'passkey'
     )
     .map(method => base64urlnopad.decode(method.credentialId))
-
-  // Run the ceremony, bind this client's key set under the passkey's
-  // unlock identity, and build the registry entry. Delegating management
-  // to the account identity lets Settings later revoke this passkey
-  // without a tap on the (possibly lost) authenticator -- from any
-  // enrolled client, since a promoted account's grant names the
-  // did:webvh. The record still binds under the account controller (the
-  // FIRST client's did:key) -- on an enrolled second client it differs
-  // from this client's `user.id`.
-  const accountController = profile.accountController ?? session.user.id
-  const { registration, entry } = await enrollPasskey({
-    clientSeed,
-    userKey: profile.userKey,
-    webvhUpdateKeys: profile.clientWebvhKeys,
-    pointer: profile.accountPointer,
-    controller: accountController,
-    userHandle: base64urlnopad.decode(base.userHandle),
+  const registration = await registerPasskey({
+    userHandle: base64urlnopad.decode(base.webAuthnUserId),
     userName,
-    locale,
-    email: session.user.email,
     excludeCredentialIds,
-    delegateManagementTo: unlockManagementGrantee({
-      pointer: profile.accountPointer,
-      controller: accountController
-    }),
     promptForPrfRetry
   })
-
-  // Make the passkey a STANDING credential with the PRF output still in hand
-  // (roster wrap, verbatim document entry -- the PRF output is high-entropy
-  // -- bridge delegation, standing-layout record). Best-effort: a failure
-  // leaves the plain bind above, which logs in normally and falls back to
-  // the connect ceremony on a fresh browser.
+  // One KDF run per typed secret: the derived credential locates the unlock
+  // Space here and drives the cleanup on a failure.
+  const credential = await deriveUnlockCredential({
+    secret: registration.prfOutput,
+    kdf: PASSKEY_KDF
+  })
+  const now = new Date()
+  const entry: PasskeyUnlockMethod = {
+    type: 'passkey',
+    label: `Passkey created ${now.toLocaleDateString(locale, DATE_FMT)}`,
+    createdAt: now.toISOString(),
+    credentialId: base64urlnopad.encode(registration.credentialId),
+    transports: registration.transports,
+    backupEligibility: registration.backupEligibility,
+    backupState: registration.backupState,
+    unlockSpaceId: credential.unlock.spaceId
+  }
+  // 2. The bare entry-first write, merged into a fresh read (a concurrent
+  // write must survive); the registry is minted with the handle the passkey
+  // just registered under when none has been written yet.
   try {
-    const established = await establishStandingUnlock({
+    await updateUnlockMethods({
+      session,
+      mutate: fresh =>
+        upsertPasskeyUnlockMethod({ record: fresh ?? base, entry })
+    })
+  } catch (err) {
+    throw new PasskeyNotEstablishedError({ cause: err })
+  }
+  // 3. The establishment. The ladder seed is minted HERE so a failure
+  // cleanup still holds rung 0 and the attribution seed an actual
+  // retirement needs, even when the ceremony threw before returning them.
+  const ladderSeed = generateLadderSeed()
+  let established: Awaited<ReturnType<typeof establishStandingUnlock>>
+  try {
+    established = await establishStandingUnlock({
       session,
       secret: registration.prfOutput,
       kdf: PASSKEY_KDF,
       lowEntropy: false,
-      email: session.user.email
+      email: session.user.email,
+      credential,
+      ladderSeed
     })
-    if (established.manageCapability) {
-      entry.manageCapability = established.manageCapability
-    }
-    Object.assign(entry, established.standingFields)
   } catch (err) {
-    log.warn(
-      'Could not establish the passkey as a standing credential; a fresh browser will need the connect-another-wallet ceremony',
-      { err }
-    )
+    log.error('Could not establish the new passkey as a standing credential', {
+      err
+    })
+    const recovered = await recoverFailedPasskeyEstablishment({
+      session,
+      secret: registration.prfOutput,
+      credential,
+      ladderSeed,
+      entry,
+      base
+    })
+    if (recovered) {
+      return recovered
+    }
+    throw new PasskeyNotEstablishedError({ cause: err })
   }
+  // 4. The completion write.
+  return await completePasskeyEntry({
+    session,
+    base,
+    entry: {
+      ...entry,
+      ...(established.manageCapability
+        ? { manageCapability: established.manageCapability }
+        : {}),
+      ...established.standingFields
+    }
+  })
+}
 
-  // Merge into a FRESH read rather than into the page-held record: anything
-  // written between the page's load and this write (another tab, another
-  // client, a login-time refresh) must survive. A fresh read that comes back
-  // empty falls back to `base` rather than to a new empty registry -- the
-  // passkey was just registered under `base.userHandle`, so that handle is
-  // the one that has to be persisted. A fresh read carrying a DIFFERENT
-  // handle wins anyway: the stored record is the source of truth, and the
-  // registration is already bound either way.
+/**
+ * The add-a-passkey completion write: merges the completed entry into a
+ * FRESH registry read (anything written since the ceremony's own read --
+ * another tab, another client, a login-time refresh -- must survive), then
+ * clears the passkey-only safety notice once the account positively has a
+ * second unlock method. A fresh read that comes back empty falls back to
+ * the ceremony's base, so the handle the passkey registered under is the
+ * one persisted; a fresh read carrying a different handle wins anyway (the
+ * stored record is the source of truth).
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.base {UnlockMethodsRecord}   the ceremony's registry base
+ * @param options.entry {PasskeyUnlockMethod}   the completed entry
+ * @returns {Promise<{ record: UnlockMethodsRecord, recorded: boolean }>}
+ */
+async function completePasskeyEntry({
+  session,
+  base,
+  entry
+}: {
+  session: Session
+  base: UnlockMethodsRecord
+  entry: PasskeyUnlockMethod
+}): Promise<{ record: UnlockMethodsRecord; recorded: boolean }> {
   let record: UnlockMethodsRecord = upsertPasskeyUnlockMethod({
     record: base,
     entry
@@ -842,8 +1017,9 @@ export async function addAccountPasskey({
           upsertPasskeyUnlockMethod({ record: fresh ?? base, entry })
       })) ?? record
   } catch (err) {
-    // The passkey is already bound and will log in; only the registry
-    // listing entry failed to persist.
+    // The passkey is standing and will log in; only the entry's completion
+    // failed to persist. The registry still holds the bare shape from the
+    // entry-first write, which this passkey's next login rebuilds.
     log.error('Could not record the new passkey in the registry', { err })
     return { record, recorded: false }
   }
@@ -859,6 +1035,234 @@ export async function addAccountPasskey({
     }
   }
   return { record, recorded: true }
+}
+
+/**
+ * The verify-then-act cleanup behind a failed passkey establishment.
+ *
+ * Verify first: the record at the credential's unlock Space is re-fetched,
+ * because the failure can be a lost response to the establishment's final
+ * record PUT with the credential fully standing server-side -- deleting on
+ * the error alone would destroy a succeeded credential. A standing record
+ * is treated as SUCCESS: the entry is completed from the hit and the
+ * ceremony returns normally (the non-null return).
+ *
+ * Otherwise, act by what was published. When nothing was (no document
+ * `keyAgreement` entry, no roster wrap, and the record absent or plain),
+ * the unlock Space and its local trio are deleted and the bare registry
+ * entry dropped: the credential then never exists -- the simplest mendable
+ * state. When something WAS published (or that could not be told), the
+ * cleanup is an ACTUAL retirement (`rotateOffUnlockCredential` with the
+ * ceremony-minted ladder seed -- the tapped-removal pattern minus the tap,
+ * since the PRF output's credential is in hand), never a record delete:
+ * the record is the retirement's anchor. Only after the retirement do the
+ * unlock Space and the bare entry go. A retirement, re-fetch, or delete
+ * that itself fails leaves the bare entry and the record standing as
+ * mendable residue, and the surrounding ceremony still fails.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.secret {Uint8Array}   the passkey's PRF output
+ * @param options.credential {UnlockCredential}   its derived credential
+ * @param options.ladderSeed {Uint8Array}   the ceremony-minted ladder seed
+ * @param options.entry {PasskeyUnlockMethod}   the bare entry as written
+ * @param options.base {UnlockMethodsRecord}   the ceremony's registry base
+ * @returns {Promise<{ record: UnlockMethodsRecord, recorded: boolean } | null>}
+ *   the ceremony outcome when the re-fetch proved the establishment
+ *   succeeded, else null (the caller fails the ceremony)
+ */
+async function recoverFailedPasskeyEstablishment({
+  session,
+  secret,
+  credential,
+  ladderSeed,
+  entry,
+  base
+}: {
+  session: Session
+  secret: Uint8Array
+  credential: UnlockCredential
+  ladderSeed: Uint8Array
+  entry: PasskeyUnlockMethod
+  base: UnlockMethodsRecord
+}): Promise<{ record: UnlockMethodsRecord; recorded: boolean } | null> {
+  let found: KeyringFetchResult | null
+  try {
+    found = await fetchKeyring({
+      secret,
+      kdf: PASSKEY_KDF,
+      credential,
+      mintManageCapability: true
+    })
+  } catch (err) {
+    // Cannot verify, so nothing is acted on: the bare entry and whatever the
+    // establishment left stand as mendable residue.
+    log.warn(
+      'Could not re-fetch the passkey unlock record after the failed establishment; leaving the residue for the standing menders',
+      { err }
+    )
+    return null
+  }
+  if (found?.standing?.ladderSeed) {
+    // The lost-response case: the record is standing, so the establishment
+    // succeeded server-side after all. Complete the entry from the hit.
+    log.warn(
+      'The passkey unlock record is standing after all; completing the registry entry'
+    )
+    const standing = await standingFieldsOfKeyringHit({ found })
+    return await completePasskeyEntry({
+      session,
+      base,
+      entry: {
+        ...entry,
+        ...(found.manageCapability
+          ? { manageCapability: found.manageCapability }
+          : {}),
+        ...standing
+      }
+    })
+  }
+  try {
+    if (await passkeyEstablishmentPublished({ session, credential })) {
+      // The retirement: document inventory out (where the entry landed), the
+      // user key rotated off the roster wrap (where one landed), every
+      // encrypted collection re-epoch'd. Its stages no-op over anything the
+      // establishment never reached.
+      const rung0 = await ladderRung({ ladderSeed, index: 0 })
+      const rotation = await rotateOffUnlockCredential({
+        session,
+        method: {
+          type: 'passkey',
+          keyAgreementKeyMultibase:
+            credential.standing.keyAgreementKeyMultibase,
+          updateKeyMultibase: rung0.keyMultibase,
+          ladderSeed
+        },
+        verb: 'cleaning up a failed passkey addition'
+      })
+      if (rotation?.rotated && rotation.userKey) {
+        await adoptRotatedUserKey({
+          session,
+          spaceId: rotationSpaceId({ session }),
+          userKey: rotation.userKey
+        })
+      }
+    }
+  } catch (err) {
+    // The retirement tore: the bare entry and the record stay standing --
+    // the state the standing menders already own.
+    log.error(
+      'Could not retire the partially established passkey credential; its bare entry and record are left for the standing menders',
+      { err }
+    )
+    return null
+  }
+  // Nothing published (or the retirement swept it): the unlock Space, the
+  // local trio, and the bare entry go, so the credential never exists.
+  try {
+    await deleteUnlockMethod({ secret, kdf: PASSKEY_KDF, credential })
+  } catch (err) {
+    log.warn('Could not delete the failed passkey unlock Space', { err })
+    return null
+  }
+  await dropBarePasskeyEntry({ session, credentialId: entry.credentialId })
+  return null
+}
+
+/**
+ * Whether a torn passkey establishment left anything published server-side:
+ * the credential's verbatim `keyAgreement` entry in the verified account
+ * document, or its wrap in any user-key roster epoch. A check that fails
+ * resolves to `true` -- the conservative direction, since the retirement it
+ * routes to no-ops over anything never published. A session with no
+ * enrolled-client context resolves to `false`: the establishment refused
+ * before its first write there.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.credential {UnlockCredential}
+ * @returns {Promise<boolean>}
+ */
+async function passkeyEstablishmentPublished({
+  session,
+  credential
+}: {
+  session: Session
+  credential: UnlockCredential
+}): Promise<boolean> {
+  const context = enrolledClientContext({ session })
+  if (!context) {
+    return false
+  }
+  try {
+    const { doc } = await verifiedAccountLog({
+      profile: session.profile,
+      pointer: context.pointer
+    })
+    const listed = await documentListsCredential({
+      doc,
+      did: context.pointer.did,
+      keyAgreementKeyMultibase: credential.standing.keyAgreementKeyMultibase,
+      // A passkey's PRF-derived key is high-entropy and publishes verbatim.
+      published: 'verbatim'
+    })
+    if (listed) {
+      return true
+    }
+    const roster = await sessionRosterStore({
+      profile: session.profile
+    }).read()
+    return (roster?.descriptor.epochs ?? []).some(epoch =>
+      epoch.recipients.some(
+        recipient => recipient.header.kid === credential.standing.recipientKid
+      )
+    )
+  } catch (err) {
+    log.warn(
+      'Could not check what a failed passkey establishment published; cleaning by retirement',
+      { err }
+    )
+    return true
+  }
+}
+
+/**
+ * Drops the entry-first BARE passkey entry after a cleanup that deleted the
+ * credential's unlock Space, matched by its `credentialId`. Best-effort: a
+ * leftover bare entry names a Space that no longer exists and is removable
+ * from Settings.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.credentialId {string}
+ * @returns {Promise<void>}
+ */
+async function dropBarePasskeyEntry({
+  session,
+  credentialId
+}: {
+  session: Session
+  credentialId: string
+}): Promise<void> {
+  try {
+    await updateUnlockMethods({
+      session,
+      mutate: current => {
+        if (!current) {
+          return null
+        }
+        const methods = current.methods.filter(
+          method =>
+            !(method.type === 'passkey' && method.credentialId === credentialId)
+        )
+        return methods.length === current.methods.length
+          ? null
+          : { ...current, methods }
+      }
+    })
+  } catch (err) {
+    log.warn('Could not drop the bare passkey entry after the cleanup', { err })
+  }
 }
 
 /**

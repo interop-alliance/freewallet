@@ -35,7 +35,10 @@ async function signup(page: Page, testInfo: TestInfo) {
   await next.click()
   await expect(page).toHaveURL(/#\/signup\?.*step=storage/)
   await page.getByRole('button', { name: 'Create Wallet' }).click()
-  await expect(page).toHaveURL(/#\/dashboard/, { timeout: 15_000 })
+  // The remembered signup rides the credential-anchored fold (establishment
+  // plus the durable login's self-enrollment), so it runs well past the old
+  // durable flow's budget.
+  await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
 
   return { passphrase, email }
 }

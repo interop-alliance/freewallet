@@ -98,9 +98,9 @@ export function LoginPage() {
   // A resumed recovery spend's show-once obligation: the replacement code to
   // display and the confirm-gated completion to run before navigating on.
   // Set by a login that resumed a torn spend; `null` otherwise.
-  const [spendPrompt, setSpendPrompt] = useState<
-    NonNullable<Session['recoverySpendPrompt']> | null
-  >(null)
+  const [spendPrompt, setSpendPrompt] = useState<NonNullable<
+    Session['recoverySpendPrompt']
+  > | null>(null)
   const [spendBusy, setSpendBusy] = useState(false)
   // The forget-this-browser dialog off a forgettable refusal: `null` closed,
   // otherwise whether the browser holds anything to delete. Reset by every
@@ -141,6 +141,19 @@ export function LoginPage() {
       if (!passphrase) {
         return
       }
+      if (forcedConnectOffer()) {
+        // The connect-this-browser e2e seam: the two-party enrollment specs
+        // need the enrollee card from a cold browser, but a healthy WAS
+        // account's default login now simply succeeds (every signup leaves
+        // standing transient entry), so the seam stands in for the login
+        // form's own connect entry until that ships -- the submit opens the
+        // card with the typed passphrase instead of logging in. Always
+        // false in production builds.
+        setNotEnrolledPassphrase(passphrase)
+        setEnrollment(null)
+        setEnrollErrorKey(null)
+        return
+      }
       const { session, userExists } = await loginWithPassphrase({
         passphrase,
         ...(forcedRememberBrowser() ? { rememberBrowser: true } : {})
@@ -148,10 +161,12 @@ export function LoginPage() {
       if (!session && userExists) {
         // The passphrase located the account, but this browser holds no
         // client key set for it and the durable route had nothing to
-        // self-enroll with (a no-WAS plain pointer record; with a WAS server
-        // the non-remembered default is the transient route, whose refusals
-        // arrive as `TransientLoginUnavailableError` in the catch below).
-        // Offer the connect-this-browser flow.
+        // self-enroll with. Only a no-WAS deployment produces this state:
+        // its bind is the plain pointer record, while every WAS signup
+        // writes the standing layout, and on a WAS server the non-remembered
+        // default is the transient route, whose refusals arrive as
+        // `TransientLoginUnavailableError` in the catch below. Offer the
+        // connect-this-browser flow.
         setErrorKey('auth.errors.clientNotEnrolled')
         setNotEnrolledPassphrase(passphrase)
         setEnrollment(null)
@@ -203,19 +218,13 @@ export function LoginPage() {
       }
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      const { key, transientReason } = loginErrorKey({ err, label: 'Login' })
+      const { key } = loginErrorKey({ err, label: 'Login' })
       setErrorKey(key)
       // A torn enrollment (the durable path's own two-client state):
       // connecting this browser mints a fresh key set and redoes the wrap,
-      // so offer that flow. A transient-login refusal opens the card for no
-      // reason at all -- a remedy that presupposes a second client is no
-      // remedy there -- except through the non-production e2e seam the
-      // two-party ceremony specs use.
-      if (
-        (key === 'auth.errors.userKeyRosterUnwrap' ||
-          (transientReason !== undefined && forcedConnectOffer())) &&
-        passphrase
-      ) {
+      // so offer that flow. A transient-login refusal never opens the card
+      // (a remedy that presupposes a second client is no remedy there).
+      if (key === 'auth.errors.userKeyRosterUnwrap' && passphrase) {
         setNotEnrolledPassphrase(passphrase)
         setEnrollment(null)
         setEnrollErrorKey(null)
@@ -437,6 +446,14 @@ export function LoginPage() {
                 <Alert severity="warning">
                   {t('auth.recover.replacementExplain')}
                 </Alert>
+                {/* Non-blocking: the resume could not finish the new
+                    passphrase's standing setup; a later login or resume
+                    completes it. */}
+                {spendPrompt.standing === 'pending' && (
+                  <Alert severity="info">
+                    {t('auth.recover.standingPending')}
+                  </Alert>
+                )}
                 <RecoveryCodeDisplay
                   code={spendPrompt.replacementCode}
                   copyLabel={t('auth.recover.copyCode')}

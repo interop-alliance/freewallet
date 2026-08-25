@@ -40,13 +40,27 @@ const state = vi.hoisted(() => ({
   // Whether the account document still lists the typed OLD credential -- what
   // the bare-entry guard consults when the registry names no inventory.
   oldCredentialInDocument: false,
-  // The old record's ladder seed, as the rebind hands it back (absent unless
-  // a test says otherwise).
+  // The old record's ladder seed, as the read-only verification (and, on the
+  // no-context arm, the rebind) hands it back (absent unless a test says
+  // otherwise).
   oldLadderSeed: undefined as Uint8Array | undefined,
-  // Whether the new passphrase's standing establishment ran. When it did not,
-  // the record is not standing-layout, so no login can reach the pending
-  // shape's repair.
+  // Whether the standing establishment succeeds. When it does not, the
+  // establishment REJECTS (fatal both places: the change fails with the old
+  // credential untouched, the passkey add runs its cleanup and fails).
   standingEstablished: true,
+  // The passkey-add cleanup's verify-then-act seams: the re-fetched record
+  // (null = absent or plain), whether the re-fetch itself fails, whether the
+  // account document lists the passkey credential's verbatim keyAgreement
+  // entry, and the roster read's descriptor (null = no roster/wrap).
+  refetchedRecord: null as unknown,
+  refetchFails: false,
+  passkeyCredentialInDocument: false,
+  rosterRead: null as unknown,
+  // The options the WebAuthn registration was called with.
+  registerPasskeyOptions: null as {
+    userHandle?: Uint8Array
+    excludeCredentialIds?: Uint8Array[]
+  } | null,
   // Whether a failing retirement fires `onInventoryRemoved` first (its document
   // edit landed and it died afterwards) or not (it failed at the edit).
   inventoryRemovedBeforeFailure: false,
@@ -56,13 +70,8 @@ const state = vi.hoisted(() => ({
   // The unlock Space the standing establishment reports for the passphrase
   // and passkey add ceremonies.
   boundUnlockSpaceId: 'space-bound',
-  // The passkey entry `enrollPasskey` hands back, and the options it was
-  // called with.
-  passkeyCredentialId: 'Y3JlZC1uZXc',
-  enrollPasskeyOptions: null as {
-    userHandle?: Uint8Array
-    excludeCredentialIds?: Uint8Array[]
-  } | null
+  // The credential id the WebAuthn registration hands back.
+  passkeyCredentialId: 'Y3JlZC1uZXc'
 }))
 
 /**
@@ -71,7 +80,7 @@ const state = vi.hoisted(() => ({
  */
 interface UnlockRecord {
   version: 1
-  userHandle: string
+  webAuthnUserId: string
   methods: {
     type: string
     unlockSpaceId?: string
@@ -115,37 +124,98 @@ vi.mock('@/session/userKeyAdoption', () => ({
 }))
 
 vi.mock('@/session/standingUnlock', () => ({
-  establishPassphraseStanding: vi.fn(
-    async ({ recordInRegistry }: { recordInRegistry?: boolean }) => {
-      state.calls.push('establishPassphraseStanding')
+  establishStandingUnlock: vi.fn(
+    async ({
+      secret,
+      credential,
+      ladderSeed
+    }: {
+      secret: string | Uint8Array
+      credential?: unknown
+      ladderSeed?: Uint8Array
+    }) => {
+      state.calls.push('establishStandingUnlock')
       if (!state.standingEstablished) {
-        return {}
+        throw new Error('establishment failed')
+      }
+      // The passkey add hands the PRF output bytes; the passphrase change
+      // hands a string plus its pre-derived credential; the add-a-passphrase
+      // ceremony hands the string alone.
+      if (typeof secret === 'string' && !credential) {
+        return {
+          unlockSpaceId: state.boundUnlockSpaceId,
+          manageCapability: {
+            id: 'urn:zcap:wide',
+            allowedAction: ['GET', 'PUT', 'DELETE']
+          },
+          persistClientKeys: async () => {},
+          ladderSeed: NEW_LADDER_SEED,
+          standingFields: {}
+        }
+      }
+      if (typeof secret === 'string') {
+        return {
+          unlockSpaceId: 'space-new',
+          manageCapability: {
+            id: 'urn:zcap:wide',
+            allowedAction: ['GET', 'PUT', 'DELETE']
+          },
+          persistClientKeys: async () => {},
+          ladderSeed: NEW_LADDER_SEED,
+          standingFields: {
+            keyAgreementKeyMultibase: state.newKeyAgreementKeyMultibase,
+            updateKeyMultibase: 'z6MkNewRung0'
+          }
+        }
       }
       return {
-        ladderSeed: NEW_LADDER_SEED,
-        // A caller that took the registry write over gets the members the
-        // entry needs back.
-        ...(recordInRegistry === false
-          ? {
-              established: {
-                unlockSpaceId: 'space-new',
-                manageCapability: {
-                  id: 'urn:zcap:wide',
-                  allowedAction: ['GET', 'PUT', 'DELETE']
-                },
-                standingFields: {
-                  keyAgreementKeyMultibase: state.newKeyAgreementKeyMultibase,
-                  updateKeyMultibase: 'z6MkNewRung0'
-                }
-              }
-            }
-          : {})
+        unlockSpaceId: state.boundUnlockSpaceId,
+        manageCapability: {
+          id: 'urn:zcap:passkey-wide',
+          allowedAction: ['GET', 'PUT', 'DELETE']
+        },
+        persistClientKeys: async () => {},
+        ladderSeed: ladderSeed ?? new Uint8Array(32),
+        standingFields: {
+          rosterKid: 'did:key:zPasskeyClient#z6LSPasskeyKak',
+          keyAgreementKeyMultibase: 'z6LSPasskeyKak',
+          updateKeyMultibase: 'z6MkPasskeyRung0',
+          unlockClientDid: 'did:key:zPasskeyClient'
+        }
       }
     }
   ),
-  establishStandingUnlock: vi.fn(async () => ({
-    unlockSpaceId: state.boundUnlockSpaceId,
-    standingFields: {}
+  standingFieldsOfKeyringHit: vi.fn(async () => ({
+    rosterKid: 'did:key:zPasskeyClient#z6LSPasskeyKak',
+    keyAgreementKeyMultibase: 'z6LSPasskeyKak',
+    updateKeyMultibase: 'z6MkPasskeyRung0',
+    unlockClientDid: 'did:key:zPasskeyClient'
+  }))
+}))
+
+vi.mock('@/lib/passkey', () => ({
+  assertPasskeyPrf: vi.fn(async () => ({ prfOutput: new Uint8Array(32) })),
+  registerPasskey: vi.fn(
+    async (options: {
+      userHandle?: Uint8Array
+      excludeCredentialIds?: Uint8Array[]
+    }) => {
+      state.calls.push('registerPasskey')
+      state.registerPasskeyOptions = options
+      return {
+        credentialId: base64urlnopad.decode(state.passkeyCredentialId),
+        transports: ['internal'],
+        prfOutput: new Uint8Array(32).fill(5),
+        backupEligibility: true,
+        backupState: true
+      }
+    }
+  )
+}))
+
+vi.mock('@/session/rosterStore', () => ({
+  sessionRosterStore: vi.fn(() => ({
+    read: vi.fn(async () => state.rosterRead)
   }))
 }))
 
@@ -161,6 +231,9 @@ vi.mock('@/session/keyring', () => ({
     if (state.verifyFails === 'other') {
       throw new Error('remote unreachable')
     }
+    // A standing record's ladder seed rides the verification, so the change
+    // ceremony's read-only verify hands the retirement its attribution seed.
+    return state.oldLadderSeed ? { ladderSeed: state.oldLadderSeed } : {}
   }),
   deleteKeyring: vi.fn(async () => {
     state.calls.push('deleteKeyring')
@@ -181,23 +254,49 @@ vi.mock('@/session/keyring', () => ({
   }),
   bindPassphrase: vi.fn(async () => ({ unlockSpaceId: 'space-bound' })),
   bindUnlockSecret: vi.fn(async () => ({ unlockSpaceId: 'space-bound' })),
-  deriveUnlockCredential: vi.fn(async ({ secret }: { secret: string }) => ({
-    unlock: { secret },
-    standing: {
-      keyAgreementKeyMultibase:
-        secret === 'old'
-          ? state.oldKeyAgreementKeyMultibase
-          : state.newKeyAgreementKeyMultibase,
-      recipientKid:
-        secret === 'old'
-          ? 'did:key:zOldPassphraseClient#z6LSOldPassphraseKak'
-          : 'did:key:zNewPassphraseClient#z6LSNewPassphraseKak',
-      clientDid:
-        secret === 'old'
-          ? 'did:key:zOldPassphraseClient'
-          : 'did:key:zNewPassphraseClient'
+  fetchKeyring: vi.fn(async () => {
+    state.calls.push('fetchKeyring')
+    if (state.refetchFails) {
+      throw new Error('unlock record unreachable')
     }
-  })),
+    return state.refetchedRecord
+  }),
+  deleteUnlockMethod: vi.fn(async () => {
+    state.calls.push('deleteUnlockMethod')
+    return { unlockSpaceDeleted: true }
+  }),
+  deriveUnlockCredential: vi.fn(
+    async ({ secret }: { secret: string | Uint8Array }) => {
+      if (typeof secret !== 'string') {
+        // The passkey add's PRF-output credential.
+        return {
+          unlock: { secret, spaceId: state.boundUnlockSpaceId },
+          standing: {
+            keyAgreementKeyMultibase: 'z6LSPasskeyKak',
+            recipientKid: 'did:key:zPasskeyClient#z6LSPasskeyKak',
+            clientDid: 'did:key:zPasskeyClient'
+          }
+        }
+      }
+      return {
+        unlock: { secret, spaceId: `space-unlock-${secret}` },
+        standing: {
+          keyAgreementKeyMultibase:
+            secret === 'old'
+              ? state.oldKeyAgreementKeyMultibase
+              : state.newKeyAgreementKeyMultibase,
+          recipientKid:
+            secret === 'old'
+              ? 'did:key:zOldPassphraseClient#z6LSOldPassphraseKak'
+              : 'did:key:zNewPassphraseClient#z6LSNewPassphraseKak',
+          clientDid:
+            secret === 'old'
+              ? 'did:key:zOldPassphraseClient'
+              : 'did:key:zNewPassphraseClient'
+        }
+      }
+    }
+  ),
   unlockKeyAgreementMembers: vi.fn(
     ({ unlock }: { unlock: { secret?: string } }) =>
       unlock.secret === 'old'
@@ -227,31 +326,9 @@ vi.mock('@/session/unlockMethods', async importOriginal => {
     canRevokeWithoutCeremony: vi.fn(() => true),
     emptyUnlockMethodsRegistry: vi.fn(() => ({
       version: 1,
-      userHandle: 'handle',
+      webAuthnUserId: 'MINTEDHANDLEMINTEDHAAA',
       methods: []
     })),
-    enrollPasskey: vi.fn(
-      async (options: {
-        userHandle?: Uint8Array
-        excludeCredentialIds?: Uint8Array[]
-      }) => {
-        state.calls.push('enrollPasskey')
-        state.enrollPasskeyOptions = options
-        return {
-          registration: { prfOutput: new Uint8Array(32) },
-          entry: {
-            type: 'passkey',
-            label: 'Passkey',
-            createdAt: '2026-08-20T00:00:00.000Z',
-            credentialId: state.passkeyCredentialId,
-            transports: ['internal'],
-            backupEligibility: true,
-            backupState: true,
-            unlockSpaceId: state.boundUnlockSpaceId
-          }
-        }
-      }
-    ),
     deleteUnlockMethodArtifacts: vi.fn(
       async ({ entry }: { entry: { type: string } }) => {
         state.calls.push(`deleteUnlockMethodArtifacts:${entry.type}`)
@@ -284,6 +361,9 @@ vi.mock('@/session/unlockMethods', async importOriginal => {
         }
         state.calls.push('putUnlockMethods')
         state.puts.push(next)
+        // Persist: a ceremony that writes twice (the passkey add's bare
+        // entry then its completion or drop) reads its own first write back.
+        state.registry = next
         return next
       }
     ),
@@ -375,7 +455,14 @@ vi.mock('@/lib/loginCredential', () => ({
 }))
 
 vi.mock('@/session/pendingRetirement', () => ({
-  documentListsCredential: vi.fn(async () => state.oldCredentialInDocument)
+  documentListsCredential: vi.fn(
+    async ({ published }: { published?: 'commitment' | 'verbatim' }) =>
+      // The verbatim form is the passkey cleanup's published-check; the
+      // commitment form is the passphrase change's bare-entry guard.
+      published === 'verbatim'
+        ? state.passkeyCredentialInDocument
+        : state.oldCredentialInDocument
+  )
 }))
 
 vi.mock('@/session/enrolledContext', () => ({
@@ -435,6 +522,7 @@ const {
   deleteAccount,
   removeAccountPasskey,
   renameAccountPasskey,
+  PasskeyNotEstablishedError,
   PendingPassphraseRetirementError,
   SamePassphraseError
 } = await import('@/session/accountSettings')
@@ -448,12 +536,14 @@ const {
 } = await import('@/session/unlockMethods')
 const {
   deleteUnlockMethodArtifacts,
-  enrollPasskey,
+  emptyUnlockMethodsRegistry,
   getUnlockMethods,
   updateUnlockMethods,
   upsertPassphraseUnlockMethod
 } = await import('@/session/unlockMethods')
-const { changePassphrase } = await import('@/session/keyring')
+const { deleteUnlockMethod } = await import('@/session/keyring')
+const { establishStandingUnlock } = await import('@/session/standingUnlock')
+const { registerPasskey } = await import('@/lib/passkey')
 const { executeLocalWipe, snapshotWipeTargets } = await import('@/session/wipe')
 const { durableSessionPersistence } = await import('@/session/persistence')
 
@@ -491,7 +581,7 @@ function docWithClientAnnexPointer(): object {
 function registryWithTwoMethods(): object {
   return {
     version: 1,
-    userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+    webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
     methods: [
       {
         type: 'passphrase',
@@ -527,7 +617,7 @@ function registryWithPassphraseStanding({
 }): object {
   return {
     version: 1,
-    userHandle: 'AAAAAAAAAAAAAAAAAAAAAA',
+    webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
     methods: [
       {
         type: 'passphrase',
@@ -594,11 +684,15 @@ beforeEach(() => {
   state.oldCredentialInDocument = false
   state.oldLadderSeed = undefined
   state.standingEstablished = true
+  state.refetchedRecord = null
+  state.refetchFails = false
+  state.passkeyCredentialInDocument = false
+  state.rosterRead = null
+  state.registerPasskeyOptions = null
   state.inventoryRemovedBeforeFailure = false
   state.puts = []
   state.boundUnlockSpaceId = 'space-bound'
   state.passkeyCredentialId = 'Y3JlZC1uZXc'
-  state.enrollPasskeyOptions = null
   vi.clearAllMocks()
 })
 
@@ -839,7 +933,7 @@ describe('deleteAccount', () => {
 })
 
 describe('changeAccountPassphrase', () => {
-  it('adopts the rebind, then retires the old credential', async () => {
+  it('establishes the new passphrase standing before touching the old one', async () => {
     const { oldPassphraseRetired, unlockSpaceId, rotation } =
       await changeAccountPassphrase({
         session: makeSession(),
@@ -849,12 +943,15 @@ describe('changeAccountPassphrase', () => {
     expect(oldPassphraseRetired).toBe(true)
     expect(unlockSpaceId).toBe('space-new')
     expect(rotation).toBe('skipped')
-    // The new passphrase gets its standing configuration before the old one is
-    // retired, so the account is never left with no standing credential.
+    // Establish-first: the old passphrase is verified read-only, the new one
+    // gets its whole standing configuration, and only then is the old unlock
+    // identity torn down and the old credential retired -- so the account is
+    // never left with no standing credential.
     expect(state.calls).toEqual([
-      'changePassphrase',
+      'verifyPassphrase',
+      'establishStandingUnlock',
       'adoptPassphraseRebind',
-      'establishPassphraseStanding',
+      'deleteKeyring',
       'rotateOffUnlockCredential'
     ])
     expect(vi.mocked(rotateOffUnlockCredential)).toHaveBeenCalledWith(
@@ -876,9 +973,10 @@ describe('changeAccountPassphrase', () => {
     })
     expect(rotation).toBe('rotated')
     expect(state.calls).toEqual([
-      'changePassphrase',
+      'verifyPassphrase',
+      'establishStandingUnlock',
       'adoptPassphraseRebind',
-      'establishPassphraseStanding',
+      'deleteKeyring',
       'rotateOffUnlockCredential',
       'adoptRotatedUserKey'
     ])
@@ -921,7 +1019,7 @@ describe('changeAccountPassphrase', () => {
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
   })
 
-  it('reads the old standing configuration before the rebind and retires by it', async () => {
+  it('reads the old standing configuration before any write and retires by it', async () => {
     state.registry = registryWithPassphraseStanding({
       keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
     })
@@ -932,16 +1030,19 @@ describe('changeAccountPassphrase', () => {
     })
     expect(rotation).toBe('skipped')
     expect(state.calls).toEqual([
-      'changePassphrase',
+      'verifyPassphrase',
+      'establishStandingUnlock',
       'adoptPassphraseRebind',
-      'establishPassphraseStanding',
+      'deleteKeyring',
       'rotateOffUnlockCredential',
       'putUnlockMethods'
     ])
-    // The read is the first thing that happens, ahead of the rebind.
+    // The read is the first thing that happens, ahead of the establishment.
     expect(
       vi.mocked(getUnlockMethods).mock.invocationCallOrder[0]
-    ).toBeLessThan(vi.mocked(changePassphrase).mock.invocationCallOrder[0])
+    ).toBeLessThan(
+      vi.mocked(establishStandingUnlock).mock.invocationCallOrder[0]
+    )
     expect(vi.mocked(rotateOffUnlockCredential)).toHaveBeenCalledWith(
       expect.objectContaining({
         method: expect.objectContaining({
@@ -1128,7 +1229,7 @@ describe('changeAccountPassphrase', () => {
     // The registry names no inventory at all, but the typed old credential's
     // commitment is right there in the account document: nothing would name
     // it after this change, so the outcome is not clean.
-    state.registry = { version: 1, userHandle: 'AAAA', methods: [] }
+    state.registry = { version: 1, webAuthnUserId: 'AAAA', methods: [] }
     state.oldCredentialInDocument = true
     state.oldLadderSeed = OLD_LADDER_SEED
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -1159,31 +1260,79 @@ describe('changeAccountPassphrase', () => {
     warn.mockRestore()
   })
 
-  it('leaves the entry naming the new credential when nothing established', async () => {
-    // The pending shape may be written only where its mender is reachable:
-    // that repair runs from a NEW-passphrase login, which takes a
-    // standing-layout record. Without one the old credential stays standing
-    // and unnamed, and the outcome says so.
-    state.registry = { version: 1, userHandle: 'AAAA', methods: [] }
-    state.oldCredentialInDocument = true
-    state.oldLadderSeed = OLD_LADDER_SEED
+  it('fails the change with the old credential untouched when the establishment fails', async () => {
+    state.registry = registryWithPassphraseStanding({
+      keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+    })
     state.standingEstablished = false
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await expect(
+      changeAccountPassphrase({
+        session: makeSession(),
+        oldPassphrase: 'old',
+        newPassphrase: 'new'
+      })
+    ).rejects.toThrow('the passphrase was not changed')
+    // Establish-first: the failure lands before the old unlock identity or
+    // its standing configuration is touched, so "not changed" is true --
+    // the old record, its Space, and its registry entry all stand.
+    expect(state.calls).toEqual(['verifyPassphrase', 'establishStandingUnlock'])
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+    expect(vi.mocked(upsertPassphraseUnlockMethod)).not.toHaveBeenCalled()
+    error.mockRestore()
+  })
+
+  it('refuses a wrong old passphrase before the establishment runs', async () => {
+    state.verifyFails = 'wrong'
+    await expect(
+      changeAccountPassphrase({
+        session: makeSession(),
+        oldPassphrase: 'wrong-old',
+        newPassphrase: 'new'
+      })
+    ).rejects.toThrow(FakeWrongPassphraseError)
+    expect(state.calls).toEqual(['verifyPassphrase'])
+    expect(vi.mocked(upsertPassphraseUnlockMethod)).not.toHaveBeenCalled()
+  })
+
+  it('a retry of the same change converges after a failed establishment', async () => {
+    // First run: the establishment fails; nothing about either credential
+    // was written durably beside the establishment's own idempotent stages.
+    state.registry = registryWithPassphraseStanding({
+      keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+    })
+    state.standingEstablished = false
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await expect(
+      changeAccountPassphrase({
+        session: makeSession(),
+        oldPassphrase: 'old',
+        newPassphrase: 'new'
+      })
+    ).rejects.toThrow('the passphrase was not changed')
+    error.mockRestore()
+    // The retry types the same passphrases: the old one still verifies (its
+    // record was never deleted), the registry still names it, and the
+    // retirement completes this time.
+    state.standingEstablished = true
     const { rotation } = await changeAccountPassphrase({
       session: makeSession(),
       oldPassphrase: 'old',
       newPassphrase: 'new'
     })
-    expect(rotation).toBe('unretired')
-    expect(vi.mocked(upsertPassphraseUnlockMethod)).toHaveBeenCalledWith(
-      expect.not.objectContaining({
-        standing: expect.anything()
+    expect(rotation).toBe('skipped')
+    expect(vi.mocked(rotateOffUnlockCredential)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: expect.objectContaining({
+          type: 'passphrase',
+          keyAgreementKeyMultibase: 'z6LSOldPassphraseKak',
+          updateKeyMultibase: 'z6MkOldPassphraseUpdateKey'
+        })
       })
     )
-    warn.mockRestore()
   })
 
-  it('mints a registry for the pending entry when none was written', async () => {
+  it('mints a registry for the rebuilt bare shape when none was written', async () => {
     // A registry absent at the start has no entry for the deferred write to
     // update, so the one state that needs a durable name for the old
     // credential mints the record rather than no-oping.
@@ -1213,7 +1362,7 @@ describe('changeAccountPassphrase', () => {
   })
 
   it('keeps an absent registry absent on every other path', async () => {
-    // The mint is the pending shape's alone: an ordinary change over an
+    // The mint is the rebuilt bare shape's alone: an ordinary change over an
     // absent registry still writes nothing.
     state.registry = null
     const { rotation, registry } = await changeAccountPassphrase({
@@ -1227,7 +1376,7 @@ describe('changeAccountPassphrase', () => {
   })
 
   it('reports a bare entry whose credential is not in the document as skipped', async () => {
-    state.registry = { version: 1, userHandle: 'AAAA', methods: [] }
+    state.registry = { version: 1, webAuthnUserId: 'AAAA', methods: [] }
     state.oldCredentialInDocument = false
     const { rotation } = await changeAccountPassphrase({
       session: makeSession(),
@@ -1240,7 +1389,7 @@ describe('changeAccountPassphrase', () => {
   })
 
   it('does not report clean when the document cannot be read for a bare entry', async () => {
-    state.registry = { version: 1, userHandle: 'AAAA', methods: [] }
+    state.registry = { version: 1, webAuthnUserId: 'AAAA', methods: [] }
     state.accountLogFails = true
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { rotation } = await changeAccountPassphrase({
@@ -1277,7 +1426,6 @@ describe('changeAccountPassphrase', () => {
     expect(state.calls).toEqual([
       'changePassphrase',
       'adoptPassphraseRebind',
-      'establishPassphraseStanding',
       'rotateOffUnlockCredential'
     ])
     warn.mockRestore()
@@ -1338,7 +1486,7 @@ describe('removeAccountPasskey', () => {
 function registryWithConcurrentEntry(): UnlockRecord {
   return {
     version: 1,
-    userHandle: 'FRESHHANDLEFRESHHANDLE',
+    webAuthnUserId: 'FRESHHANDLEFRESHHANDAA',
     methods: [
       {
         type: 'passphrase',
@@ -1359,26 +1507,6 @@ function registryWithConcurrentEntry(): UnlockRecord {
 }
 
 /**
- * The record the page loaded at mount: the passphrase entry alone, under an
- * older user handle.
- *
- * @returns {UnlockRecord}
- */
-function pageHeldRegistry(): UnlockRecord {
-  return {
-    version: 1,
-    userHandle: 'PAGEHANDLEPAGEHANDLEAA',
-    methods: [
-      {
-        type: 'passphrase',
-        createdAt: '2026-08-01T00:00:00.000Z',
-        unlockSpaceId: 'unlock-space-passphrase'
-      }
-    ]
-  }
-}
-
-/**
  * The newest record handed to `putUnlockMethods`.
  *
  * @returns {UnlockRecord}
@@ -1387,16 +1515,24 @@ function lastPut(): UnlockRecord {
   return state.puts[state.puts.length - 1]
 }
 
+/**
+ * Runs the add-a-passkey ceremony with the boilerplate options.
+ *
+ * @returns {Promise<{ record: UnlockRecord, recorded: boolean }>}
+ */
+async function runAddPasskey() {
+  return await addAccountPasskey({
+    session: makeSession(),
+    locale: 'en',
+    userName: 'user@example.test',
+    promptForPrfRetry: async () => false
+  })
+}
+
 describe('addAccountPasskey', () => {
   it('merges the new passkey into a fresh read, keeping a concurrent entry', async () => {
     state.registry = registryWithConcurrentEntry()
-    const { recorded } = await addAccountPasskey({
-      session: makeSession(),
-      registry: pageHeldRegistry() as never,
-      locale: 'en',
-      userName: 'user@example.test',
-      promptForPrfRetry: async () => false
-    })
+    const { recorded } = await runAddPasskey()
     expect(recorded).toBe(true)
     const record = lastPut()
     expect(record.methods.map(method => method.type)).toEqual([
@@ -1405,13 +1541,13 @@ describe('addAccountPasskey', () => {
       'passkey'
     ])
     // The stored record is the source of truth, handle included.
-    expect(record.userHandle).toBe('FRESHHANDLEFRESHHANDLE')
+    expect(record.webAuthnUserId).toBe('FRESHHANDLEFRESHHANDAA')
     expect(vi.mocked(updateUnlockMethods)).toHaveBeenCalled()
   })
 
-  it('registers under the page-held handle and excludes its passkeys', async () => {
-    const held = pageHeldRegistry()
-    held.methods.push({
+  it('reuses the stored handle and excludes its passkeys, minting nothing', async () => {
+    const stored = registryWithConcurrentEntry()
+    stored.methods.push({
       type: 'passkey',
       label: 'Old passkey',
       createdAt: '2026-08-02T00:00:00.000Z',
@@ -1421,34 +1557,209 @@ describe('addAccountPasskey', () => {
       backupState: true,
       unlockSpaceId: 'unlock-space-old-passkey'
     })
-    state.registry = registryWithConcurrentEntry()
-    await addAccountPasskey({
-      session: makeSession(),
-      registry: held as never,
-      locale: 'en',
-      userName: 'user@example.test',
-      promptForPrfRetry: async () => false
-    })
-    expect(vi.mocked(enrollPasskey)).toHaveBeenCalledOnce()
-    const options = state.enrollPasskeyOptions!
+    state.registry = stored
+    await runAddPasskey()
+    expect(vi.mocked(registerPasskey)).toHaveBeenCalledOnce()
+    const options = state.registerPasskeyOptions!
     expect(options.userHandle).toEqual(
-      base64urlnopad.decode('PAGEHANDLEPAGEHANDLEAA')
+      base64urlnopad.decode('FRESHHANDLEFRESHHANDAA')
     )
     expect(options.excludeCredentialIds).toEqual([
       base64urlnopad.decode('Y3JlZC1vbGQ')
     ])
+    expect(vi.mocked(emptyUnlockMethodsRegistry)).not.toHaveBeenCalled()
   })
 
-  it('persists the handle the passkey registered under when nothing is stored yet', async () => {
+  it('mints and persists a fresh handle when nothing is stored yet', async () => {
     state.registry = null
-    await addAccountPasskey({
-      session: makeSession(),
-      registry: pageHeldRegistry() as never,
-      locale: 'en',
-      userName: 'user@example.test',
-      promptForPrfRetry: async () => false
-    })
-    expect(lastPut().userHandle).toBe('PAGEHANDLEPAGEHANDLEAA')
+    await runAddPasskey()
+    // The minted registry's handle is what the passkey registered under, and
+    // the entry-first write durably persists it.
+    expect(state.registerPasskeyOptions!.userHandle).toEqual(
+      base64urlnopad.decode('MINTEDHANDLEMINTEDHAAA')
+    )
+    expect(state.puts[0]!.webAuthnUserId).toBe('MINTEDHANDLEMINTEDHAAA')
+  })
+
+  it('writes the bare entry before the establishment and completes it after', async () => {
+    state.registry = registryWithConcurrentEntry()
+    const { recorded } = await runAddPasskey()
+    expect(recorded).toBe(true)
+    expect(state.calls).toEqual([
+      'registerPasskey',
+      'putUnlockMethods',
+      'establishStandingUnlock',
+      'putUnlockMethods'
+    ])
+    // The bare write carries no identity member and no management zcap -- an
+    // early key-agreement member would be a third partial shape no repair
+    // mends. The completion adds them to the same entry.
+    const bare = state.puts[0]!.methods.find(
+      method => method.type === 'passkey'
+    )!
+    expect(bare.keyAgreementKeyMultibase).toBeUndefined()
+    expect(bare.manageCapability).toBeUndefined()
+    expect(bare.unlockSpaceId).toBe('space-bound')
+    const completed = state.puts[1]!.methods.find(
+      method => method.type === 'passkey'
+    )!
+    expect(completed).toEqual(
+      expect.objectContaining({
+        credentialId: bare.credentialId,
+        keyAgreementKeyMultibase: 'z6LSPasskeyKak',
+        updateKeyMultibase: 'z6MkPasskeyRung0',
+        manageCapability: expect.objectContaining({
+          id: 'urn:zcap:passkey-wide'
+        })
+      })
+    )
+  })
+
+  it('rejects when the establishment rejects, with no plain bind anywhere', async () => {
+    state.registry = registryWithConcurrentEntry()
+    state.standingEstablished = false
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(runAddPasskey()).rejects.toThrow(PasskeyNotEstablishedError)
+    error.mockRestore()
+    warn.mockRestore()
+  })
+
+  it('treats a standing record on the re-fetch as a lost-response success', async () => {
+    state.registry = registryWithConcurrentEntry()
+    state.standingEstablished = false
+    state.refetchedRecord = {
+      standing: { ladderSeed: new Uint8Array(32).fill(4) },
+      manageCapability: { id: 'urn:zcap:refetched' }
+    }
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { recorded } = await runAddPasskey()
+    expect(recorded).toBe(true)
+    // The establishment succeeded server-side; nothing is deleted or
+    // retired, and the entry is completed from the re-fetched hit.
+    expect(vi.mocked(deleteUnlockMethod)).not.toHaveBeenCalled()
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+    const completed = lastPut().methods.find(
+      method => method.type === 'passkey'
+    )!
+    expect(completed).toEqual(
+      expect.objectContaining({
+        keyAgreementKeyMultibase: 'z6LSPasskeyKak',
+        manageCapability: expect.objectContaining({ id: 'urn:zcap:refetched' })
+      })
+    )
+    error.mockRestore()
+    warn.mockRestore()
+  })
+
+  it('deletes the unlock Space and drops the bare entry only when nothing was published', async () => {
+    state.registry = registryWithConcurrentEntry()
+    state.standingEstablished = false
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(runAddPasskey()).rejects.toThrow(PasskeyNotEstablishedError)
+    // No document entry, no roster wrap, no record: the credential never
+    // exists -- no retirement runs.
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+    expect(vi.mocked(deleteUnlockMethod)).toHaveBeenCalledOnce()
+    expect(lastPut().methods.some(method => method.type === 'passkey')).toBe(
+      false
+    )
+    error.mockRestore()
+    warn.mockRestore()
+  })
+
+  it('cleans a partial establishment by an actual retirement', async () => {
+    state.registry = registryWithConcurrentEntry()
+    state.standingEstablished = false
+    state.passkeyCredentialInDocument = true
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(runAddPasskey()).rejects.toThrow(PasskeyNotEstablishedError)
+    // The document entry landed, so the cleanup is the retirement (with the
+    // ceremony-minted ladder seed), then the Space delete and entry drop.
+    expect(vi.mocked(rotateOffUnlockCredential)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: expect.objectContaining({
+          type: 'passkey',
+          keyAgreementKeyMultibase: 'z6LSPasskeyKak',
+          ladderSeed: expect.any(Uint8Array)
+        }),
+        verb: 'cleaning up a failed passkey addition'
+      })
+    )
+    expect(vi.mocked(deleteUnlockMethod)).toHaveBeenCalledOnce()
+    expect(lastPut().methods.some(method => method.type === 'passkey')).toBe(
+      false
+    )
+    error.mockRestore()
+    warn.mockRestore()
+  })
+
+  it('retires when only the roster wrap landed', async () => {
+    state.registry = registryWithConcurrentEntry()
+    state.standingEstablished = false
+    state.rosterRead = {
+      descriptor: {
+        epochs: [
+          {
+            id: 'did:key:zEpoch',
+            recipients: [
+              { header: { kid: 'did:key:zPasskeyClient#z6LSPasskeyKak' } }
+            ]
+          }
+        ]
+      }
+    }
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(runAddPasskey()).rejects.toThrow(PasskeyNotEstablishedError)
+    expect(vi.mocked(rotateOffUnlockCredential)).toHaveBeenCalledOnce()
+    error.mockRestore()
+    warn.mockRestore()
+  })
+
+  it('keeps the mendable residue when the cleanup retirement fails', async () => {
+    state.registry = registryWithConcurrentEntry()
+    state.standingEstablished = false
+    state.passkeyCredentialInDocument = true
+    state.rotation = 'failed'
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(runAddPasskey()).rejects.toThrow(PasskeyNotEstablishedError)
+    // The record and the bare entry stay standing -- the state the standing
+    // menders already own. Nothing is deleted.
+    expect(vi.mocked(deleteUnlockMethod)).not.toHaveBeenCalled()
+    expect(lastPut().methods.some(method => method.type === 'passkey')).toBe(
+      true
+    )
+    error.mockRestore()
+    warn.mockRestore()
+  })
+
+  it('leaves everything standing when the re-fetch itself fails', async () => {
+    state.registry = registryWithConcurrentEntry()
+    state.standingEstablished = false
+    state.refetchFails = true
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(runAddPasskey()).rejects.toThrow(PasskeyNotEstablishedError)
+    // Cannot verify, so nothing is acted on.
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+    expect(vi.mocked(deleteUnlockMethod)).not.toHaveBeenCalled()
+    expect(lastPut().methods.some(method => method.type === 'passkey')).toBe(
+      true
+    )
+    error.mockRestore()
+    warn.mockRestore()
+  })
+
+  it('refuses before the WebAuthn ceremony when the registry cannot be read', async () => {
+    state.registryFails = true
+    await expect(runAddPasskey()).rejects.toThrow('registry unreadable')
+    // Nothing exists on the authenticator: the refusal costs nothing.
+    expect(vi.mocked(registerPasskey)).not.toHaveBeenCalled()
   })
 })
 
@@ -1552,8 +1863,6 @@ describe('renameAccountPasskey', () => {
 
 describe('the SettingsPage reload-after-mutation race', () => {
   it('merges each mutation into a fresh read, not into the page-held record', async () => {
-    // The page loaded R0 at mount.
-    const pageHeld = pageHeldRegistry()
     // A concurrent write landed R1 = R0 + a recovery-code entry.
     state.registry = registryWithConcurrentEntry()
     state.boundUnlockSpaceId = 'unlock-space-new-passphrase'
@@ -1566,12 +1875,11 @@ describe('the SettingsPage reload-after-mutation race', () => {
     expect(
       afterAdd.methods.some(method => method.type === 'recovery-code')
     ).toBe(true)
-    // The page's reload has not landed yet, so its state is still R0 -- and
-    // the next mutation merges into the newest stored record regardless.
+    // The page's reload has not landed yet -- and the next mutation reads
+    // the newest stored record for itself regardless of page state.
     state.registry = afterAdd
     await addAccountPasskey({
       session: makeSession(),
-      registry: pageHeld as never,
       locale: 'en',
       userName: 'user@example.test',
       promptForPrfRetry: async () => false

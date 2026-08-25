@@ -2002,7 +2002,7 @@ describe('verifyPassphrase', () => {
         idb,
         kdf: KDF
       })
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual({})
   })
 
   it('throws WrongPassphraseError for a wrong passphrase', async () => {
@@ -2067,7 +2067,7 @@ describe('verifyPassphrase', () => {
         idb,
         kdf: KDF
       })
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual({})
 
     await expect(
       verifyPassphrase({

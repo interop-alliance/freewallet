@@ -82,8 +82,6 @@ import type { Session } from '@/types/auth'
  *
  * - `no-was-server`: transient login presupposes a remote WAS server.
  * - `remote-direct`: the partitioned CHAPI popup keeps its own storage variant.
- * - `no-standing`: the unlock record carries no standing authority (a plain
- *   pointer record: a durable signup torn before promotion).
  * - `no-delegated-clients`: a standing record without the annex-Space
  *   sibling delegation (a recovery-code record, or one minted before the
  *   sibling existed).
@@ -98,7 +96,6 @@ import type { Session } from '@/types/auth'
 export type TransientLoginUnavailableReason =
   | 'no-was-server'
   | 'remote-direct'
-  | 'no-standing'
   | 'no-delegated-clients'
   | 'unpromoted-account'
   | 'no-clientAnnex-generation'
@@ -313,14 +310,20 @@ export async function transientSessionFromKeyringHit({
 }): Promise<{ session: Session; userExists: boolean }> {
   const standing = found.standing
   if (!standing?.ladderSeed) {
-    throw new TransientLoginUnavailableError({ reason: 'no-standing' })
+    // Invariant, not a user state: a standing record is the only record a
+    // WAS signup produces (the standing layout is written before the Space
+    // exists), so a plain pointer record here is a bug in a producer, not
+    // a refusal with copy of its own.
+    throw new Error(
+      'Invariant violated: the unlock record carries no standing authority ' +
+        '(a standing record is the only record a WAS signup produces).'
+    )
   }
   const pointer = found.pointer
   if (!pointer || !isWebvhDid(pointer.did)) {
     // The torn credential-anchored signup's heal: a standing record whose
     // pointer names no did:webvh yet can only be a credential-anchored
-    // establishment that died before its re-bind -- the durable flow's
-    // records carry no ladder seed until AFTER promotion. Re-running the
+    // establishment that died before its re-bind. Re-running the
     // establishment converges (every stage is an ensure; the published log,
     // if any, is adopted by ladder attribution), and the login then re-enters
     // through the refreshed record. Needs the credential in hand -- the

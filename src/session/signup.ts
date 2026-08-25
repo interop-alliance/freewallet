@@ -1,23 +1,40 @@
 /**
  * The two new-account provisioning sequences behind the signup page: one for a
- * passkey account, one for a passphrase account. Both mint this client's key
- * set locally, bind it under the chosen unlock secret BEFORE any data Space
- * exists, provision the wallet, and only then backfill the published did:webvh
- * into the account pointer and promote the Space controller onto it. The page
- * keeps the wizard state and the error copy; the orderings live here.
+ * passkey account, one for a passphrase account. On a WAS deployment BOTH run
+ * the credential-anchored establishment (`establishCredentialAnchoredAccount`)
+ * -- the standing-layout unlock record is durably written before the Space
+ * exists, so no signup can leave a plain pointer record behind. The
+ * non-remembered passphrase default then enters through the transient
+ * composition; a remembered passphrase signup and every passkey signup follow
+ * the establishment with the ordinary durable login, whose self-enrollment
+ * makes this browser an enrolled client. Only a no-WAS deployment keeps the
+ * plain durable flow (no unlock Space exists there, so there is nothing to be
+ * standing in). The page keeps the wizard state and the error copy; the
+ * orderings live here.
  */
 import { base64urlnopad } from '@scure/base'
 import { KEYRING_KDF, type AccountPointer } from '@interop/wallet-core/keyring'
 import { mintAccountKeySet as mintSharedAccountKeySet } from '@interop/wallet-core/genesis'
 import { generateLadderSeed } from '@interop/wallet-core/clientAnnex'
-import { PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
-import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
+import { setClientLabel } from '@interop/wallet-core/keys'
+import { clientSigningKeyMultibase } from '@interop/wallet-core/webvh'
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
+import {
+  DATE_FMT,
+  DEFAULT_CLIENT_LABEL,
+  PASSKEY_KDF,
+  WAS_SERVER_URL
+} from '@/app.config'
+import {
+  initSessionFromSeed,
+  loginWithPassphrase,
+  loginWithPasskey
+} from '@/session/initSession'
 import {
   bindPassphrase,
-  bindUnlockSecret,
   deriveUnlockCredential,
   fetchTransientKeyring,
-  unlockManagementGrantee
+  type UnlockCredential
 } from '@/session/keyring'
 import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
 import { transientSessionPersistence } from '@/session/persistence'
@@ -27,17 +44,17 @@ import {
   seedWelcomeContent
 } from '@/session/provisionNewWallet'
 import {
-  establishPassphraseStanding,
-  establishStandingUnlock
-} from '@/session/standingUnlock'
-import {
   emptyUnlockMethodsRegistry,
   enrollPasskey,
   updateUnlockMethods,
   updateUnlockMethodsWithClient,
   upsertPasskeyUnlockMethod,
-  upsertPassphraseUnlockMethod
+  upsertPassphraseUnlockMethod,
+  type PasskeyUnlockMethod
 } from '@/session/unlockMethods'
+import { forcedSignupTearAfterEstablishment } from '@/lib/e2eSeams'
+import { registerPasskey } from '@/lib/passkey'
+import { sessionLogPinStore } from '@/lib/sessionKey'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
 import type { Session } from '@/types/auth'
 import { createLogger, stageTimer } from '@/lib/log'
@@ -53,9 +70,10 @@ const log = createLogger('fw:session:signup')
  * client-held keys), and the account pointer the keyring record carries in
  * place of the retired data seed: where the account lives. The Space id is an
  * independent random identifier minted here (nothing about the account derives
- * from any key); the did:webvh half is backfilled after provisioning publishes
- * it. Built before session creation so the storage clients bind to the minted
- * id.
+ * from any key). Built before session creation so the storage clients bind to
+ * the minted id. Only the no-WAS durable flow mints here now -- a WAS signup
+ * mints inside the credential-anchored establishment and the durable login's
+ * self-enrollment.
  *
  * The mint itself is wallet-core's shared `mintAccountKeySet` (both wallet
  * apps mint the same set); this wrapper only maps it onto the local names and
@@ -79,79 +97,42 @@ async function mintAccountKeySet() {
 }
 
 /**
- * The tail both signup sequences share: provisioning has published the
- * did:webvh id, so it is backfilled into the account pointer (the keyring
- * record and the local pin) by re-binding under the unlock secret still in
- * hand, and THEN the Space controller is promoted onto it. The order is
- * load-bearing: the pointer must durably name the did before the promotion
- * PUT, since the pointer is what tells the next login to sign under the
- * promoted keyId (a tear between the two is healed at the next login).
- * Best-effort -- the pointer's spaceId + host already locate the account.
- *
- * Only the re-bind differs between the two (a passphrase bind, or a passkey
- * PRF bind that also re-delegates its management zcap), so the caller passes
- * it in.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param [options.pointer] {AccountPointer}   the pre-backfill pointer
- * @param options.rebind {function}   re-binds the unlock record to the
- *   did-carrying pointer
- * @returns {Promise<void>}
- */
-async function backfillPointerAndPromote({
-  session,
-  pointer,
-  rebind
-}: {
-  session: Session
-  pointer?: AccountPointer
-  rebind: (fullPointer: AccountPointer & { did: string }) => Promise<void>
-}): Promise<void> {
-  session.profile.accountPointer = pointer
-  if (!pointer || !session.profile.didWebvh) {
-    return
-  }
-  const fullPointer = { ...pointer, did: session.profile.didWebvh.did }
-  try {
-    await rebind(fullPointer)
-    session.profile.accountPointer = fullPointer
-    await session.storage.ensurePromotedController({
-      profile: session.profile
-    })
-  } catch (err) {
-    log.warn('Could not backfill the did:webvh and promote the controller', {
-      err
-    })
-  }
-}
-
-/**
- * The CREDENTIAL-ANCHORED signup: the default on a non-remembered browser with
- * a WAS server configured. No durable client is minted anywhere -- the whole
- * establishment (`establishCredentialAnchoredAccount`) is anchored on the
- * passphrase's ladder, and the visit then enters the account through the
- * ordinary transient composition, leaving zero local residue.
- *
- * Ordering matches the durable flavor's spirit: the account is probed first
- * (a create-nothing transient record fetch -- the durable probe would
- * self-enroll this browser), and the record carrying the ladder seed is
- * durably written before anything else exists (inside the establishment).
- * The registry entry rides the establishment's pre-promotion window.
+ * The establishment half of the credential-anchored passphrase signup: one
+ * KDF run, the create-nothing existing-account probe (`fetchTransientKeyring`
+ * -- the durable probe would self-enroll this browser), and the whole
+ * credential-anchored establishment with the passphrase registry hook. Shared
+ * by the non-remembered default (which then enters transiently) and the
+ * remembered signup (which then runs the durable login) -- the remembered
+ * caller invokes THIS half only, never the transient composition, so no
+ * per-visit annex client is ever minted and abandoned for it.
  *
  * @param options {object}
  * @param options.passphrase {string}
  * @param [options.email] {string}
- * @returns {Promise<{ session?: Session, userExists: boolean }>}
+ * @param options.logPins {ResourceLogPinStore}   the chain-head pin store
+ *   every log read here rides: the visit's in-memory one on the default
+ *   signup, the durable one on a remembered signup (so the browser's pin is
+ *   seeded by its own publication)
+ * @param [options.freshnessPinFloor] {object}   threaded into the
+ *   establishment's binds when the caller holds durable state (the
+ *   remembered signup); the default caller omits it
+ * @returns {Promise<object>}   `{ userExists: true }` when the probe located
+ *   an account, else `{ userExists: false, credential }` with the derived
+ *   credential for the entry half
  */
-async function signUpCredentialAnchoredWithPassphrase({
+async function establishPassphraseAnchoredAccount({
   passphrase,
-  email
+  email,
+  logPins,
+  freshnessPinFloor
 }: {
   passphrase: string
   email?: string
-}): Promise<{ session?: Session; userExists: boolean }> {
-  const persistence = transientSessionPersistence()
+  logPins: ResourceLogPinStore
+  freshnessPinFloor?: { idb?: IDBFactory }
+}): Promise<
+  { userExists: true } | { userExists: false; credential: UnlockCredential }
+> {
   const mark = stageTimer({ log, ceremony: 'credential-anchored-signup' })
   // One 600k-iteration derivation for the whole signup.
   const credential = await deriveUnlockCredential({
@@ -161,7 +142,7 @@ async function signUpCredentialAnchoredWithPassphrase({
   mark('kdf')
   const probe = await fetchTransientKeyring({
     credential,
-    accountLogPinStore: persistence.logPins
+    accountLogPinStore: logPins
   })
   mark('existing-account-probe')
   if (probe) {
@@ -177,16 +158,17 @@ async function signUpCredentialAnchoredWithPassphrase({
     pointer,
     lowEntropy: true,
     email,
-    persistence,
+    persistence: { logPins },
+    ...(freshnessPinFloor ? { freshnessPinFloor } : {}),
     beforePromotion: async ({ zcapClient, userKey, establishment }) => {
       // The registry entry, in the last root-invocation window. Best-effort
       // by the hook's contract: a miss is re-recordable later, never fatal.
       // Read first (the compare-and-swap wrapper's own fresh read): the
       // transient login's heal branch re-runs the whole establishment, and
       // a re-fired hook starting from a fresh registry would clobber the
-      // first run's record (its user handle re-minted, every other entry
-      // dropped). Only a true absent starts fresh. A THROWN read or write
-      // -- the bootstrap-signed read refused against an account a
+      // first run's record (its WebAuthn user id re-minted, every other
+      // entry dropped). Only a true absent starts fresh. A THROWN read or
+      // write -- the bootstrap-signed read refused against an account a
       // concurrent run already promoted, say -- skips with a report: a
       // write on an empty base there would be the same clobber, and the
       // miss stays re-recordable by the later recorders.
@@ -211,16 +193,37 @@ async function signUpCredentialAnchoredWithPassphrase({
       }
     }
   })
-
   mark('establishment')
+  return { userExists: false, credential }
+}
 
-  // Enter the account exactly as any later public-terminal login would: the
-  // ordinary transient composition over the record just established.
+/**
+ * The transient-entry half of the credential-anchored passphrase signup:
+ * re-fetch the record just established and enter the account exactly as any
+ * later public-terminal login would, through the ordinary transient
+ * composition, then kick off the welcome-content seeding.
+ *
+ * @param options {object}
+ * @param options.credential {UnlockCredential}   the establishment half's
+ *   derived credential
+ * @param [options.email] {string}
+ * @param options.persistence {ReturnType<typeof transientSessionPersistence>}
+ *   the visit's in-memory handle (shared with the establishment half's pins)
+ * @returns {Promise<{ session: Session, userExists: false }>}
+ */
+async function enterEstablishedAccountTransiently({
+  credential,
+  email,
+  persistence
+}: {
+  credential: UnlockCredential
+  email?: string
+  persistence: ReturnType<typeof transientSessionPersistence>
+}): Promise<{ session: Session; userExists: false }> {
   const found = await fetchTransientKeyring({
     credential,
     accountLogPinStore: persistence.logPins
   })
-  mark('record-refetch')
   if (!found) {
     throw new Error(
       'The freshly established unlock record could not be fetched back.'
@@ -232,7 +235,6 @@ async function signUpCredentialAnchoredWithPassphrase({
     email,
     persistence
   })
-  mark('transient-session')
   // Kick off the welcome-content seeding without awaiting it: the signup is
   // already long, so the seed runs behind the dashboard navigation, tracked
   // by `welcomeSeedReady` (the dashboard shows an indicator until it
@@ -243,31 +245,78 @@ async function signUpCredentialAnchoredWithPassphrase({
 }
 
 /**
+ * Best-effort tail of a durable (remembered or passkey) WAS signup: label the
+ * first enrolled client in `key-map/client-labels.json` (every later client
+ * gets its label at enrollment approval; this one has no approving screen, so
+ * the wallet names itself -- the Connected wallets panel would otherwise show
+ * "Unnamed wallet") and kick off the welcome-content seeding un-awaited onto
+ * `session.welcomeSeedReady`. Waits for storage provisioning first, since
+ * both writes need the collections; a provisioning failure is the login
+ * page's to surface, so it is swallowed here and the writes are skipped.
+ *
+ * @param options {object}
+ * @param options.session {Session}   the freshly self-enrolled durable
+ *   session
+ * @returns {Promise<void>}
+ */
+async function finishDurableSignup({
+  session
+}: {
+  session: Session
+}): Promise<void> {
+  try {
+    await session.storageReady
+  } catch {
+    return
+  }
+  const { storage, profile } = session
+  if (storage.remoteStore && profile.keyAgent) {
+    try {
+      await setClientLabel({
+        store: storage.remoteStore.clientLabelsStore(),
+        signingKeyMultibase: clientSigningKeyMultibase({
+          keyAgent: profile.keyAgent
+        }),
+        label: DEFAULT_CLIENT_LABEL
+      })
+    } catch (err) {
+      log.warn("Could not label this first client's wallet", { err })
+    }
+  }
+  session.welcomeSeedReady = seedWelcomeContent({ session })
+}
+
+/**
  * Creates a new wallet under a passphrase, or reports that this passphrase
  * already has one.
  *
- * Durability routing mirrors the login's: on a non-remembered browser with a
- * WAS server configured the signup is CREDENTIAL-ANCHORED (ladder-anchored
- * genesis, transient session, zero local residue); an explicit
- * `rememberBrowser: true` -- the programmatic remember-this-browser entry
- * (the e2e seam today, the signup form's checkbox when it lands) -- and every
- * no-WAS deployment run the durable flow below.
+ * On a WAS deployment every signup runs the credential-anchored
+ * establishment (the standing-layout record before the Space, the
+ * ladder-anchored genesis, the registry hook). The non-remembered default
+ * then enters through the transient composition, leaving zero local residue;
+ * an explicit `rememberBrowser: true` -- the programmatic
+ * remember-this-browser entry (the e2e seam today, the signup form's
+ * checkbox when it lands) -- instead follows the establishment with the
+ * ordinary durable login, whose self-enrollment makes this browser an
+ * enrolled client (two loud log entries, the roster read through the
+ * credential's standing wrap, the client-key record persisted). The
+ * remembered result always reports `userExists: false` on success: the inner
+ * login's `userExists: true` describes the account the signup itself just
+ * created and must not route the page to "this profile already exists".
  *
- * Durable ordering: the account is probed first -- resolving the passphrase
- * through the keyring and reading `userExists` is what prevents a re-signup
- * with an existing passphrase from overwriting that account's keyring and
- * orphaning the wallet (the probe session is discarded, so it must not
- * provision). The passphrase is then bound to this client's key set BEFORE
- * the data Space is created: an account whose keyring failed to publish must
- * not be created, and binding first means a failed signup leaves no orphaned
- * data Space behind. The pointer backfill and the controller promotion come
- * last, in that order.
+ * A no-WAS deployment keeps the plain durable flow: probe (the durable
+ * `loginWithPassphrase` probe -- resolving the passphrase through the
+ * keyring and reading `userExists` prevents a re-signup with an existing
+ * passphrase from overwriting that account's keyring), bind BEFORE the local
+ * collections exist, then provision. There is no unlock Space, no transient
+ * login, and nothing to be standing in there.
  *
  * @param options {object}
  * @param options.passphrase {string}
  * @param [options.email] {string}
- * @param [options.rememberBrowser] {boolean}   `true` forces the durable
- *   flow; absent or `false`, a WAS-configured signup runs credential-anchored
+ * @param [options.rememberBrowser] {boolean}   `true` runs the durable
+ *   remembered signup; absent or `false`, a WAS-configured signup ends in a
+ *   transient session
  * @returns {Promise<{ session?: Session, userExists: boolean }>}
  */
 export async function signUpWithPassphrase({
@@ -279,24 +328,76 @@ export async function signUpWithPassphrase({
   email?: string
   rememberBrowser?: boolean
 }): Promise<{ session?: Session; userExists: boolean }> {
-  if (WAS_SERVER_URL && rememberBrowser !== true) {
-    return signUpCredentialAnchoredWithPassphrase({ passphrase, email })
+  if (WAS_SERVER_URL && rememberBrowser === true) {
+    // The remembered signup: the establishment half only (never the
+    // transient composition -- that would mint and abandon a per-visit
+    // annex client), under the DURABLE pin store so the browser's
+    // chain-head pin is seeded by its own publication, with the
+    // keyring-freshness-pin floor threaded into the binds.
+    const outcome = await establishPassphraseAnchoredAccount({
+      passphrase,
+      email,
+      logPins: sessionLogPinStore({}),
+      freshnessPinFloor: {}
+    })
+    if (outcome.userExists) {
+      return { userExists: true }
+    }
+    if (forcedSignupTearAfterEstablishment()) {
+      // The torn-signup e2e seam: simulate a tab death between the
+      // establishment and the durable-login half. Never true in production.
+      throw new Error(
+        'e2e seam: the remembered signup was torn after the establishment.'
+      )
+    }
+    // The ordinary durable login: its `canSelfEnroll` path self-enrolls
+    // this browser from the record just established.
+    const { session } = await loginWithPassphrase({
+      passphrase,
+      email,
+      credential: outcome.credential,
+      rememberBrowser: true
+    })
+    if (!session) {
+      throw new Error(
+        'The remembered signup could not log in to the account it just ' +
+          'established.'
+      )
+    }
+    await finishDurableSignup({ session })
+    return { session, userExists: false }
   }
-  // Probe for an existing account first. loginWithPassphrase resolves the
-  // passphrase through the keyring and reports whether this identity already
-  // has a wallet; probing (rather than binding a raw seed straight away) is
-  // what prevents a re-signup with an existing passphrase from overwriting
-  // that account's keyring and orphaning the wallet. The probe session is
-  // discarded after reading `userExists`, so it must not provision.
-  // One 600k-iteration derivation for the whole signup: the probe login, the
-  // bind, and the pointer-backfill re-bind all run on this identity.
+  if (WAS_SERVER_URL) {
+    // The credential-anchored default: establishment, then the transient
+    // entry, both over the visit's in-memory persistence handle.
+    const persistence = transientSessionPersistence()
+    const outcome = await establishPassphraseAnchoredAccount({
+      passphrase,
+      email,
+      logPins: persistence.logPins
+    })
+    if (outcome.userExists) {
+      return { userExists: true }
+    }
+    return enterEstablishedAccountTransiently({
+      credential: outcome.credential,
+      email,
+      persistence
+    })
+  }
+  // The no-WAS durable flow. Probe for an existing account first.
+  // loginWithPassphrase resolves the passphrase through the keyring and
+  // reports whether this identity already has a wallet; probing (rather than
+  // binding a raw seed straight away) is what prevents a re-signup with an
+  // existing passphrase from overwriting that account's keyring and
+  // orphaning the wallet. The probe session is discarded after reading
+  // `userExists`, so it must not provision. One 600k-iteration derivation
+  // for the whole signup: the probe login and the bind both run on this
+  // identity.
   const credential = await deriveUnlockCredential({
     secret: passphrase,
     kdf: KEYRING_KDF
   })
-  // Signup stays durable: the probe forces the durable route so a cold
-  // browser re-signing-up with an existing standing passphrase behaves as
-  // before (locates the account, never starts a transient ceremony).
   const probe = await loginWithPassphrase({
     passphrase,
     email,
@@ -338,43 +439,161 @@ export async function signUpWithPassphrase({
   // welcome credential.
   await provisionNewWallet({ session })
 
-  await backfillPointerAndPromote({
-    session,
-    pointer,
-    rebind: async fullPointer => {
-      await bindPassphrase({
-        clientSeed: seed,
-        controller: session.user.id,
-        passphrase,
-        email,
-        userKey,
-        webvhUpdateKeys,
-        pointer: fullPointer,
-        credential
-      })
-    }
-  })
-
-  // Make the passphrase a STANDING credential (roster wrap, document entry,
-  // bridge delegation, standing-layout record) and record its standing configuration in the
-  // registry. Best-effort like the backfill above: a failure leaves the
-  // record in the plain layout, which logs in normally and falls back to the
-  // connect-another-wallet ceremony on a fresh browser.
-  await establishPassphraseStanding({ session, passphrase, email, credential })
-
   return { session, userExists: false }
 }
 
 /**
- * Creates a new wallet under a passkey.
+ * The credential-anchored passkey signup: WebAuthn `create` first (the PRF
+ * output in hand for the whole sequence), then the credential-anchored
+ * establishment under the PRF-derived credential (`lowEntropy: false` -- the
+ * PRF key publishes verbatim), then the ordinary durable passkey login whose
+ * self-enrollment makes this browser an enrolled client. Always durable:
+ * registering a passkey is itself a durable ceremony.
  *
- * Ordering: the passkey is registered and its PRF output bound to this
- * client's key set BEFORE the data Space is created (a failed signup leaves no
- * orphaned Space); provisioning follows; the pointer backfill precedes the
- * controller promotion; and the unlock-methods registry is written only after
- * provisioning, since it lives in the data Space that provisioning creates.
- * There is no `userExists` probe -- a fresh credential cannot collide with an
- * existing account, so there is nothing to probe.
+ * The registry hook here is NOT best-effort (a throw fails the
+ * establishment): an absent passkey entry has no rebuild
+ * (`rebuildBarePasskeyEntry` mends only a present-but-bare entry -- an
+ * absent one needs the WebAuthn credential id no login carries), and a lost
+ * `webAuthnUserId` would re-mint a random one and register a second resident
+ * credential on the next passkey add. The hook is read-first like the
+ * passphrase one (a heal re-run must upsert, not clobber), minting
+ * `{ version: 1, webAuthnUserId, methods: [] }` only on a true absent.
+ *
+ * The stated residue: a failure between WebAuthn `create` and the
+ * establishment leaves an orphan resident credential on the authenticator
+ * (WebAuthn has no delete API); a retry registers another. The thrown error
+ * reaches the signup page's generic handling.
+ *
+ * @param options {object}
+ * @param options.userHandle {Uint8Array}   the freshly minted 16-byte
+ *   WebAuthn user id
+ * @param [options.email] {string}
+ * @param options.locale {string}
+ * @param options.userName {string}
+ * @param options.promptForPrfRetry {function}
+ * @returns {Promise<{ session: Session }>}
+ */
+async function signUpCredentialAnchoredWithPasskey({
+  userHandle,
+  email,
+  locale,
+  userName,
+  promptForPrfRetry
+}: {
+  userHandle: Uint8Array
+  email?: string
+  locale: string
+  userName: string
+  promptForPrfRetry: () => Promise<boolean>
+}): Promise<{ session: Session }> {
+  const mark = stageTimer({ log, ceremony: 'credential-anchored-signup' })
+  // The ONE WebAuthn ceremony of the whole signup: the durable login below
+  // takes the derived credential and skips its own PRF assertion. A
+  // brand-new wallet has no authenticator credentials yet, so there is
+  // nothing to exclude.
+  const registration = await registerPasskey({
+    userHandle,
+    userName,
+    promptForPrfRetry
+  })
+  mark('webauthn-create')
+  const credential = await deriveUnlockCredential({
+    secret: registration.prfOutput,
+    kdf: PASSKEY_KDF
+  })
+  mark('kdf')
+
+  const spaceId = mintSpaceId()
+  const pointer: AccountPointer = { spaceId, host: WAS_SERVER_URL }
+  const ladderSeed = generateLadderSeed()
+  await establishCredentialAnchoredAccount({
+    credential,
+    ladderSeed,
+    pointer,
+    lowEntropy: false,
+    email,
+    persistence: { logPins: sessionLogPinStore({}) },
+    freshnessPinFloor: {},
+    beforePromotion: async ({ zcapClient, userKey, establishment }) => {
+      // The passkey registry entry, in the last root-invocation window --
+      // fatal on failure (see the function doc). Read-first: a heal re-run
+      // upserts into the standing registry and keeps its recorded
+      // `webAuthnUserId`; only a true absent mints the record from the
+      // user id registered above.
+      const now = new Date()
+      const entry: PasskeyUnlockMethod = {
+        type: 'passkey',
+        label: `Passkey created ${now.toLocaleDateString(locale, DATE_FMT)}`,
+        createdAt: now.toISOString(),
+        credentialId: base64urlnopad.encode(registration.credentialId),
+        transports: registration.transports,
+        backupEligibility: registration.backupEligibility,
+        backupState: registration.backupState,
+        unlockSpaceId: establishment.unlockSpaceId,
+        ...(establishment.manageCapability
+          ? { manageCapability: establishment.manageCapability }
+          : {}),
+        ...establishment.standingFields
+      }
+      await updateUnlockMethodsWithClient({
+        zcapClient,
+        spaceId,
+        userKey,
+        mutate: existing =>
+          upsertPasskeyUnlockMethod({
+            record: existing ?? {
+              version: 1,
+              webAuthnUserId: base64urlnopad.encode(userHandle),
+              methods: []
+            },
+            entry
+          })
+      })
+    }
+  })
+  mark('establishment')
+
+  // The ordinary durable passkey login: its `canSelfEnroll` path self-enrolls
+  // this browser from the record just established. The derived credential
+  // skips a second WebAuthn ceremony.
+  const { session } = await loginWithPasskey({
+    credential,
+    rememberBrowser: true
+  })
+  if (!session) {
+    throw new Error(
+      'The passkey signup could not log in to the account it just ' +
+        'established.'
+    )
+  }
+  mark('durable-login')
+
+  // Mark this as a passkey-only account so the dashboard can prompt the
+  // user to add a second unlock method -- through the durable session's
+  // persistence handle (the establishment holds no durable handle).
+  // Non-fatal.
+  try {
+    await session.profile.persistence.passkeyNotices.save({
+      controller: session.user.id,
+      backupEligibility: registration.backupEligibility,
+      backupState: registration.backupState
+    })
+  } catch (err) {
+    log.warn('Could not save the passkey-safety notice', { err })
+  }
+
+  await finishDurableSignup({ session })
+  return { session }
+}
+
+/**
+ * Creates a new wallet under a passkey. On a WAS deployment the whole signup
+ * is the credential-anchored fold (see
+ * `signUpCredentialAnchoredWithPasskey`); a no-WAS deployment keeps the
+ * plain durable flow -- register and bind BEFORE the local collections
+ * exist, provision, then record the registry entry. There is no `userExists`
+ * probe on either path: a fresh credential cannot collide with an existing
+ * account, so there is nothing to probe.
  *
  * @param options {object}
  * @param [options.email] {string}
@@ -395,9 +614,19 @@ export async function signUpWithPasskey({
   userName: string
   promptForPrfRetry: () => Promise<boolean>
 }): Promise<{ session: Session }> {
-  // No `userExists` probe: a fresh credential cannot collide with an
-  // existing account, so there is nothing to probe (unlike the
-  // passphrase path).
+  // The account's WebAuthn user id, minted once per account: every later
+  // passkey registers under it, so authenticator pickers show one account.
+  const userHandle = crypto.getRandomValues(new Uint8Array(16))
+  if (WAS_SERVER_URL) {
+    return signUpCredentialAnchoredWithPasskey({
+      userHandle,
+      email,
+      locale,
+      userName,
+      promptForPrfRetry
+    })
+  }
+
   const { seed, userKey, webvhUpdateKeys, pointer } = await mintAccountKeySet()
   const { session } = await initSessionFromSeed({
     seed,
@@ -409,14 +638,9 @@ export async function signUpWithPasskey({
   })
 
   // Register the passkey and bind its PRF output to the client key set
-  // BEFORE creating the data Space: an account whose keyring failed to
-  // publish must not be created, and binding first means a failed signup
-  // leaves no orphaned data Space behind. A brand-new wallet has no
-  // authenticator credentials yet, so there is nothing to exclude.
-  // Delegating this passkey's unlock Space management zcap to the
-  // account identity keeps a lost passkey revocable tap-free from
-  // Settings.
-  const userHandle = crypto.getRandomValues(new Uint8Array(16))
+  // BEFORE creating the local collections: an account whose keyring failed
+  // to publish must not be created. A brand-new wallet has no authenticator
+  // credentials yet, so there is nothing to exclude.
   const { registration, entry, persistClientKeys } = await enrollPasskey({
     clientSeed: seed,
     userKey,
@@ -438,71 +662,15 @@ export async function signUpWithPasskey({
   // welcome credential.
   await provisionNewWallet({ session })
 
-  // The re-bind runs with the PRF output still in hand -- no second
-  // ceremony -- and also re-delegates the management zcap to the
-  // just-published did:webvh, so the passkey entry recorded below is
-  // revocable from ANY enrolled client (the pre-promotion delegation named
-  // this first client's did:key alone).
-  await backfillPointerAndPromote({
-    session,
-    pointer,
-    rebind: async fullPointer => {
-      const { manageCapability } = await bindUnlockSecret({
-        clientSeed: seed,
-        controller: session.user.id,
-        secret: registration.prfOutput,
-        kdf: PASSKEY_KDF,
-        email,
-        userKey,
-        webvhUpdateKeys,
-        pointer: fullPointer,
-        delegateManagementTo: unlockManagementGrantee({
-          pointer: fullPointer,
-          controller: session.user.id
-        })
-      })
-      if (manageCapability) {
-        entry.manageCapability = manageCapability
-      }
-    }
-  })
-
-  // Make the passkey a STANDING credential (roster wrap, verbatim document
-  // entry -- the PRF output is high-entropy -- bridge delegation,
-  // standing-layout record), with the PRF output still in hand. Best-effort:
-  // a failure leaves the plain-layout record from the rebind above, which
-  // logs in normally and falls back to the connect ceremony on a fresh
-  // browser.
-  try {
-    const established = await establishStandingUnlock({
-      session,
-      secret: registration.prfOutput,
-      kdf: PASSKEY_KDF,
-      lowEntropy: false,
-      email
-    })
-    session.profile.persistClientKeys = established.persistClientKeys
-    if (established.manageCapability) {
-      entry.manageCapability = established.manageCapability
-    }
-    Object.assign(entry, established.standingFields)
-  } catch (err) {
-    log.warn(
-      'Could not establish the passkey as a standing credential; a fresh browser will need the connect-another-wallet ceremony',
-      { err }
-    )
-  }
-
-  // Write the initial unlock-methods registry only now: it lives in the
-  // data Space, which `provisionNewWallet` just created, so this must run
-  // after provisioning (the registry write needs the Space to exist).
-  // Non-fatal -- the passkey already logs in. Read first: a registry that
-  // already exists keeps its user handle (the handle is minted once per
-  // account -- a re-minted one would register a second resident credential
-  // on the next passkey add) and its other entries; the passkey entry is
-  // upserted into it. Only a true absent mints the record from the handle
-  // registered above. A THROWN read skips the write rather than starting
-  // from an empty base, which would be the same clobber.
+  // Write the initial unlock-methods registry only now: it lives beside the
+  // data collections `provisionNewWallet` just created. Non-fatal -- the
+  // passkey already logs in. Read first: a registry that already exists
+  // keeps its WebAuthn user id (the id is minted once per account -- a
+  // re-minted one would register a second resident credential on the next
+  // passkey add) and its other entries; the passkey entry is upserted into
+  // it. Only a true absent mints the record from the user id registered
+  // above. A THROWN read skips the write rather than starting from an empty
+  // base, which would be the same clobber.
   try {
     await updateUnlockMethods({
       session,
@@ -510,7 +678,7 @@ export async function signUpWithPasskey({
         upsertPasskeyUnlockMethod({
           record: existing ?? {
             version: 1,
-            userHandle: base64urlnopad.encode(userHandle),
+            webAuthnUserId: base64urlnopad.encode(userHandle),
             methods: []
           },
           entry

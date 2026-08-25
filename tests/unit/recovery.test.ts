@@ -56,7 +56,11 @@ vi.mock('@interop/wallet-core/clients', async importOriginal => ({
 }))
 
 const registryState = vi.hoisted(() => ({
-  record: null as null | { version: 1; userHandle: string; methods: unknown[] }
+  record: null as null | {
+    version: 1
+    webAuthnUserId: string
+    methods: unknown[]
+  }
 }))
 
 const logState = vi.hoisted(() => ({
@@ -435,7 +439,7 @@ describe('the registry bookkeeping', () => {
     const entryA = entryFor({ client: codeA, label: 'Code 1' })
     await recordRecoveryMethod({ session, entry: entryA })
     expect(registryState.record?.methods).toEqual([entryA])
-    expect(registryState.record?.userHandle).toBeTruthy()
+    expect(registryState.record?.webAuthnUserId).toBeTruthy()
 
     // Re-recording the same kid replaces rather than duplicates.
     const relabeled = { ...entryA, label: 'Renamed' }

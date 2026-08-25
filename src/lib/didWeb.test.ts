@@ -182,7 +182,11 @@ describe('ensureDidWeb', () => {
       keys: keyMap(),
       didDoc: { id: DID }
     })
-    const result = await ensureDidWeb({ keystoreAgent, remoteStore, did: DID })
+    const result = await ensureDidWeb({
+      provideKeystoreAgent: async () => keystoreAgent,
+      remoteStore,
+      did: DID
+    })
     expect(result).toEqual(keyMap())
     expect(generatedCount()).toBe(0)
     expect(puts).toEqual([])
@@ -193,7 +197,11 @@ describe('ensureDidWeb', () => {
       keys: keyMap(),
       didDoc: undefined
     })
-    const result = await ensureDidWeb({ keystoreAgent, remoteStore, did: DID })
+    const result = await ensureDidWeb({
+      provideKeystoreAgent: async () => keystoreAgent,
+      remoteStore,
+      did: DID
+    })
     expect(result).toEqual(keyMap())
     expect(generatedCount()).toBe(0)
     expect(puts).toEqual([
@@ -203,7 +211,11 @@ describe('ensureDidWeb', () => {
 
   it('fresh: generates two keys (no assertion key) and writes keys.json before did.json', async () => {
     const { remoteStore, keystoreAgent, puts, generatedCount } = fakes()
-    const result = await ensureDidWeb({ keystoreAgent, remoteStore, did: DID })
+    const result = await ensureDidWeb({
+      provideKeystoreAgent: async () => keystoreAgent,
+      remoteStore,
+      did: DID
+    })
     expect(generatedCount()).toBe(2)
     expect(result.authentication.vmId).toBe(`${DID}#z6MkGen1`)
     expect('assertionMethod' in result).toBe(false)

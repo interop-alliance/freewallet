@@ -31,8 +31,8 @@
  *   the sealed bridge delegation (a pre-minted PUT-on-`did.jsonl` zcap) and
  *   the sealed update-key ladder seed -- which is what lets a fresh browser
  *   holding nothing but the credential self-enroll as an ordinary client.
- *   The reduced (pre-promotion or no-WAS) layout stays the plain keyring
- *   record: the pointer, never key material or authority. Both layouts are
+ *   The reduced (no-WAS) layout stays the plain keyring record: the
+ *   pointer, never key material or authority. Both layouts are
  *   SIGNED by the unlock identity's own Ed25519 key. The remote copy is the
  *   source of truth and is consulted first on every login; a **local
  *   cache** in the `freewallet-session` IndexedDB serves no-WAS deployments
@@ -202,8 +202,8 @@ export interface KeyringFetchResult extends KeyringRecordContents {
   // the pointer can durably adopt the did. In-memory only.
   persistAccountPointer?: (pointer: AccountPointer) => Promise<void>
   // The standing-credential members recovered from an unlock record in the
-  // standing layout (absent on a plain keyring record -- the pre-promotion or
-  // no-WAS reduced path): the pre-minted PUT-on-`did.jsonl` bridge delegation
+  // standing layout (absent on a plain keyring record -- the no-WAS reduced
+  // path): the pre-minted PUT-on-`did.jsonl` bridge delegation
   // and the update-key ladder seed, both credential-authenticated by the
   // record's binding MAC, plus the optional annex-Space sibling
   // delegation (`delegatedClients`, outside the MAC). What a fresh browser
@@ -1659,8 +1659,7 @@ export async function probeUnlockSpaceCollision({
       // forever.
       const did = pointer.did!
       const commitment = await keyAgreementCommitment({
-        keyAgreementKeyMultibase:
-          credential.standing.keyAgreementKeyMultibase
+        keyAgreementKeyMultibase: credential.standing.keyAgreementKeyMultibase
       })
       const publishedIds = [
         unlockKeyVmId({ did, keyAgreement: { commitment } }),
@@ -2017,8 +2016,8 @@ export async function bindPassphrase({
 /**
  * The CREDENTIAL-ANCHORED bind: writes a standing unlock record with NO local
  * counterpart at all -- no client-key record (such a signup mints no client
- * seed to persist), no keyring cache, and no freshness pin (the
- * caller is a transient visit whose replay bound is per-visit
+ * seed to persist), no keyring cache, and no freshness-pin write (the
+ * default caller is a transient visit whose replay bound is per-visit
  * trust-on-first-use). Everything it writes is remote: the unlock Space, the
  * standing-layout record (bridge, optional sibling, ladder seed, binding
  * MAC), and the optional management delegation.
@@ -2026,7 +2025,12 @@ export async function bindPassphrase({
  * The record's `controller` is the ladder VM's bare did:key -- the bootstrap
  * identity, re-derivable from the credential alone -- and the freshness stamp
  * advances past the caller-supplied prior stamp (the signup's first bind), so
- * the post-genesis re-bind always supersedes it.
+ * the post-genesis re-bind always supersedes it. A caller holding durable
+ * state passes `freshnessPinFloor` to floor the stamp over the local
+ * keyring-freshness pin as well: a stale pin left by a fast-clocked prior
+ * client must not make the login half refuse the record this bind just
+ * wrote as a rollback. The pin is only read here, never saved (the durable
+ * login half advances it).
  *
  * @param options {object}
  * @param options.controller {string}   the ladder VM's did:key
@@ -2053,6 +2057,11 @@ export async function bindPassphrase({
  *   caller's inert-residue license, since a transient visit holds no
  *   freshness pin and must not read local records (even a read would
  *   durably create the session database)
+ * @param [options.freshnessPinFloor] {object}   present when the caller
+ *   holds durable state: the stamp additionally advances past the local
+ *   keyring-freshness pin (read-only; `idb` overrides the IndexedDB
+ *   factory). Never passed by a transient caller -- even the read durably
+ *   creates the session database
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for the same secret
  * @returns {Promise<object>}   the unlock Space id, the management zcap when
@@ -2071,6 +2080,7 @@ export async function bindCredentialAnchoredUnlockSecret({
   delegateManagementTo,
   priorCreatedAt,
   refuseCollidingRecord,
+  freshnessPinFloor,
   credential: derived
 }: {
   controller: string
@@ -2084,6 +2094,7 @@ export async function bindCredentialAnchoredUnlockSecret({
   delegateManagementTo?: string
   priorCreatedAt?: string
   refuseCollidingRecord?: { accountDoc: unknown }
+  freshnessPinFloor?: { idb?: IDBFactory }
   credential?: UnlockCredential
 }): Promise<{
   unlockSpaceId: string
@@ -2124,8 +2135,16 @@ export async function bindCredentialAnchoredUnlockSecret({
     })
     servedCreatedAt = probed.servedCreatedAt
   }
+  // The durable caller's floor: the local pin joins the advance-past list,
+  // read-only (saving stays the durable login half's job).
+  const pinnedFloor = freshnessPinFloor
+    ? await loadKeyringFreshnessPin({
+        spaceId: unlock.spaceId,
+        idb: freshnessPinFloor.idb
+      })
+    : undefined
   const createdAt = nextRecordCreatedAt({
-    advancePast: [priorCreatedAt, servedCreatedAt]
+    advancePast: [priorCreatedAt, servedCreatedAt, pinnedFloor]
   })
   const record = await wrapUnlockRecord({
     controller,
@@ -2311,7 +2330,9 @@ export async function standingLadderSeed({
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for this secret, so a caller running several unlock-layer
  *   steps pays the KDF once
- * @returns {Promise<void>}
+ * @returns {Promise<{ ladderSeed?: Uint8Array }>}   a standing record's
+ *   ladder seed, so a ceremony that verifies before retiring holds the
+ *   attribution seed without a second record fetch
  */
 async function verifyUnlockSecret({
   controller,
@@ -2325,12 +2346,13 @@ async function verifyUnlockSecret({
   kdf: UnlockKdf
   idb?: IDBFactory
   credential?: UnlockCredential
-}): Promise<void> {
-  await verifyUnlockKeyring({
+}): Promise<{ ladderSeed?: Uint8Array }> {
+  const { ladderSeed } = await verifyUnlockKeyring({
     credential: credential ?? (await deriveUnlockCredential({ secret, kdf })),
     controller,
     idb
   })
+  return ladderSeed ? { ladderSeed } : {}
 }
 
 /**
@@ -2344,7 +2366,8 @@ async function verifyUnlockSecret({
  * @param [options.kdf] {UnlockKdf}
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for this passphrase
- * @returns {Promise<void>}
+ * @returns {Promise<{ ladderSeed?: Uint8Array }>}   a standing record's
+ *   ladder seed (see `verifyUnlockSecret`)
  */
 export async function verifyPassphrase({
   controller,
@@ -2358,7 +2381,7 @@ export async function verifyPassphrase({
   idb?: IDBFactory
   kdf?: UnlockKdf
   credential?: UnlockCredential
-}): Promise<void> {
+}): Promise<{ ladderSeed?: Uint8Array }> {
   return verifyUnlockSecret({
     controller,
     secret: passphrase,

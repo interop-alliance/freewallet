@@ -268,6 +268,10 @@ export interface Session {
   // every other login.
   recoverySpendPrompt?: {
     replacementCode: string
+    // Whether the new passphrase's standing configuration is confirmed
+    // ('established') or the resume's backfill could not finish it
+    // ('pending' -- non-blocking; a later resume or login mends it).
+    standing: 'established' | 'pending'
     // The confirm-gated completion; the caller passes the session's CURRENT
     // vault user key so a sweep rotation during the display is not written
     // over by the resume's captured key.

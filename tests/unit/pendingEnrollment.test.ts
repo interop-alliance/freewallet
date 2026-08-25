@@ -315,7 +315,7 @@ describe('resumePendingEnrollment -- branch decision', () => {
     expect(deleteClientKeyRecord).not.toHaveBeenCalled()
   })
 
-  it('surfaces the transport state when the served log has not reached a spend record\'s built-on head', async () => {
+  it("surfaces the transport state when the served log has not reached a spend record's built-on head", async () => {
     // A truncated (or lagging) log looks exactly like never-published, so
     // no spend branch is decidable on it: record kept, retry later.
     const { found } = makeFound()
@@ -374,9 +374,7 @@ describe('resumePendingEnrollment -- branch decision', () => {
     }
     // The spent code's keyAgreement VM stands in the current document.
     serveLog({
-      headVmIds: [
-        `${POINTER.did}#${spentIdentity.keyAgreementKeyMultibase}`
-      ],
+      headVmIds: [`${POINTER.did}#${spentIdentity.keyAgreementKeyMultibase}`],
       historyVmIds: [[]]
     })
 

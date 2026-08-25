@@ -15,10 +15,13 @@ import type { KeystoreAgent } from '@interop/webkms-client'
 import type { ISigner } from '@interop/data-integrity-core'
 import type { Session } from '@/types/auth'
 import { multibaseOf } from '@interop/wallet-core/webvh'
-import type { DidWebKey, DidWebKeyMap } from '@interop/wallet-core/webvh'
+import type {
+  DidWebKey,
+  DidWebKeyMap,
+  WebvhIdStore
+} from '@interop/wallet-core/webvh'
 import { DID_DOCUMENT_RESOURCE } from '@/app.config'
 import { getKmsSignFunction } from '@/lib/kms'
-import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
 /**
  * The suite type of the Ed25519 verification keys -- what the WebKMS local
@@ -129,15 +132,15 @@ export function assembleDidDocument({
  * (keys.json present, did.json missing).
  */
 async function publishDidDocument({
-  remoteStore,
+  idStore,
   did,
   keys
 }: {
-  remoteStore: WASRemoteStore
+  idStore: WebvhIdStore
   did: string
   keys: DidWebKeyMap
 }): Promise<void> {
-  await remoteStore.webvhIdStore().putIdResource({
+  await idStore.putIdResource({
     resourceId: DID_DOCUMENT_RESOURCE,
     content: assembleDidDocument({ did, keys }),
     contentType: 'application/did+json'
@@ -178,31 +181,43 @@ async function generateDidKey({
  * artifacts (`did.json`, `did.jsonl`) live in the world-readable `id`
  * collection.
  *
+ * The keystore is acquired lazily, only on the fresh-mint path: a run that
+ * short-circuits on an existing `keys.json` never touches the KMS, so a
+ * caller whose keystore acquisition is itself a provisioning step (the
+ * credential-anchored establishment) never creates a keystore it will not
+ * use.
+ *
  * @param options {object}
- * @param options.keystoreAgent {KeystoreAgent}
- * @param options.remoteStore {WASRemoteStore}
+ * @param options.provideKeystoreAgent {Function}   `() =>
+ *   Promise<KeystoreAgent>` -- called once, before the first key generation
+ * @param options.remoteStore {object}   the key-map read and the `id`
+ *   collection store (`WASRemoteStore` satisfies it structurally)
  * @param options.did {string}   from {@link didWebFromSpace}
  * @returns {Promise<DidWebKeyMap>}
  */
 export async function ensureDidWeb({
-  keystoreAgent,
+  provideKeystoreAgent,
   remoteStore,
   did
 }: {
-  keystoreAgent: KeystoreAgent
-  remoteStore: WASRemoteStore
+  provideKeystoreAgent: () => Promise<KeystoreAgent>
+  remoteStore: {
+    getKeyMap(): Promise<unknown>
+    webvhIdStore(): WebvhIdStore
+  }
   did: string
 }): Promise<DidWebKeyMap> {
+  const idStore = remoteStore.webvhIdStore()
   const existing = await remoteStore.getKeyMap()
   if (isKeyMap(existing)) {
     // keys.json is the recovery anchor: the keys already exist. Confirm the
     // published document; republish it (from the same keys) if a torn earlier
     // run wrote keys.json but not did.json. Never regenerate here.
-    const didDoc = await remoteStore.webvhIdStore().getIdResource({
+    const didDoc = await idStore.getIdResource({
       resourceId: DID_DOCUMENT_RESOURCE
     })
     if (!didDoc) {
-      await publishDidDocument({ remoteStore, did, keys: existing })
+      await publishDidDocument({ idStore, did, keys: existing })
     }
     return existing
   }
@@ -211,6 +226,7 @@ export async function ensureDidWeb({
   // assertion key -- the account document's `assertionMethod` relation lists
   // client keys only), then write keys.json before did.json so the flow is
   // crash-resumable.
+  const keystoreAgent = await provideKeystoreAgent()
   const [authentication, keyAgreement] = await Promise.all([
     generateDidKey({ keystoreAgent, did, category: 'asymmetric' }),
     generateDidKey({ keystoreAgent, did, category: 'keyAgreement' })
@@ -219,8 +235,8 @@ export async function ensureDidWeb({
     authentication,
     keyAgreement
   }
-  await remoteStore.webvhIdStore().putKeyMap({ content: keys })
-  await publishDidDocument({ remoteStore, did, keys })
+  await idStore.putKeyMap({ content: keys })
+  await publishDidDocument({ idStore, did, keys })
   return keys
 }
 

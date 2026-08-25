@@ -1,24 +1,26 @@
 /**
- * New-wallet provisioning sequence, shared by the signup and guest flows.
+ * New-wallet provisioning sequence, shared by the guest flow and the no-WAS
+ * signup (a WAS signup runs the credential-anchored establishment instead
+ * and seeds its welcome content through `seedWelcomeContent` below).
  *
- * Both create a brand-new wallet identity and then run the exact same ordered
- * sequence: provision the collections (locally always, and on the remote WAS
- * Space when one is configured), record the initial account + space-created
- * history, and seed the wallet with default contacts and a welcome credential.
- * This is business logic (no React), so it lives here rather than being pasted
- * into each page.
+ * Both callers create a brand-new wallet identity and then run the exact same
+ * ordered sequence: provision the collections (local, plus the remote Space
+ * where one applies), record the initial account + space-created history, and
+ * seed the wallet with default contacts and a welcome credential. This is
+ * business logic (no React), so it lives here rather than being pasted into
+ * each page.
  *
  * Ordering matters and is deliberate: `ensureUserCollections` must run first so
  * there is somewhere to write to before the history entries and the seeded
  * contacts/credential, and so the self-contact can carry the did:web/did:webvh
- * DIDs it mints. Signup additionally binds the passphrase to the data seed
- * *before* calling this (so a data Space is never created for an account whose
- * keyring failed to publish); that bind stays in the page, since it needs the
- * passphrase this helper never sees.
+ * DIDs it mints. The no-WAS signup additionally binds the passphrase *before*
+ * calling this (an account whose keyring failed to publish must not be
+ * created); that bind stays with the caller, since it needs the passphrase
+ * this helper never sees.
  *
  * The steps run sequentially and are not transactional: a failure part-way
- * through (e.g. after the Space exists but before the welcome credential is
- * written) leaves the wallet partially provisioned. That residual edge is
+ * through (e.g. after the collections exist but before the welcome credential
+ * is written) leaves the wallet partially provisioned. That residual edge is
  * accepted -- the next full login re-runs the idempotent `ensureUserCollections`
  * and the wallet remains usable.
  */
@@ -126,20 +128,21 @@ export async function provisionNewWallet({
 const SEED_WELCOME_TIMEOUT_MS = 15_000
 
 /**
- * Best-effort welcome-content seeding for the credential-anchored signup
- * tail: the welcome credential and the two new-account history records,
- * written through the session's own storage (the replica-less remote-direct
- * variant a transient session carries). The two contact seeds wait for
- * FW-210's remote-direct contact operations, and there is no first-client
- * label to write because a credential-anchored account has no durable
- * client. The whole function is best-effort: the account is fully
- * established before it runs, so a torn seed costs only cosmetic content --
- * a failure is logged and never rethrown, and a seed still pending after
- * `SEED_WELCOME_TIMEOUT_MS` is stepped past the same way. This helper is
- * not an ensure (the history writes mint fresh ids per call, with no
- * completion detection), so it must stay on this one never-re-entered call
- * site and must not migrate into `establishCredentialAnchoredAccount` or
- * any heal/re-run path.
+ * Best-effort welcome-content seeding for the WAS signup tails: the welcome
+ * credential and the two new-account history records, written through the
+ * session's own storage (the replica-less remote-direct variant a transient
+ * session carries, or the durable replica of a remembered/passkey signup's
+ * self-enrolled session). The two contact seeds wait for FW-210's
+ * remote-direct contact operations; the first-client label, where one
+ * applies, is the durable tail's own write. The whole function is
+ * best-effort: the account is fully established before it runs, so a torn
+ * seed costs only cosmetic content -- a failure is logged and never
+ * rethrown, and a seed still pending after `SEED_WELCOME_TIMEOUT_MS` is
+ * stepped past the same way. This helper is not an ensure (the history
+ * writes mint fresh ids per call, with no completion detection), so it must
+ * stay on the fresh-signup tails (each entered once per new account) and
+ * must not migrate into `establishCredentialAnchoredAccount` or any
+ * heal/re-run path.
  *
  * @param options {object}
  * @param options.session {Session}   the composed transient session

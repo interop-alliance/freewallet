@@ -354,6 +354,11 @@ export function RecoverPage() {
             {step === 'done' && outcome && (
               <Stack sx={{ gap: 2 }}>
                 <Alert severity="success">{t('auth.recover.recovered')}</Alert>
+                {outcome.standing === 'pending' && (
+                  <Alert severity="info">
+                    {t('auth.recover.standingPending')}
+                  </Alert>
+                )}
                 <Alert severity="warning">
                   {t('auth.recover.replacementExplain')}
                 </Alert>

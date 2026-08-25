@@ -363,9 +363,7 @@ async function decidePendingResume({
         clientSeed: unwrapKey
       })
       const published = documentKeyMultibases({
-        doc: verified.doc as Parameters<
-          typeof documentKeyMultibases
-        >[0]['doc']
+        doc: verified.doc as Parameters<typeof documentKeyMultibases>[0]['doc']
       })
       if (!published.has(spentIdentity.keyAgreementKeyMultibase)) {
         log.info(
@@ -375,7 +373,7 @@ async function decidePendingResume({
         return await discardPendingRecord({
           found,
           idb,
-          why: "the recovery code was spent elsewhere; the pending key set grants nothing"
+          why: 'the recovery code was spent elsewhere; the pending key set grants nothing'
         })
       }
     }

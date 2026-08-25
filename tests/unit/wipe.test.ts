@@ -42,7 +42,7 @@ const PASSKEY_UNLOCK_SPACE = 'unlock-space-passkey'
 
 const registry = {
   version: 1,
-  userHandle: 'u',
+  webAuthnUserId: 'u',
   methods: [
     {
       type: 'passphrase',

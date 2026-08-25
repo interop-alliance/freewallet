@@ -70,7 +70,10 @@ async function signup(page: Page, testInfo: TestInfo) {
   await next.click()
   await expect(page).toHaveURL(/#\/signup\?.*step=storage/)
   await page.getByRole('button', { name: 'Create Wallet' }).click()
-  await expect(page).toHaveURL(/#\/dashboard/, { timeout: 15_000 })
+  // The remembered signup rides the credential-anchored fold (establishment
+  // plus the durable login's self-enrollment), so it runs well past the old
+  // durable flow's budget.
+  await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
 
   return { passphrase, email }
 }
@@ -113,19 +116,21 @@ test('signup publishes a verifying did:webvh log and a Multikey did:web projecti
   const logRes = await page.request.get(logUrl)
   expect(logRes.status()).toBe(200)
   const log = readLogFromString(await logRes.text())
-  // Two entries: the genesis, then the passphrase's standing-configuration entry
-  // (its commitment-published keyAgreement key and committed ladder rung).
-  expect(log).toHaveLength(2)
+  // Four entries -- the remembered signup rides the credential-anchored
+  // fold: the ladder-anchored genesis, the `#DelegatedClients` pointer
+  // entry, then the durable login's self-enrollment pair (reveal-and-commit
+  // and add).
+  expect(log).toHaveLength(4)
 
   const resolved = await resolveDIDFromLog(log)
   // SCID + hash chain + entry proof all verify: no resolution error.
   expect(resolved.meta.error).toBeUndefined()
   expect(resolved.did).toMatch(/^did:webvh:.+:space:.+:id$/)
   expect(resolved.meta.scid.length).toBeGreaterThan(0)
-  // Version 2 (genesis + the standing-configuration entry), with prerotation committed (non-empty
-  // next-key hashes: the client's carry-over + staged hashes and the
-  // passphrase's ladder-rung commitment).
-  expect(resolved.meta.versionId.startsWith('2-')).toBe(true)
+  // Version 4 (the fold's four entries), with prerotation committed
+  // (non-empty next-key hashes: the client's carry-over + staged hashes and
+  // the passphrase's ladder-rung commitment).
+  expect(resolved.meta.versionId.startsWith('4-')).toBe(true)
   expect(resolved.meta.updateKeys.length).toBeGreaterThan(0)
   expect(resolved.meta.nextKeyHashes.length).toBeGreaterThan(0)
 
@@ -195,15 +200,15 @@ test('rotating the update key appends a verifying entry and rolls the staged key
     timeout: 30_000
   })
 
-  // --- The published log gained a verifying rotation entry (entry 3, after
-  //     the genesis and the passphrase's standing-configuration entry). ---
+  // --- The published log gained a verifying rotation entry (entry 5, after
+  //     the fold's four signup entries). ---
   const after = readLogFromString(await (await page.request.get(logUrl)).text())
-  expect(after).toHaveLength(3)
+  expect(after).toHaveLength(5)
   const resolvedAfter = await resolveDIDFromLog(after)
   expect(resolvedAfter.meta.error).toBeUndefined()
-  // Same DID, advanced to version 3.
+  // Same DID, advanced to version 5.
   expect(resolvedAfter.did).toBe(resolvedBefore.did)
-  expect(resolvedAfter.meta.versionId.startsWith('3-')).toBe(true)
+  expect(resolvedAfter.meta.versionId.startsWith('5-')).toBe(true)
   // The active update key rolled to the previously staged key, and a fresh
   // next-key hash was committed.
   expect(resolvedAfter.meta.updateKeys).not.toEqual(

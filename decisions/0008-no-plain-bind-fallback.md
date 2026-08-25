@@ -52,10 +52,18 @@ do-not-reopen.
   account (the FW-315 design's option A); the plain bind survives only
   on no-WAS deployments, where no unlock Space exists and nothing can
   be standing.
-- The recovery tail and `changePassphrase` report a failed
-  establishment truthfully (the credential IS live, the standing
-  upgrade or old-credential retirement is pending) through their own
-  outcome members, since their re-binds cannot roll back.
+- The recovery tail reports a failed establishment truthfully (the
+  credential IS live, only the standing upgrade is pending) through its
+  own outcome member, since its re-bind cannot roll back.
+- Amended 2026-08-25 (the FW-315 review's finding 1): `changePassphrase`
+  no longer passes through a plain re-bind at all. It runs
+  establish-first -- the new credential's standing establishment is the
+  ceremony's first write, ahead of the old record's teardown -- so a
+  failed establishment fails the change with the old credential fully
+  intact, and no truthful-pending outcome member is needed there. The
+  original consequence assumed the plain re-bind had to land first,
+  which also deleted the old unlock Space and left the account's only
+  live passphrase plain on a failure.
 - `no-standing` leaves `TransientLoginUnavailableReason` once every
   producer is closed and the field population is accounted for.
 

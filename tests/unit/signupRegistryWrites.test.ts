@@ -1,13 +1,17 @@
 // @vitest-environment node
 /**
  * Unit tests for the two signup registry writes in `src/session/signup.ts`
- * being read-first: the credential-anchored signup's `beforePromotion` hook
- * and the passkey signup's registry mint. Both used to PUT from an
- * unconditionally fresh registry, which a re-run (the transient login's
- * heal branch re-runs the establishment end to end) turns into a clobber --
- * the user handle re-minted, every other entry dropped. Here the registry is
- * an in-memory double behind the mocked read/write helpers, the real upsert
- * helpers run, and each signup is fired twice.
+ * being read-first: the credential-anchored signup's passphrase hook and the
+ * passkey signup's registry hook. Both write from the establishment's
+ * pre-promotion window, and a re-run (the transient login's heal branch
+ * re-runs the establishment end to end) must upsert, never clobber -- the
+ * WebAuthn user id kept, every other entry carried. The two differ in
+ * failure semantics: the passphrase hook swallows its own failures (the
+ * entry is re-recordable at the next durable login), while the passkey hook
+ * throws through and fails the signup (an absent passkey entry has no
+ * rebuild). Here the registry is an in-memory double behind the mocked
+ * read/write helpers, the real upsert helpers run, and each signup is fired
+ * twice.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -29,17 +33,17 @@ vi.mock('@/app.config', async importOriginal => ({
 
 vi.mock('@/session/keyring', () => ({
   bindPassphrase: vi.fn(),
-  bindUnlockSecret: vi.fn(async () => ({})),
   deriveUnlockCredential: vi.fn(async () => ({
     unlock: { spaceId: 'unlock-space-1' },
     standing: {}
   })),
-  fetchTransientKeyring: vi.fn(),
-  unlockManagementGrantee: vi.fn(() => 'did:key:z6MkGrantee')
+  fetchTransientKeyring: vi.fn()
 }))
 
 vi.mock('@/session/initSession', () => ({
-  initSessionFromSeed: vi.fn(async () => ({
+  initSessionFromSeed: vi.fn(),
+  loginWithPassphrase: vi.fn(),
+  loginWithPasskey: vi.fn(async () => ({
     session: {
       user: { id: 'did:key:z6MkFirstClient' },
       profile: {
@@ -47,31 +51,29 @@ vi.mock('@/session/initSession', () => ({
       },
       storage: {},
       isGuest: false
-    }
-  })),
-  loginWithPassphrase: vi.fn()
+    },
+    userExists: true
+  }))
 }))
 
 vi.mock('@/session/credentialAnchoredGenesis', () => ({
   // The establishment fires the hook the way the real one does: inside the
-  // pre-promotion window, best-effort.
+  // pre-promotion window. A hook throw is FATAL to the establishment (the
+  // Stage-1 contract) -- a hook that must be best-effort swallows its own
+  // failures.
   establishCredentialAnchoredAccount: vi.fn(async ({ beforePromotion }) => {
     const establishment = {
       did: 'did:webvh:QmScid:was.example.test:space:space-1:id',
       unlockSpaceId: 'unlock-space-1',
-      standingFields: { keyAgreementKeyMultibase: 'z6LSpassphrase' }
+      standingFields: { keyAgreementKeyMultibase: 'z6LSstanding' }
     }
-    try {
-      await beforePromotion?.({
-        was: {},
-        zcapClient: {},
-        did: establishment.did,
-        userKey: { id: 'did:key:z6MkUserKey' },
-        establishment
-      })
-    } catch (err) {
-      console.warn('The pre-promotion tail failed (continuing):', err)
-    }
+    await beforePromotion?.({
+      was: {},
+      zcapClient: {},
+      did: establishment.did,
+      userKey: { id: 'did:key:z6MkUserKey' },
+      establishment
+    })
     return establishment
   })
 }))
@@ -87,12 +89,8 @@ vi.mock('@/session/provisionNewWallet', () => ({
   seedWelcomeContent: vi.fn(async () => {})
 }))
 
-vi.mock('@/session/standingUnlock', () => ({
-  establishPassphraseStanding: vi.fn(),
-  establishStandingUnlock: vi.fn(async () => ({
-    persistClientKeys: vi.fn(),
-    standingFields: { keyAgreementKeyMultibase: 'z6LSpasskey' }
-  }))
+vi.mock('@/lib/passkey', () => ({
+  registerPasskey: vi.fn()
 }))
 
 vi.mock('@/session/unlockMethods', async importOriginal => {
@@ -138,12 +136,11 @@ vi.mock('@/session/unlockMethods', async importOriginal => {
 
 import { base64urlnopad } from '@scure/base'
 import { fetchTransientKeyring } from '@/session/keyring'
-import { enrollPasskey } from '@/session/unlockMethods'
+import { registerPasskey } from '@/lib/passkey'
 import { signUpWithPassphrase, signUpWithPasskey } from '@/session/signup'
 
 /**
- * A passkey entry the way `enrollPasskey` would build it for the given
- * credential id.
+ * A passkey entry shaped the way another writer would have recorded it.
  */
 function passkeyEntry(credentialId: string): PasskeyUnlockMethod {
   return {
@@ -183,10 +180,10 @@ describe('the credential-anchored signup hook -- read-first registry write', () 
       expect.objectContaining({
         type: 'passphrase',
         unlockSpaceId: 'unlock-space-1',
-        keyAgreementKeyMultibase: 'z6LSpassphrase'
+        keyAgreementKeyMultibase: 'z6LSstanding'
       })
     ])
-    expect(state.registry?.userHandle).toBeTruthy()
+    expect(state.registry?.webAuthnUserId).toBeTruthy()
   })
 
   it('upserts into the existing registry on a heal re-run', async () => {
@@ -201,7 +198,7 @@ describe('the credential-anchored signup hook -- read-first registry write', () 
     await signUpWithPassphrase({ passphrase: 'correct horse' })
 
     expect(state.writes.filter(write => write === 'client')).toHaveLength(2)
-    expect(state.registry?.userHandle).toBe(first.userHandle)
+    expect(state.registry?.webAuthnUserId).toBe(first.webAuthnUserId)
     expect(state.registry?.methods.map(method => method.type)).toEqual([
       'passphrase',
       'passkey'
@@ -220,7 +217,8 @@ describe('the credential-anchored signup hook -- read-first registry write', () 
 
     const result = await signUpWithPassphrase({ passphrase: 'correct horse' })
 
-    // The establishment is not failed by the skipped write.
+    // The establishment is not failed by the skipped write: the passphrase
+    // hook swallows its own failure (the entry is re-recordable later).
     expect(result.session).toBeTruthy()
     expect(state.writes.filter(write => write === 'client')).toHaveLength(1)
     expect(state.registry).toEqual(first)
@@ -235,57 +233,68 @@ describe('the credential-anchored signup hook -- read-first registry write', () 
   })
 })
 
-describe('the passkey signup -- read-first registry mint', () => {
+describe('the passkey signup -- read-first, fatal registry hook', () => {
   /**
-   * Runs one passkey signup whose enrollment yields the given credential id,
-   * returning the user handle the WebAuthn ceremony was handed.
+   * Runs one passkey signup whose WebAuthn registration yields the given
+   * credential id, returning the base64url WebAuthn user id the ceremony was
+   * handed.
    */
   async function signUp(credentialId: string): Promise<string> {
-    let handedHandle = ''
-    vi.mocked(enrollPasskey).mockImplementationOnce(async ({ userHandle }) => {
-      handedHandle = base64urlnopad.encode(userHandle)
-      return {
-        registration: {
+    let handedUserId = ''
+    vi.mocked(registerPasskey).mockImplementationOnce(
+      async ({ userHandle }) => {
+        handedUserId = base64urlnopad.encode(userHandle)
+        return {
+          credentialId: new TextEncoder().encode(credentialId),
+          transports: ['internal'],
           prfOutput: new Uint8Array(32),
           backupEligibility: false,
           backupState: false
-        },
-        entry: passkeyEntry(credentialId),
-        persistClientKeys: vi.fn()
-      } as never
-    })
+        }
+      }
+    )
     await signUpWithPasskey({
       locale: 'en',
       userName: 'someone',
       promptForPrfRetry: async () => true
     })
-    return handedHandle
+    return handedUserId
   }
 
-  it('mints the registry from the registered handle on a true absent', async () => {
-    const handle = await signUp('cred-1')
+  it('mints the registry from the registered user id on a true absent', async () => {
+    const userId = await signUp('cred-1')
 
-    expect(state.writes.filter(write => write === 'session')).toHaveLength(1)
+    expect(state.writes.filter(write => write === 'client')).toHaveLength(1)
     expect(state.registry).toEqual({
       version: 1,
-      userHandle: handle,
+      webAuthnUserId: userId,
       methods: [
-        expect.objectContaining({ type: 'passkey', credentialId: 'cred-1' })
+        expect.objectContaining({
+          type: 'passkey',
+          credentialId: base64urlnopad.encode(
+            new TextEncoder().encode('cred-1')
+          ),
+          unlockSpaceId: 'unlock-space-1',
+          keyAgreementKeyMultibase: 'z6LSstanding'
+        })
       ]
     })
   })
 
-  it('preserves the existing handle and entries on a second firing', async () => {
-    const firstHandle = await signUp('cred-1')
-    const secondHandle = await signUp('cred-2')
+  it('preserves the existing user id and entries on a second firing', async () => {
+    const firstUserId = await signUp('cred-1')
+    const secondUserId = await signUp('cred-2')
 
-    expect(secondHandle).not.toBe(firstHandle)
-    expect(state.registry?.userHandle).toBe(firstHandle)
+    expect(secondUserId).not.toBe(firstUserId)
+    expect(state.registry?.webAuthnUserId).toBe(firstUserId)
     expect(
       state.registry?.methods.map(method =>
         method.type === 'passkey' ? method.credentialId : method.type
       )
-    ).toEqual(['cred-1', 'cred-2'])
+    ).toEqual([
+      base64urlnopad.encode(new TextEncoder().encode('cred-1')),
+      base64urlnopad.encode(new TextEncoder().encode('cred-2'))
+    ])
   })
 
   it('replaces rather than duplicates an entry for the same credential', async () => {
@@ -295,23 +304,28 @@ describe('the passkey signup -- read-first registry mint', () => {
     expect(state.registry?.methods).toHaveLength(1)
   })
 
-  it('skips the write on a thrown read and still completes the signup', async () => {
+  it('a thrown registry read fails the passkey signup (no silent skip)', async () => {
     await signUp('cred-1')
     const first = structuredClone(state.registry!)
     state.readThrows = true
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(registerPasskey).mockResolvedValueOnce({
+      credentialId: new TextEncoder().encode('cred-2'),
+      transports: ['internal'],
+      prfOutput: new Uint8Array(32),
+      backupEligibility: false,
+      backupState: false
+    })
 
-    await signUp('cred-2')
-
-    expect(state.writes.filter(write => write === 'session')).toHaveLength(1)
+    await expect(
+      signUpWithPasskey({
+        locale: 'en',
+        userName: 'someone',
+        promptForPrfRetry: async () => true
+      })
+    ).rejects.toThrow('registry read refused')
+    // Nothing was written over the standing registry, and no half-recorded
+    // signup reported success.
+    expect(state.writes.filter(write => write === 'client')).toHaveLength(1)
     expect(state.registry).toEqual(first)
-    expect(warn).toHaveBeenCalledWith(
-      '[%s] %s',
-      'fw:session:signup',
-      expect.stringContaining('Could not record the new passkey'),
-      expect.any(Error),
-      ''
-    )
-    warn.mockRestore()
   })
 })
