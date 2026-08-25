@@ -58,7 +58,11 @@ async function queryHandlerPermission(): Promise<string> {
  * install the handler when the origin has not already been granted.
  */
 export async function registerWallet(): Promise<void> {
-  const mediatedWalletUrl = MEDIATOR_BASE + encodeURIComponent(DEPLOY_URL)
+  // The mediator origin must match where the handler pages are served from,
+  // so the page's own origin is the correct default when no deploy URL is
+  // configured.
+  const walletOrigin = DEPLOY_URL || window.location.origin
+  const mediatedWalletUrl = MEDIATOR_BASE + encodeURIComponent(walletOrigin)
   log.debug('Registering wallet with the mediator', { mediatedWalletUrl })
   try {
     await loadOnce(mediatedWalletUrl)
