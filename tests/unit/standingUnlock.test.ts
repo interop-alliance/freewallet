@@ -7,6 +7,7 @@
  * reported -- which credential's standing configuration the entry must name.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { transientSessionPersistence } from '@/session/persistence'
 
 vi.mock('@/session/enrolledContext', () => ({
   enrolledClientContext: vi.fn(() => ({ pointer: POINTER })),
@@ -118,7 +119,8 @@ function makeSession() {
       accountController: 'did:key:zAccount',
       accountPointer: POINTER,
       zcapClient: { isZcapClient: true },
-      userKey: { id: 'did:key:zUserKey', secret: new Uint8Array(32) }
+      userKey: { id: 'did:key:zUserKey', secret: new Uint8Array(32) },
+      persistence: transientSessionPersistence()
     }
   } as unknown as Parameters<typeof establishPassphraseStanding>[0]['session']
 }

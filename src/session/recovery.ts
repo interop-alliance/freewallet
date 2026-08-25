@@ -1256,7 +1256,9 @@ export async function recoverAccountWithCode({
         },
         updateKeyMultibase: newRung0.keyMultibase
       },
-      expectedDid: pointer.did
+      expectedDid: pointer.did,
+      pinStore: sessionLogPinStore({ idb }),
+      logId: accountLogPinId({ spaceId: pointer.spaceId })
     })
     standingEstablished = true
     log.debug(
@@ -1842,7 +1844,9 @@ export async function resumeRecoverySpend({
             keyAgreement: { commitment },
             updateKeyMultibase: rung0.keyMultibase
           },
-          expectedDid: did
+          expectedDid: did,
+          pinStore: sessionLogPinStore({ idb }),
+          logId: accountLogPinId({ spaceId: pointer.spaceId })
         })
       }
       standingEstablished = true

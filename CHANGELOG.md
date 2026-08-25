@@ -55,6 +55,11 @@
   licensed as this ceremony's own inert residue -- the transient spend's
   only license (it holds no pin), and the durable spend's backstop for a
   tab death between its bind's remote record PUT and the local persists.
+- The standing establishment's document entry (`publishUnlockKey`) reads
+  the account log under the session's chain-head pin at all three call
+  sites (the add/change-method establishment, the recovery-spend tail, and
+  the spend resume's backfill), so a served prefix of the log is refused
+  instead of getting a commitment entry built on it.
 
 ## 0.40.0 - TBD
 
