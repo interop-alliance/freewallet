@@ -1,5 +1,61 @@
 # History
 
+## 0.41.0 - TBD
+
+### Changed
+
+- The durable recovery spend is persist-before-publish end to end: the
+  required `onCommitted` seam fires between the reveal entry and the
+  add-and-retire entry and durably writes the new passphrase's
+  STANDING-layout unlock record, the local PENDING client-key record (the
+  pending group now carrying the spent code's unwrap key and the
+  replacement code's bytes beside the discriminator and built-on head),
+  and the replacement code's record and bridge. Both entry builds run over
+  the durable chain-head pin, and a hook-less wallet-core run is refused
+  (`RecoverySpendSkewError`).
+- The spend's registry mutation (spent entry out, replacement and
+  new-passphrase entries in) moved from the post-login update into the
+  ceremony tail, between the registry re-seal and the collection cascade.
+  The new passphrase's standing establishment (its roster wrap, then its
+  document commitment + rung-0 entry, before the mandatory rotation) runs
+  in the same tail; the post-login half reduces to a best-effort registry
+  backfill, and the spend resume backfills a torn establishment from
+  durable state. A failed establishment writes the registry's passphrase
+  entry BARE (no standing fields) rather than claiming a standing
+  configuration the account does not back; the resume upgrades the entry
+  once its backfill makes the establishment real. The record completion is confirm-gated: the "I saved this
+  code" confirm fills the user key, clears the pending carrier, and only
+  then writes the epoch pin, so the show-once replacement code stays
+  re-displayable from the persisted bytes until confirmed saved (a failed
+  confirm surfaces a retryable error instead of marking the code saved).
+  The completion write is the one enrolling path: a userKey persist against a
+  still-pending client-key record is dropped unless the same change clears
+  the pending group.
+- The pending-enrollment router's spend branches: a spend-written record
+  whose client stands in the document completes through the new spend
+  resume (`resumeRecoverySpend` -- the roster escrows re-derived from the
+  persisted unwrap key at every kill point, the registry backfill, and the
+  show-once prompt re-displayed on the login page until the confirm); a
+  never-published spend record refuses toward `/recover` while the code is
+  genuinely unspent, surfaces the transport state when the served log has
+  not reached the record's built-on head, and is discarded when the code
+  was spent elsewhere. The replacement code is minted once per
+  ceremony: a re-run after a pre-entry tear reuses the persisted bytes, so
+  the same replacement unlock Space address is written on every attempt.
+- The bind gained the read-first collision refusal and the fetch-and-advance
+  stamp: the recovery spend's pre-entry bind (and its pre-flight probe)
+  refuses to overwrite an unlock record naming another account or a
+  standing credential's record this ceremony cannot account for
+  (`UnlockSpaceCollisionError`, surfaced under the new-passphrase field on
+  `/recover`), and advances its `createdAt` past the served record's beside
+  the local pin. The own-rewrite license requires the served stamp to be
+  covered by the local freshness pin (a re-establishment from another
+  browser is strictly newer and refuses); a served standing record whose
+  credential inventory the verified account document does not publish is
+  licensed as this ceremony's own inert residue -- the transient spend's
+  only license (it holds no pin), and the durable spend's backstop for a
+  tab death between its bind's remote record PUT and the local persists.
+
 ## 0.40.0 - TBD
 
 ### Changed

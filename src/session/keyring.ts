@@ -78,6 +78,7 @@ import {
 } from '@/app.config'
 import {
   isWebvhDid,
+  keyAgreementCommitment,
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
 import {
@@ -106,6 +107,7 @@ import {
 } from '@interop/wallet-core/keyring'
 import {
   standingClientFromUnlockSeed,
+  unlockKeyVmId,
   unwrapUnlockRecord,
   wrapUnlockRecord,
   type StandingUnlockClient,
@@ -462,6 +464,15 @@ export function unlockKeyAgreementMembers({
  * rotation persist without re-prompting for the secret) and adds no exposure
  * the in-memory client seed did not already carry.
  *
+ * The ceremony-completion write is the ONE path that enrolls a pending
+ * record: a `userKey` change on a record whose stored `pending` group still
+ * stands is dropped unless the same change also clears `pending`
+ * (`pending: null`). Without this, an incidental mid-session persist (the
+ * login sweep's rotation adoption) would fill the user key on a
+ * still-pending record -- it would classify enrolled with a live pending
+ * group, the resume would never run again, and the pending carrier (the
+ * show-once replacement code included) would be sealed away unreachable.
+ *
  * @param options {object}
  * @param options.unlock {UnlockIdentity}
  * @param [options.idb] {IDBFactory}
@@ -479,6 +490,16 @@ function clientKeysPersister({
     if (!clientKeys) {
       return
     }
+    // The completion-only enrollment rule: a userKey fill on a pending
+    // record must arrive together with the `pending: null` clear.
+    let userKeyChange = changes.userKey
+    if (userKeyChange && clientKeys.pending && changes.pending !== null) {
+      log.debug(
+        'Dropped a userKey persist on a pending client-key record; only the ceremony completion may enroll it',
+        { ceremony: clientKeys.pending.ceremony }
+      )
+      userKeyChange = undefined
+    }
     // `pending` is three-valued: absent keeps the stored member, a value
     // replaces it, `null` clears it (the ceremony-completion write).
     const pending =
@@ -488,7 +509,7 @@ function clientKeysPersister({
     await saveClientKeys({
       unlock,
       clientSeed: clientKeys.clientSeed,
-      userKey: changes.userKey ?? clientKeys.userKey,
+      userKey: userKeyChange ?? clientKeys.userKey,
       webvhUpdateKeys: changes.webvhUpdateKeys ?? clientKeys.webvhUpdateKeys,
       controller: clientKeys.controller,
       pointerDid: changes.pointerDid ?? clientKeys.pointerDid,
@@ -525,12 +546,12 @@ function accountPointerPersister({
 }): (pointer: AccountPointer) => Promise<void> {
   return async pointer => {
     // Stamped here rather than left to the codec, so the pin advances to the
-    // exact timestamp the record carries without re-reading it. Floored over
+    // exact timestamp the record carries without re-reading it. Advanced past
     // both the record being rewritten and this client's local pin, so a
     // client whose clock lags behind whichever client bound last still writes
     // a record that supersedes what everyone has pinned.
     const createdAt = nextRecordCreatedAt({
-      floors: [
+      advancePast: [
         found.createdAt,
         await loadKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
       ]
@@ -871,25 +892,26 @@ async function settlePendingRecordProof({
 
 /**
  * The bind timestamp to stamp on a record this client is about to write: now,
- * or one millisecond past the newest floor when a floor is already at or ahead
- * of now. The floors are timestamps the new record must supersede -- the
- * record it replaces, and this client's own freshness pin -- so a client whose
- * clock lags another's does not write a record every client then refuses as a
- * rollback. Absent and unparseable floors are ignored.
+ * advanced to one millisecond past the newest of the given timestamps when one
+ * is already at or ahead of now. The advance-past timestamps are what the new
+ * record must supersede -- the record it replaces, and this client's own
+ * freshness pin -- so a client whose clock lags another's does not write a
+ * record every client then refuses as a rollback. Absent and unparseable
+ * entries are ignored.
  *
  * @param options {object}
- * @param options.floors {Array<string | null | undefined>}   ISO timestamps
- *   the returned stamp must be strictly newer than
+ * @param options.advancePast {Array<string | null | undefined>}   ISO
+ *   timestamps the returned stamp must be strictly newer than
  * @returns {string}
  */
 function nextRecordCreatedAt({
-  floors
+  advancePast
 }: {
-  floors: Array<string | null | undefined>
+  advancePast: Array<string | null | undefined>
 }): string {
   let millis = Date.now()
-  for (const floor of floors) {
-    const parsed = floor ? Date.parse(floor) : Number.NaN
+  for (const prior of advancePast) {
+    const parsed = prior ? Date.parse(prior) : Number.NaN
     if (!Number.isNaN(parsed) && parsed >= millis) {
       millis = parsed + 1
     }
@@ -1317,7 +1339,7 @@ async function buildFetchResult({
           standing,
           rebindStandingRecord: async ({ delegation, delegatedClients }) => {
             const createdAt = nextRecordCreatedAt({
-              floors: [
+              advancePast: [
                 found.createdAt,
                 await loadKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
               ]
@@ -1391,6 +1413,288 @@ async function buildFetchResult({
 }
 
 /**
+ * Thrown when a bind is about to overwrite an unlock record that belongs to
+ * someone else: the served record at the target unlock Space names a
+ * different account, or it is a standing credential's record (its ladder
+ * seed, bridge, and sibling exist nowhere else, so a plain overwrite would
+ * destroy that credential forever) that this ceremony's own earlier attempt
+ * did not write. The recovery spend's pre-entry bind is the one caller today:
+ * a colliding new passphrase refuses before the reveal entry burns anything,
+ * worded at the new-passphrase form.
+ */
+export class UnlockSpaceCollisionError extends Error {
+  constructor({ cause }: { cause?: unknown } = {}) {
+    super(
+      'This passphrase already unlocks an existing wallet credential; ' +
+        'choose a different one.'
+    )
+    this.name = 'UnlockSpaceCollisionError'
+    this.cause = cause
+  }
+}
+
+/**
+ * The shared collision predicate over a served unlock record the bind is
+ * about to overwrite: the reason the overwrite must refuse, or `null` when it
+ * is safe. A record naming another account (pointer mismatch) always
+ * collides; a same-account STANDING record collides unless the caller proved
+ * the overwrite is this ceremony's own rewrite (`ownRewriteLicensed` -- the
+ * probe's pin or document evidence, never the local pending record alone) --
+ * its randomly minted standing members are exactly what the typed material
+ * cannot re-derive, so an overwrite would destroy them. A same-account plain
+ * pointer record carries nothing an overwrite loses.
+ *
+ * The account-identity test is POINTER-based (Space id, host, did): the
+ * record's `controller` is an identity label that legitimately varies (an
+ * enrolled bind writes the account did:key; a credential-anchored bind
+ * writes a per-ceremony bootstrap did:key), so it cannot decide which
+ * account a record belongs to.
+ *
+ * @param options {object}
+ * @param options.unwrapped {UnwrappedStoredRecord}   the served record
+ * @param [options.pointer] {AccountPointer}   the account pointer this bind
+ *   writes
+ * @param [options.ownRewriteLicensed] {boolean}   the probe's evidence that
+ *   the served standing record is this ceremony's own residue (see
+ *   `probeUnlockSpaceCollision`)
+ * @returns {string | null}   the refusal reason, or `null`
+ */
+function unlockRecordCollisionReason({
+  unwrapped,
+  pointer,
+  ownRewriteLicensed = false
+}: {
+  unwrapped: UnwrappedStoredRecord
+  pointer?: AccountPointer
+  ownRewriteLicensed?: boolean
+}): string | null {
+  const { found, standing } = unwrapped
+  const served = found.pointer
+  const sameAccount =
+    !!served &&
+    !!pointer &&
+    served.spaceId === pointer.spaceId &&
+    served.host === pointer.host &&
+    (served.did ?? undefined) === (pointer.did ?? undefined)
+  if (!sameAccount) {
+    return 'the served record names another account'
+  }
+  if (standing && !ownRewriteLicensed) {
+    return (
+      "the served record is a standing credential's this ceremony cannot " +
+      'account for'
+    )
+  }
+  return null
+}
+
+/**
+ * Whether the account document lists a verification-method id, checking both
+ * the `verificationMethod` entries and the `keyAgreement` relation's string
+ * references -- the membership test behind the transient probe's
+ * inert-residue license.
+ *
+ * @param options {object}
+ * @param options.doc {unknown}   the locally verified account document
+ * @param options.vmId {string}
+ * @returns {boolean}
+ */
+function documentListsVmId({
+  doc,
+  vmId
+}: {
+  doc: unknown
+  vmId: string
+}): boolean {
+  const shaped = doc as {
+    verificationMethod?: unknown
+    keyAgreement?: unknown
+  } | null
+  const methods = Array.isArray(shaped?.verificationMethod)
+    ? shaped.verificationMethod
+    : []
+  if (methods.some(method => (method as { id?: string })?.id === vmId)) {
+    return true
+  }
+  const keyAgreement = Array.isArray(shaped?.keyAgreement)
+    ? shaped.keyAgreement
+    : []
+  return keyAgreement.some(entry =>
+    typeof entry === 'string'
+      ? entry === vmId
+      : (entry as { id?: string })?.id === vmId
+  )
+}
+
+/**
+ * The recovery spend's read-first probe of the new passphrase's unlock Space,
+ * run BEFORE the reveal entry (and re-run inside the hook's bind): loads this
+ * ceremony's own pending client-key record (a pre-entry tear's residue, whose
+ * persisted replacement-code bytes the re-run reuses), GETs the served unlock
+ * record, and refuses a colliding one with `UnlockSpaceCollisionError` per
+ * the shared predicate. A 404-shaped miss proceeds as a fresh bind; a
+ * transport error rethrows unchanged; a record that will not decrypt or parse
+ * refuses too (an overwrite of a record this probe cannot account for is not
+ * provably safe). Returns the served record's stamp so the bind can advance
+ * its own `createdAt` past it (the fetch-and-advance obligation).
+ *
+ * A served STANDING record is overwritable only on one of two proofs that it
+ * is this ceremony's own residue, never on the local pending record alone
+ * (a stale pending record must not license destroying a record someone else
+ * legitimately established since):
+ *
+ * - the pin license: an own pending record stands AND the served record's
+ *   `createdAt` is not newer than this browser's local freshness pin for
+ *   the Space -- our own earlier bind seeded the pin with exactly its
+ *   stamp, and any later establishment from another browser is strictly
+ *   newer under advance-past stamping;
+ * - the document license (`accountDoc` supplied): the credential's
+ *   key-agreement publication (commitment or verbatim) is NOT in the
+ *   verified account document, so the served record's standing members back
+ *   no published inventory -- the inert residue of a torn earlier attempt,
+ *   not a live credential. The transient spend's only license (it holds no
+ *   pin and reads no local records); the durable spend passes it too, as
+ *   the backstop for its own bind's PUT-then-persist window (a tab death
+ *   there leaves a served standing record with no pending record and no
+ *   pin).
+ *
+ * @param options {object}
+ * @param options.credential {UnlockCredential}   the new passphrase's derived
+ *   credential
+ * @param options.controller {string}   the account controller the bind writes
+ * @param [options.pointer] {AccountPointer}   the account pointer the bind
+ *   writes
+ * @param [options.accountDoc] {unknown}   the locally verified account
+ *   document, enabling the transient license above
+ * @param [options.readLocalRecord] {boolean}   consult the local client-key
+ *   record for the own-pending residue (default true); the transient spend
+ *   passes false, since even a read would durably create the session
+ *   database
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<{ ownPending?: ClientKeyRecordPending,
+ *   servedCreatedAt?: string }>}
+ */
+export async function probeUnlockSpaceCollision({
+  credential,
+  controller,
+  pointer,
+  accountDoc,
+  readLocalRecord = true,
+  idb
+}: {
+  credential: UnlockCredential
+  controller: string
+  pointer?: AccountPointer
+  accountDoc?: unknown
+  readLocalRecord?: boolean
+  idb?: IDBFactory
+}): Promise<{
+  ownPending?: ClientKeyRecordPending
+  servedCreatedAt?: string
+}> {
+  const { unlock } = credential
+  const clientKeys = readLocalRecord
+    ? await loadClientKeys({ unlock, idb })
+    : undefined
+  const localPending = clientKeys?.pending
+  const ownPending =
+    localPending?.ceremony === 'recovery-spend' &&
+    (!clientKeys?.controller || clientKeys.controller === controller) &&
+    (!clientKeys?.pointerDid ||
+      !pointer?.did ||
+      clientKeys.pointerDid === pointer.did)
+      ? localPending
+      : undefined
+  if (!WAS_SERVER_URL) {
+    return { ...(ownPending ? { ownPending } : {}) }
+  }
+  const record = await getUnlockKeyring({
+    storageServerUrl: WAS_SERVER_URL,
+    zcapClient: unlock.zcapClient,
+    spaceId: unlock.spaceId
+  })
+  if (!record) {
+    return { ...(ownPending ? { ownPending } : {}) }
+  }
+  let unwrapped: UnwrappedStoredRecord
+  try {
+    unwrapped = await unwrapStoredKeyringRecord({ record, credential })
+  } catch (err) {
+    throw new UnlockSpaceCollisionError({ cause: keyringUnwrapError(err) })
+  }
+  let ownRewriteLicensed = false
+  if (unwrapped.standing) {
+    if (ownPending) {
+      // The durable license: the pin proves the served record is our own
+      // earlier write (its stamp seeded the pin), so a strictly newer
+      // served record means another browser established this credential
+      // since -- the stale pending record does not license overwriting it.
+      const pin = await loadKeyringFreshnessPin({
+        spaceId: unlock.spaceId,
+        idb
+      })
+      const servedMillis = unwrapped.found.createdAt
+        ? Date.parse(unwrapped.found.createdAt)
+        : Number.NaN
+      const pinnedMillis = pin ? Date.parse(pin) : Number.NaN
+      ownRewriteLicensed =
+        Number.isFinite(servedMillis) &&
+        Number.isFinite(pinnedMillis) &&
+        servedMillis <= pinnedMillis
+    }
+    if (
+      !ownRewriteLicensed &&
+      accountDoc !== undefined &&
+      pointer &&
+      isWebvhDid(pointer.did)
+    ) {
+      // The document license: no published inventory backs the served
+      // record's standing members, so it is a torn attempt's inert residue
+      // (a genuinely standing credential's commitment IS in the document).
+      // The transient spend's only license (it holds no pin and reads no
+      // local records), and the durable spend's backstop for the window its
+      // own bind order creates: a tab death between the remote record PUT
+      // and the local persists leaves a served standing record with no
+      // pending record and no pin, which the pin license alone would refuse
+      // forever.
+      const did = pointer.did!
+      const commitment = await keyAgreementCommitment({
+        keyAgreementKeyMultibase:
+          credential.standing.keyAgreementKeyMultibase
+      })
+      const publishedIds = [
+        unlockKeyVmId({ did, keyAgreement: { commitment } }),
+        unlockKeyVmId({
+          did,
+          keyAgreement: {
+            publicKeyMultibase: credential.standing.keyAgreementKeyMultibase
+          }
+        })
+      ]
+      ownRewriteLicensed = !publishedIds.some(vmId =>
+        documentListsVmId({ doc: accountDoc, vmId })
+      )
+    }
+  }
+  const reason = unlockRecordCollisionReason({
+    unwrapped,
+    pointer,
+    ownRewriteLicensed
+  })
+  if (reason) {
+    log.warn('Refusing to overwrite a colliding unlock record', {
+      reason,
+      unlockSpaceId: unlock.spaceId
+    })
+    throw new UnlockSpaceCollisionError({ cause: new Error(reason) })
+  }
+  return {
+    ...(ownPending ? { ownPending } : {}),
+    servedCreatedAt: unwrapped.found.createdAt
+  }
+}
+
+/**
  * Binds an unlock secret to this client's key set and the account it belongs
  * to: derives the unlock identity for the method's KDF, ensures the unlock
  * Space (when WAS is configured), wraps, signs, and PUTs the account-pointer
@@ -1437,6 +1741,18 @@ async function buildFetchResult({
  *   sealed into the standing record beside the bridge
  * @param [options.ladderSeed] {Uint8Array}   the credential's 32-byte
  *   update-key ladder seed, sealed into the standing record beside the bridge
+ * @param [options.pending] {ClientKeyRecordPending}   a mid-flight ceremony's
+ *   pending state, written into the local client-key record (the record then
+ *   classifies pending at login and routes to the resume)
+ * @param [options.refuseCollidingRecord] {boolean | object}   the read-first
+ *   collision refusal: GET the served record first, refuse a colliding one
+ *   (`UnlockSpaceCollisionError`, shared predicate with
+ *   `probeUnlockSpaceCollision`), and advance the bind stamp past the served
+ *   record's `createdAt` beside the local pin (the fetch-and-advance
+ *   obligation). The object form carries `accountDoc` (the locally verified
+ *   account document), enabling the probe's document license beside the pin
+ *   license. The recovery spend's pre-entry bind passes it; the ordinary
+ *   bind and re-establishment sites overwrite their own records by design
  * @param [options.idb] {IDBFactory}
  * @param [options.credential] {UnlockCredential}   an already-derived unlock
  *   credential for the same secret and KDF, so a flow that unlocks more than
@@ -1456,6 +1772,8 @@ export async function bindUnlockSecret({
   delegation,
   delegatedClients,
   ladderSeed,
+  pending,
+  refuseCollidingRecord = false,
   idb,
   credential: derived
 }: {
@@ -1471,6 +1789,8 @@ export async function bindUnlockSecret({
   delegation?: IZcap
   delegatedClients?: IZcap
   ladderSeed?: Uint8Array
+  pending?: ClientKeyRecordPending
+  refuseCollidingRecord?: boolean | { accountDoc?: unknown }
   idb?: IDBFactory
   credential?: UnlockCredential
 }): Promise<{
@@ -1485,13 +1805,38 @@ export async function bindUnlockSecret({
   if (delegation && !pointer) {
     throw new TypeError('A standing unlock record requires an account pointer.')
   }
+  // The read-first collision refusal and the served half of the
+  // fetch-and-advance: the probe GETs the served record, refuses a colliding
+  // one before anything is overwritten, and hands back its `createdAt` so a
+  // bind from a browser whose clock lags the record's writer still
+  // supersedes it (the cross-browser fast-clock wedge).
+  let servedCreatedAt: string | undefined
+  if (refuseCollidingRecord) {
+    const guard =
+      typeof refuseCollidingRecord === 'object' ? refuseCollidingRecord : {}
+    const probed = await probeUnlockSpaceCollision({
+      credential,
+      controller,
+      pointer,
+      ...(guard.accountDoc !== undefined
+        ? { accountDoc: guard.accountDoc }
+        : {}),
+      idb
+    })
+    servedCreatedAt = probed.servedCreatedAt
+  }
   // The bind timestamp is stamped here rather than left to the codec, so this
-  // client seeds its freshness pin with exactly what it signed. It is floored
-  // over the local pin: every rebind site has already fetched (and pinned) the
-  // standing record, so flooring over the pin guarantees the new record
-  // supersedes it even when another client's clock ran ahead of this one.
+  // client seeds its freshness pin with exactly what it signed. It is
+  // advanced past the served record's stamp (when the read-first probe
+  // fetched one) and the local pin: every rebind site has already fetched
+  // (and pinned) the standing record, so advancing past the pin guarantees
+  // the new record supersedes it even when another client's clock ran ahead
+  // of this one.
   const createdAt = nextRecordCreatedAt({
-    floors: [await loadKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })]
+    advancePast: [
+      servedCreatedAt,
+      await loadKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
+    ]
   })
   const record =
     delegation && pointer
@@ -1560,6 +1905,7 @@ export async function bindUnlockSecret({
     // has no routing consequence (the pending/enrolled router keys on
     // `userKey` presence alone; `pointerDid` is the resume's cross-check).
     ...(pointer && isWebvhDid(pointer.did) ? { pointerDid: pointer.did } : {}),
+    ...(pending ? { pending } : {}),
     idb
   })
   await saveKeyringFreshnessPin({ spaceId: unlock.spaceId, createdAt, idb })
@@ -1596,6 +1942,10 @@ export async function bindUnlockSecret({
  *   delegation for a standing bind
  * @param [options.ladderSeed] {Uint8Array}   the update-key ladder seed for a
  *   standing bind
+ * @param [options.pending] {ClientKeyRecordPending}   a mid-flight ceremony's
+ *   pending state (see `bindUnlockSecret`)
+ * @param [options.refuseCollidingRecord] {boolean | object}   the read-first
+ *   collision refusal and served-stamp advance (see `bindUnlockSecret`)
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}
  * @param [options.credential] {UnlockCredential}   an already-derived unlock
@@ -1615,6 +1965,8 @@ export async function bindPassphrase({
   delegation,
   delegatedClients,
   ladderSeed,
+  pending,
+  refuseCollidingRecord,
   idb,
   kdf = KEYRING_KDF,
   credential
@@ -1630,6 +1982,8 @@ export async function bindPassphrase({
   delegation?: IZcap
   delegatedClients?: IZcap
   ladderSeed?: Uint8Array
+  pending?: ClientKeyRecordPending
+  refuseCollidingRecord?: boolean | { accountDoc?: unknown }
   idb?: IDBFactory
   kdf?: UnlockKdf
   credential?: UnlockCredential
@@ -1653,6 +2007,8 @@ export async function bindPassphrase({
     delegation,
     delegatedClients,
     ladderSeed,
+    ...(pending ? { pending } : {}),
+    ...(refuseCollidingRecord !== undefined ? { refuseCollidingRecord } : {}),
     idb,
     ...(credential ? { credential } : {})
   })
@@ -1669,7 +2025,7 @@ export async function bindPassphrase({
  *
  * The record's `controller` is the ladder VM's bare did:key -- the bootstrap
  * identity, re-derivable from the credential alone -- and the freshness stamp
- * floors over the caller-supplied prior stamp (the signup's first bind), so
+ * advances past the caller-supplied prior stamp (the signup's first bind), so
  * the post-genesis re-bind always supersedes it.
  *
  * @param options {object}
@@ -1688,8 +2044,15 @@ export async function bindPassphrase({
  * @param [options.delegateManagementTo] {string}   an account DID to delegate
  *   the unlock Space management zcap to (widened with PUT, the standing
  *   standing configuration)
- * @param [options.priorCreatedAt] {string}   the previous bind's stamp, the
- *   freshness floor for this one
+ * @param [options.priorCreatedAt] {string}   the previous bind's stamp; this
+ *   bind's stamp advances past it
+ * @param [options.refuseCollidingRecord] {object}   the read-first collision
+ *   refusal (see `probeUnlockSpaceCollision`): the bind GETs the served
+ *   record first, refuses a colliding one, and advances its stamp past the
+ *   served record's. Carries the verified account document -- the transient
+ *   caller's inert-residue license, since a transient visit holds no
+ *   freshness pin and must not read local records (even a read would
+ *   durably create the session database)
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for the same secret
  * @returns {Promise<object>}   the unlock Space id, the management zcap when
@@ -1707,6 +2070,7 @@ export async function bindCredentialAnchoredUnlockSecret({
   ladderSeed,
   delegateManagementTo,
   priorCreatedAt,
+  refuseCollidingRecord,
   credential: derived
 }: {
   controller: string
@@ -1719,6 +2083,7 @@ export async function bindCredentialAnchoredUnlockSecret({
   ladderSeed: Uint8Array
   delegateManagementTo?: string
   priorCreatedAt?: string
+  refuseCollidingRecord?: { accountDoc: unknown }
   credential?: UnlockCredential
 }): Promise<{
   unlockSpaceId: string
@@ -1745,7 +2110,23 @@ export async function bindCredentialAnchoredUnlockSecret({
       kdf: kdf as UnlockKdf
     }))
   const { unlock, standing } = credential
-  const createdAt = nextRecordCreatedAt({ floors: [priorCreatedAt] })
+  // The read-first refusal and the served half of fetch-and-advance, when
+  // the caller asked for it (the transient spend's re-bind of a
+  // passphrase-addressed Space that may hold another credential's record).
+  let servedCreatedAt: string | undefined
+  if (refuseCollidingRecord) {
+    const probed = await probeUnlockSpaceCollision({
+      credential,
+      controller,
+      pointer,
+      accountDoc: refuseCollidingRecord.accountDoc,
+      readLocalRecord: false
+    })
+    servedCreatedAt = probed.servedCreatedAt
+  }
+  const createdAt = nextRecordCreatedAt({
+    advancePast: [priorCreatedAt, servedCreatedAt]
+  })
   const record = await wrapUnlockRecord({
     controller,
     email,

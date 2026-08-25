@@ -35,6 +35,10 @@ vi.mock('@/session/standingUnlock', () => ({
   selfEnrollStandingClient: vi.fn()
 }))
 
+vi.mock('@/session/recovery', () => ({
+  resumeRecoverySpend: vi.fn()
+}))
+
 vi.mock('@/lib/sessionKey', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/sessionKey')>()),
   deleteClientKeyRecord: vi.fn(async () => {}),
@@ -45,8 +49,10 @@ vi.mock('@/lib/sessionKey', async importOriginal => ({
 }))
 
 import { verifyAccountLog } from '@interop/wallet-core/webvh'
+import { unlockClientIdentityFromSeed } from '@interop/wallet-core/unlock'
 import { finishForgottenBrowserWipe } from '@/session/forget'
 import { selfEnrollStandingClient } from '@/session/standingUnlock'
+import { resumeRecoverySpend } from '@/session/recovery'
 import { deleteClientKeyRecord } from '@/lib/sessionKey'
 import {
   isPendingKeyringHit,
@@ -109,15 +115,19 @@ function serveLog({
   headVmIds = [] as string[],
   historyVmIds = [] as string[][]
 } = {}) {
+  const entries = [
+    ...historyVmIds.map(ids => ({
+      state: { verificationMethod: ids.map(id => ({ id })) }
+    })),
+    { state: { verificationMethod: headVmIds.map(id => ({ id })) } }
+  ]
   vi.mocked(verifyAccountLog).mockResolvedValue({
     did: POINTER.did,
     doc: { verificationMethod: headVmIds.map(id => ({ id })) },
-    log: [
-      ...historyVmIds.map(ids => ({
-        state: { verificationMethod: ids.map(id => ({ id })) }
-      })),
-      { state: { verificationMethod: headVmIds.map(id => ({ id })) } }
-    ]
+    log: entries.map((entry, index) => ({
+      ...entry,
+      versionId: `${index + 1}-hash`
+    }))
   } as never)
 }
 
@@ -293,7 +303,8 @@ describe('resumePendingEnrollment -- branch decision', () => {
         builtOnHead: BUILT_ON_HEAD
       }
     }
-    serveLog()
+    // The served log has reached the recorded built-on head (2 entries).
+    serveLog({ historyVmIds: [[]] })
 
     await expect(resumePendingEnrollment({ found })).rejects.toMatchObject({
       name: 'PendingEnrollmentError',
@@ -304,24 +315,110 @@ describe('resumePendingEnrollment -- branch decision', () => {
     expect(deleteClientKeyRecord).not.toHaveBeenCalled()
   })
 
-  it('refuses a spend-written record on EVERY branch, the listed-VM completion included', async () => {
-    // Completing a spend record here would clear the pending members (the
-    // unwrap-key carrier, the replacement-code bytes) that only FW-317's
-    // completion machinery may consume.
+  it('surfaces the transport state when the served log has not reached a spend record\'s built-on head', async () => {
+    // A truncated (or lagging) log looks exactly like never-published, so
+    // no spend branch is decidable on it: record kept, retry later.
     const { found } = makeFound()
     found.clientKeys = {
       ...found.clientKeys!,
       pending: {
         ceremony: 'recovery-spend',
-        builtOnHead: BUILT_ON_HEAD
+        builtOnHead: BUILT_ON_HEAD,
+        unwrapKey: new Uint8Array(32).fill(3)
       }
     }
-    serveLog({ headVmIds: [VM_ID] })
+    serveLog() // one entry: behind the recorded '2-head'
+
+    await expect(resumePendingEnrollment({ found })).rejects.toMatchObject({
+      name: 'PendingResumeLogUnavailableError'
+    })
+    expect(deleteClientKeyRecord).not.toHaveBeenCalled()
+    expect(finishForgottenBrowserWipe).not.toHaveBeenCalled()
+  })
+
+  it('discards a spend record whose code was spent elsewhere (inventory retired by another entry)', async () => {
+    // The log reached the head, the VM never published, and the spent
+    // code's keyAgreement inventory is out of the document: /recover would
+    // refuse the code as spent, so keeping the record would wedge the
+    // browser -- the pending key set grants nothing and is discarded.
+    const { found } = makeFound()
+    found.clientKeys = {
+      ...found.clientKeys!,
+      pending: {
+        ceremony: 'recovery-spend',
+        builtOnHead: BUILT_ON_HEAD,
+        unwrapKey: new Uint8Array(32).fill(3)
+      }
+    }
+    serveLog({ historyVmIds: [[]] })
+
+    await expect(resumePendingEnrollment({ found })).rejects.toThrow(
+      PendingEnrollmentDiscardedError
+    )
+    expect(deleteClientKeyRecord).toHaveBeenCalled()
+  })
+
+  it('keeps the /recover refusal when the spent code still stands in the document', async () => {
+    const unwrapKey = new Uint8Array(32).fill(3)
+    const spentIdentity = await unlockClientIdentityFromSeed({
+      clientSeed: unwrapKey
+    })
+    const { found } = makeFound()
+    found.clientKeys = {
+      ...found.clientKeys!,
+      pending: {
+        ceremony: 'recovery-spend',
+        builtOnHead: BUILT_ON_HEAD,
+        unwrapKey
+      }
+    }
+    // The spent code's keyAgreement VM stands in the current document.
+    serveLog({
+      headVmIds: [
+        `${POINTER.did}#${spentIdentity.keyAgreementKeyMultibase}`
+      ],
+      historyVmIds: [[]]
+    })
 
     await expect(resumePendingEnrollment({ found })).rejects.toMatchObject({
       name: 'PendingEnrollmentError',
       reason: 'recovery-spend'
     })
+    expect(deleteClientKeyRecord).not.toHaveBeenCalled()
+  })
+
+  it('completes a spend-written record through the spend resume when the VM is listed', async () => {
+    // The add-and-retire entry landed; the spend resume (not the
+    // self-enrollment ceremony) finishes the escrows, the registry
+    // backfill, and the confirm-gated completion -- its show-once prompt
+    // rides the resume result to the login surface.
+    const { found } = makeFound()
+    found.clientKeys = {
+      ...found.clientKeys!,
+      pending: {
+        ceremony: 'recovery-spend',
+        builtOnHead: BUILT_ON_HEAD,
+        unwrapKey: new Uint8Array(32).fill(3),
+        replacementCode: new Uint8Array(16).fill(5)
+      }
+    }
+    serveLog({ headVmIds: [VM_ID] })
+    const completed = {
+      clientKeys: { clientSeed: CLIENT_SEED, userKey: USER_KEY },
+      persistClientKeys: vi.fn(),
+      recoverySpendPrompt: { replacementCode: 'zCode', complete: vi.fn() }
+    }
+    vi.mocked(resumeRecoverySpend).mockResolvedValue(completed as never)
+
+    const result = await resumePendingEnrollment({ found })
+
+    expect(result).toBe(completed)
+    expect(resumeRecoverySpend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        found,
+        verifiedLog: expect.objectContaining({ did: POINTER.did })
+      })
+    )
     expect(selfEnrollStandingClient).not.toHaveBeenCalled()
     expect(deleteClientKeyRecord).not.toHaveBeenCalled()
   })

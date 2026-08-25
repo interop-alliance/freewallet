@@ -255,6 +255,18 @@ export interface Session {
   // the freshly adopted key, and the next login re-fetches it); the login
   // page surfaces it as "this browser could not be remembered".
   userKeyPersistFailed?: boolean
+  // Set when this login resumed a torn recovery spend that still owes the
+  // show-once replacement-code display: the login surface renders the code
+  // and runs `complete` (the confirm-gated record completion, which clears
+  // the persisted carrier) once the user confirms saving it. Absent on
+  // every other login.
+  recoverySpendPrompt?: {
+    replacementCode: string
+    // The confirm-gated completion; the caller passes the session's CURRENT
+    // vault user key so a sweep rotation during the display is not written
+    // over by the resume's captured key.
+    complete: (options?: { currentUserKey?: UserKey }) => Promise<void>
+  }
   expires?: string // ISO date string, matches Auth.js convention
   isGuest: boolean
 }

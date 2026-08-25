@@ -130,7 +130,7 @@ export interface CredentialAnchoredEstablishment {
  *   commitment; a passkey PRF output publishes verbatim)
  * @param [options.email] {string}   carried inside the wrapped record
  * @param [options.priorCreatedAt] {string}   the previous bind's freshness
- *   stamp, floored under the re-bind's
+ *   stamp; the re-bind's stamp advances past it
  * @param options.persistence {TransientSessionPersistence}   the visit's
  *   in-memory handle (chain-head pins for every log read here)
  * @param [options.beforePromotion] {Function}   runs after the re-bind and

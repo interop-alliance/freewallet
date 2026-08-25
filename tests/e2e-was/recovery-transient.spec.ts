@@ -35,8 +35,10 @@ import {
 // not inherit the config's `use.baseURL`, so pass it explicitly.
 const APP_URL = 'http://localhost:5274'
 
-const NEW_PASSPHRASE = 'Recovered-transient-42!'
-const TORN_PASSPHRASE = 'Torn-transient-43!'
+// Unique per run: a fixed string would collide with a prior local run's
+// unlock record at the same passphrase-derived address, and the bind's
+// collision refusal rightly refuses to overwrite it.
+const NEW_PASSPHRASE = `Recovered-transient-42!-${Date.now()}`
 
 /**
  * The annex generation an account document currently points at, read the way
@@ -291,6 +293,11 @@ test.describe
     browser
   }) => {
     test.setTimeout(240_000)
+    // Minted per attempt: the torn spend durably writes this passphrase's
+    // unlock record before the aborted append (persist-before-publish), so
+    // a fixed string would leave a record a later run's collision probe
+    // rightly refuses.
+    const tornPassphrase = `Torn-transient-43!-${Date.now()}`
     const { context, page } = await coldTerminal(browser)
     try {
       // Every mutating request the ceremony makes, in order (preflights and
@@ -332,7 +339,7 @@ test.describe
       ).toBeVisible({ timeout: 30_000 })
       await fillSettled(
         page.locator('input[id="new-passphrase"]'),
-        TORN_PASSPHRASE
+        tornPassphrase
       )
       await page
         .getByRole('button', { name: 'Recover wallet', exact: true })

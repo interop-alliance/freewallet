@@ -78,6 +78,7 @@ import {
   PendingEnrollmentError,
   resumePendingEnrollment
 } from '@/session/pendingEnrollment'
+import type { RecoverySpendPrompt } from '@/session/recovery'
 import { assertClientStillEnrolled } from '@/session/forget'
 import {
   delegateLogWrite,
@@ -952,6 +953,16 @@ async function sessionFromKeyringHit({
     type,
     unlockSpaceId: found.unlockSpaceId,
     manageCapability: found.manageCapability
+  }
+  // A resumed recovery spend still owes the show-once replacement-code
+  // display: the prompt rides the session so the login surface can render
+  // the save-this-code dialog and run the confirm-gated completion before
+  // navigating on.
+  const recoverySpendPrompt = (
+    enrolled as { recoverySpendPrompt?: RecoverySpendPrompt } | undefined
+  )?.recoverySpendPrompt
+  if (recoverySpendPrompt) {
+    session.recoverySpendPrompt = recoverySpendPrompt
   }
   // The login credential's ladder seed, for the mid-session ceremonies that
   // write the annex (the revocation cascade's generation-delegation

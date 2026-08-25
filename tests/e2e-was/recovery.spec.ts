@@ -31,7 +31,12 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 // not inherit the config's `use.baseURL`, so pass it explicitly.
 const APP_URL = 'http://localhost:5274'
 
-const NEW_PASSPHRASE = 'Recovered-passphrase-42!'
+// Unique per run: the unlock Space address derives from the passphrase
+// alone, and the teaching server's data directory persists across local
+// runs, so a fixed string would leave a prior run's record at the same
+// address -- which the bind's collision refusal rightly refuses to
+// overwrite.
+const NEW_PASSPHRASE = `Recovered-passphrase-42!-${Date.now()}`
 
 /**
  * Opens a fresh, cold browser context (empty IndexedDB and localStorage) to
@@ -298,6 +303,122 @@ test.describe('Recovery codes', () => {
     expect(keyAgreement).toHaveLength(5)
     expect(resolved.doc?.capabilityInvocation).toHaveLength(2)
     expect(resolved.doc?.verificationMethod).toHaveLength(8)
+  })
+
+  test('a tab death after the entry is mended by the next login (the spend resume)', async ({
+    page,
+    browser
+  }, testInfo) => {
+    // The persist-before-publish cell: the durable spend's add-and-retire
+    // entry lands and the pending client-key record persists, then the tab
+    // dies BEFORE the confirm-gated record completion (a reload drops the
+    // in-memory ceremony state while the pending record survives). The next
+    // login with the new passphrase routes into the spend resume: it
+    // re-displays the SAME replacement code from the persisted bytes,
+    // completes on the confirm, and lands an ordinary enrolled session that
+    // decrypts pre-recovery history.
+    test.setTimeout(360_000)
+
+    // Minted per attempt, not shared with the durable spend cell: the unlock
+    // Space address derives from the passphrase alone, so a passphrase
+    // another cell (or a prior attempt) already bound is refused by the
+    // spend's collision probe.
+    const resumePassphrase = `Recovered-resume-42!-${Date.now()}`
+
+    const { passphrase } = await signupViaWizard(page, testInfo)
+    await expect(
+      page.getByRole('link', { name: 'Your First Credential' })
+    ).toBeVisible({ timeout: 20_000 })
+    await logOut(page)
+    await logIn(page, passphrase)
+
+    // Issue a recovery code from Settings.
+    await page.goto('/#/settings')
+    const generateButton = page.getByRole('button', {
+      name: 'Generate recovery code'
+    })
+    await expect(generateButton).toBeEnabled({ timeout: 30_000 })
+    await generateButton.click()
+    const code = (await page.locator('code').textContent()) ?? ''
+    await page.getByRole('button', { name: 'I saved this code' }).click()
+    await expect(page.getByText('Recovery code 1')).toBeVisible({
+      timeout: 60_000
+    })
+
+    // The cold profile spends the code durably.
+    const secondClient = await coldClientPage(browser)
+    try {
+      await secondClient.goto('/#/recover')
+      await forceRememberBrowser(secondClient)
+      await fillSettled(
+        secondClient.locator('input[name="recovery-code"]'),
+        code
+      )
+      await secondClient
+        .getByRole('button', { name: 'Check code', exact: true })
+        .click()
+      await expect(
+        secondClient.getByText('Found a wallet account', { exact: false })
+      ).toBeVisible({ timeout: 30_000 })
+      await fillSettled(
+        secondClient.locator('input[id="new-passphrase"]'),
+        resumePassphrase
+      )
+      await secondClient
+        .getByRole('button', { name: 'Recover wallet', exact: true })
+        .click()
+      await expect(
+        secondClient.getByText('Your wallet was recovered', { exact: false })
+      ).toBeVisible({ timeout: 120_000 })
+      const replacement =
+        (await secondClient
+          .getByTestId('replacement-recovery-code')
+          .textContent()) ?? ''
+
+      // The tab dies before "I saved the new code": the record completion
+      // never ran, so the pending record (the show-once carrier inside it)
+      // is the only survivor. A reload is the same death for the in-memory
+      // ceremony state.
+      await secondClient.reload()
+
+      // The next login with the new passphrase resumes the spend: the
+      // save-this-code card re-displays the SAME replacement code before
+      // the dashboard.
+      await secondClient.goto('/#/login')
+      await forceRememberBrowser(secondClient)
+      await fillSettled(
+        secondClient.locator('input[type="password"]'),
+        resumePassphrase
+      )
+      await secondClient
+        .getByRole('button', { name: 'Log in', exact: true })
+        .click()
+      const resumedCode = secondClient.getByTestId(
+        'resume-replacement-recovery-code'
+      )
+      await expect(resumedCode).toBeVisible({ timeout: 120_000 })
+      expect(await resumedCode.textContent()).toBe(replacement)
+      await secondClient
+        .getByRole('button', { name: 'I saved the new code' })
+        .click()
+      await expect(secondClient).toHaveURL(/#\/dashboard/, {
+        timeout: 60_000
+      })
+
+      // The resumed session decrypts pre-recovery history across the
+      // rotation, and an ordinary re-login (the completed enrolled record)
+      // goes straight to the dashboard with no code card.
+      await expect(
+        secondClient.getByRole('link', { name: 'Your First Credential' })
+      ).toBeVisible({ timeout: 30_000 })
+      await logOut(secondClient)
+      await logIn(secondClient, resumePassphrase)
+      await expect(
+        secondClient.getByTestId('resume-replacement-recovery-code')
+      ).toHaveCount(0)
+    } finally {
+      await secondClient.context().close()
+    }
   })
 
   test('login and signup pages link to the recover flow', async ({ page }) => {

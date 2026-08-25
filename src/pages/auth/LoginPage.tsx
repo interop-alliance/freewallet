@@ -42,9 +42,10 @@ import {
   passkeySupported
 } from '@/lib/passkey'
 import { registerWallet } from '@/lib/registerWallet'
+import { RecoveryCodeDisplay } from '@/components/RecoveryCodeDisplay'
 import { forcedConnectOffer, forcedRememberBrowser } from '@/lib/e2eSeams'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
-import type { AuthLocationState } from '@/types/auth'
+import type { AuthLocationState, Session } from '@/types/auth'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:login')
@@ -94,6 +95,13 @@ export function LoginPage() {
   } | null>(null)
   const [enrollBusy, setEnrollBusy] = useState(false)
   const [enrollErrorKey, setEnrollErrorKey] = useState<string | null>(null)
+  // A resumed recovery spend's show-once obligation: the replacement code to
+  // display and the confirm-gated completion to run before navigating on.
+  // Set by a login that resumed a torn spend; `null` otherwise.
+  const [spendPrompt, setSpendPrompt] = useState<
+    NonNullable<Session['recoverySpendPrompt']> | null
+  >(null)
+  const [spendBusy, setSpendBusy] = useState(false)
   // The forget-this-browser dialog off a forgettable refusal: `null` closed,
   // otherwise whether the browser holds anything to delete. Reset by every
   // fresh login attempt, so the dialog can never sit beside an error it did
@@ -185,6 +193,14 @@ export function LoginPage() {
           }
         })
         .catch(err => log.warn('Recovery health check failed', { err }))
+      if (session.recoverySpendPrompt) {
+        // The login resumed a torn recovery spend that still owes the
+        // show-once replacement-code display: render it here and gate the
+        // record completion (and navigation) on the save confirm, exactly
+        // as the /recover page does.
+        setSpendPrompt(session.recoverySpendPrompt)
+        return
+      }
       navigate('/dashboard', { replace: true })
     } catch (err) {
       const { key, transientReason } = loginErrorKey({ err, label: 'Login' })
@@ -207,6 +223,37 @@ export function LoginPage() {
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  /**
+   * The resumed spend's "I saved this code" confirm: runs the confirm-gated
+   * record completion (which clears the persisted replacement-code carrier)
+   * and then navigates on. A failed completion is logged and the login
+   * proceeds: the pending record stays, and the next login re-displays the
+   * code and completes.
+   */
+  const handleSpendPromptSaved = async () => {
+    if (!spendPrompt || spendBusy) {
+      return
+    }
+    setSpendBusy(true)
+    try {
+      // The live session's CURRENT vault user key rides into the
+      // completion: a login-sweep rotation while the code was on display
+      // must not be written over by the resume's captured key.
+      const currentUserKey = useAuthStore.getState().session?.profile.userKey
+      await spendPrompt.complete(
+        currentUserKey ? { currentUserKey } : undefined
+      )
+    } catch (err) {
+      log.warn('Could not complete the resumed recovery spend on confirm', {
+        err
+      })
+    } finally {
+      setSpendBusy(false)
+    }
+    setSpendPrompt(null)
+    navigate('/dashboard', { replace: true })
   }
 
   /**
@@ -378,6 +425,34 @@ export function LoginPage() {
         <Typography variant="h4" component="h1" sx={authStyles.title}>
           {t('auth.login.heading')}
         </Typography>
+
+        {/* A resumed recovery spend's show-once replacement code: rendered
+            full-width above the login cards, with the confirm-gated
+            completion behind the save button (the /recover page's own
+            save-this-code sequence). */}
+        {spendPrompt && (
+          <Card sx={authStyles.enrollCard} variant="outlined">
+            <CardContent sx={authStyles.authCardContent}>
+              <Stack sx={{ gap: 2 }}>
+                <Alert severity="warning">
+                  {t('auth.recover.replacementExplain')}
+                </Alert>
+                <RecoveryCodeDisplay
+                  code={spendPrompt.replacementCode}
+                  copyLabel={t('auth.recover.copyCode')}
+                  testId="resume-replacement-recovery-code"
+                />
+                <Button
+                  variant="contained"
+                  onClick={() => void handleSpendPromptSaved()}
+                  loading={spendBusy}
+                >
+                  {t('auth.recover.replacementSavedButton')}
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Connect-this-browser (enrollment) card: full-width above the
             login and passkey cards. */}

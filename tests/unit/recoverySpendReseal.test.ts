@@ -31,6 +31,12 @@ vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
     async ({ spaceId }: { spaceId: string }) =>
       state.records.get(spaceId) ?? null
   ),
+  ensureUnlockSpace: vi.fn(async () => {}),
+  putUnlockKeyring: vi.fn(
+    async ({ spaceId, record }: { spaceId: string; record: unknown }) => {
+      state.records.set(spaceId, record)
+    }
+  ),
   deleteUnlockSpace: vi.fn(async () => {})
 }))
 
@@ -46,9 +52,33 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
 
 vi.mock('@interop/wallet-core/recovery', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/recovery')>()),
-  recoverWebvhClient: vi.fn(async () => ({
-    did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id'
-  }))
+  // The hook-carrying continuation: the persist seam fires between the
+  // entries (here: before the return), and the result states it fired.
+  recoverWebvhClient: vi.fn(
+    async ({
+      onCommitted
+    }: {
+      onCommitted: (committed: {
+        builtOnHead: { scid: string; versionId: string }
+      }) => Promise<void>
+    }) => {
+      await onCommitted({
+        builtOnHead: { scid: 'QmScidForTests', versionId: '1-head' }
+      })
+      return {
+        did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
+        committed: true
+      }
+    }
+  )
+}))
+
+vi.mock('@/session/unlockMethods', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/unlockMethods')>()),
+  updateUnlockMethodsWithClient: vi.fn(async () => {
+    state.calls.push('registryMutation')
+    return null
+  })
 }))
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
@@ -122,6 +152,7 @@ import {
   wrapUnlockRecord
 } from '@interop/wallet-core/recovery'
 import { recoverAccountWithCode } from '@/session/recovery'
+import { createFakeSessionIdb } from './fakeSessionIdb'
 
 const POINTER: AccountPointer = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
@@ -170,20 +201,23 @@ beforeEach(() => {
 })
 
 describe('the recovery spend, torn in the collection fan-out', () => {
-  it('has already re-sealed the registry when the fan-out dies', async () => {
+  it('has already re-sealed the registry (and written its mutation) when the fan-out dies', async () => {
     const code = await storeRecordForCode()
+    const { idb } = createFakeSessionIdb()
 
     await expect(
       recoverAccountWithCode({
         code,
         newPassphrase: 'a fresh passphrase for the recovered account',
-        rememberBrowser: true
+        rememberBrowser: true,
+        idb
       })
     ).rejects.toThrow('the tab closed')
 
     expect(state.calls).toEqual([
       'rotateUserKeyRoster',
       'rewrapUnlockRegistry',
+      'registryMutation',
       'cascadeCollections'
     ])
   })

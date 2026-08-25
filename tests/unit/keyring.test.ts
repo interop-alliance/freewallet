@@ -772,6 +772,61 @@ describe('the client key set under the unlock layer', () => {
     expect(isEnrolledClientKeyRecord(found!.clientKeys!)).toBe(true)
   })
 
+  it('drops a userKey persist on a pending record unless the same change clears the pending group', async () => {
+    // The completion-only enrollment rule: an incidental mid-session persist
+    // (the login sweep's rotation adoption) must not fill the user key on a
+    // still-pending record -- it would classify enrolled with a live pending
+    // group and the resume would never run again.
+    const idb = createFakeIdb()
+    await bindPassphrase({
+      clientSeed: randomSeed(),
+      controller: DATA_CONTROLLER,
+      passphrase: 'pending drop passphrase',
+      webvhUpdateKeys: { updateSeed: randomSeed(), stagedSeed: randomSeed() },
+      pointer: POINTER,
+      idb,
+      kdf: KDF
+    })
+    let found = await fetchKeyring({
+      passphrase: 'pending drop passphrase',
+      idb,
+      kdf: KDF
+    })
+    const builtOnHead = { scid: 'QmScidForTests', versionId: '4-def' }
+    await found!.persistClientKeys!({
+      pending: { ceremony: 'self-enrollment', builtOnHead }
+    })
+
+    // A userKey-only change against the pending record is dropped whole for
+    // the userKey member; the record stays pending and unenrolled.
+    await found!.persistClientKeys!({ userKey: await mintUserKey() })
+    found = await fetchKeyring({
+      passphrase: 'pending drop passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.clientKeys!.userKey).toBeUndefined()
+    expect(found!.clientKeys!.pending).toEqual({
+      ceremony: 'self-enrollment',
+      builtOnHead
+    })
+    expect(isEnrolledClientKeyRecord(found!.clientKeys!)).toBe(false)
+
+    // The completion write (userKey together with `pending: null`) remains
+    // the one enrolling path.
+    await found!.persistClientKeys!({
+      userKey: await mintUserKey(),
+      pending: null
+    })
+    found = await fetchKeyring({
+      passphrase: 'pending drop passphrase',
+      idb,
+      kdf: KDF
+    })
+    expect(found!.clientKeys!.pending).toBeUndefined()
+    expect(isEnrolledClientKeyRecord(found!.clientKeys!)).toBe(true)
+  })
+
   it('locates the account but reports no client keys on a fresh profile (not enrolled)', async () => {
     // Bind through one browser profile, then fetch on a second profile whose
     // session store is empty: the passphrase can no longer reconstruct the
@@ -1059,7 +1114,7 @@ describe('record freshness (the rollback pin)', () => {
     // The skew lockout: another client bound with a clock running ahead, so
     // this client's pin sits in the future. A rebind stamped with a bare
     // `Date.now()` would be refused as a rollback by every client (including
-    // this one); flooring over the local pin keeps the rebind acceptable.
+    // this one); advancing past the local pin keeps the rebind acceptable.
     const idb = createFakeIdb()
     const passphrase = 'clock skew passphrase'
     const { spaceId } = await unlockFor(passphrase)

@@ -45,7 +45,7 @@ import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import { WAS_SERVER_URL } from '@/app.config'
 import { DID_DOCUMENT_RESOURCE } from '@interop/wallet-core/space'
 import {
-  establishPassphraseStanding,
+  standingFieldsOfKeyringHit,
   unlockLogStore
 } from '@/session/standingUnlock'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
@@ -72,6 +72,7 @@ import {
 import { accountRosterStore, sessionRosterStore } from '@/session/rosterStore'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
+  accountLogPinId,
   clientSigningKeyMultibase,
   delegationKeyInDocument,
   didKeyZcapClient,
@@ -84,7 +85,9 @@ import {
   webvhZcapClient
 } from '@interop/wallet-core/webvh'
 import {
+  clientAnnexDidParts,
   clientAnnexLogPinId,
+  delegatedClientsPointer,
   clientAnnexLogStore,
   delegatedClientsDelegationMinter,
   embeddedGenerationDelegation,
@@ -124,20 +127,33 @@ import {
   type RecoveryLogStore,
   type UnlockRecordProofState
 } from '@interop/wallet-core/recovery'
+import { base58 } from '@scure/base'
+import {
+  publishUnlockKey,
+  unlockClientIdentityFromSeed,
+  unlockKeyVmId
+} from '@interop/wallet-core/unlock'
+import type {
+  ClientKeyRecord,
+  UserKeyRosterReadResult
+} from '@interop/wallet-core/keys'
 import type { Session } from '@/types/auth'
 import {
   bindCredentialAnchoredUnlockSecret,
   bindPassphrase,
   delegateUnlockManagement,
   deriveUnlockCredential,
-  unlockManagementGrantee
+  probeUnlockSpaceCollision,
+  unlockManagementGrantee,
+  type KeyringFetchResult,
+  type PersistableClientKeys
 } from '@/session/keyring'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { transientSessionPersistence } from '@/session/persistence'
 import {
-  backfillPassphraseUnlockMethod,
   emptyUnlockMethodsRegistry,
   getUnlockMethods,
+  getUnlockMethodsWithClient,
   managementZcapClient,
   refreshStandingDelegationFields,
   updateUnlockMethods,
@@ -772,13 +788,18 @@ export async function locateRecoveryAccount({
 
 /**
  * What `recoverAccountWithCode` hands back for the page to finish on: the
- * replacement code to push hard (shown exactly once) and the spent code's
- * roster kid so the post-login registry update can drop its entry.
+ * replacement code to push hard (shown exactly once), the spent code's
+ * roster kid (the registry backfill drops its entry), and -- on the durable
+ * variant -- the confirm-gated record completion: the page runs it on the
+ * "I saved this code" confirm, before the login, so the show-once code stays
+ * re-displayable from the pending record's persisted bytes until the user
+ * has confirmed saving it.
  */
 export interface RecoveryOutcome {
   replacementCode: string
   replacementEntry: RecoveryCodeUnlockMethod
   spentRecoveryKid: string
+  completeRecovery?: (options?: { currentUserKey?: UserKey }) => Promise<void>
 }
 
 /**
@@ -794,7 +815,26 @@ export interface RecoveryOutcome {
  * for the shared sequence; every stage is idempotent or convergent, so
  * re-running with the same code after a tear makes progress rather than
  * forking anything (past the add-and-retire entry the typed code correctly
- * fails as spent, and the replacement code is the resume path).
+ * fails as spent, and the pending-record spend resume -- or the replacement
+ * code -- finishes the tail).
+ *
+ * The durable variant is persist-before-publish end to end. The required
+ * `onCommitted` seam fires between the reveal entry (the loud validation of
+ * the typed code) and the add-and-retire entry, and durably writes
+ * everything whose only holder would otherwise be tab memory once the pivot
+ * lands: the new passphrase's STANDING-layout unlock record (bridge,
+ * best-effort annex sibling, fresh ladder seed, management zcap), the local
+ * PENDING client-key record (seeds, controller, `pointerDid`, and the
+ * pending group -- the ceremony discriminator, the built-on head, the spent
+ * code's unwrap key, the replacement code's bytes -- no user key), and the
+ * replacement code's record and bridge. The tail (escrows, rotation,
+ * registry mutation, cascade, spent-Space delete) stays post-entry --
+ * structurally, since every write signs as the just-published client -- and
+ * the final record completion is CONFIRM-GATED through the returned
+ * `completeRecovery` closure, so the show-once replacement code stays
+ * re-displayable from the persisted bytes until the user confirms saving
+ * it. A tab death anywhere after the entry leaves a pending record the next
+ * login's spend resume (`resumeRecoverySpend`) finishes.
  *
  * Error discipline: a malformed code throws `RecoveryCodeInvalidError`; a
  * code with no unlock record throws `RecoveryCodeNotFoundError`; a code
@@ -862,8 +902,35 @@ export async function recoverAccountWithCode({
     verifiedLog
   })
 
+  // The new passphrase's credential (one KDF run, reused by every bind
+  // below) and the read-first collision probe: a served record at the new
+  // passphrase's unlock Space that names another account, or a standing
+  // credential's record this ceremony would clobber, refuses HERE -- before
+  // the reveal entry burns anything -- and surfaces at the new-passphrase
+  // form. The probe also finds this ceremony's own earlier attempt (a
+  // pre-entry tear's pending record), whose persisted replacement-code bytes
+  // the re-run reuses so the replacement's unlock Space address stays
+  // stable across attempts.
+  const newCredential = await deriveUnlockCredential({
+    secret: newPassphrase,
+    kdf: KEYRING_KDF
+  })
+  const { ownPending } = await probeUnlockSpaceCollision({
+    credential: newCredential,
+    controller: contents.controller,
+    pointer,
+    // The document license beside the pin license: a tab death in an
+    // earlier attempt's bind (remote record PUT landed, local persists did
+    // not) leaves a served standing record with no pending record and no
+    // pin, and only the verified document can prove it this ceremony's own
+    // inert residue (an unpublished credential inventory).
+    accountDoc: verifiedLog.doc,
+    idb
+  })
+
   // Mint the NEW ordinary client and the replacement code -- in memory only
-  // until the continuation lands.
+  // until the persist hook below makes them durable, right before the
+  // add-and-retire entry publishes them.
   const newClientSeed = crypto.getRandomValues(new Uint8Array(32))
   const newClientAgents = await agentsFromSeed({ seed: newClientSeed })
   const newClientUpdateSeeds = await mintClientWebvhUpdateKeys()
@@ -884,11 +951,42 @@ export async function recoverAccountWithCode({
       seed: newClientUpdateSeeds.stagedSeed
     })
   }
-  const replacementCode = generateRecoveryCode()
+  // The replacement code is minted ONCE per ceremony: a re-run after a
+  // pre-entry tear re-derives it from the pending record's persisted bytes,
+  // so the same unlock Space address is reused and no orphan Space strands.
+  const replacementCode = ownPending?.replacementCode
+    ? base58.encode(ownPending.replacementCode)
+    : generateRecoveryCode()
+  if (ownPending?.replacementCode) {
+    log.info(
+      'Recovery spend re-run: reusing the replacement code persisted by a ' +
+        'torn earlier attempt'
+    )
+  }
   const replacement = await recoveryClientFromCode({ code: replacementCode })
 
+  // The account did and the new client's promoted signer. The bridge and
+  // sibling delegations minted inside the hook are signed with this key
+  // PRE-entry: they verify at use time, once the add-and-retire entry has
+  // published the signer (the current-key-set rule).
+  const accountDid = pointer.did!
+  const newZcapClient = webvhZcapClient({
+    keyAgent: newClientAgents.keyAgent,
+    did: accountDid
+  })
+  const newLadderSeed = generateLadderSeed()
+  const newRung0 = await ladderRung({ ladderSeed: newLadderSeed, index: 0 })
+
+  // Filled by the `onCommitted` seam, consumed by the tail below.
+  let hookFires = 0
+  let newRecordBind: Awaited<ReturnType<typeof bindPassphrase>> | undefined
+  let bridge: IZcap | undefined
+  let sibling: IZcap | undefined
+  let replacementEntry: RecoveryCodeUnlockMethod | undefined
+
   // The self-enrolling continuation, through the delegated log write: the
-  // new client in, the spent code out, the replacement code committed.
+  // new client in, the spent code out, the replacement code committed. Both
+  // entry builds run over the durable chain-head pin.
   const logStore = delegatedLogStore({
     pointer,
     delegation: contents.delegation,
@@ -899,6 +997,8 @@ export async function recoverAccountWithCode({
     // The ceremony's own did.jsonl reads must resolve to the account the
     // record's pointer names.
     expectedDid: pointer.did,
+    pinStore: sessionLogPinStore({ idb }),
+    logId: accountLogPinId({ spaceId: pointer.spaceId }),
     recovery: {
       updateSeed: spent.updateSeed,
       keyAgreementKeyMultibase: spent.keyAgreementKeyMultibase,
@@ -909,16 +1009,159 @@ export async function recoverAccountWithCode({
     replacement: {
       keyAgreementKeyMultibase: replacement.keyAgreementKeyMultibase,
       updateKeyMultibase: replacement.updateKeyMultibase
+    },
+    // The persist-before-publish seam: fires after the reveal entry stands
+    // (a revoked or spent code has been refused) and before the
+    // add-and-retire entry publishes the successors. Idempotent per attempt
+    // -- a conflict retry re-invokes it, overwriting the same records.
+    // Everything whose only holder would otherwise be tab memory once the
+    // pivot lands becomes durable here.
+    onCommitted: async ({ builtOnHead }) => {
+      hookFires += 1
+      if (hookFires > 1) {
+        log.info('Recovery-spend persist hook re-fired on a conflict retry', {
+          attempt: hookFires
+        })
+      }
+      // The new passphrase's standing members, signed by the new client's
+      // promoted key pre-entry (verifying at use time). The annex-Space
+      // sibling is best-effort, exactly as the standing establishment's: an
+      // account with no pointed generation binds without one. No annex rung
+      // commit runs here -- the spend holds no acting ladder seed to sign
+      // one with, so the fresh credential waits for the next generation
+      // swap (the documented mid-generation lockout).
+      bridge = await delegateLogWrite({
+        zcapClient: newZcapClient,
+        pointer,
+        recoveryClientDid: newCredential.standing.clientDid
+      })
+      sibling = undefined
+      const clientAnnexDid = delegatedClientsPointer({
+        doc: verifiedLog.doc as Parameters<
+          typeof delegatedClientsPointer
+        >[0]['doc']
+      })
+      if (clientAnnexDid) {
+        try {
+          sibling = await mintDelegatedClientsDelegation({
+            zcapClient: newZcapClient,
+            wasServerUrl: pointer.host,
+            clientAnnexSpaceId: clientAnnexDidParts({ did: clientAnnexDid })
+              .spaceId,
+            controller: newCredential.standing.clientDid
+          })
+        } catch (err) {
+          log.warn(
+            'Could not mint the annex-Space sibling delegation; the record binds without one',
+            { err }
+          )
+        }
+      }
+      // The new passphrase's unlock record in the STANDING layout, plus the
+      // local PENDING client-key record: seeds, controller, `pointerDid`,
+      // and the pending group -- the ceremony discriminator, the built-on
+      // head, the spent code's unwrap key (what keeps the first post-pivot
+      // roster escrow re-derivable at every kill point), and the
+      // replacement code's bytes (the show-once re-display and the stable
+      // re-run address) -- and NO user key, so the record classifies
+      // pending at login and routes to the resume. The bind re-runs the
+      // collision refusal and advances its stamp past the served record.
+      newRecordBind = await bindPassphrase({
+        clientSeed: newClientSeed,
+        controller: contents.controller,
+        passphrase: newPassphrase,
+        webvhUpdateKeys: newClientUpdateSeeds,
+        pointer,
+        delegateManagementTo: unlockManagementGrantee({
+          pointer,
+          controller: contents.controller
+        }),
+        delegation: bridge,
+        ...(sibling ? { delegatedClients: sibling } : {}),
+        ladderSeed: newLadderSeed,
+        pending: {
+          ceremony: 'recovery-spend',
+          builtOnHead,
+          unwrapKey: spent.clientSeed,
+          replacementCode: replacement.codeBytes
+        },
+        // The guarded bind re-runs the collision refusal with the document
+        // license the pre-flight held (the pin license alone cannot account
+        // for the bind window's own residue -- see the pre-flight probe).
+        refuseCollidingRecord: { accountDoc: verifiedLog.doc },
+        credential: newCredential,
+        idb
+      })
+      // The replacement code's record and bridge delegation (the delegation
+      // signed by the new client's pre-entry key, verifying once the entry
+      // publishes the signer), and the registry entry built from them for
+      // the tail's registry mutation.
+      const replacementDelegation = await delegateLogWrite({
+        zcapClient: newZcapClient,
+        pointer,
+        recoveryClientDid: replacement.clientDid
+      })
+      const replacementBind = await bindRecoveryRecord({
+        client: replacement,
+        controller: contents.controller,
+        pointer,
+        delegation: replacementDelegation
+      })
+      replacementEntry = recoveryRegistryEntry({
+        client: replacement,
+        label: `Replacement code (recovery ${new Date()
+          .toISOString()
+          .slice(0, 10)})`,
+        unlockSpaceId: replacementBind.unlockSpaceId,
+        manageCapability: replacementBind.manageCapability,
+        delegation: replacementDelegation,
+        unlockKeyAgreementKeyId: replacementBind.unlockKeyAgreementKeyId,
+        unlockKeyAgreementKeyMultibase:
+          replacementBind.unlockKeyAgreementKeyMultibase
+      })
     }
   })
   const did = continuation.did
 
+  // The build-skew guard: a core that cannot say whether the hook fired is a
+  // stale hook-less wallet-core build, and proceeding would silently
+  // reinstate the publish-then-persist phantom window the seam closes. The
+  // hook (when it fired) has already persisted the pending record, so the
+  // refusal strands nothing the resume cannot finish.
+  if (
+    typeof (continuation as { committed?: unknown }).committed !== 'boolean'
+  ) {
+    log.error(
+      'The recovery continuation did not state whether the persist hook fired; refusing a possibly hook-less run'
+    )
+    throw new RecoverySpendSkewError()
+  }
+  if ((continuation as { committed?: unknown }).committed === false) {
+    // The completed branch, named explicitly: `committed: false` means the
+    // continuation found both entries already standing and skipped the hook
+    // by design -- a state a durable spend cannot legitimately produce (a
+    // spent code refuses at the reveal attribution long before this point),
+    // so nothing was persisted and nothing can be derived. Refused loudly
+    // rather than guessed at.
+    log.error(
+      'The recovery continuation reported already-complete (committed: false); a durable spend cannot produce that state'
+    )
+    throw new RecoverySpendSkewError({
+      message:
+        'The recovery continuation reported the log entries already ' +
+        'complete without firing the persist hook; refusing rather than ' +
+        'guessing at the successor records.'
+    })
+  }
+  if (!newRecordBind || !bridge || !replacementEntry) {
+    throw new Error(
+      'The recovery continuation completed without establishing the fresh ' +
+        "credential's records."
+    )
+  }
+
   // From here the new client is an enrolled client under the current-key-set
   // rule: its `<did:webvh>#<multibase>` key signs everything.
-  const newZcapClient = webvhZcapClient({
-    keyAgent: newClientAgents.keyAgent,
-    did
-  })
   const remoteStore = new WASRemoteStore({
     storageServerUrl: pointer.host,
     zcapClient: newZcapClient,
@@ -970,6 +1213,62 @@ export async function recoverAccountWithCode({
     },
     ownerKeyAgreementKey: spent.agents.keyAgreementKey
   })
+
+  // The new passphrase's standing establishment, in the ceremony tail: the
+  // hook wrote the standing-LAYOUT record pre-pivot, but the remote halves
+  // that make the credential actually standing take the just-published
+  // client's authority, so they run here -- the credential's roster wrap
+  // first (the recovery-anchor order: decryption material before the
+  // document entry), then the document entry (keyAgreement commitment plus
+  // the rung-0 hash), signed by the new client's update keys. Placed BEFORE
+  // the mandatory rotation, whose recipients resolve from the just-updated
+  // document: with the commitment published, the rotation's resolver keeps
+  // the wrap; torn before either half, the rotation drops the wrap and the
+  // state converges to not-established, which the spend resume's backfill
+  // detects from durable state and finishes. No annex rung commit runs (the
+  // spend holds no acting ladder seed; the fresh credential waits for the
+  // next generation swap -- the documented mid-generation lockout).
+  // Best-effort, like the establishment always was: a failure leaves a
+  // record that logs in without self-enrolling -- and a BARE registry entry
+  // below (the success flag gates the standing block), so nothing downstream
+  // claims a standing configuration the account does not back.
+  let standingEstablished = false
+  try {
+    await addUserKeyRosterRecipient({
+      store: rosterStore,
+      recipient: {
+        id: newCredential.standing.recipientKid,
+        publicKeyMultibase: newCredential.standing.keyAgreementKeyMultibase
+      },
+      // The new client, escrowed into every epoch above, is the owner: it
+      // can open every epoch whether or not the spent code's wraps survive.
+      ownerKeyAgreementKey: newClientAgents.keyAgreementKey
+    })
+    await publishUnlockKey({
+      idStore: remoteStore.webvhIdStore(),
+      updateKeys: newClientUpdateSeeds,
+      unlockKeys: {
+        keyAgreement: {
+          commitment: await keyAgreementCommitment({
+            keyAgreementKeyMultibase:
+              newCredential.standing.keyAgreementKeyMultibase
+          })
+        },
+        updateKeyMultibase: newRung0.keyMultibase
+      },
+      expectedDid: pointer.did
+    })
+    standingEstablished = true
+    log.debug(
+      "Recovery-spend tail established the new passphrase's standing configuration"
+    )
+  } catch (err) {
+    log.warn(
+      'Could not establish the new passphrase as a standing credential during recovery; the spend resume backfills it on a pending record',
+      { err }
+    )
+  }
+
   const pinnedEpochId = await loadUserKeyEpochPin({
     accountDid: pointer.did,
     idb
@@ -1015,16 +1314,13 @@ export async function recoverAccountWithCode({
     throw new Error('The user key roster vanished during recovery.')
   }
   const newUserKey = postRotation.userKey
-  await savePinFromDescriptor({
-    accountDid: pointer.did,
-    epochId: postRotation.latestEpochId,
-    descriptor: postRotation.descriptor,
-    idb
-  })
+  // The epoch pin deliberately does NOT persist here: it follows the record
+  // completion (the persist-before-pin order), inside the confirm-gated
+  // closure below.
 
   // Re-seal the unlock-methods registry to the rotated user key: its record is a
-  // single-recipient envelope to the vault KAK, and the post-login registry
-  // update (`recordRecoveryOutcome`) runs on the new-user key session. Ahead
+  // single-recipient envelope to the vault KAK, and the registry mutation
+  // below runs under the rotated key. Ahead
   // of the collection cascade below, which is the long stage a torn visit
   // dies in: the spent code is the only holder of the pre-rotation key left,
   // so a re-seal deferred past it would strand the registry. Best-effort: a
@@ -1037,6 +1333,94 @@ export async function recoverAccountWithCode({
       spaceId: pointer.spaceId,
       from: userKeyVaultKeys({ userKey: oldUserKey }),
       to: userKeyVaultKeys({ userKey: newUserKey })
+    })
+  }
+
+  // The registry mutation, moved into the ceremony tail from the post-login
+  // update so a re-run or the spend resume can complete it from durable
+  // state: the spent code's entry out, the replacement code's entry in, and
+  // the new passphrase's entry recording the standing members the hook
+  // minted -- one read-modify-write under the rotated user key the re-seal
+  // above just adopted. Best-effort: a torn write here is re-applied by the
+  // spend resume's backfill or the post-login recovery-entry backfill.
+  const recordBind = newRecordBind
+  const replacementMethod = replacementEntry
+  const newBridge = bridge
+  try {
+    const bridgeKeyId = delegationProofKeyId(newBridge)
+    const siblingKeyId = sibling ? delegationProofKeyId(sibling) : undefined
+    const dropped = new Set([replacementMethod.recoveryKid, spent.recipientKid])
+    await updateUnlockMethodsWithClient({
+      zcapClient: newZcapClient,
+      spaceId: pointer.spaceId,
+      userKey: newUserKey,
+      mutate: existing => {
+        const base = existing ?? emptyUnlockMethodsRegistry()
+        const methods = [
+          ...base.methods.filter(
+            method =>
+              method.type !== 'recovery-code' ||
+              !dropped.has(method.recoveryKid)
+          ),
+          replacementMethod
+        ]
+        // The standing block only when the establishment above landed: a
+        // failed establishment writes a BARE entry instead -- the shape the
+        // bare-entry repairs treat as mendable (and they rebuild only once
+        // the document actually carries the credential's commitment), so
+        // the registry never asserts a standing configuration the account
+        // does not back.
+        return upsertPassphraseUnlockMethod({
+          record: { ...base, methods },
+          unlockSpaceId: recordBind.unlockSpaceId,
+          manageCapability: recordBind.manageCapability,
+          ...(standingEstablished
+            ? {
+                standing: {
+                  rosterKid: newCredential.standing.recipientKid,
+                  keyAgreementKeyMultibase:
+                    newCredential.standing.keyAgreementKeyMultibase,
+                  updateKeyMultibase: newRung0.keyMultibase,
+                  unlockClientDid: newCredential.standing.clientDid,
+                  ...(bridgeKeyId ? { delegationKeyId: bridgeKeyId } : {}),
+                  ...((newBridge as { expires?: string }).expires
+                    ? {
+                        delegationExpires: (newBridge as { expires?: string })
+                          .expires
+                      }
+                    : {}),
+                  ...(siblingKeyId
+                    ? { delegatedClientsKeyId: siblingKeyId }
+                    : {}),
+                  ...(sibling && (sibling as { expires?: string }).expires
+                    ? {
+                        delegatedClientsExpires: (
+                          sibling as { expires?: string }
+                        ).expires
+                      }
+                    : {}),
+                  ...(recordBind.unlockKeyAgreementKeyId
+                    ? {
+                        unlockKeyAgreementKeyId:
+                          recordBind.unlockKeyAgreementKeyId
+                      }
+                    : {}),
+                  ...(recordBind.unlockKeyAgreementKeyMultibase
+                    ? {
+                        unlockKeyAgreementKeyMultibase:
+                          recordBind.unlockKeyAgreementKeyMultibase
+                      }
+                    : {})
+                }
+              }
+            : {})
+        })
+      }
+    })
+    log.debug('Recovery-spend registry mutation written in the ceremony tail')
+  } catch (err) {
+    log.warn('Could not update the unlock-methods registry during recovery', {
+      err
     })
   }
 
@@ -1067,61 +1451,584 @@ export async function recoverAccountWithCode({
     log.warn("Could not delete the spent code's unlock Space", { err })
   }
 
-  // The replacement code's record + delegation, minted by the NEW client
-  // (its standing configuration -- VM, commitment, roster wrap -- already landed above).
-  const replacementPointer: AccountPointer = { ...pointer, did }
-  const replacementDelegation = await delegateLogWrite({
-    zcapClient: newZcapClient,
-    pointer: replacementPointer,
-    recoveryClientDid: replacement.clientDid
-  })
-  const replacementBind = await bindRecoveryRecord({
-    client: replacement,
-    controller: contents.controller,
-    pointer: replacementPointer,
-    delegation: replacementDelegation
-  })
-  const replacementEntry = recoveryRegistryEntry({
-    client: replacement,
-    label: `Replacement code (recovery ${new Date().toISOString().slice(0, 10)})`,
-    unlockSpaceId: replacementBind.unlockSpaceId,
-    manageCapability: replacementBind.manageCapability,
-    delegation: replacementDelegation,
-    unlockKeyAgreementKeyId: replacementBind.unlockKeyAgreementKeyId,
-    unlockKeyAgreementKeyMultibase:
-      replacementBind.unlockKeyAgreementKeyMultibase
-  })
-
-  // Bind the new client under the new passphrase: the keyring record, the
-  // local client-key record (client seed + rotated user key + update-key seeds),
-  // the freshness pin, and the management zcap. An ordinary passphrase login
-  // now finds an enrolled client.
-  // Deliberately no email: the recovery record no longer carries one to
-  // inherit (it was the forged-record deception payload), and the recovered
-  // keyring record starts without one.
-  await bindPassphrase({
-    clientSeed: newClientSeed,
-    controller: contents.controller,
-    passphrase: newPassphrase,
-    userKey: newUserKey,
-    webvhUpdateKeys: newClientUpdateSeeds,
-    pointer: replacementPointer,
-    // The account controller stamp above is an identity label; management
-    // authority goes to the did:webvh, whose current-key-set the just-written
-    // add-and-retire entry now resolves to the NEW client (the original
-    // controller's key is lost -- delegating to it would strand the method).
-    delegateManagementTo: unlockManagementGrantee({
-      pointer: replacementPointer,
-      controller: contents.controller
-    }),
-    idb
-  })
+  // The confirm-gated record completion (what replaces the old tail bind):
+  // the pending client-key record already holds the key set, so completing
+  // it -- the rotated user key in, the pending carrier (the ceremony
+  // discriminator, the built-on head, the spent code's unwrap key, and the
+  // replacement code's bytes) cleared -- waits for the show-once dialog's
+  // "I saved this code" confirm. Until then the replacement code stays
+  // re-displayable from the persisted bytes: a tab death leaves the pending
+  // record, and the next login's spend resume re-displays the code before
+  // completing. The epoch pin follows the completion (the persist-before-pin
+  // order) and is non-fatal.
+  const persistNewClientKeys = recordBind.persistClientKeys
+  const completeRecovery = async (
+    options: { currentUserKey?: UserKey } = {}
+  ) => {
+    // The completion prefers the CURRENT user key over the closure capture:
+    // a sweep rotation during the show-once display would otherwise be
+    // written back over by a stale key. The caller with a live session
+    // passes its vault user key; a caller without one (the /recover page
+    // pre-login) has nothing rotating underneath it.
+    const userKeyToPersist = options.currentUserKey ?? newUserKey
+    await persistNewClientKeys({
+      userKey: userKeyToPersist,
+      pointerDid: did,
+      pending: null
+    })
+    log.info('Recovery-spend record completed; the pending carrier is cleared')
+    if (userKeyToPersist.id !== newUserKey.id) {
+      // The captured descriptor and epoch predate the newer key; the pin
+      // was already advanced by whatever rotated it.
+      log.debug(
+        'Skipping the stale epoch pin at recovery completion; a newer user key was adopted meanwhile'
+      )
+      return
+    }
+    try {
+      await savePinFromDescriptor({
+        accountDid: did,
+        epochId: postRotation.latestEpochId,
+        descriptor: postRotation.descriptor,
+        idb
+      })
+    } catch (err) {
+      log.warn(
+        'Could not pin the user key roster epoch after recovery; the next login establishes it from the verified roster',
+        { err }
+      )
+    }
+  }
 
   return {
     replacementCode,
-    replacementEntry,
-    spentRecoveryKid: spent.recipientKid
+    replacementEntry: replacementMethod,
+    spentRecoveryKid: spent.recipientKid,
+    completeRecovery
   }
+}
+
+/**
+ * Thrown when wallet-core's recovery continuation returned without the
+ * persist hook having fired: `committed` absent from the return (a build
+ * skew -- a stale hook-less wallet-core body running under new app code
+ * would silently reinstate the publish-then-persist phantom window), or the
+ * explicit completed branch (`committed: false`, which a durable spend
+ * cannot legitimately produce -- distinct copy via `message`). Either way
+ * the run is refused instead of trusted; when the hook did fire, the
+ * pending record is already durable, so the refusal strands nothing the
+ * spend resume cannot finish.
+ */
+export class RecoverySpendSkewError extends Error {
+  constructor({ message }: { message?: string } = {}) {
+    super(
+      message ??
+        'The recovery continuation did not state whether the persist hook ' +
+          'fired; refusing a possibly hook-less run (stale wallet-core build).'
+    )
+    this.name = 'RecoverySpendSkewError'
+  }
+}
+
+/**
+ * Whether the account document lists a verification-method id -- the
+ * standing backfill's completion test over a credential's published
+ * `keyAgreement` entry (commitment or verbatim), checking the
+ * `verificationMethod` entries and the `keyAgreement` relation's string
+ * references.
+ *
+ * @param options {object}
+ * @param options.doc {unknown}   the locally verified account document
+ * @param options.vmId {string}
+ * @returns {boolean}
+ */
+function docListsUnlockVm({
+  doc,
+  vmId
+}: {
+  doc: unknown
+  vmId: string
+}): boolean {
+  const shaped = doc as {
+    verificationMethod?: unknown
+    keyAgreement?: unknown
+  } | null
+  const methods = Array.isArray(shaped?.verificationMethod)
+    ? shaped.verificationMethod
+    : []
+  if (methods.some(method => (method as { id?: string })?.id === vmId)) {
+    return true
+  }
+  const keyAgreement = Array.isArray(shaped?.keyAgreement)
+    ? shaped.keyAgreement
+    : []
+  return keyAgreement.some(entry =>
+    typeof entry === 'string'
+      ? entry === vmId
+      : (entry as { id?: string })?.id === vmId
+  )
+}
+
+/**
+ * A resumed recovery spend's show-once obligation, handed to the login
+ * surface: the replacement code to display (re-derived from the pending
+ * record's persisted bytes) and the confirm-gated record completion to run
+ * once the user has confirmed saving it.
+ */
+export interface RecoverySpendPrompt {
+  replacementCode: string
+  // The confirm-gated completion. A caller with a live session passes its
+  // CURRENT vault user key, so a sweep rotation during the show-once
+  // display is not written back over by the closure's captured key.
+  complete: (options?: { currentUserKey?: UserKey }) => Promise<void>
+}
+
+/**
+ * The spend-completion resume: finishes a durable recovery spend whose
+ * add-and-retire entry landed but whose tail was torn, from the pending
+ * client-key record alone, at the new passphrase's next login (the
+ * pending-enrollment router's VM-listed spend branch). Every stage detects
+ * its own completion from durable state:
+ *
+ * 1. The roster escrows. The read is tried with the new client's own
+ *    key-agreement key first; when the current epoch holds no wrap for it
+ *    (the pivot-to-escrow band), the spent code's key-agreement identity is
+ *    re-derived from the pending record's `unwrapKey` and the new client and
+ *    replacement code are escrowed into every epoch, then the read re-runs.
+ *    A between-escrows tear (the new client's wrap standing, the
+ *    replacement's missing) is backfilled the same way.
+ * 2. The standing-establishment backfill (best-effort): the tail publishes
+ *    the credential's roster wrap and document commitment post-pivot, so a
+ *    tear before them leaves the standing-layout record without the
+ *    standing property -- detected here from durable state (wrap in the
+ *    roster's current epoch, commitment VM in the verified document) and
+ *    finished, exactly like the registry mutation.
+ * 3. The registry backfill (best-effort): when the registry does not yet
+ *    record the replacement code and the new passphrase's entry, the
+ *    replacement's delegation and record are re-minted from the persisted
+ *    bytes and the tail's registry mutation re-applies.
+ * 4. The completion: the user key (now readable from the roster) fills the
+ *    record and the pending carrier clears -- gated on the show-once
+ *    confirm when the replacement code's bytes still stand, through the
+ *    returned prompt's `complete`.
+ *
+ * The mandatory rotation and the collection cascade are NOT re-run here: the
+ * completing login proceeds enrolled, and its login sweep converges the
+ * roster onto the post-entry document (rotating the spent code's wrap away)
+ * and finishes the cascade.
+ *
+ * @param options {object}
+ * @param options.found {KeyringFetchResult}   the new passphrase's keyring
+ *   hit, holding the spend-written pending record
+ * @param [options.verifiedLog] {VerifiedAccountLog}   the caller's verified
+ *   account log (the pending router's own read); fetched here when absent
+ * @param [options.idb] {IDBFactory}
+ * @returns {Promise<object>}   the completed key set, its persist closure,
+ *   and the show-once prompt while the confirm is still owed
+ */
+export async function resumeRecoverySpend({
+  found,
+  verifiedLog,
+  idb
+}: {
+  found: KeyringFetchResult
+  verifiedLog?: VerifiedAccountLog
+  idb?: IDBFactory
+}): Promise<{
+  clientKeys: ClientKeyRecord
+  persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+  recoverySpendPrompt?: RecoverySpendPrompt
+}> {
+  const clientKeys = found.clientKeys
+  const pending = clientKeys?.pending
+  const pointer = found.pointer
+  const persistClientKeys = found.persistClientKeys
+  if (
+    !clientKeys ||
+    pending?.ceremony !== 'recovery-spend' ||
+    !pointer ||
+    !isWebvhDid(pointer.did) ||
+    !persistClientKeys ||
+    !clientKeys.webvhUpdateKeys
+  ) {
+    throw new Error('This keyring hit cannot resume a recovery spend.')
+  }
+  const did = pointer.did!
+  const logPointer = {
+    did,
+    spaceId: pointer.spaceId,
+    host: pointer.host
+  }
+  const agents = await agentsFromSeed({ seed: clientKeys.clientSeed })
+  const newZcapClient = webvhZcapClient({ keyAgent: agents.keyAgent, did })
+  const { publicKeyMultibase: kaMultibase } =
+    agents.keyAgreementKey as unknown as { publicKeyMultibase?: string }
+  if (!kaMultibase) {
+    throw new Error(
+      "The pending record's key-agreement key has no public multibase."
+    )
+  }
+  const rosterStore = accountRosterStore({
+    zcapClient: newZcapClient,
+    keyAgent: agents.keyAgent,
+    pointer: logPointer,
+    pinStore: sessionLogPinStore({ idb })
+  })
+  const pinnedEpochId = await loadUserKeyEpochPin({ accountDid: did, idb })
+  const replacement = pending.replacementCode
+    ? await recoveryClientFromCode({
+        code: base58.encode(pending.replacementCode)
+      })
+    : undefined
+
+  // 1. The escrow completion. Both `addUserKeyRosterRecipient` calls are the
+  // exact writes the torn tail owed, owned by the spent code's re-derived
+  // key-agreement identity -- reachable only pre-rotation, which is exactly
+  // when they are missing.
+  async function escrowFromUnwrapKey({
+    includeSelf
+  }: {
+    includeSelf: boolean
+  }): Promise<void> {
+    if (!pending?.unwrapKey) {
+      throw new Error(
+        'The pending record carries no unwrap key to complete the roster ' +
+          'escrows with.'
+      )
+    }
+    log.info(
+      'Recovery-spend resume: completing the roster escrows from the ' +
+        'pending unwrap key',
+      { includeSelf }
+    )
+    const spentIdentity = await unlockClientIdentityFromSeed({
+      clientSeed: pending.unwrapKey
+    })
+    if (includeSelf) {
+      await addUserKeyRosterRecipient({
+        store: rosterStore,
+        recipient: {
+          id: agents.keyAgreementKey.id,
+          publicKeyMultibase: kaMultibase!
+        },
+        ownerKeyAgreementKey: spentIdentity.agents.keyAgreementKey
+      })
+    }
+    if (replacement) {
+      await addUserKeyRosterRecipient({
+        store: rosterStore,
+        recipient: {
+          id: replacement.recipientKid,
+          publicKeyMultibase: replacement.keyAgreementKeyMultibase
+        },
+        ownerKeyAgreementKey: spentIdentity.agents.keyAgreementKey
+      })
+    }
+  }
+  let read: UserKeyRosterReadResult | null
+  try {
+    read = await readUserKeyRoster({
+      store: rosterStore,
+      clientKeyAgreementKey: agents.keyAgreementKey,
+      pinnedEpochId
+    })
+  } catch (err) {
+    if ((err as Error | null)?.name !== 'UserKeyRosterUnwrapError') {
+      throw err
+    }
+    // The pivot-to-escrow band: the entry landed, the escrows did not.
+    await escrowFromUnwrapKey({ includeSelf: true })
+    read = await readUserKeyRoster({
+      store: rosterStore,
+      clientKeyAgreementKey: agents.keyAgreementKey,
+      pinnedEpochId
+    })
+  }
+  if (!read) {
+    throw new Error(
+      'The account has no user key roster; the recovery spend cannot resume.'
+    )
+  }
+  const rosterRead = read
+  if (replacement) {
+    // The between-escrows tear: this client's wrap stands, the replacement
+    // code's does not. Best-effort -- a rotation has already re-wrapped the
+    // current epoch to the replacement's published VM if one ran.
+    const currentEpoch = rosterRead.descriptor.epochs?.find(
+      epoch => epoch.id === rosterRead.descriptor.currentEpoch
+    )
+    const replacementEscrowed = currentEpoch?.recipients.some(
+      recipient => recipient.header.kid === replacement.recipientKid
+    )
+    if (!replacementEscrowed) {
+      try {
+        await escrowFromUnwrapKey({ includeSelf: false })
+      } catch (err) {
+        log.warn(
+          "Could not backfill the replacement code's roster escrow during the spend resume",
+          { err }
+        )
+      }
+    }
+  }
+  const userKey = rosterRead.userKey
+
+  // 2. The standing-establishment backfill (best-effort): the wrap and the
+  // document commitment are each detected from durable state and finished
+  // only when missing -- the recovery-anchor order preserved (wrap before
+  // the document entry). The wrap's owner is this client's own key, which
+  // holds a wrap in every epoch whether or not the rotation has run.
+  const standingClient = found.standingClient
+  const standingLadderSeed = found.standing?.ladderSeed
+  // Whether the credential's standing configuration is real (both halves
+  // confirmed or completed) -- the gate on the registry writes below, so a
+  // failed backfill leaves a BARE entry rather than asserting standing
+  // members the account does not back.
+  let standingEstablished = false
+  if (standingClient && standingLadderSeed) {
+    try {
+      const currentEpoch = rosterRead.descriptor.epochs?.find(
+        epoch => epoch.id === rosterRead.descriptor.currentEpoch
+      )
+      const wrapStanding = currentEpoch?.recipients.some(
+        recipient => recipient.header.kid === standingClient.recipientKid
+      )
+      if (!wrapStanding) {
+        log.info(
+          "Recovery-spend resume: backfilling the credential's standing roster wrap"
+        )
+        await addUserKeyRosterRecipient({
+          store: rosterStore,
+          recipient: {
+            id: standingClient.recipientKid,
+            publicKeyMultibase: standingClient.keyAgreementKeyMultibase
+          },
+          ownerKeyAgreementKey: agents.keyAgreementKey
+        })
+      }
+      const commitment = await keyAgreementCommitment({
+        keyAgreementKeyMultibase: standingClient.keyAgreementKeyMultibase
+      })
+      const commitmentVmId = unlockKeyVmId({
+        did,
+        keyAgreement: { commitment }
+      })
+      const verified =
+        verifiedLog ??
+        (await verifyAccountLog({
+          did,
+          spaceId: pointer.spaceId,
+          host: pointer.host,
+          pinStore: sessionLogPinStore({ idb })
+        }))
+      if (!docListsUnlockVm({ doc: verified.doc, vmId: commitmentVmId })) {
+        log.info(
+          "Recovery-spend resume: publishing the credential's document entry"
+        )
+        const remoteStore = new WASRemoteStore({
+          storageServerUrl: pointer.host,
+          zcapClient: newZcapClient,
+          spaceId: pointer.spaceId,
+          controller: did
+        })
+        const rung0 = await ladderRung({
+          ladderSeed: standingLadderSeed,
+          index: 0
+        })
+        await publishUnlockKey({
+          idStore: remoteStore.webvhIdStore(),
+          updateKeys: clientKeys.webvhUpdateKeys,
+          unlockKeys: {
+            keyAgreement: { commitment },
+            updateKeyMultibase: rung0.keyMultibase
+          },
+          expectedDid: did
+        })
+      }
+      standingEstablished = true
+    } catch (err) {
+      log.warn(
+        'Could not backfill the standing establishment during the spend resume',
+        { err }
+      )
+    }
+  }
+
+  // 3. The registry backfill (best-effort): re-apply the tail's registry
+  // mutation when the registry does not yet record both successors.
+  if (replacement) {
+    try {
+      const existing = await getUnlockMethodsWithClient({
+        zcapClient: newZcapClient,
+        spaceId: pointer.spaceId,
+        userKey
+      })
+      const hasReplacement = recoveryEntriesOf({ record: existing }).some(
+        entry => entry.recoveryKid === replacement.recipientKid
+      )
+      const passphraseEntry = (existing?.methods ?? []).find(
+        method =>
+          method.type === 'passphrase' &&
+          method.unlockSpaceId === found.unlockSpaceId
+      )
+      const hasPassphrase = passphraseEntry !== undefined
+      // A bare entry (no key-agreement multibase) is the shape a failed
+      // establishment leaves; once the backfill above has made the standing
+      // configuration real, the entry is upgraded below.
+      const hasStandingPassphrase =
+        !!passphraseEntry &&
+        'keyAgreementKeyMultibase' in passphraseEntry &&
+        !!passphraseEntry.keyAgreementKeyMultibase
+      if (!hasReplacement || !hasPassphrase) {
+        log.info('Recovery-spend resume: backfilling the registry mutation', {
+          hasReplacement,
+          hasPassphrase
+        })
+        const replacementDelegation = await delegateLogWrite({
+          zcapClient: newZcapClient,
+          pointer,
+          recoveryClientDid: replacement.clientDid
+        })
+        const replacementBind = await bindRecoveryRecord({
+          client: replacement,
+          controller: found.controller,
+          pointer,
+          delegation: replacementDelegation
+        })
+        const entry = recoveryRegistryEntry({
+          client: replacement,
+          label: `Replacement code (recovery ${new Date()
+            .toISOString()
+            .slice(0, 10)})`,
+          unlockSpaceId: replacementBind.unlockSpaceId,
+          manageCapability: replacementBind.manageCapability,
+          delegation: replacementDelegation,
+          unlockKeyAgreementKeyId: replacementBind.unlockKeyAgreementKeyId,
+          unlockKeyAgreementKeyMultibase:
+            replacementBind.unlockKeyAgreementKeyMultibase
+        })
+        const spentKid = pending.unwrapKey
+          ? (
+              await unlockClientIdentityFromSeed({
+                clientSeed: pending.unwrapKey
+              })
+            ).recipientKid
+          : undefined
+        // The standing fields only when the establishment above is real: a
+        // failed backfill writes the bare entry instead, upgraded on a
+        // later resume once the establishment lands.
+        const standingFields = standingEstablished
+          ? await standingFieldsOfKeyringHit({ found })
+          : undefined
+        const dropped = new Set([
+          entry.recoveryKid,
+          ...(spentKid ? [spentKid] : [])
+        ])
+        await updateUnlockMethodsWithClient({
+          zcapClient: newZcapClient,
+          spaceId: pointer.spaceId,
+          userKey,
+          mutate: current => {
+            const base = current ?? emptyUnlockMethodsRegistry()
+            const methods = [
+              ...base.methods.filter(
+                method =>
+                  method.type !== 'recovery-code' ||
+                  !dropped.has(method.recoveryKid)
+              ),
+              entry
+            ]
+            return upsertPassphraseUnlockMethod({
+              record: { ...base, methods },
+              unlockSpaceId: found.unlockSpaceId,
+              manageCapability: found.manageCapability,
+              ...(standingFields ? { standing: standingFields } : {})
+            })
+          }
+        })
+      } else if (standingEstablished && !hasStandingPassphrase) {
+        // The upgrade of a bare entry (a tail whose establishment failed
+        // wrote it): the backfill above just made the standing
+        // configuration real, so the entry now records it.
+        log.info(
+          "Recovery-spend resume: upgrading the bare passphrase entry with the established standing configuration"
+        )
+        const standingFields = await standingFieldsOfKeyringHit({ found })
+        await updateUnlockMethodsWithClient({
+          zcapClient: newZcapClient,
+          spaceId: pointer.spaceId,
+          userKey,
+          mutate: current =>
+            upsertPassphraseUnlockMethod({
+              record: current ?? emptyUnlockMethodsRegistry(),
+              unlockSpaceId: found.unlockSpaceId,
+              manageCapability: found.manageCapability,
+              standing: standingFields
+            })
+        })
+      }
+    } catch (err) {
+      log.warn(
+        'Could not backfill the unlock-methods registry during the spend resume',
+        { err }
+      )
+    }
+  }
+
+  // 4. The completion, confirm-gated while the show-once obligation stands.
+  const completedClientKeys: ClientKeyRecord = {
+    clientSeed: clientKeys.clientSeed,
+    userKey,
+    webvhUpdateKeys: clientKeys.webvhUpdateKeys,
+    ...(clientKeys.controller ? { controller: clientKeys.controller } : {}),
+    pointerDid: did
+  }
+  const complete = async (options: { currentUserKey?: UserKey } = {}) => {
+    // The CURRENT key wins over the closure capture: the confirming session
+    // may have adopted a sweep rotation while the code was on display.
+    const userKeyToPersist = options.currentUserKey ?? userKey
+    await persistClientKeys({
+      userKey: userKeyToPersist,
+      pointerDid: did,
+      pending: null
+    })
+    log.info(
+      'Recovery-spend resume: record completed; the pending carrier is cleared'
+    )
+    if (userKeyToPersist.id !== userKey.id) {
+      // The captured descriptor predates the newer key; whatever rotated it
+      // advanced the pin already.
+      log.debug(
+        'Skipping the stale epoch pin at spend-resume completion; a newer user key was adopted meanwhile'
+      )
+      return
+    }
+    try {
+      await savePinFromDescriptor({
+        accountDid: did,
+        epochId: rosterRead.latestEpochId,
+        descriptor: rosterRead.descriptor,
+        idb
+      })
+    } catch (err) {
+      log.warn(
+        'Could not pin the user key roster epoch after the spend resume; the next login establishes it from the verified roster',
+        { err }
+      )
+    }
+  }
+  if (pending.replacementCode) {
+    return {
+      clientKeys: completedClientKeys,
+      persistClientKeys,
+      recoverySpendPrompt: {
+        replacementCode: base58.encode(pending.replacementCode),
+        complete
+      }
+    }
+  }
+  await complete()
+  return { clientKeys: completedClientKeys, persistClientKeys }
 }
 
 /**
@@ -1260,6 +2167,22 @@ async function recoverAccountTransient({
   const credential = await deriveUnlockCredential({
     secret: newPassphrase,
     kdf: KEYRING_KDF
+  })
+  // The read-first collision probe, BEFORE the reveal entry: a served
+  // record at the new passphrase's unlock Space that names another account,
+  // or a live standing credential's record, refuses here and surfaces at
+  // the new-passphrase form. A transient visit holds no freshness pin and
+  // must not read local records (even a read durably creates the session
+  // database), so the own-residue license is the verified document: a
+  // same-account standing record whose credential inventory the document
+  // does not publish is a torn earlier attempt's inert residue, safe to
+  // overwrite.
+  await probeUnlockSpaceCollision({
+    credential,
+    controller: contents.controller,
+    pointer,
+    accountDoc: verifiedLog.doc,
+    readLocalRecord: false
   })
   const { standing } = credential
   const ladderSeed = generateLadderSeed()
@@ -1402,7 +2325,10 @@ async function recoverAccountTransient({
         controller: standing.clientDid
       })
       // The new passphrase's unlock record, the fresh ladder seed inside --
-      // durably written before the VM that seed backs publishes.
+      // durably written before the VM that seed backs publishes. The bind
+      // re-runs the read-first collision refusal (with the served stamp
+      // folded into its advance-past set), so a record established between
+      // the pre-flight probe and this write still refuses.
       newRecordBind = await bindCredentialAnchoredUnlockSecret({
         controller: bootstrapAgent.id,
         pointer,
@@ -1410,6 +2336,7 @@ async function recoverAccountTransient({
         delegatedClients: sibling,
         ladderSeed,
         delegateManagementTo: did,
+        refuseCollidingRecord: { accountDoc: verifiedLog.doc },
         credential
       })
       // The replacement code's record (no sibling -- a code needs no
@@ -1660,38 +2587,31 @@ export async function listRecoveryCodeEntries({
 }
 
 /**
- * The two post-login registry updates a recovery owes, run in sequence.
- *
- * Sequenced, not concurrent: both are read-modify-writes over the same
- * registry resource with last-write-wins puts, so firing them together races
- * -- the loser's read goes stale and its put silently drops the winner's
- * update (losing the replacement code's entry, or repointing the passphrase
- * entry at the deleted pre-recovery unlock Space). Both halves are
- * best-effort: the account is already recovered and logged in.
+ * The post-login half a durable recovery still owes, now that the registry
+ * mutation AND the new passphrase's standing establishment both run in the
+ * ceremony tail (and are backfilled by the spend resume): one best-effort
+ * backfill of the recovery entries -- the mender when the tail's registry
+ * write was torn AND the pending record was already completed, the one
+ * state the resume can no longer reach. It re-establishes nothing: running
+ * the full establishment here would mint a second ladder seed and publish a
+ * second document entry over a healthy tail's.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.outcome {RecoveryOutcome}
- * @param [options.passphrase] {string}   the freshly chosen passphrase, still
- *   in hand on the recovery page: when given, it is promoted to a standing
- *   credential (roster wrap, commitment document entry, bridge delegation,
- *   standing-layout record) after the registry writes
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 export async function updateRegistryAfterRecovery({
   session,
-  outcome,
-  passphrase,
-  idb
+  outcome
 }: {
   session: Session
   outcome: RecoveryOutcome
-  passphrase?: string
-  idb?: IDBFactory
 }): Promise<void> {
   try {
-    // The replacement recorded and the spent code dropped in one write.
+    // The backfill of the tail's registry mutation: the replacement recorded
+    // and the spent code dropped in one write. A tail that already wrote
+    // them converges (the write replaces the same entry by kid).
     await recordRecoveryMethod({
       session,
       entry: outcome.replacementEntry,
@@ -1699,20 +2619,6 @@ export async function updateRegistryAfterRecovery({
     })
   } catch (err) {
     log.warn('Could not update the unlock-methods registry', { err })
-  }
-  try {
-    // `backfillPassphraseUnlockMethod` itself is a no-op on a transient
-    // session; this call site is additionally reached only from the
-    // `remembered` (durable) branch of the recovery login, so the session
-    // here is always durable in practice.
-    await backfillPassphraseUnlockMethod({ session })
-  } catch (err) {
-    log.warn('Could not backfill the unlock-methods registry', { err })
-  }
-  if (passphrase) {
-    // Best-effort inside (a plain-layout record still logs in); runs after
-    // the registry writes so its upsert reads their result.
-    await establishPassphraseStanding({ session, passphrase, idb })
   }
 }
 

@@ -88,6 +88,13 @@ export function RecoverPage() {
     if (isStorageUnreachable(err)) {
       return 'auth.recover.errors.couldNotCheck'
     }
+    // The colliding-passphrase refusal (matched on `name`: the error crosses
+    // no package boundary today, but the page matches every non-local class
+    // this way): the chosen new passphrase already unlocks another standing
+    // credential's record, refused before the reveal entry burned anything.
+    if ((err as Error | null)?.name === 'UnlockSpaceCollisionError') {
+      return 'auth.recover.errors.passphraseCollision'
+    }
     // The account-log continuity refusal, matched on `name` rather than
     // `instanceof`: wallet-core may be linked rather than resolved, which
     // duplicates class identity. A rollback may be nothing worse than
@@ -157,6 +164,35 @@ export function RecoverPage() {
   }
 
   /**
+   * The "I saved this code" confirm: runs the confirm-gated record
+   * completion (the durable ceremony's `completeRecovery` closure -- the
+   * rotated user key into the client-key record, the pending carrier with
+   * the replacement-code bytes cleared, then the epoch pin), so the
+   * show-once code stays re-displayable until this click. A failed
+   * completion does NOT mark the code saved: a retryable error surfaces at
+   * the dialog and the confirm can be re-clicked; the record staying
+   * pending remains the safe fallback (the next login's spend resume
+   * re-displays the code and completes).
+   */
+  const handleReplacementSaved = async () => {
+    if (busy || replacementSaved) {
+      return
+    }
+    setBusy(true)
+    setErrorKey(null)
+    try {
+      await outcome?.completeRecovery?.()
+    } catch (err) {
+      log.warn('Could not complete the recovery record on confirm', { err })
+      setErrorKey('auth.recover.errors.completionFailed')
+      return
+    } finally {
+      setBusy(false)
+    }
+    setReplacementSaved(true)
+  }
+
+  /**
    * Step three: an ordinary passphrase login as the freshly enrolled client,
    * then the post-login registry update (drop the spent code's entry, record
    * the replacement's).
@@ -186,16 +222,14 @@ export function RecoverPage() {
       recordWalletLogin({ session })
       if (remembered) {
         // Fire-and-forget behind the login-time registry chain
-        // (`session.registryReady`), so the update cannot race the chain's
-        // read-modify-writes: the sequencing the registry updates need
-        // lives in `updateRegistryAfterRecovery`, and every half is
-        // best-effort. The passphrase still in hand lets it promote the
-        // fresh credential to the standing configuration (self-enrolling
-        // on the next fresh browser). The transient variant already
-        // updated the registry inside the ceremony (a transient session
-        // cannot write it later).
+        // (`session.registryReady`), so the backfill cannot race the
+        // chain's read-modify-writes. The ceremony tail already wrote the
+        // registry mutation and the standing establishment; this is the
+        // best-effort backfill of the recovery entries alone. The transient
+        // variant already updated the registry inside the ceremony (a
+        // transient session cannot write it later).
         void (session.registryReady ?? Promise.resolve()).then(() =>
-          updateRegistryAfterRecovery({ session, outcome, passphrase })
+          updateRegistryAfterRecovery({ session, outcome })
         )
       }
       navigate('/dashboard', { replace: true })
@@ -337,7 +371,7 @@ export function RecoverPage() {
 
                 <Button
                   variant={replacementSaved ? 'outlined' : 'contained'}
-                  onClick={() => setReplacementSaved(true)}
+                  onClick={() => void handleReplacementSaved()}
                   disabled={replacementSaved}
                 >
                   {replacementSaved

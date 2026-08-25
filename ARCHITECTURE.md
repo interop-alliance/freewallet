@@ -193,12 +193,12 @@ stays authentic forever. So each client keeps a **freshness pin** (plaintext
 local state, per unlock credential): the newest signed `createdAt` it has
 accepted. A record older than the pin is refused as a rollback
 (`KeyringRecordRolledBackError`); an equal or newer one is accepted and
-advances the pin, which only moves forward (the pin write is a transactional
-forward-only compare-and-set). The stamps are wall-clock, made safe against
-clock skew by a floor: every record write site stamps `max(now, fetched
-record's createdAt + 1ms, local pin + 1ms)`, so a rebind after a fast-clock
-client's bind still supersedes it and cannot wedge other clients into the
-rollback refusal. Nothing compares pointers: a validly signed, non-stale
+advances the pin, which only moves forward (a transactional forward-only
+compare-and-set). The stamps are wall-clock, made safe against
+clock skew by advance-past stamping: every write site stamps `max(now,
+fetched record's createdAt + 1ms, local pin + 1ms)`, so a rebind after a
+fast-clock client's bind cannot wedge other clients into the rollback
+refusal. Nothing compares pointers: a validly signed, non-stale
 record naming an account this client has never seen is followed wherever it
 points -- a rebind, a host migration, and a fresh account bound under a
 reused passphrase are all legitimate, and all produce a newer signed record.
@@ -1087,25 +1087,31 @@ Recovery (`/recover`, `recoverAccountWithCode`): the typed code decrypts
 its unlock record, the log is fetched and locally verified against the
 pointer, and the delegation writes the self-enrolling continuation: a
 **reveal-and-commit** entry signed by the code's pre-committed update key
-(with prerotation active, an entry verifies against its own re-stated
-`updateKeys`, each hashing into the previous entry's `nextKeyHashes` --
-what lets a committed key reveal itself), then an **add-and-retire** entry.
-The continuation enrolls what the browser's durability decision would
-enroll at login. With `rememberBrowser` (the programmatic remember entry)
-a brand-new ordinary client key set is minted and the add-and-retire
-entry, signed by the new client's update key, brings in the new client
-(both VMs, all four signing relations, update authority), retires the
-spent code's VM, update key, and hash, and adds a replacement code's
-inventory. The user key is unwrapped from the code's standing wrap and
-**mandatorily rotated** off the spent code (recipients of the fresh epoch
-resolved from the
-just-updated verified document); a replacement code is pushed hard (shown
-once, must be confirmed saved before login unlocks); the spent code's unlock
-Space is deleted (a typed code is a spent credential and thereafter fails
-with wording distinct from "wrong code"); and the new client binds under a
-freshly chosen passphrase, ending in an ordinary enrolled login. The fresh
-user key then fans out through the epoch cascade (see "Client revocation"
-below), so writes stop landing under epochs the spent code could read.
+(prerotation is what lets a committed key reveal itself), then an
+**add-and-retire** entry.
+The continuation enrolls what the durability decision would at login. With `rememberBrowser` (the programmatic remember entry)
+a fresh ordinary client key set is minted; inside the continuation's
+required `onCommitted` seam (between the reveal and add-and-retire
+entries) the successors become durable: the new
+passphrase's unlock record in the standing LAYOUT (bridge, ladder seed --
+its standing property completes post-pivot), the PENDING client-key
+record (seeds, controller, `pointerDid`, the pending group: built-on
+head, unwrap key, replacement-code bytes; no user key), and the
+replacement code's record and bridge. A colliding unlock record (another
+credential's) refuses up front. The add-and-retire entry
+then brings in the new client, retires the spent code's inventory, and
+adds the replacement code's. The tail makes the passphrase standing (its
+roster wrap, then its commitment + rung-0 entry, before the rotation);
+the user key unwraps from the code's wrap and **mandatorily rotates** off
+it; the registry mutation (spent entry out, successors in) runs between
+the re-seal and the cascade; the replacement code is pushed hard (the
+save confirm also completes the local record, clearing the carrier); the
+spent code's unlock Space is deleted (a spent code thereafter fails
+distinctly); an ordinary enrolled login follows. A
+post-entry tab death leaves the pending record; the next login's spend
+resume finishes it -- escrows re-derived from the unwrap key, standing
+and registry backfilled, the code re-displayed until confirmed saved, the
+sweep completing rotation and cascade.
 
 The DEFAULT on a non-remembered browser is the **transient recovery
 variant** (wallet-core's `recoverWebvhLadderAnchored`): no durable client is
@@ -1940,7 +1946,7 @@ finished (see Tear mending in the Glossary).
 | Client enrollment (two-party) | Settings > Connected wallets + login page | `src/components/EnrolledClientsSection.tsx` | `/enrollment` | re-run with the same connect code |
 | Client revocation + epoch cascade | Settings > Connected wallets | `src/session/revocation.ts` | `/clients` | re-run; cascade-completion sweep |
 | Recovery-code issuance | Settings > Recovery codes | `src/session/recovery.ts` | `/recovery` | re-run (nothing binds until the confirm) |
-| Recovery spend (durable and transient) | `/recover` | `src/session/recovery.ts` | `/recovery`, `/clientAnnex` | re-run; open gaps in both variants (below) |
+| Recovery spend (durable and transient) | `/recover` | `src/session/recovery.ts` | `/recovery`, `/clientAnnex` | durable: pending record pre-pivot + spend resume; transient: re-run, open gaps (below) |
 | Recovery-code revocation | Settings > Recovery codes | `src/session/recovery.ts` | `/recovery` | re-run; cascade-completion sweep |
 | Unlock-credential rotation | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts` | `/unlock` | torn-retirement repair at next passphrase login; login sweep; re-seal repair |
 | Forget ceremony | Settings > Connected wallets, own row | `src/session/forget.ts` | `/clientAnnex` | re-run (wipe last); forgotten-browser detector at the next login |
@@ -1953,12 +1959,7 @@ finished (see Tear mending in the Glossary).
 The open gaps (stated residues with no mender yet; see Tear mending in
 the Glossary). Two are unbuilt repairs on client-less accounts, where no
 login sweep will ever run: the transient recovery's roster-append repair,
-and one for a user-key rotation torn mid-fan-out. The third is the
-durable spend's pre-persist window: the add-and-retire entry lands before
-the new client's key set or the replacement code's record persists
-anywhere, so a tab death there on an account with no other durable client
-strands the account. The fix is reordering onto the transient variant's
-persist-before-publish seam.
+and one for a user-key rotation torn mid-fan-out.
 
 ## What lives elsewhere (do not reimplement here)
 

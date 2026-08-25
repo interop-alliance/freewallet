@@ -8,12 +8,18 @@
  * HISTORY, which of four outcomes the record gets:
  *
  * - **complete** (the VM stands in the current document): finish the
- *   enrollment -- the core's resume mode completes the roster escrow through
- *   the credential's standing wrap, the record gains its user key and drops
- *   `pending`, and the login proceeds enrolled.
+ *   ceremony -- a self-enrollment record through the core's resume mode
+ *   (the roster escrow through the credential's standing wrap), a
+ *   spend-written record through the spend resume (`resumeRecoverySpend`:
+ *   the escrows from the pending unwrap key, the registry backfill, and the
+ *   confirm-gated completion whose show-once prompt rides the resume
+ *   result) -- the record gains its user key and drops `pending`, and the
+ *   login proceeds enrolled.
  * - **seeded re-run** (the VM was never published): re-run the enrollment
  *   with the recorded key set, so the resumed run publishes the same client
- *   the torn run was publishing -- never a second mint.
+ *   the torn run was publishing -- never a second mint. A spend-written
+ *   record refuses here instead (`reason: 'recovery-spend'`, copy directing
+ *   back to `/recover` with the same, still-unspent code).
  * - **wipe** (the VM was published at an earlier version and since removed):
  *   this client was deliberately disconnected; the detector's wipe and
  *   `BrowserForgottenError` apply exactly as for an enrolled record, and a
@@ -38,14 +44,20 @@
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import {
   clientSigningKeyMultibase,
+  documentKeyMultibases,
   isWebvhDid,
   verifyAccountLog
 } from '@interop/wallet-core/webvh'
+import { unlockClientIdentityFromSeed } from '@interop/wallet-core/unlock'
 import type { ClientKeyRecord } from '@interop/wallet-core/keys'
 import { deleteClientKeyRecord, sessionLogPinStore } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { finishForgottenBrowserWipe } from '@/session/forget'
 import { selfEnrollStandingClient } from '@/session/standingUnlock'
+import {
+  resumeRecoverySpend,
+  type RecoverySpendPrompt
+} from '@/session/recovery'
 import type {
   KeyringFetchResult,
   PersistableClientKeys
@@ -199,6 +211,7 @@ export async function resumePendingEnrollment({
 }): Promise<{
   clientKeys: ClientKeyRecord
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+  recoverySpendPrompt?: RecoverySpendPrompt
 }> {
   try {
     return await decidePendingResume({ found, idb })
@@ -231,6 +244,7 @@ async function decidePendingResume({
 }): Promise<{
   clientKeys: ClientKeyRecord
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+  recoverySpendPrompt?: RecoverySpendPrompt
 }> {
   const clientKeys = found.clientKeys!
   const pointer = found.pointer!
@@ -239,14 +253,6 @@ async function decidePendingResume({
     // The routing gate requires a promoted pointer; a hit without one can
     // only reach here through a caller bug, and is refused fail-closed.
     throw new PendingEnrollmentError({ reason: 'unresumable' })
-  }
-  // A spend-written record is /recover's to finish with the same code, on
-  // EVERY branch: freewallet has no spend completion machinery until FW-317
-  // lands, and completing it here would clear the pending members (the
-  // unwrap-key carrier, the replacement-code bytes) whose whole purpose is
-  // post-pivot re-derivability.
-  if (clientKeys.pending?.ceremony === 'recovery-spend') {
-    throw new PendingEnrollmentError({ reason: 'recovery-spend' })
   }
   // Every branch below is decided from THIS verified read: a continuity or
   // integrity refusal rethrows unchanged (through the wrapper's
@@ -274,12 +280,46 @@ async function decidePendingResume({
   const vmId = `${pointerDid}#${clientSigningKeyMultibase({ keyAgent })}`
 
   if (docListsVm({ doc: verified.doc, vmId })) {
-    // The add entry landed; only the completion is missing.
+    // The add entry landed; only the completion is missing. A spend-written
+    // record completes through the spend resume (escrows, registry
+    // backfill, the confirm-gated completion); an enrollment record through
+    // the self-enrollment ceremony's resume mode.
+    if (clientKeys.pending?.ceremony === 'recovery-spend') {
+      log.info('Pending-record resume: completing the recovery spend', {
+        branch: 'spend-complete',
+        clientDid
+      })
+      return await resumeRecoverySpend({ found, verifiedLog: verified, idb })
+    }
     log.info('Pending-record resume: completing through the ceremony', {
       branch: 'complete',
       clientDid
     })
     return await resumeThroughCeremony({ found, idb })
+  }
+
+  // A spend record's branches below are decided from log HISTORY, so they
+  // are decidable only once the served log has reached the head the pivot
+  // entry was built on: a truncated (or lagging) log looks exactly like
+  // never-published, and deciding on it would misroute the record. Surfaced
+  // as the transport class -- record kept, retry later -- per the
+  // transport carve-out.
+  if (
+    clientKeys.pending?.ceremony === 'recovery-spend' &&
+    !logReachedHead({
+      log: verified.log,
+      builtOnHead: clientKeys.pending.builtOnHead
+    })
+  ) {
+    log.info(
+      "Pending-record resume: the served log has not reached the spend record's built-on head",
+      { branch: 'spend-log-behind', clientDid }
+    )
+    throw new PendingResumeLogUnavailableError({
+      cause: new Error(
+        "the served log has not reached the pending record's built-on head"
+      )
+    })
   }
 
   if (logEverListedVm({ log: verified.log, vmId })) {
@@ -305,6 +345,45 @@ async function decidePendingResume({
       idb,
       why: 'the recorded account pointer DID no longer matches the credential'
     })
+  }
+  // A never-published spend record is /recover's to re-run with the same
+  // code (still unspent on this branch -- the pivot never landed): the
+  // seeded re-run here would complete it as a self-enrollment while the
+  // unspent code's whole inventory stays live. Unless the code was SPENT
+  // ELSEWHERE: the log reached our built-on head (checked above) yet the
+  // spent code's keyAgreement inventory is out of the document -- someone
+  // else's entry retired it, /recover would refuse the code as spent, and
+  // keeping the record would wedge the browser -- so it falls through to
+  // the discard (the pending key set grants nothing) and the browser
+  // returns to record-less routing.
+  if (clientKeys.pending?.ceremony === 'recovery-spend') {
+    const unwrapKey = clientKeys.pending.unwrapKey
+    if (unwrapKey) {
+      const spentIdentity = await unlockClientIdentityFromSeed({
+        clientSeed: unwrapKey
+      })
+      const published = documentKeyMultibases({
+        doc: verified.doc as Parameters<
+          typeof documentKeyMultibases
+        >[0]['doc']
+      })
+      if (!published.has(spentIdentity.keyAgreementKeyMultibase)) {
+        log.info(
+          'Pending-record resume: the recovery code was spent elsewhere; discarding',
+          { branch: 'spend-spent-elsewhere', clientDid }
+        )
+        return await discardPendingRecord({
+          found,
+          idb,
+          why: "the recovery code was spent elsewhere; the pending key set grants nothing"
+        })
+      }
+    }
+    log.info(
+      'Pending-record resume: spend record never published; refusing to /recover',
+      { branch: 'spend-rerun-refused', clientDid }
+    )
+    throw new PendingEnrollmentError({ reason: 'recovery-spend' })
   }
   const resumable = !!(
     found.standing?.ladderSeed &&
@@ -416,6 +495,37 @@ function docListsVm({ doc, vmId }: { doc: unknown; vmId: string }): boolean {
     Array.isArray(methods) &&
     methods.some(method => (method as { id?: string })?.id === vmId)
   )
+}
+
+/**
+ * Whether the served log has reached the head a pending record's pivot
+ * entry was built on -- the guard that keeps a truncated or lagging log
+ * from deciding a spend record's history branches. Compared on the leading
+ * version number of `versionId` (`N-hash`), against the served head entry's
+ * own `versionId` where present, the entry count otherwise; an unparseable
+ * recorded head does not wedge the resume.
+ *
+ * @param options {object}
+ * @param options.log {Array<{ versionId?: string }>}
+ * @param options.builtOnHead {{ scid: string, versionId: string }}
+ * @returns {boolean}
+ */
+function logReachedHead({
+  log: entries,
+  builtOnHead
+}: {
+  log: Array<{ versionId?: string }>
+  builtOnHead: { scid: string; versionId: string }
+}): boolean {
+  const wanted = Number.parseInt(builtOnHead.versionId, 10)
+  if (!Number.isFinite(wanted)) {
+    return true
+  }
+  const head = entries[entries.length - 1]
+  const served = head?.versionId
+    ? Number.parseInt(head.versionId, 10)
+    : entries.length
+  return Number.isFinite(served) && served >= wanted
 }
 
 /**
