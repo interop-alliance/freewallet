@@ -37,7 +37,10 @@ import {
   type UnlockCredential
 } from '@/session/keyring'
 import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
-import { transientSessionPersistence } from '@/session/persistence'
+import {
+  transientSessionStores,
+  type TransientSessionStores
+} from '@/session/persistence'
 import { transientSessionFromKeyringHit } from '@/session/transientLogin'
 import {
   provisionNewWallet,
@@ -207,8 +210,9 @@ async function establishPassphraseAnchoredAccount({
  * @param options.credential {UnlockCredential}   the establishment half's
  *   derived credential
  * @param [options.email] {string}
- * @param options.persistence {ReturnType<typeof transientSessionPersistence>}
- *   the visit's in-memory handle (shared with the establishment half's pins)
+ * @param options.persistence {TransientSessionStores}
+ *   the visit's in-memory store family (shared with the establishment
+ *   half's pins)
  * @returns {Promise<{ session: Session, userExists: false }>}
  */
 async function enterEstablishedAccountTransiently({
@@ -218,7 +222,7 @@ async function enterEstablishedAccountTransiently({
 }: {
   credential: UnlockCredential
   email?: string
-  persistence: ReturnType<typeof transientSessionPersistence>
+  persistence: TransientSessionStores
 }): Promise<{ session: Session; userExists: false }> {
   const found = await fetchTransientKeyring({
     credential,
@@ -369,8 +373,8 @@ export async function signUpWithPassphrase({
   }
   if (WAS_SERVER_URL) {
     // The credential-anchored default: establishment, then the transient
-    // entry, both over the visit's in-memory persistence handle.
-    const persistence = transientSessionPersistence()
+    // entry, both over the visit's in-memory store family.
+    const persistence = transientSessionStores()
     const outcome = await establishPassphraseAnchoredAccount({
       passphrase,
       email,

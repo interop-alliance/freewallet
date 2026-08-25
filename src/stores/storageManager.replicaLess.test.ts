@@ -37,7 +37,10 @@ import type {
 import { ensureFirstEpoch, ownerRecipient } from '@interop/was-client/edv'
 import { cidFrom } from '@interop/was-client/sync'
 import type { Json } from '@/lib/sync'
-import { transientSessionPersistence } from '@/session/persistence'
+import {
+  transientSessionPersistence,
+  transientSessionStores
+} from '@/session/persistence'
 import type { ControllerProfile, User } from '@/types/auth'
 import { BrowserStore } from './browserStore'
 import { StorageManager } from './storageManager'
@@ -343,7 +346,13 @@ describe('replica-less remote-direct StorageManager', () => {
     const { remoteStore, provision } = makeFakeRemote()
     await provision(owner)
 
-    const persistence = transientSessionPersistence()
+    const persistence = transientSessionPersistence({
+      stores: transientSessionStores(),
+      clientAnnex: {
+        clientAnnexDid: 'did:webvh:example:annex',
+        invocationCapability: {} as IZcap
+      }
+    })
     const user: User = { id: 'did:key:z6MkTestClient' }
     const profile = {
       zcapClient: {} as ZcapClient,
@@ -407,7 +416,13 @@ describe('replica-less remote-direct StorageManager', () => {
     expect(
       () =>
         new StorageManager({
-          persistence: transientSessionPersistence()
+          persistence: transientSessionPersistence({
+            stores: transientSessionStores(),
+            clientAnnex: {
+              clientAnnexDid: 'did:webvh:example:annex',
+              invocationCapability: {} as IZcap
+            }
+          })
         })
     ).toThrow(/remote WAS store/)
   })

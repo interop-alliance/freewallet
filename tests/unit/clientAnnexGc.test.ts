@@ -48,7 +48,8 @@ import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import {
   durableSessionPersistence,
-  transientSessionPersistence
+  transientSessionPersistence,
+  transientSessionStores
 } from '@/session/persistence'
 import type { SessionPersistence } from '@/session/persistence'
 import {
@@ -153,7 +154,13 @@ afterEach(() => {
 describe('sweepClientAnnexGenerations -- the preconditions', () => {
   it('skips a transient session', async () => {
     const session = makeSession({
-      persistence: transientSessionPersistence()
+      persistence: transientSessionPersistence({
+        stores: transientSessionStores(),
+        clientAnnex: {
+          clientAnnexDid: 'did:webvh:example:annex',
+          invocationCapability: {} as never
+        }
+      })
     })
     await expect(sweepClientAnnexGenerations({ session })).resolves.toBeNull()
     expect(runClientAnnexGc).not.toHaveBeenCalled()

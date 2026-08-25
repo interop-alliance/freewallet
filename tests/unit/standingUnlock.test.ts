@@ -11,7 +11,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { ladderRung } from '@interop/wallet-core/clientAnnex'
-import { transientSessionPersistence } from '@/session/persistence'
+import { transientSessionStores } from '@/session/persistence'
 
 vi.mock('@/session/enrolledContext', () => ({
   enrolledClientContext: vi.fn(() => ({ pointer: POINTER })),
@@ -124,7 +124,7 @@ function makeSession() {
       accountPointer: POINTER,
       zcapClient: { isZcapClient: true },
       userKey: { id: 'did:key:zUserKey', secret: new Uint8Array(32) },
-      persistence: transientSessionPersistence()
+      persistence: transientSessionStores()
     }
   } as unknown as Parameters<typeof establishStandingUnlock>[0]['session']
 }

@@ -219,16 +219,14 @@ export async function initGuestSession() {
  * @param [options.persistence] {SessionPersistence}   the typed persistence
  *   handle for this session; defaults to the durable one built over `idb`
  *   (with cache persistence off for guests). A transient login supplies the
- *   in-memory handle here, which also skips provisioning, the login-time
- *   sweeps, and every durable pin write.
- * @param [options.transient] {object}   the transient-session identity: the
+ *   transient handle here, which carries the client-annex identity: the
  *   annex DID whose generation holds this visit's verification method
  *   (every WAS request signs as `<clientAnnexDid>#<vm>` in place of the
  *   account-document spelling) and the generation delegation every request
- *   rides (`profile.invocationCapability`). Supplied only by the transient
- *   login composition, together with the in-memory `persistence`; its
- *   presence also skips the KMS keystore and the login-time roster read (the
- *   standing-wrap read already happened)
+ *   rides (stamped as `profile.invocationCapability`). The non-durable
+ *   variant also skips the KMS keystore, the login-time roster read (the
+ *   standing-wrap read already happened), `profile.clientSeed`,
+ *   provisioning, the login-time sweeps, and every durable pin write.
  * @returns {Promise<{ session: Session, userExists: boolean,
  *   rosterRead: UserKeyRosterReadResult | null }>}   `rosterRead` is this
  *   login's verified roster read, which the caller's registry re-seal repair
@@ -245,8 +243,7 @@ export async function initSessionFromSeed({
   remoteDirectStorage = false,
   provisionStorage = true,
   idb,
-  persistence: suppliedPersistence,
-  transient
+  persistence: suppliedPersistence
 }: {
   seed: Uint8Array
   userKey?: UserKey
@@ -259,7 +256,6 @@ export async function initSessionFromSeed({
   provisionStorage?: boolean
   idb?: IDBFactory
   persistence?: SessionPersistence
-  transient?: { clientAnnexDid: string; invocationCapability: IZcap }
 }) {
   const persistence =
     suppliedPersistence ??
@@ -271,12 +267,14 @@ export async function initSessionFromSeed({
   // been promoted: every data-Space request must be signed with this
   // client's verification method in the did:webvh document
   // (`<did:webvh>#<multibase>`), not its did:key. Same key, promoted keyId.
-  // A transient session's verification method lives in the annex
-  // generation's document instead, so its requests sign as
-  // `<clientAnnexDid>#<multibase>` and ride the generation delegation.
+  // A transient handle's verification method lives in the annex
+  // generation's document instead (the handle carries the annex DID), so
+  // its requests sign as `<clientAnnexDid>#<multibase>` and ride the
+  // generation delegation -- the account-document spelling is structurally
+  // out of a transient session's reach.
   const accountDid = accountPointer?.did
-  const sessionZcapClient = transient
-    ? webvhZcapClient({ keyAgent, did: transient.clientAnnexDid })
+  const sessionZcapClient = !isDurableSession(persistence)
+    ? webvhZcapClient({ keyAgent, did: persistence.clientAnnex.clientAnnexDid })
     : isWebvhDid(accountDid)
       ? webvhZcapClient({ keyAgent, did: accountDid })
       : zcapClient
@@ -289,10 +287,10 @@ export async function initSessionFromSeed({
   // keystore, so the independent trips need not be serialized.
   // Failure is non-fatal for now: no wallet feature depends on
   // the keystore yet, so a KMS outage must not lock users out -- the settings
-  // page surfaces the unprovisioned state. Transient sessions skip the KMS
-  // whole: keystore provisioning is durable account bootstrap.
+  // page surfaces the unprovisioned state. A non-durable handle skips the
+  // KMS whole: keystore provisioning is durable account bootstrap.
   const keystorePromise =
-    !isGuest && !transient && KMS_SERVER_URL
+    !isGuest && isDurableSession(persistence) && KMS_SERVER_URL
       ? ensureKeystore({
           kmsServerUrl: KMS_SERVER_URL,
           keyAgent,
@@ -325,16 +323,16 @@ export async function initSessionFromSeed({
   // descriptor feeds the cascade-completion sweep fired further down.
   // Gated on a promoted pointer: the log-governed roster anchors its entry
   // proofs in the did:webvh document, so an unpromoted account has no roster
-  // to read. A transient session skips it too -- its user key just came out
-  // of the credential's standing wrap, so a second read would be the same
-  // read again.
+  // to read. A non-durable handle skips it too -- its user key just came
+  // out of the credential's standing wrap, so a second read would be the
+  // same read again.
   let activeUserKey = userKey
   let rosterRead: UserKeyRosterReadResult | null = null
   let userKeyPersistFailed = false
   if (
     userKey &&
     !isGuest &&
-    !transient &&
+    isDurableSession(persistence) &&
     WAS_SERVER_URL &&
     accountPointer &&
     isWebvhDid(accountPointer.did)
@@ -390,12 +388,13 @@ export async function initSessionFromSeed({
     ...(persistClientKeys ? { persistClientKeys } : {}),
     ...(accountPointer ? { accountPointer } : {}),
     // Every remote request a transient session makes rides the generation
-    // delegation (WASRemoteStore invokes it in place of the root capability).
-    ...(transient
-      ? { invocationCapability: transient.invocationCapability }
+    // delegation the handle carries (WASRemoteStore invokes it in place of
+    // the root capability).
+    ...(!isDurableSession(persistence)
+      ? { invocationCapability: persistence.clientAnnex.invocationCapability }
       : {})
   }
-  if (!isGuest && !transient) {
+  if (!isGuest && isDurableSession(persistence)) {
     // The client seed backs the unlock-method re-bind ceremonies, all of
     // them durable; a transient session's per-visit seed must never be one.
     profile.clientSeed = seed

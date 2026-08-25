@@ -149,7 +149,7 @@ import {
   type PersistableClientKeys
 } from '@/session/keyring'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
-import { transientSessionPersistence } from '@/session/persistence'
+import { transientSessionStores } from '@/session/persistence'
 import {
   emptyUnlockMethodsRegistry,
   getUnlockMethods,
@@ -781,7 +781,7 @@ export async function locateRecoveryAccount({
     pointer: contents.pointer,
     ...(rememberBrowser
       ? {}
-      : { accountLogPinStore: transientSessionPersistence().logPins }),
+      : { accountLogPinStore: transientSessionStores().logPins }),
     idb
   })
 }
@@ -2165,9 +2165,9 @@ async function recoverAccountTransient({
   const spaceId = pointer.spaceId
   const host = pointer.host
 
-  // The visit's in-memory persistence handle: trust-on-first-use chain-head
+  // The visit's in-memory store family: trust-on-first-use chain-head
   // pins for every log read here, gone with the tab.
-  const persistence = transientSessionPersistence()
+  const persistence = transientSessionStores()
   const logPins = persistence.logPins
 
   const verifiedLog = await verifyAccountLog({

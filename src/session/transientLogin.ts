@@ -65,7 +65,8 @@ import { hasClientKeyRecord } from '@/lib/sessionKey'
 import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
 import {
   transientSessionPersistence,
-  type TransientSessionPersistence
+  transientSessionStores,
+  type TransientSessionStores
 } from '@/session/persistence'
 import { initSessionFromSeed } from '@/session/initSession'
 import {
@@ -168,8 +169,9 @@ export class AlreadyRememberedError extends Error {
  *   absent means route on the record probe
  * @returns {Promise<object>}   `{ durability: 'durable', credential? }` or
  *   `{ durability: 'transient', credential, persistence }` -- the transient arm
- *   carries the visit's in-memory persistence handle so every later stage
- *   (the record fetch's account-log pins included) shares it
+ *   carries the visit's in-memory store family so every later stage (the
+ *   record fetch's account-log pins included) shares it; the composition
+ *   folds the annex identity over these stores into the session's handle
  */
 export async function routeUnlockLogin({
   secret,
@@ -190,7 +192,7 @@ export async function routeUnlockLogin({
   | {
       durability: 'transient'
       credential: UnlockCredential
-      persistence: TransientSessionPersistence
+      persistence: TransientSessionStores
     }
 > {
   if (!WAS_SERVER_URL || remoteDirectStorage) {
@@ -223,7 +225,7 @@ export async function routeUnlockLogin({
   return {
     durability: 'transient',
     credential: derived,
-    persistence: transientSessionPersistence()
+    persistence: transientSessionStores()
   }
 }
 
@@ -272,18 +274,21 @@ function refuseMissingGeneration(
  *    roster request signs as `<clientAnnexDid>#<vm>` under the generation
  *    delegation, and the unwrap uses the credential's own key-agreement key.
  *    Deliberately no escrow -- a transient client never joins the roster.
- * 5. Assemble the session on the replica-less storage variant
- *    (`initSessionFromSeed` with the transient option: annex signing,
- *    the delegation as `profile.invocationCapability`, no KMS, no second
- *    roster read, no sweeps).
+ * 5. Assemble the session on the replica-less storage variant: the annex
+ *    identity and the generation delegation are folded over the visit's
+ *    stores into the transient persistence handle
+ *    (`transientSessionPersistence`), and that one handle tells
+ *    `initSessionFromSeed` everything -- annex signing, the delegation as
+ *    `profile.invocationCapability`, no KMS, no second roster read, no
+ *    sweeps.
  *
  * @param options {object}
  * @param options.found {TransientKeyringFetchResult}   the transient keyring
  *   hit
  * @param options.type {'passphrase' | 'passkey'}   the method that unlocked
  * @param [options.email] {string}   caller-supplied email, when any
- * @param options.persistence {TransientSessionPersistence}   the visit's
- *   in-memory handle (the same one the record fetch's settle rode)
+ * @param options.persistence {TransientSessionStores}   the visit's
+ *   in-memory store family (the same one the record fetch's settle rode)
  * @param [options.credential] {UnlockCredential}   the derived unlock
  *   credential, when the caller holds one -- what arms the torn
  *   credential-anchored-signup heal (the establishment re-run needs the unlock
@@ -304,7 +309,7 @@ export async function transientSessionFromKeyringHit({
   found: TransientKeyringFetchResult
   type: 'passphrase' | 'passkey'
   email?: string
-  persistence: TransientSessionPersistence
+  persistence: TransientSessionStores
   credential?: UnlockCredential
   healAttempted?: boolean
 }): Promise<{ session: Session; userExists: boolean }> {
@@ -553,16 +558,21 @@ export async function transientSessionFromKeyringHit({
     descriptor: rosterRead.descriptor
   })
 
+  // The session's handle: the annex identity folded over the visit's stores,
+  // so durability and the annex signing arrive as one typed declaration.
+  const sessionPersistence = transientSessionPersistence({
+    stores: persistence,
+    clientAnnex: {
+      clientAnnexDid,
+      invocationCapability: generationDelegation
+    }
+  })
   const { session, userExists } = await initSessionFromSeed({
     seed,
     userKey: rosterRead.userKey,
     accountPointer: pointer,
     email: email ?? found.email,
-    persistence,
-    transient: {
-      clientAnnexDid,
-      invocationCapability: generationDelegation
-    }
+    persistence: sessionPersistence
   })
   // Stamp what the durable tail stamps, minus what a transient session does
   // not hold (no management zcap was minted).

@@ -8,10 +8,15 @@
  * an in-memory roster-epoch pin, a per-visit in-memory `writerId`, and one
  * in-memory descriptor/meta cache pair -- and no sessionKey factory at all,
  * so code needing the durable database must hold (and assert for) the
- * durable variant. This is the typed seam
+ * durable variant. The transient variant also carries the session's
+ * client-annex identity (the annex DID and the generation delegation every
+ * request rides), so durability -- and the annex signing that comes with it
+ * -- is declared once, in the handle's type, never half-declared through a
+ * second option. This is the typed seam
  * `decisions/0001-no-memory-overlay-storage-fork.md` requires in place of a
  * transparent in-memory storage fork.
  */
+import type { IZcap } from '@interop/data-integrity-core'
 import type { CollectionEncryption } from '@interop/was-client'
 import type { EncryptionDescriptorCache } from '@interop/wallet-core/descriptors'
 import {
@@ -152,11 +157,34 @@ export interface DurableSessionPersistence extends SessionPersistenceBase {
 }
 
 /**
- * A transient session: a public-terminal visit. Nothing this handle serves
- * outlives the tab, and it has no member reaching the session database.
+ * The transient visit's in-memory store family: what the login routing builds
+ * BEFORE the annex identity exists, so the record fetch's account-log pins
+ * and the composition's epoch pin ride the same stores the session will.
+ * Nothing it serves outlives the tab, and it has no member reaching the
+ * session database. Deliberately NOT a member of {@link SessionPersistence}:
+ * a session's handle must declare the whole transient shape, the client-annex
+ * identity included.
  */
-export interface TransientSessionPersistence extends SessionPersistenceBase {
+export interface TransientSessionStores extends SessionPersistenceBase {
   durability: typeof DURABILITY_IN_MEMORY
+}
+
+/**
+ * A transient session's handle: a public-terminal visit. Beside the
+ * in-memory stores it carries the session's client-annex identity -- every
+ * WAS request signs as `<clientAnnexDid>#<vm>` and rides the generation
+ * delegation -- so durability cannot be half-declared: a caller that supplies
+ * a transient handle has, by type, already declared the annex identity, and
+ * the durable-only members (the KMS keystore, the login-time roster read,
+ * the account-document keyId) are structurally out of reach.
+ */
+export interface TransientSessionPersistence extends TransientSessionStores {
+  // Session assembly only: the annex zcap spelling and the
+  // `profile.invocationCapability` stamp. Never thread the delegation into
+  // the unlock-methods registry helpers -- a delegated registry read/write
+  // from a transient session would clobber the registry from a public
+  // terminal (the registry stays durable-session-only).
+  clientAnnex: { clientAnnexDid: string; invocationCapability: IZcap }
 }
 
 export type SessionPersistence =
@@ -432,14 +460,16 @@ export function durableSessionPersistence({
 }
 
 /**
- * Builds the transient persistence handle: a public-terminal visit's, whose
- * every member is in-memory and dies with the tab. There is deliberately no
- * member reaching the `freewallet-session` database -- a transient session
- * must never create it, even on a read (the versioned open is durable).
+ * Builds the transient visit's in-memory store family, whose every member
+ * dies with the tab. There is deliberately no member reaching the
+ * `freewallet-session` database -- a transient session must never create it,
+ * even on a read (the versioned open is durable). The session's full handle
+ * is composed over these stores once the annex identity exists
+ * ({@link transientSessionPersistence}).
  *
- * @returns {TransientSessionPersistence}
+ * @returns {TransientSessionStores}
  */
-export function transientSessionPersistence(): TransientSessionPersistence {
+export function transientSessionStores(): TransientSessionStores {
   const epochPins = new Map<string, string>()
   const unlockMethods = new Map<string, unknown>()
   // One cache pair for the whole session, whatever scope asks: a transient
@@ -499,6 +529,29 @@ export function transientSessionPersistence(): TransientSessionPersistence {
       return metas
     }
   }
+}
+
+/**
+ * Composes the transient session's handle over an already-built store family
+ * and the client-annex identity the composition just enrolled. The spread
+ * copies the store methods, which close over the same in-memory maps, so
+ * pins established before the session (the record fetch's account-log pins,
+ * the login-time epoch pin) carry into the handle unchanged.
+ *
+ * @param options {object}
+ * @param options.stores {TransientSessionStores}   the visit's store family
+ * @param options.clientAnnex {object}   the annex DID this session invokes as
+ *   and the generation delegation every request rides
+ * @returns {TransientSessionPersistence}
+ */
+export function transientSessionPersistence({
+  stores,
+  clientAnnex
+}: {
+  stores: TransientSessionStores
+  clientAnnex: { clientAnnexDid: string; invocationCapability: IZcap }
+}): TransientSessionPersistence {
+  return { ...stores, clientAnnex }
 }
 
 /**

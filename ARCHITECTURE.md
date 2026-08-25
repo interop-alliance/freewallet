@@ -809,7 +809,17 @@ and the durable `writerId`. The transient variant -- a public-terminal visit
 -- is in-memory throughout and dies with the tab: it has no member reaching
 the session database, and the login that carries it skips storage
 provisioning, the login-time sweeps, and the bare-Space-URL `userExists`
-probe. Global UI prefs (theme, language) are not session state and ride a
+probe. The transient variant also carries the visit's client-annex
+identity -- the annex DID every WAS request signs under and the
+generation delegation every request rides -- as a required member of its
+handle type (`TransientSessionPersistence`), built from the pre-session
+in-memory store family (`TransientSessionStores`, from
+`transientSessionStores()`) plus that identity
+(`transientSessionPersistence({ stores, clientAnnex })`). Session assembly
+reads both off the handle rather than a separate option, so durability and
+the annex signing that comes with it are declared exactly once; they still
+surface to the storage layer as `profile.invocationCapability`. Global UI
+prefs (theme, language) are not session state and ride a
 sibling seam (`src/lib/prefsStorage.ts`): during a transient session, pref
 writes land in an in-memory overlay that shadows reads, which still fall
 through to localStorage.

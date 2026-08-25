@@ -3,6 +3,7 @@
  * members and refusals, and the durable handle's cache memoization.
  */
 import { describe, expect, it } from 'vitest'
+import type { IZcap } from '@interop/data-integrity-core'
 import {
   assertAccountCeremonyAllowed,
   assertDurableSession,
@@ -10,25 +11,64 @@ import {
   durableSessionPersistence,
   isDurableSession,
   StepUpRequiredError,
-  transientSessionPersistence
+  transientSessionPersistence,
+  transientSessionStores,
+  type TransientSessionPersistence
 } from '@/session/persistence'
+
+/**
+ * A full transient handle over fresh stores, with a stub annex identity --
+ * what the composition hands the session once the enrollment has run.
+ */
+function transientHandle(): TransientSessionPersistence {
+  return transientSessionPersistence({
+    stores: transientSessionStores(),
+    clientAnnex: {
+      clientAnnexDid: 'did:webvh:example:annex',
+      invocationCapability: {} as IZcap
+    }
+  })
+}
 
 describe('the transient persistence handle', () => {
   it('is typed non-durable and carries no idb factory member', () => {
-    const handle = transientSessionPersistence()
+    const handle = transientHandle()
     expect(isDurableSession(handle)).toBe(false)
     expect('idb' in handle).toBe(false)
   })
 
+  it('composes the annex identity over the stores unchanged', async () => {
+    const stores = transientSessionStores()
+    const accountDid = 'did:webvh:example'
+    await stores.epochPins.saveFromDescriptor({
+      accountDid,
+      epochId: 'epoch-0',
+      descriptor: { epochs: [{ id: 'epoch-0' }] }
+    })
+    const handle = transientSessionPersistence({
+      stores,
+      clientAnnex: {
+        clientAnnexDid: 'did:webvh:example:annex',
+        invocationCapability: {} as IZcap
+      }
+    })
+    // The annex identity is attached...
+    expect(handle.clientAnnex.clientAnnexDid).toBe('did:webvh:example:annex')
+    // ...and the stores carry through: a pin written before the session is
+    // readable through the composed handle, and the writer id is the same.
+    expect(await handle.epochPins.load({ accountDid })).toBe('epoch-0')
+    expect(handle.getWriterId()).toBe(stores.getWriterId())
+  })
+
   it('mints one writer id per handle, not per call', () => {
-    const handle = transientSessionPersistence()
-    const other = transientSessionPersistence()
+    const handle = transientSessionStores()
+    const other = transientSessionStores()
     expect(handle.getWriterId()).toBe(handle.getWriterId())
     expect(handle.getWriterId()).not.toBe(other.getWriterId())
   })
 
   it('serves one descriptor/meta cache pair whatever scope asks', async () => {
-    const handle = transientSessionPersistence()
+    const handle = transientSessionStores()
     const cache = handle.descriptorCache({ scope: 'a' })
     expect(cache).toBeDefined()
     expect(handle.descriptorCache({ scope: 'b' })).toBe(cache)
@@ -38,7 +78,7 @@ describe('the transient persistence handle', () => {
   })
 
   it('retains the login-seeded descriptor when no refresh overwrites it', async () => {
-    const handle = transientSessionPersistence()
+    const handle = transientSessionStores()
     const cache = handle.descriptorCache({ scope: 'space' })!
     const seeded = { currentEpoch: 'epoch-0', epochs: [] }
     await cache.writeDescriptor({
@@ -53,7 +93,7 @@ describe('the transient persistence handle', () => {
   })
 
   it('keeps the roster-epoch pin forward-only within the visit', async () => {
-    const handle = transientSessionPersistence()
+    const handle = transientSessionStores()
     const accountDid = 'did:webvh:example'
     const descriptor = {
       epochs: [{ id: 'epoch-0' }, { id: 'epoch-1' }, { id: 'epoch-2' }]
@@ -88,7 +128,7 @@ describe('the transient persistence handle', () => {
   })
 
   it('round-trips the unlock-methods cache in memory', async () => {
-    const handle = transientSessionPersistence()
+    const handle = transientSessionStores()
     const controller = 'did:key:controller'
     expect(await handle.unlockMethodsCache.load({ controller })).toBeNull()
     await handle.unlockMethodsCache.save({ controller, record: { v: 1 } })
@@ -100,7 +140,7 @@ describe('the transient persistence handle', () => {
   })
 
   it('serves an empty passkey-notice store', async () => {
-    const handle = transientSessionPersistence()
+    const handle = transientSessionStores()
     const controller = 'did:key:controller'
     await handle.passkeyNotices.save({
       controller,
@@ -141,7 +181,7 @@ describe('the durable persistence handle', () => {
 
 describe('the durability refusals', () => {
   it('refuses a durable-subject ceremony from a transient session', () => {
-    const transient = transientSessionPersistence()
+    const transient = transientHandle()
     expect(() =>
       assertDurableSession({
         persistence: transient,
@@ -157,7 +197,7 @@ describe('the durability refusals', () => {
   })
 
   it('refuses an account ceremony outside a step-up', () => {
-    const transient = transientSessionPersistence()
+    const transient = transientHandle()
     expect(() =>
       assertAccountCeremonyAllowed({
         persistence: transient,

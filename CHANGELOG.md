@@ -1,5 +1,14 @@
 # History
 
+## 0.40.1 - TBD
+
+### Changed
+
+- The transient session's client-annex identity and generation
+  delegation now ride the typed persistence handle instead of a
+  separate `initSessionFromSeed` option, so a session's durability is
+  declared exactly once.
+
 ## 0.40.0 - 2026-08-25
 
 ### Changed

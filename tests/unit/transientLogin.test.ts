@@ -87,7 +87,7 @@ import { establishCredentialAnchoredAccount } from '@/session/credentialAnchored
 import { fetchTransientKeyring } from '@/session/keyring'
 import { initSessionFromSeed } from '@/session/initSession'
 import type { TransientKeyringFetchResult } from '@/session/keyring'
-import { transientSessionPersistence } from '@/session/persistence'
+import { transientSessionStores } from '@/session/persistence'
 import {
   AlreadyRememberedError,
   routeUnlockLogin,
@@ -290,7 +290,7 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
       await transientSessionFromKeyringHit({
         found,
         type: 'passphrase',
-        persistence: transientSessionPersistence()
+        persistence: transientSessionStores()
       })
     } catch (err) {
       return err
@@ -407,7 +407,7 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
 describe('transientSessionFromKeyringHit -- the composition wiring', () => {
   it('enrolls, reads the standing wrap under the delegation, and assembles', async () => {
     primeHappyPath()
-    const persistence = transientSessionPersistence()
+    const persistence = transientSessionStores()
     const found = makeFound()
 
     const { session, userExists } = await transientSessionFromKeyringHit({
@@ -460,19 +460,29 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
       clientKeyAgreementKey: found.standingClient.agents.keyAgreementKey
     })
 
-    // The session assembly: the transient option, the record's email
-    // deferring to the typed one, and the stamps the durable tail applies.
+    // The session assembly: the transient handle composed over the routed
+    // stores carries the annex identity (durability declared once), the
+    // record's email defers to the typed one, and the stamps the durable
+    // tail applies follow.
     expect(initSessionFromSeed).toHaveBeenCalledWith(
       expect.objectContaining({
         accountPointer: POINTER,
         email: 'typed@example.test',
-        persistence,
-        transient: {
-          clientAnnexDid: CLIENT_ANNEX_DID,
-          invocationCapability: GENERATION_DELEGATION
-        }
+        persistence: expect.objectContaining({
+          durability: persistence.durability,
+          logPins: persistence.logPins,
+          clientAnnex: {
+            clientAnnexDid: CLIENT_ANNEX_DID,
+            invocationCapability: GENERATION_DELEGATION
+          }
+        })
       })
     )
+    // The composed handle preserves the routed stores (same writer id, same
+    // pin maps under the copied methods).
+    const passedPersistence =
+      vi.mocked(initSessionFromSeed).mock.calls[0]![0].persistence!
+    expect(passedPersistence.getWriterId()).toBe(persistence.getWriterId())
     expect(session.profile.accountController).toBe(found.controller)
     expect(session.profile.unlockMethod).toEqual({
       type: 'passphrase',
@@ -491,7 +501,7 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
     await transientSessionFromKeyringHit({
       found: makeFound(),
       type: 'passkey',
-      persistence: transientSessionPersistence()
+      persistence: transientSessionStores()
     })
     expect(initSessionFromSeed).toHaveBeenCalledWith(
       expect.objectContaining({ email: 'record@example.test' })
@@ -502,7 +512,7 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
 describe('transientSessionFromKeyringHit -- the credential-anchored signup heals', () => {
   it('heals a promoted account with no roster: ladder-signed epoch[0] under the delegation', async () => {
     primeHappyPath()
-    const persistence = transientSessionPersistence()
+    const persistence = transientSessionStores()
     const found = makeFound()
     // The first read finds nothing (the signup died before epoch[0]); the
     // re-read after the heal delivers the fresh key.
@@ -552,7 +562,7 @@ describe('transientSessionFromKeyringHit -- the credential-anchored signup heals
 
   it('re-runs the establishment for a ladder-seeded record with no did, then re-enters', async () => {
     primeHappyPath()
-    const persistence = transientSessionPersistence()
+    const persistence = transientSessionStores()
     const credential = CREDENTIAL
     const torn = makeFound({
       pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
@@ -592,7 +602,7 @@ describe('transientSessionFromKeyringHit -- the credential-anchored signup heals
       transientSessionFromKeyringHit({
         found: torn,
         type: 'passphrase',
-        persistence: transientSessionPersistence()
+        persistence: transientSessionStores()
       })
     ).rejects.toMatchObject({ reason: 'unpromoted-account' })
     expect(establishCredentialAnchoredAccount).not.toHaveBeenCalled()

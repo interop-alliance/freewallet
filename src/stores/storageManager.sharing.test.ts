@@ -42,7 +42,8 @@ import {
 import { mintRecordEncryption } from '@/session/recordEnvelope'
 import {
   durableSessionPersistence,
-  transientSessionPersistence
+  transientSessionPersistence,
+  transientSessionStores
 } from '@/session/persistence'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { ControllerProfile, User } from '@/types/auth'
@@ -1613,7 +1614,13 @@ describe('StorageManager unknown-epoch refresh', () => {
       'private-credentials': descriptor1
     })
     const { localStore } = await initLocalStore(ciphers)
-    const persistence = transientSessionPersistence()
+    const persistence = transientSessionPersistence({
+      stores: transientSessionStores(),
+      clientAnnex: {
+        clientAnnexDid: 'did:webvh:example:annex',
+        invocationCapability: {} as IZcap
+      }
+    })
     // The login-time acquisition seeds the handle's in-memory cache pair.
     await persistence
       .descriptorCache({ scope: remoteStore.spaceId })

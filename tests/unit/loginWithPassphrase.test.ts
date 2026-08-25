@@ -83,7 +83,7 @@ import {
   routeUnlockLogin,
   transientSessionFromKeyringHit
 } from '@/session/transientLogin'
-import { transientSessionPersistence } from '@/session/persistence'
+import { transientSessionStores } from '@/session/persistence'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
 import { ensureKeystore } from '@/lib/kms'
@@ -352,7 +352,7 @@ describe('loginWithPassphrase -- stale client-key record from another account', 
     vi.mocked(fetchKeyring).mockResolvedValue(staleHit as never)
     vi.mocked(routeUnlockLogin).mockReset()
     vi.mocked(routeUnlockLogin).mockResolvedValueOnce({ durability: 'durable' })
-    const persistence = transientSessionPersistence()
+    const persistence = transientSessionStores()
     const transientCredential = {
       unlock: { spaceId: 'unlock-space-test' },
       standing: {}
@@ -408,7 +408,7 @@ describe('loginWithPassphrase -- stale client-key record from another account', 
         unlock: { spaceId: 'unlock-space-test' },
         standing: {}
       } as never,
-      persistence: transientSessionPersistence()
+      persistence: transientSessionStores()
     })
     vi.mocked(fetchTransientKeyring).mockResolvedValue({
       controller: 'did:key:z6MkNewAccountController',
@@ -804,7 +804,7 @@ describe('loginWithPassphrase -- durability routing glue', () => {
   })
 
   it('runs the transient route over the shared in-memory handle', async () => {
-    const persistence = transientSessionPersistence()
+    const persistence = transientSessionStores()
     vi.mocked(routeUnlockLogin).mockResolvedValue({
       durability: 'transient',
       credential: CREDENTIAL,
@@ -847,7 +847,7 @@ describe('loginWithPassphrase -- durability routing glue', () => {
     vi.mocked(routeUnlockLogin).mockResolvedValue({
       durability: 'transient',
       credential: CREDENTIAL,
-      persistence: transientSessionPersistence()
+      persistence: transientSessionStores()
     })
     vi.mocked(fetchTransientKeyring).mockResolvedValue(null)
     await expect(

@@ -73,3 +73,15 @@ Reopen this decision when one or more of the following holds:
 
 If revisited, prefer an explicit, typed seam over a transparent
 interposed factory: the defect class was silence, not memory-backing.
+
+## Amendment (2026-08-25)
+
+The typed handle's transient variant now carries the session's
+client-annex identity -- the annex DID every WAS request signs under and
+the generation delegation every request rides -- as a required member,
+not a separate option beside the handle. A transient handle therefore
+cannot be constructed half-declared, and session assembly consults no
+second durability discriminant. This closes the "second durability
+switch" that had come to ride alongside the handle: `initSessionFromSeed`
+no longer branches on a `transient` block in addition to
+`isDurableSession(persistence)`.

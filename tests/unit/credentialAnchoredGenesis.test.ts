@@ -131,7 +131,7 @@ import { verifyAccountLog } from '@interop/wallet-core/webvh'
 import { bindCredentialAnchoredUnlockSecret } from '@/session/keyring'
 import type { UnlockCredential } from '@/session/keyring'
 import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
-import { transientSessionPersistence } from '@/session/persistence'
+import { transientSessionStores } from '@/session/persistence'
 
 const ACCOUNT_DID =
   'did:webvh:QmScidForTests:was.example.test:space:space-123:id'
@@ -178,7 +178,7 @@ async function establish(
     ladderSeed: new Uint8Array(32).fill(7),
     pointer: POINTER,
     lowEntropy: true,
-    persistence: transientSessionPersistence(),
+    persistence: transientSessionStores(),
     ...(beforePromotion ? { beforePromotion } : {})
   } as never)
 }
