@@ -1,6 +1,6 @@
 # History
 
-## 0.42.0 - TBD
+## 0.40.0 - 2026-08-25
 
 ### Changed
 
@@ -32,8 +32,6 @@
 - The `no-standing` transient-login refusal reason is removed; a record
   without a ladder seed is now an invariant violation rather than a
   user-facing refusal, since every WAS signup produces a standing record.
-
-## 0.41.0 - TBD
 
 ### Changed
 
@@ -124,8 +122,6 @@
   `VITE_DEPLOY_URL` used to register the literal mediator URL
   `...?origin=undefined`), and the docs page fetches its markdown relative
   to the serving origin.
-
-## 0.40.0 - TBD
 
 ### Changed
 
