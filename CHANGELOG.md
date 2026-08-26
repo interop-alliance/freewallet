@@ -34,6 +34,12 @@
 
 - The `remote-direct` transient-login refusal reason, along with its arm in
   the shared refusal-copy mapping.
+- The non-production `__E2E_MINT_CLIENT_ANNEX_GENERATION__` seam, whose last
+  caller went away when the remembered signup started minting the annex
+  generation itself. A non-production waiter for the login-time pass chain
+  (`__E2E_LOGIN_CHAIN_SETTLED__`) replaces the wait it had been providing
+  incidentally, so an e2e fixture can let that chain finish instead of
+  tearing its context down mid-pass.
 
 ## 0.42.0 - TBD
 

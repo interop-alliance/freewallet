@@ -163,6 +163,69 @@ export async function deleteCredential(page: Page) {
 }
 
 /**
+ * Waits for the login-time pass chain (`session.registryReady`) and the annex
+ * GC sweep forked off its tail to settle, through the non-production seam the
+ * auth store publishes. Navigation to the dashboard waits on storage
+ * provisioning alone, so a fixture that closes its context (or starts a
+ * second visit) the moment the dashboard renders aborts those passes wherever
+ * they happen to be, and which of them landed decides what the account looks
+ * like afterwards.
+ *
+ * Call it in any fixture that builds a durable account and then hands it to
+ * something else. Neither promise rejects, so this resolves whether the
+ * passes succeeded or warned and skipped.
+ *
+ * @param page {Page}   a page holding a logged-in session
+ * @param [timeoutMs] {number}   how long to wait for the chain to settle
+ * @returns {Promise<number>}   how long the wait actually took, in
+ *   milliseconds -- a fixture can record it to show the chain was still in
+ *   flight rather than already settled
+ */
+export async function awaitLoginChain(
+  page: Page,
+  timeoutMs = 120_000
+): Promise<number> {
+  return await page.evaluate(async (budgetMs: number) => {
+    const startedAt = Date.now()
+    const seam = () =>
+      (
+        window as unknown as {
+          __E2E_LOGIN_CHAIN_SETTLED__?: () => Promise<void>
+        }
+      ).__E2E_LOGIN_CHAIN_SETTLED__
+    const deadline = Date.now() + budgetMs
+    while (!seam()) {
+      if (Date.now() > deadline) {
+        throw new Error(
+          'No session published __E2E_LOGIN_CHAIN_SETTLED__ on this page.'
+        )
+      }
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        seam()!(),
+        new Promise((_resolve, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `The login-time pass chain did not settle in ${budgetMs}ms.`
+                )
+              ),
+            Math.max(0, deadline - Date.now())
+          )
+        })
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
+    return Date.now() - startedAt
+  }, timeoutMs)
+}
+
+/**
  * Forces the durable login route (the programmatic remember-this-browser
  * entry) for login submits on this page. A transient session is the
  * default on a non-remembered browser, so specs exercising the standing

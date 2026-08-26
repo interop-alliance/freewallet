@@ -20,7 +20,7 @@
  * list on the durable client never grows a row for it.
  */
 import { test, expect, type Browser, type Page } from '@playwright/test'
-import { fillSettled, signupViaWizard } from './helpers'
+import { awaitLoginChain, fillSettled, signupViaWizard } from './helpers'
 import {
   captureFrameLocalStorageKeys,
   expectNoFrameStorageResidue
@@ -252,6 +252,12 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
       const page = await context.newPage()
       // This browser IS a remembered durable client of its own account.
       const durable = await signupViaWizard(page, testInfo)
+      // The self-enrollment this signup ran struck the credential's ladder
+      // VM, and the replacements for the three members it rotted ride the
+      // login-time chain nothing awaits (FW-354). Starting the popup visit
+      // before that chain settles races it, so the fixture waits; the wait
+      // stands in for the product gap rather than closing it.
+      await awaitLoginChain(page)
 
       await withoutUnpartitionedStorageAccess({ page })
       const { frame, baseline } = await popupToConsent(page, {

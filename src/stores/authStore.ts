@@ -26,36 +26,29 @@ function publishStorageSeam(session: Session | null): void {
 }
 
 /**
- * E2E test seam. The annex-generation establishment
- * (`establishClientAnnexGeneration` in `src/session/standingUnlock.ts`) runs
- * from a live enrolled session holding the credential's secret; no shipped
- * login ceremony triggers it yet, and the transient-login e2e needs an
- * account in that state. In non-production builds only, publish a driver on
- * `window.__E2E_MINT_CLIENT_ANNEX_GENERATION__` so a Playwright spec can run it
- * from the signed-in durable context. Cleared on logout. No-op in production.
+ * E2E test seam. Navigation to the dashboard waits on storage provisioning
+ * alone, so the login-time pass chain (`session.registryReady`) and the annex
+ * GC sweep forked off its tail (`session.clientAnnexGcSweep`) are still in
+ * flight when a spec's fixture reaches the dashboard. A fixture that closes
+ * its browser context there aborts the chain wherever it happens to be, and
+ * the account it leaves behind depends on which pass got in first. In
+ * non-production builds only, publish a waiter on
+ * `window.__E2E_LOGIN_CHAIN_SETTLED__` so a Playwright fixture can let the
+ * chain finish before it tears the context down. Neither promise rejects.
+ * Cleared on logout. No-op in production.
  */
-function publishClientAnnexFixtureSeam(session: Session | null): void {
+function publishLoginChainSeam(session: Session | null): void {
   if (import.meta.env.MODE === 'production') {
     return
   }
   ;(
     window as unknown as {
-      __E2E_MINT_CLIENT_ANNEX_GENERATION__?: (options: {
-        passphrase: string
-      }) => Promise<void>
+      __E2E_LOGIN_CHAIN_SETTLED__?: () => Promise<void>
     }
-  ).__E2E_MINT_CLIENT_ANNEX_GENERATION__ = session
-    ? async ({ passphrase }: { passphrase: string }) => {
-        const [{ establishClientAnnexGeneration }, { KEYRING_KDF }] =
-          await Promise.all([
-            import('@/session/standingUnlock'),
-            import('@interop/wallet-core/keyring')
-          ])
-        await establishClientAnnexGeneration({
-          session,
-          secret: passphrase,
-          kdf: KEYRING_KDF
-        })
+  ).__E2E_LOGIN_CHAIN_SETTLED__ = session
+    ? async () => {
+        await session.registryReady
+        await session.clientAnnexGcSweep
       }
     : undefined
 }
@@ -74,7 +67,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     const previous = get().session
     set({ session })
     publishStorageSeam(session)
-    publishClientAnnexFixtureSeam(session)
+    publishLoginChainSeam(session)
     // The UI-prefs half of the durability seam: while a transient session is
     // live, theme/language toggles land in an in-memory overlay instead of
     // localStorage (`src/lib/prefsStorage.ts`).
@@ -113,7 +106,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     // stays in IndexedDB; only the passphrase-derived session is discarded).
     await get().session?.storage.close()
     publishStorageSeam(null)
-    publishClientAnnexFixtureSeam(null)
+    publishLoginChainSeam(null)
     setTransientPrefs({ active: false })
     set({ session: null })
   }
