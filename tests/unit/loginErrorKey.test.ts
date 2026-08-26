@@ -49,6 +49,20 @@ describe('loginErrorKey', () => {
     }
   })
 
+  it('maps the no-wrap refusal onto its own retrying-will-not-help copy', () => {
+    expect(keyFor('no-user-key-wrap').key).toBe(
+      'auth.errors.transientNoUserKeyWrap'
+    )
+  })
+
+  it('maps the mint-refused roster onto its own copy', () => {
+    // Not the retryable setup-did-not-finish copy: the mint preconditions
+    // refuse the same way on every retry.
+    expect(keyFor('roster-mint-refused').key).toBe(
+      'auth.errors.transientRosterMintRefused'
+    )
+  })
+
   it('maps the annex-generation family onto the honest refusal', () => {
     for (const reason of [
       'no-delegated-clients',
@@ -73,7 +87,9 @@ describe('loginErrorKey', () => {
       'unpromoted-account',
       'no-clientAnnex-generation',
       'no-generation-delegation',
-      'no-user-key-roster'
+      'no-user-key-roster',
+      'no-user-key-wrap',
+      'roster-mint-refused'
     ]
     for (const reason of reasons) {
       expect(keyFor(reason).key).not.toBe('auth.errors.clientNotEnrolled')

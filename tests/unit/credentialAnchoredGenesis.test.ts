@@ -45,6 +45,7 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
     typeof import('@interop/wallet-core/clientAnnex')
   >()),
   establishCredentialAnchoredAccount: vi.fn(),
+  mendCredentialAnchoredAccount: vi.fn(),
   ladderVmAgent: vi.fn(async () => ({ id: 'did:key:zLadder' }))
 }))
 
@@ -75,16 +76,32 @@ vi.mock('@/session/rosterStore', () => ({
   accountRosterStore: vi.fn(() => ({ isRosterStore: true }))
 }))
 
+vi.mock('@/session/unlockMethods', () => ({
+  emptyUnlockMethodsRegistry: vi.fn(() => ({ version: 1, methods: [] })),
+  updateUnlockMethodsWithClient: vi.fn(async () => null),
+  upsertPassphraseUnlockMethod: vi.fn(record => record)
+}))
+
 import {
   establishCredentialAnchoredAccount as coreEstablish,
-  ladderVmAgent
+  ladderVmAgent,
+  mendCredentialAnchoredAccount as coreMend
 } from '@interop/wallet-core/clientAnnex'
 import { bindCredentialAnchoredUnlockSecret } from '@/session/keyring'
 import type { UnlockCredential } from '@/session/keyring'
 import { accountRosterStore } from '@/session/rosterStore'
 import { promoteKeystoreController } from '@/lib/kms'
-import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
+import {
+  establishCredentialAnchoredAccount,
+  mendCredentialAnchoredAccount,
+  passphraseRegistryUpsertHook
+} from '@/session/credentialAnchoredGenesis'
+import {
+  updateUnlockMethodsWithClient,
+  upsertPassphraseUnlockMethod
+} from '@/session/unlockMethods'
 import { transientSessionStores } from '@/session/persistence'
+import { ENCRYPTED_STANDARD_COLLECTIONS } from '@/app.config'
 
 const ACCOUNT_DID =
   'did:webvh:QmScidForTests:was.example.test:space:space-123:id'
@@ -123,12 +140,8 @@ function establishmentResult(
  * Runs the binding against the current mocks and returns the options the
  * mocked wallet-core orchestrator received.
  */
-async function establish(
-  overrides: Record<string, unknown> = {}
-): Promise<{
-  establishment: Awaited<
-    ReturnType<typeof establishCredentialAnchoredAccount>
-  >
+async function establish(overrides: Record<string, unknown> = {}): Promise<{
+  establishment: Awaited<ReturnType<typeof establishCredentialAnchoredAccount>>
   options: Record<string, unknown>
 }> {
   const persistence =
@@ -168,8 +181,7 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
     expect(options.spaceId).toBe(POINTER.spaceId)
     expect(options.standing).toEqual({
       clientDid: CREDENTIAL.standing.clientDid,
-      keyAgreementKeyMultibase:
-        CREDENTIAL.standing.keyAgreementKeyMultibase,
+      keyAgreementKeyMultibase: CREDENTIAL.standing.keyAgreementKeyMultibase,
       recipientKid: CREDENTIAL.standing.recipientKid,
       keyAgreementKey: CREDENTIAL.standing.agents.keyAgreementKey
     })
@@ -321,6 +333,232 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
         level: 'warn',
         msg: expect.stringContaining('Keystore controller promotion failed'),
         err: keystoreError
+      })
+    )
+    removeSink()
+  })
+})
+
+describe('mendCredentialAnchoredAccount -- the mend binding', () => {
+  beforeEach(() => {
+    vi.mocked(coreMend).mockResolvedValue({ reenter: false } as never)
+  })
+
+  it('hands wallet-core the account core, the shared hooks, and the mend members', async () => {
+    const persistence = transientSessionStores()
+    const invocation = {
+      was: { isInvocationWas: true },
+      zcapClient: { isInvocationZcap: true },
+      capability: { id: 'urn:zcap:generation' }
+    }
+    const rosterStore = { isDelegatedRosterStore: true }
+    const delegatedRead = { error: new Error('refused'), retry: vi.fn() }
+    const registry = { unlockSpaceId: 'unlock-space-1' }
+    const beforePromotion = vi.fn(async () => undefined)
+
+    const report = await mendCredentialAnchoredAccount({
+      credential: CREDENTIAL,
+      ladderSeed: new Uint8Array(32).fill(7),
+      pointer: { ...POINTER, did: ACCOUNT_DID },
+      controller: 'did:key:z6MkController',
+      lowEntropy: true,
+      priorCreatedAt: '2026-08-20T00:00:00.000Z',
+      persistence,
+      beforePromotion,
+      invocation,
+      rosterStore,
+      delegatedRead,
+      registry,
+      repairShaped: true
+    } as never)
+
+    expect(report).toEqual({ reenter: false })
+    expect(coreMend).toHaveBeenCalledTimes(1)
+    const options = vi.mocked(coreMend).mock.calls[0]![0] as Record<
+      string,
+      unknown
+    >
+    expect(options.account).toEqual({
+      controller: 'did:key:z6MkController',
+      pointer: { ...POINTER, did: ACCOUNT_DID },
+      ladderSeed: new Uint8Array(32).fill(7)
+    })
+    // The same hook set the establishment binding hands over.
+    expect(options.standing).toEqual({
+      clientDid: CREDENTIAL.standing.clientDid,
+      keyAgreementKeyMultibase: CREDENTIAL.standing.keyAgreementKeyMultibase,
+      recipientKid: CREDENTIAL.standing.recipientKid,
+      keyAgreementKey: CREDENTIAL.standing.agents.keyAgreementKey
+    })
+    expect(typeof options.bindRecord).toBe('function')
+    expect(typeof options.rosterStoreFor).toBe('function')
+    expect(typeof options.bootstrapWasFor).toBe('function')
+    expect(options.idStore).toEqual({ isIdStore: true })
+    expect(options.pinStore).toBe(persistence.logPins)
+    // The mend members ride through unchanged.
+    expect(options.priorCreatedAt).toBe('2026-08-20T00:00:00.000Z')
+    expect(options.beforePromotion).toBe(beforePromotion)
+    expect(options.invocation).toBe(invocation)
+    expect(options.rosterStore).toBe(rosterStore)
+    expect(options.delegatedRead).toBe(delegatedRead)
+    expect(options.registry).toBe(registry)
+    expect(options.repairShaped).toBe(true)
+    // The roster arm's completion probe and fan-out cover this wallet's own
+    // encrypted collections, the set the establishment installed epoch[0] on.
+    expect(options.collectionIds).toEqual(
+      ENCRYPTED_STANDARD_COLLECTIONS.map(({ id }) => id)
+    )
+  })
+
+  it('refuses with no WAS server before wallet-core is ever called', async () => {
+    state.wasUrl = undefined
+
+    await expect(
+      mendCredentialAnchoredAccount({
+        credential: CREDENTIAL,
+        ladderSeed: new Uint8Array(32).fill(7),
+        pointer: POINTER,
+        controller: 'did:key:z6MkController',
+        lowEntropy: true,
+        persistence: transientSessionStores()
+      } as never)
+    ).rejects.toThrow(TypeError)
+    expect(coreMend).not.toHaveBeenCalled()
+  })
+})
+
+describe('passphraseRegistryUpsertHook -- the shared registry hook', () => {
+  it('threads the invocation capability into the registry write', async () => {
+    const capability = { id: 'urn:zcap:generation' }
+    const hook = passphraseRegistryUpsertHook({
+      spaceId: 'space-123',
+      capability
+    } as never)
+    const context = {
+      zcapClient: { isHookZcap: true },
+      userKey: { id: 'did:key:z6LSuser' },
+      establishment: {
+        did: ACCOUNT_DID,
+        unlockSpaceId: 'unlock-space-1',
+        standingFields: {}
+      }
+    }
+
+    await hook(context as never)
+
+    expect(updateUnlockMethodsWithClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        zcapClient: context.zcapClient,
+        spaceId: 'space-123',
+        userKey: context.userKey,
+        capability
+      })
+    )
+  })
+
+  it("carries a standing entry's management zcap forward on a re-fire", async () => {
+    // A mend re-fire synthesizes the establishment context from the standing
+    // record, which carries no management zcap. The upsert rebuilds the
+    // entry from scratch, so an absent capability here would durably delete
+    // the standing entry's zcap -- what account deletion and the last-client
+    // transition invoke with.
+    const held = { id: 'urn:zcap:manage-standing' }
+    let mutate: ((existing: unknown) => unknown) | undefined
+    vi.mocked(updateUnlockMethodsWithClient).mockImplementationOnce(
+      async options => {
+        mutate = options.mutate as (existing: unknown) => unknown
+        return null
+      }
+    )
+    const hook = passphraseRegistryUpsertHook({ spaceId: 'space-123' })
+
+    await hook({
+      zcapClient: {},
+      userKey: { id: 'did:key:z6LSuser' },
+      establishment: {
+        did: ACCOUNT_DID,
+        unlockSpaceId: 'unlock-space-1',
+        standingFields: {}
+      }
+    } as never)
+    mutate!({
+      version: 1,
+      methods: [
+        {
+          type: 'passphrase',
+          unlockSpaceId: 'unlock-space-1',
+          manageCapability: held
+        }
+      ]
+    })
+
+    expect(upsertPassphraseUnlockMethod).toHaveBeenCalledWith(
+      expect.objectContaining({
+        unlockSpaceId: 'unlock-space-1',
+        manageCapability: held
+      })
+    )
+  })
+
+  it("leaves another unlock Space's zcap out of a re-fired entry", async () => {
+    let mutate: ((existing: unknown) => unknown) | undefined
+    vi.mocked(updateUnlockMethodsWithClient).mockImplementationOnce(
+      async options => {
+        mutate = options.mutate as (existing: unknown) => unknown
+        return null
+      }
+    )
+    const hook = passphraseRegistryUpsertHook({ spaceId: 'space-123' })
+
+    await hook({
+      zcapClient: {},
+      userKey: { id: 'did:key:z6LSuser' },
+      establishment: {
+        did: ACCOUNT_DID,
+        unlockSpaceId: 'unlock-space-1',
+        standingFields: {}
+      }
+    } as never)
+    mutate!({
+      version: 1,
+      methods: [
+        {
+          type: 'passphrase',
+          unlockSpaceId: 'unlock-space-OTHER',
+          manageCapability: { id: 'urn:zcap:manage-other' }
+        }
+      ]
+    })
+
+    const call = vi.mocked(upsertPassphraseUnlockMethod).mock.calls.at(-1)![0]
+    expect(call).not.toHaveProperty('manageCapability')
+  })
+
+  it('swallows a thrown registry write with a warn (best-effort)', async () => {
+    vi.mocked(updateUnlockMethodsWithClient).mockRejectedValueOnce(
+      new Error('registry write refused')
+    )
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+    const hook = passphraseRegistryUpsertHook({ spaceId: 'space-123' })
+
+    await expect(
+      hook({
+        zcapClient: {},
+        userKey: { id: 'did:key:z6LSuser' },
+        establishment: {
+          did: ACCOUNT_DID,
+          unlockSpaceId: 'unlock-space-1',
+          standingFields: {}
+        }
+      } as never)
+    ).resolves.toBeUndefined()
+
+    expect(capture.events).toContainEqual(
+      expect.objectContaining({
+        ns: 'fw:session:genesis',
+        level: 'warn',
+        msg: expect.stringContaining('skipping the passphrase entry')
       })
     )
     removeSink()

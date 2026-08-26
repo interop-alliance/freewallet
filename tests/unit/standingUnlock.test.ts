@@ -144,9 +144,8 @@ const { establishClientAnnexGeneration, establishStandingUnlock } =
   await import('@/session/standingUnlock')
 const { updateUnlockMethods } = await import('@/session/unlockMethods')
 const { fetchKeyring } = await import('@/session/keyring')
-const { clientAnnexReachOf, ensureGenerationDelegation } = await import(
-  '@/session/annexReach'
-)
+const { clientAnnexReachOf, ensureGenerationDelegation } =
+  await import('@/session/annexReach')
 const { ensurePointedClientAnnexGeneration, mintDelegatedClientsDelegation } =
   await import('@interop/wallet-core/clientAnnex')
 

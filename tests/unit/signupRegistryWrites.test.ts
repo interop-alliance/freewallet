@@ -57,7 +57,12 @@ vi.mock('@/session/initSession', () => ({
   }))
 }))
 
-vi.mock('@/session/credentialAnchoredGenesis', () => ({
+vi.mock('@/session/credentialAnchoredGenesis', async importOriginal => ({
+  // The real module rides along for `passphraseRegistryUpsertHook` (the
+  // hook under test); only the establishment is doubled.
+  ...(await importOriginal<
+    typeof import('@/session/credentialAnchoredGenesis')
+  >()),
   // The establishment fires the hook the way the real one does: inside the
   // pre-promotion window. A hook throw is FATAL to the establishment (the
   // Stage-1 contract) -- a hook that must be best-effort swallows its own
@@ -227,7 +232,7 @@ describe('the credential-anchored signup hook -- read-first registry write', () 
     expect(state.registry).toEqual(first)
     expect(capture.events).toContainEqual(
       expect.objectContaining({
-        ns: 'fw:session:signup',
+        ns: 'fw:session:genesis',
         level: 'warn',
         msg: expect.stringContaining('skipping the passphrase entry'),
         err: expect.any(Error)

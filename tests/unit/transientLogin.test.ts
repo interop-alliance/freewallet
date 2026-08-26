@@ -9,6 +9,8 @@
  * deterministically; the per-visit key mint (`agentsFromSeed`) runs for real.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
+import { WasError } from '@interop/was-client'
 
 const state = vi.hoisted(() => ({
   wasUrl: 'https://was.example.test' as string | undefined
@@ -58,7 +60,8 @@ vi.mock('@/session/initSession', () => ({
 }))
 
 vi.mock('@/session/credentialAnchoredGenesis', () => ({
-  establishCredentialAnchoredAccount: vi.fn()
+  mendCredentialAnchoredAccount: vi.fn(async () => ({ reenter: false })),
+  passphraseRegistryUpsertHook: vi.fn(() => vi.fn())
 }))
 
 vi.mock('@/session/keyring', async importOriginal => ({
@@ -79,13 +82,14 @@ import {
   ensureCredentialClientAnnexGeneration
 } from '@interop/wallet-core/clientAnnex'
 import {
-  ensureUserKeyRoster,
-  ensureWalletSpaceEpochs,
   readUserKeyRoster,
   userKeyRosterDescriptorStore
 } from '@interop/wallet-core/keys'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
-import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
+import {
+  mendCredentialAnchoredAccount,
+  passphraseRegistryUpsertHook
+} from '@/session/credentialAnchoredGenesis'
 import { fetchTransientKeyring } from '@/session/keyring'
 import { initSessionFromSeed } from '@/session/initSession'
 import type { TransientKeyringFetchResult } from '@/session/keyring'
@@ -327,12 +331,18 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
    * Runs the composition against the current mocks and returns the caught
    * refusal.
    */
-  async function refusalFor(found: TransientKeyringFetchResult) {
+  async function refusalFor(
+    found: TransientKeyringFetchResult,
+    extra: { credential?: unknown } = {}
+  ) {
     try {
       await transientSessionFromKeyringHit({
         found,
         type: 'passphrase',
-        persistence: transientSessionStores()
+        persistence: transientSessionStores(),
+        ...(extra.credential !== undefined
+          ? { credential: extra.credential as never }
+          : {})
       })
     } catch (err) {
       return err
@@ -471,14 +481,84 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
   it('refuses when even the tear heal leaves no user key roster', async () => {
     primeHappyPath()
     vi.mocked(readUserKeyRoster).mockResolvedValue(null as never)
+    vi.mocked(mendCredentialAnchoredAccount).mockResolvedValue({
+      reenter: false,
+      rosterEpochs: { converged: true, outcome: 'delivered' }
+    } as never)
+    const err = await refusalFor(makeFound(), { credential: CREDENTIAL })
+    expect((err as TransientLoginUnavailableError).reason).toBe(
+      'no-user-key-roster'
+    )
+    // The mend ran before the refusal: it is the promoted-account-with-no-
+    // roster arm, and only its own empty re-read refuses.
+    expect(mendCredentialAnchoredAccount).toHaveBeenCalled()
+    expect(initSessionFromSeed).not.toHaveBeenCalled()
+  })
+
+  it('refuses with no credential in hand when the roster is absent', async () => {
+    primeHappyPath()
+    vi.mocked(readUserKeyRoster).mockResolvedValue(null as never)
     const err = await refusalFor(makeFound())
     expect((err as TransientLoginUnavailableError).reason).toBe(
       'no-user-key-roster'
     )
-    // The heal ran before the refusal: it is the promoted-account-with-no-
-    // roster carve-out, and only its own empty re-read refuses.
-    expect(ensureUserKeyRoster).toHaveBeenCalled()
-    expect(initSessionFromSeed).not.toHaveBeenCalled()
+    // No mend without the credential: the arm cannot re-bind or hook.
+    expect(mendCredentialAnchoredAccount).not.toHaveBeenCalled()
+  })
+
+  it("maps the mend's no-wrap outcome onto its own refusal", async () => {
+    primeHappyPath()
+    const noWrap = new Error('no wrap for this credential')
+    vi.mocked(readUserKeyRoster).mockResolvedValue(null as never)
+    vi.mocked(mendCredentialAnchoredAccount).mockResolvedValue({
+      reenter: false,
+      rosterEpochs: { converged: false, outcome: 'no-wrap', error: noWrap }
+    } as never)
+    const err = await refusalFor(makeFound(), { credential: CREDENTIAL })
+    expect((err as TransientLoginUnavailableError).reason).toBe(
+      'no-user-key-wrap'
+    )
+    expect((err as Error).cause).toBe(noWrap)
+  })
+
+  it('refuses no-user-key-wrap when the roster read itself throws the unwrap', async () => {
+    // The read returns null only for an ABSENT roster; a roster with no wrap
+    // for this credential throws. The refusal is the composition's own, so
+    // the raw error never reaches the login page's enrollment card, and no
+    // mend arm is asked to fix a state it cannot fix.
+    primeHappyPath()
+    const unwrap = Object.assign(new Error('no wrap for this recipient'), {
+      name: 'UserKeyRosterUnwrapError'
+    })
+    vi.mocked(readUserKeyRoster).mockRejectedValue(unwrap as never)
+    const err = await refusalFor(makeFound(), { credential: CREDENTIAL })
+    expect((err as TransientLoginUnavailableError).reason).toBe(
+      'no-user-key-wrap'
+    )
+    expect((err as Error).cause).toBe(unwrap)
+    expect(mendCredentialAnchoredAccount).not.toHaveBeenCalled()
+  })
+
+  it("maps the mend's mint-refused outcome onto its own refusal", async () => {
+    // The mint preconditions refused (a held roster-epoch pin, or foreign
+    // key-agreement entries): a retry re-runs the same refusal, so it is not
+    // folded into the retryable absent-roster copy.
+    primeHappyPath()
+    const refused = new Error('the mint preconditions refused')
+    vi.mocked(readUserKeyRoster).mockResolvedValue(null as never)
+    vi.mocked(mendCredentialAnchoredAccount).mockResolvedValue({
+      reenter: false,
+      rosterEpochs: {
+        converged: false,
+        outcome: 'mint-refused',
+        error: refused
+      }
+    } as never)
+    const err = await refusalFor(makeFound(), { credential: CREDENTIAL })
+    expect((err as TransientLoginUnavailableError).reason).toBe(
+      'roster-mint-refused'
+    )
+    expect((err as Error).cause).toBe(refused)
   })
 
   it('rethrows a network failure unchanged (flap, not lapse)', async () => {
@@ -735,13 +815,13 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
   })
 })
 
-describe('transientSessionFromKeyringHit -- the credential-anchored signup heals', () => {
-  it('heals a promoted account with no roster: ladder-signed epoch[0] under the delegation', async () => {
+describe('transientSessionFromKeyringHit -- the shared mend ceremony', () => {
+  it('mends a promoted account with no roster through the roster arm, under the delegated authority', async () => {
     primeHappyPath()
     const persistence = transientSessionStores()
     const found = makeFound()
     // The first read finds nothing (the signup died before epoch[0]); the
-    // re-read after the heal delivers the fresh key.
+    // re-read after the mend delivers the fresh key.
     vi.mocked(readUserKeyRoster)
       .mockResolvedValueOnce(null as never)
       .mockResolvedValue({
@@ -750,43 +830,114 @@ describe('transientSessionFromKeyringHit -- the credential-anchored signup heals
         rotated: false,
         latestEpochId: 'did:key:z6LSfresh'
       } as never)
+    vi.mocked(mendCredentialAnchoredAccount).mockResolvedValue({
+      reenter: false,
+      rosterEpochs: { converged: true, outcome: 'delivered' }
+    } as never)
+    const registryHook = vi.fn()
+    vi.mocked(passphraseRegistryUpsertHook).mockReturnValue(
+      registryHook as never
+    )
 
     const { session } = await transientSessionFromKeyringHit({
       found,
       type: 'passphrase',
-      persistence
+      persistence,
+      credential: CREDENTIAL
     })
 
-    // The heal's roster store: the ladder-signed signer (not the visit
-    // key's), still invoked under the generation delegation.
+    // The mend rode the visit's live authority: the invocation triple
+    // under the generation delegation, a ladder-signed roster store (the
+    // last store built carries the delegation), the record's registry
+    // context, and the passphrase registry hook bound to the same
+    // delegation.
+    const mendCall = vi.mocked(mendCredentialAnchoredAccount).mock.calls[0]![0]
+    expect(mendCall.invocation!.capability).toBe(GENERATION_DELEGATION)
+    expect(mendCall.rosterStore).toBeTruthy()
+    expect(mendCall.registry).toEqual(
+      expect.objectContaining({
+        unlockSpaceId: found.unlockSpaceId,
+        delegation: found.standing!.delegation,
+        delegatedClients: SIBLING_DELEGATION
+      })
+    )
+    expect(mendCall.beforePromotion).toBe(registryHook)
+    expect(passphraseRegistryUpsertHook).toHaveBeenCalledWith({
+      spaceId: POINTER.spaceId,
+      capability: GENERATION_DELEGATION
+    })
     const healStoreCall = vi
       .mocked(userKeyRosterDescriptorStore)
       .mock.calls.at(-1)![0]
     expect(healStoreCall.capability).toBe(GENERATION_DELEGATION)
-    const ensureCall = vi.mocked(ensureUserKeyRoster).mock.calls[0]![0]
-    expect(ensureCall.clientKeyAgreementKey).toBe(
-      found.standingClient.agents.keyAgreementKey
-    )
-    expect(ensureCall.userKey.id).toMatch(/^did:key:/)
-    // The collection epochs complete under the same delegated authority,
-    // keyed to what the roster delivers after the ensure (a racing tab's
-    // heal may have landed the roster first), never to the minted candidate.
-    expect(ensureWalletSpaceEpochs).toHaveBeenCalledWith(
-      expect.objectContaining({
-        spaceId: POINTER.spaceId,
-        capability: GENERATION_DELEGATION,
-        userKey: expect.objectContaining({ id: 'did:key:z6LSfresh' })
-      })
-    )
-    expect(
-      vi.mocked(readUserKeyRoster).mock.invocationCallOrder.at(-1)!
-    ).toBeLessThan(
-      vi.mocked(ensureWalletSpaceEpochs).mock.invocationCallOrder[0]!
-    )
+    // The composition re-read the roster after the arm delivered.
+    expect(vi.mocked(readUserKeyRoster).mock.calls.length).toBeGreaterThan(1)
     expect(session).toBeTruthy()
   })
 
-  it('re-runs the establishment for a ladder-seeded record with no did, then re-enters', async () => {
+  it("completes a torn promotion through the mend's delegated-read trigger, then reads on", async () => {
+    primeHappyPath()
+    const persistence = transientSessionStores()
+    const found = makeFound()
+    const torn = new Error('delegated read refused')
+    vi.mocked(readUserKeyRoster)
+      .mockRejectedValueOnce(torn as never)
+      .mockResolvedValue({
+        descriptor: { epochs: [{ id: 'did:key:z6LSepoch1' }] },
+        userKey: { id: 'did:key:z6LSepoch1', secret: new Uint8Array(32) },
+        rotated: true,
+        latestEpochId: 'did:key:z6LSepoch1'
+      } as never)
+    vi.mocked(mendCredentialAnchoredAccount).mockImplementation(
+      async options => {
+        // The promotion arm's contract: mend, then retry the caller's read.
+        await options.delegatedRead!.retry()
+        return {
+          reenter: false,
+          promotion: { converged: true, outcome: 'retried' }
+        } as never
+      }
+    )
+
+    const { session } = await transientSessionFromKeyringHit({
+      found,
+      type: 'passphrase',
+      persistence,
+      credential: CREDENTIAL
+    })
+
+    const mendCall = vi.mocked(mendCredentialAnchoredAccount).mock.calls[0]![0]
+    expect(mendCall.delegatedRead!.error).toBe(torn)
+    expect(session).toBeTruthy()
+  })
+
+  it('rethrows the original roster error unchanged when the promotion arm does not converge', async () => {
+    primeHappyPath()
+    const found = makeFound()
+    const torn = new TypeError('Failed to fetch')
+    vi.mocked(readUserKeyRoster).mockRejectedValue(torn as never)
+    vi.mocked(mendCredentialAnchoredAccount).mockImplementation(
+      async options => {
+        // Wallet-core's contract: a promotion or retry that still fails
+        // rethrows the caller's original error unchanged.
+        throw options.delegatedRead!.error
+      }
+    )
+    const err = await transientSessionFromKeyringHit({
+      found,
+      type: 'passphrase',
+      persistence: transientSessionStores(),
+      credential: CREDENTIAL
+    }).then(
+      () => {
+        throw new Error('expected a rethrow')
+      },
+      (thrown: unknown) => thrown
+    )
+    expect(err).toBe(torn)
+  })
+
+  it('mends a ladder-seeded record with no did through the establishment arm, then re-enters', async () => {
     primeHappyPath()
     const persistence = transientSessionStores()
     const credential = CREDENTIAL
@@ -795,6 +946,10 @@ describe('transientSessionFromKeyringHit -- the credential-anchored signup heals
     })
     const refreshed = makeFound()
     vi.mocked(fetchTransientKeyring).mockResolvedValue(refreshed as never)
+    vi.mocked(mendCredentialAnchoredAccount).mockResolvedValueOnce({
+      reenter: true,
+      establishment: { converged: true, outcome: 'established' }
+    } as never)
 
     const { session } = await transientSessionFromKeyringHit({
       found: torn,
@@ -803,11 +958,12 @@ describe('transientSessionFromKeyringHit -- the credential-anchored signup heals
       credential
     })
 
-    expect(establishCredentialAnchoredAccount).toHaveBeenCalledWith(
+    expect(mendCredentialAnchoredAccount).toHaveBeenCalledWith(
       expect.objectContaining({
         credential,
         ladderSeed: torn.standing!.ladderSeed,
         pointer: torn.pointer,
+        controller: torn.controller,
         lowEntropy: true,
         persistence
       })
@@ -818,6 +974,150 @@ describe('transientSessionFromKeyringHit -- the credential-anchored signup heals
       accountLogPinStore: persistence.logPins
     })
     expect(session).toBeTruthy()
+  })
+
+  it('maps a non-converged establishment arm onto the unpromoted-account refusal', async () => {
+    // The mend catches an establishment throw into the report; the
+    // composition maps it onto the typed refusal instead of letting a raw
+    // ceremony error escape the login.
+    const boom = new Error('the establishment died mid-run')
+    const torn = makeFound({
+      pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
+    })
+    vi.mocked(mendCredentialAnchoredAccount).mockResolvedValueOnce({
+      reenter: false,
+      establishment: { converged: false, outcome: 'established', error: boom }
+    } as never)
+    const err = await transientSessionFromKeyringHit({
+      found: torn,
+      type: 'passphrase',
+      persistence: transientSessionStores(),
+      credential: CREDENTIAL
+    }).then(
+      () => {
+        throw new Error('expected a refusal')
+      },
+      (thrown: unknown) => thrown
+    )
+    expect((err as TransientLoginUnavailableError).reason).toBe(
+      'unpromoted-account'
+    )
+    expect((err as Error).cause).toBe(boom)
+    expect(fetchTransientKeyring).not.toHaveBeenCalled()
+  })
+
+  it('rethrows a transport-class establishment failure unchanged', async () => {
+    // A flap is not an account state: it must stay distinguishable from the
+    // refusal whose copy says a retry finishes the setup.
+    const offline = new WasError('the server could not be reached')
+    const torn = makeFound({
+      pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
+    })
+    vi.mocked(mendCredentialAnchoredAccount).mockResolvedValueOnce({
+      reenter: false,
+      establishment: {
+        converged: false,
+        outcome: 'established',
+        error: offline
+      }
+    } as never)
+    const err = await transientSessionFromKeyringHit({
+      found: torn,
+      type: 'passphrase',
+      persistence: transientSessionStores(),
+      credential: CREDENTIAL
+    }).then(
+      () => {
+        throw new Error('expected a rethrow')
+      },
+      (thrown: unknown) => thrown
+    )
+    expect(err).toBe(offline)
+  })
+
+  it('states that it holds no durable roster-epoch pin', async () => {
+    const torn = makeFound({
+      pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
+    })
+    await transientSessionFromKeyringHit({
+      found: torn,
+      type: 'passphrase',
+      persistence: transientSessionStores(),
+      credential: CREDENTIAL
+    }).catch(() => undefined)
+    const mendCall = vi.mocked(mendCredentialAnchoredAccount).mock.calls[0]![0]
+    expect(await mendCall.hasRosterEpochPin()).toBe(false)
+  })
+
+  it("carries reenterRepairShaped into the re-entry's completion arms", async () => {
+    // The record-downgrade re-bind left the registry arm unfired (its root
+    // window is closed for good), so the re-entry must fire the completion
+    // arms under the visit's post-promotion authority.
+    primeHappyPath()
+    const torn = makeFound({
+      pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
+    })
+    vi.mocked(fetchTransientKeyring).mockResolvedValue(makeFound() as never)
+    vi.mocked(mendCredentialAnchoredAccount)
+      .mockResolvedValueOnce({
+        reenter: true,
+        reenterRepairShaped: true,
+        establishment: { converged: true, outcome: 'rebound' }
+      } as never)
+      .mockResolvedValue({ reenter: false } as never)
+
+    const { session } = await transientSessionFromKeyringHit({
+      found: torn,
+      type: 'passphrase',
+      persistence: transientSessionStores(),
+      credential: CREDENTIAL
+    })
+
+    expect(session).toBeTruthy()
+    const reentryCall = vi.mocked(mendCredentialAnchoredAccount).mock
+      .calls[1]![0]
+    expect(reentryCall.repairShaped).toBe(true)
+    expect(reentryCall.invocation!.capability).toBe(GENERATION_DELEGATION)
+  })
+
+  it('logs the collections a partial epoch fan-out left behind', async () => {
+    primeHappyPath()
+    vi.mocked(readUserKeyRoster)
+      .mockResolvedValueOnce(null as never)
+      .mockResolvedValue({
+        descriptor: { epochs: [{ id: 'did:key:z6LSfresh' }] },
+        userKey: { id: 'did:key:z6LSfresh', secret: new Uint8Array(32) },
+        rotated: false,
+        latestEpochId: 'did:key:z6LSfresh'
+      } as never)
+    vi.mocked(mendCredentialAnchoredAccount).mockResolvedValue({
+      reenter: false,
+      rosterEpochs: {
+        converged: true,
+        outcome: 'delivered',
+        epochsFailed: [
+          { collectionId: 'contacts', error: new Error('epoch PUT failed') }
+        ]
+      }
+    } as never)
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+
+    await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence: transientSessionStores(),
+      credential: CREDENTIAL
+    })
+
+    expect(capture.events).toContainEqual(
+      expect.objectContaining({
+        ns: 'fw:session:transient',
+        level: 'warn',
+        msg: expect.stringContaining('collection epochs incomplete')
+      })
+    )
+    removeSink()
   })
 
   it('still refuses an unpromoted account with no credential in hand', async () => {
@@ -831,6 +1131,6 @@ describe('transientSessionFromKeyringHit -- the credential-anchored signup heals
         persistence: transientSessionStores()
       })
     ).rejects.toMatchObject({ reason: 'unpromoted-account' })
-    expect(establishCredentialAnchoredAccount).not.toHaveBeenCalled()
+    expect(mendCredentialAnchoredAccount).not.toHaveBeenCalled()
   })
 })

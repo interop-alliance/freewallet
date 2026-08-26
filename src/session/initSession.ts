@@ -66,7 +66,10 @@ import {
   fetchTransientKeyring,
   KeyringRecordUnusableError
 } from '@/session/keyring'
-import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
+import {
+  mendCredentialAnchoredAccount,
+  passphraseRegistryUpsertHook
+} from '@/session/credentialAnchoredGenesis'
 import { sessionLogPinStore } from '@/lib/sessionKey'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
@@ -706,15 +709,19 @@ async function checkUserKeyRosterAtLogin({
 /**
  * The durable resume of a remembered (or passkey) signup torn before the
  * establishment's re-bind: a keyring hit whose record carries a ladder seed
- * but whose pointer names no did:webvh yet. Runs the same heal the transient
- * composition runs -- the credential-anchored establishment re-run from the
- * record's own ladder seed (every stage an ensure; the published log, if
- * any, adopted by ladder attribution), under the DURABLE pin store -- then
- * re-fetches the keyring so the caller continues into the ordinary
- * self-enrollment. One attempt only: a re-run that does not converge hands
- * the original hit back and the existing routing stands. Reached only on the
- * explicit `rememberBrowser: true` entry; the default durable login never
- * runs it.
+ * but whose pointer names no did:webvh yet. Runs the shared mend ceremony's
+ * establishment arm (the establishment re-run from the record's own ladder
+ * seed, or a record re-bind when the log already resolves), under the
+ * DURABLE pin store, with the read-first registry hook (a passphrase
+ * credential's; a passkey entry stays the add-a-passkey ceremony's own
+ * write) and the local keyring-freshness-pin floor -- the re-bind's stamp
+ * must advance past this browser's own pin, or the very next fetch would
+ * refuse the repair's record as a rollback -- then re-fetches the keyring so
+ * the caller continues into the ordinary self-enrollment. One attempt only:
+ * a run that does not converge hands the original hit back (the arm's error
+ * is warned, not thrown) and the existing routing stands. Reached only on
+ * the explicit `rememberBrowser: true` entry; the default durable login
+ * never runs it.
  *
  * @param options {object}
  * @param options.found {KeyringFetchResult}   the torn hit (ladder seed
@@ -745,21 +752,59 @@ async function healUnpromotedRememberedAccount({
   if (!ladderSeed || !pointer) {
     return found
   }
-  await establishCredentialAnchoredAccount({
+  const report = await mendCredentialAnchoredAccount({
     credential,
     ladderSeed,
     pointer,
+    controller: found.controller,
     lowEntropy: type === 'passphrase',
     email: email ?? found.email,
     priorCreatedAt: found.createdAt,
-    persistence: { logPins: sessionLogPinStore({ idb }) }
+    persistence: { logPins: sessionLogPinStore({ idb }) },
+    freshnessPinFloor: { ...(idb ? { idb } : {}) },
+    // The resume runs only on a pointer naming no did:webvh, so there is no
+    // account DID to key a durable roster-epoch pin by and this caller
+    // states that it holds none rather than dropping the option.
+    hasRosterEpochPin: async () => false,
+    ...(found.standing?.delegatedClients
+      ? { delegatedClients: found.standing.delegatedClients }
+      : {}),
+    ...(type === 'passphrase'
+      ? {
+          beforePromotion: passphraseRegistryUpsertHook({
+            spaceId: pointer.spaceId
+          })
+        }
+      : {})
   })
-  const refreshed = await fetchKeyring({
-    credential,
-    idb,
-    mintManageCapability: true
-  })
-  return refreshed ?? found
+  // A `reenterRepairShaped` report needs no re-entry glue here: the durable
+  // login continues into the self-enrollment, whose own login-time registry
+  // backfill records the passphrase entry the arm left unwritten.
+  const refreshed = report.reenter
+    ? await fetchKeyring({
+        credential,
+        idb,
+        mintManageCapability: true
+      })
+    : undefined
+  if (!refreshed || !isWebvhDid(refreshed.pointer?.did)) {
+    // The mend did not converge: the pointer still names no did:webvh, so
+    // the self-enrollment that follows would die on it with a generic
+    // failure and no pending record to resume from. The arm's own error is
+    // rethrown instead, so a transport-class failure maps to the offline
+    // copy and a refusal maps to its own.
+    log.error('The remembered-signup resume mend did not converge', {
+      err: report.establishment?.error
+    })
+    throw (
+      report.establishment?.error ??
+      new Error(
+        'The remembered-signup resume could not promote the account ' +
+          'pointer to a did:webvh.'
+      )
+    )
+  }
+  return refreshed
 }
 
 /**

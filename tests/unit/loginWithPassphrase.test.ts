@@ -33,11 +33,11 @@ vi.mock('@/lib/kms', () => ({ ensureKeystore: vi.fn() }))
 // A full factory: the durable resume heal is the only consumer here, and the
 // real module drags in the whole establishment stack.
 vi.mock('@/session/credentialAnchoredGenesis', () => ({
-  establishCredentialAnchoredAccount: vi.fn(async () => ({
-    did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-    unlockSpaceId: 'unlock-space-test',
-    standingFields: {}
-  }))
+  mendCredentialAnchoredAccount: vi.fn(async () => ({
+    reenter: true,
+    establishment: { converged: true, outcome: 'established' }
+  })),
+  passphraseRegistryUpsertHook: vi.fn(() => vi.fn())
 }))
 vi.mock('@/stores/storageManager', () => ({
   StorageManager: { initStorageClients: vi.fn() }
@@ -64,7 +64,10 @@ vi.mock('@/session/forget', () => ({
 }))
 
 import { StorageManager } from '@/stores/storageManager'
-import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
+import {
+  mendCredentialAnchoredAccount,
+  passphraseRegistryUpsertHook
+} from '@/session/credentialAnchoredGenesis'
 import {
   canSelfEnroll,
   selfEnrollStandingClient
@@ -672,7 +675,7 @@ describe('loginWithPassphrase -- durable resume of a torn remembered signup', ()
     host: 'https://was.example.test'
   }
 
-  it('re-runs the establishment under rememberBrowser: true, then self-enrolls from the refreshed record', async () => {
+  it('mends the torn signup under rememberBrowser: true, then self-enrolls from the refreshed record', async () => {
     const clientSeed = randomSeed()
     const controller = await didFromSeed(clientSeed)
     const ladderSeed = randomSeed()
@@ -693,10 +696,13 @@ describe('loginWithPassphrase -- durable resume of a torn remembered signup', ()
     vi.mocked(fetchKeyring)
       .mockResolvedValueOnce(tornHit as never)
       .mockResolvedValueOnce(healedHit as never)
-    vi.mocked(establishCredentialAnchoredAccount).mockResolvedValue({
-      did: POINTER.did,
-      unlockSpaceId: 'unlock-space-test',
-      standingFields: {}
+    const registryHook = vi.fn()
+    vi.mocked(passphraseRegistryUpsertHook).mockReturnValue(
+      registryHook as never
+    )
+    vi.mocked(mendCredentialAnchoredAccount).mockResolvedValue({
+      reenter: true,
+      establishment: { converged: true, outcome: 'established' }
     } as never)
     vi.mocked(canSelfEnroll).mockReturnValue(true)
     const persist = vi.fn(async () => {})
@@ -711,16 +717,24 @@ describe('loginWithPassphrase -- durable resume of a torn remembered signup', ()
       rememberBrowser: true
     })
 
-    expect(establishCredentialAnchoredAccount).toHaveBeenCalledOnce()
-    expect(establishCredentialAnchoredAccount).toHaveBeenCalledWith(
+    expect(mendCredentialAnchoredAccount).toHaveBeenCalledOnce()
+    expect(mendCredentialAnchoredAccount).toHaveBeenCalledWith(
       expect.objectContaining({
         credential: CREDENTIAL,
         ladderSeed,
         pointer: TORN_POINTER,
+        controller,
         lowEntropy: true,
-        priorCreatedAt: tornHit.createdAt
+        priorCreatedAt: tornHit.createdAt,
+        // The resume's own obligations: the read-first registry hook and
+        // the local keyring-freshness-pin floor ride the mend.
+        beforePromotion: registryHook,
+        freshnessPinFloor: expect.any(Object)
       })
     )
+    expect(passphraseRegistryUpsertHook).toHaveBeenCalledWith({
+      spaceId: TORN_POINTER.spaceId
+    })
     // The keyring was re-fetched after the heal, and the self-enrollment ran
     // over the refreshed (promoted) hit.
     expect(fetchKeyring).toHaveBeenCalledTimes(2)
@@ -740,17 +754,69 @@ describe('loginWithPassphrase -- durable resume of a torn remembered signup', ()
       standing: { delegation: {}, ladderSeed: randomSeed() }
     }
     vi.mocked(fetchKeyring).mockResolvedValue(tornHit as never)
-    vi.mocked(establishCredentialAnchoredAccount).mockClear()
+    vi.mocked(mendCredentialAnchoredAccount).mockClear()
 
     const { session, userExists } = await loginWithPassphrase({
       passphrase: PASSPHRASE,
       credential: CREDENTIAL
     })
 
-    expect(establishCredentialAnchoredAccount).not.toHaveBeenCalled()
+    expect(mendCredentialAnchoredAccount).not.toHaveBeenCalled()
     // The existing routing stands: not enrolled, no session.
     expect(session).toBeNull()
     expect(userExists).toBe(true)
+  })
+
+  it("rethrows the arm's error when the mend did not converge", async () => {
+    // Proceeding would run the self-enrollment against a pointer that names
+    // no did:webvh and die there with a generic failure; the arm's own
+    // error is what the login copy is decided from.
+    const tornHit = {
+      controller: 'did:key:z6MkDataControllerForTests',
+      pointer: TORN_POINTER,
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: '2026-08-25T00:00:00.000Z',
+      standing: { delegation: {}, ladderSeed: randomSeed() }
+    }
+    vi.mocked(fetchKeyring).mockResolvedValue(tornHit as never)
+    const boom = new Error('the establishment died mid-run')
+    vi.mocked(mendCredentialAnchoredAccount).mockResolvedValue({
+      reenter: false,
+      establishment: { converged: false, outcome: 'established', error: boom }
+    } as never)
+
+    await expect(
+      loginWithPassphrase({
+        passphrase: PASSPHRASE,
+        credential: CREDENTIAL,
+        rememberBrowser: true
+      })
+    ).rejects.toBe(boom)
+    expect(selfEnrollStandingClient).not.toHaveBeenCalled()
+  })
+
+  it('rethrows when the re-fetched record still names no did:webvh', async () => {
+    const tornHit = {
+      controller: 'did:key:z6MkDataControllerForTests',
+      pointer: TORN_POINTER,
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: '2026-08-25T00:00:00.000Z',
+      standing: { delegation: {}, ladderSeed: randomSeed() }
+    }
+    vi.mocked(fetchKeyring).mockResolvedValue(tornHit as never)
+    vi.mocked(mendCredentialAnchoredAccount).mockResolvedValue({
+      reenter: true,
+      establishment: { converged: true, outcome: 'rebound' }
+    } as never)
+
+    await expect(
+      loginWithPassphrase({
+        passphrase: PASSPHRASE,
+        credential: CREDENTIAL,
+        rememberBrowser: true
+      })
+    ).rejects.toThrow('did:webvh')
+    expect(selfEnrollStandingClient).not.toHaveBeenCalled()
   })
 })
 

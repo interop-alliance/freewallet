@@ -48,6 +48,33 @@ export function forcedSignupTearAfterEstablishment(): boolean {
 }
 
 /**
+ * Whether a test has asked the credential-anchored establishment to tear
+ * itself between the record re-bind (and the registry write) and the
+ * controller promotion -- the one-request window whose torn state a later
+ * login mends through the shared mend ceremony's promotion arm. Read from
+ * the signup's `beforePromotion` hook (unit tests run it in a node
+ * environment, hence the `window` guard). Always `false` in production
+ * builds.
+ *
+ * @returns {boolean}
+ */
+export function forcedEstablishmentTearBeforePromotion(): boolean {
+  if (import.meta.env.MODE === 'production') {
+    return false
+  }
+  if (typeof window === 'undefined') {
+    return false
+  }
+  return Boolean(
+    (
+      window as unknown as {
+        __E2E_TEAR_ESTABLISHMENT_BEFORE_PROMOTION__?: boolean
+      }
+    ).__E2E_TEAR_ESTABLISHMENT_BEFORE_PROMOTION__
+  )
+}
+
+/**
  * Whether a test has forced the connect-this-browser card open. In
  * production the card opens only for the durable path's own two-client
  * states (a torn enrollment's roster-unwrap failure, or a no-WAS plain

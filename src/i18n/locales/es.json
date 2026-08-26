@@ -225,6 +225,8 @@
       "profileExists": "Ya existe un perfil con esta frase de contraseña. Si su registro se interrumpió, inicie sesión con la misma frase (o llave de acceso) para terminar de configurarlo.",
       "setupFailed": "No se pudo terminar de configurar su billetera. Inténtelo de nuevo.",
       "transientSetupIncomplete": "Se encontró su cuenta, pero parte de su configuración no terminó. Inicie sesión de nuevo para reintentar los pasos restantes.",
+      "transientNoUserKeyWrap": "Se encontró su cuenta, pero este método de inicio de sesión ya no tiene una copia vigente de la clave de la cuenta. Reintentar no ayudará: inicie sesión desde una billetera conectada, o cambie este método allí, para restaurar su acceso.",
+      "transientRosterMintRefused": "Se encontró su cuenta, pero no se pudo verificar ni reconstruir su registro de claves desde este método de inicio de sesión. Reintentar no ayudará: inicie sesión desde una billetera conectada para restaurarlo.",
       "transientUnavailable": "Se encontró su cuenta, pero por ahora no es accesible desde un navegador nuevo.",
       "keyringUnusable": "Se encontró su cuenta, pero su registro de acceso guardado no se pudo leer. Si el problema persiste, cambie su frase de contraseña desde un dispositivo donde aún tenga la sesión iniciada para escribir un registro nuevo.",
       "clientNotEnrolled": "Se encontró su cuenta, pero este navegador aún no tiene sus claves. Use \"Conectar este navegador\" abajo para inscribirlo desde un navegador donde su billetera ya esté configurada.",

@@ -923,28 +923,48 @@ fields a durable login stamps, so a mid-session ceremony (the App Connect
 grant path's generation-delegation renewal below) can sign as the ladder
 with no durable signer in hand.
 
-Two of those refusals carry a heal first, for the tears a torn
-credential-anchored signup can leave. A standing record whose pointer names
-no did:webvh can only be a credential-anchored establishment that died
-before its re-bind, so the composition re-runs
-`establishCredentialAnchoredAccount` and re-enters through the refreshed
-record; without the derived credential in hand (a test double), or when the
-re-run does not converge, the `unpromoted-account` refusal stands. Every WAS
-signup runs this same establishment now, so the heal also mends a
-`rememberBrowser: true` signup torn before its durable login's
-self-enrollment: the non-remembered entry above and a fresh
-`rememberBrowser: true` login attempt both re-run the same establishment
-from the record's own ladder seed. A promoted account whose roster read
-comes back empty is the tear between genesis and epoch[0] (the user key
-died with the signup tab), healed as the explicit carve-out from the
-sweeps-skipped rule: a fresh user key is minted, epoch[0] lands with a
-ladder-signed entry proof wrapped to the credential's standing KAK, and the
-collection epochs complete, every write invoked as the annex VM under the
-generation delegation (the `capability` option on `ensureWalletSpaceEpochs`
-and the roster store). Nothing encrypted predates the heal, so the fresh
-key orphans nothing. A roster read failing outright, rather than empty,
-retries once behind a bootstrap-signed promotion completion -- the
-one-request-wide tear between the record re-bind and the promotion.
+The tears a torn credential-anchored signup can leave are mended by the
+shared mend ceremony, wallet-core's `mendCredentialAnchoredAccount`
+(`@interop/wallet-core/clientAnnex`; the app binding sits beside the
+establishment's in `src/session/credentialAnchoredGenesis.ts`). Its arms,
+each firing at most once per invocation and detected from durable state
+alone: the establishment arm re-runs the whole establishment for a
+standing record whose pointer names no did:webvh (or re-binds the record
+when the account log already resolves and the ladder attributes -- a
+record downgraded by a stale heal, which a stage-1 re-run would brick);
+the promotion arm completes the Space controller promotion under the
+ladder VM's bare did:key and retries the failed delegated read once (the
+one-request-wide tear between the record re-bind and the promotion); the
+roster-and-epochs arm mints a fresh user key behind its preconditions
+when the roster is absent, lands epoch[0] ladder-signed and wrapped to
+the credential's standing KAK, and installs the collection epochs under
+the key the roster delivers (writes invoked as the annex VM under the
+generation delegation); and the registry arm re-fires the read-first
+registry hook when an earlier arm mended. The composition maps the mend's
+report onto its typed refusals: a non-converged establishment arm (an
+establishment throw rides the report, it does not escape the login raw)
+falls through to `unpromoted-account` unless the arm's failure is
+transport-class, which rethrows unchanged so a flap stays a flap; a
+still-absent roster refuses `no-user-key-roster`; a roster carrying no
+wrap for this credential refuses `no-user-key-wrap` (its own reason -- a
+retry cannot help), on both paths that state arrives by, the mend's own
+`no-wrap` outcome and the roster read's unwrap throw, which is mapped
+here rather than left to escape into the durable path's
+connect-this-browser copy; a mint the roster arm's preconditions refused
+(a durable roster-epoch pin held for the account, or foreign
+key-agreement entries) refuses `roster-mint-refused`, since every retry
+re-runs the same refusal; and the promotion arm's still-failing retry
+rethrows the original roster error unchanged. Without the derived
+credential in hand (a test double) no arm runs and the refusals stand. A
+partial collection fan-out is not a refusal: the stranded collections are
+named in a warn, the only trace on a client-less account no login sweep
+revisits. The durable resume of a
+`rememberBrowser: true` signup torn before its self-enrollment runs the
+same mend (`healUnpromotedRememberedAccount`), supplying the registry
+hook and the local keyring-freshness-pin floor; a mend that leaves the
+pointer naming no did:webvh rethrows the arm's error rather than sending
+a self-enrollment at a pointer it cannot use. Nothing encrypted
+predates the roster arm's mint, so a fresh user key orphans nothing.
 
 The handle also carries the durability refusals. Update-key rotation requires
 the durable variant outright (`DurableSessionRequiredError`): its subject is
@@ -2346,7 +2366,10 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   re-derivable, so a re-run, sweep, or repair can always roll it forward
   from durable state. A write that fails the rule is a defect with its own
   work item, not a documented limitation. A stated residue with no mender
-  is an open gap. Avoid: tear closure.
+  is an open gap. A ceremony family may also expose one taxonomy-spanning
+  mend entry point whose arms are these menders, run by whatever context
+  holds the needed authority (the credential-anchored establishment's
+  `mendCredentialAnchoredAccount`). Avoid: tear closure.
 - **Repair** -- the mender of last resort: code waiting at the one entry
   point where the authority a torn state needs reassembles, detecting that
   state from durable state alone and finishing the ceremony. Used where

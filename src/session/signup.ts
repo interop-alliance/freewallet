@@ -36,7 +36,10 @@ import {
   fetchTransientKeyring,
   type UnlockCredential
 } from '@/session/keyring'
-import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
+import {
+  establishCredentialAnchoredAccount,
+  passphraseRegistryUpsertHook
+} from '@/session/credentialAnchoredGenesis'
 import {
   transientSessionStores,
   type TransientSessionStores
@@ -47,15 +50,16 @@ import {
   seedWelcomeContent
 } from '@/session/provisionNewWallet'
 import {
-  emptyUnlockMethodsRegistry,
   enrollPasskey,
   updateUnlockMethods,
   updateUnlockMethodsWithClient,
   upsertPasskeyUnlockMethod,
-  upsertPassphraseUnlockMethod,
   type PasskeyUnlockMethod
 } from '@/session/unlockMethods'
-import { forcedSignupTearAfterEstablishment } from '@/lib/e2eSeams'
+import {
+  forcedEstablishmentTearBeforePromotion,
+  forcedSignupTearAfterEstablishment
+} from '@/lib/e2eSeams'
 import { registerPasskey } from '@/lib/passkey'
 import { sessionLogPinStore } from '@/lib/sessionKey'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
@@ -163,36 +167,18 @@ async function establishPassphraseAnchoredAccount({
     email,
     persistence: { logPins },
     ...(freshnessPinFloor ? { freshnessPinFloor } : {}),
-    beforePromotion: async ({ zcapClient, userKey, establishment }) => {
-      // The registry entry, in the last root-invocation window. Best-effort
-      // by the hook's contract: a miss is re-recordable later, never fatal.
-      // Read first (the compare-and-swap wrapper's own fresh read): the
-      // transient login's heal branch re-runs the whole establishment, and
-      // a re-fired hook starting from a fresh registry would clobber the
-      // first run's record (its WebAuthn user id re-minted, every other
-      // entry dropped). Only a true absent starts fresh. A THROWN read or
-      // write -- the bootstrap-signed read refused against an account a
-      // concurrent run already promoted, say -- skips with a report: a
-      // write on an empty base there would be the same clobber, and the
-      // miss stays re-recordable by the later recorders.
-      try {
-        await updateUnlockMethodsWithClient({
-          zcapClient,
-          spaceId,
-          userKey,
-          mutate: existing =>
-            upsertPassphraseUnlockMethod({
-              record: existing ?? emptyUnlockMethodsRegistry(),
-              unlockSpaceId: establishment.unlockSpaceId,
-              manageCapability: establishment.manageCapability,
-              standing: establishment.standingFields
-            })
-        })
-      } catch (err) {
-        log.warn(
-          'Could not update the unlock-methods registry at signup; skipping the passphrase entry (re-recordable at the next durable login)',
-          { err }
-        )
+    // The registry entry, in the last root-invocation window: the shared
+    // read-first hook (the mend entry point's arms re-fire the same one).
+    // Best-effort by the hook's own contract -- a re-fired hook upserts
+    // into the standing registry, only a true absent starts fresh, and a
+    // thrown read or write skips with a warn (re-recordable later). The
+    // e2e tear seam fires after the registry write so the torn state it
+    // leaves is exactly a re-bound, registry-carrying account whose
+    // controller promotion never ran.
+    beforePromotion: async context => {
+      await passphraseRegistryUpsertHook({ spaceId })(context)
+      if (forcedEstablishmentTearBeforePromotion()) {
+        throw new Error('e2e: the signup tore before the controller promotion.')
       }
     }
   })
@@ -237,7 +223,8 @@ async function enterEstablishedAccountTransiently({
     found,
     type: 'passphrase',
     email,
-    persistence
+    persistence,
+    credential
   })
   // Kick off the welcome-content seeding without awaiting it: the signup is
   // already long, so the seed runs behind the dashboard navigation, tracked

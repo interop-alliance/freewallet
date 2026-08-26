@@ -31,7 +31,7 @@ importers:
         version: 3.4.5
       '@interop/did-method-webvh':
         specifier: ^5.5.1
-        version: 5.5.1
+        version: 5.6.0
       '@interop/ed25519-signature':
         specifier: ^7.1.4
         version: 7.1.4(@interop/jsonld-signatures@11.8.5)
@@ -69,8 +69,8 @@ importers:
         specifier: ^0.4.1
         version: 0.4.1
       '@interop/wallet-core':
-        specifier: ^0.56.0
-        version: 0.56.0(@interop/jsonld-signatures@11.8.5)
+        specifier: ^0.57.0
+        version: 0.57.0(@interop/jsonld-signatures@11.8.5)
       '@interop/was-client':
         specifier: ^0.44.5
         version: 0.44.5(@interop/jsonld-signatures@11.8.5)
@@ -331,8 +331,8 @@ packages:
       '@csstools/css-parser-algorithms': ^4.0.0
       '@csstools/css-tokenizer': ^4.0.0
 
-  '@csstools/css-color-parser@4.2.0':
-    resolution: {integrity: sha512-5+5LEmFuY1AjXdYhmgjTJogtQnP1evJ1zrBZGUNZ0thkpwnnmKxcHdAMn/OtFjAb25zA+jKDVYVRl+5G7rjv1A==}
+  '@csstools/css-color-parser@4.2.1':
+    resolution: {integrity: sha512-YpAJZhaHplYQkG8ib+/Fx5Y0eF2lVWi3tIvMJA6i39TLyUNp2439cifzW8VMjhlqrBjHzK5hVGugRRm2zTKI/A==}
     engines: {node: '>=20.19.0'}
     peerDependencies:
       '@csstools/css-parser-algorithms': ^4.0.0
@@ -344,8 +344,8 @@ packages:
     peerDependencies:
       '@csstools/css-tokenizer': ^4.0.0
 
-  '@csstools/css-syntax-patches-for-csstree@1.1.8':
-    resolution: {integrity: sha512-CpMLjAvwQg3BL5S0IeqsZNMH7EQrEWi0kLKOC13ZBF0ZwERiLWlibNPJr8G1kdU3Ms/r2KiNrF81pUh2HwAHdg==}
+  '@csstools/css-syntax-patches-for-csstree@1.1.9':
+    resolution: {integrity: sha512-iGGw4OsAYsS6pD29MdJ2bX/nJx65a04ZZiw6x+VwWlP2DdXf6f++Zmuv/OzALpdyfVhjbduIIF2cXM7HWBIe9A==}
     peerDependencies:
       css-tree: ^3.2.1
     peerDependenciesMeta:
@@ -550,8 +550,8 @@ packages:
     resolution: {integrity: sha512-gJqAjJFW+PgNxwGpLVTisYENxNrZicyUGVhiHKIt02qcgSJZxS6XH/i9FtNoOLqD3uhc2cpwLzC+fdQTHZQPhA==}
     engines: {node: '>=24.0'}
 
-  '@interop/did-method-webvh@5.5.1':
-    resolution: {integrity: sha512-SEoifXSP/d9CZ8qjM1S2uswTdh4G1HVvxi7bKt3OhjglX8v87l7Oq1tV/XYCfRyaDBs9dW7m9CH4GdQIA+KRRA==}
+  '@interop/did-method-webvh@5.6.0':
+    resolution: {integrity: sha512-vfQ+LcZ073RkIjZVxO2HmZzdNnDB19PYZJedTEMZyBBQZpRWa4ZyKYOCsYEQE60Pu8cuFz/4yKhr2UH7L/3IlQ==}
     engines: {node: '>=22'}
 
   '@interop/did-web-resolver@6.3.1':
@@ -675,8 +675,8 @@ packages:
     resolution: {integrity: sha512-wP7/x9+TOo0DF9OmKgAhSRgOnvQrJlWReL3IsxX3/9jxyFEbdIZ+CV62uoplM3VbjYPSX9VJCzd0LZtHhNOPlQ==}
     engines: {node: '>=24.0'}
 
-  '@interop/wallet-core@0.56.0':
-    resolution: {integrity: sha512-VdF8nTy4OLVrKR1rjnMy6cyQHr82+jqmRYuLsf8fA+3RgvNQcuqxLHyJHqEVXwq2iVhQf6JqVHAwM1cqxZklhQ==}
+  '@interop/wallet-core@0.57.0':
+    resolution: {integrity: sha512-YCKgmxVhQ3nufD5Kqrp4aPxfvqzPpEXMnncqkFd68v4wA/t84tNQIAogm6byABnN+zzCpeONdmME67jfwgj2yw==}
     engines: {node: '>=24.0'}
 
   '@interop/was-client@0.44.5':
@@ -3513,7 +3513,7 @@ snapshots:
   '@asamuzakjp/css-color@6.0.7':
     dependencies:
       '@csstools/css-calc': 3.3.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
-      '@csstools/css-color-parser': 4.2.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
+      '@csstools/css-color-parser': 4.2.1(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-parser-algorithms': 4.0.0(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-tokenizer': 4.0.0
       lru-cache: 11.5.2
@@ -3638,7 +3638,7 @@ snapshots:
       '@csstools/css-parser-algorithms': 4.0.0(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-tokenizer': 4.0.0
 
-  '@csstools/css-color-parser@4.2.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)':
+  '@csstools/css-color-parser@4.2.1(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)':
     dependencies:
       '@csstools/color-helpers': 6.1.1
       '@csstools/css-calc': 3.3.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
@@ -3649,7 +3649,7 @@ snapshots:
     dependencies:
       '@csstools/css-tokenizer': 4.0.0
 
-  '@csstools/css-syntax-patches-for-csstree@1.1.8(css-tree@3.2.1)':
+  '@csstools/css-syntax-patches-for-csstree@1.1.9(css-tree@3.2.1)':
     optionalDependencies:
       css-tree: 3.2.1
 
@@ -3858,7 +3858,7 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
-  '@interop/did-method-webvh@5.5.1':
+  '@interop/did-method-webvh@5.6.0':
     dependencies:
       '@interop/data-integrity-core': 8.7.1
       '@noble/curves': 2.3.0
@@ -4062,14 +4062,14 @@ snapshots:
 
   '@interop/vh-resource-log@0.4.1':
     dependencies:
-      '@interop/did-method-webvh': 5.5.1
+      '@interop/did-method-webvh': 5.6.0
       '@interop/storage-core': 0.9.1
 
-  '@interop/wallet-core@0.56.0(@interop/jsonld-signatures@11.8.5)':
+  '@interop/wallet-core@0.57.0(@interop/jsonld-signatures@11.8.5)':
     dependencies:
       '@interop/data-integrity-core': 8.7.1
       '@interop/data-integrity-proof': 3.4.5
-      '@interop/did-method-webvh': 5.5.1
+      '@interop/did-method-webvh': 5.6.0
       '@interop/ed25519-signature': 7.1.4(@interop/jsonld-signatures@11.8.5)
       '@interop/ed25519-verification-key': 8.0.4
       '@interop/ezcap': 7.4.3
@@ -5703,7 +5703,7 @@ snapshots:
       '@asamuzakjp/css-color': 6.0.7
       '@asamuzakjp/dom-selector': 8.3.2
       '@bramus/specificity': 2.4.2
-      '@csstools/css-syntax-patches-for-csstree': 1.1.8(css-tree@3.2.1)
+      '@csstools/css-syntax-patches-for-csstree': 1.1.9(css-tree@3.2.1)
       '@exodus/bytes': 1.15.1(@noble/hashes@2.3.0)
       css-tree: 3.2.1
       data-urls: 7.0.0(@noble/hashes@2.3.0)

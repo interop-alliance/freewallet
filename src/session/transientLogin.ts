@@ -50,9 +50,6 @@ import {
   type ClientAnnexWriteStore
 } from '@interop/wallet-core/clientAnnex'
 import {
-  ensureUserKeyRoster,
-  ensureWalletSpaceEpochs,
-  mintUserKey,
   readUserKeyRoster,
   userKeyRosterDescriptorStore,
   userKeyRosterLogSigner,
@@ -63,12 +60,17 @@ import {
   type ICapabilityAgent
 } from '@interop/wallet-core/webvh'
 import { ladderVmAgent } from '@interop/wallet-core/clientAnnex'
-import { ensurePromotedSpaceController } from '@interop/wallet-core/genesis'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import { WasClient } from '@interop/was-client'
 import { WAS_SERVER_URL } from '@/app.config'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
-import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
+import { isStorageUnreachable } from '@/lib/storageErrors'
+import { createLogger } from '@/lib/log'
+import {
+  mendCredentialAnchoredAccount,
+  passphraseRegistryUpsertHook,
+  type CredentialAnchoredMendReport
+} from '@/session/credentialAnchoredGenesis'
 import {
   transientSessionPersistence,
   transientSessionStores,
@@ -103,6 +105,16 @@ import type { WebvhIdStore } from '@interop/wallet-core/webvh'
  * - `no-generation-delegation`: the generation would need its delegation
  *   minted, which takes a signer this session does not hold.
  * - `no-user-key-roster`: the account has no user key roster to read.
+ * - `no-user-key-wrap`: the roster exists (adopted from another runner or a
+ *   rotation) but its current epoch carries no wrap for this credential --
+ *   a materially different state from an absent roster, and often
+ *   attack-relevant, so it is not folded into `no-user-key-roster`.
+ * - `roster-mint-refused`: the roster reads as absent, but the mend's mint
+ *   preconditions refused to create one -- this browser holds a
+ *   roster-epoch pin for the account (so a served-absent roster is a
+ *   rollback or a tampering signal, not a torn signup), or the account
+ *   document carries key-agreement entries this credential does not own. A
+ *   retry never helps.
  *
  * The three annex-family reasons stand only where the ladder-signed mend
  * could not run at all -- an account whose document anchors no ladder VM of
@@ -119,6 +131,10 @@ export type TransientLoginUnavailableReason =
   | 'no-clientAnnex-generation'
   | 'no-generation-delegation'
   | 'no-user-key-roster'
+  | 'no-user-key-wrap'
+  | 'roster-mint-refused'
+
+const log = createLogger('fw:session:transient')
 
 /**
  * A transient login refused before any ceremony byte was written: the
@@ -417,6 +433,11 @@ async function ensureClientAnnexGenerationReady({
  * @param [options.healAttempted] {boolean}   internal: the re-entry marker of
  *   the unpromoted-account heal, so a heal that did not converge refuses
  *   instead of looping
+ * @param [options.repairShaped] {boolean}   internal: carried across the
+ *   heal's re-entry when the mend reported `reenterRepairShaped`. The
+ *   re-bound record left the registry arm unfired (its root window is
+ *   permanently closed), so the re-entry's mend must run the completion arms
+ *   under the visit's post-promotion authority even with no tear of its own
  * @returns {Promise<{ session: Session, userExists: boolean }>}
  */
 export async function transientSessionFromKeyringHit({
@@ -425,7 +446,8 @@ export async function transientSessionFromKeyringHit({
   email,
   persistence,
   credential,
-  healAttempted = false
+  healAttempted = false,
+  repairShaped = false
 }: {
   found: TransientKeyringFetchResult
   type: 'passphrase' | 'passkey'
@@ -433,6 +455,7 @@ export async function transientSessionFromKeyringHit({
   persistence: TransientSessionStores
   credential?: UnlockCredential
   healAttempted?: boolean
+  repairShaped?: boolean
 }): Promise<{ session: Session; userExists: boolean }> {
   const standing = found.standing
   if (!standing?.ladderSeed) {
@@ -448,36 +471,72 @@ export async function transientSessionFromKeyringHit({
   const pointer = found.pointer
   if (!pointer || !isWebvhDid(pointer.did)) {
     // The torn credential-anchored signup's heal: a standing record whose
-    // pointer names no did:webvh yet can only be a credential-anchored
-    // establishment that died before its re-bind. Re-running the
-    // establishment converges (every stage is an ensure; the published log,
-    // if any, is adopted by ladder attribution), and the login then re-enters
-    // through the refreshed record. Needs the credential in hand -- the
-    // ordinary login path supplies it.
+    // pointer names no did:webvh yet is the mend ceremony's establishment
+    // arm (a re-run of the whole establishment, or a record re-bind when
+    // the log already resolves), and the login then re-enters through the
+    // refreshed record. Needs the credential in hand -- the ordinary login
+    // path supplies it. A report whose arm did not converge (an
+    // establishment throw rides the report, it does not escape raw) falls
+    // through to the typed refusal, with the arm's error as its cause; the
+    // single-shot re-entry marker stays here, on the caller's glue.
     if (!healAttempted && credential && pointer && standing.ladderSeed) {
-      await establishCredentialAnchoredAccount({
+      const report = await mendCredentialAnchoredAccount({
         credential,
         ladderSeed: standing.ladderSeed,
         pointer,
+        controller: found.controller,
         lowEntropy: type === 'passphrase',
         email: email ?? found.email,
         priorCreatedAt: found.createdAt,
-        persistence
+        persistence,
+        // The visit's epoch pins are in-memory and empty at this point, so
+        // this caller never holds a durable roster-epoch pin: it says so
+        // rather than leaving the mint precondition to a dropped option.
+        hasRosterEpochPin: async () => false,
+        ...(standing.delegatedClients
+          ? { delegatedClients: standing.delegatedClients }
+          : {}),
+        ...(type === 'passphrase'
+          ? {
+              beforePromotion: passphraseRegistryUpsertHook({
+                spaceId: pointer.spaceId
+              })
+            }
+          : {})
       })
-      const refreshed = await fetchTransientKeyring({
-        credential,
-        accountLogPinStore: persistence.logPins
-      })
-      if (refreshed) {
-        return transientSessionFromKeyringHit({
-          found: refreshed,
-          type,
-          email,
-          persistence,
+      if (report.reenter) {
+        const refreshed = await fetchTransientKeyring({
           credential,
-          healAttempted: true
+          accountLogPinStore: persistence.logPins
         })
+        if (refreshed) {
+          return transientSessionFromKeyringHit({
+            found: refreshed,
+            type,
+            email,
+            persistence,
+            credential,
+            healAttempted: true,
+            repairShaped: report.reenterRepairShaped === true
+          })
+        }
       }
+      // A transport-class failure is not an account state: it rethrows
+      // unchanged, so a flap surfaces as the storage-unreachable copy rather
+      // than as a permanent-sounding refusal a retry is supposed to fix.
+      const establishmentError = report.establishment?.error
+      if (
+        establishmentError !== undefined &&
+        isStorageUnreachable(establishmentError)
+      ) {
+        throw establishmentError
+      }
+      throw new TransientLoginUnavailableError({
+        reason: 'unpromoted-account',
+        ...(establishmentError !== undefined
+          ? { cause: establishmentError }
+          : {})
+      })
     }
     throw new TransientLoginUnavailableError({ reason: 'unpromoted-account' })
   }
@@ -656,70 +715,188 @@ export async function transientSessionFromKeyringHit({
       store: rosterStore,
       clientKeyAgreementKey: found.standingClient.agents.keyAgreementKey
     })
+  // A roster read comes back null only for an ABSENT roster head; a roster
+  // whose current epoch carries no wrap for this credential THROWS instead.
+  // That state is this composition's own refusal (no mend arm can mend it,
+  // and the raw throw would otherwise reach the login page's
+  // connect-this-browser card, which a transient refusal must never open),
+  // so it is mapped here rather than routed into the mend. Matched by name:
+  // the refusal is raised inside an app-injected seam, so the raising copy
+  // of wallet-core can differ from the one this module imports.
+  function refuseUnwrapFailure(err: unknown): void {
+    if (
+      (err as { name?: unknown } | null)?.name === 'UserKeyRosterUnwrapError'
+    ) {
+      throw new TransientLoginUnavailableError({
+        reason: 'no-user-key-wrap',
+        cause: err
+      })
+    }
+  }
+  // The mend ceremony's post-promotion arms (the promotion completion, the
+  // roster-and-epochs completion, the registry re-fire), invoked with the
+  // visit's live authority: writes sign as the ladder VM through the
+  // delegated roster store, requests ride the generation delegation, and
+  // the registry hook (a passphrase credential's; a passkey entry stays the
+  // add-a-passkey ceremony's own write) rides the same delegation.
+  const mendPromotedArms = async (
+    unlockCredential: UnlockCredential,
+    extra: {
+      delegatedRead?: { error: unknown; retry: () => Promise<void> }
+      repairShaped?: boolean
+    }
+  ): Promise<CredentialAnchoredMendReport> => {
+    const report = await mendCredentialAnchoredAccount({
+      credential: unlockCredential,
+      ladderSeed,
+      pointer: accountPointer,
+      controller: found.controller,
+      lowEntropy: type === 'passphrase',
+      email: email ?? found.email,
+      priorCreatedAt: found.createdAt,
+      persistence,
+      // The visit's epoch pins are in-memory and empty, so this caller holds
+      // no durable roster-epoch pin and says so explicitly.
+      hasRosterEpochPin: async () => false,
+      ...(standing.delegatedClients
+        ? { delegatedClients: standing.delegatedClients }
+        : {}),
+      invocation: {
+        was: new WasClient({
+          serverUrl: accountHost,
+          zcapClient: transientZcapClient
+        }),
+        zcapClient: transientZcapClient,
+        capability: generationDelegation
+      },
+      rosterStore: rosterStoreSignedBy(await ladderVmAgent({ ladderSeed })),
+      registry: {
+        unlockSpaceId: found.unlockSpaceId,
+        delegation: standing.delegation,
+        delegatedClients: siblingDelegation,
+        ...(found.unlockKeyAgreementKeyId
+          ? { unlockKeyAgreementKeyId: found.unlockKeyAgreementKeyId }
+          : {}),
+        ...(found.unlockKeyAgreementKeyMultibase
+          ? {
+              unlockKeyAgreementKeyMultibase:
+                found.unlockKeyAgreementKeyMultibase
+            }
+          : {})
+      },
+      ...(type === 'passphrase'
+        ? {
+            beforePromotion: passphraseRegistryUpsertHook({
+              spaceId: accountSpaceId,
+              capability: generationDelegation
+            })
+          }
+        : {}),
+      ...extra
+    })
+    const epochsFailed = report.rosterEpochs?.epochsFailed
+    if (epochsFailed && epochsFailed.length > 0) {
+      // A partial collection fan-out. On a client-less account no login
+      // sweep ever revisits a stranded collection, so this line is the only
+      // trace that one stayed on an earlier key.
+      log.warn('The mend left collection epochs incomplete', {
+        collectionIds: epochsFailed.map(({ collectionId }) => collectionId)
+      })
+    }
+    return report
+  }
   let rosterRead
+  let mendReport: CredentialAnchoredMendReport | undefined
   try {
     rosterRead = await readRoster()
   } catch (err) {
-    // A credential-anchored establishment torn between its record re-bind and
-    // the controller promotion leaves the generation delegation
-    // unverifiable: the Space still answers to the bootstrap did:key, so the
-    // delegated read above fails. Completing the promotion is the one
-    // ladder-derived repair that fixes it; when the attempt itself fails
-    // (any other cause -- the account was never ladder-anchored, the network
-    // flapped), the original error stands unchanged.
-    try {
-      const bootstrapAgent = await ladderVmAgent({ ladderSeed })
-      const bootstrapWas = new WasClient({
-        serverUrl: pointer.host,
-        zcapClient: didKeyZcapClient({ keyAgent: bootstrapAgent })
-      })
-      await ensurePromotedSpaceController({
-        was: bootstrapWas,
-        wasAsClient: bootstrapWas,
-        spaceId: pointer.spaceId,
-        did: accountDid
-      })
-    } catch {
+    // A credential-anchored establishment torn between its record re-bind
+    // and the controller promotion leaves the generation delegation
+    // unverifiable: the Space still answers to the bootstrap did:key, so
+    // the delegated read above fails. The mend ceremony's promotion arm
+    // completes the promotion and retries the read once; when the
+    // promotion or the retried read still fails (any other cause -- the
+    // account was never ladder-anchored, the network flapped), the
+    // original error is rethrown unchanged. With no credential in hand the
+    // arm cannot run at all, and the original error stands.
+    refuseUnwrapFailure(err)
+    if (!credential) {
       throw err
     }
-    rosterRead = await readRoster()
+    mendReport = await mendPromotedArms(credential, {
+      delegatedRead: {
+        error: err,
+        retry: async () => {
+          rosterRead = await readRoster()
+        }
+      }
+    })
   }
   if (!rosterRead) {
-    // The tear-3 heal (promoted account, no roster): the credential-anchored
-    // establishment died between the genesis and the roster's epoch[0], so
-    // the user key died in memory and nothing anywhere delivers one. The
-    // explicit carve-out from the sweeps-skipped rule: mint a fresh user
-    // key, land epoch[0] with a ladder-signed entry proof (the ceremony-tail
-    // license's first-entry shape), wrapped to the credential's standing
-    // key-agreement key, and complete the collection epochs -- every write
-    // invoked as the annex VM under the generation delegation, since the
-    // promoted Space answers to nothing else this session holds. Nothing
-    // encrypted existed yet (the epoch gate in the ceremony guarantees it),
-    // so the fresh key orphans nothing. The collection epochs are installed
-    // under the key the roster DELIVERS after the ensure, not the minted
-    // candidate: the ensure adopts a roster another tab's heal landed first,
-    // and epoch[0] is create-if-absent, so installing under this tab's
-    // candidate would key a collection to a key nobody holds.
-    const bootstrapAgent = await ladderVmAgent({ ladderSeed })
-    const healStore = rosterStoreSignedBy(bootstrapAgent)
-    await ensureUserKeyRoster({
-      store: healStore,
-      userKey: await mintUserKey(),
-      clientKeyAgreementKey: found.standingClient.agents.keyAgreementKey
-    })
-    rosterRead = await readRoster()
-    if (!rosterRead) {
-      throw new TransientLoginUnavailableError({ reason: 'no-user-key-roster' })
+    // The promoted-account-without-epochs tear (the establishment died
+    // between the genesis and the roster's epoch[0], so the user key died
+    // in memory): the mend ceremony's roster-and-epochs arm mints a fresh
+    // user key behind its preconditions, lands epoch[0] ladder-signed and
+    // wrapped to the credential's standing key-agreement key, and installs
+    // the collection epochs under the key the roster DELIVERS after the
+    // ensure -- the shared mint policy, one home. A roster the promotion
+    // arm's invocation already completed skips the second call.
+    if (!mendReport?.rosterEpochs) {
+      if (!credential) {
+        throw new TransientLoginUnavailableError({
+          reason: 'no-user-key-roster'
+        })
+      }
+      mendReport = await mendPromotedArms(credential, {})
     }
-    await ensureWalletSpaceEpochs({
-      was: new WasClient({
-        serverUrl: pointer.host,
-        zcapClient: transientZcapClient
-      }),
-      spaceId: pointer.spaceId,
-      userKey: rosterRead.userKey,
-      capability: generationDelegation
-    })
+    const arm = mendReport.rosterEpochs
+    if (arm?.outcome === 'no-wrap') {
+      // The roster was adopted (another run or a rotation landed first) but
+      // its current epoch carries no wrap for this credential: its own
+      // refusal, distinct from an absent roster -- a retry cannot help, a
+      // re-escrow from another client or a rotation can.
+      throw new TransientLoginUnavailableError({
+        reason: 'no-user-key-wrap',
+        ...(arm.error !== undefined ? { cause: arm.error } : {})
+      })
+    }
+    if (arm?.outcome === 'mint-refused') {
+      // The mint preconditions refused: this browser holds a roster-epoch
+      // pin for the account (so a served-absent roster reads as a rollback
+      // or tampering, never as a torn signup), or the document publishes
+      // key-agreement entries this credential does not own. Minting over
+      // either would orphan a live account's ciphertext, so the refusal is
+      // its own -- a retry re-runs the same refused preconditions.
+      throw new TransientLoginUnavailableError({
+        reason: 'roster-mint-refused',
+        ...(arm.error !== undefined ? { cause: arm.error } : {})
+      })
+    }
+    try {
+      rosterRead = await readRoster()
+    } catch (err) {
+      refuseUnwrapFailure(err)
+      throw err
+    }
+    if (!rosterRead) {
+      throw new TransientLoginUnavailableError({
+        reason: 'no-user-key-roster',
+        ...(arm?.error !== undefined ? { cause: arm.error } : {})
+      })
+    }
+  } else if (repairShaped && credential && !mendReport) {
+    // The heal's re-entry with `reenterRepairShaped`: the record-downgrade
+    // re-bind rewrote the record but left the registry arm unfired (the
+    // root window a live establishment writes in is permanently closed), so
+    // the completion arms run here under the visit's post-promotion
+    // authority even though nothing tore this time. Best-effort: the
+    // session is already assemblable, so a failure is logged rather than
+    // refused.
+    try {
+      mendReport = await mendPromotedArms(credential, { repairShaped: true })
+    } catch (err) {
+      log.warn('The repair-shaped mend re-entry did not complete', { err })
+    }
   }
   await persistence.epochPins.saveFromDescriptor({
     accountDid,

@@ -2,7 +2,44 @@
 
 ## 0.42.0 - TBD
 
+### Changed
+
+- The torn credential-anchored-signup heals moved out of the login paths
+  into wallet-core's shared mend ceremony
+  (`mendCredentialAnchoredAccount`): the transient composition and the
+  remembered-signup resume now call one entry point whose arms converge
+  every tear state (the establishment re-run, the record re-bind, the
+  Space-promotion completion, the roster-and-epochs completion, the
+  registry re-fire). The epoch mint policy now has one home in
+  wallet-core.
+- An establishment failure inside the login-time heal no longer escapes as
+  a raw error: it rides the mend report and surfaces as the typed
+  unpromoted-account refusal, with the failure as its cause. A
+  transport-class failure still rethrows unchanged, so an offline start
+  keeps its own copy.
+- The durable resume of a remembered signup now rethrows when the mend
+  leaves the pointer naming no did:webvh, instead of continuing into a
+  self-enrollment that would fail on it.
+- A registry hook re-fired by the mend now carries the standing entry's
+  management zcap forward instead of clearing it (the synthesized
+  establishment context supplies none).
+- The remembered-signup resume now supplies the read-first registry hook
+  (a resume can record the passphrase entry the torn signup lost) and the
+  local keyring-freshness-pin floor (a resume re-bind can no longer land
+  behind this browser's own pin and be refused as a rollback).
+
 ### Added
+
+- A new transient-login refusal for a user-key roster that carries no wrap
+  for the logging-in credential (`no-user-key-wrap`), with its own copy in
+  both locales; previously the state was folded into the absent-roster
+  refusal, or escaped as a raw unwrap error.
+- A new transient-login refusal for a roster mint the mend's preconditions
+  refused (`roster-mint-refused`), with its own copy in both locales: a
+  retry re-runs the same refusal, so the copy points at a connected
+  wallet.
+- The mend's partial collection fan-out is now logged with the collections
+  it left behind.
 
 - The seven contact operations (list, load, add, update, delete, add
   revision, list revisions) are now served remote-direct, reaching contacts

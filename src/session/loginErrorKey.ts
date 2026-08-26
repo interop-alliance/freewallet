@@ -220,6 +220,18 @@ function transientRefusalKey(reason: TransientLoginUnavailableReason): string {
     case 'unpromoted-account':
     case 'no-user-key-roster':
       return 'auth.errors.transientSetupIncomplete'
+    // The roster exists but its current epoch carries no wrap for this
+    // credential (an adopted roster, or a rotation that dropped it). A
+    // retry cannot help; another client or a rotation must re-escrow the
+    // credential, so the copy is its own.
+    case 'no-user-key-wrap':
+      return 'auth.errors.transientNoUserKeyWrap'
+    // The roster reads as absent but the mend's mint preconditions refused
+    // to create one (a held roster-epoch pin, or key-agreement entries this
+    // credential does not own). A retry re-runs the same refused
+    // preconditions, so the copy points at a connected wallet instead.
+    case 'roster-mint-refused':
+      return 'auth.errors.transientRosterMintRefused'
     // The annex-generation family: no live generation the credential's
     // sibling delegation can reach. No remedy exists that a credential-only
     // visit can run until the ladder-signed generation mint lands, so the
