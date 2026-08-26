@@ -139,6 +139,21 @@ export class WASRemoteStore {
   }
 
   /**
+   * Swaps the bound invocation capability for a freshly minted one -- the
+   * transient session's generation-delegation renewal, whose replacement
+   * must reach the requests this store makes for the rest of the session.
+   * Every request site reads the field at call time, so the swap takes
+   * effect immediately; nothing already in flight is retried.
+   *
+   * @param options {object}
+   * @param options.capability {IZcap}   the fresh delegation
+   * @returns {void}
+   */
+  adoptInvocationCapability({ capability }: { capability: IZcap }): void {
+    this.#capability = capability
+  }
+
+  /**
    * The `Space` handle every navigational request in this store rides -- the
    * one place `this.was.space(...)` is called, so no request path can miss
    * the bound invocation capability. With no capability bound the handle

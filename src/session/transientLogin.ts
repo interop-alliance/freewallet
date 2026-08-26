@@ -13,9 +13,12 @@
  * forces either side (true runs the durable standing self-enrollment; false
  * on a remembered browser refuses rather than forking the durability decision, per
  * `decisions/0001`). `transientSessionFromKeyringHit` is the composition
- * itself: verify the account log, enroll a per-visit key into the client
- * annex generation through the record's sibling delegation (the loud entry
- * `decisions/0002` requires before any authority is exercised), take the
+ * itself: verify the account log, ensure the credential can reach a live
+ * client annex generation with a current generation delegation (the
+ * ladder-signed mint-or-renew, a no-op on a healthy account), enroll a
+ * per-visit key into that generation through the record's sibling delegation
+ * (the loud entry `decisions/0002` requires before any authority is
+ * exercised), take the
  * generation delegation as embedded, read the user key from the credential's
  * standing roster wrap (no escrow -- a transient client never joins the
  * roster), and assemble the session on the replica-less remote-direct
@@ -37,10 +40,13 @@ import {
   webvhZcapClient
 } from '@interop/wallet-core/webvh'
 import {
+  clientAnnexDidParts,
   delegatedClientsDelegationSpaceId,
   delegatedClientsPointer,
   embeddedGenerationDelegation,
   enrollTransientClient,
+  ensureCredentialClientAnnexGeneration,
+  type ClientAnnexGenerationEnsureOutcome,
   type ClientAnnexWriteStore
 } from '@interop/wallet-core/clientAnnex'
 import {
@@ -69,6 +75,7 @@ import {
   type TransientSessionStores
 } from '@/session/persistence'
 import { initSessionFromSeed } from '@/session/initSession'
+import { unlockLogStore } from '@/session/standingUnlock'
 import {
   deriveUnlockCredential,
   fetchTransientKeyring,
@@ -76,6 +83,9 @@ import {
   type UnlockCredential
 } from '@/session/keyring'
 import type { Session } from '@/types/auth'
+import type { IZcap } from '@interop/data-integrity-core'
+import type { AccountPointer } from '@interop/wallet-core/keyring'
+import type { WebvhIdStore } from '@interop/wallet-core/webvh'
 
 /**
  * Why a transient login cannot proceed. Typed reasons, no copy: the login
@@ -91,8 +101,15 @@ import type { Session } from '@/types/auth'
  *   delegated-clients pointer, or the pointed generation's log is gone (a
  *   GC'd generation nothing re-minted).
  * - `no-generation-delegation`: the generation would need its delegation
- *   minted, which takes a durable signer this session does not hold.
+ *   minted, which takes a signer this session does not hold.
  * - `no-user-key-roster`: the account has no user key roster to read.
+ *
+ * The three annex-family reasons stand only where the ladder-signed mend
+ * could not run at all -- an account whose document anchors no ladder VM of
+ * this credential's, where the record's own sibling and the pointed
+ * generation's embedded delegation are the whole reach and one of them is
+ * missing. The refusal then carries wallet-core's own typed refusal as its
+ * `cause`.
  */
 export type TransientLoginUnavailableReason =
   | 'no-was-server'
@@ -113,12 +130,16 @@ export class TransientLoginUnavailableError extends Error {
 
   constructor({
     reason,
-    message
+    message,
+    cause
   }: {
     reason: TransientLoginUnavailableReason
     message?: string
+    cause?: unknown
   }) {
-    super(message ?? `A transient login is unavailable here (${reason}).`)
+    super(message ?? `A transient login is unavailable here (${reason}).`, {
+      ...(cause !== undefined ? { cause } : {})
+    })
     this.name = 'TransientLoginUnavailableError'
     this.reason = reason
   }
@@ -258,18 +279,117 @@ function refuseMissingGeneration(
 }
 
 /**
+ * The composition's client-annex reach stage: one converging ensure over the
+ * four durable states that make the annex unreachable from a
+ * credential-only visit (no `#DelegatedClients` pointer, a collected or
+ * never-minted generation, a stale generation delegation, a missing or
+ * misaimed sibling delegation). It is run on every visit, not only a broken
+ * one: on a healthy account it is a pure no-op report, and running it is
+ * what gives the renew-precedes-mint behavior the grant path depends on.
+ *
+ * Everything it writes is ladder-signed, so an account whose document does
+ * not anchor this credential's ladder VM (one with enrolled durable clients,
+ * or one anchored on another credential's ladder) is refused by wallet-core
+ * before anything is written. That refusal is resolved as a value rather
+ * than thrown: such an account may still be perfectly reachable through the
+ * record's own sibling delegation and the pointed generation's embedded
+ * delegation -- today's path -- and the caller falls back to it, refusing
+ * with its own typed reason only when that path cannot proceed either.
+ *
+ * @param options {object}
+ * @param options.found {TransientKeyringFetchResult}   the keyring hit
+ * @param options.standing {object}   its standing members, with the ladder
+ *   seed the caller already required
+ * @param options.pointer {AccountPointer}   the account pointer
+ * @param options.account {object}   the verified account log view
+ * @param options.persistence {TransientSessionStores}   the visit's stores
+ * @returns {Promise<object>}   `{ outcome }` on a completed ensure, or
+ *   `{ unavailable }` carrying wallet-core's typed refusal
+ */
+async function reachClientAnnexGeneration({
+  found,
+  standing,
+  pointer,
+  account,
+  persistence
+}: {
+  found: TransientKeyringFetchResult
+  standing: {
+    delegation: IZcap
+    delegatedClients?: IZcap
+    ladderSeed: Uint8Array
+  }
+  pointer: AccountPointer
+  account: Parameters<
+    typeof ensureCredentialClientAnnexGeneration
+  >[0]['account']
+  persistence: TransientSessionStores
+}): Promise<{
+  outcome?: ClientAnnexGenerationEnsureOutcome
+  unavailable?: unknown
+}> {
+  const zcapClient = found.standingClient.agents.zcapClient
+  try {
+    const outcome = await ensureCredentialClientAnnexGeneration({
+      wasServerUrl: pointer.host,
+      spaceId: pointer.spaceId,
+      account,
+      ladderSeed: standing.ladderSeed,
+      standingClient: { did: found.standingClient.clientDid, zcapClient },
+      bootstrapWasFor: ({ keyAgent }) =>
+        new WasClient({
+          serverUrl: pointer.host,
+          zcapClient: didKeyZcapClient({ keyAgent })
+        }),
+      // The account log through the record's own bridge delegation: pointer
+      // entries publish with `logOnly: true`, which is all the bridge can do.
+      idStore: unlockLogStore({
+        pointer,
+        delegation: standing.delegation,
+        zcapClient
+      }) as WebvhIdStore,
+      onRebindRecord: async ({ delegatedClients }) => {
+        const rebind = found.rebindStandingRecord
+        if (!rebind) {
+          // Invariant, not a user state: every standing hit carries the
+          // re-bind closure, and a fresh sibling nothing re-seals into the
+          // record would strand the credential that just minted it.
+          throw new Error(
+            'Invariant violated: the transient keyring hit carries no record ' +
+              're-bind closure, so a fresh sibling delegation cannot be sealed.'
+          )
+        }
+        await rebind({ delegation: standing.delegation, delegatedClients })
+      },
+      ...(standing.delegatedClients
+        ? { delegatedClients: standing.delegatedClients }
+        : {}),
+      pinStore: persistence.logPins
+    })
+    return { outcome }
+  } catch (err) {
+    if ((err as Error).name === 'ClientAnnexGenerationUnavailableError') {
+      return { unavailable: err }
+    }
+    throw err
+  }
+}
+
+/**
  * The transient composition, from a transient keyring hit to a live session:
  *
  * 1. Precondition refusals (typed, before any request beyond the record
- *    fetch): standing authority, the `delegatedClients` sibling, a promoted
- *    pointer.
- * 2. Verify the account log under the visit's in-memory pins and require the
- *    delegated-clients pointer (the current annex generation).
+ *    fetch): standing authority and a promoted pointer.
+ * 2. Verify the account log under the visit's in-memory pins, then run the
+ *    client-annex reach stage (`reachClientAnnexGeneration`): the
+ *    ladder-signed ensure that mints or renews what the visit needs, with
+ *    the pointed-generation-and-record-sibling fallback behind it and the
+ *    typed refusals behind that.
  * 3. Mint a per-visit key set in memory and enroll it into the generation
  *    through the sibling delegation, signed by the credential's static rung
  *    0 (`enrollTransientClient`; the GC-race re-read is built in). The
- *    generation delegation is taken as embedded -- a generation that would
- *    need one minted refuses instead (its mint takes a durable signer).
+ *    generation delegation is taken as embedded -- the reach stage above is
+ *    what installs and renews it.
  * 4. Read the user key from the credential's STANDING roster wrap: the
  *    roster request signs as `<clientAnnexDid>#<vm>` under the generation
  *    delegation, and the unwrap uses the credential's own key-agreement key.
@@ -360,26 +480,13 @@ export async function transientSessionFromKeyringHit({
     }
     throw new TransientLoginUnavailableError({ reason: 'unpromoted-account' })
   }
-  const delegatedClients = standing.delegatedClients
-  if (!delegatedClients) {
-    throw new TransientLoginUnavailableError({ reason: 'no-delegated-clients' })
-  }
   const accountDid = pointer.did
   // Aliased for the hoisted `readAccountDocument` closure below, where the
   // guard's narrowing of `pointer` does not reach.
   const accountSpaceId = pointer.spaceId
   const accountHost = pointer.host
-  const clientAnnexSpaceId = delegatedClientsDelegationSpaceId({
-    delegation: delegatedClients
-  })
-  if (!clientAnnexSpaceId) {
-    throw new TransientLoginUnavailableError({
-      reason: 'no-delegated-clients',
-      message:
-        "The sibling delegation's target does not address an annex Space."
-    })
-  }
   const ladderSeed = standing.ladderSeed
+  const accountPointer = pointer
 
   // The account log, verified under the visit's in-memory pins
   // (trust-on-first-use for this visit; nothing durable protects or is
@@ -391,10 +498,64 @@ export async function transientSessionFromKeyringHit({
     host: pointer.host,
     pinStore: persistence.logPins
   })
-  if (!delegatedClientsPointer({ doc: verified.doc })) {
-    throw new TransientLoginUnavailableError({
-      reason: 'no-clientAnnex-generation'
+
+  // The client-annex reach: the ladder-signed ensure first (a no-op on a
+  // healthy ladder-anchored account, the mend otherwise), then the fallback
+  // for an account whose document anchors no ladder VM of this credential's,
+  // where nothing ladder-signed could verify and the record's own sibling
+  // plus the pointed generation's embedded delegation are the whole reach.
+  const reached = await reachClientAnnexGeneration({
+    found,
+    standing: { ...standing, ladderSeed },
+    pointer: accountPointer,
+    account: { did: accountDid, doc: verified.doc, log: verified.log },
+    persistence
+  })
+  const healedGenerationDelegation = reached.outcome?.generationDelegation
+  let siblingDelegation: IZcap
+  let annexSpaceId: string
+  if (reached.outcome) {
+    siblingDelegation = reached.outcome.delegatedClients
+    annexSpaceId = clientAnnexDidParts({
+      did: reached.outcome.clientAnnexDid
+    }).spaceId
+    if (reached.outcome.generationMinted || reached.outcome.spaceMinted) {
+      // The pointer moved: the pre-mend document names a generation that is
+      // no longer the live one, so the enrollment must read the fresh log.
+      verified = await verifyAccountLog({
+        did: accountDid,
+        spaceId: accountSpaceId,
+        host: accountHost,
+        pinStore: persistence.logPins
+      })
+    }
+  } else {
+    const recordSibling = standing.delegatedClients
+    if (!recordSibling) {
+      throw new TransientLoginUnavailableError({
+        reason: 'no-delegated-clients',
+        cause: reached.unavailable
+      })
+    }
+    const siblingSpaceId = delegatedClientsDelegationSpaceId({
+      delegation: recordSibling
     })
+    if (!siblingSpaceId) {
+      throw new TransientLoginUnavailableError({
+        reason: 'no-delegated-clients',
+        message:
+          "The sibling delegation's target does not address an annex Space.",
+        cause: reached.unavailable
+      })
+    }
+    if (!delegatedClientsPointer({ doc: verified.doc })) {
+      throw new TransientLoginUnavailableError({
+        reason: 'no-clientAnnex-generation',
+        cause: reached.unavailable
+      })
+    }
+    siblingDelegation = recordSibling
+    annexSpaceId = siblingSpaceId
   }
 
   // The per-visit key set: 32 random bytes, held in memory only. Its did:key
@@ -430,32 +591,37 @@ export async function transientSessionFromKeyringHit({
       refuseMissingGeneration(
         delegatedWebvhLogStore({
           host: pointer.host,
-          spaceId: clientAnnexSpaceId,
+          spaceId: annexSpaceId,
           collectionId: generationId,
-          delegation: delegatedClients,
+          delegation: siblingDelegation,
           zcapClient: found.standingClient.agents.zcapClient
         })
       ),
     ladderSeed,
     transientKeyMultibase,
-    // The delegation is taken as embedded, never minted from here: its mint
-    // needs a durable client's signature (or the ladder VM's, on a
-    // ladder-anchored account). A generation about to receive its first VM
-    // with no delegation entry refuses -- crucially BEFORE the entry
-    // publishes.
+    // The delegation is taken as embedded, never minted from here: the reach
+    // stage above installs and renews it (ladder-signed) before the
+    // enrollment runs, and a generation about to receive its first VM with
+    // no delegation entry refuses -- crucially BEFORE the entry publishes.
     mintGenerationDelegation: async () => {
       throw new TransientLoginUnavailableError({
-        reason: 'no-generation-delegation'
+        reason: 'no-generation-delegation',
+        ...(reached.unavailable !== undefined
+          ? { cause: reached.unavailable }
+          : {})
       })
     },
     pinStore: persistence.logPins
   })
-  const generationDelegation = embeddedGenerationDelegation({
-    doc: clientAnnexDoc
-  })
+  const generationDelegation =
+    embeddedGenerationDelegation({ doc: clientAnnexDoc }) ??
+    healedGenerationDelegation
   if (!generationDelegation) {
     throw new TransientLoginUnavailableError({
-      reason: 'no-generation-delegation'
+      reason: 'no-generation-delegation',
+      ...(reached.unavailable !== undefined
+        ? { cause: reached.unavailable }
+        : {})
     })
   }
 
@@ -575,11 +741,25 @@ export async function transientSessionFromKeyringHit({
     persistence: sessionPersistence
   })
   // Stamp what the durable tail stamps, minus what a transient session does
-  // not hold (no management zcap was minted).
+  // not hold (no management zcap was minted). The standing members ride
+  // along: the ladder seed is what lets a mid-session stage sign as the
+  // ladder VM (the App Connect grant path's generation-delegation renewal),
+  // and the sibling delegation beside it is the authority that renewal's
+  // annex write invokes under.
   session.profile.accountController = found.controller
   session.profile.unlockMethod = {
     type,
     unlockSpaceId: found.unlockSpaceId
+  }
+  session.profile.ladderSeed = ladderSeed
+  session.profile.standingUnlock = {
+    delegation: standing.delegation,
+    delegatedClients: siblingDelegation,
+    standingClient: found.standingClient,
+    unlockSpaceId: found.unlockSpaceId,
+    ...(found.rebindStandingRecord
+      ? { rebindRecord: found.rebindStandingRecord }
+      : {})
   }
   return { session, userExists }
 }

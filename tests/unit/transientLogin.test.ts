@@ -38,6 +38,7 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
     typeof import('@interop/wallet-core/clientAnnex')
   >()),
   enrollTransientClient: vi.fn(),
+  ensureCredentialClientAnnexGeneration: vi.fn(),
   embeddedGenerationDelegation: vi.fn(),
   delegatedClientsPointer: vi.fn(),
   delegatedClientsDelegationSpaceId: vi.fn()
@@ -74,7 +75,8 @@ import {
   delegatedClientsDelegationSpaceId,
   delegatedClientsPointer,
   embeddedGenerationDelegation,
-  enrollTransientClient
+  enrollTransientClient,
+  ensureCredentialClientAnnexGeneration
 } from '@interop/wallet-core/clientAnnex'
 import {
   ensureUserKeyRoster,
@@ -119,6 +121,42 @@ const CLIENT_ANNEX_DID =
 const GENERATION_DELEGATION = { id: 'urn:zcap:generation' }
 const SIBLING_DELEGATION = { id: 'urn:zcap:sibling' }
 
+const FRESH_SIBLING = { id: 'urn:zcap:sibling-fresh' }
+const FRESH_DELEGATION = { id: 'urn:zcap:generation-fresh' }
+
+/**
+ * A no-op ensure outcome (the healthy account's pure report), with the
+ * mended members overridable per test.
+ */
+function ensureOutcome(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    clientAnnexDid: CLIENT_ANNEX_DID,
+    generationDelegation: GENERATION_DELEGATION,
+    delegatedClients: SIBLING_DELEGATION,
+    generationMinted: false,
+    spaceMinted: false,
+    delegationRenewed: false,
+    siblingReminted: false,
+    ...overrides
+  }
+}
+
+/**
+ * Wallet-core's typed refusal, matched by name the way the composition
+ * matches it.
+ *
+ * @param reason {string}
+ * @returns {Error}
+ */
+function unavailable(reason: string): Error {
+  const err = new Error(`unavailable (${reason})`)
+  err.name = 'ClientAnnexGenerationUnavailableError'
+  ;(err as Error & { reason: string }).reason = reason
+  return err
+}
+
 /**
  * A transient keyring hit in the standing layout, overridable per test.
  */
@@ -143,6 +181,7 @@ function makeFound(
         keyAgreementKey: { id: 'did:key:z6MkStandingClient#z6LSkak' }
       }
     },
+    rebindStandingRecord: vi.fn(async () => undefined),
     ...overrides
   } as unknown as TransientKeyringFetchResult
 }
@@ -160,6 +199,9 @@ function primeHappyPath() {
     updateKeys: [],
     nextKeyHashes: []
   } as never)
+  vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+    ensureOutcome() as never
+  )
   vi.mocked(delegatedClientsPointer).mockReturnValue(CLIENT_ANNEX_DID)
   vi.mocked(delegatedClientsDelegationSpaceId).mockReturnValue(
     'clientAnnex-space-1'
@@ -309,13 +351,45 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
     expect((err as Error).message).toMatch(/no standing authority/)
   })
 
-  it('refuses a standing record without the delegatedClients sibling', async () => {
+  it('refuses a record without the sibling when the ladder cannot mend', async () => {
+    // The one state the mend cannot reach: the account document anchors no
+    // ladder VM of this credential's (an account with enrolled durable
+    // clients), so nothing ladder-signed verifies and the record's own
+    // sibling was the whole reach.
+    primeHappyPath()
+    const refusal = unavailable('ladder-vm-not-anchored')
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockRejectedValue(refusal)
     const found = makeFound()
     delete (found.standing as { delegatedClients?: unknown }).delegatedClients
     const err = await refusalFor(found)
     expect((err as TransientLoginUnavailableError).reason).toBe(
       'no-delegated-clients'
     )
+    expect((err as Error).cause).toBe(refusal)
+  })
+
+  it('proceeds on the record sibling when the ladder is not anchored', async () => {
+    // The same refusal on an account that is nonetheless reachable: the
+    // pointed generation is live and its delegation embedded, which is
+    // exactly today's path.
+    primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockRejectedValue(
+      unavailable('ladder-vm-not-anchored')
+    )
+    const { session } = await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence: transientSessionStores()
+    })
+    expect(session).toBeTruthy()
+    expect(enrollTransientClient).toHaveBeenCalled()
+  })
+
+  it('rethrows a mend failure that is not the typed refusal', async () => {
+    primeHappyPath()
+    const boom = new Error('the annex Space PUT failed')
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockRejectedValue(boom)
+    expect(await refusalFor(makeFound())).toBe(boom)
   })
 
   it('refuses an unpromoted account pointer', async () => {
@@ -329,6 +403,9 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
 
   it('refuses when the account document carries no annex pointer', async () => {
     primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockRejectedValue(
+      unavailable('update-key-not-attributable')
+    )
     vi.mocked(delegatedClientsPointer).mockReturnValue(undefined)
     const err = await refusalFor(makeFound())
     expect((err as TransientLoginUnavailableError).reason).toBe(
@@ -339,6 +416,9 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
 
   it('refuses a collected generation from the store wrapper, pre-write', async () => {
     primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockRejectedValue(
+      unavailable('ladder-vm-not-anchored')
+    )
     vi.mocked(delegatedWebvhLogStore).mockReturnValue({
       getIdResourceRaw: vi.fn(async () => undefined),
       putIdResource: vi.fn(async () => undefined)
@@ -360,6 +440,9 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
 
   it('refuses instead of minting a generation delegation', async () => {
     primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockRejectedValue(
+      unavailable('ladder-vm-not-anchored')
+    )
     vi.mocked(enrollTransientClient).mockImplementation(
       async ({ mintGenerationDelegation }) => {
         await mintGenerationDelegation!({ clientAnnexDid: CLIENT_ANNEX_DID })
@@ -374,6 +457,9 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
 
   it('refuses a generation document with no embedded delegation', async () => {
     primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockRejectedValue(
+      unavailable('ladder-vm-not-anchored')
+    )
     vi.mocked(embeddedGenerationDelegation).mockReturnValue(undefined)
     const err = await refusalFor(makeFound())
     expect((err as TransientLoginUnavailableError).reason).toBe(
@@ -488,6 +574,16 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
       type: 'passphrase',
       unlockSpaceId: 'unlock-space-1'
     })
+    // The standing members ride the profile: what the grant path's
+    // ladder-signed renewal stage signs and invokes with.
+    expect(session.profile.ladderSeed).toBe(found.standing!.ladderSeed)
+    expect(session.profile.standingUnlock).toEqual({
+      delegation: found.standing!.delegation,
+      delegatedClients: SIBLING_DELEGATION,
+      standingClient: found.standingClient,
+      unlockSpaceId: 'unlock-space-1',
+      rebindRecord: found.rebindStandingRecord
+    })
     expect(userExists).toBe(true)
 
     // The visit's epoch pin advanced in memory only.
@@ -505,6 +601,136 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
     })
     expect(initSessionFromSeed).toHaveBeenCalledWith(
       expect.objectContaining({ email: 'record@example.test' })
+    )
+  })
+})
+
+describe('transientSessionFromKeyringHit -- the client-annex reach stage', () => {
+  /**
+   * Runs the composition against the current mocks and returns the ensure's
+   * one call arguments beside the session.
+   */
+  async function runComposition(found = makeFound()) {
+    const persistence = transientSessionStores()
+    const { session } = await transientSessionFromKeyringHit({
+      found,
+      type: 'passphrase',
+      persistence
+    })
+    return {
+      session,
+      persistence,
+      found,
+      ensureCall: vi.mocked(ensureCredentialClientAnnexGeneration).mock
+        .calls[0]![0]
+    }
+  }
+
+  it('runs the ensure on every visit, with the credential members', async () => {
+    primeHappyPath()
+    const { ensureCall, persistence, found } = await runComposition()
+    expect(ensureCall.wasServerUrl).toBe(POINTER.host)
+    expect(ensureCall.spaceId).toBe(POINTER.spaceId)
+    expect(ensureCall.ladderSeed).toBe(found.standing!.ladderSeed)
+    expect(ensureCall.delegatedClients).toBe(SIBLING_DELEGATION)
+    expect(ensureCall.pinStore).toBe(persistence.logPins)
+    expect(ensureCall.standingClient).toEqual({
+      did: found.standingClient.clientDid,
+      zcapClient: found.standingClient.agents.zcapClient
+    })
+    const verifiedView =
+      await vi.mocked(verifyAccountLog).mock.results[0]!.value
+    expect(ensureCall.account).toEqual({
+      did: POINTER.did,
+      doc: verifiedView.doc,
+      log: verifiedView.log
+    })
+    // A healthy account is a pure no-op report: nothing is re-verified.
+    expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(1)
+  })
+
+  it('re-seals a freshly minted sibling through the record re-bind', async () => {
+    primeHappyPath()
+    const found = makeFound()
+    delete (found.standing as { delegatedClients?: unknown }).delegatedClients
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockImplementation(
+      async ({ onRebindRecord }) => {
+        await onRebindRecord({ delegatedClients: FRESH_SIBLING as never })
+        return ensureOutcome({
+          delegatedClients: FRESH_SIBLING,
+          siblingReminted: true
+        }) as never
+      }
+    )
+    const { ensureCall } = await runComposition(found)
+    expect(ensureCall.delegatedClients).toBeUndefined()
+    expect(found.rebindStandingRecord).toHaveBeenCalledWith({
+      delegation: found.standing!.delegation,
+      delegatedClients: FRESH_SIBLING
+    })
+    // The enrollment rides the sibling the mend handed back, not the
+    // record's (absent) one.
+    vi.mocked(enrollTransientClient).mock.calls[0]![0].storeForGenerationId(
+      'gen-Ux3v0kQf9aPmB2hZ'
+    )
+    expect(delegatedWebvhLogStore).toHaveBeenCalledWith(
+      expect.objectContaining({ delegation: FRESH_SIBLING })
+    )
+  })
+
+  it('re-verifies the account log when the mend moved the pointer', async () => {
+    primeHappyPath()
+    const minted =
+      'did:webvh:QmClientAnnexScid:was.example.test:space:clientAnnex-space-2:gen-Fr3sh0kQf9aPmB2h'
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+      ensureOutcome({
+        clientAnnexDid: minted,
+        generationMinted: true,
+        spaceMinted: true,
+        generationDelegation: FRESH_DELEGATION
+      }) as never
+    )
+    await runComposition()
+    expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(2)
+    // The enrollment addresses the freshly minted generation's Space.
+    const enrollCall = vi.mocked(enrollTransientClient).mock.calls[0]![0]
+    enrollCall.storeForGenerationId('gen-Fr3sh0kQf9aPmB2h')
+    expect(delegatedWebvhLogStore).toHaveBeenCalledWith(
+      expect.objectContaining({ spaceId: 'clientAnnex-space-2' })
+    )
+  })
+
+  it('adopts a re-minted generation in an existing Space', async () => {
+    primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+      ensureOutcome({ generationMinted: true }) as never
+    )
+    await runComposition()
+    expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(2)
+    expect(enrollTransientClient).toHaveBeenCalled()
+  })
+
+  it('carries a renewed generation delegation into the session', async () => {
+    primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+      ensureOutcome({
+        delegationRenewed: true,
+        generationDelegation: FRESH_DELEGATION
+      }) as never
+    )
+    // The annex document the enrollment hands back carries the renewed
+    // delegation; the outcome's is the fallback when it does not.
+    vi.mocked(embeddedGenerationDelegation).mockReturnValue(undefined)
+    await runComposition()
+    expect(initSessionFromSeed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        persistence: expect.objectContaining({
+          clientAnnex: {
+            clientAnnexDid: CLIENT_ANNEX_DID,
+            invocationCapability: FRESH_DELEGATION
+          }
+        })
+      })
     )
   })
 })

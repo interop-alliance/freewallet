@@ -80,6 +80,7 @@ import type { Session } from '@/types/auth'
 import { APP_CONNECTIONS_COLLECTION } from '@interop/wallet-core/space'
 import { clampGrantExpires } from '@interop/wallet-core/clientAnnex'
 import { zcapExpiring } from '@interop/wallet-core/webvh'
+import { renewTransientGenerationDelegation } from '@/session/annexReach'
 import {
   RP_ZCAP_TTL_MS,
   RP_ZCAP_WRITE_TTL_MS,
@@ -348,10 +349,10 @@ export class ZcapUnavailableError extends Error {
  * grant it mints chains under -- is expired, inside its renewal window, or
  * carries no parseable expiry. A grant clamped under such a parent would
  * either verify nowhere or lapse within days, so the mint refuses outright.
- * The renew-precedes-mint stage (renewing the delegation before the first
- * grant) is the eventual answer; it cannot run from a transient session
- * until the transient profile carries its ladder members, so this refusal
- * stands in for it. `composeAndDeliverResponse` maps it, like any unmapped
+ * The renew-precedes-mint stage runs first (the ladder-signed renewal over
+ * the standing members the transient login stamps), so this refusal is
+ * reached only when the session holds nothing to renew with, or the renewal
+ * itself failed. `composeAndDeliverResponse` maps it, like any unmapped
  * error, onto the generic `processFailed` reason -- acceptable for now.
  */
 export class GenerationDelegationStaleError extends Error {
@@ -896,6 +897,47 @@ export async function processZcaps({
 
   // `hasZcapStorage` above guarantees a resolved `spaceUrl`.
   const spaceUrl = session.storage.spaceUrl!
+  const now = Date.now()
+  const { zcapClient } = session.profile
+  // A transient session holds its Space authority as a delegated zcap (the
+  // generation delegation), so its grants chain under THAT, signed by the
+  // annex key the delegation names -- a grant delegated off the root by a
+  // key the account document never lists would verify nowhere. A durable
+  // session delegates off the root as before.
+  let invocationCapability = session.profile.invocationCapability
+
+  /**
+   * Whether a generation delegation is past its expiry or inside its renewal
+   * window. A delegated zcap always carries `expires`; the union type's root
+   * half does not, and a root could never sit here.
+   *
+   * @param delegation {IZcap}
+   * @returns {boolean}
+   */
+  function delegationStale(delegation: IZcap): boolean {
+    return zcapExpiring({
+      expires: 'expires' in delegation ? delegation.expires : undefined,
+      now
+    })
+  }
+
+  if (invocationCapability && delegationStale(invocationCapability)) {
+    // The blocking renewal stage, ahead of every remote call below: a grant
+    // minted under a lapsing parent would either verify nowhere or lapse
+    // within days, and the collection listing that follows rides this very
+    // delegation, so an already-expired one must be replaced before it is
+    // invoked. The delegation is renewed in place -- ladder-signed, from the
+    // standing members the transient login stamped -- and the live session,
+    // the remote store included, adopts the fresh one. The refusal stands
+    // only when there is nothing to renew with, or the renewal did not
+    // produce a current delegation.
+    const renewed = await renewTransientGenerationDelegation({ session })
+    if (!renewed || delegationStale(renewed)) {
+      throw new GenerationDelegationStaleError()
+    }
+    invocationCapability = renewed
+  }
+
   // The existing collections' public state, fetched fresh at delegation time
   // (the consent preview resolves against its own snapshot): resolution
   // refuses a public grant that would convert an existing collection, and
@@ -912,28 +954,7 @@ export async function processZcaps({
     existingCollectionsFrom(await session.storage.listCollectionPublicStates())
   )
   const spaceRootCapability = await generateZcapUri({ url: spaceUrl })
-  const now = Date.now()
-  const { zcapClient, invocationCapability } = session.profile
-  // A transient session holds its Space authority as a delegated zcap (the
-  // generation delegation), so its grants chain under THAT, signed by the
-  // annex key the delegation names -- a grant delegated off the root by a
-  // key the account document never lists would verify nowhere. A durable
-  // session delegates off the root as before.
   const parentCapability = invocationCapability ?? spaceRootCapability
-  if (
-    invocationCapability &&
-    zcapExpiring({
-      // A delegated zcap always carries `expires`; the union type's root half
-      // does not, and a root could never sit here.
-      expires:
-        'expires' in invocationCapability
-          ? invocationCapability.expires
-          : undefined,
-      now
-    })
-  ) {
-    throw new GenerationDelegationStaleError()
-  }
 
   /**
    * A grant's expiry for a requested TTL: the full TTL under the root, and

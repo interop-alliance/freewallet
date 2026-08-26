@@ -140,8 +140,10 @@ export interface ControllerProfile {
   // rung 0 (derived from this seed and the generation id), so the ceremonies
   // that write the annex mid-session -- the revocation cascade's
   // generation-delegation re-mint and the rotation's strike-or-swap -- read
-  // it from here. In-memory only, same trust class as `clientSeed`; absent
-  // for guests and for records without standing authority.
+  // it from here. A transient session stamps it too: it is what lets the
+  // grant path's renewal stage sign as the ladder VM with no durable signer
+  // in hand. In-memory only, same trust class as `clientSeed`; absent for
+  // guests and for records without standing authority.
   ladderSeed?: Uint8Array
   // The login credential's other standing members, stamped from the keyring
   // hit beside `ladderSeed`: the pre-minted PUT-on-`did.jsonl` bridge
@@ -152,7 +154,9 @@ export interface ControllerProfile {
   // bridge and sibling delegations, everything else restated verbatim). The
   // forget ceremony signs its ladder-signed removal entry through these
   // without re-prompting for the secret, and the last-client transition
-  // re-binds the record through the closure before its removal entry.
+  // re-binds the record through the closure before its removal entry. A
+  // transient session stamps them too (its sibling delegation is the
+  // authority the grant path's renewal stage writes the annex under).
   // In-memory only, same trust class as `clientSeed`; absent for guests and
   // for records without standing authority.
   standingUnlock?: {
@@ -169,7 +173,9 @@ export interface ControllerProfile {
   // session's authority over the data Space is a delegated Space-subtree
   // zcap rather than the root capability -- the transient session's
   // generation delegation. Absent for durable sessions, whose invocations
-  // root on the Space controller. In-memory only, never persisted.
+  // root on the Space controller. Re-stamped in place when the grant path's
+  // renewal stage installs a fresh delegation. In-memory only, never
+  // persisted.
   invocationCapability?: IZcap
   // The session-lifetime memo of this account's locally verified did:webvh
   // log (`src/session/verifiedLog.ts`): one verification per session instead

@@ -2763,12 +2763,16 @@ describe('fetchTransientKeyring (FW-215)', () => {
     expect(found!.standing!.delegation).toEqual(DELEGATION)
     expect(found!.standingClient).toBeDefined()
     // Nothing durable rides the result: no client keys, no persist or enroll
-    // closures, no management zcap.
+    // closures, no management zcap. The record re-bind closure DOES ride
+    // along (the visit's annex mend re-seals a fresh sibling delegation
+    // through it), in its transient shape -- a remote record write that
+    // touches no local cache or freshness pin, as the database check below
+    // confirms.
     expect(found).not.toHaveProperty('clientKeys')
     expect(found).not.toHaveProperty('persistClientKeys')
     expect(found).not.toHaveProperty('enrollClientKeys')
-    expect(found).not.toHaveProperty('rebindStandingRecord')
     expect(found).not.toHaveProperty('manageCapability')
+    expect(typeof found!.rebindStandingRecord).toBe('function')
     // And no IndexedDB database was created at any point.
     expect(await idb.databases()).toEqual([])
   })

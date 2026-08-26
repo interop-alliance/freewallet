@@ -1208,6 +1208,14 @@ export interface TransientKeyringFetchResult extends KeyringRecordContents {
     ladderSeed?: Uint8Array
   }
   standingClient: StandingUnlockClient
+  // Present beside `standing`: the record re-bind closure, in its transient
+  // shape -- the remote record is re-written, nothing local is touched. What
+  // the visit's client-annex heal re-seals a freshly minted sibling
+  // delegation into.
+  rebindStandingRecord?: (options: {
+    delegation: IZcap
+    delegatedClients?: IZcap
+  }) => Promise<void>
   unlockKeyAgreementKeyId?: string
   unlockKeyAgreementKeyMultibase?: string
 }
@@ -1297,8 +1305,113 @@ export async function fetchTransientKeyring({
     ...unwrapped.found,
     unlockSpaceId: unlock.spaceId,
     standingClient,
-    ...(unwrapped.standing ? { standing: unwrapped.standing } : {}),
+    ...(unwrapped.standing
+      ? {
+          standing: unwrapped.standing,
+          rebindStandingRecord: standingRecordRebinder({
+            unlock,
+            standingClient,
+            found: unwrapped.found,
+            standing: unwrapped.standing
+          })
+        }
+      : {}),
     ...unlockKeyAgreementMembers({ unlock })
+  }
+}
+
+/**
+ * Builds a standing record's re-bind closure: re-wraps and re-PUTs the
+ * record with a freshly minted bridge delegation (and, when supplied, a
+ * fresh annex-Space sibling; an existing sibling is restated verbatim
+ * otherwise), everything else -- the controller, the pointer, the email,
+ * the ladder seed -- restated verbatim.
+ *
+ * The one difference between the durable and the transient variant is
+ * `local`: a durable hit floors the fresh stamp over this browser's
+ * keyring-freshness pin and updates the local cache and pin afterwards,
+ * while a transient visit (which holds no durable local state at all)
+ * floors over the served record alone and writes nothing locally. The
+ * remote record write is the same one either way.
+ *
+ * @param options {object}
+ * @param options.unlock {UnlockIdentity}   the derived unlock identity
+ * @param options.standingClient {StandingUnlockClient}   the credential's
+ *   own client identity (its binding MAC key authenticates the account core)
+ * @param options.found {KeyringRecordContents}   the served record's contents
+ * @param options.standing {object}   the record's standing members
+ * @param [options.local] {object}   the durable variant's local state (the
+ *   `freewallet-session` IndexedDB factory); absent for a transient visit
+ * @returns {Function}   `({ delegation, delegatedClients }) => Promise<void>`
+ */
+function standingRecordRebinder({
+  unlock,
+  standingClient,
+  found,
+  standing,
+  local
+}: {
+  unlock: UnlockIdentity
+  standingClient: StandingUnlockClient
+  found: KeyringRecordContents
+  standing: NonNullable<UnwrappedStoredRecord['standing']>
+  local?: { idb?: IDBFactory }
+}): (options: {
+  delegation: IZcap
+  delegatedClients?: IZcap
+}) => Promise<void> {
+  return async ({ delegation, delegatedClients }) => {
+    const createdAt = nextRecordCreatedAt({
+      advancePast: [
+        found.createdAt,
+        ...(local
+          ? [
+              await loadKeyringFreshnessPin({
+                spaceId: unlock.spaceId,
+                idb: local.idb
+              })
+            ]
+          : [])
+      ]
+    })
+    // A fresh sibling replaces the stored one; absent a fresh one,
+    // the record's own sibling is restated verbatim.
+    const carriedDelegatedClients =
+      delegatedClients ?? standing.delegatedClients
+    const record = await wrapUnlockRecord({
+      controller: found.controller,
+      email: found.email,
+      pointer: found.pointer!,
+      delegation,
+      ...(carriedDelegatedClients
+        ? { delegatedClients: carriedDelegatedClients }
+        : {}),
+      ...(standing.ladderSeed ? { ladderSeed: standing.ladderSeed } : {}),
+      keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+      signer: unlock.recordSigner,
+      bindingMacKey: standingClient.bindingMacKey,
+      createdAt
+    })
+    if (WAS_SERVER_URL) {
+      await putUnlockKeyring({
+        storageServerUrl: WAS_SERVER_URL,
+        zcapClient: unlock.zcapClient,
+        spaceId: unlock.spaceId,
+        record
+      })
+    }
+    if (local) {
+      await saveKeyringCache({
+        spaceId: unlock.spaceId,
+        record,
+        idb: local.idb
+      })
+      await saveKeyringFreshnessPin({
+        spaceId: unlock.spaceId,
+        createdAt,
+        idb: local.idb
+      })
+    }
   }
 }
 
@@ -1337,48 +1450,13 @@ async function buildFetchResult({
     ...(standing
       ? {
           standing,
-          rebindStandingRecord: async ({ delegation, delegatedClients }) => {
-            const createdAt = nextRecordCreatedAt({
-              advancePast: [
-                found.createdAt,
-                await loadKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
-              ]
-            })
-            // A fresh sibling replaces the stored one; absent a fresh one,
-            // the record's own sibling is restated verbatim.
-            const carriedDelegatedClients =
-              delegatedClients ?? standing.delegatedClients
-            const record = await wrapUnlockRecord({
-              controller: found.controller,
-              email: found.email,
-              pointer: found.pointer!,
-              delegation,
-              ...(carriedDelegatedClients
-                ? { delegatedClients: carriedDelegatedClients }
-                : {}),
-              ...(standing.ladderSeed
-                ? { ladderSeed: standing.ladderSeed }
-                : {}),
-              keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-              signer: unlock.recordSigner,
-              bindingMacKey: standingClient.bindingMacKey,
-              createdAt
-            })
-            if (WAS_SERVER_URL) {
-              await putUnlockKeyring({
-                storageServerUrl: WAS_SERVER_URL,
-                zcapClient: unlock.zcapClient,
-                spaceId: unlock.spaceId,
-                record
-              })
-            }
-            await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
-            await saveKeyringFreshnessPin({
-              spaceId: unlock.spaceId,
-              createdAt,
-              idb
-            })
-          }
+          rebindStandingRecord: standingRecordRebinder({
+            unlock,
+            standingClient,
+            found,
+            standing,
+            local: { idb }
+          })
         }
       : {}),
     ...(clientKeys

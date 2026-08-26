@@ -1,6 +1,12 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from 'vitest'
+
+vi.mock('@/session/annexReach', () => ({
+  renewTransientGenerationDelegation: vi.fn(async () => null)
+}))
+
 import type { Session } from '@/types/auth'
+import { renewTransientGenerationDelegation } from '@/session/annexReach'
 import { ZCAP_RENEWAL_WINDOW_MS } from '@interop/wallet-core/webvh'
 import { RP_ZCAP_WRITE_TTL_MS } from '@/app.config'
 import { GenerationDelegationStaleError, processZcaps } from './processZcaps'
@@ -52,12 +58,13 @@ function fakeSession({
     id: 'urn:zcap:delegated',
     ...args
   }))
+  const listCollectionPublicStates = vi.fn(async () => [])
   const session = {
     user: { id: 'did:key:z6MkUser' },
     storage: {
       hasRemoteStorage: true,
       spaceUrl: SPACE_URL,
-      listCollectionPublicStates: async () => [],
+      listCollectionPublicStates,
       ensureCollection: vi.fn(async () => {}),
       provisionAppCollection: vi.fn(async () => {})
     },
@@ -66,12 +73,13 @@ function fakeSession({
       invocationCapability
     }
   } as unknown as Session
-  return { session, delegate }
+  return { session, delegate, listCollectionPublicStates }
 }
 
 describe('processZcaps delegation parent', () => {
   afterEach(() => {
     vi.useRealTimers()
+    vi.mocked(renewTransientGenerationDelegation).mockResolvedValue(null)
   })
 
   it('delegates under the generation delegation with the full write TTL when the parent outlives it', async () => {
@@ -107,7 +115,7 @@ describe('processZcaps delegation parent', () => {
     )
   })
 
-  it('refuses to mint under an expired generation delegation', async () => {
+  it('refuses to mint under an expired generation delegation with nothing to renew', async () => {
     vi.useFakeTimers({ now: NOW })
     const { session, delegate } = fakeSession({
       invocationCapability: delegationExpiringIn(-1)
@@ -130,6 +138,53 @@ describe('processZcaps delegation parent', () => {
     expect(failure).toBeInstanceOf(GenerationDelegationStaleError)
     expect((failure as Error).name).toBe('GenerationDelegationStaleError')
     expect(delegate).not.toHaveBeenCalled()
+  })
+
+  it('renews a stale generation delegation and mints under the fresh one', async () => {
+    vi.useFakeTimers({ now: NOW })
+    const renewed = delegationExpiringIn(100)
+    vi.mocked(renewTransientGenerationDelegation).mockResolvedValue(
+      renewed as never
+    )
+    const { session, delegate } = fakeSession({
+      invocationCapability: delegationExpiringIn(2)
+    })
+    await processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+    expect(renewTransientGenerationDelegation).toHaveBeenCalledWith({ session })
+    const args = delegate.mock.calls[0][0]
+    expect(args.capability).toBe(renewed)
+    expect((args.expires as Date).getTime()).toBe(NOW + RP_ZCAP_WRITE_TTL_MS)
+  })
+
+  it('refuses when the renewal itself returns a still-stale delegation', async () => {
+    vi.useFakeTimers({ now: NOW })
+    vi.mocked(renewTransientGenerationDelegation).mockResolvedValue(
+      delegationExpiringIn(1) as never
+    )
+    const { session, delegate } = fakeSession({
+      invocationCapability: delegationExpiringIn(-1)
+    })
+    await expect(
+      processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+    ).rejects.toBeInstanceOf(GenerationDelegationStaleError)
+    expect(delegate).not.toHaveBeenCalled()
+  })
+
+  it('renews before the collection listing rides the same delegation', async () => {
+    // The listing invokes the generation delegation too, so an already
+    // expired one must be replaced before it is used -- otherwise the
+    // approval dies of a generic listing failure and the renewal never runs.
+    vi.useFakeTimers({ now: NOW })
+    vi.mocked(renewTransientGenerationDelegation).mockResolvedValue(
+      delegationExpiringIn(100) as never
+    )
+    const { session, listCollectionPublicStates } = fakeSession({
+      invocationCapability: delegationExpiringIn(-1)
+    })
+    await processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+    expect(
+      vi.mocked(renewTransientGenerationDelegation).mock.invocationCallOrder[0]!
+    ).toBeLessThan(listCollectionPublicStates.mock.invocationCallOrder[0]!)
   })
 
   it('delegates off the Space root with the unclamped TTL for a durable session', async () => {

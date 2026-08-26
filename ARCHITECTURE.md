@@ -871,23 +871,44 @@ remembered (the resume is its one mender); the resume's discard outcome
 deletes it, so the next attempt probes record-less again. The composition
 (`transientSessionFromKeyringHit`): the transient unlock-record
 fetch (`fetchTransientKeyring`, no durable operation), the account log
-verified under the visit's in-memory pins, a per-visit key minted in memory
-and enrolled into the client annex generation through the record's
-`delegatedClients` sibling delegation (wallet-core's
+verified under the visit's in-memory pins, then the **client-annex reach
+stage** (`reachClientAnnexGeneration`, over wallet-core's
+`ensureCredentialClientAnnexGeneration`), run on every visit rather than
+only a broken one: a no-op report on a healthy ladder-anchored account,
+otherwise a ladder-signed mend that mints a missing generation, renews an
+expiring or expired generation delegation, and re-mints a missing or
+misaimed sibling delegation, re-sealing the fresh sibling into the unlock
+record through its re-bind closure (`standingRecordRebinder`, shared
+between the durable and transient variants; the transient shape writes the
+remote record only, nothing local). A mend that moves the account-log
+pointer re-verifies the log before enrollment. On an account whose document
+anchors no ladder VM of this credential's -- enrolled durable clients, or
+another credential's ladder -- the reach stage's own refusal
+(`ClientAnnexGenerationUnavailableError`) is resolved as a value, and the
+composition falls back to the prior path: the record's own `delegatedClients`
+sibling delegation and the pointed generation's embedded delegation. A
+per-visit key is then minted in memory and enrolled into the generation
+through whichever sibling delegation the reach stage produced (wallet-core's
 `enrollClientAnnexTransientClient` -- the loud entry before any authority,
 with the GC-race re-read built in), the generation delegation taken as
-embedded (its mint takes a durable signer), the user key unwrapped from the
-credential's standing roster wrap (the read signs as `<clientAnnexDid>#<vm>`
-under the delegation; no escrow, since a transient client never joins the
-roster), and a session on the replica-less storage variant above. Transient
-sessions skip the KMS keystore, the login-time roster read, provisioning, and
-every login-time sweep. Every unavailable state -- a record without standing
-authority or the sibling, an unpromoted account, no live generation or
-embedded delegation, no roster -- refuses with a typed
-`TransientLoginUnavailableError` before any ceremony byte is written (the
-login page renders per-reason refusal copy, and no reason opens the
-connect-this-browser card); network errors rethrow unchanged so a flap
-stays distinguishable from a lapse.
+embedded or, when the reach stage just installed or renewed one, the one it
+returned, the user key unwrapped from the credential's standing roster wrap
+(the read signs as `<clientAnnexDid>#<vm>` under the delegation; no escrow,
+since a transient client never joins the roster), and a session on the
+replica-less storage variant above. Transient sessions skip the KMS
+keystore, the login-time roster read, provisioning, and every login-time
+sweep. Every unavailable state -- a record without standing authority, an
+unpromoted account, no reachable generation or generation delegation on
+EITHER path, no roster -- refuses with a typed
+`TransientLoginUnavailableError`, carrying the ladder-signed reach stage's
+own refusal as `cause` when that ran and failed first (the login page
+renders per-reason refusal copy, and no reason opens the connect-this-browser
+card); network errors rethrow unchanged so a flap stays distinguishable from
+a lapse. The session also stamps `profile.ladderSeed` and
+`profile.standingUnlock` from the credential's standing members, the same
+fields a durable login stamps, so a mid-session ceremony (the App Connect
+grant path's generation-delegation renewal below) can sign as the ladder
+with no durable signer in hand.
 
 Two of those refusals carry a heal first, for the tears a torn
 credential-anchored signup can leave. A standing record whose pointer names
@@ -1871,10 +1892,16 @@ A grant delegated from a transient session chains under the session's
 generation delegation (`profile.invocationCapability`) rather than the
 Space root (which would be signed by an annex key the account document
 never lists), with its `expires` clamped to the parent's. A generation
-delegation that is expired or inside its renewal window refuses the
-approval (`GenerationDelegationStaleError`) instead of minting a silently
-short grant; the blocking renewal stage is a follow-up once the transient
-profile carries the ladder members a ladder-signed replacement needs.
+delegation that is expired or inside its renewal window runs the blocking
+renewal stage first (`renewTransientGenerationDelegation`): a fresh
+delegation, ladder-signed through the credential's sibling delegation, is
+installed in place and adopted by the live session (the profile stamp, the
+persistence handle, and the `WASRemoteStore`'s bound capability all swap
+together), so the collection-state listing and the grant mint that follow
+ride the fresh parent. The approval refuses (`GenerationDelegationStaleError`)
+only when the renewal cannot run at all -- the account document does not
+anchor this credential's ladder VM -- or when it fails, rather than minting
+a silently short grant.
 
 ## Sharing a wallet collection (`https://w3id.org/byoe#shared-wallet-collection`)
 

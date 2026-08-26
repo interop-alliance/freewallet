@@ -1,6 +1,20 @@
 # History
 
-## 0.40.1 - TBD
+## 0.41.0 - TBD
+
+### Added
+
+- A transient login now heals its client-annex generation on every visit:
+  it mints a missing generation, renews an expiring or expired generation
+  delegation, and re-mints a missing or misaimed sibling delegation, all
+  signed by the credential's ladder. An account with enrolled durable
+  clients (no ladder VM of this credential's) falls back to the existing
+  record-sibling-plus-embedded-delegation path, and the transient login's
+  refusals now stand only when that fallback path also fails.
+- The App Connect / interaction-URL grant path renews a stale generation
+  delegation in place before minting any grant, instead of refusing
+  outright. The refusal now stands only when the account document does
+  not anchor the credential's ladder VM or the renewal itself fails.
 
 ### Changed
 
@@ -8,6 +22,9 @@
   delegation now ride the typed persistence handle instead of a
   separate `initSessionFromSeed` option, so a session's durability is
   declared exactly once.
+- The transient session profile now carries the login credential's ladder
+  seed and standing members, so mid-session ceremonies can sign as the
+  ladder without a durable signer in hand.
 
 ## 0.40.0 - 2026-08-25
 

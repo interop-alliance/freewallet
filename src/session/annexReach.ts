@@ -27,12 +27,20 @@ import {
   clientAnnexLogStore,
   delegatedClientsPointer,
   ensureGenerationDelegationCurrent,
+  ladderSignedGenerationDelegationMinter,
+  ladderVmKeyMultibase,
   mintGenerationDelegation
 } from '@interop/wallet-core/clientAnnex'
+import type { IZcap } from '@interop/data-integrity-core'
+import type { ZcapClient } from '@interop/ezcap'
 import type { ResourceLogPinStore } from '@interop/vh-resource-log'
+import { ladderVmIds, verifyAccountLog } from '@interop/wallet-core/webvh'
 import type { PublishedKeyDocument } from '@interop/wallet-core/webvh'
+import { createLogger } from '@/lib/log'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import type { Session } from '@/types/auth'
+
+const log = createLogger('fw:session:annex')
 
 /**
  * The account document a `#DelegatedClients` pointer is read out of.
@@ -96,6 +104,55 @@ export function clientAnnexReachOf({
     logId: clientAnnexLogPinId({ spaceId, generationId }),
     logStore: () =>
       (store ??= clientAnnexLogStore({ was, spaceId, generationId }))
+  }
+}
+
+/**
+ * The reach a CREDENTIAL-ONLY session has over a generation: the annex Space
+ * answers to the account did:webvh, which a transient session's per-visit key
+ * is not, so its log writes invoke the record's sibling delegation under the
+ * credential-derived standing client instead of this session's own key.
+ *
+ * @param options {object}
+ * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.clientAnnexDid {string}   the generation's did:webvh
+ * @param options.standing {object}   the session's standing members: the
+ *   credential's client identity and its annex-Space sibling delegation
+ * @returns {ClientAnnexReach}
+ */
+export function standingClientAnnexReachOf({
+  pointer,
+  clientAnnexDid,
+  standing
+}: {
+  pointer: ReachPointer
+  clientAnnexDid: string
+  standing: {
+    standingClient: { agents: { zcapClient: ZcapClient } }
+    delegatedClients: IZcap
+  }
+}): ClientAnnexReach {
+  const { spaceId, generationId } = clientAnnexDidParts({
+    did: clientAnnexDid
+  })
+  const was = new WasClient({
+    serverUrl: pointer.host,
+    zcapClient: standing.standingClient.agents.zcapClient
+  })
+  let store: ReturnType<typeof clientAnnexLogStore> | undefined
+  return {
+    clientAnnexDid,
+    spaceId,
+    generationId,
+    was,
+    logId: clientAnnexLogPinId({ spaceId, generationId }),
+    logStore: () =>
+      (store ??= clientAnnexLogStore({
+        was,
+        spaceId,
+        generationId,
+        capability: standing.delegatedClients
+      }))
   }
 }
 
@@ -196,19 +253,204 @@ export async function ensureGenerationDelegation({
   accountDoc?: PublishedKeyDocument
   pin?: { pinStore: ResourceLogPinStore; logId: string }
 }): Promise<{ renewed: boolean }> {
-  return await ensureGenerationDelegationCurrent({
-    store: reach.logStore(),
+  return await runEnsureGenerationDelegation({
+    reach,
     ladderSeed,
-    generationId: reach.generationId,
-    mintGenerationDelegation: async ({ clientAnnexDid }) =>
+    mint: async ({ clientAnnexDid }) =>
       mintGenerationDelegation({
         zcapClient: session.profile.zcapClient,
         wasServerUrl: pointer.host,
         spaceId: pointer.spaceId,
         clientAnnexDid
       }),
+    ...(accountDoc !== undefined ? { accountDoc } : {}),
+    ...(pin !== undefined ? { pin } : {})
+  })
+}
+
+/**
+ * The same ensure, signed by the credential's LADDER rather than by an
+ * enrolled client's key: the fresh delegation is minted by the ladder VM
+ * (`ladderSignedGenerationDelegationMinter`), which is the one licensed
+ * delegator on a ladder-anchored account -- and the renewal must not depend
+ * on the very delegation it replaces. Its callers are the sessions that hold
+ * no durable signer at all: the transient visit's grant-approval renewal
+ * stage.
+ *
+ * @param options {object}
+ * @param options.accountDid {string}   the account did:webvh, whose ladder
+ *   VM signs
+ * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.reach {ClientAnnexReach}   the pointed generation, reached
+ *   under an authority the caller holds over the annex Space
+ * @param options.ladderSeed {Uint8Array}   the credential's ladder seed --
+ *   both the delegation's signer and the rung the annex entry is signed with
+ * @param [options.accountDoc] {PublishedKeyDocument}   the account document
+ *   the standing delegation's signer is checked against
+ * @param [options.pin] {object}   the generation log's chain-head pin store
+ *   and slot key
+ * @returns {Promise<{ renewed: boolean, delegation: IZcap }>}
+ */
+export async function ensureLadderSignedGenerationDelegation({
+  accountDid,
+  pointer,
+  reach,
+  ladderSeed,
+  accountDoc,
+  pin
+}: {
+  accountDid: string
+  pointer: ReachPointer
+  reach: ClientAnnexReach
+  ladderSeed: Uint8Array
+  accountDoc?: PublishedKeyDocument
+  pin?: { pinStore: ResourceLogPinStore; logId: string }
+}): Promise<{ renewed: boolean; delegation: IZcap }> {
+  return await runEnsureGenerationDelegation({
+    reach,
+    ladderSeed,
+    mint: ladderSignedGenerationDelegationMinter({
+      accountDid,
+      ladderSeed,
+      wasServerUrl: pointer.host,
+      spaceId: pointer.spaceId
+    }),
+    ...(accountDoc !== undefined ? { accountDoc } : {}),
+    ...(pin !== undefined ? { pin } : {})
+  })
+}
+
+/**
+ * The shared body of the two ensures above: everything but which signer
+ * mints the fresh delegation.
+ *
+ * @param options {object}
+ * @param options.reach {ClientAnnexReach}   the pointed generation
+ * @param options.ladderSeed {Uint8Array}   the seed whose committed rung
+ *   signs the annex entry
+ * @param options.mint {Function}   `({ clientAnnexDid }) => Promise<IZcap>`
+ * @param [options.accountDoc] {PublishedKeyDocument}
+ * @param [options.pin] {object}
+ * @returns {Promise<{ renewed: boolean, delegation: IZcap }>}
+ */
+async function runEnsureGenerationDelegation({
+  reach,
+  ladderSeed,
+  mint,
+  accountDoc,
+  pin
+}: {
+  reach: ClientAnnexReach
+  ladderSeed: Uint8Array
+  mint: (options: { clientAnnexDid: string }) => Promise<IZcap>
+  accountDoc?: PublishedKeyDocument
+  pin?: { pinStore: ResourceLogPinStore; logId: string }
+}): Promise<{ renewed: boolean; delegation: IZcap }> {
+  return await ensureGenerationDelegationCurrent({
+    store: reach.logStore(),
+    ladderSeed,
+    generationId: reach.generationId,
+    mintGenerationDelegation: mint,
     expectedDid: reach.clientAnnexDid,
     ...(accountDoc !== undefined ? { accountDoc } : {}),
     ...(pin !== undefined ? { pinStore: pin.pinStore, logId: pin.logId } : {})
   })
+}
+
+/**
+ * The grant path's blocking renewal stage: renews a transient session's
+ * generation delegation in place -- ladder-signed, through the credential's
+ * sibling delegation -- and swaps the fresh one into the live session, so
+ * the grants minted after it chain under a parent that outlives them.
+ *
+ * The ladder-VM gate is this path's own, mirroring the one wallet-core's
+ * annex ensure opens with: the account log is re-verified under the visit's
+ * pins and the credential's ladder VM must be a verification method of the
+ * resolved document. Without it a fresh delegation would be signed by a key
+ * the current-key-set rule authorizes nothing under -- and, worse, it would
+ * be embedded in the annex log, where every later transient visit adopts it
+ * as the generation's delegation until a GC swap. The account this guards is
+ * exactly the one the transient login's fallback serves: enrolled durable
+ * clients, no ladder VM in the document.
+ *
+ * Best-effort by contract, `null` by return: a session that is not transient
+ * (no invocation capability, no ladder members), a document that does not
+ * anchor this ladder, an account log that would not verify, or a renewal
+ * that fails for any reason leaves the session untouched, and the caller's
+ * stale-delegation refusal stands. Nothing here throws.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {Promise<IZcap | null>}   the fresh delegation, or `null` when
+ *   none was installed
+ */
+export async function renewTransientGenerationDelegation({
+  session
+}: {
+  session: Session
+}): Promise<IZcap | null> {
+  const { profile } = session
+  const { ladderSeed, standingUnlock, accountPointer, persistence } = profile
+  const delegatedClients = standingUnlock?.delegatedClients
+  if (
+    !ladderSeed ||
+    !standingUnlock ||
+    !delegatedClients ||
+    !accountPointer?.did ||
+    !('clientAnnex' in persistence)
+  ) {
+    return null
+  }
+  const accountDid = accountPointer.did
+  try {
+    // The gate: the verified account document must list this credential's
+    // ladder VM. It doubles as the ensure's signer-rot axis below.
+    const verified = await verifyAccountLog({
+      did: accountDid,
+      spaceId: accountPointer.spaceId,
+      host: accountPointer.host,
+      pinStore: persistence.logPins
+    })
+    const doc = verified.doc
+    const vmKeyMultibase = await ladderVmKeyMultibase({ ladderSeed })
+    if (!ladderVmIds({ doc }).includes(`${accountDid}#${vmKeyMultibase}`)) {
+      log.warn(
+        'Skipping the generation-delegation renewal: the account document ' +
+          "does not anchor this credential's ladder VM",
+        { accountDid }
+      )
+      return null
+    }
+    const reach = standingClientAnnexReachOf({
+      pointer: accountPointer,
+      clientAnnexDid: persistence.clientAnnex.clientAnnexDid,
+      standing: {
+        standingClient: standingUnlock.standingClient,
+        delegatedClients
+      }
+    })
+    const { delegation } = await ensureLadderSignedGenerationDelegation({
+      accountDid,
+      pointer: accountPointer,
+      reach,
+      ladderSeed,
+      accountDoc: doc,
+      pin: { pinStore: persistence.logPins, logId: reach.logId }
+    })
+    // The live session adopts it. The profile stamp is what the grant path
+    // reads its parent from, and the remote store swaps the capability its
+    // requests ride so a listing made after this renewal invokes the fresh
+    // delegation rather than the copy it captured at construction. The
+    // handle member is rewritten for coherence only: session assembly read
+    // it once at login and nothing re-reads it mid-session.
+    profile.invocationCapability = delegation
+    persistence.clientAnnex.invocationCapability = delegation
+    session.storage.remoteStore?.adoptInvocationCapability({
+      capability: delegation
+    })
+    return delegation
+  } catch (err) {
+    log.warn('Generation-delegation renewal failed', { err })
+    return null
+  }
 }
