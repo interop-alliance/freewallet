@@ -10,6 +10,7 @@
  * live in wallet-core and are mocked here.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
@@ -178,6 +179,8 @@ describe('cascadeCollectionsToUserKey', () => {
 
   it("passes the driver's result through, warning per failed collection", async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const capture = captureSink()
+    addSink(capture.sink)
     const driverResult = {
       outcomes: { 'wallet-activity': 'rotated' as const },
       failed: [{ collectionId: 'app-notes', error: new Error('stuck') }]
@@ -191,12 +194,14 @@ describe('cascadeCollectionsToUserKey', () => {
       userKey: USER_KEY
     })
     expect(result).toBe(driverResult)
-    expect(warn).toHaveBeenCalledWith(
-      '[%s] %s',
-      'fw:session:cascade',
-      'Could not rotate collection onto the current user key',
-      driverResult.failed[0]!.error,
-      { collectionId: 'app-notes' }
+    expect(capture.events).toContainEqual(
+      expect.objectContaining({
+        ns: 'fw:session:cascade',
+        level: 'warn',
+        msg: 'Could not rotate collection onto the current user key',
+        err: driverResult.failed[0]!.error,
+        data: { collectionId: 'app-notes' }
+      })
     )
     warn.mockRestore()
   })

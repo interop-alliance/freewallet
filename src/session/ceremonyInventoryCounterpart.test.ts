@@ -68,7 +68,7 @@ function parseCeremonyTable(markdown: string): CeremonyRow[] {
     const cells = trimmed
       .split('|')
       .slice(1, -1)
-      .map((cell) => cell.trim())
+      .map(cell => cell.trim())
     if (!sawHeader) {
       sawHeader = true
       continue
@@ -92,7 +92,7 @@ function parseCeremonyTable(markdown: string): CeremonyRow[] {
  * `src/session/accountSettings.ts` + `wipe.ts`.
  */
 function extractModulePaths(moduleCell: string): string[] {
-  const matches = [...moduleCell.matchAll(/`([^`]+)`/g)].map((match) => match[1])
+  const matches = [...moduleCell.matchAll(/`([^`]+)`/g)].map(match => match[1])
   const resolved: string[] = []
   let previousDir: string | null = null
   for (const raw of matches) {
@@ -116,8 +116,8 @@ describe('ceremony inventory counterpart', () => {
     expect(rows.length).toBeGreaterThan(0)
   })
 
-  const documentedRows = rows.filter((row) => row.moduleCell !== '---')
-  const exemptRows = rows.filter((row) => row.moduleCell === '---')
+  const documentedRows = rows.filter(row => row.moduleCell !== '---')
+  const exemptRows = rows.filter(row => row.moduleCell === '---')
 
   it('exempts only ceremonies with no module yet', () => {
     for (const row of exemptRows) {
@@ -126,7 +126,7 @@ describe('ceremony inventory counterpart', () => {
   })
 
   it('maps every documented row to a known ceremony id', () => {
-    const mappedIds = documentedRows.map((row) => {
+    const mappedIds = documentedRows.map(row => {
       const id = TITLE_TO_ID[row.ceremony]
       if (!id) {
         throw new Error(

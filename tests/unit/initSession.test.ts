@@ -10,6 +10,7 @@
  * derivation runs for real, since it is pure and deterministic in node.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
 import { CapabilityAgent } from '@interop/webkms-client'
 import type { ZcapClient } from '@interop/ezcap'
 
@@ -254,18 +255,21 @@ describe('initSessionFromSeed', () => {
     })
 
     it('is non-fatal: a provisioning failure still returns the session', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const capture = captureSink()
+      addSink(capture.sink)
       vi.mocked(ensureKeystore).mockRejectedValue(new Error('kms down'))
 
       const { session } = await initSessionFromSeed({ seed: randomSeed() })
 
       expect(session.profile.keystoreAgent).toBeUndefined()
-      expect(warnSpy).toHaveBeenCalledWith(
-        '[%s] %s',
-        'fw:session:init',
-        'KMS keystore provisioning failed',
-        expect.any(Error),
-        ''
+      expect(capture.events).toContainEqual(
+        expect.objectContaining({
+          ns: 'fw:session:init',
+          level: 'warn',
+          msg: 'KMS keystore provisioning failed',
+          err: expect.any(Error)
+        })
       )
     })
 

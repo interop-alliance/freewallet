@@ -14,6 +14,7 @@
  * twice.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
 import type {
   PasskeyUnlockMethod,
   UnlockMethodsRecord
@@ -214,6 +215,8 @@ describe('the credential-anchored signup hook -- read-first registry write', () 
     const first = structuredClone(state.registry!)
     state.readThrows = true
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const capture = captureSink()
+    addSink(capture.sink)
 
     const result = await signUpWithPassphrase({ passphrase: 'correct horse' })
 
@@ -222,12 +225,13 @@ describe('the credential-anchored signup hook -- read-first registry write', () 
     expect(result.session).toBeTruthy()
     expect(state.writes.filter(write => write === 'client')).toHaveLength(1)
     expect(state.registry).toEqual(first)
-    expect(warn).toHaveBeenCalledWith(
-      '[%s] %s',
-      'fw:session:signup',
-      expect.stringContaining('skipping the passphrase entry'),
-      expect.any(Error),
-      ''
+    expect(capture.events).toContainEqual(
+      expect.objectContaining({
+        ns: 'fw:session:signup',
+        level: 'warn',
+        msg: expect.stringContaining('skipping the passphrase entry'),
+        err: expect.any(Error)
+      })
     )
     warn.mockRestore()
   })

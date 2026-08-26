@@ -11,6 +11,7 @@
  * the verified-log memo invalidation on both sides of the call.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
 
 const state = vi.hoisted(() => ({
   wasUrl: 'https://was.example.test' as string | undefined,
@@ -852,6 +853,8 @@ describe('the ladder-seed settlement (the login seed with no retired seed in han
 
   it('anchors nothing on a login ladder the log attributes no rung to', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const capture = captureSink()
+    addSink(capture.sink)
 
     const { outcome, ceremonyLadderSeed } = await removeTapFree({
       updateKeyMultibase: 'z6MkSomeRecordedRung'
@@ -866,8 +869,8 @@ describe('the ladder-seed settlement (the login seed with no retired seed in han
     // The attribution warn specifically: the in-band adoption warns too on
     // this fixture's storage-less session.
     expect(
-      warn.mock.calls.filter(call =>
-        String(call[2]).includes('ladder could not be placed')
+      capture.events.filter(event =>
+        event.msg.includes('ladder could not be placed')
       )
     ).toHaveLength(1)
     warn.mockRestore()
