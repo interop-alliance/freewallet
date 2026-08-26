@@ -731,7 +731,7 @@
   },
   "chapi": {
     "accountNotFound": "Account not found. Please create your wallet from the main app first.",
-    "clientNotEnrolled": "Your account was found, but its keys are not reachable from this popup. Open the wallet app in its own tab, sign in there, then try again here. Some browsers never let a popup reach the keys -- in that case, use the wallet app directly instead.",
+    "clientNotEnrolled": "Your account was found, but its keys are not reachable from this popup. Open the wallet app in its own tab, sign in there, then try again here.",
     "storageUnreachable": "Could not reach the storage server. Please try again in a moment.",
     "loginFailed": "Could not log in. Please try again.",
     "loginPrompt": "Enter your wallet passphrase to continue:",

@@ -73,16 +73,13 @@ describe('loginErrorKey', () => {
     }
   })
 
-  it('keeps the configuration refusals on the generic developer arm', () => {
-    for (const reason of ['no-was-server', 'remote-direct'] as const) {
-      expect(keyFor(reason).key).toBe('auth.errors.setupFailed')
-    }
+  it('keeps the configuration refusal on the generic developer arm', () => {
+    expect(keyFor('no-was-server').key).toBe('auth.errors.setupFailed')
   })
 
   it('never maps a transient refusal onto the not-enrolled guidance', () => {
     const reasons: TransientLoginUnavailableReason[] = [
       'no-was-server',
-      'remote-direct',
       'no-delegated-clients',
       'unpromoted-account',
       'no-clientAnnex-generation',

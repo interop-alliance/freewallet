@@ -731,7 +731,7 @@
   },
   "chapi": {
     "accountNotFound": "Cuenta no encontrada. Cree su billetera en la aplicación principal primero.",
-    "clientNotEnrolled": "Se encontró su cuenta, pero sus claves no son accesibles desde esta ventana emergente. Abra la aplicación de la billetera en su propia pestaña, inicie sesión allí y vuelva a intentarlo aquí. Algunos navegadores nunca permiten que una ventana emergente acceda a las claves; en ese caso, use la aplicación de la billetera directamente.",
+    "clientNotEnrolled": "Se encontró su cuenta, pero sus claves no son accesibles desde esta ventana emergente. Abra la aplicación de la billetera en su propia pestaña, inicie sesión allí y vuelva a intentarlo aquí.",
     "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Inténtelo de nuevo en un momento.",
     "loginFailed": "No se pudo iniciar sesión. Inténtelo de nuevo.",
     "loginPrompt": "Introduzca la frase de contraseña de su billetera para continuar:",

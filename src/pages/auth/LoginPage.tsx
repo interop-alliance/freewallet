@@ -115,6 +115,13 @@ export function LoginPage() {
     }
   })
 
+  // Handler registration runs on mount, before the durability decision, so a
+  // transient visit registers too: an unregistered handler never appears in
+  // the mediator's chooser, and a public-terminal session that cannot answer
+  // a CHAPI request is the same as no wallet at all. It writes nothing to
+  // this origin (the registration bit lives on the mediator's), so it leaves
+  // a transient visit residue-free here; the mediator-origin bit is the
+  // stated limit no top-level wipe reaches.
   useEffect(() => {
     void registerWallet()
   }, [])

@@ -307,22 +307,34 @@ describe('routeUnlockLogin -- the post-KDF durability decision', () => {
     })
   })
 
-  it('keeps the remote-direct (popup) session on the durable route', async () => {
+  // The CHAPI popup (FW-203) runs this same table with the Storage Access
+  // handle as `idb`, so the two engine cases fall out of the record probe
+  // rather than out of a popup arm: a granted handle probes the first-party
+  // record, a denied one probes the partitioned bucket and finds none.
+  it('routes a popup durable when the unpartitioned handle finds the record', async () => {
+    const unpartitioned = {} as IDBFactory
+    vi.mocked(hasClientKeyRecord).mockResolvedValue(true)
     const routed = await routeUnlockLogin({
       kdf: KDF,
       credential: CREDENTIAL,
-      remoteDirectStorage: true
+      idb: unpartitioned
     })
     expect(routed.durability).toBe('durable')
-    expect(hasClientKeyRecord).not.toHaveBeenCalled()
-    await expect(
-      routeUnlockLogin({
-        kdf: KDF,
-        credential: CREDENTIAL,
-        remoteDirectStorage: true,
-        rememberBrowser: false
-      })
-    ).rejects.toMatchObject({ reason: 'remote-direct' })
+    expect(hasClientKeyRecord).toHaveBeenCalledWith({
+      spaceId: 'unlock-space-1',
+      idb: unpartitioned
+    })
+  })
+
+  it('routes a popup transient when Storage Access is denied (decisions/0009)', async () => {
+    // A denied grant resolves no handle, so the probe runs against the
+    // partitioned bucket, where no client-key record can exist.
+    const routed = await routeUnlockLogin({ kdf: KDF, credential: CREDENTIAL })
+    expect(routed.durability).toBe('transient')
+    expect(hasClientKeyRecord).toHaveBeenCalledWith({
+      spaceId: 'unlock-space-1',
+      idb: undefined
+    })
   })
 })
 

@@ -14,6 +14,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
 
+// The deployment axis: a WAS server or the local-only build. It decides
+// whether a popup's descriptor cache is a cache at all, so the popup tests
+// below drive it directly. The default is the local-only build, which is
+// what this file's other tests have always run under.
+const state = vi.hoisted(() => ({
+  wasUrl: undefined as string | undefined
+}))
+
+vi.mock('@/app.config', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/app.config')>()),
+  get WAS_SERVER_URL() {
+    return state.wasUrl
+  }
+}))
+
 vi.mock('@/session/keyring', async importOriginal => ({
   ...(await importOriginal<typeof import('@/session/keyring')>()),
   fetchKeyring: vi.fn(),
@@ -164,6 +179,7 @@ beforeEach(() => {
   })
   vi.mocked(assertClientStillEnrolled).mockReset()
   vi.mocked(assertClientStillEnrolled).mockResolvedValue(undefined as never)
+  state.wasUrl = undefined
 })
 
 afterEach(() => {
@@ -575,7 +591,7 @@ describe('loginWithPassphrase -- self-enrolling standing credential', () => {
     expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
   })
 
-  it('stays in the not-enrolled state for a remote-direct (popup) session', async () => {
+  it('stays in the not-enrolled state for a popup session', async () => {
     vi.mocked(fetchKeyring).mockResolvedValue({
       controller: 'did:key:z6MkDataControllerForTests',
       pointer: POINTER,
@@ -587,7 +603,7 @@ describe('loginWithPassphrase -- self-enrolling standing credential', () => {
 
     const { session, userExists } = await loginWithPassphrase({
       passphrase: PASSPHRASE,
-      remoteDirectStorage: true
+      popup: true
     })
 
     expect(session).toBeNull()
@@ -656,7 +672,7 @@ describe('loginWithPassphrase -- pending-record resume routing (FW-280)', () => 
     vi.mocked(isPendingKeyringHit).mockReturnValue(true)
 
     await expect(
-      loginWithPassphrase({ passphrase: PASSPHRASE, remoteDirectStorage: true })
+      loginWithPassphrase({ passphrase: PASSPHRASE, popup: true })
     ).rejects.toMatchObject({ name: 'PendingEnrollmentError', reason: 'popup' })
     expect(resumePendingEnrollment).not.toHaveBeenCalled()
     expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
@@ -845,6 +861,121 @@ describe('loginWithPassphrase -- fetch failure', () => {
   })
 })
 
+describe('loginWithPassphrase -- the popup session (FW-203)', () => {
+  it('routes the durable popup arm remote-direct with suppressed local caches', async () => {
+    state.wasUrl = 'https://was.example.test'
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller,
+      pointer: POINTER,
+      clientKeys: { clientSeed },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    })
+    vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
+      storage: fakeStorage,
+      userExists: true
+    })
+
+    const { session } = await loginWithPassphrase({
+      passphrase: PASSPHRASE,
+      popup: true
+    })
+
+    // The partitioned replica no sync controller drives is never the active
+    // backend: the popup serves synced collections straight off the remote.
+    expect(StorageManager.initStorageClients).toHaveBeenCalledWith(
+      expect.objectContaining({ remoteDirect: true })
+    )
+    // The Storage Access handle unpartitions IndexedDB, never localStorage,
+    // so a persisted descriptor cache would be partitioned residue no
+    // top-level wipe can reach. The popup's caches are in-memory instead:
+    // a write reads back within the session and reaches no durable store.
+    const cache = session!.profile.persistence.descriptorCache({
+      scope: 'space'
+    })
+    const descriptor = { currentEpoch: 'epoch-0', epochs: [] }
+    await cache.writeDescriptor({
+      collectionId: 'contacts',
+      descriptor: descriptor as never
+    })
+    expect(await cache.readDescriptor({ collectionId: 'contacts' })).toEqual(
+      descriptor
+    )
+  })
+
+  it('keeps the popup caches persistent with no WAS server (local mode)', async () => {
+    // With no server to serve descriptors, the same localStorage pair is the
+    // only record of the locally minted key epochs. Suppressing it would
+    // mint fresh ones and orphan everything the main app already encrypted.
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller,
+      pointer: POINTER,
+      clientKeys: { clientSeed },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    })
+    vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
+      storage: fakeStorage,
+      userExists: true
+    })
+
+    const { session } = await loginWithPassphrase({
+      passphrase: PASSPHRASE,
+      popup: true
+    })
+
+    const cache = session!.profile.persistence.descriptorCache({
+      scope: 'space'
+    })
+    await cache.writeDescriptor({
+      collectionId: 'contacts',
+      descriptor: { currentEpoch: 'epoch-0', epochs: [] } as never
+    })
+    expect(
+      await cache.readDescriptor({ collectionId: 'contacts' })
+    ).toBeUndefined()
+  })
+
+  it('persists the caches for an ordinary (non-popup) durable login', async () => {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller,
+      pointer: POINTER,
+      clientKeys: { clientSeed },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    })
+    vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
+      storage: fakeStorage,
+      userExists: true
+    })
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+
+    expect(StorageManager.initStorageClients).toHaveBeenCalledWith(
+      expect.objectContaining({ remoteDirect: false })
+    )
+    // The localStorage-backed cache: in this Node environment it has no
+    // store to write to, so the read-back is empty -- the discriminator
+    // against the in-memory pair the WAS-backed popup gets.
+    const cache = session!.profile.persistence.descriptorCache({
+      scope: 'space'
+    })
+    await cache.writeDescriptor({
+      collectionId: 'contacts',
+      descriptor: { currentEpoch: 'epoch-0', epochs: [] } as never
+    })
+    expect(
+      await cache.readDescriptor({ collectionId: 'contacts' })
+    ).toBeUndefined()
+  })
+})
+
 describe('loginWithPassphrase -- durability routing glue', () => {
   const CREDENTIAL = {
     unlock: { spaceId: 'unlock-space-test' },
@@ -856,16 +987,20 @@ describe('loginWithPassphrase -- durability routing glue', () => {
     await loginWithPassphrase({
       passphrase: PASSPHRASE,
       credential: CREDENTIAL,
-      remoteDirectStorage: true,
+      popup: true,
       rememberBrowser: true
     })
+    // The popup flag is deliberately NOT among them: a popup no longer
+    // forces durability, it only gates what the partitioning implies.
     expect(routeUnlockLogin).toHaveBeenCalledWith(
       expect.objectContaining({
         secret: PASSPHRASE,
         credential: CREDENTIAL,
-        remoteDirectStorage: true,
         rememberBrowser: true
       })
+    )
+    expect(routeUnlockLogin).not.toHaveBeenCalledWith(
+      expect.objectContaining({ popup: true })
     )
   })
 

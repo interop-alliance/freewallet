@@ -164,7 +164,7 @@ without standing authority (a no-WAS bind) and for the rendezvous
 onboarding flow, and as the future opt-in step-up approval policy; the
 storage-partitioned CHAPI popup
 never self-enrolls (a durable client per popup visit would litter the log)
-and stays a degraded state.
+and takes the transient session instead.
 
 The unlock record is **signed** by the unlock identity's own Ed25519 key,
 and its proof is verified before the record is decrypted. That closes host
@@ -847,7 +847,10 @@ per-user database), so `StorageManager.initStorageClients` builds it only for
 a durable session, and a replica-less session serves every synced-collection
 operation through the remote-direct backend (the CHAPI popup's, over the
 remote WAS collections). The sync controller never starts for a session with
-no local replica (`StorageManager.hasLocalReplica` is its gate). The remote
+no local replica (`StorageManager.hasLocalReplica` is its gate). A transient
+CHAPI popup session is this same shape: no `BrowserStore`, no provisioning,
+and no login-time sweeps, so nothing provisions a replica in the popup's
+partitioned bucket. The remote
 stack also takes a delegated authority: `WASRemoteStore` accepts an optional
 invocation capability (threaded from `profile.invocationCapability`) that
 every request rides -- the navigational handles through one private
@@ -869,7 +872,11 @@ browser held none. The record
 probe is create-nothing: `hasClientKeyRecord` checks `indexedDB.databases()`
 before opening, and on an engine with no `databases()` falls back to a
 versionless open whose `versionchange` transaction is aborted on
-`oldVersion === 0`; the ratchet is silent for now. An explicit
+`oldVersion === 0`; the ratchet is silent for now. The CHAPI popup runs
+this same table, with the Storage Access API handle threaded in as the
+probe's factory, so a remembered browser routes durable from the popup and
+a denied or unsupported handle routes transient (see "The popup's
+durability is the browser's ratchet state"). An explicit
 `rememberBrowser` input forces either side: `true` is the programmatic
 durable entry (the standing self-enrollment; a remembered signup's own
 login half, its durable resume, and the recovery tail all pass it, and
@@ -914,9 +921,11 @@ unpromoted account, no reachable generation or generation delegation on
 EITHER path, no roster -- refuses with a typed
 `TransientLoginUnavailableError`, carrying the ladder-signed readiness
 stage's
-own refusal as `cause` when that ran and failed first (the login page
-renders per-reason refusal copy, and no reason opens the connect-this-browser
-card); network errors rethrow unchanged so a flap stays distinguishable from
+own refusal as `cause` when that ran and failed first (the login page and
+the CHAPI popup both render per-reason refusal copy from one shared
+mapping, `transientRefusalKey`, and no reason opens the
+connect-this-browser card); network errors rethrow unchanged so a flap
+stays distinguishable from
 a lapse. The session also stamps `profile.ladderSeed` and
 `profile.standingUnlock` from the credential's standing members, the same
 fields a durable login stamps, so a mid-session ceremony (the App Connect
@@ -1631,15 +1640,62 @@ Flow:
 The CHAPI pages (`src/pages/chapi/`) are not wrapped in `ProtectedRoute` and
 do not use the main app layout.
 
+**The popup's durability is the browser's ratchet state.** The popup does
+not choose its own durability. It runs the same post-KDF routing every
+login runs (`routeUnlockLogin`, see "Session persistence"), with the
+Storage Access API handle threaded in as the record probe's `idb` factory.
+A granted handle probes the FIRST-PARTY client-key record, so a remembered
+browser proceeds durable as that client. A denied handle probes the
+partitioned bucket instead, finds no record, and routes transient, exactly
+as a non-remembered browser does. So does every engine that offers no
+unpartitioned-IndexedDB request at all, which is Safari's and Firefox's
+steady state. That one uniform fallback is
+`decisions/0009-popup-denied-storage-access-goes-transient.md`, and it is
+reached by construction rather than by a popup arm of the routing. A
+transient popup session composes like any other (the client-annex
+enrollment, the standing roster wrap, the replica-less storage variant),
+and its App Connect response VP holds and signs as the visit key's bare
+did:key; only WAS invocations take the `<clientAnnexDid>#<vm>` form.
+
+The popup marker (a `popup` option on `loginWithPassphrase`,
+`loginWithPasskey`, `sessionFromKeyringHit`, and `initSessionFromSeed`)
+gates only what the partitioning implies, and only in the durable arm:
+remote-direct storage (below), suppressed localStorage caches, and the
+durable arm's popup refusals. Those refusals are the record-less branch's
+self-enrollment, the pending-enrollment resume, and the six login-time
+chain passes that already carried the guard. The Storage Access handle
+unpartitions IndexedDB and does not reach localStorage. A persisted
+descriptor or meta cache would therefore be partitioned residue no
+top-level wipe can reach, so the popup's cache pair is in-memory for the
+visit. The suppression is scoped to a WAS deployment, where that pair is
+genuinely a cache (the descriptors are served, and the local copy is the
+offline fallback). On a no-WAS deployment the same store is the only
+record of the locally minted key epochs, so suppressing it would mint
+fresh ones and orphan everything already encrypted; a local-mode popup
+keeps its persistent pair. Three chain passes carry no popup guard today -- the
+standing-delegation self-refresh, the ladder-rung refresh, and the
+did:webvh pointer heal. Whether they should is an open decision, tracked
+separately.
+
+Handler registration is not on the durability axis. `registerWallet()` runs
+at mount on the login page, before the routing decides, so a transient
+login registers the handler too. It writes nothing to the wallet origin
+(the registration bit lives on the mediator's), so a transient visit stays
+residue-free here; the mediator-origin bit remains the stated limit no
+top-level wipe reaches.
+
 **Remote-direct popup storage.** The popup runs in a third-party iframe, so
 its own IndexedDB is a partitioned bucket no `SyncController` ever drives: a
 credential stored there would be stranded and a credential list would always
 come back empty. Every synced-collection read/write in `StorageManager` goes
 through one `SyncedCollectionStore` backend chosen once at construction
 (`src/stores/remoteDirectStore.ts`): the local `BrowserStore` in the normal
-case, or a `RemoteDirectStore` for the popup (selected via `remoteDirect`,
-threaded from `loginWithPassphrase({ remoteDirectStorage: true })` in both
-popup pages). The remote-direct backend serves credential, history, and
+case, or a `RemoteDirectStore` for a durable popup session (selected via
+`remoteDirect`, threaded from the `popup` option). A transient session is
+replica-less and reaches the same backend that way (see "Replica-less,
+capability-bound storage"), so a transient popup visit provisions nothing
+in the partitioned bucket. The remote-direct backend
+serves credential, history, and
 public-link reads/writes straight over the remote WAS collections
 (`WASRemoteStore.listSyncedResources` / `getSyncedResource` /
 `putSyncedResource` / `deleteSyncedResource`), with the same per-collection

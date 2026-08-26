@@ -1,5 +1,40 @@
 # History
 
+## 0.43.0 - TBD
+
+### Changed
+
+- The CHAPI popup no longer forces a durable login. It runs the same
+  post-KDF durability routing every login runs, with the Storage Access API
+  handle as the client-key record probe's factory. A granted handle finds
+  the first-party record, so a remembered browser logs in as that durable
+  client. A denied handle finds none in the partitioned bucket and routes
+  transient, as does every engine offering no unpartitioned-IndexedDB
+  request at all.
+- A transient popup session is replica-less by construction: no local
+  replica is built, and provisioning and the login-time sweeps are skipped,
+  so nothing provisions the popup's partitioned bucket.
+- `remoteDirectStorage` is retired as the popup marker. The login entry
+  points take a `popup` option instead, which gates only what the
+  partitioning implies: remote-direct storage in the durable arm, and the
+  durable arm's popup refusals (no self-enrollment, no pending-enrollment
+  resume, and the login-time chain passes that already carried the guard).
+- A durable popup session on a WAS deployment no longer persists its
+  descriptor and meta caches to localStorage. The Storage Access handle
+  unpartitions IndexedDB and does not reach localStorage, so a persisted
+  cache would be partitioned residue no top-level wipe can reach; the
+  popup's pair is in-memory for the visit. A no-WAS popup keeps the
+  persistent pair, which is the only record of its minted key epochs.
+- A popup login that cannot compose a transient session now reports the
+  shared per-reason refusal copy in place of a generic login failure. The
+  popup's not-enrolled copy is reachable only on a no-WAS deployment now,
+  and was trimmed accordingly.
+
+### Removed
+
+- The `remote-direct` transient-login refusal reason, along with its arm in
+  the shared refusal-copy mapping.
+
 ## 0.42.0 - TBD
 
 ### Changed

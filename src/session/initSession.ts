@@ -211,9 +211,16 @@ export async function initGuestSession() {
  *   requests with the `<did:webvh>#<multibase>` keyId from the start
  * @param [options.email] {string}
  * @param [options.isGuest] {boolean}
- * @param [options.remoteDirectStorage] {boolean}   route credential + history
- *   operations straight to the remote WAS collections (the CHAPI popup, whose
- *   local IndexedDB is third-party partitioned); default false
+ * @param [options.popup] {boolean}   this session is a CHAPI popup visit, in
+ *   the third-party partitioned iframe. Two consequences, both of the
+ *   partitioning: credential + history operations route straight to the
+ *   remote WAS collections (the local replica there is a bucket no sync
+ *   controller ever drives), and the durable handle's localStorage cache
+ *   families are suppressed for the visit on a WAS deployment (the Storage
+ *   Access handle unpartitions IndexedDB and does not reach localStorage, so
+ *   a persisted cache would be partitioned residue no top-level wipe can
+ *   reach -- see the shared wipe enumeration's stated limits; the local-mode
+ *   carve-out is at the call below). Default false
  * @param [options.provisionStorage] {boolean}   fire `ensureUserCollections`
  *   from session creation and expose it as `session.storageReady`; default
  *   true. Set false for the new-wallet flows that provision explicitly.
@@ -243,7 +250,7 @@ export async function initSessionFromSeed({
   accountPointer,
   email,
   isGuest = false,
-  remoteDirectStorage = false,
+  popup = false,
   provisionStorage = true,
   idb,
   persistence: suppliedPersistence
@@ -255,14 +262,26 @@ export async function initSessionFromSeed({
   accountPointer?: AccountPointer
   email?: string
   isGuest?: boolean
-  remoteDirectStorage?: boolean
+  popup?: boolean
   provisionStorage?: boolean
   idb?: IDBFactory
   persistence?: SessionPersistence
 }) {
+  // A popup's localStorage cache pair is suppressed -- but only where the
+  // pair is genuinely a CACHE. With a WAS server the descriptors are served
+  // and the local copy is the offline fallback, so dropping it costs the
+  // popup nothing and spares the partitioned bucket residue no top-level
+  // wipe can reach (the Storage Access handle unpartitions IndexedDB, never
+  // localStorage). With no WAS server the same store is the only record of
+  // the locally minted key epochs, so dropping it would mint fresh ones and
+  // orphan everything already encrypted.
+  const suppressPopupCaches = popup && !!WAS_SERVER_URL
   const persistence =
     suppliedPersistence ??
-    durableSessionPersistence({ idb, persistCaches: !isGuest })
+    durableSessionPersistence({
+      idb,
+      persistCaches: !isGuest && !suppressPopupCaches
+    })
   const { keyAgent, zcapClient, keyAgreementKey, keyResolver } =
     await agentsFromSeed({ seed })
 
@@ -415,7 +434,7 @@ export async function initSessionFromSeed({
       user,
       profile,
       isGuest,
-      remoteDirect: remoteDirectStorage
+      remoteDirect: popup
     })
   ])
   // Bind the provisioned keystore onto the (already-shared) profile object;
@@ -818,8 +837,11 @@ async function healUnpromotedRememberedAccount({
  * `src/session/transientLogin.ts`, which persists nothing locally -- and the
  * durable branches below are reached on a remembered browser (the silent
  * ratchet), with `rememberBrowser: true` (the programmatic standing
- * self-enrollment entry), in a remote-direct popup, or with no WAS server.
- * The durable branches:
+ * self-enrollment entry), or with no WAS server. The CHAPI popup runs the
+ * same routing: a granted Storage Access handle lets the probe see the
+ * first-party record and a remembered browser proceeds durable, while a
+ * denied one routes transient like any non-remembered browser
+ * (`decisions/0009`). The durable branches:
  *
  * - **Enrolled hit**: the keyring record was found AND this client holds a
  *   key set under the passphrase's unlock method; the session is built from
@@ -836,9 +858,11 @@ async function healUnpromotedRememberedAccount({
  * - **Located, not enrolled**: the keyring record was found (the account
  *   exists) but this client holds no key set -- a fresh browser. A standing
  *   record self-enrolls this browser right here and the login proceeds as an
- *   enrolled hit; only a plain pointer record (the no-WAS reduced path, or a
- *   remote-direct popup session) returns `{ session: null, userExists:
- *   true }`, and the caller surfaces the not-enrolled guidance. On the
+ *   enrolled hit; only a plain pointer record (the no-WAS reduced path)
+ *   returns `{ session: null, userExists: true }`, and the caller surfaces
+ *   the not-enrolled guidance. A popup visit reaches this branch only on a
+ *   no-WAS deployment: with a WAS server, a record-less popup routed
+ *   transient long before here. On the
  *   explicit `rememberBrowser: true` entry, a standing record whose pointer
  *   names no did:webvh yet (a remembered signup torn before the
  *   establishment's re-bind) first runs the durable resume heal
@@ -858,9 +882,13 @@ async function healUnpromotedRememberedAccount({
  * @param [options.email] {string}
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the keyring
  *   cache (CHAPI popups thread the Storage Access API handle here)
- * @param [options.remoteDirectStorage] {boolean}   route credential + history
- *   operations straight to the remote WAS collections (the CHAPI popup);
- *   default false
+ * @param [options.popup] {boolean}   this login runs in the CHAPI popup's
+ *   partitioned iframe. It no longer forces durability -- the routing decides
+ *   that from the record probe over the Storage Access handle -- and gates
+ *   only what the partitioning actually implies: remote-direct storage,
+ *   suppressed localStorage caches on a WAS deployment, and the durable
+ *   arm's popup refusals (no self-enrollment, no pending resume, and the
+ *   login-time chain passes that carry the guard). Default false
  * @param [options.provisionStorage] {boolean}   fire `ensureUserCollections`
  *   from session creation and expose it as `session.storageReady`; default
  *   true. Signup's existence probe passes false (it discards the session after
@@ -882,7 +910,7 @@ export async function loginWithPassphrase({
   passphrase,
   email,
   idb,
-  remoteDirectStorage = false,
+  popup = false,
   provisionStorage = true,
   credential,
   rememberBrowser
@@ -890,7 +918,7 @@ export async function loginWithPassphrase({
   passphrase: string
   email?: string
   idb?: IDBFactory
-  remoteDirectStorage?: boolean
+  popup?: boolean
   provisionStorage?: boolean
   credential?: UnlockCredential
   rememberBrowser?: boolean
@@ -910,7 +938,6 @@ export async function loginWithPassphrase({
       kdf: KEYRING_KDF,
       credential: derived,
       idb,
-      remoteDirectStorage,
       rememberBrowser
     })
     if (routed.durability === 'transient') {
@@ -971,7 +998,7 @@ export async function loginWithPassphrase({
         found,
         type: 'passphrase',
         email,
-        remoteDirectStorage,
+        popup,
         provisionStorage,
         idb,
         // For the torn-retirement repair's establish-first arm, which may
@@ -1021,7 +1048,9 @@ export async function loginWithPassphrase({
  * @param options.found {KeyringFetchResult}   the keyring hit
  * @param options.type {'passphrase' | 'passkey'}   the method that unlocked
  * @param [options.email] {string}   caller-supplied email, when any
- * @param [options.remoteDirectStorage] {boolean}
+ * @param [options.popup] {boolean}   the CHAPI popup's partitioned iframe:
+ *   remote-direct storage, suppressed localStorage caches, and the durable
+ *   arm's popup refusals
  * @param [options.provisionStorage] {boolean}
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the user key
  *   roster-epoch pin
@@ -1035,7 +1064,7 @@ async function sessionFromKeyringHit({
   found,
   type,
   email,
-  remoteDirectStorage = false,
+  popup = false,
   provisionStorage = true,
   idb,
   loginCredential
@@ -1043,7 +1072,7 @@ async function sessionFromKeyringHit({
   found: KeyringFetchResult
   type: 'passphrase' | 'passkey'
   email?: string
-  remoteDirectStorage?: boolean
+  popup?: boolean
   provisionStorage?: boolean
   idb?: IDBFactory
   loginCredential?: { secret: string | Uint8Array; derived?: UnlockCredential }
@@ -1072,11 +1101,11 @@ async function sessionFromKeyringHit({
     // reduced path; every WAS signup writes the standing layout) the caller
     // surfaces the not-enrolled state and offers the connect-another-wallet
     // ceremony.
-    if (remoteDirectStorage || !canSelfEnroll({ found })) {
+    if (popup || !canSelfEnroll({ found })) {
       return { session: null, userExists: true }
     }
   }
-  if (pendingResume && remoteDirectStorage) {
+  if (pendingResume && popup) {
     // The pending arm's own popup guard: a partitioned popup visit never
     // resumes a ceremony (mirroring the record-less branch above), and must
     // not fall through to a fail-open session either.
@@ -1141,7 +1170,7 @@ async function sessionFromKeyringHit({
     persistClientKeys,
     accountPointer: found.pointer,
     email: email ?? found.email,
-    remoteDirectStorage,
+    popup,
     provisionStorage,
     idb
   })
@@ -1250,7 +1279,7 @@ async function sessionFromKeyringHit({
   // a registry this same login can mend. Gated on the login's roster read
   // having succeeded -- that read is where the superseded generations come
   // from. Best-effort behind provisioning.
-  if (session.registryReady && !remoteDirectStorage && rosterRead) {
+  if (session.registryReady && !popup && rosterRead) {
     const loginRosterRead = rosterRead
     session.registryReady = session.registryReady.then(async () => {
       try {
@@ -1275,7 +1304,7 @@ async function sessionFromKeyringHit({
   // records its own standing configuration. Ordered ahead of the ladder-rung refresh below,
   // which would otherwise overwrite the entry's recorded rung -- the very
   // anchor the retirement attributes by. Best-effort behind provisioning.
-  if (session.registryReady && !remoteDirectStorage) {
+  if (session.registryReady && !popup) {
     session.registryReady = session.registryReady.then(async () => {
       try {
         await repairTornPassphraseRetirement({
@@ -1297,7 +1326,7 @@ async function sessionFromKeyringHit({
   // backfill's refresh write must not run ahead of. A passkey login is the
   // only thing that can mend its own entry -- the torn-retirement repair
   // above is a passphrase's. Best-effort behind provisioning.
-  if (session.registryReady && !remoteDirectStorage) {
+  if (session.registryReady && !popup) {
     session.registryReady = session.registryReady.then(async () => {
       try {
         await rebuildBarePasskeyEntry({ session, found })
@@ -1319,7 +1348,7 @@ async function sessionFromKeyringHit({
   // `createIfMissing`). The remote-direct popup is excluded, as it always
   // was; a transient session has no `registryReady` and so no backfill,
   // which is the durable-only rule the registry lives under.
-  if (session.registryReady && !remoteDirectStorage) {
+  if (session.registryReady && !popup) {
     session.registryReady = session.registryReady.then(async () => {
       try {
         await backfillPassphraseUnlockMethod({ session })
@@ -1546,7 +1575,7 @@ async function sessionFromKeyringHit({
   // annex rung 0; a healthy delegation is one no-op read. Best-effort: a
   // rung the generation does not commit (a credential bound mid-generation)
   // skips quietly, everything else warns and the next login retries.
-  if (session.registryReady && !remoteDirectStorage && ladderSeed) {
+  if (session.registryReady && !popup && ladderSeed) {
     session.registryReady = session.registryReady.then(async () => {
       try {
         const pointer = session.profile.accountPointer
@@ -1590,7 +1619,7 @@ async function sessionFromKeyringHit({
   // remote-direct popup deliberately does not run it: a popup visit is a
   // constrained, latency-sensitive context, and the next top-level durable
   // login sweeps the same durable state.
-  if (session.registryReady && !remoteDirectStorage) {
+  if (session.registryReady && !popup) {
     session.clientAnnexGcSweep = session.registryReady
       .catch(() => {})
       .then(() =>
@@ -1639,8 +1668,8 @@ async function sessionFromKeyringHit({
  * @param options {object}
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the keyring
  *   cache (CHAPI popups thread the Storage Access API handle here)
- * @param [options.remoteDirectStorage] {boolean}   route credential + history
- *   operations straight to the remote WAS collections; default false
+ * @param [options.popup] {boolean}   the CHAPI popup's partitioned iframe,
+ *   exactly as on `loginWithPassphrase`; default false
  * @param [options.provisionStorage] {boolean}   fire `ensureUserCollections`
  *   from session creation and expose it as `session.storageReady`; default
  *   true
@@ -1655,14 +1684,14 @@ async function sessionFromKeyringHit({
  */
 export async function loginWithPasskey({
   idb,
-  remoteDirectStorage = false,
+  popup = false,
   provisionStorage = true,
   signal,
   rememberBrowser,
   credential
 }: {
   idb?: IDBFactory
-  remoteDirectStorage?: boolean
+  popup?: boolean
   provisionStorage?: boolean
   signal?: AbortSignal
   rememberBrowser?: boolean
@@ -1683,7 +1712,6 @@ export async function loginWithPasskey({
       kdf: PASSKEY_KDF,
       credential: derived,
       idb,
-      remoteDirectStorage,
       rememberBrowser
     })
     if (routed.durability === 'transient') {
@@ -1742,7 +1770,7 @@ export async function loginWithPasskey({
       return await sessionFromKeyringHit({
         found,
         type: 'passkey',
-        remoteDirectStorage,
+        popup,
         provisionStorage,
         idb
       })

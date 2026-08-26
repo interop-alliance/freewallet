@@ -94,7 +94,6 @@ import type { WebvhIdStore } from '@interop/wallet-core/webvh'
  * page maps each onto its own refusal copy (`loginErrorKey`).
  *
  * - `no-was-server`: transient login presupposes a remote WAS server.
- * - `remote-direct`: the partitioned CHAPI popup keeps its own storage variant.
  * - `no-delegated-clients`: a standing record without the annex-Space
  *   sibling delegation (a recovery-code record, or one minted before the
  *   sibling existed).
@@ -125,7 +124,6 @@ import type { WebvhIdStore } from '@interop/wallet-core/webvh'
  */
 export type TransientLoginUnavailableReason =
   | 'no-was-server'
-  | 'remote-direct'
   | 'no-delegated-clients'
   | 'unpromoted-account'
   | 'no-clientAnnex-generation'
@@ -186,13 +184,20 @@ export class AlreadyRememberedError extends Error {
  * KDF never re-runs) and the client-key record probe never creates the
  * session database.
  *
- * The decision table: no WAS server or a remote-direct (CHAPI popup) session
- * is always durable (transient login is unreachable there);
- * `rememberBrowser: true` is durable (the programmatic standing
- * self-enrollment entry); a browser holding this credential's client-key
- * record is durable (the ratchet -- with `rememberBrowser: false` refused as
- * `AlreadyRememberedError` rather than silently coerced); everything else --
- * a non-remembered browser -- is transient, the default.
+ * The decision table: no WAS server is always durable (transient login is
+ * unreachable there); `rememberBrowser: true` is durable (the programmatic
+ * standing self-enrollment entry); a browser holding this credential's
+ * client-key record is durable (the ratchet -- with `rememberBrowser: false`
+ * refused as `AlreadyRememberedError` rather than silently coerced);
+ * everything else -- a non-remembered browser -- is transient, the default.
+ *
+ * The CHAPI popup runs this same table, with the Storage Access API handle
+ * threaded in as `idb`: a granted handle probes the FIRST-PARTY record and a
+ * remembered browser routes durable, while a denied one (and every engine
+ * offering no unpartitioned-IndexedDB request at all) finds no record in the
+ * partitioned bucket and routes transient. That is
+ * `decisions/0009-popup-denied-storage-access-goes-transient.md`'s uniform
+ * fallback, reached by construction rather than by a popup arm of its own.
  *
  * @param options {object}
  * @param [options.secret] {string | Uint8Array}   the unlock secret, when no
@@ -201,7 +206,6 @@ export class AlreadyRememberedError extends Error {
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for the same secret
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the probe
- * @param [options.remoteDirectStorage] {boolean}   the CHAPI popup variant
  * @param [options.rememberBrowser] {boolean}   the explicit durability input;
  *   absent means route on the record probe
  * @returns {Promise<object>}   `{ durability: 'durable', credential? }` or
@@ -215,14 +219,12 @@ export async function routeUnlockLogin({
   kdf,
   credential,
   idb,
-  remoteDirectStorage = false,
   rememberBrowser
 }: {
   secret?: string | Uint8Array
   kdf: UnlockKdf
   credential?: UnlockCredential
   idb?: IDBFactory
-  remoteDirectStorage?: boolean
   rememberBrowser?: boolean
 }): Promise<
   | { durability: 'durable'; credential?: UnlockCredential }
@@ -232,11 +234,9 @@ export async function routeUnlockLogin({
       persistence: TransientSessionStores
     }
 > {
-  if (!WAS_SERVER_URL || remoteDirectStorage) {
+  if (!WAS_SERVER_URL) {
     if (rememberBrowser === false) {
-      throw new TransientLoginUnavailableError({
-        reason: WAS_SERVER_URL ? 'remote-direct' : 'no-was-server'
-      })
+      throw new TransientLoginUnavailableError({ reason: 'no-was-server' })
     }
     return { durability: 'durable', ...(credential ? { credential } : {}) }
   }

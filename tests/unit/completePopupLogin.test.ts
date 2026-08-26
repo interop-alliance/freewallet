@@ -1,8 +1,9 @@
 // @vitest-environment node
 /**
  * Unit tests for the shared CHAPI popup login sequence
- * (`src/session/completePopupLogin.ts`): remote-direct keyring resolve, the
- * account-not-found guard, and the error mapping both popup pages apply.
+ * (`src/session/completePopupLogin.ts`): the popup keyring resolve, the
+ * account-not-found guard, and the error mapping both popup pages apply --
+ * including the transient refusals a record-less popup now reaches (FW-203).
  * `loginWithPassphrase` (network + IndexedDB) and the storage-error
  * classifier are stubbed.
  */
@@ -22,6 +23,10 @@ import {
   completePopupLogin,
   mapPopupLoginError
 } from '@/session/completePopupLogin'
+import {
+  TransientLoginUnavailableError,
+  type TransientLoginUnavailableReason
+} from '@/session/transientLogin'
 
 const PASSPHRASE = 'correct horse battery staple'
 const fakeSession = { user: { id: 'did:key:z6MkUser' } } as unknown as Session
@@ -36,7 +41,7 @@ afterEach(() => {
 })
 
 describe('completePopupLogin', () => {
-  it('returns the session and logs in remote-direct', async () => {
+  it('returns the session and logs in as a popup session', async () => {
     vi.mocked(loginWithPassphrase).mockResolvedValue({
       session: fakeSession,
       userExists: true
@@ -47,7 +52,7 @@ describe('completePopupLogin', () => {
     expect(result).toEqual({ session: fakeSession })
     expect(loginWithPassphrase).toHaveBeenCalledWith({
       passphrase: PASSPHRASE,
-      remoteDirectStorage: true,
+      popup: true,
       idb: undefined
     })
   })
@@ -65,7 +70,7 @@ describe('completePopupLogin', () => {
     expect(result).toEqual({ session: fakeSession })
     expect(loginWithPassphrase).toHaveBeenCalledWith({
       passphrase: PASSPHRASE,
-      remoteDirectStorage: true,
+      popup: true,
       idb: unpartitioned
     })
   })
@@ -102,6 +107,17 @@ describe('completePopupLogin', () => {
     expect(result).toEqual({ errorKey: 'chapi.storageUnreachable' })
   })
 
+  it('maps a transient refusal to the shared per-reason copy', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(loginWithPassphrase).mockRejectedValue(
+      new TransientLoginUnavailableError({ reason: 'no-user-key-wrap' })
+    )
+
+    const result = await completePopupLogin({ passphrase: PASSPHRASE })
+
+    expect(result).toEqual({ errorKey: 'auth.errors.transientNoUserKeyWrap' })
+  })
+
   it('maps any other failure to the generic login-failed key', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.mocked(loginWithPassphrase).mockRejectedValue(new Error('boom'))
@@ -117,6 +133,27 @@ describe('mapPopupLoginError', () => {
   it('returns the storage-unreachable key for an unreachable-server error', () => {
     vi.mocked(isStorageUnreachable).mockReturnValue(true)
     expect(mapPopupLoginError(new Error('x'))).toBe('chapi.storageUnreachable')
+  })
+
+  it('never maps a transient refusal onto the not-enrolled guidance', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const reasons: TransientLoginUnavailableReason[] = [
+      'no-was-server',
+      'no-delegated-clients',
+      'unpromoted-account',
+      'no-clientAnnex-generation',
+      'no-generation-delegation',
+      'no-user-key-roster',
+      'no-user-key-wrap',
+      'roster-mint-refused'
+    ]
+    for (const reason of reasons) {
+      const key = mapPopupLoginError(
+        new TransientLoginUnavailableError({ reason })
+      )
+      expect(key).not.toBe('chapi.clientNotEnrolled')
+      expect(key).not.toBe('chapi.loginFailed')
+    }
   })
 
   it('returns the generic key for anything else', () => {

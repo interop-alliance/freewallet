@@ -206,12 +206,20 @@ export function loginErrorKey({
 }
 
 /**
- * The i18n key for one transient-login refusal reason.
+ * The i18n key for one transient-login refusal reason. Exported for the CHAPI
+ * popup's own error mapping (`mapPopupLoginError`), which reaches the same
+ * refusals now that a record-less popup routes transient: the reason-to-copy
+ * decision stays in one place rather than being restated per surface. The
+ * copy is affordance-free by construction (no reason opens the
+ * connect-this-browser card), so it reads correctly in a popup that has no
+ * such card to offer.
  *
  * @param reason {TransientLoginUnavailableReason}
  * @returns {string}
  */
-function transientRefusalKey(reason: TransientLoginUnavailableReason): string {
+export function transientRefusalKey(
+  reason: TransientLoginUnavailableReason
+): string {
   switch (reason) {
     // A failed heal: both states are tears the transient composition mends
     // in place (re-running the credential-anchored establishment, minting
@@ -240,12 +248,11 @@ function transientRefusalKey(reason: TransientLoginUnavailableReason): string {
     case 'no-clientAnnex-generation':
     case 'no-generation-delegation':
       return 'auth.errors.transientUnavailable'
-    // The two configuration refusals (a `rememberBrowser: false` caller on
-    // a no-WAS deployment or in the partitioned CHAPI popup). The login
-    // form never produces them; the developer-facing string is the error's
-    // own message, carried in the log above.
+    // The configuration refusal (a `rememberBrowser: false` caller on a
+    // no-WAS deployment). The login form never produces it; the
+    // developer-facing string is the error's own message, carried in the log
+    // above.
     case 'no-was-server':
-    case 'remote-direct':
       return 'auth.errors.setupFailed'
   }
 }
