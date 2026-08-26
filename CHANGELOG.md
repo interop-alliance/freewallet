@@ -15,6 +15,9 @@
   delegation in place before minting any grant, instead of refusing
   outright. The refusal now stands only when the account document does
   not anchor the credential's ladder VM or the renewal itself fails.
+- Add the typed ceremony vocabulary: wallet-core's `CEREMONY_IDS` extended
+  with the app-only ids, with a counterpart test keeping ARCHITECTURE.md's
+  Ceremony inventory table and the id set equal.
 
 ### Changed
 
