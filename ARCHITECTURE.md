@@ -871,8 +871,9 @@ remembered (the resume is its one mender); the resume's discard outcome
 deletes it, so the next attempt probes record-less again. The composition
 (`transientSessionFromKeyringHit`): the transient unlock-record
 fetch (`fetchTransientKeyring`, no durable operation), the account log
-verified under the visit's in-memory pins, then the **client-annex reach
-stage** (`reachClientAnnexGeneration`, over wallet-core's
+verified under the visit's in-memory pins, then the **client-annex
+generation-readiness stage** (`ensureClientAnnexGenerationReady`, over
+wallet-core's
 `ensureCredentialClientAnnexGeneration`), run on every visit rather than
 only a broken one: a no-op report on a healthy ladder-anchored account,
 otherwise a ladder-signed mend that mints a missing generation, renews an
@@ -883,15 +884,17 @@ between the durable and transient variants; the transient shape writes the
 remote record only, nothing local). A mend that moves the account-log
 pointer re-verifies the log before enrollment. On an account whose document
 anchors no ladder VM of this credential's -- enrolled durable clients, or
-another credential's ladder -- the reach stage's own refusal
+another credential's ladder -- the readiness stage's own refusal
 (`ClientAnnexGenerationUnavailableError`) is resolved as a value, and the
 composition falls back to the prior path: the record's own `delegatedClients`
 sibling delegation and the pointed generation's embedded delegation. A
 per-visit key is then minted in memory and enrolled into the generation
-through whichever sibling delegation the reach stage produced (wallet-core's
+through whichever sibling delegation the readiness stage produced
+(wallet-core's
 `enrollClientAnnexTransientClient` -- the loud entry before any authority,
 with the GC-race re-read built in), the generation delegation taken as
-embedded or, when the reach stage just installed or renewed one, the one it
+embedded or, when the readiness stage just installed or renewed one, the one
+it
 returned, the user key unwrapped from the credential's standing roster wrap
 (the read signs as `<clientAnnexDid>#<vm>` under the delegation; no escrow,
 since a transient client never joins the roster), and a session on the
@@ -900,7 +903,8 @@ keystore, the login-time roster read, provisioning, and every login-time
 sweep. Every unavailable state -- a record without standing authority, an
 unpromoted account, no reachable generation or generation delegation on
 EITHER path, no roster -- refuses with a typed
-`TransientLoginUnavailableError`, carrying the ladder-signed reach stage's
+`TransientLoginUnavailableError`, carrying the ladder-signed readiness
+stage's
 own refusal as `cause` when that ran and failed first (the login page
 renders per-reason refusal copy, and no reason opens the connect-this-browser
 card); network errors rethrow unchanged so a flap stays distinguishable from

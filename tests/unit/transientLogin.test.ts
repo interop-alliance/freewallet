@@ -355,7 +355,7 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
     // The one state the mend cannot reach: the account document anchors no
     // ladder VM of this credential's (an account with enrolled durable
     // clients), so nothing ladder-signed verifies and the record's own
-    // sibling was the whole reach.
+    // sibling was all the visit could use.
     primeHappyPath()
     const refusal = unavailable('ladder-vm-not-anchored')
     vi.mocked(ensureCredentialClientAnnexGeneration).mockRejectedValue(refusal)
@@ -605,7 +605,7 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
   })
 })
 
-describe('transientSessionFromKeyringHit -- the client-annex reach stage', () => {
+describe('transientSessionFromKeyringHit -- the client-annex generation-readiness stage', () => {
   /**
    * Runs the composition against the current mocks and returns the ensure's
    * one call arguments beside the session.

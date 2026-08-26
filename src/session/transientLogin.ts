@@ -107,8 +107,8 @@ import type { WebvhIdStore } from '@interop/wallet-core/webvh'
  * The three annex-family reasons stand only where the ladder-signed mend
  * could not run at all -- an account whose document anchors no ladder VM of
  * this credential's, where the record's own sibling and the pointed
- * generation's embedded delegation are the whole reach and one of them is
- * missing. The refusal then carries wallet-core's own typed refusal as its
+ * generation's embedded delegation are all the visit can use and one of
+ * them is missing. The refusal then carries wallet-core's own typed refusal as its
  * `cause`.
  */
 export type TransientLoginUnavailableReason =
@@ -279,9 +279,9 @@ function refuseMissingGeneration(
 }
 
 /**
- * The composition's client-annex reach stage: one converging ensure over the
- * four durable states that make the annex unreachable from a
- * credential-only visit (no `#DelegatedClients` pointer, a collected or
+ * The composition's client-annex generation-readiness stage: one converging
+ * ensure over the four durable states that make the annex unreachable from
+ * a credential-only visit (no `#DelegatedClients` pointer, a collected or
  * never-minted generation, a stale generation delegation, a missing or
  * misaimed sibling delegation). It is run on every visit, not only a broken
  * one: on a healthy account it is a pure no-op report, and running it is
@@ -306,7 +306,7 @@ function refuseMissingGeneration(
  * @returns {Promise<object>}   `{ outcome }` on a completed ensure, or
  *   `{ unavailable }` carrying wallet-core's typed refusal
  */
-async function reachClientAnnexGeneration({
+async function ensureClientAnnexGenerationReady({
   found,
   standing,
   pointer,
@@ -381,15 +381,16 @@ async function reachClientAnnexGeneration({
  * 1. Precondition refusals (typed, before any request beyond the record
  *    fetch): standing authority and a promoted pointer.
  * 2. Verify the account log under the visit's in-memory pins, then run the
- *    client-annex reach stage (`reachClientAnnexGeneration`): the
+ *    client-annex generation-readiness stage
+ *    (`ensureClientAnnexGenerationReady`): the
  *    ladder-signed ensure that mints or renews what the visit needs, with
  *    the pointed-generation-and-record-sibling fallback behind it and the
  *    typed refusals behind that.
  * 3. Mint a per-visit key set in memory and enroll it into the generation
  *    through the sibling delegation, signed by the credential's static rung
  *    0 (`enrollTransientClient`; the GC-race re-read is built in). The
- *    generation delegation is taken as embedded -- the reach stage above is
- *    what installs and renews it.
+ *    generation delegation is taken as embedded -- the readiness stage above
+ *    is what installs and renews it.
  * 4. Read the user key from the credential's STANDING roster wrap: the
  *    roster request signs as `<clientAnnexDid>#<vm>` under the generation
  *    delegation, and the unwrap uses the credential's own key-agreement key.
@@ -499,27 +500,28 @@ export async function transientSessionFromKeyringHit({
     pinStore: persistence.logPins
   })
 
-  // The client-annex reach: the ladder-signed ensure first (a no-op on a
-  // healthy ladder-anchored account, the mend otherwise), then the fallback
-  // for an account whose document anchors no ladder VM of this credential's,
-  // where nothing ladder-signed could verify and the record's own sibling
-  // plus the pointed generation's embedded delegation are the whole reach.
-  const reached = await reachClientAnnexGeneration({
+  // The client-annex generation readiness: the ladder-signed ensure first (a
+  // no-op on a healthy ladder-anchored account, the mend otherwise), then the
+  // fallback for an account whose document anchors no ladder VM of this
+  // credential's, where nothing ladder-signed could verify and the record's
+  // own sibling plus the pointed generation's embedded delegation are all
+  // the visit can use.
+  const readiness = await ensureClientAnnexGenerationReady({
     found,
     standing: { ...standing, ladderSeed },
     pointer: accountPointer,
     account: { did: accountDid, doc: verified.doc, log: verified.log },
     persistence
   })
-  const healedGenerationDelegation = reached.outcome?.generationDelegation
+  const healedGenerationDelegation = readiness.outcome?.generationDelegation
   let siblingDelegation: IZcap
   let annexSpaceId: string
-  if (reached.outcome) {
-    siblingDelegation = reached.outcome.delegatedClients
+  if (readiness.outcome) {
+    siblingDelegation = readiness.outcome.delegatedClients
     annexSpaceId = clientAnnexDidParts({
-      did: reached.outcome.clientAnnexDid
+      did: readiness.outcome.clientAnnexDid
     }).spaceId
-    if (reached.outcome.generationMinted || reached.outcome.spaceMinted) {
+    if (readiness.outcome.generationMinted || readiness.outcome.spaceMinted) {
       // The pointer moved: the pre-mend document names a generation that is
       // no longer the live one, so the enrollment must read the fresh log.
       verified = await verifyAccountLog({
@@ -534,7 +536,7 @@ export async function transientSessionFromKeyringHit({
     if (!recordSibling) {
       throw new TransientLoginUnavailableError({
         reason: 'no-delegated-clients',
-        cause: reached.unavailable
+        cause: readiness.unavailable
       })
     }
     const siblingSpaceId = delegatedClientsDelegationSpaceId({
@@ -545,13 +547,13 @@ export async function transientSessionFromKeyringHit({
         reason: 'no-delegated-clients',
         message:
           "The sibling delegation's target does not address an annex Space.",
-        cause: reached.unavailable
+        cause: readiness.unavailable
       })
     }
     if (!delegatedClientsPointer({ doc: verified.doc })) {
       throw new TransientLoginUnavailableError({
         reason: 'no-clientAnnex-generation',
-        cause: reached.unavailable
+        cause: readiness.unavailable
       })
     }
     siblingDelegation = recordSibling
@@ -599,15 +601,16 @@ export async function transientSessionFromKeyringHit({
       ),
     ladderSeed,
     transientKeyMultibase,
-    // The delegation is taken as embedded, never minted from here: the reach
-    // stage above installs and renews it (ladder-signed) before the
-    // enrollment runs, and a generation about to receive its first VM with
-    // no delegation entry refuses -- crucially BEFORE the entry publishes.
+    // The delegation is taken as embedded, never minted from here: the
+    // readiness stage above installs and renews it (ladder-signed) before
+    // the enrollment runs, and a generation about to receive its first VM
+    // with no delegation entry refuses -- crucially BEFORE the entry
+    // publishes.
     mintGenerationDelegation: async () => {
       throw new TransientLoginUnavailableError({
         reason: 'no-generation-delegation',
-        ...(reached.unavailable !== undefined
-          ? { cause: reached.unavailable }
+        ...(readiness.unavailable !== undefined
+          ? { cause: readiness.unavailable }
           : {})
       })
     },
@@ -619,8 +622,8 @@ export async function transientSessionFromKeyringHit({
   if (!generationDelegation) {
     throw new TransientLoginUnavailableError({
       reason: 'no-generation-delegation',
-      ...(reached.unavailable !== undefined
-        ? { cause: reached.unavailable }
+      ...(readiness.unavailable !== undefined
+        ? { cause: readiness.unavailable }
         : {})
     })
   }
