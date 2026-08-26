@@ -1,5 +1,18 @@
 # History
 
+## 0.42.0 - TBD
+
+### Added
+
+- The seven contact operations (list, load, add, update, delete, add
+  revision, list revisions) are now served remote-direct, reaching contacts
+  from a transient session and the CHAPI popup. Head rows are read and
+  written in place under compare-and-swap on the served ETag; revisions
+  append content-addressed to `contacts-history`.
+- The credential-anchored signup now seeds the two default contacts
+  (the Interop Alliance Team, and a self-contact) through the same
+  remote-direct path. Accounts created before this release keep no backfill.
+
 ## 0.41.0 - 2026-08-26
 
 ### Added

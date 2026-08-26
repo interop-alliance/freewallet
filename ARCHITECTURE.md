@@ -955,9 +955,15 @@ enrollment approval, recovery-code issuance and revocation, account deletion,
 Space export and import) refuse from a transient session with
 `StepUpRequiredError`: they are reachable from a public terminal only inside
 the step-up ceremony (a loudly enrolled in-memory client, bracketed by
-ladder-signed enroll and retire entries), designed but not yet built. Contacts
-are not reachable in a transient session either (the remote-direct backend
-rejects them) until remote-direct contacts land.
+ladder-signed enroll and retire entries), designed but not yet built.
+Contacts ARE reachable in a transient session: the remote-direct backend
+serves all seven contact operations directly against the remote `contacts`
+and `contacts-history` collections. Head rows are read and written in place
+under compare-and-swap on the served ETag -- a lost race re-reads the fresh
+head and re-applies the edit, bounded to a few attempts. Revisions append
+content-addressed to `contacts-history`, the same shape a durable replica's
+own writes take. The tie-break `writerId` a revision carries is the visit's
+in-memory one.
 
 ## The user key wrap-set roster (`key-map/user-key.jsonl`)
 
@@ -1623,8 +1629,13 @@ pushed (the raw EDV envelope under its content-derived envelope-hash id,
 created with `If-None-Match: *`, stamped with the same `Key-Epoch`), so the
 main app's replication pulls it cleanly. An unknown-epoch read (a rekey by
 another client) drives the same one-time descriptor refresh the local
-backend uses, so a fresh-epoch credential is never dropped. Contacts are not
-reachable in a popup, so the remote-direct backend rejects them. The backend
+backend uses, so a fresh-epoch credential is never dropped. Contacts are
+reachable in the popup too, over the same remote-direct path: head rows are
+mutable and updated in place under `If-Match` compare-and-swap rather than
+created once and left alone, but the ids and epoch stamps match what
+background replication would have pushed, so a durable replica pulls the
+popup's contact edits cleanly. A delete leaves the server's own tombstone,
+which the pull side maps to a removal like any other. The backend
 is selected only when a remote store is configured; a guest or no-WAS
 session always uses the local `BrowserStore`. Reads gate on
 `StorageManager.ready()` -- the local collections being open, or nothing at
@@ -2045,7 +2056,7 @@ Security notes:
 | `/credential/:cid`                       | `CredentialDetailPage`   | VC detail + verify (protected)       |
 | `/add-credential`                        | `AddCredentialPage`      | Manual VC import (protected)         |
 | `/accept-credentials`                    | `AcceptCredentialsPage`  | URL / QR import flow (protected)     |
-| `/contacts`                              | `ContactsPage`           | Contact list (protected, stub data)  |
+| `/contacts`                              | `ContactsPage`           | Contact list (protected)             |
 | `/contacts/:contactId`                   | `ContactDetailPage`      | Contact detail (protected)           |
 | `/storage`                               | `StoragePage`            | WAS collection browser (protected)   |
 | `/storage/collections/:id`               | `CollectionContentsPage` | Collection resources (protected)     |

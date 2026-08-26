@@ -3488,12 +3488,21 @@ export class StorageManager {
   }
 
   /**
-   * Lists the stored contacts.
+   * Lists the stored contacts. Unknown-epoch rows mean the contacts cipher
+   * may be built from a stale descriptor (a rekey emits no change-feed
+   * entry), so the shared helper refreshes the descriptor once and re-reads,
+   * uniformly for both backends -- the same seam `listCredentials` rides.
    *
    * @returns {Promise<Array<StoredContact>>}
    */
   async listContacts(): Promise<Array<StoredContact>> {
-    return await this.#store.listContacts()
+    return this.#readWithEpochRefresh({
+      collectionId: 'contacts',
+      read: async () => ({
+        value: await this.#store.listContacts(),
+        unknownEpoch: this.#store.unknownEpochContacts > 0
+      })
+    })
   }
 
   /**

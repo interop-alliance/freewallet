@@ -14,6 +14,7 @@ import type { Json } from '@/lib/sync'
 import { BrowserStore } from './browserStore'
 import { UnknownEpochError, type DocCipher } from '@interop/was-client/edv'
 import { KeyUnwrapError } from '@interop/was-client'
+import type { ContactRevisionPayload } from '@interop/social-core'
 import { durableSessionPersistence } from '@/session/persistence'
 import { PublicCopyRetractionError, StorageManager } from './storageManager'
 import { RemoteDirectStore } from './remoteDirectStore'
@@ -106,6 +107,82 @@ function makeFakeEpochCipher(epoch: string): DocCipher {
           jwe: { ciphertext: JSON.stringify(data) }
         } as Json,
         epoch
+      }
+    },
+    async decrypt({ envelope }: { envelope: Json }) {
+      const { ciphertext } = (envelope as { jwe: { ciphertext: string } }).jwe
+      return JSON.parse(ciphertext) as Json
+    }
+  }
+}
+
+/**
+ * A reversible fake DocCipher for a mutable random-id collection (the
+ * contacts head): `encrypt` mints a fresh row id like {@link makeFakeCipher},
+ * and `encryptUpdate` keeps the caller's id verbatim while advancing the
+ * envelope `sequence` from the prior envelope -- the contract the real EDV
+ * update path provides. An optional fixed `epoch` mimics a multi-recipient
+ * cipher's `Key-Epoch` surfacing.
+ */
+function makeFakeContactsCipher(epoch?: string): DocCipher {
+  return {
+    async encrypt({ data }: { data: Json }) {
+      fakeCipherCounter += 1
+      const id = `z6FakeContactRow${fakeCipherCounter}`
+      return {
+        id,
+        envelope: {
+          id,
+          sequence: 0,
+          jwe: { ciphertext: JSON.stringify(data) }
+        } as Json,
+        ...(epoch !== undefined ? { epoch } : {})
+      }
+    },
+    async encryptUpdate({
+      id,
+      data,
+      current
+    }: {
+      id: string
+      data: Json
+      current: Json
+    }) {
+      const sequence = (current as { sequence: number }).sequence + 1
+      return {
+        id,
+        envelope: {
+          id,
+          sequence,
+          jwe: { ciphertext: JSON.stringify(data) }
+        } as Json,
+        ...(epoch !== undefined ? { epoch } : {})
+      }
+    },
+    async decrypt({ envelope }: { envelope: Json }) {
+      const { ciphertext } = (envelope as { jwe: { ciphertext: string } }).jwe
+      return JSON.parse(ciphertext) as Json
+    }
+  }
+}
+
+/**
+ * A reversible fake DocCipher whose id is derived from the plaintext (a
+ * stand-in for the real content-derived envelope-hash id), so re-encrypting
+ * the identical document converges on the same row id -- what the
+ * append-idempotence of `contacts-history` rides on.
+ */
+function makeFakeContentCipher(): DocCipher {
+  return {
+    async encrypt({ data }: { data: Json }) {
+      const id = `z6Content${JSON.stringify(data)}`
+      return {
+        id,
+        envelope: {
+          id,
+          sequence: 0,
+          jwe: { ciphertext: JSON.stringify(data) }
+        } as Json
       }
     },
     async decrypt({ envelope }: { envelope: Json }) {
@@ -1399,35 +1476,42 @@ describe('StorageManager (local-first facade)', () => {
 /**
  * An in-memory stand-in for the remote WAS standard collections: one map of
  * resource-id to raw stored body per logical collection, exposing the same
- * `listSyncedResources` / `getSyncedResource` / `putSyncedResource` /
- * `deleteSyncedResource` surface the remote-direct backend calls.
- * `putSyncedResource` honors the create-if-absent contract (a second write to
- * an existing id reports `created: false`) and records any `Key-Epoch`
- * stamp under `epochs`, so a test can assert a remote-direct write carried it.
+ * `listSyncedResources` / `getSyncedResource` / `getSyncedResourceWithEtag` /
+ * `putSyncedResource` / `deleteSyncedResource` surface the remote-direct
+ * backend calls. `putSyncedResource` honors the conditional-write contract:
+ * create-if-absent by default (a second write to an existing id reports
+ * `created: false`), or update-in-place with `ifMatch` -- a per-resource
+ * `version` backs the quoted ETag, and a mismatched `ifMatch` throws a
+ * `status: 412` error like the server (so a test can exercise the
+ * compare-and-swap retry). `deleteSyncedResource` evaluates `ifMatch` the
+ * same way. Any `Key-Epoch` stamp is recorded under `epochs`, so a test can
+ * assert a remote-direct write carried it.
  */
 function makeFakeRemoteStore(): {
   remoteStore: WASRemoteStore
   collections: Map<string, Map<string, Json>>
   epochs: Map<string, Map<string, string | undefined>>
+  versions: Map<string, Map<string, number>>
 } {
   const collections = new Map<string, Map<string, Json>>()
   const epochs = new Map<string, Map<string, string | undefined>>()
-  const collectionFor = (logicalKey: string): Map<string, Json> => {
-    let collection = collections.get(logicalKey)
-    if (!collection) {
-      collection = new Map<string, Json>()
-      collections.set(logicalKey, collection)
-    }
-    return collection
-  }
-  const epochsFor = (logicalKey: string): Map<string, string | undefined> => {
-    let map = epochs.get(logicalKey)
+  const versions = new Map<string, Map<string, number>>()
+  const mapFor = <T>(
+    maps: Map<string, Map<string, T>>,
+    logicalKey: string
+  ): Map<string, T> => {
+    let map = maps.get(logicalKey)
     if (!map) {
-      map = new Map<string, string | undefined>()
-      epochs.set(logicalKey, map)
+      map = new Map<string, T>()
+      maps.set(logicalKey, map)
     }
     return map
   }
+  const collectionFor = (logicalKey: string) => mapFor(collections, logicalKey)
+  const epochsFor = (logicalKey: string) => mapFor(epochs, logicalKey)
+  const versionsFor = (logicalKey: string) => mapFor(versions, logicalKey)
+  const preconditionFailed = () =>
+    Object.assign(new Error('precondition failed'), { status: 412 })
   const remoteStore = {
     async listSyncedResources({ logicalKey }: { logicalKey: string }) {
       return [...collectionFor(logicalKey).keys()].map(id => ({
@@ -1444,37 +1528,78 @@ function makeFakeRemoteStore(): {
     }) {
       return collectionFor(logicalKey).get(resourceId)
     },
-    async putSyncedResource({
-      logicalKey,
-      resourceId,
-      body,
-      epoch
-    }: {
-      logicalKey: string
-      resourceId: string
-      body: Json
-      epoch?: string
-    }) {
-      const collection = collectionFor(logicalKey)
-      if (collection.has(resourceId)) {
-        return { created: false }
-      }
-      collection.set(resourceId, body)
-      epochsFor(logicalKey).set(resourceId, epoch)
-      return { created: true }
-    },
-    async deleteSyncedResource({
+    async getSyncedResourceWithEtag({
       logicalKey,
       resourceId
     }: {
       logicalKey: string
       resourceId: string
     }) {
+      const data = collectionFor(logicalKey).get(resourceId)
+      if (data === undefined) {
+        return undefined
+      }
+      return {
+        data,
+        etag: `"${versionsFor(logicalKey).get(resourceId) ?? 1}"`
+      }
+    },
+    async putSyncedResource({
+      logicalKey,
+      resourceId,
+      body,
+      epoch,
+      ifMatch
+    }: {
+      logicalKey: string
+      resourceId: string
+      body: Json
+      epoch?: string
+      ifMatch?: string
+    }) {
+      const collection = collectionFor(logicalKey)
+      const resourceVersions = versionsFor(logicalKey)
+      if (ifMatch !== undefined) {
+        const current = resourceVersions.get(resourceId)
+        if (current === undefined || ifMatch !== `"${current}"`) {
+          throw preconditionFailed()
+        }
+        collection.set(resourceId, body)
+        epochsFor(logicalKey).set(resourceId, epoch)
+        resourceVersions.set(resourceId, current + 1)
+        return { created: true }
+      }
+      if (collection.has(resourceId)) {
+        return { created: false }
+      }
+      collection.set(resourceId, body)
+      epochsFor(logicalKey).set(resourceId, epoch)
+      resourceVersions.set(resourceId, 1)
+      return { created: true }
+    },
+    async deleteSyncedResource({
+      logicalKey,
+      resourceId,
+      ifMatch
+    }: {
+      logicalKey: string
+      resourceId: string
+      ifMatch?: string
+    }) {
+      const current = versionsFor(logicalKey).get(resourceId)
+      if (
+        ifMatch !== undefined &&
+        current !== undefined &&
+        ifMatch !== `"${current}"`
+      ) {
+        throw preconditionFailed()
+      }
       collectionFor(logicalKey).delete(resourceId)
       epochsFor(logicalKey).delete(resourceId)
+      versionsFor(logicalKey).delete(resourceId)
     }
   } as unknown as WASRemoteStore
-  return { remoteStore, collections, epochs }
+  return { remoteStore, collections, epochs, versions }
 }
 
 describe('StorageManager (remote-direct popup mode)', () => {
@@ -1755,17 +1880,400 @@ describe('RemoteDirectStore', () => {
     // The collection was scanned once (the first add), not once per item.
     expect(lists).toBe(1)
   })
+})
 
-  it('rejects contact operations rather than hitting the partitioned store', async () => {
-    const { remoteStore } = makeFakeRemoteStore()
+describe('RemoteDirectStore contacts', () => {
+  /**
+   * A store over the fake remote with contacts-shaped ciphers (mutable
+   * random-id heads, content-derived history rows).
+   */
+  function makeContactsStore({ epoch }: { epoch?: string } = {}) {
+    const fake = makeFakeRemoteStore()
     const store = new RemoteDirectStore({
-      remoteStore,
+      remoteStore: fake.remoteStore,
       ciphers: {
-        privateCredentials: makeFakeCipher(),
-        walletActivity: makeFakeCipher()
+        contacts: makeFakeContactsCipher(epoch),
+        contactsHistory: makeFakeContentCipher()
       }
     })
-    await expect(store.listContacts()).rejects.toThrow(/not available/)
+    return { ...fake, store }
+  }
+
+  it('round-trips add/list/load with the epoch stamped on the head row', async () => {
+    const { store, collections, epochs } = makeContactsStore({
+      epoch: 'epoch-contacts'
+    })
+
+    const stored = await store.addContact({
+      contact: { displayName: 'Alice' },
+      writerId: 'writer-a'
+    })
+    expect(stored.contactId).toBeTruthy()
+    expect(stored.contactId).not.toBe(stored.id)
+
+    // Exactly one remote head row, stamped with the cipher's epoch.
+    expect(collections.get('contacts')!.size).toBe(1)
+    expect(epochs.get('contacts')!.get(stored.id)).toBe('epoch-contacts')
+
+    const listed = await store.listContacts()
+    expect(listed).toEqual([stored])
+    expect(await store.loadContact({ id: stored.id })).toEqual(stored)
+    expect(await store.loadContact({ id: 'z6Absent' })).toBeUndefined()
+  })
+
+  it('updates in place, preserving the row id and contactId and advancing the version', async () => {
+    const { store, collections, versions } = makeContactsStore()
+    const stored = await store.addContact({
+      contact: { displayName: 'Alice' },
+      writerId: 'writer-a'
+    })
+    expect(versions.get('contacts')!.get(stored.id)).toBe(1)
+
+    const updated = await store.updateContact({
+      id: stored.id,
+      contact: { displayName: 'Alicia' },
+      writerId: 'writer-b'
+    })
+
+    // Same row, same logical identity, fresh content and advanced version.
+    expect(updated.id).toBe(stored.id)
+    expect(updated.contactId).toBe(stored.contactId)
+    expect(collections.get('contacts')!.size).toBe(1)
+    expect(versions.get('contacts')!.get(stored.id)).toBe(2)
+    // The rewritten envelope advanced the EDV sequence from the prior one.
+    const envelope = collections.get('contacts')!.get(stored.id) as {
+      sequence: number
+    }
+    expect(envelope.sequence).toBe(1)
+    const [head] = await store.listContacts()
+    expect(head.contact).toEqual({ displayName: 'Alicia' })
+  })
+
+  it('re-applies an update on the fresh head after losing a CAS race', async () => {
+    const { store, remoteStore, collections, versions } = makeContactsStore()
+    const stored = await store.addContact({
+      contact: { displayName: 'Alice' },
+      writerId: 'writer-a'
+    })
+
+    // A concurrent writer sneaks in between this client's read and its
+    // conditional PUT exactly once: the first If-Match put finds the version
+    // already advanced and answers 412.
+    const rawPut = remoteStore.putSyncedResource.bind(remoteStore)
+    let raced = false
+    remoteStore.putSyncedResource = (async (options: {
+      logicalKey: string
+      resourceId: string
+      body: Json
+      epoch?: string
+      ifMatch?: string
+    }) => {
+      if (options.ifMatch !== undefined && !raced) {
+        raced = true
+        const concurrentHead = {
+          contactId: stored.contactId,
+          updatedAt: new Date().toISOString(),
+          writerId: 'writer-concurrent',
+          contact: { displayName: 'Alison' }
+        }
+        collections.get('contacts')!.set(options.resourceId, {
+          id: options.resourceId,
+          sequence: 1,
+          jwe: { ciphertext: JSON.stringify(concurrentHead) }
+        } as Json)
+        versions.get('contacts')!.set(options.resourceId, 2)
+      }
+      return rawPut(options)
+    }) as typeof remoteStore.putSyncedResource
+
+    const updated = await store.updateContact({
+      id: stored.id,
+      contact: { displayName: 'Alicia' },
+      writerId: 'writer-b'
+    })
+
+    // The edit converged on the fresh head: same row and identity, this
+    // client's content on top (the replication driver's LWW outcome), and the
+    // version advanced past the concurrent writer's.
+    expect(updated.id).toBe(stored.id)
+    expect(updated.contactId).toBe(stored.contactId)
+    expect(versions.get('contacts')!.get(stored.id)).toBe(3)
+    const [head] = await store.listContacts()
+    expect(head.contact).toEqual({ displayName: 'Alicia' })
+  })
+
+  it('refuses to update a missing or unreadable head', async () => {
+    const { store, collections } = makeContactsStore()
+    await expect(
+      store.updateContact({
+        id: 'z6Absent',
+        contact: { displayName: 'Nobody' },
+        writerId: 'writer-a'
+      })
+    ).rejects.toThrow(/to update/)
+
+    // A poisoned envelope: rewriting it blind would sever the contact from
+    // its history, so the update refuses rather than clobbering.
+    collections.set(
+      'contacts',
+      new Map([
+        [
+          'z6Poison',
+          {
+            id: 'z6Poison',
+            sequence: 0,
+            jwe: { ciphertext: 'not-json{' }
+          } as Json
+        ]
+      ])
+    )
+    await expect(
+      store.updateContact({
+        id: 'z6Poison',
+        contact: { displayName: 'Nobody' },
+        writerId: 'writer-a'
+      })
+    ).rejects.toThrow(/unreadable/)
+  })
+
+  it('treats a transport-retried create reported as 412 as its own successful write', async () => {
+    // The http client retries an idempotent PUT whose success response was
+    // lost; the retry hits `If-None-Match: *` on the row the first attempt
+    // already created and surfaces `created: false`. The add re-reads the row
+    // and recognizes its own freshly minted contactId as success.
+    const { store, remoteStore, collections } = makeContactsStore()
+    const rawPut = remoteStore.putSyncedResource.bind(remoteStore)
+    remoteStore.putSyncedResource = (async (options: {
+      logicalKey: string
+      resourceId: string
+      body: Json
+      epoch?: string
+      ifMatch?: string
+    }) => {
+      // The write lands server-side, but the reported outcome is the retry's.
+      await rawPut(options)
+      return { created: false }
+    }) as typeof remoteStore.putSyncedResource
+
+    const stored = await store.addContact({
+      contact: { displayName: 'Alice' },
+      writerId: 'writer-a'
+    })
+
+    expect(collections.get('contacts')!.size).toBe(1)
+    expect(await store.loadContact({ id: stored.id })).toEqual(stored)
+  })
+
+  it("refuses a create collision that is not this call's own write", async () => {
+    // `created: false` with no row (or another writer's row) behind it is a
+    // genuinely lost create, not a transport retry: it must throw.
+    const { store, remoteStore } = makeContactsStore()
+    remoteStore.putSyncedResource = (async () => ({
+      created: false
+    })) as typeof remoteStore.putSyncedResource
+
+    await expect(
+      store.addContact({ contact: { displayName: 'Alice' }, writerId: 'w-a' })
+    ).rejects.toThrow(/already exists/)
+  })
+
+  it('hard-deletes a contact head and tolerates an already-absent row', async () => {
+    const { store, collections } = makeContactsStore()
+    const stored = await store.addContact({
+      contact: { displayName: 'Alice' },
+      writerId: 'writer-a'
+    })
+
+    await store.deleteContact({ id: stored.id })
+    expect(collections.get('contacts')!.size).toBe(0)
+
+    // Already gone (a delete/delete race, or a re-click): idempotent no-op.
+    await expect(
+      store.deleteContact({ id: stored.id })
+    ).resolves.toBeUndefined()
+  })
+
+  it('re-reads and retries a delete after losing its CAS race', async () => {
+    const { store, remoteStore, collections, versions } = makeContactsStore()
+    const stored = await store.addContact({
+      contact: { displayName: 'Alice' },
+      writerId: 'writer-a'
+    })
+
+    // A concurrent writer rewrites the head between this client's read and
+    // its conditional DELETE exactly once: the first If-Match delete answers
+    // 412, the re-read picks up the fresh ETag, and the retry removes the row.
+    const rawDelete = remoteStore.deleteSyncedResource.bind(remoteStore)
+    let raced = false
+    remoteStore.deleteSyncedResource = (async (options: {
+      logicalKey: string
+      resourceId: string
+      ifMatch?: string
+    }) => {
+      if (options.ifMatch !== undefined && !raced) {
+        raced = true
+        versions.get('contacts')!.set(options.resourceId, 2)
+      }
+      return rawDelete(options)
+    }) as typeof remoteStore.deleteSyncedResource
+
+    await store.deleteContact({ id: stored.id })
+
+    expect(raced).toBe(true)
+    expect(collections.get('contacts')!.size).toBe(0)
+  })
+
+  it('fails a delete closed when the server serves no ETag', async () => {
+    // The no-ETag rule the update path applies: never degrade the
+    // compare-and-swap to an unconditional delete.
+    const { store, remoteStore, collections } = makeContactsStore()
+    const stored = await store.addContact({
+      contact: { displayName: 'Alice' },
+      writerId: 'writer-a'
+    })
+    const rawGet = remoteStore.getSyncedResourceWithEtag.bind(remoteStore)
+    remoteStore.getSyncedResourceWithEtag = (async (options: {
+      logicalKey: string
+      resourceId: string
+    }) => {
+      const found = await rawGet(options)
+      return found ? { data: found.data } : undefined
+    }) as typeof remoteStore.getSyncedResourceWithEtag
+
+    await expect(store.deleteContact({ id: stored.id })).rejects.toThrow(
+      /no ETag/
+    )
+    expect(collections.get('contacts')!.size).toBe(1)
+  })
+
+  it('appends contact revisions content-addressed and idempotent', async () => {
+    const { store, collections, epochs } = makeContactsStore()
+    const revision = {
+      contactId: 'c-1',
+      action: 'create',
+      timestamp: '2026-08-26T10:00:00.000Z',
+      writerId: 'writer-a',
+      snapshot: { displayName: 'Alice' }
+    } as unknown as ContactRevisionPayload
+
+    await store.addContactRevision({ revision })
+    // The identical revision converges on the identical content-derived id:
+    // the re-append is a no-op, never a duplicate row and never an error.
+    await store.addContactRevision({ revision })
+
+    expect(collections.get('contactsHistory')!.size).toBe(1)
+    const [rowId] = [...collections.get('contactsHistory')!.keys()]
+    expect(epochs.get('contactsHistory')!.has(rowId)).toBe(true)
+  })
+
+  it("lists one contact's revisions newest first, filtering and tolerating bad rows", async () => {
+    const { store, collections } = makeContactsStore()
+    const base = {
+      action: 'update',
+      snapshot: { displayName: 'Alice' }
+    }
+    // Out-of-order appends, another contact's revision, and a tie on the
+    // timestamp broken by writerId descending.
+    await store.addContactRevision({
+      revision: {
+        ...base,
+        contactId: 'c-1',
+        timestamp: '2026-08-26T10:00:00.000Z',
+        writerId: 'writer-a'
+      } as unknown as ContactRevisionPayload
+    })
+    await store.addContactRevision({
+      revision: {
+        ...base,
+        contactId: 'c-1',
+        timestamp: '2026-08-26T12:00:00.000Z',
+        writerId: 'writer-a'
+      } as unknown as ContactRevisionPayload
+    })
+    await store.addContactRevision({
+      revision: {
+        ...base,
+        contactId: 'c-1',
+        timestamp: '2026-08-26T12:00:00.000Z',
+        writerId: 'writer-b'
+      } as unknown as ContactRevisionPayload
+    })
+    await store.addContactRevision({
+      revision: {
+        ...base,
+        contactId: 'c-other',
+        timestamp: '2026-08-26T13:00:00.000Z',
+        writerId: 'writer-a'
+      } as unknown as ContactRevisionPayload
+    })
+    // A poisoned history row must not brick the whole listing.
+    collections.get('contactsHistory')!.set('z6Poison', {
+      id: 'z6Poison',
+      sequence: 0,
+      jwe: { ciphertext: 'not-json{' }
+    } as Json)
+
+    const revisions = await store.listContactRevisions({ contactId: 'c-1' })
+
+    expect(
+      revisions.map(({ timestamp, writerId }) => ({ timestamp, writerId }))
+    ).toEqual([
+      { timestamp: '2026-08-26T12:00:00.000Z', writerId: 'writer-b' },
+      { timestamp: '2026-08-26T12:00:00.000Z', writerId: 'writer-a' },
+      { timestamp: '2026-08-26T10:00:00.000Z', writerId: 'writer-a' }
+    ])
+  })
+
+  it('counts unknown-epoch contact rows apart and re-reads them after a cipher swap', async () => {
+    const { remoteStore, collections } = makeFakeRemoteStore()
+    const good = makeFakeContactsCipher()
+    const head = {
+      contactId: 'c-1',
+      updatedAt: '2026-08-26T10:00:00.000Z',
+      writerId: 'writer-a',
+      contact: { displayName: 'Alice' }
+    }
+    const { id, envelope } = await good.encrypt({
+      data: head as unknown as Json
+    })
+    collections.set('contacts', new Map([[id, envelope]]))
+
+    // A cipher that cannot route the envelope's epoch (a stale descriptor).
+    const stale: DocCipher = {
+      async encrypt() {
+        throw new Error('unused')
+      },
+      async decrypt() {
+        throw new UnknownEpochError({
+          collectionId: 'contacts',
+          kids: ['z6MkUnknownEpochKey']
+        })
+      }
+    }
+    const store = new RemoteDirectStore({
+      remoteStore,
+      ciphers: { contacts: stale, contactsHistory: makeFakeContentCipher() }
+    })
+
+    // Skipped as unknown-epoch (the facade's descriptor-refresh signal), not
+    // dropped as unreadable.
+    expect(await store.listContacts()).toHaveLength(0)
+    expect(store.unknownEpochContacts).toBe(1)
+
+    // A descriptor refresh swaps in a cipher that can decrypt it.
+    store.setCiphers({
+      contacts: good,
+      contactsHistory: makeFakeContentCipher()
+    })
+    expect(await store.listContacts()).toEqual([
+      {
+        id,
+        contactId: 'c-1',
+        contact: { displayName: 'Alice' },
+        updatedAt: '2026-08-26T10:00:00.000Z'
+      }
+    ])
+    expect(store.unknownEpochContacts).toBe(0)
   })
 })
 

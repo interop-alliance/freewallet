@@ -132,9 +132,9 @@ const SEED_WELCOME_TIMEOUT_MS = 15_000
  * credential and the two new-account history records, written through the
  * session's own storage (the replica-less remote-direct variant a transient
  * session carries, or the durable replica of a remembered/passkey signup's
- * self-enrolled session). The two contact seeds wait for FW-210's
- * remote-direct contact operations; the first-client label, where one
- * applies, is the durable tail's own write. The whole function is
+ * self-enrolled session). The two contact seeds ride the same storage (the
+ * remote-direct backend serves contacts too); the first-client label, where
+ * one applies, is the durable tail's own write. The whole function is
  * best-effort: the account is fully established before it runs, so a torn
  * seed costs only cosmetic content -- a failure is logged and never
  * rethrown, and a seed still pending after `SEED_WELCOME_TIMEOUT_MS` is
@@ -153,7 +153,7 @@ export async function seedWelcomeContent({
 }: {
   session: Session
 }): Promise<void> {
-  const { storage, user } = session
+  const { storage, user, profile } = session
   // Attribute the seeds to the account's own identity: on a transient
   // session `user.id` is the per-visit ephemeral key (GC'd with its annex
   // generation, never an account identity), and `accountController` is the
@@ -170,10 +170,35 @@ export async function seedWelcomeContent({
   // The catch stays attached to the seeding promise itself, so a rejection
   // arriving after the timeout has won cannot become unhandled.
   const seeding = (async () => {
-    // The two records are independent, so they are written together.
+    // The default contacts mirror `provisionNewWallet`'s: the Interop
+    // Alliance Team, and a self-contact carrying the account DIDs the
+    // establishment published (the account pointer's did:webvh stands in
+    // where the profile carries no resolved `didWebvh`, as on a transient
+    // tail) plus the signup email -- gated on `isGuest` like the durable
+    // seed, though no guest reaches this WAS-only tail.
+    const selfDids = [
+      profile.didWeb?.did,
+      profile.didWebvh?.did ?? profile.accountPointer?.did
+    ].filter((did): did is string => Boolean(did))
+    // The records and contacts are independent, so they are written together.
+    // The contact seeds keep their own catch (`provisionNewWallet`'s rule):
+    // they are decorative, so a failed contact write is logged and stepped
+    // over rather than taking the welcome credential down with it.
+    const seedContacts = Promise.all([
+      storage.addContact({ contact: interopAllianceTeamContact }),
+      storage.addContact({
+        contact: selfContact({
+          dids: selfDids,
+          ...(session.isGuest ? {} : { email: user.email })
+        })
+      })
+    ]).catch(err => {
+      log.warn('Could not seed the default contacts', { err })
+    })
     await Promise.all([
       storage.addHistoryNewAccount({ user: seedUser }),
-      storage.addHistorySpaceCreated({ user: seedUser })
+      storage.addHistorySpaceCreated({ user: seedUser }),
+      seedContacts
     ])
     // `addCredential` records its own credential-created history entry, so
     // this must not log one separately.

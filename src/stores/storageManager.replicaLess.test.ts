@@ -239,15 +239,27 @@ function makeFakeRemote(): {
   const logicalToId: Record<string, string> = {
     privateCredentials: 'private-credentials',
     walletActivity: 'wallet-activity',
-    publicCredentials: 'public-credentials'
+    publicCredentials: 'public-credentials',
+    contacts: 'contacts',
+    contactsHistory: 'contacts-history'
   }
   const resources = new Map<string, Map<string, Json>>()
+  const versions = new Map<string, Map<string, number>>()
   const resourcesFor = (logicalKey: string): Map<string, Json> => {
     const id = logicalToId[logicalKey] ?? logicalKey
     let map = resources.get(id)
     if (!map) {
       map = new Map<string, Json>()
       resources.set(id, map)
+    }
+    return map
+  }
+  const versionsFor = (logicalKey: string): Map<string, number> => {
+    const id = logicalToId[logicalKey] ?? logicalKey
+    let map = versions.get(id)
+    if (!map) {
+      map = new Map<string, number>()
+      versions.set(id, map)
     }
     return map
   }
@@ -278,20 +290,51 @@ function makeFakeRemote(): {
     }) {
       return resourcesFor(logicalKey).get(resourceId)
     },
+    async getSyncedResourceWithEtag({
+      logicalKey,
+      resourceId
+    }: {
+      logicalKey: string
+      resourceId: string
+    }) {
+      const data = resourcesFor(logicalKey).get(resourceId)
+      if (data === undefined) {
+        return undefined
+      }
+      return {
+        data,
+        etag: `"${versionsFor(logicalKey).get(resourceId) ?? 1}"`
+      }
+    },
     async putSyncedResource({
       logicalKey,
       resourceId,
-      body
+      body,
+      ifMatch
     }: {
       logicalKey: string
       resourceId: string
       body: Json
+      ifMatch?: string
     }) {
       const map = resourcesFor(logicalKey)
+      const resourceVersions = versionsFor(logicalKey)
+      if (ifMatch !== undefined) {
+        const current = resourceVersions.get(resourceId)
+        if (current === undefined || ifMatch !== `"${current}"`) {
+          throw Object.assign(new Error('precondition failed'), {
+            status: 412
+          })
+        }
+        map.set(resourceId, body)
+        resourceVersions.set(resourceId, current + 1)
+        return { created: true }
+      }
       if (map.has(resourceId)) {
         return { created: false }
       }
       map.set(resourceId, body)
+      resourceVersions.set(resourceId, 1)
       return { created: true }
     },
     async deleteSyncedResource({
@@ -302,12 +345,18 @@ function makeFakeRemote(): {
       resourceId: string
     }) {
       resourcesFor(logicalKey).delete(resourceId)
+      versionsFor(logicalKey).delete(resourceId)
     }
   } as unknown as WASRemoteStore
   // A CAS-backed minimal Collection so the real `ensureFirstEpoch` installs
   // real epoch descriptors (what provisioning would have written).
   const provision = async (owner: { keyAgreementKey: IKeyAgreementKey }) => {
-    for (const id of ['private-credentials', 'wallet-activity']) {
+    for (const id of [
+      'private-credentials',
+      'wallet-activity',
+      'contacts',
+      'contacts-history'
+    ]) {
       let version = 0
       const fakeCollection = {
         async describeWithEtag() {
@@ -409,6 +458,84 @@ describe('replica-less remote-direct StorageManager', () => {
     } finally {
       initClientSpy.mockRestore()
       browserStoreSpy.mockRestore()
+    }
+  })
+
+  it('serves the contacts round-trip through the remote-direct backend', async () => {
+    const owner = await generateKey()
+    const { remoteStore, provision } = makeFakeRemote()
+    await provision(owner)
+
+    const persistence = transientSessionPersistence({
+      stores: transientSessionStores(),
+      clientAnnex: {
+        clientAnnexDid: 'did:webvh:example:annex',
+        invocationCapability: {} as IZcap
+      }
+    })
+    const user: User = { id: 'did:key:z6MkTestClient' }
+    const profile = {
+      zcapClient: {} as ZcapClient,
+      keyAgreementKey: owner.keyAgreementKey,
+      keyResolver: owner.keyResolver,
+      persistence
+    } as ControllerProfile
+
+    const initClientSpy = vi
+      .spyOn(WASRemoteStore, 'initClient')
+      .mockResolvedValue({ remoteStore })
+    try {
+      const { storage } = await StorageManager.initStorageClients({
+        user,
+        profile
+      })
+      await storage.ready()
+
+      // Add + list + load through the facade (real EDV ciphers throughout).
+      const stored = await storage.addContact({
+        contact: { displayName: 'Alice' }
+      })
+      expect(stored.contactId).toBeTruthy()
+      expect(await storage.listContacts()).toEqual([stored])
+      expect(await storage.loadContact({ id: stored.id })).toEqual(stored)
+
+      // Update rewrites the same row in place, preserving the identity.
+      const updated = await storage.updateContact({
+        id: stored.id,
+        contact: { displayName: 'Alicia' }
+      })
+      expect(updated.id).toBe(stored.id)
+      expect(updated.contactId).toBe(stored.contactId)
+      const [head] = await storage.listContacts()
+      expect(head.contact).toEqual({ displayName: 'Alicia' })
+
+      // The facade paired each mutation with a contacts-history revision,
+      // attributed to the transient handle's in-memory writerId.
+      const writerId = persistence.getWriterId()
+      const revisions = await storage.listContactRevisions({
+        contactId: stored.contactId
+      })
+      expect(revisions.map(({ action }) => action)).toEqual([
+        'update',
+        'create'
+      ])
+      for (const revision of revisions) {
+        expect(revision.writerId).toBe(writerId)
+      }
+
+      // Delete removes the remote head and appends the delete revision.
+      await storage.deleteContact({ id: stored.id })
+      expect(await storage.listContacts()).toEqual([])
+      const afterDelete = await storage.listContactRevisions({
+        contactId: stored.contactId
+      })
+      expect(afterDelete.map(({ action }) => action)).toEqual([
+        'delete',
+        'update',
+        'create'
+      ])
+    } finally {
+      initClientSpy.mockRestore()
     }
   })
 

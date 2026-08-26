@@ -45,6 +45,7 @@ import {
   type SyncedDoc
 } from '@/lib/sync'
 import { createContactsConflictHandler } from '@/stores/contactsConflictHandler'
+import { compareContactRevisionsNewestFirst } from '@/lib/contactRevisions'
 import {
   isEncryptedEnvelope,
   UnknownEpochError,
@@ -120,51 +121,6 @@ const contactsHistoryIndexSchema = {
 } as const
 
 /**
- * Orders two contact revisions newest first by the LOGICAL timestamp their
- * payloads carry, not by the order the local rows happened to be written --
- * the same `ORDER BY timestamp DESC, writerId DESC` the mobile wallet applies
- * to its `contact_revisions` table, so a history replicated from another
- * writer reads identically in both wallets.
- *
- * Timestamps are compared as parsed instants, falling back to a lexical
- * comparison of the raw strings when either side is unparseable or the two
- * instants are equal -- ISO stamps minted by different writers differ in
- * fractional-second precision, so the raw strings are only a tiebreak, never
- * the primary key. Equal timestamps are broken by `writerId` descending, the
- * same "lexically greater writerId wins" convention as social-core's
- * `remotePayloadWins`.
- *
- * @param first {ContactRevisionPayload}
- * @param second {ContactRevisionPayload}
- * @returns {number}
- */
-function compareContactRevisionsNewestFirst(
-  first: ContactRevisionPayload,
-  second: ContactRevisionPayload
-): number {
-  const firstInstant = Date.parse(first.timestamp ?? '')
-  const secondInstant = Date.parse(second.timestamp ?? '')
-  if (
-    Number.isFinite(firstInstant) &&
-    Number.isFinite(secondInstant) &&
-    firstInstant !== secondInstant
-  ) {
-    return secondInstant - firstInstant
-  }
-  const firstStamp = first.timestamp ?? ''
-  const secondStamp = second.timestamp ?? ''
-  if (firstStamp !== secondStamp) {
-    return firstStamp < secondStamp ? 1 : -1
-  }
-  const firstWriter = first.writerId ?? ''
-  const secondWriter = second.writerId ?? ''
-  if (firstWriter === secondWriter) {
-    return 0
-  }
-  return firstWriter < secondWriter ? 1 : -1
-}
-
-/**
  * The local active replica of the wallet's standard collections, stored in
  * IndexedDB via RxDB/Dexie. Documents use the same synced-doc shape the
  * replication adapter moves over the wire, so a local write is directly
@@ -196,6 +152,7 @@ export class BrowserStore {
   // caller can refresh the descriptor and re-read.
   #unknownEpochCredentials = 0
   #unknownEpochHistory = 0
+  #unknownEpochContacts = 0
   // Count of rows the most recent list read had to skip because this wallet
   // holds no key for their (known) key epoch -- KeyUnwrapError: it was never a
   // recipient, or was removed and the epoch rotated. Like the unknown-epoch
@@ -738,6 +695,17 @@ export class BrowserStore {
    */
   get unknownEpochHistory(): number {
     return this.#unknownEpochHistory
+  }
+
+  /**
+   * The count of `contacts` rows the most recent {@link listContacts} scan
+   * had to skip for the same reason, so the facade's shared epoch-refresh path
+   * can rebuild the ciphers and re-read after a rekey by another client.
+   *
+   * @returns {number}
+   */
+  get unknownEpochContacts(): number {
+    return this.#unknownEpochContacts
   }
 
   /**
@@ -1401,11 +1369,12 @@ export class BrowserStore {
   async #contactEntries(): Promise<
     Array<{ rowId: string; head: ContactHeadPayload }>
   > {
-    const { entries } = await this.#decryptedRows({
+    const { entries, unknownEpochRowIds } = await this.#decryptedRows({
       logicalKey: 'contacts',
       sort: 'asc',
       cache: false
     })
+    this.#unknownEpochContacts = unknownEpochRowIds.length
     return entries.map(({ rowId, data }) => ({
       rowId,
       head: upgradeContactHeadPayload(data as unknown as ContactHeadPayload)

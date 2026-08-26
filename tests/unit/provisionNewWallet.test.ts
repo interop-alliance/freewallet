@@ -139,7 +139,7 @@ describe('provisionNewWallet', () => {
 })
 
 describe('seedWelcomeContent', () => {
-  it('seeds the two history records and the welcome credential', async () => {
+  it('seeds the history records, the default contacts, and the welcome credential', async () => {
     const { session, storage, user, order } = sessionStub()
     // The seeds must be attributed to the account pointer's did:webvh --
     // never to the per-visit ephemeral `user.id`, and not to the record's
@@ -173,15 +173,59 @@ describe('seedWelcomeContent', () => {
       credential: welcomeCredential,
       user: seedUser
     })
-    // The seed writes nothing else: no collections ensure, no contacts, and
-    // no separate credential-created history (addCredential owns it).
+    // The two default contacts mirror `provisionNewWallet`'s: the self
+    // contact carries the account pointer's did:webvh (the profile resolves
+    // no `didWebvh` on a transient tail) and the signup email.
+    expect(storage.addContact).toHaveBeenCalledWith({
+      contact: interopAllianceTeamContact
+    })
+    expect(storage.addContact).toHaveBeenCalledWith({
+      contact: selfContact({
+        dids: ['did:webvh:QmScid:was.example.test:space:s1:id'],
+        email: user.email
+      })
+    })
+    // The seed writes nothing else: no collections ensure, and no separate
+    // credential-created history (addCredential owns it).
     expect(storage.ensureUserCollections).not.toHaveBeenCalled()
-    expect(storage.addContact).not.toHaveBeenCalled()
+    // The contact seeds are kicked off first (they carry their own catch),
+    // then the history records; the welcome credential follows them all.
     expect(order).toEqual([
+      'addContact',
+      'addContact',
       'addHistoryNewAccount',
       'addHistorySpaceCreated',
       'addCredential'
     ])
+  })
+
+  it('prefers the profile-resolved didWeb and didWebvh for the self-contact', async () => {
+    const { session, storage } = sessionStub()
+    ;(
+      session.profile as unknown as {
+        didWeb?: { did: string }
+        didWebvh?: { did: string }
+        accountPointer?: { did?: string }
+      }
+    ).didWeb = { did: 'did:web:was.example.test:u:alice' }
+    ;(session.profile as unknown as { didWebvh?: { did: string } }).didWebvh = {
+      did: 'did:webvh:QmScid:was.example.test:space:s1:id'
+    }
+    ;(
+      session.profile as unknown as { accountPointer?: { did?: string } }
+    ).accountPointer = { did: 'did:webvh:QmScid:stale' }
+
+    await seedWelcomeContent({ session })
+
+    expect(storage.addContact).toHaveBeenCalledWith({
+      contact: selfContact({
+        dids: [
+          'did:web:was.example.test:u:alice',
+          'did:webvh:QmScid:was.example.test:space:s1:id'
+        ],
+        email: session.user.email
+      })
+    })
   })
 
   it('resolves and warns on a storage failure (best-effort)', async () => {
@@ -199,6 +243,33 @@ describe('seedWelcomeContent', () => {
         event => event.msg === 'Could not seed the welcome content'
       )
     ).toBe(true)
+  })
+
+  it('still seeds the welcome credential when a contact seed fails', async () => {
+    // The contact seeds are decorative and carry their own catch, so a
+    // rejection there must not take the welcome credential down with it.
+    const capture = captureSink()
+    addSink(capture.sink)
+    const { session, storage } = sessionStub()
+    vi.mocked(storage.addContact).mockRejectedValue(
+      new Error('contacts unreachable')
+    )
+
+    await expect(seedWelcomeContent({ session })).resolves.toBeUndefined()
+
+    expect(storage.addCredential).toHaveBeenCalledWith(
+      expect.objectContaining({ credential: welcomeCredential })
+    )
+    expect(
+      capture.events.some(
+        event => event.msg === 'Could not seed the default contacts'
+      )
+    ).toBe(true)
+    expect(
+      capture.events.some(
+        event => event.msg === 'Could not seed the welcome content'
+      )
+    ).toBe(false)
   })
 
   it('falls back to the ephemeral user id with no account controller', async () => {

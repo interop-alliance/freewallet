@@ -21,6 +21,7 @@
  */
 import type { ZcapClient } from '@interop/ezcap'
 import {
+  readEtag,
   WasClient,
   type Collection,
   type CollectionEncryption,
@@ -942,14 +943,60 @@ export class WASRemoteStore {
   }
 
   /**
+   * Reads one resource of a standard synced collection like
+   * {@link getSyncedResource}, but also surfaces the served strong `ETag`
+   * validator (the server's quoted `"<version>"`), so a compare-and-swap
+   * update or delete can carry `If-Match` naming exactly the read it was
+   * based on. Returns `undefined` when the resource is missing.
+   *
+   * @param options {object}
+   * @param options.logicalKey {string}
+   * @param options.resourceId {string}
+   * @returns {Promise<{ data: Json; etag?: string } | undefined>}
+   */
+  async getSyncedResourceWithEtag({
+    logicalKey,
+    resourceId
+  }: {
+    logicalKey: string
+    resourceId: string
+  }): Promise<{ data: Json; etag?: string } | undefined> {
+    const collectionId = this.#collectionId(logicalKey)
+    try {
+      const response = await this.was.request({
+        path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
+          resourceId
+        )}`,
+        method: 'GET',
+        capability: this.#capability
+      })
+      const etag = readEtag(response)
+      const data = response.data as Json
+      return etag !== undefined ? { data, etag } : { data }
+    } catch (err) {
+      if (errorStatus(err) === 404) {
+        return undefined
+      }
+      throw err
+    }
+  }
+
+  /**
    * Writes one resource into a standard synced collection: the caller-supplied
-   * raw body under the caller-supplied id, created-if-absent
-   * (`If-None-Match: *`), via the raw `was.request()` escape hatch so the body
-   * is stored verbatim (no re-encryption). This reproduces exactly what
-   * background replication would have pushed, so the main app's replication
-   * pulls it cleanly. A `412` means the identical row already exists (the
-   * content-derived id collided) and is reported as not-created rather than
-   * thrown.
+   * raw body under the caller-supplied id, via the raw `was.request()` escape
+   * hatch so the body is stored verbatim (no re-encryption). This reproduces
+   * exactly what background replication would have pushed, so the main app's
+   * replication pulls it cleanly.
+   *
+   * Two conditional-write shapes:
+   *
+   * - Default (no `ifMatch`): created-if-absent (`If-None-Match: *`). A `412`
+   *   means the identical row already exists (the content-derived id
+   *   collided) and is reported as not-created rather than thrown.
+   * - With `ifMatch` (the quoted ETag of the read the new body was built on):
+   *   update-in-place, the same `If-Match` convention the replication push
+   *   path sends. A `412` here is a lost race and PROPAGATES, so the caller's
+   *   compare-and-swap loop can re-read and re-apply.
    *
    * When `epoch` is given, it is stamped as the `Key-Epoch` header exactly
    * as background replication does (the sync port's `putContent`), so a
@@ -958,24 +1005,30 @@ export class WASRemoteStore {
    * @param options {object}
    * @param options.logicalKey {string}
    * @param options.resourceId {string}   the content-derived envelope-hash id
+   *   (or a mutable collection's stable row id)
    * @param options.body {Json}   the raw EDV envelope (or plaintext document)
    * @param [options.epoch] {string}   the opaque key-epoch id the envelope was
    *   encrypted under; absent for a plaintext or pre-epoch write
+   * @param [options.ifMatch] {string}   the quoted ETag an update-in-place
+   *   must match; create-if-absent when omitted
    * @returns {Promise<{ created: boolean }>}
    */
   async putSyncedResource({
     logicalKey,
     resourceId,
     body,
-    epoch
+    epoch,
+    ifMatch
   }: {
     logicalKey: string
     resourceId: string
     body: Json
     epoch?: string
+    ifMatch?: string
   }): Promise<{ created: boolean }> {
     const collectionId = this.#collectionId(logicalKey)
-    const headers: Record<string, string> = { 'if-none-match': '*' }
+    const headers: Record<string, string> =
+      ifMatch !== undefined ? { 'if-match': ifMatch } : { 'if-none-match': '*' }
     if (epoch !== undefined) {
       headers[KEY_EPOCH_HEADER] = epoch
     }
@@ -991,7 +1044,7 @@ export class WASRemoteStore {
       })
       return { created: true }
     } catch (err) {
-      if (errorStatus(err) === 412) {
+      if (ifMatch === undefined && errorStatus(err) === 412) {
         return { created: false }
       }
       throw err
@@ -1001,20 +1054,27 @@ export class WASRemoteStore {
   /**
    * Deletes one resource of a standard synced collection, via the raw
    * `was.request()` escape hatch. A missing resource (`404`) is treated as
-   * already-deleted (idempotent). Used by the remote-direct popup backend to
-   * remove a credential or a revoked public link.
+   * already-deleted (idempotent). With `ifMatch` (the quoted ETag of the read
+   * that decided the delete) the removal is conditional, and a `412` -- a
+   * concurrent rewrite -- propagates for the caller's compare-and-swap loop
+   * to re-read and retry. Used by the remote-direct backend to remove a
+   * credential, a revoked public link, or a contact head.
    *
    * @param options {object}
    * @param options.logicalKey {string}
    * @param options.resourceId {string}
+   * @param [options.ifMatch] {string}   the quoted ETag the stored resource
+   *   must still carry; unconditional when omitted
    * @returns {Promise<void>}
    */
   async deleteSyncedResource({
     logicalKey,
-    resourceId
+    resourceId,
+    ifMatch
   }: {
     logicalKey: string
     resourceId: string
+    ifMatch?: string
   }): Promise<void> {
     const collectionId = this.#collectionId(logicalKey)
     try {
@@ -1023,6 +1083,7 @@ export class WASRemoteStore {
           resourceId
         )}`,
         method: 'DELETE',
+        ...(ifMatch !== undefined ? { headers: { 'if-match': ifMatch } } : {}),
         capability: this.#capability
       })
     } catch (err) {

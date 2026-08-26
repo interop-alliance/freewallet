@@ -25,13 +25,24 @@
  * `If-None-Match: *`, stamped with the same `Key-Epoch`) and the main app's
  * replication pulls popup writes cleanly.
  *
- * Contacts (and their revisions) are not reachable in a popup -- neither CHAPI
- * flow manages them -- so this backend rejects contact operations with a clear
- * error rather than silently operating on the empty partitioned IndexedDB.
+ * Contacts (and their revisions) are served remote-direct too: the head rows
+ * ride the mutable `contacts` collection (stable row ids, `If-Match`
+ * compare-and-swap on update/delete with a bounded re-read retry, so a lost
+ * race against a concurrent writer re-applies on the fresh head instead of
+ * silently clobbering it), and revisions are direct content-addressed appends
+ * to `contacts-history` -- both byte-identical to what background replication
+ * would have pushed, so durable replicas pull transient contact edits cleanly.
  */
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import type { ContactData, ContactRevisionPayload } from '@interop/social-core'
-import { cidFrom } from '@interop/was-client/sync'
+import {
+  upgradeContactHeadPayload,
+  upgradeContactRevisionPayload,
+  type ContactData,
+  type ContactHeadPayload,
+  type ContactRevisionPayload
+} from '@interop/social-core'
+import { cidFrom, errorStatus } from '@interop/was-client/sync'
+import { compareContactRevisionsNewestFirst } from '@/lib/contactRevisions'
 import type { Json } from '@/lib/sync'
 import {
   isEncryptedEnvelope,
@@ -39,6 +50,7 @@ import {
   type DocCipher
 } from '@interop/was-client/edv'
 import { KeyUnwrapError } from '@interop/was-client'
+import { uuidv7 } from 'uuidv7'
 import type { StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'
@@ -46,6 +58,13 @@ import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:storage:direct')
+
+/**
+ * How many times a contacts head compare-and-swap (update or delete) tries in
+ * total: each `412` re-reads the fresh head and re-applies the edit on it;
+ * exhausting the attempts throws the final `412`.
+ */
+const CONTACT_CAS_ATTEMPTS = 3
 
 /**
  * The storage operations `StorageManager` routes uniformly through one selected
@@ -95,6 +114,7 @@ export interface SyncedCollectionStore {
   removePublicCredential(options: { cid: string }): Promise<void>
   hasPublicCredential(options: { cid: string }): Promise<boolean>
   listPublicCredentials(): Promise<Array<StoredCredential>>
+  readonly unknownEpochContacts: number
   listContacts(): Promise<Array<StoredContact>>
   loadContact(options: { id: string }): Promise<StoredContact | undefined>
   addContact(options: {
@@ -133,6 +153,8 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   // client cannot make a stored app key read as absent (which would mint a
   // second identity for the app).
   #unknownEpochAppKeys = 0
+  // The contacts scan's counterpart of the credential counter above.
+  #unknownEpochContacts = 0
   #noEpochKeyAppKeys = 0
   #undecryptableAppKeys = 0
   // Count of resources the last read skipped because this wallet holds no key
@@ -741,45 +763,450 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     return credentials
   }
 
+  get unknownEpochContacts(): number {
+    return this.#unknownEpochContacts
+  }
+
   /**
-   * Rejects a contact operation: contacts are not reachable in the CHAPI popup
-   * (neither flow manages them), so this backend refuses rather than silently
-   * operating on the empty partitioned IndexedDB.
+   * Decrypts one remote `contacts` row body to its head payload, mirroring
+   * the local store's per-row tolerance: a plaintext (legacy) body passes
+   * through, an unknown-epoch row is reported apart (a descriptor refresh may
+   * pick it up), and any other decrypt failure -- a no-epoch-key row
+   * included -- is reported as unreadable. Every readable head passes through
+   * the idempotent `upgradeContactHeadPayload` read-side upgrade.
    *
-   * @returns {never}
+   * @param options {object}
+   * @param options.data {Json | undefined}   the raw stored body
+   * @returns {Promise<{ head?: ContactHeadPayload; unknownEpoch?: boolean;
+   *   err?: unknown }>}
    */
-  #contactsUnsupported(): never {
-    throw new Error(
-      'Contacts are not available in the remote-direct popup storage backend.'
-    )
+  async #decryptContactHead({ data }: { data: Json | undefined }): Promise<{
+    head?: ContactHeadPayload
+    unknownEpoch?: boolean
+    err?: unknown
+  }> {
+    if (data === undefined) {
+      return {}
+    }
+    if (!isEncryptedEnvelope(data)) {
+      return {
+        head: upgradeContactHeadPayload(data as unknown as ContactHeadPayload)
+      }
+    }
+    const cipher = this.#cipherFor('contacts')
+    try {
+      const raw = await cipher.decrypt({ envelope: data })
+      return {
+        head: upgradeContactHeadPayload(raw as unknown as ContactHeadPayload)
+      }
+    } catch (err) {
+      if (err instanceof UnknownEpochError) {
+        return { unknownEpoch: true, err }
+      }
+      return { err }
+    }
   }
 
+  /**
+   * Lists the remote `contacts` collection, decrypting each head row with the
+   * local store's tolerance (an unknown-epoch row is skipped and counted for
+   * the facade's descriptor refresh; an unreadable row is warned and skipped),
+   * and mapping each readable head to a {@link StoredContact} with the same
+   * legacy `contactId ?? rowId` fallback the local reads apply.
+   *
+   * @returns {Promise<Array<StoredContact>>}
+   */
   async listContacts(): Promise<Array<StoredContact>> {
-    return this.#contactsUnsupported()
+    const resources = await this.#remote.listSyncedResources({
+      logicalKey: 'contacts'
+    })
+    const bodies = await Promise.all(
+      resources.map(({ id }) =>
+        this.#remote.getSyncedResource({
+          logicalKey: 'contacts',
+          resourceId: id
+        })
+      )
+    )
+    const decrypted = await Promise.all(
+      bodies.map(data => this.#decryptContactHead({ data }))
+    )
+    const contacts: StoredContact[] = []
+    let unknownEpoch = 0
+    for (let position = 0; position < resources.length; position++) {
+      const { id: rowId } = resources[position]
+      const { head, unknownEpoch: isUnknownEpoch, err } = decrypted[position]
+      if (err) {
+        if (isUnknownEpoch) {
+          // Possibly-fresh data behind a stale descriptor: skip it so a
+          // descriptor refresh can pick it up.
+          log.warn('Skipping unknown-epoch remote contacts row', { rowId, err })
+          unknownEpoch += 1
+        } else {
+          log.warn('Skipping unreadable remote contacts row', { rowId, err })
+        }
+        continue
+      }
+      if (!head) {
+        continue
+      }
+      contacts.push({
+        id: rowId,
+        // Legacy heads written before the row-id / contact-id split carry no
+        // usable distinction; fall back to the row id for those.
+        contactId: head.contactId ?? rowId,
+        contact: head.contact,
+        updatedAt: head.updatedAt
+      })
+    }
+    this.#unknownEpochContacts = unknownEpoch
+    return contacts
   }
 
-  async loadContact(): Promise<StoredContact | undefined> {
-    return this.#contactsUnsupported()
+  /**
+   * Loads one contact by row id -- a single remote GET plus at most one
+   * decrypt. Mirrors the scan's per-row tolerance: a missing row, or one
+   * whose envelope will not decrypt under the current keys, resolves to
+   * `undefined` exactly as the scan would have skipped it.
+   *
+   * @param options {object}
+   * @param options.id {string}
+   * @returns {Promise<StoredContact | undefined>}
+   */
+  async loadContact({
+    id
+  }: {
+    id: string
+  }): Promise<StoredContact | undefined> {
+    const data = await this.#remote.getSyncedResource({
+      logicalKey: 'contacts',
+      resourceId: id
+    })
+    const { head, err } = await this.#decryptContactHead({ data })
+    if (err) {
+      log.warn('Skipping unreadable remote contacts row', { id, err })
+      return undefined
+    }
+    if (!head) {
+      return undefined
+    }
+    return {
+      id,
+      contactId: head.contactId ?? id,
+      contact: head.contact,
+      updatedAt: head.updatedAt
+    }
   }
 
-  async addContact(): Promise<StoredContact> {
-    return this.#contactsUnsupported()
+  /**
+   * Adds a contact to the remote `contacts` collection under the cipher's
+   * freshly minted stable row id (the collection spec's
+   * `idDerivation: 'random'`), with the same head payload and epoch stamp the
+   * local store's write would replicate -- so a durable replica pulls this
+   * transient add verbatim. Created with `If-None-Match: *`; the row id is
+   * fresh randomness, so `created: false` normally cannot happen -- except
+   * when the transport retried a PUT whose success response was lost (the
+   * underlying http client retries idempotent methods), and the retry hit the
+   * server's `412` on the row the first attempt already created. So a
+   * not-created outcome re-reads the row: one that carries the contactId this
+   * call just minted IS this call's own write and reports success; anything
+   * else is a genuine collision and throws.
+   *
+   * @param options {object}
+   * @param options.contact {ContactData}
+   * @param options.writerId {string}
+   * @returns {Promise<StoredContact>}
+   */
+  async addContact({
+    contact,
+    writerId
+  }: {
+    contact: ContactData
+    writerId: string
+  }): Promise<StoredContact> {
+    const cipher = this.#cipherFor('contacts')
+    const contactId = uuidv7()
+    const updatedAt = new Date().toISOString()
+    const head: ContactHeadPayload = {
+      contactId,
+      updatedAt,
+      writerId,
+      contact
+    }
+    const { id, envelope, epoch } = await cipher.encrypt({
+      data: head as unknown as Json
+    })
+    const { created } = await this.#remote.putSyncedResource({
+      logicalKey: 'contacts',
+      resourceId: id,
+      body: envelope,
+      epoch
+    })
+    if (!created) {
+      const found = await this.#remote.getSyncedResourceWithEtag({
+        logicalKey: 'contacts',
+        resourceId: id
+      })
+      const { head: storedHead } = found
+        ? await this.#decryptContactHead({ data: found.data })
+        : { head: undefined }
+      if (storedHead?.contactId !== contactId) {
+        throw new Error(`Remote "contacts" row "${id}" already exists.`)
+      }
+      // The transport's retried create: the stored row is this call's own
+      // write, so the add succeeded.
+    }
+    return { id, contactId, contact, updatedAt }
   }
 
-  async updateContact(): Promise<StoredContact> {
-    return this.#contactsUnsupported()
+  /**
+   * Rewrites a contact's remote head row in place under its existing id, as a
+   * compare-and-swap on the ETag of the read the new head was built on, with
+   * a bounded re-read retry: a `412` (a concurrent writer got there first)
+   * re-reads the fresh head and re-applies this edit on it, matching the
+   * replication driver's last-write-wins outcome (the fresh `updatedAt` wins)
+   * without silently clobbering the concurrent write mid-flight. The logical
+   * `contactId` sealed in the existing head is preserved verbatim. Throws
+   * when the existing head is unreachable (missing row, undecryptable
+   * envelope, no served ETag): rewriting it blind would sever the contact
+   * from its history.
+   *
+   * @param options {object}
+   * @param options.id {string}
+   * @param options.contact {ContactData}
+   * @param options.writerId {string}
+   * @returns {Promise<StoredContact>}
+   */
+  async updateContact({
+    id,
+    contact,
+    writerId
+  }: {
+    id: string
+    contact: ContactData
+    writerId: string
+  }): Promise<StoredContact> {
+    for (let attempt = 1; attempt <= CONTACT_CAS_ATTEMPTS; attempt++) {
+      // Resolved per attempt: a descriptor refresh (`setCiphers`) racing a
+      // retry must land on the freshly swapped cipher, never a stale capture.
+      const cipher = this.#cipherFor('contacts')
+      const found = await this.#remote.getSyncedResourceWithEtag({
+        logicalKey: 'contacts',
+        resourceId: id
+      })
+      if (!found) {
+        throw new Error(`No remote "contacts" row "${id}" to update.`)
+      }
+      const { data, etag } = found
+      if (etag === undefined) {
+        // Fail closed rather than downgrading the compare-and-swap to an
+        // unconditional overwrite (the registry writes' no-ETag rule).
+        throw new Error(
+          `Cannot update contact "${id}": the server served no ETag to ` +
+            'compare-and-swap against.'
+        )
+      }
+      const { head: existingHead, err } = await this.#decryptContactHead({
+        data
+      })
+      if (err || !existingHead) {
+        throw new Error(
+          `Cannot update contact "${id}": its stored head is unreadable.`,
+          { cause: err }
+        )
+      }
+      const contactId = existingHead.contactId ?? id
+      const updatedAt = new Date().toISOString()
+      const head: ContactHeadPayload = {
+        contactId,
+        updatedAt,
+        writerId,
+        contact
+      }
+      // Re-encrypt in place through the cipher's update path when the prior
+      // body is an envelope: it keeps the row's existing id verbatim and
+      // advances the EDV `sequence` from the prior envelope. A plaintext
+      // (legacy) prior row falls back to a fresh encrypt written under the
+      // same row id -- `encryptUpdate` needs a prior envelope to advance from.
+      let body: Json
+      let epoch: string | undefined
+      if (cipher.encryptUpdate && isEncryptedEnvelope(data)) {
+        ;({ envelope: body, epoch } = await cipher.encryptUpdate({
+          id,
+          data: head as unknown as Json,
+          current: data
+        }))
+      } else {
+        ;({ envelope: body, epoch } = await cipher.encrypt({
+          data: head as unknown as Json
+        }))
+      }
+      try {
+        await this.#remote.putSyncedResource({
+          logicalKey: 'contacts',
+          resourceId: id,
+          body,
+          epoch,
+          ifMatch: etag
+        })
+        return { id, contactId, contact, updatedAt }
+      } catch (casErr) {
+        if (errorStatus(casErr) !== 412 || attempt === CONTACT_CAS_ATTEMPTS) {
+          throw casErr
+        }
+        log.warn('Lost a contacts update race; re-reading the fresh head', {
+          id,
+          attempt,
+          err: casErr
+        })
+      }
+    }
+    // Unreachable: every loop arm returns or throws.
+    throw new Error(`Could not update contact "${id}".`)
   }
 
-  async deleteContact(): Promise<void> {
-    return this.#contactsUnsupported()
+  /**
+   * Hard-deletes a contact's remote head row (the server keeps a tombstone
+   * its `changes` feed serves, so durable replicas pull the removal), as a
+   * compare-and-swap on the ETag of the read that decided the delete: a `412`
+   * re-reads and retries (bounded), and a row already gone -- a `404`, or a
+   * fresh read finding nothing -- counts as deleted. A read served without an
+   * ETag fails closed rather than degrading to an unconditional delete (the
+   * no-ETag rule the update path applies).
+   *
+   * @param options {object}
+   * @param options.id {string}
+   * @returns {Promise<void>}
+   */
+  async deleteContact({ id }: { id: string }): Promise<void> {
+    for (let attempt = 1; attempt <= CONTACT_CAS_ATTEMPTS; attempt++) {
+      const found = await this.#remote.getSyncedResourceWithEtag({
+        logicalKey: 'contacts',
+        resourceId: id
+      })
+      if (!found) {
+        return
+      }
+      if (found.etag === undefined) {
+        throw new Error(
+          `Cannot delete contact "${id}": the server served no ETag to ` +
+            'compare-and-swap against.'
+        )
+      }
+      try {
+        await this.#remote.deleteSyncedResource({
+          logicalKey: 'contacts',
+          resourceId: id,
+          ifMatch: found.etag
+        })
+        return
+      } catch (err) {
+        if (errorStatus(err) !== 412 || attempt === CONTACT_CAS_ATTEMPTS) {
+          throw err
+        }
+        log.warn('Lost a contacts delete race; re-reading the fresh head', {
+          id,
+          attempt,
+          err
+        })
+      }
+    }
   }
 
-  async addContactRevision(): Promise<void> {
-    return this.#contactsUnsupported()
+  /**
+   * Appends one revision to the remote `contacts-history` collection --
+   * content-addressed and append-only, exactly like `wallet-activity`, and
+   * byte-identical to what background replication would have pushed. The
+   * create is `If-None-Match: *`, so a re-append of the identical envelope
+   * (the content-derived id collided) is an idempotent no-op.
+   *
+   * @param options {object}
+   * @param options.revision {ContactRevisionPayload}
+   * @returns {Promise<void>}
+   */
+  async addContactRevision({
+    revision
+  }: {
+    revision: ContactRevisionPayload
+  }): Promise<void> {
+    const cipher = this.#cipherFor('contactsHistory')
+    const { id, envelope, epoch } = await cipher.encrypt({
+      data: revision as unknown as Json
+    })
+    await this.#remote.putSyncedResource({
+      logicalKey: 'contactsHistory',
+      resourceId: id,
+      body: envelope,
+      epoch
+    })
   }
 
-  async listContactRevisions(): Promise<Array<ContactRevisionPayload>> {
-    return this.#contactsUnsupported()
+  /**
+   * Lists a single contact's revision history, most recent first, ordered by
+   * the logical `timestamp` each payload carries (`writerId` descending
+   * breaks a tie) -- the shared {@link compareContactRevisionsNewestFirst}.
+   * The remote-direct backend has no plaintext row-to-contact index (that is
+   * a local-replica read accelerator), so every history row is fetched and
+   * decrypted, filtered by its TRUE `contactId`, with the usual per-row
+   * tolerance: an unknown-epoch, no-epoch-key, or otherwise unreadable row is
+   * warned and skipped.
+   *
+   * @param options {object}
+   * @param options.contactId {string}
+   * @returns {Promise<Array<ContactRevisionPayload>>}
+   */
+  async listContactRevisions({
+    contactId
+  }: {
+    contactId: string
+  }): Promise<Array<ContactRevisionPayload>> {
+    const cipher = this.#cipherFor('contactsHistory')
+    const resources = await this.#remote.listSyncedResources({
+      logicalKey: 'contactsHistory'
+    })
+    const bodies = await Promise.all(
+      resources.map(({ id }) =>
+        this.#remote.getSyncedResource({
+          logicalKey: 'contactsHistory',
+          resourceId: id
+        })
+      )
+    )
+    const decrypted = await Promise.all(
+      bodies.map(async data => {
+        if (data === undefined || !isEncryptedEnvelope(data)) {
+          return { raw: data }
+        }
+        try {
+          return { raw: await cipher.decrypt({ envelope: data }) }
+        } catch (err) {
+          return { err }
+        }
+      })
+    )
+    const revisions: ContactRevisionPayload[] = []
+    for (let position = 0; position < resources.length; position++) {
+      const { id: resourceId } = resources[position]
+      const { raw, err } = decrypted[position]
+      if (err) {
+        log.warn('Skipping unreadable remote contacts-history row', {
+          resourceId,
+          err
+        })
+        continue
+      }
+      if (raw === undefined) {
+        continue
+      }
+      const revision = upgradeContactRevisionPayload(
+        raw as unknown as ContactRevisionPayload
+      )
+      if (revision.contactId === contactId) {
+        revisions.push(revision)
+      }
+    }
+    revisions.sort(compareContactRevisionsNewestFirst)
+    return revisions
   }
 
   setCiphers(ciphers: Record<string, DocCipher>): void {
