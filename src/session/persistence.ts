@@ -28,6 +28,7 @@ import { getOrCreateWriterId } from '@/lib/writerId'
 import {
   deletePasskeySafetyNotice,
   deleteUnlockMethodsCache,
+  epochPinWriteAllowed,
   loadPasskeySafetyNotice,
   loadUnlockMethodsCache,
   loadUserKeyEpochPin,
@@ -485,15 +486,13 @@ export function transientSessionStores(): TransientSessionStores {
         return epochPins.get(accountDid) ?? null
       },
       async saveFromDescriptor({ accountDid, epochId, descriptor }) {
-        // Forward-only within the visit, like the durable pin: a write that
-        // would move the pin backward along the served epoch order (or that
-        // cannot be ordered against it) is dropped rather than adopted.
-        const stored = epochPins.get(accountDid)
-        if (stored && stored !== epochId) {
-          const epochIds = (descriptor.epochs ?? []).map(epoch => epoch.id)
-          if (epochIds.indexOf(epochId) <= epochIds.indexOf(stored)) {
-            return
-          }
+        // Forward-only within the visit, like the durable pin: the shared
+        // predicate is the one decision (`epochPinWriteAllowed`), so the
+        // durable and transient variants cannot drift apart on it.
+        const stored = epochPins.get(accountDid) ?? null
+        const epochIds = (descriptor.epochs ?? []).map(epoch => epoch.id)
+        if (!epochPinWriteAllowed({ stored, epochId, epochIds })) {
+          return
         }
         epochPins.set(accountDid, epochId)
       }

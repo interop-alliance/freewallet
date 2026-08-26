@@ -522,6 +522,38 @@ function epochPinFrom(stored: unknown): string | null {
 }
 
 /**
+ * Whether an epoch-pin write may replace the stored pin: the write must
+ * restate the stored pin or advance it along the served append-only epoch
+ * order. A stored or written epoch absent from that order is refused --
+ * a descriptor omitting the pinned epoch is a rollback, not a fresh start.
+ * The one ordering decision for both roster-epoch pin variants (the durable
+ * writer below and the transient session's in-memory pin), so the two
+ * cannot drift apart.
+ *
+ * @param options {object}
+ * @param options.stored {string | null}   the stored pin, if any
+ * @param options.epochId {string}   the epoch being written
+ * @param options.epochIds {string[]}   the served append-only epoch order
+ * @returns {boolean}
+ */
+export function epochPinWriteAllowed({
+  stored,
+  epochId,
+  epochIds
+}: {
+  stored: string | null
+  epochId: string
+  epochIds: string[]
+}): boolean {
+  if (!stored || stored === epochId) {
+    return true
+  }
+  const storedIndex = epochIds.indexOf(stored)
+  const nextIndex = epochIds.indexOf(epochId)
+  return storedIndex !== -1 && nextIndex !== -1 && nextIndex > storedIndex
+}
+
+/**
  * Pins the latest-seen user key roster epoch for an account -- the continuity
  * prior beside the keyring-freshness pin. The roster lives as an opaque
  * resource the server enforces no descriptor invariants on, so a served roster
@@ -570,25 +602,19 @@ export async function saveUserKeyEpochPin({
       read.onerror = () => reject(read.error)
       read.onsuccess = () => {
         const stored = epochPinFrom(read.result)
-        if (stored === epochId) {
+        if (
+          !epochPinWriteAllowed({ stored, epochId, epochIds: epochIds ?? [] })
+        ) {
+          log.warn(
+            'Refusing to move the user key epoch pin backward (or off the served epoch order); keeping the stored pin',
+            { storedEpochId: stored, epochId }
+          )
           resolve()
           return
         }
-        if (stored) {
-          const storedIndex = epochIds ? epochIds.indexOf(stored) : -1
-          const nextIndex = epochIds ? epochIds.indexOf(epochId) : -1
-          if (
-            storedIndex === -1 ||
-            nextIndex === -1 ||
-            nextIndex < storedIndex
-          ) {
-            log.warn(
-              'Refusing to move the user key epoch pin backward (or off the served epoch order); keeping the stored pin',
-              { storedEpochId: stored, epochId }
-            )
-            resolve()
-            return
-          }
+        if (stored === epochId) {
+          resolve()
+          return
         }
         const write = store.put({ epochId, pinnedAt: Date.now() }, key)
         write.onerror = () => reject(write.error)

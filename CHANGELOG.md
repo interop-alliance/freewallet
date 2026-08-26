@@ -29,6 +29,14 @@
   seed and standing members, so mid-session ceremonies can sign as the
   ladder without a durable signer in hand.
 
+### Fixed
+
+- The transient session's roster-epoch pin now refuses a served descriptor
+  that omits the pinned epoch, matching the durable pin's refusal, so a
+  host cannot roll a public-terminal visit back onto an older user-key
+  generation. Both pin variants now decide through one shared predicate
+  (`epochPinWriteAllowed`) instead of parallel comparisons.
+
 ## 0.40.0 - 2026-08-25
 
 ### Changed
