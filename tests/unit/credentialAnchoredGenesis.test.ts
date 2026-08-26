@@ -1,41 +1,37 @@
 // @vitest-environment node
 /**
- * Unit tests for the credential-anchored establishment
- * (`src/session/credentialAnchoredGenesis.ts`), focused on the genesis
- * landing check: wallet-core's ceremony COLLECTS its roster and epoch
- * failures instead of throwing, and on a credential-anchored account no
- * login-time sweep ever finishes them -- so the establishment must refuse
- * before the re-bind, leaving the record DID-less and the next login's heal
- * re-run as the completer. The wallet-core boundaries are mocked at the
- * module seam; what runs here is the stage wiring and the refusal.
+ * Unit tests for freewallet's binding onto the credential-anchored
+ * establishment (`src/session/credentialAnchoredGenesis.ts`). The stage
+ * order and the genesis landing checks live in wallet-core's orchestrator
+ * (covered by its own suite); what runs here is the binding: the options the
+ * app hands the orchestrator, the hooks it closes over (the unlock-record
+ * codec with the credential/email/freshness floor, the bootstrap-identity
+ * roster store, the keystore promotion), and the warn-only handling of the
+ * ceremony's collected best-effort failures.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
 
 const state = vi.hoisted(() => ({
-  wasUrl: 'https://was.example.test' as string | undefined
-}))
-
-// Hoisted so the module-seam mock factories (which run before the module
-// body's initializers) can name them.
-const { CANDIDATE_USER_KEY_ID, CLIENT_ANNEX_DID } = vi.hoisted(() => ({
-  CANDIDATE_USER_KEY_ID: 'did:key:zCandidate',
-  CLIENT_ANNEX_DID:
-    'did:webvh:QmClientAnnexScid:was.example.test:space:clientAnnex-space-1:' +
-    'gen-Ux3v0kQf9aPmB2hZ'
+  wasUrl: 'https://was.example.test' as string | undefined,
+  kmsUrl: undefined as string | undefined
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
   get WAS_SERVER_URL() {
     return state.wasUrl
+  },
+  get KMS_SERVER_URL() {
+    return state.kmsUrl
   }
 }))
 
 vi.mock('@interop/was-client', async importOriginal => {
-  const configure = vi.fn(async () => undefined)
   class MockWasClient {
-    space() {
-      return { configure }
+    options: unknown
+    constructor(options: unknown) {
+      this.options = options
     }
   }
   return {
@@ -44,62 +40,28 @@ vi.mock('@interop/was-client', async importOriginal => {
   }
 })
 
-vi.mock('@interop/wallet-core/genesis', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/wallet-core/genesis')>()),
-  ensurePromotedSpaceController: vi.fn(async () => undefined)
+vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
+  ...(await importOriginal<
+    typeof import('@interop/wallet-core/clientAnnex')
+  >()),
+  establishCredentialAnchoredAccount: vi.fn(),
+  ladderVmAgent: vi.fn(async () => ({ id: 'did:key:zLadder' }))
 }))
 
 vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
   didKeyZcapClient: vi.fn(() => ({ isBootstrapZcapClient: true })),
-  keyAgreementCommitment: vi.fn(async () => ({ commitment: 'zCommitment' })),
-  verifyAccountLog: vi.fn(),
   wasWebvhIdStore: vi.fn(() => ({ isIdStore: true }))
 }))
 
-vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
-  ...(await importOriginal<
-    typeof import('@interop/wallet-core/clientAnnex')
-  >()),
-  clientAnnexDidParts: vi.fn(() => ({
-    spaceId: 'clientAnnex-space-1',
-    generationId: 'gen-Ux3v0kQf9aPmB2hZ'
-  })),
-  clientAnnexLogStore: vi.fn(() => ({ isAnnexLogStore: true })),
-  delegatedClientsPointer: vi.fn(() => undefined),
-  ensureCredentialAnchoredAccountGenesis: vi.fn(),
-  ensureGenerationDelegationCurrent: vi.fn(async () => undefined),
-  ladderRung: vi.fn(async ({ index }: { index: number }) => ({
-    seed: new Uint8Array(32).fill(index),
-    keyMultibase: `z6MkRung${index}`
-  })),
-  ladderVmAgent: vi.fn(async () => ({ id: 'did:key:zLadder' })),
-  ladderVmZcapClient: vi.fn(async () => ({ isLadderZcapClient: true })),
-  mintCredentialClientAnnexGeneration: vi.fn(async () => ({
-    did: CLIENT_ANNEX_DID,
-    generationId: 'gen-Ux3v0kQf9aPmB2hZ'
-  })),
-  mintDelegatedClientsDelegation: vi.fn(async () => ({
-    id: 'urn:zcap:sibling'
-  })),
-  mintGenerationDelegation: vi.fn(async () => ({ id: 'urn:zcap:generation' })),
-  setDelegatedClientsPointer: vi.fn(async () => undefined)
+vi.mock('@/lib/didWeb', () => ({
+  didWebFromSpace: vi.fn(() => 'did:web:was.example.test:space:space-123'),
+  ensureDidWeb: vi.fn(async () => ({ isKeyMap: true }))
 }))
 
-vi.mock('@interop/wallet-core/keys', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
-  ensureWalletSpaceEpochs: vi.fn(async () => ({ outcomes: {}, failed: [] })),
-  mintUserKey: vi.fn(async () => ({
-    id: CANDIDATE_USER_KEY_ID,
-    secret: new Uint8Array(32)
-  })),
-  readUserKeyRoster: vi.fn()
-}))
-
-vi.mock('@interop/wallet-core/recovery', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/wallet-core/recovery')>()),
-  delegateLogWrite: vi.fn(async () => ({ id: 'urn:zcap:bridge' })),
-  delegationProofKeyId: vi.fn(() => 'did:key:zLadder#zLadderVm')
+vi.mock('@/lib/kms', () => ({
+  ensureKeystore: vi.fn(async () => ({ isKeystoreAgent: true })),
+  promoteKeystoreController: vi.fn(async () => undefined)
 }))
 
 vi.mock('@/session/keyring', () => ({
@@ -113,23 +75,14 @@ vi.mock('@/session/rosterStore', () => ({
   accountRosterStore: vi.fn(() => ({ isRosterStore: true }))
 }))
 
-vi.mock('@/stores/wasRemoteStore', () => ({
-  mintSpaceId: vi.fn(() => 'clientAnnex-space-1')
-}))
-
 import {
-  ensureCredentialAnchoredAccountGenesis,
-  mintCredentialClientAnnexGeneration,
-  setDelegatedClientsPointer
+  establishCredentialAnchoredAccount as coreEstablish,
+  ladderVmAgent
 } from '@interop/wallet-core/clientAnnex'
-import { ensurePromotedSpaceController } from '@interop/wallet-core/genesis'
-import {
-  ensureWalletSpaceEpochs,
-  readUserKeyRoster
-} from '@interop/wallet-core/keys'
-import { verifyAccountLog } from '@interop/wallet-core/webvh'
 import { bindCredentialAnchoredUnlockSecret } from '@/session/keyring'
 import type { UnlockCredential } from '@/session/keyring'
+import { accountRosterStore } from '@/session/rosterStore'
+import { promoteKeystoreController } from '@/lib/kms'
 import { establishCredentialAnchoredAccount } from '@/session/credentialAnchoredGenesis'
 import { transientSessionStores } from '@/session/persistence'
 
@@ -152,229 +105,224 @@ const CREDENTIAL = {
 } as unknown as UnlockCredential
 
 /**
- * A genesis result in the standing shape, overridable per test.
+ * A completed orchestrator result, overridable per test.
  */
-function genesisResult(
+function establishmentResult(
   overrides: Record<string, unknown> = {}
 ): Record<string, unknown> {
   return {
     did: ACCOUNT_DID,
-    rosterDescriptor: { currentEpoch: CANDIDATE_USER_KEY_ID, epochs: [] },
-    epochs: { outcomes: {}, failed: [] },
+    unlockSpaceId: 'unlock-space-1',
+    standingFields: { rosterKid: CREDENTIAL.standing.recipientKid },
     failed: [],
     ...overrides
   }
 }
 
 /**
- * Runs the establishment against the current mocks, with an optional
- * pre-promotion tail spy.
+ * Runs the binding against the current mocks and returns the options the
+ * mocked wallet-core orchestrator received.
  */
 async function establish(
-  beforePromotion?: (context: { userKey: { id: string } }) => Promise<void>
-) {
-  return establishCredentialAnchoredAccount({
+  overrides: Record<string, unknown> = {}
+): Promise<{
+  establishment: Awaited<
+    ReturnType<typeof establishCredentialAnchoredAccount>
+  >
+  options: Record<string, unknown>
+}> {
+  const persistence =
+    (overrides.persistence as { logPins: unknown } | undefined) ??
+    transientSessionStores()
+  const establishment = await establishCredentialAnchoredAccount({
     credential: CREDENTIAL,
     ladderSeed: new Uint8Array(32).fill(7),
     pointer: POINTER,
     lowEntropy: true,
-    persistence: transientSessionStores(),
-    ...(beforePromotion ? { beforePromotion } : {})
+    ...overrides,
+    persistence
   } as never)
+  expect(coreEstablish).toHaveBeenCalledTimes(1)
+  const options = vi.mocked(coreEstablish).mock
+    .calls[0][0] as unknown as Record<string, unknown>
+  return { establishment, options }
 }
 
 beforeEach(() => {
   state.wasUrl = 'https://was.example.test'
-  vi.mocked(verifyAccountLog).mockResolvedValue({
-    doc: { id: ACCOUNT_DID },
-    log: [{ entry: 1 }]
-  } as never)
+  state.kmsUrl = undefined
+  vi.mocked(coreEstablish).mockResolvedValue(establishmentResult() as never)
 })
 
 afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('establishCredentialAnchoredAccount -- the landed genesis', () => {
-  it('completes the establishment and hands the tail the candidate user key', async () => {
-    vi.mocked(ensureCredentialAnchoredAccountGenesis).mockResolvedValue(
-      genesisResult() as never
-    )
-    const seen: string[] = []
-
-    const establishment = await establish(async ({ userKey }) => {
-      seen.push(userKey.id)
-    })
+describe('establishCredentialAnchoredAccount -- the orchestrator binding', () => {
+  it('hands wallet-core the standing members and the bootstrap wiring', async () => {
+    const persistence = transientSessionStores()
+    const { establishment, options } = await establish({ persistence })
 
     expect(establishment.did).toBe(ACCOUNT_DID)
-    expect(establishment.unlockSpaceId).toBe('unlock-space-1')
-    expect(seen).toEqual([CANDIDATE_USER_KEY_ID])
-    // No adopted roster, so no read-back and no follow-up epoch fan-out.
-    expect(readUserKeyRoster).not.toHaveBeenCalled()
-    expect(ensureWalletSpaceEpochs).not.toHaveBeenCalled()
-    // The annex generation and both binds ran, and promotion came last.
-    expect(mintCredentialClientAnnexGeneration).toHaveBeenCalledTimes(1)
-    expect(setDelegatedClientsPointer).toHaveBeenCalledTimes(1)
-    expect(bindCredentialAnchoredUnlockSecret).toHaveBeenCalledTimes(2)
-    expect(ensurePromotedSpaceController).toHaveBeenCalledTimes(1)
+    expect(options.wasServerUrl).toBe(POINTER.host)
+    expect(options.spaceId).toBe(POINTER.spaceId)
+    expect(options.standing).toEqual({
+      clientDid: CREDENTIAL.standing.clientDid,
+      keyAgreementKeyMultibase:
+        CREDENTIAL.standing.keyAgreementKeyMultibase,
+      recipientKid: CREDENTIAL.standing.recipientKid,
+      keyAgreementKey: CREDENTIAL.standing.agents.keyAgreementKey
+    })
+    expect(options.lowEntropy).toBe(true)
+    expect(options.pinStore).toBe(persistence.logPins)
+    expect(options.idStore).toEqual({ isIdStore: true })
+    expect(ladderVmAgent).toHaveBeenCalledTimes(1)
+    // The bootstrap storage client the hooks share, signing as the ladder
+    // VM's bare did:key.
+    const bootstrapWas = (
+      options.bootstrapWasFor as (context: object) => {
+        options: { serverUrl: string; zcapClient: unknown }
+      }
+    )({})
+    expect(bootstrapWas.options.serverUrl).toBe(POINTER.host)
+    expect(bootstrapWas.options.zcapClient).toEqual({
+      isBootstrapZcapClient: true
+    })
+    // A DID-less signup pointer states no expectedDid and no prior stamp.
+    expect(options).not.toHaveProperty('expectedDid')
+    expect(options).not.toHaveProperty('priorCreatedAt')
   })
 
-  it('recovers the adopted roster key on a heal and passes THAT key on', async () => {
-    vi.mocked(ensureCredentialAnchoredAccountGenesis).mockResolvedValue(
-      genesisResult({
-        rosterDescriptor: { currentEpoch: 'did:key:zAdopted', epochs: [] },
-        // The ceremony skips its own epochs stage on the key mismatch.
-        epochs: undefined,
-        epochsSkipped: { rosterEpochId: 'did:key:zAdopted' }
+  it('threads expectedDid, priorCreatedAt, and the caller tail through', async () => {
+    const beforePromotion = vi.fn(async () => undefined)
+    const { options } = await establish({
+      pointer: { ...POINTER, did: ACCOUNT_DID },
+      priorCreatedAt: '2026-08-20T00:00:00.000Z',
+      beforePromotion
+    })
+
+    expect(options.expectedDid).toBe(ACCOUNT_DID)
+    expect(options.priorCreatedAt).toBe('2026-08-20T00:00:00.000Z')
+    expect(options.beforePromotion).toBe(beforePromotion)
+  })
+
+  it('closes the bindRecord hook over the credential, email, and pin floor', async () => {
+    const freshnessPinFloor = { idb: { isIdbFactory: true } as never }
+    const { options } = await establish({
+      email: 'user@example.test',
+      freshnessPinFloor
+    })
+
+    const bindRecord = options.bindRecord as (
+      bind: Record<string, unknown>
+    ) => Promise<unknown>
+    const bind = {
+      controller: 'did:key:zLadder',
+      pointer: { ...POINTER, did: ACCOUNT_DID },
+      delegation: { id: 'urn:zcap:bridge' },
+      delegatedClients: { id: 'urn:zcap:sibling' },
+      delegateManagementTo: ACCOUNT_DID,
+      priorCreatedAt: '2026-08-22T00:00:00.000Z'
+    }
+    await bindRecord(bind)
+
+    expect(bindCredentialAnchoredUnlockSecret).toHaveBeenCalledWith({
+      ...bind,
+      email: 'user@example.test',
+      ladderSeed: new Uint8Array(32).fill(7),
+      freshnessPinFloor,
+      credential: CREDENTIAL
+    })
+  })
+
+  it('builds the roster store on the bootstrap identity and the pin store', async () => {
+    const persistence = transientSessionStores()
+    const { options } = await establish({ persistence })
+
+    const rosterStoreFor = options.rosterStoreFor as (context: {
+      did: string
+    }) => unknown
+    expect(rosterStoreFor({ did: ACCOUNT_DID })).toEqual({
+      isRosterStore: true
+    })
+    expect(accountRosterStore).toHaveBeenCalledWith({
+      zcapClient: { isBootstrapZcapClient: true },
+      keyAgent: { id: 'did:key:zLadder' },
+      pointer: {
+        did: ACCOUNT_DID,
+        spaceId: POINTER.spaceId,
+        host: POINTER.host
+      },
+      pinStore: persistence.logPins
+    })
+  })
+
+  it('refuses with no WAS server before wallet-core is ever called', async () => {
+    state.wasUrl = undefined
+
+    await expect(
+      establishCredentialAnchoredAccount({
+        credential: CREDENTIAL,
+        ladderSeed: new Uint8Array(32).fill(7),
+        pointer: POINTER,
+        lowEntropy: true,
+        persistence: transientSessionStores()
+      } as never)
+    ).rejects.toThrow(TypeError)
+    expect(coreEstablish).not.toHaveBeenCalled()
+  })
+
+  it('arms no KMS thunk without a KMS, and promoteKeystore no-ops', async () => {
+    const { options } = await establish()
+
+    expect(options).not.toHaveProperty('provideDidWebKeys')
+    const promoteKeystore = options.promoteKeystore as (context: {
+      did: string
+    }) => Promise<void>
+    await promoteKeystore({ did: ACCOUNT_DID })
+    expect(promoteKeystoreController).not.toHaveBeenCalled()
+  })
+
+  it('arms the KMS thunk when a KMS is configured', async () => {
+    state.kmsUrl = 'https://was.example.test/kms'
+    const { options } = await establish()
+
+    expect(typeof options.provideDidWebKeys).toBe('function')
+  })
+
+  it('warns the collected best-effort failures instead of throwing', async () => {
+    const didWebError = new Error('the KMS hung')
+    const keystoreError = new Error('the keystore promotion was refused')
+    vi.mocked(coreEstablish).mockResolvedValue(
+      establishmentResult({
+        failed: [
+          { stage: 'didWebKeys', error: didWebError },
+          { stage: 'keystorePromotion', error: keystoreError }
+        ]
       }) as never
     )
-    vi.mocked(readUserKeyRoster).mockResolvedValue({
-      userKey: { id: 'did:key:zAdopted', secret: new Uint8Array(32) }
-    } as never)
-    const seen: string[] = []
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
 
-    await establish(async ({ userKey }) => {
-      seen.push(userKey.id)
-    })
+    const { establishment } = await establish()
 
-    expect(readUserKeyRoster).toHaveBeenCalledWith({
-      store: expect.objectContaining({ isRosterStore: true }),
-      clientKeyAgreementKey: CREDENTIAL.standing.agents.keyAgreementKey
-    })
-    // The collection epochs complete under the adopted key, not the candidate.
-    expect(ensureWalletSpaceEpochs).toHaveBeenCalledWith(
+    expect(establishment.failed).toHaveLength(2)
+    expect(capture.events).toContainEqual(
       expect.objectContaining({
-        spaceId: POINTER.spaceId,
-        userKey: expect.objectContaining({ id: 'did:key:zAdopted' })
+        ns: 'fw:session:genesis',
+        level: 'warn',
+        msg: expect.stringContaining('did:web provisioning failed'),
+        err: didWebError
       })
     )
-    expect(seen).toEqual(['did:key:zAdopted'])
-  })
-})
-
-describe('establishCredentialAnchoredAccount -- the genesis landing check', () => {
-  /**
-   * Runs the establishment against the current mocks and returns the caught
-   * refusal.
-   */
-  async function refusal() {
-    try {
-      await establish()
-    } catch (err) {
-      return err
-    }
-    throw new Error('expected a refusal')
-  }
-
-  it('refuses a failed roster stage before anything downstream runs', async () => {
-    const cause = new Error('the roster append lost its CAS')
-    vi.mocked(ensureCredentialAnchoredAccountGenesis).mockResolvedValue(
-      genesisResult({
-        rosterDescriptor: undefined,
-        failed: [{ stage: 'roster', error: cause }]
-      }) as never
+    expect(capture.events).toContainEqual(
+      expect.objectContaining({
+        ns: 'fw:session:genesis',
+        level: 'warn',
+        msg: expect.stringContaining('Keystore controller promotion failed'),
+        err: keystoreError
+      })
     )
-
-    const err = await refusal()
-
-    expect(err).toBeInstanceOf(Error)
-    expect((err as Error).message).toMatch(/roster stage failed/)
-    expect((err as Error).cause).toBe(cause)
-    // The first (interim) bind legitimately precedes the genesis; the
-    // re-bind, the annex generation, the caller's tail, and the promotion
-    // must all be unreached, so the record stays DID-less and heal-able.
-    expect(bindCredentialAnchoredUnlockSecret).toHaveBeenCalledTimes(1)
-    expect(mintCredentialClientAnnexGeneration).not.toHaveBeenCalled()
-    expect(setDelegatedClientsPointer).not.toHaveBeenCalled()
-    expect(ensurePromotedSpaceController).not.toHaveBeenCalled()
-  })
-
-  it('refuses a failed roster stage without invoking the caller tail', async () => {
-    vi.mocked(ensureCredentialAnchoredAccountGenesis).mockResolvedValue(
-      genesisResult({
-        rosterDescriptor: undefined,
-        failed: [{ stage: 'roster', error: new Error('nope') }]
-      }) as never
-    )
-    const tail = vi.fn(async () => undefined)
-
-    await expect(establish(tail)).rejects.toThrow(/roster stage failed/)
-    expect(tail).not.toHaveBeenCalled()
-  })
-
-  it('refuses a failed epochs stage', async () => {
-    const cause = new Error('the epoch stage never ran')
-    vi.mocked(ensureCredentialAnchoredAccountGenesis).mockResolvedValue(
-      genesisResult({ failed: [{ stage: 'epochs', error: cause }] }) as never
-    )
-
-    const err = await refusal()
-
-    expect((err as Error).message).toMatch(/epochs stage failed/)
-    expect((err as Error).cause).toBe(cause)
-    expect(bindCredentialAnchoredUnlockSecret).toHaveBeenCalledTimes(1)
-    expect(ensurePromotedSpaceController).not.toHaveBeenCalled()
-  })
-
-  it('refuses a per-collection epoch failure', async () => {
-    const cause = new Error('the collection would not epoch')
-    vi.mocked(ensureCredentialAnchoredAccountGenesis).mockResolvedValue(
-      genesisResult({
-        epochs: {
-          outcomes: {},
-          failed: [{ collectionId: 'contacts', error: cause }]
-        }
-      }) as never
-    )
-
-    const err = await refusal()
-
-    expect((err as Error).message).toMatch(/key epoch on collection "contacts"/)
-    expect((err as Error).cause).toBe(cause)
-    expect(ensurePromotedSpaceController).not.toHaveBeenCalled()
-  })
-
-  it('refuses a genesis that reported no roster descriptor', async () => {
-    vi.mocked(ensureCredentialAnchoredAccountGenesis).mockResolvedValue(
-      genesisResult({ rosterDescriptor: undefined }) as never
-    )
-
-    const err = await refusal()
-
-    expect((err as Error).message).toMatch(
-      /user-key roster genesis did not land/
-    )
-    expect(bindCredentialAnchoredUnlockSecret).toHaveBeenCalledTimes(1)
-    expect(mintCredentialClientAnnexGeneration).not.toHaveBeenCalled()
-    expect(ensurePromotedSpaceController).not.toHaveBeenCalled()
-  })
-
-  it("refuses the heal branch's own per-collection epoch failure", async () => {
-    const cause = new Error('the heal fan-out stranded a collection')
-    vi.mocked(ensureCredentialAnchoredAccountGenesis).mockResolvedValue(
-      genesisResult({
-        rosterDescriptor: { currentEpoch: 'did:key:zAdopted', epochs: [] },
-        // The ceremony skips its own epochs stage on the key mismatch.
-        epochs: undefined,
-        epochsSkipped: { rosterEpochId: 'did:key:zAdopted' }
-      }) as never
-    )
-    vi.mocked(readUserKeyRoster).mockResolvedValue({
-      userKey: { id: 'did:key:zAdopted', secret: new Uint8Array(32) }
-    } as never)
-    vi.mocked(ensureWalletSpaceEpochs).mockResolvedValue({
-      outcomes: {},
-      failed: [{ collectionId: 'wallet-activity', error: cause }]
-    } as never)
-
-    const err = await refusal()
-
-    expect((err as Error).message).toMatch(
-      /key epoch on collection "wallet-activity"/
-    )
-    expect((err as Error).cause).toBe(cause)
-    expect(bindCredentialAnchoredUnlockSecret).toHaveBeenCalledTimes(1)
-    expect(mintCredentialClientAnnexGeneration).not.toHaveBeenCalled()
-    expect(ensurePromotedSpaceController).not.toHaveBeenCalled()
+    removeSink()
   })
 })

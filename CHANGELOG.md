@@ -28,6 +28,13 @@
 - The transient session profile now carries the login credential's ladder
   seed and standing members, so mid-session ceremonies can sign as the
   ladder without a durable signer in hand.
+- The credential-anchored establishment's stage sequence moved into
+  wallet-core's shared orchestrator; `src/session/credentialAnchoredGenesis.ts`
+  is now a thin binding supplying only the unlock-record codec, the
+  roster store builder, the KMS/did:web thunk, and the registry-write hook.
+- The add/change-method client-annex fold now runs through wallet-core's
+  shared generation primitive, embedding the generation delegation before
+  flipping the auxiliary Space's controller.
 
 ### Fixed
 

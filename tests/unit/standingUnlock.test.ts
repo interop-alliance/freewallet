@@ -6,7 +6,11 @@
  * the registry write, deciding after their own outcome which credential's
  * standing configuration the entry names), and it honors a caller-minted
  * ladder seed, so a ceremony can clean up a torn establishment by an actual
- * retirement.
+ * retirement. The annex-generation establishment
+ * (`establishClientAnnexGeneration`) is covered for its adoption of the
+ * shared stage-3 fold: the pointer entry signs with this enrolled client's
+ * own update keys, and a generation the fold just minted skips the separate
+ * delegation renewal.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
@@ -27,6 +31,28 @@ vi.mock('@/session/enrolledContext', () => ({
 
 vi.mock('@interop/wallet-core/unlock', () => ({
   publishUnlockKey: vi.fn(async () => ({}))
+}))
+
+vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
+  ...(await importOriginal<
+    typeof import('@interop/wallet-core/clientAnnex')
+  >()),
+  commitClientAnnexRung: vi.fn(async () => ({})),
+  ensurePointedClientAnnexGeneration: vi.fn(async () => ({
+    clientAnnexDid: ANNEX_DID,
+    generationDelegation: { id: 'urn:zcap:generation' },
+    generationMinted: true,
+    spaceMinted: true
+  })),
+  mintDelegatedClientsDelegation: vi.fn(async () => ({
+    id: 'urn:zcap:sibling'
+  })),
+  mintGenerationDelegation: vi.fn(async () => ({ id: 'urn:zcap:generation' }))
+}))
+
+vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
+  didKeyZcapClient: vi.fn(() => ({ isBootstrapZcapClient: true }))
 }))
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
@@ -57,7 +83,10 @@ vi.mock('@/session/rosterStore', () => ({
 
 vi.mock('@/session/verifiedLog', () => ({
   invalidateVerifiedLog: vi.fn(),
-  verifiedAccountLog: vi.fn(async () => ({ doc: { id: POINTER.did } }))
+  verifiedAccountLog: vi.fn(async () => ({
+    doc: { id: POINTER.did },
+    log: []
+  }))
 }))
 
 vi.mock('@/session/annexReach', () => ({
@@ -71,10 +100,6 @@ vi.mock('@/lib/sessionKey', () => ({
     read: async () => null,
     write: async () => undefined
   }))
-}))
-
-vi.mock('@/stores/wasRemoteStore', () => ({
-  mintSpaceId: vi.fn(() => 'space-annex')
 }))
 
 vi.mock('@/session/unlockMethods', () => ({
@@ -102,6 +127,9 @@ const POINTER = {
   host: 'https://was.example.test'
 }
 
+const ANNEX_DID =
+  'did:webvh:QmAnnexScid:was.example.test:space:space-annex:gen-1'
+
 const CREDENTIAL = {
   unlock: {},
   standing: {
@@ -112,8 +140,15 @@ const CREDENTIAL = {
   }
 }
 
-const { establishStandingUnlock } = await import('@/session/standingUnlock')
+const { establishClientAnnexGeneration, establishStandingUnlock } =
+  await import('@/session/standingUnlock')
 const { updateUnlockMethods } = await import('@/session/unlockMethods')
+const { fetchKeyring } = await import('@/session/keyring')
+const { clientAnnexReachOf, ensureGenerationDelegation } = await import(
+  '@/session/annexReach'
+)
+const { ensurePointedClientAnnexGeneration, mintDelegatedClientsDelegation } =
+  await import('@interop/wallet-core/clientAnnex')
 
 function makeSession() {
   return {
@@ -166,5 +201,53 @@ describe('establishStandingUnlock', () => {
     expect(outcome.ladderSeed).toBe(ladderSeed)
     const rung0 = await ladderRung({ ladderSeed, index: 0 })
     expect(outcome.standingFields.updateKeyMultibase).toBe(rung0.keyMultibase)
+  })
+})
+
+describe('establishClientAnnexGeneration', () => {
+  it('adopts the shared fold under this client and skips the renewal on a fresh mint', async () => {
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      unlockSpaceId: 'space-cred',
+      standing: {
+        ladderSeed: new Uint8Array(32).fill(3),
+        delegation: { id: 'urn:zcap:bridge' }
+      },
+      standingClient: {
+        clientDid: CREDENTIAL.standing.clientDid,
+        keyAgreementKeyMultibase: CREDENTIAL.standing.keyAgreementKeyMultibase
+      },
+      rebindStandingRecord: vi.fn(async () => {})
+    } as never)
+    vi.mocked(clientAnnexReachOf).mockReturnValue({
+      spaceId: 'space-annex'
+    } as never)
+
+    await establishClientAnnexGeneration({
+      session: makeSession(),
+      secret: 'pass',
+      kdf: KEYRING_KDF
+    })
+
+    // The shared stage-3 fold, driven by this enrolled client: its bare
+    // did:key mints, its own document update keys sign the pointer entry.
+    expect(ensurePointedClientAnnexGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        account: expect.objectContaining({ did: POINTER.did }),
+        accountSpaceId: POINTER.spaceId,
+        wasServerUrl: POINTER.host,
+        mintController: 'did:key:zClient',
+        updateKeys: { updateSeed: expect.any(Uint8Array) }
+      })
+    )
+    // The fold minted the generation with its delegation embedded, so the
+    // separate renewal never runs.
+    expect(ensureGenerationDelegation).not.toHaveBeenCalled()
+    // The sibling delegation targets the fold's annex Space.
+    expect(mintDelegatedClientsDelegation).toHaveBeenCalledWith(
+      expect.objectContaining({ clientAnnexSpaceId: 'space-annex' })
+    )
+    expect(clientAnnexReachOf).toHaveBeenCalledWith(
+      expect.objectContaining({ clientAnnexDid: ANNEX_DID })
+    )
   })
 })

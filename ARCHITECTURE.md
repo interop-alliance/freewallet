@@ -714,10 +714,18 @@ WAS deployment.
 
 **The credential-anchored variant.** Every WAS signup -- passphrase or
 passkey, remembered or not -- now runs this establishment first, through
-`establishCredentialAnchoredAccount` in
-`src/session/credentialAnchoredGenesis.ts` (wallet-core's
+wallet-core's `establishCredentialAnchoredAccount` orchestrator
+(`@interop/wallet-core/clientAnnex`, wrapping
 `ensureCredentialAnchoredAccountGenesis`): no durable client is minted by
-the establishment itself. A non-remembered browser then enters through the
+the establishment itself. The stage sequence and its ordering rules are
+canonical in wallet-core's ARCHITECTURE.md, "Ceremonies and cascades" ->
+"The credential-anchored establishment". `src/session/credentialAnchoredGenesis.ts`
+is a thin binding over that orchestrator: it supplies only the
+app-specific hooks -- the unlock-record codec (`bindRecord` over
+`bindCredentialAnchoredUnlockSecret`), the roster store builder, the
+KMS/did:web thunk and keystore-promotion closure, and the callers'
+registry-write `beforePromotion` hook. What follows is the account-level
+narrative, at a summary level. A non-remembered browser then enters through the
 ordinary transient composition below. A `rememberBrowser: true` signup (the
 signup form's remember choice, or the e2e seam) instead follows the
 establishment with the ordinary durable login, whose self-enrollment makes
@@ -751,15 +759,16 @@ entry carries the KMS `authentication` VM, and the keystore controller is
 promoted to the did:webvh in the establishment's existing promotion stage,
 mirroring the Space's. The stage is best-effort with a timeout: a failed
 or hung KMS leaves the account keystore-less, Settings shows the state,
-and a later keystore-creation pass heals it. The ordering rule is the
-transposed persist-before-publish
-invariant: the unlock record carrying the ladder seed (with an interim
-bridge delegated by the ladder's bare did:key) is durably written BEFORE
-the Space is created and before rung 0 publishes. After the genesis, the
-establishment
-mints the client annex generation under the same bootstrap identity, embeds
-the ladder-VM-signed generation delegation, flips the auxiliary Space's
-controller, appends the `#DelegatedClients` pointer as a second rung-0-signed
+and a later keystore-creation pass heals it. Summarized (wallet-core's
+ARCHITECTURE.md states the ordering rule itself): the unlock record
+carrying the ladder seed (with an interim bridge delegated by the
+ladder's bare did:key) is durably written BEFORE the Space is created and
+before rung 0 publishes -- the transposed persist-before-publish
+invariant. After the genesis, the establishment
+mints the client annex generation under the same bootstrap identity through
+wallet-core's shared `ensurePointedClientAnnexGeneration` primitive, embeds
+the ladder-VM-signed generation delegation before flipping the auxiliary
+Space's controller, appends the `#DelegatedClients` pointer as a second rung-0-signed
 account-log entry, re-binds the record (full pointer, ladder-VM-signed bridge
 and sibling, management zcap to the account DID), writes the unlock-methods
 registry in the last root-invocation window (read-first: the entry is upserted
@@ -2075,7 +2084,11 @@ finished (see Tear mending in the Glossary).
 The open gaps (stated residues with no mender yet; see Tear mending in
 the Glossary). Two are unbuilt repairs on client-less accounts, where no
 login sweep will ever run: the transient recovery's roster-append repair,
-and one for a user-key rotation torn mid-fan-out.
+and one for a user-key rotation torn mid-fan-out. A third is KMS-specific:
+on a KMS deployment, an establishment torn between the re-bind and the
+promotion leaves the keystore's controller on the ladder's bare did:key,
+outside the current-key-set rule, with no mender yet; the mender is
+designed alongside the did:web-stage collapse work.
 
 ## What lives elsewhere (do not reimplement here)
 

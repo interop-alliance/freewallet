@@ -53,12 +53,12 @@ import {
   commitClientAnnexRung,
   clientAnnexDidParts,
   delegatedClientsPointer,
+  ensurePointedClientAnnexGeneration,
   generateLadderSeed,
   ladderRung,
-  mintCredentialClientAnnexGeneration,
   mintDelegatedClientsDelegation,
-  selfEnrollClientCore,
-  setDelegatedClientsPointer
+  mintGenerationDelegation,
+  selfEnrollClientCore
 } from '@interop/wallet-core/clientAnnex'
 import {
   delegateLogWrite,
@@ -95,7 +95,6 @@ import {
   refreshStandingDelegationFields,
   type StandingUnlockFields
 } from '@/session/unlockMethods'
-import { mintSpaceId } from '@/stores/wasRemoteStore'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:unlock')
@@ -430,55 +429,57 @@ export async function establishClientAnnexGeneration({
   }
 
   // The generation: reuse the pointed one when the document already carries
-  // the delegated-clients pointer; mint and point otherwise, in the standing
-  // order (the annex log publishes first, the pointer follows).
-  const { doc } = await verifiedAccountLog({
+  // the delegated-clients pointer; mint and point otherwise through the
+  // shared stage-3 fold (mint, embed the delegation while the auxiliary
+  // Space still answers to its creation controller, flip the controller,
+  // append the pointer entry last). Space creation accepts did:key
+  // controllers only, so the fold creates the auxiliary Space under this
+  // client's bare did:key; the pointer entry signs with this enrolled
+  // client's own document update keys, and the embedded delegation with its
+  // promoted key.
+  const account = await verifiedAccountLog({
     profile: session.profile,
     pointer
   })
-  let clientAnnexDid = delegatedClientsPointer({ doc })
-  if (!clientAnnexDid) {
-    // Space creation accepts did:key controllers only, so the auxiliary
-    // Space follows the account Space's own order: created (and written)
-    // under this client's bare did:key, then its controller promoted to the
-    // account did:webvh -- before any delegation roots in its root zcap.
-    const clientAnnexSpaceId = mintSpaceId()
-    const bootstrapWas = new WasClient({
+  const pointed = await ensurePointedClientAnnexGeneration({
+    account: { did: pointer.did, doc: account.doc, log: account.log },
+    wasServerUrl: pointer.host,
+    accountSpaceId: pointer.spaceId,
+    ladderSeed,
+    was: new WasClient({
       serverUrl: pointer.host,
       zcapClient: didKeyZcapClient({ keyAgent })
-    })
-    const minted = await mintCredentialClientAnnexGeneration({
-      was: bootstrapWas,
-      wasServerUrl: pointer.host,
-      spaceId: clientAnnexSpaceId,
-      controller: keyAgent.id,
-      ladderSeed
-    })
-    await bootstrapWas
-      .space(clientAnnexSpaceId)
-      .configure({ controller: pointer.did, force: true })
-    await setDelegatedClientsPointer({
-      idStore: remoteStore.webvhIdStore(),
-      updateKeys: clientWebvhKeys,
-      clientAnnexDid: minted.did,
-      expectedDid: pointer.did,
-      pinStore: session.profile.persistence.logPins,
-      logId: accountLogPinId({ spaceId: pointer.spaceId })
-    })
+    }),
+    mintController: keyAgent.id,
+    mintGenerationDelegation: async ({ clientAnnexDid: generationDid }) =>
+      mintGenerationDelegation({
+        zcapClient: session.profile.zcapClient,
+        wasServerUrl: pointer.host,
+        spaceId: pointer.spaceId,
+        clientAnnexDid: generationDid
+      }),
+    idStore: remoteStore.webvhIdStore(),
+    updateKeys: clientWebvhKeys,
+    pinStore: session.profile.persistence.logPins
+  })
+  const clientAnnexDid = pointed.clientAnnexDid
+  if (pointed.generationMinted) {
     invalidateVerifiedLog({ profile: session.profile })
-    clientAnnexDid = minted.did
   }
 
-  // The embedded generation delegation, installed when the annex document
-  // carries none yet (the fresh-genesis case) and renewed near expiry
-  // otherwise -- signed by this enrolled client's promoted key either way.
+  // The embedded generation delegation on an ALREADY-POINTED generation:
+  // installed when the annex document carries none yet and renewed near
+  // expiry otherwise -- signed by this enrolled client's promoted key. A
+  // generation the fold just minted carries a fresh delegation already.
   const clientAnnex = clientAnnexReachOf({ session, pointer, clientAnnexDid })
-  await ensureGenerationDelegation({
-    session,
-    pointer,
-    reach: clientAnnex,
-    ladderSeed
-  })
+  if (!pointed.generationMinted) {
+    await ensureGenerationDelegation({
+      session,
+      pointer,
+      reach: clientAnnex,
+      ladderSeed
+    })
+  }
 
   // The sibling delegation, re-sealed into the record beside the existing
   // bridge; the registry entry records its signer and expiry for the health
