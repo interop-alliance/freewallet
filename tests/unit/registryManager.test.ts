@@ -17,7 +17,6 @@ vi.mock('@digitalcredentials/issuer-registry-client', () => ({
 
 const DIRECT_REGISTRIES_URL =
   'https://digitalcredentials.github.io/dcc-known-registries/known-did-registries.json'
-const PROXY_BASE_URL = 'https://was.example'
 const REGISTRY_PAYLOAD = [
   {
     type: 'dcc-legacy',
@@ -33,25 +32,14 @@ const FALLBACK_REGISTRIES = [
   }
 ]
 
-async function loadRegistryManager(
-  corsProxyFetch: (options: { url: string }) => ReturnType<typeof fetch>
-) {
+async function loadRegistryManager() {
   vi.resetModules()
   vi.doMock('@/app.config', () => ({
     KNOWN_REGISTRIES_URL: DIRECT_REGISTRIES_URL,
     KnownDidRegistries: FALLBACK_REGISTRIES
   }))
-  vi.doMock('@/lib/corsProxy', () => ({ corsProxyFetch }))
 
   return import('@/lib/registryManager')
-}
-
-/**
- * A corsProxyFetch stub that hits the (stubbed) global fetch directly, i.e. the
- * no-proxy-configured shape.
- */
-function directProxyFetch({ url }: { url: string }) {
-  return fetch(url)
 }
 
 function registriesResponse() {
@@ -67,44 +55,25 @@ describe('registryManager', () => {
     vi.clearAllMocks()
   })
 
-  it('loads registries via corsProxyFetch when the request succeeds', async () => {
+  it('loads registries directly from KNOWN_REGISTRIES_URL, no proxy', async () => {
     const fetchMock = vi.fn(async (url: URL | RequestInfo) => {
       expect(url).toBe(DIRECT_REGISTRIES_URL)
       return registriesResponse()
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const { registryManager } = await loadRegistryManager(directProxyFetch)
+    const { registryManager } = await loadRegistryManager()
 
     await registryManager.lookupDid('did:key:z123')
 
     expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock).toHaveBeenCalledWith(DIRECT_REGISTRIES_URL)
     expect(registryClientUseMock).toHaveBeenCalledWith({
       registries: REGISTRY_PAYLOAD
     })
   })
 
-  it('loads registries via the WAS proxy URL when corsProxyFetch wraps fetch', async () => {
-    const proxyUrl =
-      `${PROXY_BASE_URL}/api/cors?url=` +
-      encodeURIComponent(DIRECT_REGISTRIES_URL)
-    const fetchMock = vi.fn(async (url: URL | RequestInfo) => {
-      expect(url).toBe(proxyUrl)
-      return registriesResponse()
-    })
-    vi.stubGlobal('fetch', fetchMock)
-
-    const { registryManager } = await loadRegistryManager(({ url }) =>
-      fetch(`${PROXY_BASE_URL}/api/cors?url=${encodeURIComponent(url)}`)
-    )
-
-    await registryManager.lookupDid('did:key:z123')
-
-    expect(fetchMock).toHaveBeenCalledOnce()
-    expect(fetchMock).toHaveBeenCalledWith(proxyUrl)
-  })
-
-  it('uses fallback KnownDidRegistries when corsProxyFetch fails', async () => {
+  it('uses fallback KnownDidRegistries when the direct fetch fails', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
@@ -112,7 +81,7 @@ describe('registryManager', () => {
       })
     )
 
-    const { registryManager } = await loadRegistryManager(directProxyFetch)
+    const { registryManager } = await loadRegistryManager()
 
     await registryManager.lookupDid('did:key:z123')
 
@@ -132,7 +101,7 @@ describe('registryManager', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const { registryManager } = await loadRegistryManager(directProxyFetch)
+    const { registryManager } = await loadRegistryManager()
 
     await registryManager.lookupDid('did:key:z123')
     expect(registryClientUseMock).toHaveBeenLastCalledWith({
@@ -158,7 +127,7 @@ describe('registryManager', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const { registryManager } = await loadRegistryManager(directProxyFetch)
+    const { registryManager } = await loadRegistryManager()
 
     await registryManager.lookupDid('did:key:z123')
     await registryManager.lookupDid('did:key:z456')
@@ -173,7 +142,7 @@ describe('registryManager', () => {
     const fetchMock = vi.fn(async () => registriesResponse())
     vi.stubGlobal('fetch', fetchMock)
 
-    const { registryManager } = await loadRegistryManager(directProxyFetch)
+    const { registryManager } = await loadRegistryManager()
 
     await registryManager.lookupDid('did:key:z123')
     await registryManager.lookupDid('did:key:z456')
@@ -187,7 +156,7 @@ describe('registryManager', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const { registryManager, __resetRegistryCacheForTests } =
-      await loadRegistryManager(directProxyFetch)
+      await loadRegistryManager()
 
     await registryManager.lookupDid('did:key:z123')
     __resetRegistryCacheForTests()
