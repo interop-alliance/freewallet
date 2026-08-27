@@ -1516,13 +1516,15 @@ Disconnect confirms with the limitation (re-keying stops future reads;
 already-fetched ciphertext stays readable), runs the cascade with keep-this-
 tab-open progress copy, and surfaces both failure modes as resumable ("try
 again -- it picks up where it stopped"; a partial collection fan-out points
-at the login-time sweep). The last enrolled client cannot be disconnected:
-that would abandon the account's update authority (it is also always the
-current client from its own session, and self-revocation is refused), and
-the panel says so, pointing at recovery-code issuance instead. The
-connect-another-wallet entry point (the enrollment ceremony's approving
-half: one card offering both the QR onboarding invite and the pasted
-connect code) lives in this panel.
+at the login-time sweep). The last enrolled client is never disconnected
+through this cascade: it is always the current client from its own session,
+and self-revocation is refused. Its row offers the last-client transition
+instead (see "The forget affordance"), which lands the account client-less
+and ladder-anchored -- the shape every credential-anchored signup produces
+-- with the standing credentials still reaching it through transient
+logins. The connect-another-wallet entry point (the enrollment ceremony's
+approving half: one card offering both the QR onboarding invite and the
+pasted connect code) lives in this panel.
 
 **The Applications sibling knows the current-key-set rule.** The
 Applications page (`src/lib/connectedApps.ts`) is the account's other
@@ -1555,9 +1557,14 @@ mean "chain dead" there. A dead chain comes back as a skipped revocation.
 
 ## Storage model (local-first)
 
-The local `BrowserStore` (RxDB over Dexie/IndexedDB) is always the **active
-replica**: every credential, public-link, and history read/write targets it,
-online or offline, guest or not. One local database per user holds every
+Every credential, public-link, and history read/write goes through one
+`SyncedCollectionStore` backend, chosen once at session construction. A
+replica-less session -- the transient default, and the durable CHAPI popup
+-- serves them remote-direct over the remote WAS collections (see
+"Replica-less, capability-bound storage" and "Remote-direct popup
+storage"). A session that has a local replica -- a durable login, a guest,
+a no-WAS session -- serves them from the local `BrowserStore` (RxDB over
+Dexie/IndexedDB), online or offline. One local database per user holds every
 standard collection (`private-credentials`, `public-credentials`,
 `wallet-activity`, `contacts`, `contacts-history`, `app-connections`) on the
 generic synced-doc schema (`{ id, updatedAt, version, data }`, see
@@ -2476,13 +2483,16 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   throughout, dies with the tab). A write site consults no flag. Avoid:
   posture, tier, mode.
 - **StorageManager** -- the facade class in `src/stores/storageManager.ts`.
-  Routes all wallet reads/writes to the local `BrowserStore` (the active
-  replica) and exposes the optional `WASRemoteStore` for background
+  Routes all wallet reads/writes to the session's `SyncedCollectionStore`
+  backend (the local `BrowserStore`, or the remote-direct store for a
+  replica-less session) and exposes the optional `WASRemoteStore` for background
   replication and remote-only features (storage browser, export/import,
   quotas).
-- **BrowserStore** -- the always-on local active replica, using RxDB /
-  IndexedDB (Dexie). Holds every standard wallet collection on the generic
-  synced-doc schema.
+- **BrowserStore** -- the local active replica of a session that has one,
+  using RxDB / IndexedDB (Dexie). Holds every standard wallet collection on
+  the generic synced-doc schema. A replica-less session (the transient
+  default, and the durable CHAPI popup) constructs none and reaches the same
+  collections remote-direct.
 - **WASRemoteStore** -- remote storage client. Speaks the WAS protocol via
   `ZcapClient`. Handles the Space lifecycle, the storage-browser
   read-through over arbitrary collections and resources, export/import, and
