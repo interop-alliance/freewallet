@@ -85,7 +85,8 @@ describe('corsProxyFetch', () => {
     await corsProxyFetch({ url: TARGET_URL })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `https://was.example/api/cors?url=${encodeURIComponent(TARGET_URL)}`
+      `https://was.example/api/cors?url=${encodeURIComponent(TARGET_URL)}`,
+      { signal: undefined }
     )
   })
 
@@ -96,6 +97,19 @@ describe('corsProxyFetch', () => {
 
     await corsProxyFetch({ url: TARGET_URL })
 
-    expect(fetchMock).toHaveBeenCalledWith(TARGET_URL)
+    expect(fetchMock).toHaveBeenCalledWith(TARGET_URL, { signal: undefined })
+  })
+
+  it('passes an abort signal through to fetch', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const { corsProxyFetch } = await loadCorsProxy(undefined)
+    const controller = new AbortController()
+
+    await corsProxyFetch({ url: TARGET_URL, signal: controller.signal })
+
+    expect(fetchMock).toHaveBeenCalledWith(TARGET_URL, {
+      signal: controller.signal
+    })
   })
 })

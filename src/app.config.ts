@@ -270,8 +270,10 @@ export const KEYRING_CACHE_TTL_MS =
 
 export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
 // CORS proxy base URL for every cross-origin fetch on a user-supplied URL --
-// remote credential URLs from AddCredentialPage and the known-registries
-// fetch. The target URL is appended as a `?url=` query parameter (the single
+// remote credential URLs from AddCredentialPage and the `oidf` issuer-registry
+// lookups (the registries list itself is fetched direct, since it is served
+// with `Access-Control-Allow-Origin: *`). The target URL is appended as a
+// `?url=` query parameter (the single
 // proxy path lives in `src/lib/corsProxy.ts`). When a WAS server is
 // configured, its built-in proxy facet at `/api/cors` is the default.
 export const CORS_PROXY_URL =

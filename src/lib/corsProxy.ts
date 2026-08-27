@@ -1,7 +1,7 @@
 /**
  * The wallet's single CORS-proxy path. Every cross-origin fetch the app makes
- * on behalf of a user-supplied URL (a pasted credential URL, the known-issuer
- * registries list) goes through one proxy base -- `CORS_PROXY_URL`, which
+ * on behalf of a user-supplied URL (a pasted credential URL, the `oidf`
+ * issuer-registry lookups) goes through one proxy base -- `CORS_PROXY_URL`, which
  * defaults to the configured WAS server's `/api/cors` facet -- so there is one
  * config key and one URL-building rule to reason about.
  */
@@ -32,14 +32,17 @@ export function corsProxyUrl({ url }: { url: string }): string {
  *
  * @param options {object}
  * @param options.url {string}   the target URL to fetch
+ * @param [options.signal] {AbortSignal}   bounds a stalled proxy hop
  * @returns {Promise<Response>}
  */
 export async function corsProxyFetch({
-  url
+  url,
+  signal
 }: {
   url: string
+  signal?: AbortSignal
 }): Promise<Response> {
-  return fetch(corsProxyUrl({ url }))
+  return fetch(corsProxyUrl({ url }), { signal })
 }
 
 /**
