@@ -12,6 +12,11 @@ import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:registries')
 
+/**
+ * Deadline for a whole registries load.
+ */
+export const REGISTRY_LOAD_TIMEOUT_MS = 10_000
+
 const EMPTY_RESULT: LookupResult = {
   matchingIssuers: [],
   uncheckedRegistries: []
@@ -37,12 +42,29 @@ async function loadRegistries(): Promise<EntityIdentityRegistry[]> {
   if (registriesLoadPromise) {
     return registriesLoadPromise
   }
+
+  /**
+   * Bound the load with an AbortController deadline: the fetch and the
+   * body read were both uncancellable, so a stalled load never settled
+   * and the fallback branch stayed unreachable, leaving issuer lookups pending.
+   */
   const thisLoad = (async function fetchRegistries() {
-    const regRes = await fetch(KNOWN_REGISTRIES_URL)
-    if (!regRes.ok) {
-      throw new Error(`Registry fetch failed: ${regRes.status}`)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      REGISTRY_LOAD_TIMEOUT_MS
+    )
+    try {
+      const regRes = await fetch(KNOWN_REGISTRIES_URL, {
+        signal: controller.signal
+      })
+      if (!regRes.ok) {
+        throw new Error(`Registry fetch failed: ${regRes.status}`)
+      }
+      return (await regRes.json()) as EntityIdentityRegistry[]
+    } finally {
+      clearTimeout(timeoutId)
     }
-    return (await regRes.json()) as EntityIdentityRegistry[]
   })()
   thisLoad.catch(() => {
     if (registriesLoadPromise === thisLoad) {

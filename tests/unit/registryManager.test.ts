@@ -51,6 +51,7 @@ function registriesResponse() {
 
 describe('registryManager', () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.clearAllMocks()
   })
@@ -67,9 +68,36 @@ describe('registryManager', () => {
     await registryManager.lookupDid('did:key:z123')
 
     expect(fetchMock).toHaveBeenCalledOnce()
-    expect(fetchMock).toHaveBeenCalledWith(DIRECT_REGISTRIES_URL)
+    expect(fetchMock).toHaveBeenCalledWith(
+      DIRECT_REGISTRIES_URL,
+      expect.anything()
+    )
     expect(registryClientUseMock).toHaveBeenCalledWith({
       registries: REGISTRY_PAYLOAD
+    })
+  })
+
+  it('falls back when the load stalls past the deadline', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn(
+      (_url: URL | RequestInfo, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('Aborted', 'AbortError'))
+          )
+        })
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { registryManager, REGISTRY_LOAD_TIMEOUT_MS } =
+      await loadRegistryManager()
+
+    const lookup = registryManager.lookupDid('did:key:z123')
+    await vi.advanceTimersByTimeAsync(REGISTRY_LOAD_TIMEOUT_MS)
+    await lookup
+
+    expect(registryClientUseMock).toHaveBeenCalledWith({
+      registries: FALLBACK_REGISTRIES
     })
   })
 
