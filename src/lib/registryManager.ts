@@ -8,7 +8,6 @@ import {
 } from '@digitalcredentials/issuer-registry-client'
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
 import { KNOWN_REGISTRIES_URL, KnownDidRegistries } from '@/app.config'
-import { corsProxyFetch } from './corsProxy'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:registries')
@@ -22,8 +21,10 @@ let cachedClient: RegistryClient | undefined
 let registriesLoadPromise: Promise<EntityIdentityRegistry[]> | undefined
 
 /**
- * Loads issuer registries through the CORS proxy. Rejects on failure rather
- * than substituting the fallback list, so the caller can decide what to cache.
+ * Loads issuer registries directly from `KNOWN_REGISTRIES_URL` -- GitHub
+ * Pages serves it with `Access-Control-Allow-Origin: *`, so no CORS proxy
+ * hop is needed. Rejects on failure rather than substituting the fallback
+ * list, so the caller can decide what to cache.
  *
  * A rejected load is evicted from the module-level cache so a later lookup
  * retries the fetch, rather than every subsequent caller receiving the same
@@ -37,7 +38,7 @@ async function loadRegistries(): Promise<EntityIdentityRegistry[]> {
     return registriesLoadPromise
   }
   const thisLoad = (async function fetchRegistries() {
-    const regRes = await corsProxyFetch({ url: KNOWN_REGISTRIES_URL })
+    const regRes = await fetch(KNOWN_REGISTRIES_URL)
     if (!regRes.ok) {
       throw new Error(`Registry fetch failed: ${regRes.status}`)
     }
