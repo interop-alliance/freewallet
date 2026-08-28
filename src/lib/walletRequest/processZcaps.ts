@@ -78,7 +78,10 @@
 import { generateZcapUri } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
 import { APP_CONNECTIONS_COLLECTION } from '@interop/wallet-core/space'
-import { clampGrantExpires } from '@interop/wallet-core/clientAnnex'
+import {
+  clampGrantExpires,
+  GENERATION_DELEGATION_TTL_MS
+} from '@interop/wallet-core/clientAnnex'
 import { zcapExpiring } from '@interop/wallet-core/webvh'
 import { renewTransientGenerationDelegation } from '@/session/annexReach'
 import {
@@ -289,6 +292,14 @@ function collectionClassFor({
 }
 
 /**
+ * The refusals that carry their own consent copy, in place of the generic
+ * "cannot fulfill" note. Only one today: a whole-Space target asked for by a
+ * session whose grants chain under a generation delegation, which is scoped to
+ * the Space's items subtree and can never parent a whole-Space grant.
+ */
+export type UnsatisfiableReason = 'whole-space-transient'
+
+/**
  * A requested capability's `invocationTarget` resolved against the user's own
  * Space. `satisfiable: false` means the descriptor cannot be fulfilled (a
  * foreign URL, an invalid collection name, or an unknown descriptor type); it
@@ -316,6 +327,9 @@ interface ResolvedTarget {
   // Which action ceiling applies (`ACTION_CEILINGS`). Absent only when the
   // target is unsatisfiable, i.e. when no grant will be made at all.
   targetClass?: TargetClass
+  // Why an unsatisfiable target was refused, when the refusal has consent copy
+  // of its own. Absent on every generic refusal.
+  unsatisfiableReason?: UnsatisfiableReason
 }
 
 /**
@@ -380,6 +394,106 @@ export function hasZcapStorage(session: Session): boolean {
   return !!session.storage.hasRemoteStorage && !!session.storage.spaceUrl
 }
 
+/**
+ * Whether this session's grants chain under a generation delegation rather
+ * than under the Space root capability -- true for a transient session, which
+ * holds its Space authority as that delegation. Two consequences ride on it:
+ * the whole-Space class is unsatisfiable (see {@link resolveGrant}) and every
+ * grant's expiry is clamped to the parent's ({@link grantTtlDays}). Exposed so
+ * a consent screen states both without re-deriving the condition.
+ *
+ * @param session {Session}
+ * @returns {boolean}
+ */
+export function sessionGrantsAreGenerationScoped(session: Session): boolean {
+  return !!session.profile.invocationCapability
+}
+
+/**
+ * Whether a generation delegation is past its expiry or inside its renewal
+ * window. A delegated zcap always carries `expires`; the union type's root
+ * half does not, and a root could never sit here.
+ *
+ * @param options {object}
+ * @param options.delegation {IZcap}
+ * @param options.now {number}   epoch milliseconds
+ * @returns {boolean}
+ */
+function delegationStale({
+  delegation,
+  now
+}: {
+  delegation: IZcap
+  now: number
+}): boolean {
+  return zcapExpiring({
+    expires: 'expires' in delegation ? delegation.expires : undefined,
+    now
+  })
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * The lifetimes the consent screen should show, in days: what the mint will
+ * actually produce rather than the configured TTL constants. Under the Space
+ * root the two are the same. Under a generation delegation each grant is
+ * clamped to the parent's own `expires`, which for a 365-day share grant bites
+ * essentially always -- the parent's TTL is a year too, and part of it has
+ * already elapsed -- so a static number would overstate the share row by
+ * however much of that year is gone.
+ *
+ * A parent inside its renewal window is derived against a FRESH generation
+ * delegation, because that is what the mint will hold: `processZcaps` renews
+ * before it delegates, and the renewed parent's own TTL is the bound that
+ * survives.
+ *
+ * The three configured TTLs are read from the app config, which is what every
+ * caller mints with; `processZcaps`'s per-call TTL overrides exist for tests
+ * and are not reflected here.
+ *
+ * @param options {object}
+ * @param [options.session] {Session}   absent before the consent screen has a
+ *   session, where the configured TTLs are all there is to state
+ * @param [options.now] {number}   epoch milliseconds, for tests
+ * @returns {{ ttlDays: number, writeTtlDays: number, shareTtlDays: number }}
+ */
+export function grantTtlDays({
+  session,
+  now = Date.now()
+}: {
+  session?: Session
+  now?: number
+}): { ttlDays: number; writeTtlDays: number; shareTtlDays: number } {
+  const delegation = session?.profile.invocationCapability
+
+  /**
+   * One grant class's shown lifetime.
+   *
+   * @param ttlMs {number}
+   * @returns {number}
+   */
+  function daysFor(ttlMs: number): number {
+    if (!delegation) {
+      return Math.max(1, Math.round(ttlMs / DAY_MS))
+    }
+    const expires = delegationStale({ delegation, now })
+      ? now + Math.min(ttlMs, GENERATION_DELEGATION_TTL_MS)
+      : clampGrantExpires({ ttlMs, delegation, now }).getTime()
+    // A grant is only ever minted under a parent outside its renewal window,
+    // so the clamped remainder is a month or more; the floor guards the
+    // display (and a sub-day TTL configured through the environment) rather
+    // than a state the mint can reach.
+    return Math.max(1, Math.round((expires - now) / DAY_MS))
+  }
+
+  return {
+    ttlDays: daysFor(RP_ZCAP_TTL_MS),
+    writeTtlDays: daysFor(RP_ZCAP_WRITE_TTL_MS),
+    shareTtlDays: daysFor(SHARE_ZCAP_TTL_MS)
+  }
+}
+
 const UNSATISFIABLE: ResolvedTarget = Object.freeze({
   satisfiable: false,
   wholeSpace: false,
@@ -387,6 +501,13 @@ const UNSATISFIABLE: ResolvedTarget = Object.freeze({
   encrypted: false,
   isPublic: false,
   isShare: false
+})
+
+// The same refusal, carrying the one reason the consent screen words for
+// itself (see {@link UnsatisfiableReason}).
+const UNSATISFIABLE_WHOLE_SPACE_TRANSIENT: ResolvedTarget = Object.freeze({
+  ...UNSATISFIABLE,
+  unsatisfiableReason: 'whole-space-transient'
 })
 
 // The satisfiable counterpart: the flags every resolved target states, spread
@@ -752,24 +873,43 @@ function capActions({
  * @param [options.allowMissingController] {boolean}   App Connect
  *   consent-preview only: the app-key DID may not exist yet, so an absent
  *   controller is not yet a failure there
+ * @param [options.generationDelegationParent] {boolean}   this session's
+ *   grants chain under a generation delegation rather than the Space root
+ *   (a transient session), which refuses the whole-Space class
  * @returns {ResolvedGrant}
  */
 export function resolveGrant({
   descriptor,
   spaceUrl,
   collections,
-  allowMissingController = false
+  allowMissingController = false,
+  generationDelegationParent = false
 }: {
   descriptor: ICapabilityQueryDetail
   spaceUrl: string
   collections: ExistingCollections
   allowMissingController?: boolean
+  generationDelegationParent?: boolean
 }): ResolvedGrant {
   let target = resolveInvocationTarget({
     descriptor: descriptor.invocationTarget,
     spaceUrl,
     collections
   })
+  // A transient session's grants chain under the generation delegation, whose
+  // `invocationTarget` is the Space's ITEMS subtree -- the Space URL with a
+  // trailing slash. A whole-Space target resolves to the slashless Space URL,
+  // which is neither equal to nor contained in that subtree, so the zcap
+  // containment rule refuses the pair at invocation time. The delegation
+  // library performs no parent-containment check when minting, so without
+  // this the wallet would consent to, sign, and deliver a capability that
+  // verifies nowhere -- the same dead-grant symptom, one layer down. Refuse
+  // the class at resolution instead, alongside a grant left with no permitted
+  // action, and word the refusal on the consent screen. Recorded here and
+  // applied last, so a generic refusal below cannot overwrite the reason with
+  // the wordless one.
+  const wholeSpaceUnderGeneration =
+    target.wholeSpace && generationDelegationParent
   // A grant with no recipient cannot be delegated: the wire type requires a
   // `controller` but an actual request body can omit it, which would render a
   // consent row with no recipient and delegate to nobody. Refuse it visibly
@@ -806,6 +946,9 @@ export function resolveGrant({
   if (target.satisfiable && allowedActions.length === 0) {
     target = UNSATISFIABLE
   }
+  if (wholeSpaceUnderGeneration) {
+    target = UNSATISFIABLE_WHOLE_SPACE_TRANSIENT
+  }
   return {
     descriptor,
     target,
@@ -825,21 +968,32 @@ export function resolveGrant({
  * @param options.collections {ExistingCollections}
  * @param [options.allowMissingController] {boolean}   App Connect
  *   consent-preview only (see {@link resolveGrant})
+ * @param [options.generationDelegationParent] {boolean}   see
+ *   {@link resolveGrant}; `sessionGrantsAreGenerationScoped` derives it from a
+ *   session
  * @returns {ResolvedGrant[]}
  */
 export function resolveGrants({
   zcapRequests,
   spaceUrl,
   collections,
-  allowMissingController
+  allowMissingController,
+  generationDelegationParent
 }: {
   zcapRequests: ICapabilityQueryDetail[]
   spaceUrl: string
   collections: ExistingCollections
   allowMissingController?: boolean
+  generationDelegationParent?: boolean
 }): ResolvedGrant[] {
   return zcapRequests.map(descriptor =>
-    resolveGrant({ descriptor, spaceUrl, collections, allowMissingController })
+    resolveGrant({
+      descriptor,
+      spaceUrl,
+      collections,
+      allowMissingController,
+      generationDelegationParent
+    })
   )
 }
 
@@ -904,24 +1058,22 @@ export async function processZcaps({
   // annex key the delegation names -- a grant delegated off the root by a
   // key the account document never lists would verify nowhere. A remembered
   // session delegates off the root as before.
+  //
+  // The annex key signs that child delegation under its annex verification
+  // method (`<clientAnnexDid>#<multibase>`), so the loop's correctness rests
+  // on a published relation: the server checks a delegation proof under the
+  // `CapabilityDelegation` purpose against the resolved annex document, and
+  // the transient VM is published there under `capabilityDelegation` beside
+  // `capabilityInvocation` (wallet-core's `enrollClientAnnexTransientClient`).
+  // Publishing it under invocation alone -- what a wallet-core before 0.58.0
+  // did -- leaves every grant this loop mints refused at the server, which
+  // masks the refusal as a 404.
   let invocationCapability = session.profile.invocationCapability
 
-  /**
-   * Whether a generation delegation is past its expiry or inside its renewal
-   * window. A delegated zcap always carries `expires`; the union type's root
-   * half does not, and a root could never sit here.
-   *
-   * @param delegation {IZcap}
-   * @returns {boolean}
-   */
-  function delegationStale(delegation: IZcap): boolean {
-    return zcapExpiring({
-      expires: 'expires' in delegation ? delegation.expires : undefined,
-      now
-    })
-  }
-
-  if (invocationCapability && delegationStale(invocationCapability)) {
+  if (
+    invocationCapability &&
+    delegationStale({ delegation: invocationCapability, now })
+  ) {
     // The blocking renewal stage, ahead of every remote call below: a grant
     // minted under a lapsing parent would either verify nowhere or lapse
     // within days, and the collection listing that follows rides this very
@@ -932,7 +1084,7 @@ export async function processZcaps({
     // only when there is nothing to renew with, or the renewal did not
     // produce a current delegation.
     const renewed = await renewTransientGenerationDelegation({ session })
-    if (!renewed || delegationStale(renewed)) {
+    if (!renewed || delegationStale({ delegation: renewed, now })) {
       throw new GenerationDelegationStaleError()
     }
     invocationCapability = renewed
@@ -1046,7 +1198,8 @@ export async function processZcaps({
     const { target, allowedActions, write } = resolveGrant({
       descriptor,
       spaceUrl,
-      collections
+      collections,
+      generationDelegationParent: !!invocationCapability
     })
     if (!target.satisfiable || !target.invocationTarget) {
       continue

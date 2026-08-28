@@ -23,6 +23,11 @@
  * so. Display-only -- approval is the single Continue button on the parent
  * page.
  *
+ * The expiry line's day counts are the caller's ({@link grantTtlDays}): what
+ * the mint will actually produce, which under a transient session's generation
+ * delegation is the configured TTL clamped to that parent. The panel states
+ * them; it does not derive them.
+ *
  * A share grant (`https://w3id.org/byoe#shared-wallet-collection`) is the strongest thing this
  * panel can show and is rendered unmistakably differently: a heavier border
  * and a filled callout that says the grant is read AND decrypt, that it covers
@@ -272,7 +277,13 @@ export function ZcapGrantsPanel({
               </>
             ) : (
               <Typography variant="body2" color="text.secondary">
-                {t('chapi.get.zcapCannotFulfill')}
+                {/* A refusal that carries its own copy says why; every other
+                    one falls back to the generic note. */}
+                {t(
+                  target.unsatisfiableReason === 'whole-space-transient'
+                    ? 'chapi.get.zcapCannotFulfillWholeSpaceTransient'
+                    : 'chapi.get.zcapCannotFulfill'
+                )}
               </Typography>
             )}
           </Box>

@@ -20,7 +20,7 @@
  * Connect button approves the whole thing (match-or-mint the app key,
  * delegate the grants to its DID, respond in a single round).
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -35,12 +35,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { loadOnce } from 'credential-handler-polyfill'
 import { receiveCredentialEvent } from 'web-credential-handler'
-import {
-  MEDIATOR_BASE,
-  RP_ZCAP_TTL_MS,
-  RP_ZCAP_WRITE_TTL_MS,
-  SHARE_ZCAP_TTL_MS
-} from '@/app.config'
+import { MEDIATOR_BASE } from '@/app.config'
 import {
   completePopupLogin,
   mapPopupLoginError
@@ -64,12 +59,14 @@ import {
   didAuthMethodSupported,
   domainMatchesOrigin,
   existingCollectionsFrom,
+  grantTtlDays,
   hasTypedExample,
   hasZcapStorage,
   isDidAuthOnly,
   queriesOf,
   requestsCredentialType,
   resolveGrants,
+  sessionGrantsAreGenerationScoped,
   startExchange,
   vcApiExchangeUrl,
   vcMatchesFor,
@@ -122,14 +119,6 @@ const BLOCK_MESSAGE_KEY: Record<BlockReason, string> = {
   malformedRequest: 'chapi.get.malformedRequest',
   exchangeFailed: 'chapi.get.exchangeFailed'
 }
-
-const RP_ZCAP_TTL_DAYS = Math.round(RP_ZCAP_TTL_MS / (24 * 60 * 60 * 1000))
-const RP_ZCAP_WRITE_TTL_DAYS = Math.round(
-  RP_ZCAP_WRITE_TTL_MS / (24 * 60 * 60 * 1000)
-)
-const SHARE_ZCAP_TTL_DAYS = Math.round(
-  SHARE_ZCAP_TTL_MS / (24 * 60 * 60 * 1000)
-)
 
 const EMPTY_PROFILE: WalletRequestProfile = {
   didAuth: false,
@@ -230,6 +219,12 @@ export function WalletGetPage() {
   // fetched in the background for the consent screen; display-only garnish.
   const [appManifest, setAppManifest] = useState<AppManifestInfo | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
+  // What the mint will actually produce, which under a transient session's
+  // generation delegation is each configured TTL clamped to that parent.
+  const grantDays = useMemo(
+    () => grantTtlDays({ session: session ?? undefined }),
+    [session]
+  )
   const initialized = useRef(false)
 
   useEffect(() => {
@@ -443,7 +438,9 @@ export function WalletGetPage() {
               }),
               spaceUrl: loggedIn.storage.spaceUrl,
               collections: existingCollections,
-              allowMissingController: true
+              allowMissingController: true,
+              generationDelegationParent:
+                sessionGrantsAreGenerationScoped(loggedIn)
             })
           )
         }
@@ -474,7 +471,9 @@ export function WalletGetPage() {
           resolveGrants({
             zcapRequests: profile.zcapRequests,
             spaceUrl: loggedIn.storage.spaceUrl,
-            collections: existingCollections
+            collections: existingCollections,
+            generationDelegationParent:
+              sessionGrantsAreGenerationScoped(loggedIn)
           })
         )
       }
@@ -704,9 +703,9 @@ export function WalletGetPage() {
             {resolvedGrants.length > 0 && (
               <ZcapGrantsPanel
                 grants={resolvedGrants}
-                ttlDays={RP_ZCAP_TTL_DAYS}
-                writeTtlDays={RP_ZCAP_WRITE_TTL_DAYS}
-                shareTtlDays={SHARE_ZCAP_TTL_DAYS}
+                ttlDays={grantDays.ttlDays}
+                writeTtlDays={grantDays.writeTtlDays}
+                shareTtlDays={grantDays.shareTtlDays}
                 walletMintedRecipient
                 heading={t('chapi.get.appConnect.zcapHeading')}
               />
@@ -792,9 +791,9 @@ export function WalletGetPage() {
             {profile.zcapRequests.length > 0 && (
               <ZcapGrantsPanel
                 grants={resolvedGrants}
-                ttlDays={RP_ZCAP_TTL_DAYS}
-                writeTtlDays={RP_ZCAP_WRITE_TTL_DAYS}
-                shareTtlDays={SHARE_ZCAP_TTL_DAYS}
+                ttlDays={grantDays.ttlDays}
+                writeTtlDays={grantDays.writeTtlDays}
+                shareTtlDays={grantDays.shareTtlDays}
               />
             )}
 

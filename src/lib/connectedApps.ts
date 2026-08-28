@@ -21,8 +21,7 @@
  * `revokeAppAccess` retires an app: for each app-provisioned encrypted
  * collection it rotates the epoch to drop the app's recipient key (so the app
  * cannot decrypt future writes) and revokes those pull-axis grants
- * indivisibly, then revokes any remaining storage grants (skipped for an
- * orphaned app, whose grants no longer verify anyway), then removes the
+ * indivisibly, then revokes any remaining storage grants, then removes the
  * app-key credential and records the revocation. The honest ceiling stands:
  * ciphertext the app already fetched stays readable to it -- rotation
  * protects only prospective writes.
@@ -466,50 +465,61 @@ export async function listConnectedApps({
  * revoked/expired) are swallowed inside those methods; only a genuine failure
  * propagates.
  *
- * An `orphaned` app (see {@link AppGrantsState}) skips the per-grant server
- * revocation entirely: its grants already stopped verifying when the signing
- * client's verification method left the account document, so the POSTs would
- * only count into `skipped`. The epoch rotation and the credential deletion
- * remain meaningful and still run.
+ * The recorded revocations are always POSTed, exactly as an agent row's are,
+ * including for a row the listing marks `orphaned` (see
+ * {@link AppGrantsState}). "Signer gone" does not mean "chain dead" here: a
+ * grant minted in a transient session is signed by an annex verification
+ * method the account document never lists, so it derives as orphaned while
+ * chaining under a generation delegation that stays alive until its own TTL.
+ * Skipping the POSTs would report success and leave that capability working.
+ * The marker's own derivation is still wrong for such a row -- it claims a
+ * signing client was disconnected when it was a per-visit key -- and fixing it
+ * is roadmap FW-380; until then this revokes the superset. On a genuinely
+ * orphaned row the server answers each POST with a chain-verification refusal,
+ * which counts into `skipped`; a transport failure propagates instead, before
+ * the credential is deleted, so the row stays listed and a retry re-runs the
+ * whole sequence.
+ *
+ * The rotation's own outcome rides back beside the grant counts, because the
+ * two stages revoke different capabilities: an app-provisioned collection's
+ * pull-axis grant is revoked indivisibly with its epoch rotation, and the
+ * second stage's re-POST of that same capability is answered "already revoked"
+ * and counted as skipped. Without `rotated` a caller reading `revoked === 0`
+ * would report that nothing was withdrawn from an app whose only grant this
+ * call just withdrew.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
  * @param options.user {User}   the session user (activity actor)
  * @param options.app {ConnectedApp}
- * @param [options.grantsState] {AppGrantsState}   the derived grant state
- *   (default `unknown`, which revokes like `active`)
- * @returns {Promise<{ revoked: number; skipped: number }>}   the grant outcome
+ * @returns {Promise<{ revoked: number; skipped: number; rotated: number }>}
+ *   the grant outcome, plus the collections the rotation re-keyed
  */
 export async function revokeAppAccess({
   storage,
   user,
-  app,
-  grantsState = 'unknown'
+  app
 }: {
   storage: StorageManager
   user: User
   app: ConnectedApp
-  grantsState?: AppGrantsState
-}): Promise<{ revoked: number; skipped: number }> {
+}): Promise<{ revoked: number; skipped: number; rotated: number }> {
   // Both stages below look up the app's recorded grants in the activity
   // history; scan it once here and pass it through.
   const items = await storage.listHistoryItems()
   // Rotate the epoch off the app for each app-provisioned encrypted collection
   // (and revoke those collections' pull-axis grants) before anything else, so a
   // revoked app cannot decrypt future writes.
-  await storage.revokeAppCollectionRecipients({
+  const rotation = await storage.revokeAppCollectionRecipients({
     origin: app.origin,
     subjectDid: app.subjectDid,
     items
   })
-  const outcome =
-    grantsState === 'orphaned'
-      ? { revoked: 0, skipped: 0 }
-      : await storage.revokeAppGrants({
-          origin: app.origin,
-          subjectDid: app.subjectDid,
-          items
-        })
+  const outcome = await storage.revokeAppGrants({
+    origin: app.origin,
+    subjectDid: app.subjectDid,
+    items
+  })
   await storage.deleteAppKey({ cid: app.cid })
   await storage.addHistoryAppRevoke({
     user,
@@ -519,7 +529,7 @@ export async function revokeAppAccess({
     revoked: outcome.revoked,
     skipped: outcome.skipped
   })
-  return outcome
+  return { ...outcome, rotated: rotation.rotated }
 }
 
 /**

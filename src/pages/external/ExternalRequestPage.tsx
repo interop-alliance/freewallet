@@ -18,7 +18,7 @@
  * with its own copy. The grant is recorded on the Login activity under the
  * fixed `n/a (API request)` origin marker before anything is delivered.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -28,11 +28,6 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import {
-  RP_ZCAP_TTL_MS,
-  RP_ZCAP_WRITE_TTL_MS,
-  SHARE_ZCAP_TTL_MS
-} from '@/app.config'
 import { useAuthStore } from '@/stores/authStore'
 import { loginWithPassphrase } from '@/session/initSession'
 import { loginErrorKey } from '@/session/loginErrorKey'
@@ -46,6 +41,7 @@ import type { Session } from '@/types/auth'
 import {
   composeAndDeliverResponse,
   existingCollectionsFrom,
+  grantTtlDays,
   hasZcapStorage,
   resolveGrants,
   WalletResponseFailure,
@@ -92,14 +88,6 @@ type BlockReason =
   | 'nothingGranted'
   | 'exchangeFailed'
 
-const RP_ZCAP_TTL_DAYS = Math.round(RP_ZCAP_TTL_MS / (24 * 60 * 60 * 1000))
-const RP_ZCAP_WRITE_TTL_DAYS = Math.round(
-  RP_ZCAP_WRITE_TTL_MS / (24 * 60 * 60 * 1000)
-)
-const SHARE_ZCAP_TTL_DAYS = Math.round(
-  SHARE_ZCAP_TTL_MS / (24 * 60 * 60 * 1000)
-)
-
 /**
  * The distinct grantee DIDs a request names, for the requester row. An agent
  * request names one; the row lists each in case a request names several.
@@ -132,6 +120,12 @@ export function ExternalRequestPage() {
   const [session, setSession] = useState<Session | null>(null)
   const [resolvedGrants, setResolvedGrants] = useState<ResolvedGrant[]>([])
   const [loginError, setLoginError] = useState<string | null>(null)
+  // What the mint will actually produce: under a transient session's
+  // generation delegation each configured TTL is clamped to that parent.
+  const grantDays = useMemo(
+    () => grantTtlDays({ session: session ?? undefined }),
+    [session]
+  )
   // The composed response a failed exchange POST left behind, offered for
   // manual delivery: the Login activity is already recorded, so the grant
   // stands whether or not the requester ever receives it.
@@ -170,6 +164,15 @@ export function ExternalRequestPage() {
       collections: existingCollectionsFrom(
         await loggedIn.storage.listCollectionPublicStates()
       )
+      // Deliberately NOT `generationDelegationParent`: this page bars the
+      // whole-Space class outright below, for every session, and refuses the
+      // WHOLE request when one is asked for. Resolving it as unsatisfiable
+      // instead would drop that one grant silently and let the rest of the
+      // request through, since `barredGrants` only bars SATISFIABLE targets.
+      // That rests on `ALLOWED_TARGET_CLASSES` never admitting `space`: were
+      // the allowlist widened to it, this page would have to pass the flag
+      // like the popup does, or consent would show a whole-Space row the mint
+      // then drops.
     })
     // The allowlist: the first point a target's class is known is after
     // resolution, so the check runs here, still before consent renders.
@@ -477,9 +480,9 @@ export function ExternalRequestPage() {
           <Stack spacing={2}>
             <ZcapGrantsPanel
               grants={resolvedGrants}
-              ttlDays={RP_ZCAP_TTL_DAYS}
-              writeTtlDays={RP_ZCAP_WRITE_TTL_DAYS}
-              shareTtlDays={SHARE_ZCAP_TTL_DAYS}
+              ttlDays={grantDays.ttlDays}
+              writeTtlDays={grantDays.writeTtlDays}
+              shareTtlDays={grantDays.shareTtlDays}
               revokeNote={t('externalRequest.noRevokeNote')}
             />
             <Typography variant="caption" color="text.secondary">

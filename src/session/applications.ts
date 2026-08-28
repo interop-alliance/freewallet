@@ -63,17 +63,21 @@ export async function listApplicationsView({
 
 /**
  * Revokes one connected app's access. The grant state is derived first,
- * against the same verified key set the listing marked the row with: an
- * orphaned app's grants already stopped verifying with its signing client's
- * revocation, so the per-grant revocation POSTs are skipped while the epoch
- * rotation and the app-key deletion still run.
+ * against the same verified key set the listing marked the row with, and is
+ * returned so the page can word the outcome. It no longer gates the revocation
+ * itself: the recorded revocations are always POSTed, for the reason
+ * `revokeAppAccess` states (a transient session's grants derive as orphaned
+ * while their chain is still alive).
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.app {ConnectedApp}
  * @param [options.signingKeys] {Set<string>}   the account's current signing
  *   keys, or undefined when the check was unavailable
- * @returns {Promise<{ grantsState: AppGrantsState, revoked: number }>}
+ * @returns {Promise<{ grantsState: AppGrantsState, revoked: number,
+ *   withdrew: boolean }>}   `withdrew` is whether this call actually took a
+ *   capability away, over both revocation stages, which is what the outcome
+ *   copy turns on
  */
 export async function revokeApplication({
   session,
@@ -83,7 +87,11 @@ export async function revokeApplication({
   session: Session
   app: ConnectedApp
   signingKeys?: Set<string>
-}): Promise<{ grantsState: AppGrantsState; revoked: number }> {
+}): Promise<{
+  grantsState: AppGrantsState
+  revoked: number
+  withdrew: boolean
+}> {
   const grantsState = deriveAppGrantsState({
     app,
     currentSigningKeys: signingKeys
@@ -91,10 +99,17 @@ export async function revokeApplication({
   const outcome = await revokeAppAccess({
     storage: session.storage,
     user: session.user,
-    app,
-    grantsState
+    app
   })
-  return { grantsState, revoked: outcome.revoked }
+  // The rotation revokes an app-provisioned collection's pull grant with the
+  // epoch, and the second stage's re-POST of that same capability comes back
+  // "already revoked" and counts as skipped -- so `revoked` alone reads as
+  // zero for an app whose only grant was just withdrawn.
+  return {
+    grantsState,
+    revoked: outcome.revoked,
+    withdrew: outcome.revoked > 0 || outcome.rotated > 0
+  }
 }
 
 /**

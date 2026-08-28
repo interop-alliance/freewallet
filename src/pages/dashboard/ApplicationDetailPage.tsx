@@ -117,18 +117,24 @@ export function ApplicationDetailPage() {
     setRevoking(true)
     setRevokeError(false)
     try {
-      const { revoked } = await revokeApplication({
+      const { withdrew } = await revokeApplication({
         session,
         app,
         signingKeys
       })
       showToast({
-        message:
-          grantsState === 'orphaned'
+        // What actually happened outranks the row's marker: the revocations
+        // are POSTed whatever it says, and a row that derived as orphaned but
+        // still had a live chain (a grant minted in a transient session) reads
+        // as revoked, not as access that had already ended. `withdrew` spans
+        // both stages, so a single app-provisioned collection -- whose pull
+        // grant the rotation revokes, leaving the second stage nothing but an
+        // already-revoked POST -- still reads as revoked.
+        message: withdrew
+          ? t('applications.revokeSuccess')
+          : grantsState === 'orphaned'
             ? t('applications.revokeSuccessOrphaned')
-            : revoked > 0
-              ? t('applications.revokeSuccess')
-              : t('applications.revokeSuccessLegacy')
+            : t('applications.revokeSuccessLegacy')
       })
       navigate('/applications')
     } catch (err) {

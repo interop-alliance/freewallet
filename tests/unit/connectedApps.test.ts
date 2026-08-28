@@ -484,7 +484,7 @@ describe('revokeAppAccess', () => {
 
     const outcome = await revokeAppAccess({ storage, user, app })
 
-    expect(outcome).toEqual({ revoked: 1, skipped: 0 })
+    expect(outcome).toEqual({ revoked: 1, skipped: 0, rotated: 0 })
     // The epoch rotation runs first, so a revoked app cannot decrypt future
     // writes before its grants are even withdrawn.
     expect(storage.revokeAppCollectionRecipients).toHaveBeenCalledWith({
@@ -508,35 +508,22 @@ describe('revokeAppAccess', () => {
     })
   })
 
-  it('skips the server grant revocation for an orphaned app', async () => {
+  it('posts the grant revocations for a row that derives as orphaned', async () => {
     const storage = fakeStorage({ appKeys: [], history: [] })
 
-    const outcome = await revokeAppAccess({
-      storage,
-      user,
-      app,
-      grantsState: 'orphaned'
-    })
+    const outcome = await revokeAppAccess({ storage, user, app })
 
-    // The grants stopped verifying when the signing client left the account
-    // document, so no per-grant POSTs -- but the epoch rotation and the
-    // credential deletion remain meaningful and still run.
-    expect(outcome).toEqual({ revoked: 0, skipped: 0 })
-    expect(storage.revokeAppGrants).not.toHaveBeenCalled()
-    expect(storage.revokeAppCollectionRecipients).toHaveBeenCalledWith({
+    // A grant minted in a transient session is signed by an annex key the
+    // account document never lists, so its row derives as orphaned while its
+    // chain is still alive under the generation delegation. The revocations
+    // are POSTed whatever the marker says.
+    expect(outcome).toEqual({ revoked: 1, skipped: 0, rotated: 0 })
+    expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: APP_DID,
       items: []
     })
     expect(storage.deleteAppKey).toHaveBeenCalledWith({ cid: 'c-app' })
-    expect(storage.addHistoryAppRevoke).toHaveBeenCalledWith({
-      user,
-      origin: 'https://app.example',
-      name: 'Example App',
-      cid: 'c-app',
-      revoked: 0,
-      skipped: 0
-    })
   })
 
   it('does not delete the credential when grant revocation fails', async () => {

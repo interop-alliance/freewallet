@@ -772,6 +772,7 @@
       "zcapShareExpiry": "El permiso de obtención vence en {{days}} días; la capacidad de descifrar no vence por sí sola.",
       "zcapShareRevokeNote": "(puede quitar a este lector en cualquier momento desde la Configuración de la billetera)",
       "zcapCannotFulfill": "Esta billetera no puede satisfacer esta solicitud.",
+      "zcapCannotFulfillWholeSpaceTransient": "Esta billetera no puede otorgar acceso a todo su Espacio cuando la sesión se inició en un navegador que no recuerda. Todavía se puede otorgar acceso a colecciones individuales.",
       "zcapUnavailable": "Esta solicitud requiere almacenamiento remoto, que esta billetera no tiene configurado.",
       "appKeysUnreadable": "Esta billetera no pudo leer la conexión guardada de esta aplicación. Su clave está en una época de claves que esta sesión no puede abrir, así que conectarla de nuevo ahora le daría una identidad nueva y dejaría huérfanos sus datos actuales. Inténtelo más tarde o inicie sesión desde una billetera ya conectada a esta cuenta.",
       "zcapExpiry": "Caduca en {{days}} días",

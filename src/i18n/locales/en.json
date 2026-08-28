@@ -772,6 +772,7 @@
       "zcapShareExpiry": "The fetch permission expires in {{days}} days; being able to decrypt does not expire on its own.",
       "zcapShareRevokeNote": "(you can remove this reader any time from wallet Settings)",
       "zcapCannotFulfill": "This wallet cannot fulfill this request.",
+      "zcapCannotFulfillWholeSpaceTransient": "This wallet cannot grant access to your entire Space when it is signed in on a browser it does not remember. Access to individual collections can still be granted.",
       "zcapUnavailable": "This request needs remote storage, which this wallet isn't configured with.",
       "appKeysUnreadable": "This wallet could not read this app's stored connection. Its key is in a key epoch this session cannot open, so connecting again now would give the app a new identity and orphan its existing data. Try again later, or log in from a wallet client that is already connected to this account.",
       "zcapExpiry": "Expires in {{days}} days",
