@@ -487,18 +487,15 @@ vi.mock('@/session/wipe', () => ({
   snapshotWipeTargets: vi.fn(
     ({
       session,
-      registry,
-      clientAnnexSpaceId
+      registry
     }: {
       session: { user: { id: string } }
       registry?: { methods?: { unlockSpaceId: string }[] } | null
-      clientAnnexSpaceId?: string
     }) => {
       state.calls.push('snapshotWipeTargets')
       return {
         clientDid: session.user.id,
         dbPrefix: 'db-prefix',
-        clientAnnexSpaceId,
         unlockSpaceIds: (registry?.methods ?? []).map(
           entry => entry.unlockSpaceId
         ),
@@ -798,7 +795,7 @@ describe('deleteAccount', () => {
     warn.mockRestore()
   })
 
-  it('tears the auxiliary Space down before the wipe and hands its id to the enumeration', async () => {
+  it('tears the auxiliary Space down before the wipe', async () => {
     state.accountDoc = docWithClientAnnexPointer()
     const result = await deleteAccount({
       session: makeSession(),
@@ -806,9 +803,7 @@ describe('deleteAccount', () => {
     })
     expect(result).toBe('deleted')
     // Before the wipe: once the account Space is gone the server can no
-    // longer resolve the auxiliary Space's did:webvh controller. The
-    // annex pin slots are the enumeration's (cleared by prefix under
-    // the snapshotted annex Space id).
+    // longer resolve the auxiliary Space's did:webvh controller.
     expect(state.calls).toEqual([
       'verifyPassphrase',
       `clientAnnexSpaceDelete:${CLIENT_ANNEX_SPACE_ID}`,
@@ -817,9 +812,6 @@ describe('deleteAccount', () => {
       'deleteKeyring',
       'executeLocalWipe'
     ])
-    expect(vi.mocked(snapshotWipeTargets)).toHaveBeenCalledWith(
-      expect.objectContaining({ clientAnnexSpaceId: CLIENT_ANNEX_SPACE_ID })
-    )
   })
 
   it('deletes the account even when the discovery steps fail', async () => {
@@ -853,12 +845,8 @@ describe('deleteAccount', () => {
     })
     expect(result).toBe('deleted')
     expect(state.calls).toContain('wipeRemoteStorage')
-    // The annex pin slots no longer ride behind the Space delete: the
-    // enumeration still receives the snapshotted id and clears them by
-    // prefix.
-    expect(vi.mocked(snapshotWipeTargets)).toHaveBeenCalledWith(
-      expect.objectContaining({ clientAnnexSpaceId: CLIENT_ANNEX_SPACE_ID })
-    )
+    // The wipe still runs: a failed auxiliary-Space delete leaves an orphan
+    // Space, not an unwiped browser.
     expect(state.calls).toContain('executeLocalWipe')
     warn.mockRestore()
   })

@@ -493,7 +493,6 @@ describe('wipeStaleClientResidue', () => {
       expect.objectContaining({
         targets: expect.objectContaining({
           clientDid: agents.keyAgent.id,
-          accountDid: staleAccountDid,
           accountSpaceId: 'old-space',
           unlockSpaceIds: ['unlock-stale']
         }),
@@ -623,9 +622,6 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     expect(vi.mocked(executeLocalWipe).mock.calls[0]![0]).toMatchObject({
       targets: WIPE_TARGETS,
       clearWriter: true
-    })
-    expect(vi.mocked(snapshotWipeTargets).mock.calls[0]![0]).toMatchObject({
-      clientAnnexSpaceId: 'annex-space'
     })
     expect(vi.mocked(assertAccountCeremonyAllowed)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(invalidateVerifiedLog)).toHaveBeenCalled()

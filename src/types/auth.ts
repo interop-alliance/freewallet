@@ -261,11 +261,11 @@ export interface Session {
   // indicator and reloads the list when it settles. Absent on every other
   // session kind.
   welcomeSeedReady?: Promise<void>
-  // Set when the login's roster read adopted a rotated user key (or advanced
-  // the epoch pin) but the durable local copy -- the client-key record or the
-  // epoch pin -- could not be written. The session itself is fine (it runs on
-  // the freshly adopted key, and the next login re-fetches it); the login
-  // page surfaces it as "this browser could not be remembered".
+  // Set when the login's roster read adopted a rotated user key but this
+  // browser's copy of it -- the client-key record -- could not be written.
+  // The session itself is fine (it runs on the freshly adopted key, and the
+  // next login re-fetches it); the login page surfaces it as "this browser
+  // could not be remembered".
   userKeyPersistFailed?: boolean
   // Set when this login resumed a torn recovery spend that still owes the
   // show-once replacement-code display: the login surface renders the code

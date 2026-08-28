@@ -18,7 +18,6 @@ import { mintAccountKeySet as mintSharedAccountKeySet } from '@interop/wallet-co
 import { generateLadderSeed } from '@interop/wallet-core/clientAnnex'
 import { setClientLabel } from '@interop/wallet-core/keys'
 import { clientSigningKeyMultibase } from '@interop/wallet-core/webvh'
-import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import {
   DATE_FMT,
   DEFAULT_CLIENT_LABEL,
@@ -44,6 +43,10 @@ import {
   transientSessionStores,
   type TransientSessionStores
 } from '@/session/persistence'
+import {
+  memoryResourceLogPinStore,
+  type ResourceLogPinStore
+} from '@interop/vh-resource-log'
 import { transientSessionFromKeyringHit } from '@/session/transientLogin'
 import {
   provisionNewWallet,
@@ -61,7 +64,6 @@ import {
   forcedSignupTearAfterEstablishment
 } from '@/lib/e2eSeams'
 import { registerPasskey } from '@/lib/passkey'
-import { sessionLogPinStore } from '@/lib/sessionKey'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
 import type { Session } from '@/types/auth'
 import { createLogger, stageTimer } from '@/lib/log'
@@ -116,13 +118,8 @@ async function mintAccountKeySet() {
  * @param options {object}
  * @param options.passphrase {string}
  * @param [options.email] {string}
- * @param options.logPins {ResourceLogPinStore}   the chain-head pin store
- *   every log read here rides: the visit's in-memory one on the default
- *   signup, the durable one on a remembered signup (so the browser's pin is
- *   seeded by its own publication)
- * @param [options.freshnessPinFloor] {object}   threaded into the
- *   establishment's binds when the caller holds durable state (the
- *   remembered signup); the default caller omits it
+ * @param options.logPins {ResourceLogPinStore}   the visit's in-memory
+ *   chain-head pin store, which every log read here rides
  * @returns {Promise<object>}   `{ userExists: true }` when the probe located
  *   an account, else `{ userExists: false, credential }` with the derived
  *   credential for the entry half
@@ -130,13 +127,11 @@ async function mintAccountKeySet() {
 async function establishPassphraseAnchoredAccount({
   passphrase,
   email,
-  logPins,
-  freshnessPinFloor
+  logPins
 }: {
   passphrase: string
   email?: string
   logPins: ResourceLogPinStore
-  freshnessPinFloor?: { idb?: IDBFactory }
 }): Promise<
   { userExists: true } | { userExists: false; credential: UnlockCredential }
 > {
@@ -166,7 +161,6 @@ async function establishPassphraseAnchoredAccount({
     lowEntropy: true,
     email,
     persistence: { logPins },
-    ...(freshnessPinFloor ? { freshnessPinFloor } : {}),
     // The registry entry, in the last root-invocation window: the shared
     // read-first hook (the mend entry point's arms re-fire the same one).
     // Best-effort by the hook's own contract -- a re-fired hook upserts
@@ -322,14 +316,11 @@ export async function signUpWithPassphrase({
   if (WAS_SERVER_URL && rememberBrowser === true) {
     // The remembered signup: the establishment half only (never the
     // transient composition -- that would mint and abandon a per-visit
-    // annex client), under the DURABLE pin store so the browser's
-    // chain-head pin is seeded by its own publication, with the
-    // keyring-freshness-pin floor threaded into the binds.
+    // annex client).
     const outcome = await establishPassphraseAnchoredAccount({
       passphrase,
       email,
-      logPins: sessionLogPinStore({}),
-      freshnessPinFloor: {}
+      logPins: memoryResourceLogPinStore()
     })
     if (outcome.userExists) {
       return { userExists: true }
@@ -503,8 +494,7 @@ async function signUpCredentialAnchoredWithPasskey({
     pointer,
     lowEntropy: false,
     email,
-    persistence: { logPins: sessionLogPinStore({}) },
-    freshnessPinFloor: {},
+    persistence: { logPins: memoryResourceLogPinStore() },
     beforePromotion: async ({ zcapClient, userKey, establishment }) => {
       // The passkey registry entry, in the last root-invocation window --
       // fatal on failure (see the function doc). Read-first: a heal re-run

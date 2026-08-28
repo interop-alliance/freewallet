@@ -136,9 +136,9 @@ export async function resealUnlockRegistryForRotation({
  *    only stage that needs the pre-rotation vault keys, and step 2 destroys
  *    this browser's durable copy of them, so it goes first: a run torn
  *    anywhere after this point leaves a registry the surviving keys open.
- * 2. The epoch pin and the client-key record persist together -- the pin must
- *    never advance without the key that authenticated the roster it advanced
- *    to.
+ * 2. The client-key record persists the adopted key, and the visit's epoch
+ *    pin advances with it -- the pin must never advance without the key that
+ *    authenticated the roster it advanced to.
  * 3. The live session swaps onto the adopted key -- but ONLY if step 1
  *    reported success. The ceremony's own later registry reads and writes (an
  *    entry drop, the deferred entry write, a re-mint's field refresh) must go
@@ -154,8 +154,8 @@ export async function resealUnlockRegistryForRotation({
  * @param options {object}
  * @param options.session {Session}
  * @param options.spaceId {string}   the data Space id
- * @param options.accountDid {string}   the account did:webvh, the epoch pin's
- *   key
+ * @param options.accountDid {string}   the account did:webvh, the visit's
+ *   epoch pin key
  * @param options.userKey {UserKey}   the freshly rotated per-user key
  * @param options.latestEpochId {string}   the roster epoch the key came from
  * @param options.descriptor {object}   the roster descriptor that epoch was

@@ -742,10 +742,9 @@ describe('loginWithPassphrase -- durable resume of a torn remembered signup', ()
         controller,
         lowEntropy: true,
         priorCreatedAt: tornHit.createdAt,
-        // The resume's own obligations: the read-first registry hook and
-        // the local keyring-freshness-pin floor ride the mend.
-        beforePromotion: registryHook,
-        freshnessPinFloor: expect.any(Object)
+        // The resume's own obligation: the read-first registry hook rides
+        // the mend.
+        beforePromotion: registryHook
       })
     )
     expect(passphraseRegistryUpsertHook).toHaveBeenCalledWith({

@@ -218,11 +218,9 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
     expect(options.beforePromotion).toBe(beforePromotion)
   })
 
-  it('closes the bindRecord hook over the credential, email, and pin floor', async () => {
-    const freshnessPinFloor = { idb: { isIdbFactory: true } as never }
+  it('closes the bindRecord hook over the credential and the email', async () => {
     const { options } = await establish({
-      email: 'user@example.test',
-      freshnessPinFloor
+      email: 'user@example.test'
     })
 
     const bindRecord = options.bindRecord as (
@@ -242,7 +240,6 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
       ...bind,
       email: 'user@example.test',
       ladderSeed: new Uint8Array(32).fill(7),
-      freshnessPinFloor,
       credential: CREDENTIAL
     })
   })

@@ -4,10 +4,10 @@
  * login-time driver of wallet-core's `runClientAnnexGc`. The ceremony itself is
  * mocked at the module seam so what this module actually supplies -- the
  * durable-session and enrolled-client preconditions, the verified-log memo,
- * the options it threads, the GenerationCollect digest write, and the local
- * pin-slot cleanup -- is what runs; the pure annex helpers
- * (`clientAnnexDidParts`, `clientAnnexLogPinId`, `delegatedClientsPointer`,
- * `isWebvhDid`) run for real against fixture documents.
+ * the options it threads, and the GenerationCollect digest write -- is what
+ * runs; the pure annex helpers (`clientAnnexDidParts`,
+ * `delegatedClientsPointer`, `isWebvhDid`) run for real against fixture
+ * documents.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -25,11 +25,6 @@ vi.mock('@interop/was-client', async importOriginal => ({
   })
 }))
 
-vi.mock('@/lib/sessionKey', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/lib/sessionKey')>()),
-  deleteLogPin: vi.fn()
-}))
-
 vi.mock('@/session/enrolledContext', () => ({
   enrolledClientContext: vi.fn()
 }))
@@ -39,11 +34,7 @@ vi.mock('@/session/verifiedLog', () => ({
   invalidateVerifiedLog: vi.fn()
 }))
 
-import {
-  clientAnnexLogPinId,
-  runClientAnnexGc
-} from '@interop/wallet-core/clientAnnex'
-import { deleteLogPin } from '@/lib/sessionKey'
+import { runClientAnnexGc } from '@interop/wallet-core/clientAnnex'
 import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import {
@@ -65,7 +56,6 @@ const POINTER = {
 }
 const CLIENT_ANNEX_DID =
   'did:webvh:QmClientAnnexScid:was.example.test:space:clientAnnex-space-1:gen-Ux3v0kQf9aPmB2hZ'
-const CLIENT_ANNEX_SPACE_ID = 'clientAnnex-space-1'
 const CLIENT_WEBVH_KEYS = { current: { seed: 'current' } }
 const ID_STORE = { isIdStore: true }
 const REPORT = {
@@ -248,22 +238,6 @@ describe('sweepClientAnnexGenerations -- the pass', () => {
       firstEntry: '2026-05-01T00:00:00Z',
       lastEntry: '2026-08-01T00:00:00Z',
       entryCount: 4
-    })
-  })
-
-  it('drops the collected generation pin slot, in the annex Space', async () => {
-    const idb = { isIdbFactory: true } as unknown as IDBFactory
-    const session = makeSession({
-      persistence: durableSessionPersistence({ idb })
-    })
-    await sweepClientAnnexGenerations({ session })
-    await gcOptions().onCollected!({ generationId: 'gen-Ux3v0kQf9aPmB2hZ' })
-    expect(deleteLogPin).toHaveBeenCalledWith({
-      logId: clientAnnexLogPinId({
-        spaceId: CLIENT_ANNEX_SPACE_ID,
-        generationId: 'gen-Ux3v0kQf9aPmB2hZ'
-      }),
-      idb
     })
   })
 

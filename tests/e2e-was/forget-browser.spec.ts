@@ -9,16 +9,18 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 
 /**
  * The login page's forget affordance (the no-unlock-material grade) e2e (WAS
- * mode). A wedged login -- a keyring replay refusal, a keyring forgery
- * refusal, or either continuity refusal -- offers "Forget wallet data on this
- * browser": a whole-database, browser-scoped wipe that runs no ceremony and
- * signs nothing, since nothing derived from the typed secret is trusted in
- * those states. Covers:
+ * mode). A wedged login -- a keyring forgery refusal or either continuity
+ * refusal -- offers "Forget wallet data on this browser": a whole-database,
+ * browser-scoped wipe that runs no ceremony and signs nothing, since nothing
+ * derived from the typed secret is trusted in those states. Both cells wedge
+ * the login by serving a forged unlock record, which is the only wedge left:
+ * the wallet keeps no continuity pin across sessions, so no local state can
+ * put a login into a refusal. Covers:
  *
- * 1. A PASSKEY login wedged by a poisoned keyring-freshness pin offers the
- *    affordance with no passphrase ever typed, the confirm actually deletes
- *    every wallet database and `freewallet:` localStorage family, and the same
- *    passkey then self-enrolls this browser back into the same account.
+ * 1. A PASSKEY login wedged by a forged unlock record offers the affordance
+ *    with no passphrase ever typed, the confirm actually deletes every wallet
+ *    database and `freewallet:` localStorage family, and the same passkey
+ *    then self-enrolls this browser back into the same account.
  * 2. The stale-state rule: a passphrase refusal's forget affordance does not
  *    survive a following passkey attempt that fails for a different,
  *    non-forgettable reason (PRF unsupported) -- so a failure sequence can
@@ -173,52 +175,66 @@ async function logout(page: Page): Promise<void> {
 }
 
 /**
- * Poisons every keyring-freshness pin in the `freewallet-session` database:
- * each `keyring-freshness/<unlockSpaceId>` slot is overwritten with a
- * far-future `createdAt`, so the next login for that unlock method sees the
- * served record as a replay and refuses with
- * `KeyringRecordRolledBackError` (`auth.errors.keyringRolledBack`) -- one of
- * the forgettable refusals.
+ * The served unlock record's resource path: one plaintext JSON document per
+ * unlock Space, at `/space/<unlockSpaceId>/keyring/keyring.json`. Matched as
+ * a regular expression so a query string cannot slip past it.
+ */
+const UNLOCK_RECORD_URL = /\/keyring\/keyring\.json(?:\?|$)/
+
+/**
+ * Makes the storage server serve a FORGED unlock record: every GET of the
+ * record is fetched for real and handed back with one byte of its
+ * `proof.proofValue` flipped, so the proof no longer verifies under the key
+ * the typed secret derives. The next login refuses with
+ * `KeyringRecordForgedError` (`auth.errors.keyringForged`) -- one of the
+ * forgettable refusals -- before the record is ever decrypted.
+ *
+ * Interception is the only wedge left: this wallet keeps no continuity pin
+ * across sessions (`decisions/0012-no-durable-continuity-pins.md`), so no
+ * local state can put a login into a refusal.
  *
  * @param page {Page}
- * @returns {Promise<number>}   how many pins were poisoned
+ * @returns {Promise<void>}
  */
-async function poisonFreshnessPins(page: Page): Promise<number> {
-  return page.evaluate(async () => {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('freewallet-session')
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
-    })
-    try {
-      const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
-        const request = db
-          .transaction('session', 'readonly')
-          .objectStore('session')
-          .getAllKeys()
-        request.onsuccess = () => resolve(request.result)
-        request.onerror = () => reject(request.error)
-      })
-      const pinKeys = keys.filter(
-        key => typeof key === 'string' && key.startsWith('keyring-freshness/')
-      )
-      await new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction('session', 'readwrite')
-        const store = transaction.objectStore('session')
-        for (const key of pinKeys) {
-          store.put(
-            { createdAt: '2999-01-01T00:00:00.000Z', pinnedAt: Date.now() },
-            key
-          )
-        }
-        transaction.oncomplete = () => resolve()
-        transaction.onerror = () => reject(transaction.error)
-      })
-      return pinKeys.length
-    } finally {
-      db.close()
+async function serveForgedUnlockRecord(page: Page): Promise<void> {
+  await page.route(UNLOCK_RECORD_URL, async route => {
+    if (route.request().method() !== 'GET') {
+      await route.fallback()
+      return
     }
+    const response = await route.fetch()
+    if (!response.ok()) {
+      await route.fulfill({ response })
+      return
+    }
+    const record = (await response.json()) as {
+      proof?: { proofValue?: string }
+    }
+    const proofValue = record.proof?.proofValue
+    if (typeof proofValue !== 'string' || proofValue.length === 0) {
+      throw new Error('The served unlock record carries no proof to forge.')
+    }
+    // Flip the last character within the same base58 alphabet, so the value
+    // stays well-formed and fails on the SIGNATURE rather than on decoding.
+    const last = proofValue.at(-1)
+    record.proof!.proofValue =
+      proofValue.slice(0, -1) + (last === 'z' ? 'y' : 'z')
+    await route.fulfill({
+      response,
+      json: record
+    })
   })
+}
+
+/**
+ * Stops serving the forged record, so a later login on the same page reaches
+ * the genuine one.
+ *
+ * @param page {Page}
+ * @returns {Promise<void>}
+ */
+async function serveGenuineUnlockRecord(page: Page): Promise<void> {
+  await page.unroute(UNLOCK_RECORD_URL)
 }
 
 /**
@@ -258,8 +274,8 @@ test.describe('Forget wallet data on this browser', () => {
     const cdp = await enableWebAuthn(page)
     await addAuthenticator(cdp, { hasPrf: true })
 
-    // A passkey signup is durable outright: this browser is remembered, so it
-    // holds a client-key record and a keyring-freshness pin.
+    // A passkey signup remembers this browser, so it holds a client-key
+    // record and logs in as an enrolled client.
     await passkeySignup(page, { email: passkeyEmail(testInfo) })
     await expect(
       page.getByRole('link', { name: 'Your First Credential' })
@@ -267,9 +283,9 @@ test.describe('Forget wallet data on this browser', () => {
 
     await logout(page)
 
-    // Wedge the next login: a pin newer than the served record's signed
-    // `createdAt` reads as a replay.
-    expect(await poisonFreshnessPins(page)).toBeGreaterThan(0)
+    // Wedge the next login: the served record's proof no longer verifies
+    // under the key the passkey's PRF output derives.
+    await serveForgedUnlockRecord(page)
     const before = await readBrowserWalletData(page)
     expect(before.databases).toContain('freewallet-session')
     expect(
@@ -281,7 +297,7 @@ test.describe('Forget wallet data on this browser', () => {
     await forceRememberBrowser(page)
     await page.getByRole('button', { name: 'Log in with a Passkey' }).click()
     await expect(
-      page.getByText('out-of-date login record', { exact: false })
+      page.getByText('login record that is not authentic', { exact: false })
     ).toBeVisible({ timeout: 45_000 })
 
     const forgetButton = page.getByTestId('forget-browser-button')
@@ -312,7 +328,7 @@ test.describe('Forget wallet data on this browser', () => {
     ).toBeVisible({ timeout: 30_000 })
     // The refusal that offered the affordance is cleared with it.
     await expect(
-      page.getByText('out-of-date login record', { exact: false })
+      page.getByText('login record that is not authentic', { exact: false })
     ).toHaveCount(0)
 
     // The wipe is asserted by direct enumeration, not by the toast.
@@ -326,7 +342,9 @@ test.describe('Forget wallet data on this browser', () => {
     }).toPass({ timeout: 30_000 })
 
     // The passkey is a standing credential, so the forgotten browser
-    // self-enrolls at the next login and lands back in the same wallet.
+    // self-enrolls at the next login and lands back in the same wallet --
+    // against the genuine record this time.
+    await serveGenuineUnlockRecord(page)
     await page.goto('/#/login')
     await page.reload()
     await forceRememberBrowser(page)
@@ -355,15 +373,15 @@ test.describe('Forget wallet data on this browser', () => {
     await addAuthenticator(cdp, { hasPrf: false })
     await plantPrflessPasskey(page, { email: passkeyEmail(testInfo) })
 
-    expect(await poisonFreshnessPins(page)).toBeGreaterThan(0)
+    await serveForgedUnlockRecord(page)
 
-    // The PASSPHRASE login wedges on the replay refusal and offers forget.
+    // The PASSPHRASE login wedges on the forgery refusal and offers forget.
     await page.goto('/#/login')
     await forceRememberBrowser(page)
     await fillSettled(page.locator('input[type="password"]'), passphrase)
     await page.getByRole('button', { name: 'Log in', exact: true }).click()
     await expect(
-      page.getByText('out-of-date login record', { exact: false })
+      page.getByText('login record that is not authentic', { exact: false })
     ).toBeVisible({ timeout: 45_000 })
     await expect(page.getByTestId('forget-browser-button')).toBeVisible()
 
@@ -382,7 +400,7 @@ test.describe('Forget wallet data on this browser', () => {
       })
     ).toHaveCount(0)
     await expect(
-      page.getByText('out-of-date login record', { exact: false })
+      page.getByText('login record that is not authentic', { exact: false })
     ).toHaveCount(0)
     // Nothing was wiped: the browser still holds its wallet data.
     const after = await readBrowserWalletData(page)

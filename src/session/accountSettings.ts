@@ -145,7 +145,7 @@ export async function loadUnlockRegistry({
  * standing configuration, all unchanged -- so "could not change your
  * passphrase" is true and a retry with the same new passphrase converges
  * (every establishment stage is idempotent). Only after the establishment
- * does the old unlock identity go (its Space and local trio), and the live
+ * does the old unlock identity go (its Space and local state), and the live
  * profile is swapped onto the new one -- later re-wraps (rolled update-key
  * seeds, a rotated user key) must hit the new client-key record. The
  * registry's passphrase entry is written LAST, after the retirement, and it
@@ -390,7 +390,7 @@ export async function changeAccountPassphrase({
     }
     // The old unlock identity's teardown: its Space (best-effort -- a failed
     // delete leaves the old record able to locate the account only until
-    // the retirement below strips its standing) and its local trio. A
+    // the retirement below strips its standing) and its local state. A
     // change torn between the establishment and here leaves BOTH
     // passphrases live; the next new-passphrase login's torn-retirement
     // repair, or a retry of this change, retires the old one.
@@ -1049,7 +1049,7 @@ async function completePasskeyEntry({
  *
  * Otherwise, act by what was published. When nothing was (no document
  * `keyAgreement` entry, no roster wrap, and the record absent or plain),
- * the unlock Space and its local trio are deleted and the bare registry
+ * the unlock Space and its local state are deleted and the bare registry
  * entry dropped: the credential then never exists -- the simplest mendable
  * state. When something WAS published (or that could not be told), the
  * cleanup is an ACTUAL retirement (`rotateOffUnlockCredential` with the
@@ -1158,7 +1158,7 @@ async function recoverFailedPasskeyEstablishment({
     return null
   }
   // Nothing published (or the retirement swept it): the unlock Space, the
-  // local trio, and the bare entry go, so the credential never exists.
+  // local state, and the bare entry go, so the credential never exists.
   try {
     await deleteUnlockMethod({ secret, kdf: PASSKEY_KDF, credential })
   } catch (err) {
@@ -1541,27 +1541,24 @@ export type AccountDeletionResult =
  * through the account document's delegated-clients pointer);
  * (b0) walk the registry and delete EVERY unlock method's server-side
  * artifacts -- its unlock Space, and with it the sealed bridge and
- * `delegatedClients` delegations -- plus each method's local trio,
+ * `delegatedClients` delegations -- plus each method's local state,
  * best-effort per entry: this is what removes the dangling existence-oracle
  * Spaces a probe could still find after the account is gone (an entry
  * recording no management capability keeps its Space, stated residue);
  * (b1) tear down the auxiliary annex Space beside the account Space --
  * one recursive Space delete, run BEFORE the data-Space wipe because the
  * server resolves the auxiliary Space's did:webvh controller by reading the
- * account log out of the account Space -- and drop the annex chain-head
- * pin slots for every generation the listing named; warn-only, and a failure
- * leaves an orphan the server can identify by its `DelegatedClientsSpace`
- * type;
+ * account log out of the account Space; warn-only, and a failure leaves an
+ * orphan the server can identify by its `DelegatedClientsSpace` type;
  * (b) wipe the remote data Space -- on failure the caller keeps the old
  * semantics: surface the error, do NOT log out, the data is still there;
  * (c) retire the passphrase keyring only after a successful wipe -- if the
  * keyring died first and the wipe then failed, the data Space would be
  * orphaned unrecoverably; non-fatal, since the data is already gone;
  * (w) run the shared wipe enumeration (`src/session/wipe.ts`) over the
- * targets snapshotted at (a2): every unlock method's local trio, the pins
- * (annex slots by prefix), the Space-keyed bookkeeping, the
- * unlock-methods cache, the replica databases, and the per-account
- * localStorage families -- a surviving replica is the one fatal stage, and
+ * targets snapshotted at (a2): every unlock method's local state, the
+ * Space-keyed bookkeeping, the unlock-methods cache, the replica databases,
+ * and the per-account localStorage families -- a surviving replica is the one fatal stage, and
  * a replica delete that could not be confirmed ends as
  * `'deleted-unverified'` rather than as a clean deletion.
  *
@@ -1655,7 +1652,7 @@ export async function deleteAccount({
 
     // (b0) The registry walk: every unlock method's unlock Space (holding
     // its record with the sealed bridge and sibling delegations) and local
-    // trio, best-effort per entry. Run before the data-Space wipe only for
+    // state, best-effort per entry. Run before the data-Space wipe only for
     // ordering hygiene -- each delete rides the entry's own management zcap,
     // whose unlock Space is its own root.
     for (const entry of registry?.methods ?? []) {
@@ -1673,9 +1670,7 @@ export async function deleteAccount({
     // controller is the account did:webvh, which the server resolves by
     // reading the account log out of the account Space -- once that is
     // wiped, no authority can reach the auxiliary Space again. One recursive
-    // delete covers the generation collections and the embedded delegations;
-    // the annex chain-head pin slots are cleared by the shared wipe
-    // enumeration below (by prefix, so they go even when this delete fails).
+    // delete covers the generation collections and the embedded delegations.
     if (clientAnnex) {
       try {
         await clientAnnex.was.space(clientAnnex.spaceId).delete()
@@ -1692,8 +1687,7 @@ export async function deleteAccount({
   const targets = snapshotWipeTargets({
     session,
     registry,
-    registryUnread,
-    clientAnnexSpaceId: clientAnnex?.spaceId
+    registryUnread
   })
   // (b) Wipe the remote data Space. On failure keep the old semantics:
   // surface the error, do not log out (the data is still there).
@@ -1723,9 +1717,9 @@ export async function deleteAccount({
     }
   }
   // The local half: the shared wipe enumeration, for guests and full
-  // accounts alike -- every unlock method's local trio, the pins, the
-  // Space-keyed continuity bookkeeping, the caches, the replica databases,
-  // and the per-account localStorage families. A surviving replica keeps the
+  // accounts alike -- every unlock method's local state, the Space-keyed
+  // bookkeeping, the caches, the replica databases, and the per-account
+  // localStorage families. A surviving replica keeps the
   // old fatal semantics (the local data is still there, so do not log out);
   // every other stage failure is hygiene residue on an account already gone.
   const { failed, unverified } = await executeLocalWipe({

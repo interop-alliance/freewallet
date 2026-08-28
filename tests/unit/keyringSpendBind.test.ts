@@ -50,7 +50,6 @@ import {
   UnlockSpaceCollisionError,
   type UnlockCredential
 } from '@/session/keyring'
-import { saveKeyringFreshnessPin } from '@/lib/sessionKey'
 import { createFakeSessionIdb } from './fakeSessionIdb'
 
 const POINTER = {
@@ -160,7 +159,7 @@ describe('probeUnlockSpaceCollision', () => {
     ).rejects.toThrow(UnlockSpaceCollisionError)
   })
 
-  it('refuses a same-account STANDING record no pending record accounts for', async () => {
+  it('refuses a same-account STANDING record nothing licenses overwriting', async () => {
     const { idb } = createFakeSessionIdb()
     const credential = await deriveUnlockCredential({
       secret: PASSPHRASE,
@@ -178,14 +177,15 @@ describe('probeUnlockSpaceCollision', () => {
     ).rejects.toThrow(UnlockSpaceCollisionError)
   })
 
-  it("accepts this ceremony's own earlier attempt (matching pending record) and returns the served stamp", async () => {
+  it("returns this ceremony's own pending record for the re-run to reuse", async () => {
     const { idb } = createFakeSessionIdb()
     const credential = await deriveUnlockCredential({
       secret: PASSPHRASE,
       kdf: KEYRING_KDF
     })
     // The earlier attempt's own bind: standing record + pending client-key
-    // record at the same Space.
+    // record at the same Space. The document license (no published
+    // inventory backs the served record) is what lets the probe proceed.
     await bindPassphrase({
       clientSeed: new Uint8Array(32).fill(1),
       controller: CONTROLLER,
@@ -202,6 +202,7 @@ describe('probeUnlockSpaceCollision', () => {
       credential,
       controller: CONTROLLER,
       pointer: POINTER,
+      accountDoc: { verificationMethod: [], keyAgreement: [] },
       idb
     })
     expect(probed.ownPending?.ceremony).toBe('recovery-spend')
@@ -209,46 +210,11 @@ describe('probeUnlockSpaceCollision', () => {
     expect(probed.servedCreatedAt).toBeDefined()
   })
 
-  it('refuses the own-pending overwrite when the served record is newer than the pin (re-established elsewhere)', async () => {
-    const { idb } = createFakeSessionIdb()
-    const credential = await deriveUnlockCredential({
-      secret: PASSPHRASE,
-      kdf: KEYRING_KDF
-    })
-    // This browser's own earlier attempt: standing record + pending
-    // client-key record, the freshness pin seeded with the bind's own stamp.
-    await bindPassphrase({
-      clientSeed: new Uint8Array(32).fill(1),
-      controller: CONTROLLER,
-      passphrase: PASSPHRASE,
-      pointer: POINTER,
-      delegation: DELEGATION,
-      ladderSeed: generateLadderSeed(),
-      pending: PENDING,
-      credential,
-      idb
-    })
-    // Another browser established the same passphrase since: under
-    // advance-past stamping its record is strictly newer than our pin. The
-    // stale pending record must not license destroying it.
-    const laterCreatedAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
-    await serveStandingRecord({ credential, createdAt: laterCreatedAt })
-
-    await expect(
-      probeUnlockSpaceCollision({
-        credential,
-        controller: CONTROLLER,
-        pointer: POINTER,
-        idb
-      })
-    ).rejects.toThrow(UnlockSpaceCollisionError)
-  })
-
   it('transient license: accepts a same-account standing record the verified document does not back', async () => {
-    // The transient spend holds no freshness pin and reads no local records;
-    // its own-residue license is the verified account document. A served
-    // standing record whose credential inventory the document does not
-    // publish is a torn earlier attempt's inert residue.
+    // The transient spend reads no local records; its own-residue license is
+    // the verified account document. A served standing record whose
+    // credential inventory the document does not publish is a torn earlier
+    // attempt's inert residue.
     const credential = await deriveUnlockCredential({
       secret: PASSPHRASE,
       kdf: KEYRING_KDF
@@ -336,35 +302,17 @@ describe('probeUnlockSpaceCollision', () => {
 })
 
 describe('the bind under the spend obligations', () => {
-  it('accepts the own-rewrite and advances the stamp past a fast-clock own record (fetch-and-advance)', async () => {
+  it('advances the stamp past a fast-clock served record (fetch-and-advance)', async () => {
     const { idb } = createFakeSessionIdb()
     const credential = await deriveUnlockCredential({
       secret: PASSPHRASE,
       kdf: KEYRING_KDF
     })
-    // The earlier attempt's own bind: standing record + pending client-key
-    // record, the freshness pin seeded with the bind's own stamp.
-    await bindPassphrase({
-      clientSeed: new Uint8Array(32).fill(1),
-      controller: CONTROLLER,
-      passphrase: PASSPHRASE,
-      pointer: POINTER,
-      delegation: DELEGATION,
-      ladderSeed: generateLadderSeed(),
-      pending: PENDING,
-      credential,
-      idb
-    })
-    // That earlier bind ran on a fast clock: its record is stamped an hour
-    // ahead, and the pin carries exactly the same stamp -- the state an own
-    // bind always leaves, which is what licenses the rewrite.
+    // An earlier attempt's own record, written on a fast clock: stamped an
+    // hour ahead, and backed by no published inventory, so the document
+    // license lets this bind rewrite it.
     const fastCreatedAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
     await serveStandingRecord({ credential, createdAt: fastCreatedAt })
-    await saveKeyringFreshnessPin({
-      spaceId: credential.unlock.spaceId,
-      createdAt: fastCreatedAt,
-      idb
-    })
 
     await bindPassphrase({
       clientSeed: new Uint8Array(32).fill(1),
@@ -374,26 +322,28 @@ describe('the bind under the spend obligations', () => {
       delegation: DELEGATION,
       ladderSeed: generateLadderSeed(),
       pending: PENDING,
-      refuseCollidingRecord: true,
+      refuseCollidingRecord: {
+        accountDoc: { verificationMethod: [], keyAgreement: [] }
+      },
       credential,
       idb
     })
 
     // The freshly written record supersedes the fast-clock one: its stamp is
-    // strictly newer, so no client refuses it as a rollback.
+    // strictly newer, so no reader sees the rewrite as the older of the two.
     const found = await fetchKeyring({ passphrase: PASSPHRASE, idb })
     expect(Date.parse(found!.createdAt)).toBeGreaterThan(
       Date.parse(fastCreatedAt)
     )
   })
 
-  it('refuses the guarded bind when the credential was re-established elsewhere (served record newer than the pin)', async () => {
+  it('refuses the guarded bind when the credential was re-established elsewhere', async () => {
     const { idb } = createFakeSessionIdb()
     const credential = await deriveUnlockCredential({
       secret: PASSPHRASE,
       kdf: KEYRING_KDF
     })
-    // This browser's own earlier attempt seeds the pin with its own stamp.
+    // This browser's own earlier attempt leaves a pending client-key record.
     await bindPassphrase({
       clientSeed: new Uint8Array(32).fill(1),
       controller: CONTROLLER,
@@ -406,9 +356,8 @@ describe('the bind under the spend obligations', () => {
       idb
     })
     // The code was spent elsewhere and the same passphrase re-established
-    // from another browser: under advance-past stamping the served record is
-    // strictly newer than our pin, so the stale pending record must not
-    // license overwriting the live credential's standing members.
+    // from another browser. A stale pending record licenses nothing on its
+    // own, so the live credential's standing members stand.
     const laterCreatedAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
     await serveStandingRecord({ credential, createdAt: laterCreatedAt })
     const established = state.records.get(credential.unlock.spaceId)

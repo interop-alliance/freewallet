@@ -15,6 +15,21 @@ const state = vi.hoisted(() => ({
   wasUrl: 'https://was.example.test' as string | undefined
 }))
 
+// The visit's in-memory roster-epoch pin, stubbed on the durable handle so
+// the login's read and the adoption's write are both observable.
+const epochPins = vi.hoisted(() => ({
+  load: vi.fn(
+    async (_options: { accountDid: string }) => null as string | null
+  ),
+  saveFromDescriptor: vi.fn(
+    async (_options: {
+      accountDid: string
+      epochId: string
+      descriptor: { epochs?: Array<{ id: string }> }
+    }) => undefined
+  )
+}))
+
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
   get WAS_SERVER_URL() {
@@ -58,15 +73,18 @@ vi.mock('@interop/wallet-core/clients', async importOriginal => ({
   }))
 }))
 
-vi.mock('@/lib/sessionKey', () => ({
-  loadUserKeyEpochPin: vi.fn(async () => null),
-  saveUserKeyEpochPin: vi.fn(async () => undefined),
-  savePinFromDescriptor: vi.fn(async () => undefined),
-  sessionLogPinStore: vi.fn(() => ({
-    read: async () => null,
-    write: async () => undefined
-  }))
-}))
+vi.mock('@/session/persistence', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/session/persistence')>()
+  return {
+    ...actual,
+    durableSessionPersistence: vi.fn(
+      (options?: Parameters<typeof actual.durableSessionPersistence>[0]) => ({
+        ...actual.durableSessionPersistence(options),
+        epochPins
+      })
+    )
+  }
+})
 
 vi.mock('@/session/userKeyCascade', () => ({
   cascadeCollectionsToUserKey: vi.fn(async () => ({ outcomes: {}, failed: [] }))
@@ -80,11 +98,6 @@ import {
   checkUserKeyRosterAtLogin,
   convergeUserKeyRosterToAccount
 } from '@interop/wallet-core/clients'
-import {
-  loadUserKeyEpochPin,
-  savePinFromDescriptor,
-  sessionLogPinStore
-} from '@/lib/sessionKey'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import { StorageManager } from '@/stores/storageManager'
 import { initSessionFromSeed } from '@/session/initSession'
@@ -456,26 +469,6 @@ describe('a failed user-key persist at login (browser not remembered)', () => {
     }) as never)
   }
 
-  it('flags the session instead of failing the login when the pin persist throws', async () => {
-    const fake = makeFakeStorage()
-    vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
-      storage: fake.storage,
-      userExists: true
-    })
-    vi.mocked(savePinFromDescriptor).mockRejectedValueOnce(
-      new Error('IndexedDB write failed')
-    )
-    readInvokesAdoptionCallback()
-
-    const { session } = await initSessionFromSeed({
-      seed: randomSeed(),
-      userKey: OLD_USER_KEY,
-      accountPointer: POINTER
-    })
-    expect(session.userKeyPersistFailed).toBe(true)
-    expect(session.profile.userKey).toEqual(OLD_USER_KEY)
-  })
-
   it('adopts a rotated key in memory even when the client-key record write fails', async () => {
     const fake = makeFakeStorage()
     vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
@@ -575,12 +568,10 @@ describe('the roster stage of the sweep', () => {
       })
     )
     // The epoch pin is keyed by the account DID, never by the Space id a
-    // substituted pointer could change; the chain-head pins ride the keyed
-    // session store (wallet-core derives their slot keys).
-    expect(vi.mocked(loadUserKeyEpochPin)).toHaveBeenCalledWith(
+    // substituted pointer could change.
+    expect(epochPins.load).toHaveBeenCalledWith(
       expect.objectContaining({ accountDid: POINTER.did })
     )
-    expect(vi.mocked(sessionLogPinStore)).toHaveBeenCalled()
     // The fresh key is adopted -- persisted for the next login, swapped into
     // the live session -- and the fan-out runs against it.
     expect(persistClientKeys).toHaveBeenCalledWith({ userKey: FRESH_USER_KEY })

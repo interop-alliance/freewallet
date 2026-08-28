@@ -267,8 +267,9 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
         lastClient: forgetLastClient
       })
       if (outcome.wipeFailed.length > 0) {
-        // Residue is self-healing: a surviving replica or trio is finished
-        // by the next login's forgotten-browser detector.
+        // Residue is self-healing: a surviving replica, or an unlock
+        // method's surviving local state, is finished by the next login's
+        // forgotten-browser detector.
         log.warn('The forget wipe left residue behind', {
           wipeFailed: outcome.wipeFailed
         })

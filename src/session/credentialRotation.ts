@@ -6,7 +6,7 @@
  * is a real rotation. The ceremony itself is `retireUnlockCredential` in
  * `@interop/wallet-core/unlock`, run once for every wallet; this module
  * supplies the freewallet-shaped seams around it (the session preconditions,
- * the roster store, the epoch pin, the collections source, and the durable
+ * the roster store, the epoch pin, the collections source, and the
  * persistence of a rotated key).
  *
  * The order is load-bearing: the credential's document inventory leaves first,

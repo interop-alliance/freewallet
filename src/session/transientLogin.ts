@@ -110,9 +110,9 @@ import type { WebvhIdStore } from '@interop/wallet-core/webvh'
  *   attack-relevant, so it is not folded into `no-user-key-roster`.
  * - `roster-mint-refused`: the roster reads as absent, but the mend's mint
  *   preconditions refused to create one, so a fabricated-absent roster
- *   cannot become a single-recipient genesis. This composition holds no
- *   durable roster-epoch pin and says so (its epoch pins are in-memory and
- *   empty), so that precondition never fires here and the refusal means one
+ *   cannot become a single-recipient genesis. This composition's epoch pins
+ *   are empty at this point and it says so, so that precondition never fires
+ *   here and the refusal means one
  *   of the rest: the account log did not resolve, the verified document
  *   publishes a key-agreement entry this credential does not own (another
  *   standing credential holds the account, the common arm), or an encrypted
@@ -493,9 +493,9 @@ export async function transientSessionFromKeyringHit({
         email: email ?? found.email,
         priorCreatedAt: found.createdAt,
         persistence,
-        // The visit's epoch pins are in-memory and empty at this point, so
-        // this caller never holds a durable roster-epoch pin: it says so
-        // rather than leaving the mint precondition to a dropped option.
+        // The visit's epoch pins are empty at this point, so this caller
+        // holds no roster-epoch pin: it says so rather than leaving the mint
+        // precondition to a dropped option.
         hasRosterEpochPin: async () => false,
         ...(standing.delegatedClients
           ? { delegatedClients: standing.delegatedClients }
@@ -759,8 +759,8 @@ export async function transientSessionFromKeyringHit({
       email: email ?? found.email,
       priorCreatedAt: found.createdAt,
       persistence,
-      // The visit's epoch pins are in-memory and empty, so this caller holds
-      // no durable roster-epoch pin and says so explicitly.
+      // The visit's epoch pins are empty, so this caller holds no
+      // roster-epoch pin and says so explicitly.
       hasRosterEpochPin: async () => false,
       ...(standing.delegatedClients
         ? { delegatedClients: standing.delegatedClients }

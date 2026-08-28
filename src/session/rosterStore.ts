@@ -21,16 +21,14 @@
  * the shared orchestrator from the document edit's own post-edit log) reaches
  * the store as-is.
  *
- * The chain-head pin rides the durability seam: the session builder takes it
- * from the profile's persistence handle, and the bare-parts builder defaults
- * to the durable `sessionLogPinStore` (its callers are durable ceremonies)
- * unless a `pinStore` is supplied. In a durable session the pin is the
- * keyed store in the session database (wallet-core derives the roster log's
- * slot key from the Space id), so log continuity spans logins; a transient
- * session pins in memory for the visit. The bare-parts builder's own
- * `verifyAccountLog` read carries the same store for the account-log
- * chain-head pin; the session builder's read gets it inside the verified-log
- * memo.
+ * The chain-head pin is in-memory whatever the session's durability: the
+ * session builder takes it from the profile's persistence handle, and the
+ * bare-parts builder mints its own unless a `pinStore` is supplied. It
+ * guards one visit's several roster reads against a host serving
+ * inconsistent versions across them, and remembers nothing past the tab. The
+ * bare-parts builder's own `verifyAccountLog` read carries the same store
+ * for the account-log chain-head pin; the session builder's read gets it
+ * inside the verified-log memo.
  */
 import type { ZcapClient } from '@interop/ezcap'
 import {
@@ -38,7 +36,6 @@ import {
   userKeyRosterLogSigner
 } from '@interop/wallet-core/keys'
 import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
-import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import {
   webvhResourceLogController,
   type WebvhResourceLogController
@@ -48,8 +45,11 @@ import {
   type ICapabilityAgent
 } from '@interop/wallet-core/webvh'
 import type { AccountLogPointer } from '@interop/wallet-core/clients'
+import {
+  memoryResourceLogPinStore,
+  type ResourceLogPinStore
+} from '@interop/vh-resource-log'
 import type { ControllerProfile } from '@/types/auth'
-import { sessionLogPinStore } from '@/lib/sessionKey'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 
 /**
@@ -82,7 +82,7 @@ export function accountRosterStore({
   pointer: AccountLogPointer
   pinStore?: ResourceLogPinStore
 }): SealableEncryptionDescriptorStore {
-  const pins = pinStore ?? sessionLogPinStore()
+  const pins = pinStore ?? memoryResourceLogPinStore()
   let pending: Promise<WebvhResourceLogController> | undefined
   return userKeyRosterDescriptorStore({
     storageServerUrl: pointer.host,

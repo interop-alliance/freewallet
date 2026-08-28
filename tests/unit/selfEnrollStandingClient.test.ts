@@ -4,10 +4,10 @@
  * `src/session/standingUnlock.ts`) under the persist-before-publish seam
  * (FW-280): the required `onCommitted` hook writes the PENDING-shape
  * client-key record before the ceremony's pivot entry, the completion
- * overwrites it with the enrolled shape after the core returns, the epoch
- * pin stays after the completion (the FW-254 order), a hook-less core return
- * is refused as build skew (after persisting the key set the stale core
- * already published), and the resume mode replays the recorded key set
+ * overwrites it with the enrolled shape after the core returns, a hook-less
+ * core return is refused as build skew (after persisting the key set the
+ * stale core already published), and the resume mode replays the recorded
+ * key set
  * through the record's own persist closure. Wallet-core's
  * `selfEnrollClientCore` is mocked (its own ordering is covered in
  * wallet-core's suites); everything else runs real.
@@ -22,17 +22,7 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
   selfEnrollClientCore: vi.fn()
 }))
 
-vi.mock('@/lib/sessionKey', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/lib/sessionKey')>()),
-  saveUserKeyEpochPin: vi.fn(async () => {}),
-  sessionLogPinStore: vi.fn(() => ({
-    read: async () => null,
-    write: async () => undefined
-  }))
-}))
-
 import { selfEnrollClientCore } from '@interop/wallet-core/clientAnnex'
-import { saveUserKeyEpochPin } from '@/lib/sessionKey'
 import {
   selfEnrollStandingClient,
   SelfEnrollmentSkewError
@@ -123,7 +113,6 @@ function coreFiringHook({
         clientDid: 'did:key:zNewClient',
         did: POINTER.did,
         userKey,
-        latestEpochId: USER_KEY.id,
         ...(committed !== 'omitted' ? { committed } : {})
       } as never
     })
@@ -134,7 +123,7 @@ beforeEach(() => {
 })
 
 describe('selfEnrollStandingClient -- the persist hook (fresh run)', () => {
-  it('writes the pending shape in the hook, then completes to the enrolled shape before the pin', async () => {
+  it('writes the pending shape in the hook, then completes to the enrolled shape', async () => {
     const { found, enrolledPersister, enrollClientKeys } = makeFound()
     coreFiringHook()
     const order: string[] = []
@@ -144,9 +133,6 @@ describe('selfEnrollStandingClient -- the persist hook (fresh run)', () => {
     })
     enrolledPersister.mockImplementation(async () => {
       order.push('complete')
-    })
-    vi.mocked(saveUserKeyEpochPin).mockImplementation(async () => {
-      order.push('pin')
     })
 
     const { clientKeys } = await selfEnrollStandingClient({ found })
@@ -164,7 +150,7 @@ describe('selfEnrollStandingClient -- the persist hook (fresh run)', () => {
       ceremony: 'self-enrollment',
       builtOnHead: BUILT_ON_HEAD
     })
-    // The completion: user key in, pending cleared, persisted BEFORE the pin.
+    // The completion: user key in, pending cleared.
     expect(enrolledPersister).toHaveBeenCalledWith(
       expect.objectContaining({
         userKey: USER_KEY,
@@ -172,12 +158,12 @@ describe('selfEnrollStandingClient -- the persist hook (fresh run)', () => {
         pending: null
       })
     )
-    expect(order).toEqual(['enroll', 'complete', 'pin'])
+    expect(order).toEqual(['enroll', 'complete'])
     expect(clientKeys.userKey).toBe(USER_KEY)
     expect(clientKeys.pointerDid).toBe(POINTER.did)
   })
 
-  it('propagates a hook (pending persist) failure without completing or pinning', async () => {
+  it('propagates a hook (pending persist) failure without completing', async () => {
     const { found, enrolledPersister, enrollClientKeys } = makeFound()
     // The mock core awaits the hook, so a throwing persist aborts the core
     // exactly as the real ceremony withholds the pivot on a hook throw.
@@ -188,7 +174,6 @@ describe('selfEnrollStandingClient -- the persist hook (fresh run)', () => {
       'quota exceeded'
     )
     expect(enrolledPersister).not.toHaveBeenCalled()
-    expect(saveUserKeyEpochPin).not.toHaveBeenCalled()
   })
 
   it('logs the named event when the hook re-fires on a conflict retry', async () => {
@@ -206,15 +191,6 @@ describe('selfEnrollStandingClient -- the persist hook (fresh run)', () => {
           'Self-enrollment persist hook re-fired on a conflict retry'
       )
     ).toBe(true)
-  })
-
-  it('still succeeds when the pin write rejects (persist-before-pin, FW-254)', async () => {
-    const { found } = makeFound()
-    coreFiringHook()
-    vi.mocked(saveUserKeyEpochPin).mockRejectedValue(new Error('blocked'))
-
-    const { clientKeys } = await selfEnrollStandingClient({ found })
-    expect(clientKeys.userKey).toBe(USER_KEY)
   })
 })
 
@@ -239,8 +215,6 @@ describe('selfEnrollStandingClient -- the build-skew guard', () => {
     expect(persisted.userKey).toBe(USER_KEY)
     expect(persisted.pointerDid).toBe(POINTER.did)
     expect(persisted.pending).toBeUndefined()
-    // Refused before the pin: nothing pretended the ceremony completed.
-    expect(saveUserKeyEpochPin).not.toHaveBeenCalled()
   })
 
   it('still refuses when even the skew persist fails (the key set could not be saved)', async () => {
@@ -251,7 +225,6 @@ describe('selfEnrollStandingClient -- the build-skew guard', () => {
     await expect(selfEnrollStandingClient({ found })).rejects.toThrow(
       SelfEnrollmentSkewError
     )
-    expect(saveUserKeyEpochPin).not.toHaveBeenCalled()
   })
 })
 

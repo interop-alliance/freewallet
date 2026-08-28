@@ -72,7 +72,7 @@ import {
   unwrapRecordEnvelope,
   wrapRecordEnvelope
 } from '@/session/recordEnvelope'
-import { deleteUnlockLocalTrio } from '@/lib/sessionKey'
+import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:methods')
@@ -1094,12 +1094,11 @@ export async function revokeUnlockMethod({
     })
   }
   // Retiring the method also retires this client's local records under it:
-  // the keyring cache, the client-key wrap (other methods keep their own
-  // wraps of the same key set) and the freshness pin. These three are the
-  // unlock layer's durable retirement and go straight to the session
-  // database: they exist only on a remembered browser, and this path is
-  // reached only from durable ceremonies.
-  await deleteUnlockLocalTrio({ spaceId: entry.unlockSpaceId, idb })
+  // the keyring cache and the client-key wrap (other methods keep their own
+  // wraps of the same key set). Both go straight to the session database:
+  // they exist only on a remembered browser, and this path is reached only
+  // from remembered-session ceremonies.
+  await deleteUnlockLocalState({ spaceId: entry.unlockSpaceId, idb })
   await dropRegistryEntry({ session, entry })
   return rotation
 }
@@ -1111,8 +1110,8 @@ export async function revokeUnlockMethod({
  * `delegatedClients` delegations) goes through the recorded management zcap;
  * an entry recording none keeps its Space -- the walk is best-effort by
  * design, and the account behind the record is dead either way. Client-side,
- * the entry's local trio (keyring cache, client-key record, freshness pin)
- * is dropped. Deliberately NO rotation and NO registry rewrite: the registry
+ * the entry's local state (keyring cache, client-key record) is dropped.
+ * Deliberately NO rotation and NO registry rewrite: the registry
  * and the roster die with the account Space the caller is about to wipe.
  *
  * @param options {object}
@@ -1141,7 +1140,7 @@ export async function deleteUnlockMethodArtifacts({
       capability: entry.manageCapability
     })
   }
-  await deleteUnlockLocalTrio({ spaceId: entry.unlockSpaceId, idb })
+  await deleteUnlockLocalState({ spaceId: entry.unlockSpaceId, idb })
 }
 
 /**

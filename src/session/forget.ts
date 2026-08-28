@@ -115,11 +115,12 @@ import {
   verifyAccountLog
 } from '@interop/wallet-core/webvh'
 import type { RevokedClientKeys } from '@interop/wallet-core/webvh'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { WAS_SERVER_URL } from '@/app.config'
 import type { Session, User } from '@/types/auth'
 import { deriveSpaceId } from '@interop/was-client/sync'
 import type { VerifiedAccountLog } from '@interop/wallet-core/clients'
-import { SESSION_DB_NAME, sessionLogPinStore } from '@/lib/sessionKey'
+import { SESSION_DB_NAME } from '@/lib/sessionKey'
 import { clearWriterId } from '@/lib/writerId'
 import { BrowserStore, migrationMarkerKeys } from '@/stores/browserStore'
 import {
@@ -143,7 +144,6 @@ import {
   type PassphraseUnlockMethod,
   type UnlockMethod
 } from '@/session/unlockMethods'
-import { pointedClientAnnexReach } from '@/session/annexReach'
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import { cascadeCollections } from '@/session/userKeyCascade'
 import { createLogger } from '@/lib/log'
@@ -391,30 +391,16 @@ export async function forgetThisBrowser({
     })
   }
 
-  // The annex Space id, for the wipe's pin-slot enumeration. Best-effort.
-  let clientAnnexSpaceId: string | undefined
-  try {
-    const reach = await pointedClientAnnexReach({ session, pointer })
-    if (reach) {
-      clientAnnexSpaceId = reach.spaceId
-    }
-  } catch (err) {
-    log.warn('Could not resolve the annex Space id for the forget wipe', {
-      err
-    })
-  }
-
   // Snapshot-first: every wipe target derives from the live session BEFORE
   // the ceremony ends this client's authority (and before anything deletes).
-  // The login credential's own trio is enumerated from the session itself,
-  // so an unread registry narrows the wipe to the other methods' trios and
+  // The login credential's own local state is enumerated from the session
+  // itself, so an unread registry narrows the wipe to the other methods' and
   // is reported on the outcome, rather than leaving this browser's
   // client-key record behind a wipe that reads as clean.
   const targets = snapshotWipeTargets({
     session,
     registry,
-    registryUnread,
-    ...(clientAnnexSpaceId ? { clientAnnexSpaceId } : {})
+    registryUnread
   })
 
   const forgottenClient: RevokedClientKeys = {
@@ -461,9 +447,9 @@ export async function forgetThisBrowser({
       // swapped onto it, so the later registry writes below read under the
       // current key; the surviving readers -- other durable clients,
       // transient logins -- would otherwise find it sealed to a retired
-      // generation. The pin and the client-key record persist behind it, so a
-      // run torn before the removal entry leaves this browser consistent for
-      // the resuming re-click.
+      // generation. The client-key record persists behind it, so a run torn
+      // before the removal entry leaves this browser consistent for the
+      // resuming re-click.
       await adoptRotatedUserKeyInBand({
         session,
         spaceId: pointer.spaceId,
@@ -789,7 +775,7 @@ export async function assertClientStillEnrolled({
       did: pointer.did,
       spaceId: pointer.spaceId,
       host: pointer.host,
-      pinStore: sessionLogPinStore({ idb })
+      pinStore: memoryResourceLogPinStore()
     })
   } catch {
     // Unverifiable is not "forgotten": a flap, a missing log, and a
@@ -811,8 +797,9 @@ export async function assertClientStillEnrolled({
 /**
  * The detector's finish-the-wipe tail: the removal entry landed for this
  * client, so the local residue is wiped from what the hit alone can derive
- * (this credential's trio, this client's replica and cache families, the
- * account's pins) and the typed `BrowserForgottenError` surfaces the state.
+ * (this credential's local state, this client's replica and cache families,
+ * the account's Space-to-DID mapping) and the typed `BrowserForgottenError`
+ * surfaces the state.
  * Exported for the pending-record resume, whose published-then-removed branch
  * is the same removal case reached through a pending-shape record.
  *
@@ -836,7 +823,6 @@ export async function finishForgottenBrowserWipe({
   const pointer = found.pointer!
   const { failed, unverified } = await wipeClientResidue({
     clientDid,
-    accountDid: pointer.did,
     accountSpaceId: pointer.spaceId,
     unlockSpaceId: found.unlockSpaceId,
     idb,
@@ -850,15 +836,14 @@ export async function finishForgottenBrowserWipe({
 
 /**
  * The wipe body the record-triggered login wipes share: builds the
- * client-keyed targets (replica prefix, cache scopes), the account's pin
- * targets, and the credential's local trio, and runs the shared executor.
- * No registry read happens on either caller (it needs account authority the
- * hit does not carry), so the enumeration is narrowed by design rather than
- * by a failed read.
+ * client-keyed targets (replica prefix, cache scopes), the account's
+ * Space-to-DID mapping, and the credential's local state, and runs the
+ * shared executor. No registry read happens on either caller (it needs
+ * account authority the hit does not carry), so the enumeration is narrowed
+ * by design rather than by a failed read.
  *
  * @param options {object}
  * @param options.clientDid {string}
- * @param [options.accountDid] {string}
  * @param [options.accountSpaceId] {string}
  * @param options.unlockSpaceId {string}
  * @param [options.idb] {IDBFactory}
@@ -867,14 +852,12 @@ export async function finishForgottenBrowserWipe({
  */
 async function wipeClientResidue({
   clientDid,
-  accountDid,
   accountSpaceId,
   unlockSpaceId,
   idb,
   clearWriter = false
 }: {
   clientDid: string
-  accountDid?: string
   accountSpaceId?: string
   unlockSpaceId: string
   idb?: IDBFactory
@@ -882,7 +865,6 @@ async function wipeClientResidue({
 }): Promise<{ failed: string[]; unverified: string[] }> {
   const targets: WipeTargets = {
     clientDid,
-    ...(accountDid ? { accountDid } : {}),
     ...(accountSpaceId ? { accountSpaceId } : {}),
     unlockSpaceIds: [unlockSpaceId],
     registryUnread: false,
@@ -927,13 +909,13 @@ function spaceIdOfWebvhDid(did: string): string | undefined {
  * so no wipe ever ran on this browser. Every target derives from the record
  * itself (snapshot-first, before anything is deleted): the stale client's
  * did:key keys the replica database and the cache families, the record's
- * `pointerDid` keys the dead account's pins (its Space id recovered from the
- * did itself), and the unlock Space id keys the whole local trio -- deleting
- * the trio is what deletes the record, so the wipe is also the record's
- * deleter, and it clears the keyring cache and freshness pin the durable
- * fetch wrote moments earlier. Best-effort: the caller re-routes on whatever
- * this reports, and a record the trio stage could not delete surfaces on the
- * next pass as the loud unusable-record refusal.
+ * `pointerDid` keys the dead account's Space-to-DID mapping (its Space id
+ * recovered from the did itself), and the unlock Space id keys the
+ * credential's whole local state -- deleting that is what deletes the
+ * record, so the wipe is also the record's deleter, and it clears the
+ * keyring cache the fetch wrote moments earlier. Best-effort: the caller
+ * re-routes on whatever this reports, and a record the wipe could not
+ * delete surfaces on the next pass as the loud unusable-record refusal.
  *
  * @param options {object}
  * @param options.found {KeyringFetchResult}   a hit carrying `clientKeys`
@@ -954,7 +936,6 @@ export async function wipeStaleClientResidue({
   const accountSpaceId = accountDid ? spaceIdOfWebvhDid(accountDid) : undefined
   return wipeClientResidue({
     clientDid: keyAgent.id,
-    ...(accountDid ? { accountDid } : {}),
     ...(accountSpaceId ? { accountSpaceId } : {}),
     unlockSpaceId: found.unlockSpaceId,
     idb
@@ -1085,9 +1066,9 @@ export async function forgetBrowserWalletData(): Promise<{
       }
     }
 
-    // The session database, wholesale (every account's trios, pins, and
-    // caches live inside it) and by its known name, so it goes whatever the
-    // engine can enumerate.
+    // The session database, wholesale (every account's unlock-local state
+    // and caches live inside it) and by its known name, so it goes whatever
+    // the engine can enumerate.
     try {
       await new Promise<void>(resolve => {
         const request = indexedDB.deleteDatabase(SESSION_DB_NAME)

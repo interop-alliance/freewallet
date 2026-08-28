@@ -69,6 +69,7 @@ import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import type { AccountPointer, UnlockKdf } from '@interop/wallet-core/keyring'
 import type { ZcapClient } from '@interop/ezcap'
 import { ID_COLLECTION } from '@interop/wallet-core/space'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { Session } from '@/types/auth'
 import {
   bindUnlockSecret,
@@ -79,7 +80,6 @@ import {
   type PersistableClientKeys,
   type UnlockCredential
 } from '@/session/keyring'
-import { saveUserKeyEpochPin, sessionLogPinStore } from '@/lib/sessionKey'
 import { WAS_SERVER_URL } from '@/app.config'
 import { requireEnrolledClientContext } from '@/session/enrolledContext'
 import {
@@ -574,12 +574,7 @@ export class SelfEnrollmentSkewError extends Error {
  * closing anywhere after the add entry leaves a record the next login's
  * resume finishes rather than a phantom client only Disconnect could
  * remove. After the core returns, the completion overwrites the record with
- * the enrolled shape (the user key in, `pending` cleared), and only then
- * the epoch pin is written (the FW-254 persist-before-pin order, kept for
- * the completion). A rejecting pin write (quota, a blocked upgrade) is not
- * a login failure once the key set is persisted: it is logged and the login
- * proceeds, and the next login's roster read establishes the pin from the
- * verified roster.
+ * the enrolled shape (the user key in, `pending` cleared).
  *
  * With `resume`, the mint is skipped and the recorded key set replays: the
  * core detects the standing entries from the log, publishes only what is
@@ -592,18 +587,15 @@ export class SelfEnrollmentSkewError extends Error {
  * @param options {object}
  * @param options.found {KeyringFetchResult}   a hit `canSelfEnroll` accepted
  *   (fresh), or a pending-record hit the resume gate accepted (`resume`)
- * @param [options.idb] {IDBFactory}
  * @param [options.resume] {object}   the pending record's replayed contents:
  *   `{ clientSeed, webvhUpdateKeys, builtOnHead }`
  * @returns {Promise<object>}   the persisted key set and its persist closure
  */
 export async function selfEnrollStandingClient({
   found,
-  idb,
   resume
 }: {
   found: KeyringFetchResult
-  idb?: IDBFactory
   resume?: {
     clientSeed: Uint8Array
     webvhUpdateKeys: ClientWebvhUpdateKeys
@@ -638,7 +630,7 @@ export async function selfEnrollStandingClient({
     }),
     // A fresh browser normally has no pin yet -- this first contact is the
     // pin's trust-on-first-use establishment; later logins verify against it.
-    accountLogPinStore: sessionLogPinStore({ idb }),
+    accountLogPinStore: memoryResourceLogPinStore(),
     ...(resume ? { resume } : {}),
     // The persist-before-publish seam: the pending-shape record becomes
     // durable on the head the add entry is about to be built on, before that
@@ -733,18 +725,6 @@ export async function selfEnrollStandingClient({
         pending: null
       })
     }
-  }
-  try {
-    await saveUserKeyEpochPin({
-      accountDid: result.did,
-      epochId: result.latestEpochId,
-      idb
-    })
-  } catch (err) {
-    log.warn(
-      'The self-enrolled client could not pin the user key roster epoch; the next login establishes it from the verified roster',
-      { err }
-    )
   }
   const clientKeys: ClientKeyRecord = {
     clientSeed: result.clientSeed,

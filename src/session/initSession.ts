@@ -21,6 +21,7 @@ import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { ControllerProfile, Session, User } from '@/types/auth'
 import { KMS_SERVER_URL, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
@@ -70,7 +71,6 @@ import {
   mendCredentialAnchoredAccount,
   passphraseRegistryUpsertHook
 } from '@/session/credentialAnchoredGenesis'
-import { sessionLogPinStore } from '@/lib/sessionKey'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
   routeUnlockLogin,
@@ -224,8 +224,9 @@ export async function initGuestSession() {
  * @param [options.provisionStorage] {boolean}   fire `ensureUserCollections`
  *   from session creation and expose it as `session.storageReady`; default
  *   true. Set false for the new-wallet flows that provision explicitly.
- * @param [options.idb] {IDBFactory}   first-party IndexedDB for the user key
- *   roster-epoch pin (CHAPI popups thread the Storage Access API handle here)
+ * @param [options.idb] {IDBFactory}   first-party IndexedDB for the
+ *   `freewallet-session` database (CHAPI popups thread the Storage Access
+ *   API handle here)
  * @param [options.persistence] {SessionPersistence}   the typed persistence
  *   handle for this session; defaults to the durable one built over `idb`
  *   (with cache persistence off for guests). A transient login supplies the
@@ -236,7 +237,7 @@ export async function initGuestSession() {
  *   rides (stamped as `profile.invocationCapability`). The non-durable
  *   variant also skips the KMS keystore, the login-time roster read (the
  *   standing-wrap read already happened), `profile.clientSeed`,
- *   provisioning, the login-time sweeps, and every durable pin write.
+ *   provisioning and the login-time sweeps.
  * @returns {Promise<{ session: Session, userExists: boolean,
  *   rosterRead: UserKeyRosterReadResult | null }>}   `rosterRead` is this
  *   login's verified roster read, which the caller's registry re-seal repair
@@ -367,14 +368,12 @@ export async function initSessionFromSeed({
       clientKeyAgreementKey: keyAgreementKey,
       persistence
     })
-    rosterRead = rosterCheck.read
-    userKeyPersistFailed = rosterCheck.persistFailed
+    rosterRead = rosterCheck
     if (rosterRead?.rotated) {
       activeUserKey = rosterRead.userKey
-      // A failed client-key-record write is the same non-fatal state as a
-      // failed pin persist: the session runs on the freshly adopted key, and
-      // only this browser's durable copy stayed behind (the next login's
-      // roster read rotates it again).
+      // A failed client-key-record write is non-fatal: the session runs on
+      // the freshly adopted key, and only this browser's copy stayed behind
+      // (the next login's roster read rotates it again).
       try {
         await persistClientKeys?.({ userKey: rosterRead.userKey })
       } catch (err) {
@@ -670,9 +669,9 @@ async function convergeRosterToDocument({
  *   (identity) KAK -- its roster entry
  * @param options.persistence {SessionPersistence}   the session's persistence
  *   handle: both continuity pins (the chain-head pin and the epoch pin) ride
- *   it, so a transient session pins in memory for the visit
- * @returns {Promise<object>}   the roster read (or null), and whether the
- *   epoch-pin persist failed
+ *   it, and both guard this visit alone
+ * @returns {Promise<UserKeyRosterReadResult | null>}   the roster read, or
+ *   null
  */
 async function checkUserKeyRosterAtLogin({
   zcapClient,
@@ -688,10 +687,9 @@ async function checkUserKeyRosterAtLogin({
   userKey: UserKey
   clientKeyAgreementKey: IKeyAgreementKey
   persistence: SessionPersistence
-}): Promise<{ read: UserKeyRosterReadResult | null; persistFailed: boolean }> {
+}): Promise<UserKeyRosterReadResult | null> {
   const accountDid = pointer.did
-  let persistFailed = false
-  const read = await sharedCheckUserKeyRosterAtLogin({
+  return await sharedCheckUserKeyRosterAtLogin({
     store: accountRosterStore({
       zcapClient,
       keyAgent,
@@ -705,24 +703,16 @@ async function checkUserKeyRosterAtLogin({
     userKey,
     clientKeyAgreementKey,
     pinnedEpochId: await persistence.epochPins.load({ accountDid }),
-    // The pin advances to the epoch just authenticated. A throw from here
-    // propagates out of the shared check (it is no longer swallowed into the
-    // offline null path), so the failure is caught HERE, where its meaning
-    // is known: the read itself succeeded, only the local persist did not.
+    // The pin advances to the epoch just authenticated, guarding this
+    // visit's later roster reads against an older served epoch.
     onRosterRead: async ({ latestEpochId, descriptor }) => {
-      try {
-        await persistence.epochPins.saveFromDescriptor({
-          accountDid,
-          epochId: latestEpochId,
-          descriptor
-        })
-      } catch (err) {
-        persistFailed = true
-        log.warn('Could not persist the user key epoch pin', { err })
-      }
+      await persistence.epochPins.saveFromDescriptor({
+        accountDid,
+        epochId: latestEpochId,
+        descriptor
+      })
     }
   })
-  return { read, persistFailed }
 }
 
 /**
@@ -730,13 +720,10 @@ async function checkUserKeyRosterAtLogin({
  * establishment's re-bind: a keyring hit whose record carries a ladder seed
  * but whose pointer names no did:webvh yet. Runs the shared mend ceremony's
  * establishment arm (the establishment re-run from the record's own ladder
- * seed, or a record re-bind when the log already resolves), under the
- * DURABLE pin store, with the read-first registry hook (a passphrase
- * credential's; a passkey entry stays the add-a-passkey ceremony's own
- * write) and the local keyring-freshness-pin floor -- the re-bind's stamp
- * must advance past this browser's own pin, or the very next fetch would
- * refuse the repair's record as a rollback -- then re-fetches the keyring so
- * the caller continues into the ordinary self-enrollment. One attempt only:
+ * seed, or a record re-bind when the log already resolves), with the
+ * read-first registry hook (a passphrase credential's; a passkey entry
+ * stays the add-a-passkey ceremony's own write), then re-fetches the
+ * keyring so the caller continues into the ordinary self-enrollment. One attempt only:
  * a run that does not converge hands the original hit back (the arm's error
  * is warned, not thrown) and the existing routing stands. Reached only on
  * the explicit `rememberBrowser: true` entry; the default durable login
@@ -779,11 +766,10 @@ async function healUnpromotedRememberedAccount({
     lowEntropy: type === 'passphrase',
     email: email ?? found.email,
     priorCreatedAt: found.createdAt,
-    persistence: { logPins: sessionLogPinStore({ idb }) },
-    freshnessPinFloor: { ...(idb ? { idb } : {}) },
+    persistence: { logPins: memoryResourceLogPinStore() },
     // The resume runs only on a pointer naming no did:webvh, so there is no
-    // account DID to key a durable roster-epoch pin by and this caller
-    // states that it holds none rather than dropping the option.
+    // account DID to key a roster-epoch pin by and this caller states that
+    // it holds none rather than dropping the option.
     hasRosterEpochPin: async () => false,
     ...(found.standing?.delegatedClients
       ? { delegatedClients: found.standing.delegatedClients }
@@ -873,9 +859,8 @@ async function healUnpromotedRememberedAccount({
  *
  * `fetchKeyring` rethrows when the remote could not be reached (so the
  * caller's storage-unreachable handling fires rather than misreading it as "no
- * account"), throws `KeyringRecordForgedError` or
- * `KeyringRecordRolledBackError` on an authenticity or freshness refusal, and
- * all storage/network errors from session init propagate unchanged.
+ * account"), throws `KeyringRecordForgedError` on an authenticity refusal,
+ * and all storage/network errors from session init propagate unchanged.
  *
  * @param options {object}
  * @param options.passphrase {string}
@@ -1052,8 +1037,8 @@ export async function loginWithPassphrase({
  *   remote-direct storage, suppressed localStorage caches, and the durable
  *   arm's popup refusals
  * @param [options.provisionStorage] {boolean}
- * @param [options.idb] {IDBFactory}   first-party IndexedDB for the user key
- *   roster-epoch pin
+ * @param [options.idb] {IDBFactory}   first-party IndexedDB for the
+ *   `freewallet-session` database
  * @param [options.loginCredential] {object}   the unlock secret this login
  *   typed (and the derived credential, when the routing already ran the
  *   KDF), threaded to the torn-retirement repair so its establish-first arm
@@ -1114,8 +1099,7 @@ async function sessionFromKeyringHit({
   // The record-to-account cross-check, BEFORE the forgotten-browser detector
   // below. The account-identity test is POINTER-based, matching the pending
   // arm's discard: the record's stamped `pointerDid` against the DID the
-  // (signed, MAC-authenticated, freshness-pinned) unlock record now points
-  // at. The record's `controller` is deliberately NOT the discriminator --
+  // (signed, MAC-authenticated) unlock record now points at. The record's `controller` is deliberately NOT the discriminator --
   // it is an identity label that legitimately varies (see the routing note
   // in `keyring.ts`), and the loud unusable-record refusal below stays its
   // check. A mismatching `pointerDid` is stale residue: a prior account
@@ -1124,8 +1108,9 @@ async function sessionFromKeyringHit({
   // this check the detector would misread it as "forgotten" (the stale
   // client's verification method is absent from the pointed account's
   // document) and wipe with the wrong copy. The stale wipe clears what the
-  // record alone derives -- the dead account's replica, caches, and pins,
-  // and the credential's whole local trio, the record included (keeping the
+  // record alone derives -- the dead account's replica and caches, its
+  // Space-to-DID mapping, and the credential's whole local state, the
+  // record included (keeping the
   // record would route every later login durable onto the same dead end) --
   // and the entry points catch the typed signal and re-route once as a
   // record-less browser. A pending-shape record is the resume's to route
@@ -1156,7 +1141,7 @@ async function sessionFromKeyringHit({
       ? await assertClientStillEnrolled({ found, idb })
       : undefined
   const enrolled = !found.clientKeys
-    ? await selfEnrollStandingClient({ found, idb })
+    ? await selfEnrollStandingClient({ found })
     : pendingResume
       ? await resumePendingEnrollment({ found, idb })
       : undefined

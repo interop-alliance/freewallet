@@ -1,5 +1,41 @@
 # History
 
+## 0.43.0 - TBD
+
+### Changed
+
+- Continuity is now checked within a session and not across sessions
+  (`decisions/0012-no-durable-continuity-pins.md`). Both persistence
+  strategies build the same in-memory pin stores the transient one already
+  built, so a remembered browser and a public-terminal visit have identical
+  continuity properties. A per-visit pin still catches a host serving
+  inconsistent versions across one login's many log reads.
+- Two bounds are now stated rather than defended. A host serving a valid
+  prefix of the account log is not detected, and a rotation run against that
+  view can re-wrap the fresh user key to a revoked client. A replayed unlock
+  record is not detected, so a login can land in an account the user has
+  moved off; it is visible on arrival and reversible by logging in again once
+  the host serves the current record.
+- `deleteUnlockLocalTrio` is now `deleteUnlockLocalState`, and deletes an
+  unlock method's keyring cache and client-key record.
+
+### Removed
+
+- The four durable continuity pins in the `freewallet-session` database: the
+  keyed chain-head store (the account log's and the roster log's slots), the
+  user key roster-epoch pin, and the unlock record's freshness pin.
+  `src/lib/sessionKey.ts` exports no pin function.
+- `KeyringRecordRolledBackError` and its login-page copy. The other
+  authenticity and continuity refusals still reach the login page's forget
+  affordance.
+- The `freshnessPinFloor` parameter threaded through signup, the
+  credential-anchored genesis, and the unlock-secret bind, along with the
+  stale-pin refusal it existed to prevent. A bind still advances its record
+  stamp past the served record's stamp.
+- The wipe enumeration's epoch-pin and log-pin stages with their now-dead
+  targets, and the annex GC's pin-slot deletion. The Space-to-DID mapping
+  stays: the pre-promotion heal login needs it to state an `expectedDid`.
+
 ## 0.42.0 - TBD
 
 ### Changed

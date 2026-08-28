@@ -42,6 +42,10 @@
  */
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
+import {
+  memoryResourceLogPinStore,
+  type ResourceLogPinStore
+} from '@interop/vh-resource-log'
 import { WAS_SERVER_URL } from '@/app.config'
 import { DID_DOCUMENT_RESOURCE } from '@interop/wallet-core/space'
 import {
@@ -178,12 +182,7 @@ import {
   adoptRotatedUserKeyInBand,
   rewrapUnlockRegistryToUserKey
 } from '@/session/userKeyAdoption'
-import {
-  deleteUnlockLocalTrio,
-  loadUserKeyEpochPin,
-  savePinFromDescriptor,
-  sessionLogPinStore
-} from '@/lib/sessionKey'
+import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { assertAccountCeremonyAllowed } from '@/session/persistence'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { mintSpaceId, WASRemoteStore } from '@/stores/wasRemoteStore'
@@ -676,11 +675,9 @@ function isResourceLogContinuityError(err: unknown): boolean {
  *   pointer (as `unwrapUnlockRecord` returned it, its binding verified)
  * @param [options.verifiedLog] {VerifiedAccountLog}   an already-verified
  *   account log; fetched and verified here when absent
- * @param [options.accountLogPinStore] {object}   the chain-head pin store the
- *   log fetch rides when no `verifiedLog` is supplied -- an in-memory store
- *   for a non-remembered browser (nothing durable may be written there); the
- *   durable session store is the default
- * @param [options.idb] {IDBFactory}
+ * @param [options.accountLogPinStore] {ResourceLogPinStore}   the chain-head
+ *   pin store the log fetch rides when no `verifiedLog` is supplied; this
+ *   check's own in-memory store is the default
  * @returns {Promise<void>}
  */
 async function completeRecoveryRecordProof({
@@ -688,15 +685,13 @@ async function completeRecoveryRecordProof({
   proofState,
   pointer,
   verifiedLog,
-  accountLogPinStore,
-  idb
+  accountLogPinStore
 }: {
   record: unknown
   proofState: UnlockRecordProofState
   pointer: AccountPointer
   verifiedLog?: VerifiedAccountLog
-  accountLogPinStore?: ReturnType<typeof sessionLogPinStore>
-  idb?: IDBFactory
+  accountLogPinStore?: ResourceLogPinStore
 }): Promise<void> {
   if (proofState === 'verified') {
     return
@@ -722,7 +717,7 @@ async function completeRecoveryRecordProof({
         ? { verifiedLog }
         : {
             accountLogPinStore:
-              accountLogPinStore ?? sessionLogPinStore({ idb })
+              accountLogPinStore ?? memoryResourceLogPinStore()
           })
     })
     await verifyRecordProof({
@@ -758,31 +753,18 @@ async function completeRecoveryRecordProof({
  *
  * @param options {object}
  * @param options.code {string}
- * @param [options.rememberBrowser] {boolean}   `true` establishes the
- *   account-log chain-head pin durably (the browser is about to be
- *   remembered); the default pins in memory only, so the locate step of a
- *   public-terminal recovery leaves zero local residue
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
 export async function locateRecoveryAccount({
-  code,
-  rememberBrowser = false,
-  idb
+  code
 }: {
   code: string
-  rememberBrowser?: boolean
-  idb?: IDBFactory
 }): Promise<void> {
   const { record, contents, proofState } = await readRecoveryRecord({ code })
   await completeRecoveryRecordProof({
     record,
     proofState,
-    pointer: contents.pointer,
-    ...(rememberBrowser
-      ? {}
-      : { accountLogPinStore: transientSessionStores().logPins }),
-    idb
+    pointer: contents.pointer
   })
 }
 
@@ -897,7 +879,7 @@ export async function recoverAccountWithCode({
     did: pointer.did,
     spaceId: pointer.spaceId,
     host: pointer.host,
-    pinStore: sessionLogPinStore({ idb })
+    pinStore: memoryResourceLogPinStore()
   })
 
   // Settle the record's proof before acting on anything it carries. An
@@ -928,11 +910,11 @@ export async function recoverAccountWithCode({
     credential: newCredential,
     controller: contents.controller,
     pointer,
-    // The document license beside the pin license: a tab death in an
-    // earlier attempt's bind (remote record PUT landed, local persists did
-    // not) leaves a served standing record with no pending record and no
-    // pin, and only the verified document can prove it this ceremony's own
-    // inert residue (an unpublished credential inventory).
+    // The one overwrite license: a tab death in an earlier attempt's bind
+    // (remote record PUT landed, local persists did not) leaves a served
+    // standing record with no pending record behind it, and only the
+    // verified document can prove it this ceremony's own inert residue (an
+    // unpublished credential inventory).
     accountDoc: verifiedLog.doc,
     idb
   })
@@ -995,7 +977,7 @@ export async function recoverAccountWithCode({
 
   // The self-enrolling continuation, through the delegated log write: the
   // new client in, the spent code out, the replacement code committed. Both
-  // entry builds run over the durable chain-head pin.
+  // entry builds run over the ceremony's own chain-head pin.
   const logStore = delegatedLogStore({
     pointer,
     delegation: contents.delegation,
@@ -1006,7 +988,7 @@ export async function recoverAccountWithCode({
     // The ceremony's own did.jsonl reads must resolve to the account the
     // record's pointer names.
     expectedDid: pointer.did,
-    pinStore: sessionLogPinStore({ idb }),
+    pinStore: memoryResourceLogPinStore(),
     logId: accountLogPinId({ spaceId: pointer.spaceId }),
     recovery: {
       updateSeed: spent.updateSeed,
@@ -1204,7 +1186,7 @@ export async function recoverAccountWithCode({
     zcapClient: newZcapClient,
     keyAgent: newClientAgents.keyAgent,
     pointer: { did: pointer.did, spaceId: pointer.spaceId, host: pointer.host },
-    pinStore: sessionLogPinStore({ idb })
+    pinStore: memoryResourceLogPinStore()
   })
   await addUserKeyRosterRecipient({
     store: rosterStore,
@@ -1266,7 +1248,7 @@ export async function recoverAccountWithCode({
         updateKeyMultibase: newRung0.keyMultibase
       },
       expectedDid: pointer.did,
-      pinStore: sessionLogPinStore({ idb }),
+      pinStore: memoryResourceLogPinStore(),
       logId: accountLogPinId({ spaceId: pointer.spaceId })
     })
     standingEstablished = true
@@ -1280,10 +1262,6 @@ export async function recoverAccountWithCode({
     )
   }
 
-  const pinnedEpochId = await loadUserKeyEpochPin({
-    accountDid: pointer.did,
-    idb
-  })
   // The just-updated, locally verified document: the recipient source for
   // the rotation below. (Roster provenance is the store's own: every read
   // resolves from the log's verified head, anchored in this same document.)
@@ -1291,12 +1269,11 @@ export async function recoverAccountWithCode({
     did: pointer.did,
     spaceId: pointer.spaceId,
     host: pointer.host,
-    pinStore: sessionLogPinStore({ idb })
+    pinStore: memoryResourceLogPinStore()
   })
   const preRotation = await readUserKeyRoster({
     store: rosterStore,
-    clientKeyAgreementKey: newClientAgents.keyAgreementKey,
-    pinnedEpochId
+    clientKeyAgreementKey: newClientAgents.keyAgreementKey
   })
   if (!preRotation) {
     throw new Error(
@@ -1318,8 +1295,7 @@ export async function recoverAccountWithCode({
   })
   const postRotation = await readUserKeyRoster({
     store: rosterStore,
-    clientKeyAgreementKey: newClientAgents.keyAgreementKey,
-    pinnedEpochId
+    clientKeyAgreementKey: newClientAgents.keyAgreementKey
   })
   if (!postRotation) {
     throw new Error('The user key roster vanished during recovery.')
@@ -1457,7 +1433,7 @@ export async function recoverAccountWithCode({
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId
     })
-    await deleteUnlockLocalTrio({ spaceId: unlock.spaceId, idb })
+    await deleteUnlockLocalState({ spaceId: unlock.spaceId, idb })
   } catch (err) {
     log.warn("Could not delete the spent code's unlock Space", { err })
   }
@@ -1470,8 +1446,7 @@ export async function recoverAccountWithCode({
   // "I saved this code" confirm. Until then the replacement code stays
   // re-displayable from the persisted bytes: a tab death leaves the pending
   // record, and the next login's spend resume re-displays the code before
-  // completing. The epoch pin follows the completion (the persist-before-pin
-  // order) and is non-fatal.
+  // completing.
   const persistNewClientKeys = recordBind.persistClientKeys
   const completeRecovery = async (
     options: { currentUserKey?: UserKey } = {}
@@ -1488,27 +1463,6 @@ export async function recoverAccountWithCode({
       pending: null
     })
     log.info('Recovery-spend record completed; the pending carrier is cleared')
-    if (userKeyToPersist.id !== newUserKey.id) {
-      // The captured descriptor and epoch predate the newer key; the pin
-      // was already advanced by whatever rotated it.
-      log.debug(
-        'Skipping the stale epoch pin at recovery completion; a newer user key was adopted meanwhile'
-      )
-      return
-    }
-    try {
-      await savePinFromDescriptor({
-        accountDid: did,
-        epochId: postRotation.latestEpochId,
-        descriptor: postRotation.descriptor,
-        idb
-      })
-    } catch (err) {
-      log.warn(
-        'Could not pin the user key roster epoch after recovery; the next login establishes it from the verified roster',
-        { err }
-      )
-    }
   }
 
   return {
@@ -1640,18 +1594,15 @@ export interface RecoverySpendPrompt {
  *   hit, holding the spend-written pending record
  * @param [options.verifiedLog] {VerifiedAccountLog}   the caller's verified
  *   account log (the pending router's own read); fetched here when absent
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<object>}   the completed key set, its persist closure,
  *   and the show-once prompt while the confirm is still owed
  */
 export async function resumeRecoverySpend({
   found,
-  verifiedLog,
-  idb
+  verifiedLog
 }: {
   found: KeyringFetchResult
   verifiedLog?: VerifiedAccountLog
-  idb?: IDBFactory
 }): Promise<{
   clientKeys: ClientKeyRecord
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
@@ -1690,9 +1641,8 @@ export async function resumeRecoverySpend({
     zcapClient: newZcapClient,
     keyAgent: agents.keyAgent,
     pointer: logPointer,
-    pinStore: sessionLogPinStore({ idb })
+    pinStore: memoryResourceLogPinStore()
   })
-  const pinnedEpochId = await loadUserKeyEpochPin({ accountDid: did, idb })
   const replacement = pending.replacementCode
     ? await recoveryClientFromCode({
         code: base58.encode(pending.replacementCode)
@@ -1747,8 +1697,7 @@ export async function resumeRecoverySpend({
   try {
     read = await readUserKeyRoster({
       store: rosterStore,
-      clientKeyAgreementKey: agents.keyAgreementKey,
-      pinnedEpochId
+      clientKeyAgreementKey: agents.keyAgreementKey
     })
   } catch (err) {
     if ((err as Error | null)?.name !== 'UserKeyRosterUnwrapError') {
@@ -1758,8 +1707,7 @@ export async function resumeRecoverySpend({
     await escrowFromUnwrapKey({ includeSelf: true })
     read = await readUserKeyRoster({
       store: rosterStore,
-      clientKeyAgreementKey: agents.keyAgreementKey,
-      pinnedEpochId
+      clientKeyAgreementKey: agents.keyAgreementKey
     })
   }
   if (!read) {
@@ -1837,7 +1785,7 @@ export async function resumeRecoverySpend({
           did,
           spaceId: pointer.spaceId,
           host: pointer.host,
-          pinStore: sessionLogPinStore({ idb })
+          pinStore: memoryResourceLogPinStore()
         }))
       if (!docListsUnlockVm({ doc: verified.doc, vmId: commitmentVmId })) {
         log.info(
@@ -1861,7 +1809,7 @@ export async function resumeRecoverySpend({
             updateKeyMultibase: rung0.keyMultibase
           },
           expectedDid: did,
-          pinStore: sessionLogPinStore({ idb }),
+          pinStore: memoryResourceLogPinStore(),
           logId: accountLogPinId({ spaceId: pointer.spaceId })
         })
       }
@@ -2015,27 +1963,6 @@ export async function resumeRecoverySpend({
     log.info(
       'Recovery-spend resume: record completed; the pending carrier is cleared'
     )
-    if (userKeyToPersist.id !== userKey.id) {
-      // The captured descriptor predates the newer key; whatever rotated it
-      // advanced the pin already.
-      log.debug(
-        'Skipping the stale epoch pin at spend-resume completion; a newer user key was adopted meanwhile'
-      )
-      return
-    }
-    try {
-      await savePinFromDescriptor({
-        accountDid: did,
-        epochId: rosterRead.latestEpochId,
-        descriptor: rosterRead.descriptor,
-        idb
-      })
-    } catch (err) {
-      log.warn(
-        'Could not pin the user key roster epoch after the spend resume; the next login establishes it from the verified roster',
-        { err }
-      )
-    }
   }
   if (pending.replacementCode) {
     return {
@@ -2192,9 +2119,9 @@ async function recoverAccountTransient({
   // The read-first collision probe, BEFORE the reveal entry: a served
   // record at the new passphrase's unlock Space that names another account,
   // or a live standing credential's record, refuses here and surfaces at
-  // the new-passphrase form. A transient visit holds no freshness pin and
-  // must not read local records (even a read durably creates the session
-  // database), so the own-residue license is the verified document: a
+  // the new-passphrase form. A transient visit must not read local records
+  // (even a read durably creates the session database), so the own-residue
+  // license is the verified document: a
   // same-account standing record whose credential inventory the document
   // does not publish is a torn earlier attempt's inert residue, safe to
   // overwrite.

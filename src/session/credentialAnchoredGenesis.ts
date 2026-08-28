@@ -9,8 +9,8 @@
  * supplies only what is app-specific:
  *
  * - the unlock-record codec (`bindRecord` wraps
- *   `bindCredentialAnchoredUnlockSecret`, carrying the credential, the
- *   email, and the durable caller's keyring-freshness-pin floor);
+ *   `bindCredentialAnchoredUnlockSecret`, carrying the credential and the
+ *   email);
  * - the storage wiring under the bootstrap identity (the `WasClient`, the
  *   account `id`-collection store, the ladder-signed roster store builder);
  * - the KMS/did:web thunk (`provideDidWebKeys`, best-effort with a local
@@ -97,7 +97,6 @@ const DID_WEB_KEYS_TIMEOUT_MS = 30_000
  * @param options.ladderSeed {Uint8Array}
  * @param options.pointer {AccountPointer}
  * @param [options.email] {string}
- * @param [options.freshnessPinFloor] {object}
  * @param options.logPins {ResourceLogPinStore}
  * @param options.mark {Function}   the caller's stage timer
  * @returns {Promise<object>}   the hook members, spreadable into either
@@ -108,7 +107,6 @@ async function establishmentHooks({
   ladderSeed,
   pointer,
   email,
-  freshnessPinFloor,
   logPins,
   mark
 }: {
@@ -116,7 +114,6 @@ async function establishmentHooks({
   ladderSeed: Uint8Array
   pointer: AccountPointer
   email?: string
-  freshnessPinFloor?: { idb?: IDBFactory }
   logPins: ResourceLogPinStore
   mark: (stage: string) => void
 }) {
@@ -204,14 +201,13 @@ async function establishmentHooks({
         }
 
   // The unlock-record codec: the ceremony supplies the pointer shape, the
-  // delegations, and `priorCreatedAt`; the credential, the email, and the
-  // durable caller's freshness-pin floor ride the closure.
+  // delegations, and `priorCreatedAt`; the credential and the email ride the
+  // closure.
   const bindRecord: CredentialAnchoredBindRecordHook = async bind =>
     bindCredentialAnchoredUnlockSecret({
       ...bind,
       email,
       ladderSeed,
-      ...(freshnessPinFloor ? { freshnessPinFloor } : {}),
       credential
     })
 
@@ -278,16 +274,8 @@ async function establishmentHooks({
  * @param [options.priorCreatedAt] {string}   the previous bind's freshness
  *   stamp; its presence SKIPS the first bind (the record already carries the
  *   ladder seed) and the re-bind's stamp advances past it
- * @param options.persistence {object}   the chain-head pin store for every
- *   log read here (`logPins`): the transient visit's in-memory handle on the
- *   default signup and the heal, or a durable handle when a remembered
- *   caller wants its own publication to seed the browser's durable pin
- * @param [options.freshnessPinFloor] {object}   present when the caller holds
- *   durable state (the remembered and passkey signups): threaded into both
- *   binds so their stamps additionally advance past the local
- *   keyring-freshness pin (read-only; `idb` overrides the IndexedDB
- *   factory). The transient callers omit it -- even the read durably
- *   creates the session database
+ * @param options.persistence {object}   the in-memory chain-head pin store
+ *   for every log read here (`logPins`), which every caller supplies
  * @param [options.beforePromotion] {Function}   runs after the re-bind and
  *   BEFORE the controller promotion -- the last window where a root
  *   invocation under the bootstrap did:key works (the signup's registry
@@ -306,7 +294,6 @@ export async function establishCredentialAnchoredAccount({
   email,
   priorCreatedAt,
   persistence,
-  freshnessPinFloor,
   beforePromotion
 }: {
   credential: UnlockCredential
@@ -316,7 +303,6 @@ export async function establishCredentialAnchoredAccount({
   email?: string
   priorCreatedAt?: string
   persistence: { logPins: ResourceLogPinStore }
-  freshnessPinFloor?: { idb?: IDBFactory }
   beforePromotion?: (context: {
     was: WasClient
     zcapClient: ZcapClient
@@ -339,7 +325,6 @@ export async function establishCredentialAnchoredAccount({
     ladderSeed,
     pointer,
     email,
-    freshnessPinFloor,
     logPins: persistence.logPins,
     mark
   })
@@ -465,10 +450,8 @@ export function passphraseRegistryUpsertHook({
  * @param options.lowEntropy {boolean}
  * @param [options.email] {string}
  * @param [options.priorCreatedAt] {string}   the record's freshness stamp
- * @param options.persistence {object}   the chain-head pin store
+ * @param options.persistence {object}   the in-memory chain-head pin store
  *   (`logPins`)
- * @param [options.freshnessPinFloor] {object}   the durable caller's local
- *   keyring-freshness-pin floor, threaded into the binds
  * @param [options.beforePromotion] {Function}   the read-first registry
  *   hook; the establishment arm fires it in its root window, the registry
  *   arm under the post-promotion authority
@@ -482,9 +465,11 @@ export function passphraseRegistryUpsertHook({
  * @param [options.delegatedRead] {object}   the promotion arm's
  *   failed-delegated-read trigger (`error`, `retry`)
  * @param options.hasRosterEpochPin {Function}   the mint-precondition port:
- *   whether this caller holds a durable roster-epoch pin for the account. A
- *   caller with no durable pins passes `async () => false` explicitly, so
- *   "no pin" is always a statement, never a dropped option
+ *   whether this caller holds a roster-epoch pin for the account. This
+ *   wallet holds none across sessions
+ *   (`decisions/0012-no-durable-continuity-pins.md`), so every caller
+ *   passes `async () => false` explicitly -- "no pin" stays a statement,
+ *   never a dropped option
  * @param [options.registry] {object}   the registry arm's context from the
  *   caller's standing record
  * @param [options.userKey] {UserKey}   the session's user key, when held
@@ -505,7 +490,6 @@ export async function mendCredentialAnchoredAccount({
   email,
   priorCreatedAt,
   persistence,
-  freshnessPinFloor,
   beforePromotion,
   delegatedClients,
   invocation,
@@ -525,7 +509,6 @@ export async function mendCredentialAnchoredAccount({
   email?: string
   priorCreatedAt?: string
   persistence: { logPins: ResourceLogPinStore }
-  freshnessPinFloor?: { idb?: IDBFactory }
   beforePromotion?: (context: {
     was: WasClient
     zcapClient: ZcapClient
@@ -557,7 +540,6 @@ export async function mendCredentialAnchoredAccount({
     ladderSeed,
     pointer,
     email,
-    freshnessPinFloor,
     logPins: persistence.logPins,
     mark
   })

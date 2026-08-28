@@ -27,11 +27,9 @@
 import { deriveSpaceId } from '@interop/was-client/sync'
 import {
   deleteAccountDidForSpace,
-  deleteLogPinsForSpace,
   deletePasskeySafetyNotice,
-  deleteUnlockLocalTrio,
+  deleteUnlockLocalState,
   deleteUnlockMethodsCache,
-  deleteUserKeyEpochPin,
   sessionDatabaseExists
 } from '@/lib/sessionKey'
 import { clearWriterId } from '@/lib/writerId'
@@ -60,28 +58,16 @@ export interface WipeTargets {
    */
   clientDid: string
   /**
-   * The account did:webvh (or did:key pre-promotion), when the session holds
-   * a pointer; keys the roster-epoch pin.
-   */
-  accountDid?: string
-  /**
-   * The account data Space id; keys the chain-head pin slots and the
-   * Space-to-DID mapping.
+   * The account data Space id; keys the Space-to-DID mapping.
    */
   accountSpaceId?: string
   /**
-   * The auxiliary annex Space id, when the consumer's discovery found
-   * one; its pin slots are cleared by prefix (one per generation, with the
-   * generation ids possibly no longer listable).
-   */
-  clientAnnexSpaceId?: string
-  /**
-   * Every unlock method's unlock Space id -- each keys a local trio (keyring
-   * cache, client-key record, freshness pin): the whole registry, unioned
+   * Every unlock method's unlock Space id -- each keys that method's local
+   * state (keyring cache, client-key record): the whole registry, unioned
    * with the live session's own credential (`profile.unlockMethod` and
    * `profile.standingUnlock`), so a registry the consumer could not read
-   * still leaves the login credential's trio -- this browser's client seed
-   * and its cached user key -- in the enumeration.
+   * still leaves the login credential's own state -- this browser's client
+   * seed and its cached user key -- in the enumeration.
    */
   unlockSpaceIds: string[]
   /**
@@ -117,19 +103,16 @@ export interface WipeTargets {
  * @param [options.registry] {UnlockMethodsRecord | null}
  * @param [options.registryUnread] {boolean}   the consumer's registry read
  *   failed (default false: the registry was read, or the consumer has none)
- * @param [options.clientAnnexSpaceId] {string}
  * @returns {WipeTargets}
  */
 export function snapshotWipeTargets({
   session,
   registry,
-  registryUnread = false,
-  clientAnnexSpaceId
+  registryUnread = false
 }: {
   session: Session
   registry?: UnlockMethodsRecord | null
   registryUnread?: boolean
-  clientAnnexSpaceId?: string
 }): WipeTargets {
   const clientDid = session.user.id
   const accountSpaceId = session.profile.accountPointer?.spaceId
@@ -141,9 +124,7 @@ export function snapshotWipeTargets({
   ])
   return {
     clientDid,
-    accountDid: session.profile.accountPointer?.did,
     accountSpaceId,
-    clientAnnexSpaceId,
     unlockSpaceIds: [...unlockSpaceIds],
     registryUnread,
     cacheScopes: [
@@ -202,8 +183,8 @@ export async function executeLocalWipe({
   }
 
   // A registry the consumer could not read is a narrowed enumeration (the
-  // other unlock methods' trios may survive), reported as a failed stage up
-  // front so the outcome never reads as clean.
+  // other unlock methods' local state may survive), reported as a failed
+  // stage up front so the outcome never reads as clean.
   if (targets.registryUnread) {
     failed.push('unlock-methods-registry')
   }
@@ -225,29 +206,14 @@ export async function executeLocalWipe({
   const haveSessionDb = await sessionDatabaseExists({ idb }).catch(() => true)
   if (haveSessionDb) {
     for (const unlockSpaceId of targets.unlockSpaceIds) {
-      await stage(`unlock-trio:${unlockSpaceId}`, async () => {
-        await deleteUnlockLocalTrio({ spaceId: unlockSpaceId, idb })
-      })
-    }
-    if (targets.accountDid) {
-      const accountDid = targets.accountDid
-      await stage('epoch-pin', async () => {
-        await deleteUserKeyEpochPin({ accountDid, idb })
+      await stage(`unlock-local-state:${unlockSpaceId}`, async () => {
+        await deleteUnlockLocalState({ spaceId: unlockSpaceId, idb })
       })
     }
     if (targets.accountSpaceId) {
       const spaceId = targets.accountSpaceId
-      await stage('account-log-pins', async () => {
-        await deleteLogPinsForSpace({ spaceId, idb })
-      })
       await stage('space-did-mapping', async () => {
         await deleteAccountDidForSpace({ spaceId, idb })
-      })
-    }
-    if (targets.clientAnnexSpaceId) {
-      const spaceId = targets.clientAnnexSpaceId
-      await stage('clientAnnex-log-pins', async () => {
-        await deleteLogPinsForSpace({ spaceId, idb })
       })
     }
     await stage('unlock-methods-cache', async () => {
@@ -284,7 +250,7 @@ export async function executeLocalWipe({
  * The guest-wipe consumer: a guest session's whole durable residue is its
  * replica databases, the migration markers, and (in principle) local-mode
  * cache families, all derived from the guest's random client did:key. The
- * guest holds no keyring, no pins, and no registry, so those families
+ * guest holds no keyring and no registry, so those families
  * enumerate empty by construction.
  *
  * @param options {object}

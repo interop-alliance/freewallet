@@ -3,8 +3,8 @@
  * Unit tests for the keyring v2 module (`src/session/keyring.ts`): the unlock
  * derivation (deterministic, secret-sensitive), the record wrap/unwrap
  * round-trip and its validation, the local client-key record (this client's
- * key set + cached user key under the unlock layer), account-pointer continuity
- * (the local pin and its refusal), and the `fetchKeyring` / `bindPassphrase`
+ * key set + cached user key under the unlock layer), record authenticity
+ * (the frame proof and its refusal), and the `fetchKeyring` / `bindPassphrase`
  * / `changePassphrase` public contract across the WAS-configured and
  * cache-only branches. The module is method-agnostic -- unlock derivation
  * runs off a generic `{ secret, kdf }` pair (a string passphrase under
@@ -27,12 +27,7 @@ import type {
 import { WasError, type CollectionEncryption } from '@interop/was-client'
 import { deriveSpaceId } from '@interop/was-client/sync'
 import { createEdvDocCipher } from '@interop/was-client/edv'
-import {
-  loadClientKeyRecord,
-  loadKeyringCache,
-  loadKeyringFreshnessPin,
-  saveKeyringFreshnessPin
-} from '@/lib/sessionKey'
+import { loadClientKeyRecord, loadKeyringCache } from '@/lib/sessionKey'
 import {
   KEYRING_CACHE_TTL_MS,
   PASSKEY_KDF,
@@ -101,7 +96,6 @@ import {
   fetchKeyring,
   fetchTransientKeyring,
   KeyringRecordForgedError,
-  KeyringRecordRolledBackError,
   KeyringRecordUnusableError,
   verifyPassphrase,
   WrongPassphraseError
@@ -1016,169 +1010,6 @@ describe('record authenticity (the proof)', () => {
   })
 })
 
-describe('record freshness (the rollback pin)', () => {
-  it('seeds the pin at bind time', async () => {
-    const idb = createFakeIdb()
-    await bindPassphrase({
-      clientSeed: randomSeed(),
-      controller: DATA_CONTROLLER,
-      passphrase: 'bind seeds pin passphrase',
-      pointer: POINTER,
-      idb,
-      kdf: KDF
-    })
-    const { spaceId } = await unlockFor('bind seeds pin passphrase')
-    const pinned = await loadKeyringFreshnessPin({ spaceId, idb })
-    expect(typeof pinned).toBe('string')
-    expect(Number.isNaN(Date.parse(pinned!))).toBe(false)
-  })
-
-  it('refuses a replayed older record', async () => {
-    const idb = createFakeIdb()
-    await bindPassphrase({
-      clientSeed: randomSeed(),
-      controller: DATA_CONTROLLER,
-      passphrase: 'rollback passphrase',
-      pointer: POINTER,
-      idb,
-      kdf: KDF
-    })
-
-    // The host re-serves a record it once wrote legitimately, from before the
-    // account moved. Authentic forever, so only the pin catches it.
-    const { record, spaceId } = await craftRecord({
-      passphrase: 'rollback passphrase',
-      plaintext: {
-        controller: DATA_CONTROLLER,
-        pointer: { ...POINTER, spaceId: 'superseded-space' },
-        createdAt: new Date(Date.now() - 60_000).toISOString()
-      }
-    })
-    wasState.spaces.set(spaceId, record)
-
-    await expect(
-      fetchKeyring({ passphrase: 'rollback passphrase', idb, kdf: KDF })
-    ).rejects.toThrow(KeyringRecordRolledBackError)
-  })
-
-  it('follows a newer record to a DIFFERENT pointer and advances the pin (machine-B regression)', async () => {
-    // The wedge the retired pointer-equality pin created: a passphrase reused
-    // for a fresh account after the old one was deleted used to be refused
-    // forever on every machine that had seen the old account. A newer, validly
-    // signed record is simply followed.
-    const idb = createFakeIdb()
-    await bindPassphrase({
-      clientSeed: randomSeed(),
-      controller: DATA_CONTROLLER,
-      passphrase: 'rebind passphrase',
-      pointer: POINTER,
-      idb,
-      kdf: KDF
-    })
-
-    const rebound = new Date(Date.now() + 60_000).toISOString()
-    const { record, spaceId } = await craftRecord({
-      passphrase: 'rebind passphrase',
-      plaintext: {
-        controller: DATA_CONTROLLER,
-        pointer: { ...POINTER, spaceId: 'a-brand-new-space' },
-        createdAt: rebound
-      }
-    })
-    wasState.spaces.set(spaceId, record)
-
-    const found = await fetchKeyring({
-      passphrase: 'rebind passphrase',
-      idb,
-      kdf: KDF
-    })
-    expect(found!.pointer!.spaceId).toBe('a-brand-new-space')
-    expect(await loadKeyringFreshnessPin({ spaceId, idb })).toBe(rebound)
-
-    // And the pin now holds: the previously current record is a rollback.
-    const { record: older } = await craftRecord({
-      passphrase: 'rebind passphrase',
-      plaintext: {
-        controller: DATA_CONTROLLER,
-        pointer: POINTER,
-        createdAt: new Date(Date.now() - 60_000).toISOString()
-      }
-    })
-    wasState.spaces.set(spaceId, older)
-    await expect(
-      fetchKeyring({ passphrase: 'rebind passphrase', idb, kdf: KDF })
-    ).rejects.toThrow(KeyringRecordRolledBackError)
-  })
-
-  it('binds above a pin set by a client with a faster clock', async () => {
-    // The skew lockout: another client bound with a clock running ahead, so
-    // this client's pin sits in the future. A rebind stamped with a bare
-    // `Date.now()` would be refused as a rollback by every client (including
-    // this one); advancing past the local pin keeps the rebind acceptable.
-    const idb = createFakeIdb()
-    const passphrase = 'clock skew passphrase'
-    const { spaceId } = await unlockFor(passphrase)
-    const future = new Date(Date.now() + 3_600_000).toISOString()
-    await saveKeyringFreshnessPin({ spaceId, createdAt: future, idb })
-
-    await bindPassphrase({
-      clientSeed: randomSeed(),
-      controller: DATA_CONTROLLER,
-      passphrase,
-      pointer: { ...POINTER, spaceId: 'rebound-space' },
-      idb,
-      kdf: KDF
-    })
-
-    const pinned = await loadKeyringFreshnessPin({ spaceId, idb })
-    expect(Date.parse(pinned!)).toBeGreaterThan(Date.parse(future))
-
-    // And the record the rebind wrote is accepted, not refused as a rollback.
-    const found = await fetchKeyring({ passphrase, idb, kdf: KDF })
-    expect(found!.pointer!.spaceId).toBe('rebound-space')
-  })
-
-  it('drops the pin on a remote miss (the continuity prior is stale)', async () => {
-    const idb = createFakeIdb()
-    await bindPassphrase({
-      clientSeed: randomSeed(),
-      controller: DATA_CONTROLLER,
-      passphrase: 'stale pin passphrase',
-      pointer: POINTER,
-      idb,
-      kdf: KDF
-    })
-    // Retired everywhere: the fetch sees "no account" and forgets the prior.
-    wasState.spaces.clear()
-    await expect(
-      fetchKeyring({ passphrase: 'stale pin passphrase', idb, kdf: KDF })
-    ).resolves.toBeNull()
-    const { spaceId: unlockSpaceId } = await unlockFor('stale pin passphrase')
-    expect(
-      await loadKeyringFreshnessPin({ spaceId: unlockSpaceId, idb })
-    ).toBeNull()
-
-    // The same passphrase later resolves to a different (re-created) account,
-    // on a record older than the retired one: no stale pin blocks it.
-    const { record, spaceId } = await craftRecord({
-      passphrase: 'stale pin passphrase',
-      plaintext: {
-        controller: DATA_CONTROLLER,
-        pointer: { ...POINTER, spaceId: 'recreated-space' },
-        createdAt: new Date(Date.now() - 60_000).toISOString()
-      }
-    })
-    wasState.spaces.set(spaceId, record)
-
-    const found = await fetchKeyring({
-      passphrase: 'stale pin passphrase',
-      idb,
-      kdf: KDF
-    })
-    expect(found!.pointer!.spaceId).toBe('recreated-space')
-  })
-})
-
 describe('fetchKeyring', () => {
   it('consults the remote even on a cache hit (the remote is the source of truth)', async () => {
     const idb = createFakeIdb()
@@ -1523,7 +1354,7 @@ describe('bindPassphrase', () => {
 })
 
 describe('changePassphrase', () => {
-  it('retires the old method (Space, cache, client-key record, and pin deleted)', async () => {
+  it('retires the old method (Space, cache, and client-key record deleted)', async () => {
     const idb = createFakeIdb()
     const clientSeed = randomSeed()
     await bindPassphrase({
@@ -1561,12 +1392,6 @@ describe('changePassphrase', () => {
     ).resolves.not.toBeNull()
     await expect(
       loadClientKeyRecord({ spaceId: newSpace, idb })
-    ).resolves.not.toBeNull()
-    await expect(
-      loadKeyringFreshnessPin({ spaceId: oldSpace, idb })
-    ).resolves.toBeNull()
-    await expect(
-      loadKeyringFreshnessPin({ spaceId: newSpace, idb })
     ).resolves.not.toBeNull()
   })
 
@@ -2127,10 +1952,9 @@ describe('deleteKeyring', () => {
     expect(unlockSpaceDeleted).toBe(true)
     expect(deleteUnlockSpace).toHaveBeenCalledOnce()
     expect(wasState.spaces.has(spaceId)).toBe(false)
-    // The whole unlock-Space-keyed trio goes together.
+    // Both unlock-Space-keyed records go together.
     await expect(loadKeyringCache({ spaceId, idb })).resolves.toBeNull()
     await expect(loadClientKeyRecord({ spaceId, idb })).resolves.toBeNull()
-    await expect(loadKeyringFreshnessPin({ spaceId, idb })).resolves.toBeNull()
     // The keyring is gone: nothing resolves for this passphrase any more.
     await expect(
       fetchKeyring({

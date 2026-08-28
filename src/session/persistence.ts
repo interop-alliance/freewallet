@@ -4,11 +4,13 @@
  * of the handle's TYPE, never a flag a write site consults -- the durable
  * variant reaches the `freewallet-session` IndexedDB database (it alone
  * carries the `idb` factory), durable localStorage caches, and the durable
- * `writerId` mint, while the transient variant holds an in-memory pin store,
- * an in-memory roster-epoch pin, a per-visit in-memory `writerId`, and one
- * in-memory descriptor/meta cache pair -- and no sessionKey factory at all,
- * so code needing the durable database must hold (and assert for) the
- * durable variant. The transient variant also carries the session's
+ * `writerId` mint, while the transient variant holds a per-visit in-memory
+ * `writerId` and one in-memory descriptor/meta cache pair -- and no
+ * sessionKey factory at all, so code needing the durable database must hold
+ * (and assert for) the durable variant. The two continuity pin stores are
+ * the exception both variants share: they are in-memory whatever the
+ * durability, since continuity is checked within a session and not across
+ * sessions (`decisions/0012-no-durable-continuity-pins.md`). The transient variant also carries the session's
  * client-annex identity (the annex DID and the generation delegation every
  * request rides), so durability -- and the annex signing that comes with it
  * -- is declared once, in the handle's type, never half-declared through a
@@ -28,14 +30,10 @@ import { getOrCreateWriterId } from '@/lib/writerId'
 import {
   deletePasskeySafetyNotice,
   deleteUnlockMethodsCache,
-  epochPinWriteAllowed,
   loadPasskeySafetyNotice,
   loadUnlockMethodsCache,
-  loadUserKeyEpochPin,
   savePasskeySafetyNotice,
-  savePinFromDescriptor,
-  saveUnlockMethodsCache,
-  sessionLogPinStore
+  saveUnlockMethodsCache
 } from '@/lib/sessionKey'
 
 /**
@@ -78,9 +76,8 @@ export interface CollectionMetaCache {
 }
 
 /**
- * The user key roster-epoch pin, behind the seam: the durable variant is the
- * `user-key-epoch-pin/<accountDid>` family in the session database, the
- * transient variant an in-memory map guarding the visit alone.
+ * The user key roster-epoch pin, behind the seam: an in-memory map guarding
+ * the visit alone, whichever durability the handle carries.
  */
 export interface UserKeyEpochPinStore {
   load(options: { accountDid: string }): Promise<string | null>
@@ -128,9 +125,12 @@ export interface PasskeySafetyNoticeStore {
  */
 interface SessionPersistenceBase {
   // The keyed chain-head pin store every resource-log read rides
-  // (the account log, the roster log).
+  // (the account log, the roster log). In-memory on both variants: it
+  // catches a host serving inconsistent versions across one visit's many
+  // log reads, and remembers nothing past the tab.
   logPins: ResourceLogPinStore
-  // The roster-epoch pin (chainless, keyed by account DID).
+  // The roster-epoch pin (chainless, keyed by account DID), in memory for
+  // the visit like the chain-head pins beside it.
   epochPins: UserKeyEpochPinStore
   // The unlock-methods registry's local cache (the write-through on every
   // successful remote read; the only copy with no WAS server).
@@ -375,6 +375,62 @@ export function memoryMetaCache(): CollectionMetaCache {
 }
 
 /**
+ * Whether an epoch-pin write may replace the pinned epoch: the write must
+ * restate the pinned epoch or advance it along the served append-only epoch
+ * order. A pinned or written epoch absent from that order is refused -- a
+ * descriptor omitting the pinned epoch is a rollback, not a fresh start.
+ *
+ * @param options {object}
+ * @param options.stored {string | null}   the pinned epoch, if any
+ * @param options.epochId {string}   the epoch being written
+ * @param options.epochIds {string[]}   the served append-only epoch order
+ * @returns {boolean}
+ */
+export function epochPinWriteAllowed({
+  stored,
+  epochId,
+  epochIds
+}: {
+  stored: string | null
+  epochId: string
+  epochIds: string[]
+}): boolean {
+  if (!stored || stored === epochId) {
+    return true
+  }
+  const storedIndex = epochIds.indexOf(stored)
+  const nextIndex = epochIds.indexOf(epochId)
+  return storedIndex !== -1 && nextIndex !== -1 && nextIndex > storedIndex
+}
+
+/**
+ * The in-memory roster-epoch pin both variants build. One login reads the
+ * roster several times, and the pin is what catches a host serving an older
+ * epoch to a later read within the same visit; nothing about it outlives the
+ * tab (`decisions/0012-no-durable-continuity-pins.md`).
+ *
+ * @returns {UserKeyEpochPinStore}
+ */
+export function memoryEpochPinStore(): UserKeyEpochPinStore {
+  const pins = new Map<string, string>()
+  return {
+    async load({ accountDid }) {
+      return pins.get(accountDid) ?? null
+    },
+    async saveFromDescriptor({ accountDid, epochId, descriptor }) {
+      // Forward-only within the visit: a served descriptor that drops or
+      // precedes the pinned epoch never becomes the pin.
+      const stored = pins.get(accountDid) ?? null
+      const epochIds = (descriptor.epochs ?? []).map(epoch => epoch.id)
+      if (!epochPinWriteAllowed({ stored, epochId, epochIds })) {
+        return
+      }
+      pins.set(accountDid, epochId)
+    }
+  }
+}
+
+/**
  * Builds the durable persistence handle -- today's behavior, and the default
  * every login constructs unless the caller supplies a transient handle.
  *
@@ -398,15 +454,8 @@ export function durableSessionPersistence({
   return {
     durability: DURABILITY_INDEXEDDB,
     ...(idb ? { idb } : {}),
-    logPins: sessionLogPinStore({ idb }),
-    epochPins: {
-      async load({ accountDid }) {
-        return await loadUserKeyEpochPin({ accountDid, idb })
-      },
-      async saveFromDescriptor({ accountDid, epochId, descriptor }) {
-        await savePinFromDescriptor({ accountDid, epochId, descriptor, idb })
-      }
-    },
+    logPins: memoryResourceLogPinStore(),
+    epochPins: memoryEpochPinStore(),
     unlockMethodsCache: {
       async load({ controller }) {
         return await loadUnlockMethodsCache({ controller, idb })
@@ -471,7 +520,6 @@ export function durableSessionPersistence({
  * @returns {TransientSessionStores}
  */
 export function transientSessionStores(): TransientSessionStores {
-  const epochPins = new Map<string, string>()
   const unlockMethods = new Map<string, unknown>()
   // One cache pair for the whole session, whatever scope asks: a transient
   // session serves exactly one account, and the pair is seeded once at login.
@@ -481,22 +529,7 @@ export function transientSessionStores(): TransientSessionStores {
   return {
     durability: DURABILITY_IN_MEMORY,
     logPins: memoryResourceLogPinStore(),
-    epochPins: {
-      async load({ accountDid }) {
-        return epochPins.get(accountDid) ?? null
-      },
-      async saveFromDescriptor({ accountDid, epochId, descriptor }) {
-        // Forward-only within the visit, like the durable pin: the shared
-        // predicate is the one decision (`epochPinWriteAllowed`), so the
-        // durable and transient variants cannot drift apart on it.
-        const stored = epochPins.get(accountDid) ?? null
-        const epochIds = (descriptor.epochs ?? []).map(epoch => epoch.id)
-        if (!epochPinWriteAllowed({ stored, epochId, epochIds })) {
-          return
-        }
-        epochPins.set(accountDid, epochId)
-      }
-    },
+    epochPins: memoryEpochPinStore(),
     unlockMethodsCache: {
       async load({ controller }) {
         return unlockMethods.get(controller) ?? null

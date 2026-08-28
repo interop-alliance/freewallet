@@ -1,11 +1,10 @@
 // @vitest-environment node
 /**
- * The standing self-enrollment's persist-before-pin ordering
- * (`selfEnrollStandingClient`): the freshly minted key set is persisted
- * under the credential's unlock identity BEFORE the roster epoch pin is
- * written, a rejecting pin write is logged rather than failing the login,
- * and a rejecting persist stays fatal (an unpersisted key set past the add
- * entry is the phantom-client window the ordering closes).
+ * The standing self-enrollment's persist-before-publish ordering
+ * (`selfEnrollStandingClient`): the pending-shape record is written inside
+ * the required `onCommitted` seam and the enrolled shape on the return, and
+ * a rejecting persist stays fatal (an unpersisted key set past the add entry
+ * is the phantom-client window the ordering closes).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeyringFetchResult } from '@/session/keyring'
@@ -25,34 +24,23 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => {
 const { selfEnrollClientCore } =
   await import('@interop/wallet-core/clientAnnex')
 
-vi.mock('@/lib/sessionKey', async importOriginal => {
-  const actual = await importOriginal<object>()
-  return {
-    ...actual,
-    saveUserKeyEpochPin: vi.fn(),
-    sessionLogPinStore: vi.fn(() => ({}))
-  }
-})
-const { saveUserKeyEpochPin } = await import('@/lib/sessionKey')
-
 const { selfEnrollStandingClient } = await import('@/session/standingUnlock')
 
 /**
  * The key set wallet-core's continuation hands back, threaded through the
- * persist call, the pin, and the returned `clientKeys` alike.
+ * persist call and the returned `clientKeys` alike.
  */
 const CORE_RESULT = {
   clientSeed: new Uint8Array(32).fill(9),
   webvhUpdateKeys: { updateSeed: new Uint8Array(32).fill(4) },
   clientDid: 'did:key:zFreshClient',
   did: 'did:webvh:scid-a:example.com:space-1',
-  userKey: { id: 'did:key:zUserKey' },
-  latestEpochId: 'did:key:zEpoch'
+  userKey: { id: 'did:key:zUserKey' }
 }
 
 /**
- * The call order both mocks push into, so the persist-before-pin ordering
- * is asserted on rather than inferred.
+ * The call order the persist mocks push into, so the write ordering is
+ * asserted on rather than inferred.
  */
 let order: string[] = []
 
@@ -117,9 +105,6 @@ beforeEach(() => {
       return { ...CORE_RESULT, committed: true } as never
     }
   )
-  vi.mocked(saveUserKeyEpochPin).mockImplementation(async () => {
-    order.push('pin')
-  })
 })
 
 afterEach(() => {
@@ -127,12 +112,12 @@ afterEach(() => {
 })
 
 describe('selfEnrollStandingClient', () => {
-  it('persists the pending shape in the hook and the enrolled shape before the pin', async () => {
+  it('persists the pending shape in the hook and the enrolled shape on the return', async () => {
     const found = hit()
-    await selfEnrollStandingClient({ found })
-    // Two persists: the hook's pending write (pre-pivot), the completion
-    // (enrolled shape), then the pin -- persist-before-pin preserved.
-    expect(order).toEqual(['persist', 'persist', 'pin'])
+    const outcome = await selfEnrollStandingClient({ found })
+    // Two persists: the hook's pending write (pre-pivot), then the
+    // completion's enrolled shape.
+    expect(order).toEqual(['persist', 'persist'])
     expect(found.enrollClientKeys).toHaveBeenNthCalledWith(1, {
       clientSeed: CORE_RESULT.clientSeed,
       webvhUpdateKeys: CORE_RESULT.webvhUpdateKeys,
@@ -150,19 +135,6 @@ describe('selfEnrollStandingClient', () => {
       pointerDid: CORE_RESULT.did,
       pending: null
     })
-    expect(vi.mocked(saveUserKeyEpochPin).mock.calls[0]![0]).toMatchObject({
-      accountDid: CORE_RESULT.did,
-      epochId: CORE_RESULT.latestEpochId
-    })
-  })
-
-  it('logs a rejecting pin write and completes the enrollment anyway', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.mocked(saveUserKeyEpochPin).mockRejectedValueOnce(
-      new Error('QuotaExceededError')
-    )
-    const found = hit()
-    const outcome = await selfEnrollStandingClient({ found })
     expect(outcome.clientKeys).toEqual({
       clientSeed: CORE_RESULT.clientSeed,
       userKey: CORE_RESULT.userKey,
@@ -171,10 +143,9 @@ describe('selfEnrollStandingClient', () => {
       pointerDid: CORE_RESULT.did
     })
     expect(outcome.persistClientKeys).toBe(persistClosure)
-    expect(warn).toHaveBeenCalled()
   })
 
-  it('stays fatal when the key-set persist itself rejects, without pinning', async () => {
+  it('stays fatal when the key-set persist itself rejects', async () => {
     const found = hit()
     vi.mocked(found.enrollClientKeys!).mockRejectedValue(
       new Error('client-key record write failed')
@@ -182,6 +153,5 @@ describe('selfEnrollStandingClient', () => {
     await expect(selfEnrollStandingClient({ found })).rejects.toThrow(
       /client-key record write failed/
     )
-    expect(vi.mocked(saveUserKeyEpochPin)).not.toHaveBeenCalled()
   })
 })

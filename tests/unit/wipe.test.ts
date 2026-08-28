@@ -2,26 +2,19 @@
 /**
  * Unit tests for the shared wipe enumeration (`src/session/wipe.ts`) and its
  * sessionKey primitives: snapshot-first target derivation, deletion of every
- * unlock method's local trio across the registry, the pin families
- * (annex slots by prefix), the per-account localStorage families, and
- * the guest consumer -- asserted by DIRECT enumeration of the backing
- * stores, never by the deleter's own report.
+ * unlock method's local state across the registry, the Space-to-DID mapping,
+ * the per-account localStorage families, and the guest consumer -- asserted
+ * by DIRECT enumeration of the backing stores, never by the deleter's own
+ * report.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { deriveSpaceId } from '@interop/was-client/sync'
-import { accountLogPinId } from '@interop/wallet-core/webvh'
-import { clientAnnexLogPinId } from '@interop/wallet-core/clientAnnex'
-import { userKeyRosterPinId } from '@interop/wallet-core/keys'
 import {
-  deleteSessionKeysByPrefix,
   saveAccountDidForSpace,
   saveClientKeyRecord,
   saveKeyringCache,
-  saveKeyringFreshnessPin,
   savePasskeySafetyNotice,
-  saveUnlockMethodsCache,
-  saveUserKeyEpochPin,
-  sessionLogPinStore
+  saveUnlockMethodsCache
 } from '@/lib/sessionKey'
 import {
   executeLocalWipe,
@@ -36,7 +29,6 @@ const CLIENT_DID = 'did:key:z6MkClientClientClientClient'
 const DB_PREFIX = deriveSpaceId(CLIENT_DID)
 const ACCOUNT_DID = 'did:webvh:QmScid:example.com:space:acct-space'
 const ACCOUNT_SPACE_ID = 'acct-space'
-const CLIENT_ANNEX_SPACE_ID = 'comp-space'
 const PASSPHRASE_UNLOCK_SPACE = 'unlock-space-passphrase'
 const PASSKEY_UNLOCK_SPACE = 'unlock-space-passkey'
 
@@ -129,38 +121,7 @@ async function seedSessionDatabase(idb: IDBFactory): Promise<void> {
   ]) {
     await saveKeyringCache({ spaceId, record: { r: spaceId }, idb })
     await saveClientKeyRecord({ spaceId, record: { c: spaceId }, idb })
-    await saveKeyringFreshnessPin({
-      spaceId,
-      createdAt: '2026-01-01T00:00:00Z',
-      idb
-    })
   }
-  await saveUserKeyEpochPin({ accountDid: ACCOUNT_DID, epochId: 'e1', idb })
-  await saveUserKeyEpochPin({
-    accountDid: 'did:webvh:other',
-    epochId: 'e',
-    idb
-  })
-  const pins = sessionLogPinStore({ idb })
-  const pin = { method: 'm', scid: 's', head: 'h' }
-  await pins.write({
-    logId: accountLogPinId({ spaceId: ACCOUNT_SPACE_ID }),
-    pin
-  })
-  await pins.write({
-    logId: userKeyRosterPinId({ spaceId: ACCOUNT_SPACE_ID }),
-    pin
-  })
-  for (const generationId of ['gen-1', 'gen-2']) {
-    await pins.write({
-      logId: clientAnnexLogPinId({
-        spaceId: CLIENT_ANNEX_SPACE_ID,
-        generationId
-      }),
-      pin
-    })
-  }
-  await pins.write({ logId: accountLogPinId({ spaceId: 'other-space' }), pin })
   await saveAccountDidForSpace({
     spaceId: ACCOUNT_SPACE_ID,
     accountDid: ACCOUNT_DID,
@@ -210,30 +171,6 @@ function seedLocalStorage(backing: Map<string, string>): void {
   backing.set('fw-theme', 'dark')
 }
 
-describe('deleteSessionKeysByPrefix', () => {
-  it('deletes exactly the keys under the prefix', async () => {
-    const { idb, sessionStore } = createFakeSessionIdb()
-    await saveKeyringCache({ spaceId: 'a', record: {}, idb })
-    const pins = sessionLogPinStore({ idb })
-    const pin = { method: 'm', scid: 's', head: 'h' }
-    await pins.write({ logId: 'space/one/id/did.jsonl', pin })
-    await pins.write({ logId: 'space/one/gen-2/did.jsonl', pin })
-    await pins.write({ logId: 'space/one-more/id/did.jsonl', pin })
-    await deleteSessionKeysByPrefix({ prefix: 'log-head/space/one/', idb })
-    expect([...sessionStore.keys()].sort()).toEqual([
-      'keyring/a',
-      'log-head/space/one-more/id/did.jsonl'
-    ])
-  })
-
-  it('refuses an empty prefix', async () => {
-    const { idb } = createFakeSessionIdb()
-    await expect(
-      deleteSessionKeysByPrefix({ prefix: '', idb })
-    ).rejects.toThrow('non-empty prefix')
-  })
-})
-
 describe('the shared wipe enumeration', () => {
   let localStorageBacking: Map<string, string>
 
@@ -249,7 +186,7 @@ describe('the shared wipe enumeration', () => {
   })
 
   for (const loginSide of ['passphrase', 'passkey'] as const) {
-    it(`deletes both methods' trios and every family (from a ${loginSide} login)`, async () => {
+    it(`deletes both methods' local state and every family (from a ${loginSide} login)`, async () => {
       const { idb, sessionStore } = createFakeSessionIdb()
       await seedSessionDatabase(idb)
       const wipeLocalStorage = vi.fn(async () => {})
@@ -265,8 +202,7 @@ describe('the shared wipe enumeration', () => {
       const session = sessionFixture({ storage: { wipeLocalStorage } })
       const targets = snapshotWipeTargets({
         session,
-        registry: orderedRegistry,
-        clientAnnexSpaceId: CLIENT_ANNEX_SPACE_ID
+        registry: orderedRegistry
       })
       expect(deriveSpaceId(targets.clientDid)).toBe(DB_PREFIX)
       expect(targets.unlockSpaceIds).toContain(PASSPHRASE_UNLOCK_SPACE)
@@ -286,9 +222,6 @@ describe('the shared wipe enumeration', () => {
         [
           'keyring/other-unlock-space',
           'client-keys/other-unlock-space',
-          'keyring-freshness/other-unlock-space',
-          'user-key-epoch-pin/did:webvh:other',
-          `log-head/${accountLogPinId({ spaceId: 'other-space' })}`,
           'account-did/space/other-space',
           'unlock-methods/did:key:z6MkOther'
         ].sort()
@@ -323,9 +256,9 @@ describe('the shared wipe enumeration', () => {
 
     // Reported, never read as "no other methods".
     expect(failed).toEqual(['unlock-methods-registry'])
-    // The login credential's trio -- the client-key record above all -- is
-    // gone; the unread passkey method's trio is the stated residue.
-    for (const family of ['keyring', 'client-keys', 'keyring-freshness']) {
+    // The login credential's local state -- the client-key record above all
+    // -- is gone; the unread passkey method's is the stated residue.
+    for (const family of ['keyring', 'client-keys']) {
       expect(sessionStore.has(`${family}/${PASSPHRASE_UNLOCK_SPACE}`)).toBe(
         false
       )
@@ -383,8 +316,8 @@ describe('the shared wipe enumeration', () => {
     expect(failed).toEqual([])
     expect(unverified).toEqual([])
     // The fallback probe answered "absent" without creating anything, so
-    // the trio deletes were skipped rather than run through a versioned
-    // open.
+    // the local-state deletes were skipped rather than run through a
+    // versioned open.
     expect(databaseNames.has('freewallet-session')).toBe(false)
   })
 

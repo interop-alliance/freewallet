@@ -68,21 +68,6 @@ vi.mock('@interop/was-client', async importOriginal => ({
   }
 }))
 
-vi.mock('@/lib/sessionKey', () => ({
-  savePinFromDescriptor: vi.fn(async () => {
-    state.calls.push('savePinFromDescriptor')
-  }),
-  loadUserKeyEpochPin: vi.fn(async () => {
-    state.calls.push('loadUserKeyEpochPin')
-    return 'did:key:z6LSOldUserKey'
-  }),
-  // Built eagerly by the durable persistence handle the fixture carries.
-  sessionLogPinStore: vi.fn(() => ({
-    read: async () => null,
-    write: async () => undefined
-  }))
-}))
-
 vi.mock('@/session/rosterStore', () => ({
   sessionRosterStore: vi.fn(() => ({ rosterStore: true }))
 }))
@@ -115,7 +100,6 @@ import {
   retireClientAnnexRung,
   swapClientAnnexGeneration
 } from '@interop/wallet-core/clientAnnex'
-import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
 import { durableSessionPersistence } from '@/session/persistence'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { cascadeCollections } from '@/session/userKeyCascade'
@@ -226,6 +210,24 @@ function ceremonyDriving({
 }
 
 /**
+ * The visit's in-memory roster-epoch pin, stubbed so the ceremony's read
+ * and the adoption callback's write are both observable in `state.calls`.
+ */
+const epochPinLoad = vi.fn(async (_options: { accountDid: string }) => {
+  state.calls.push('loadUserKeyEpochPin')
+  return 'did:key:z6LSOldUserKey' as string | null
+})
+const epochPinSave = vi.fn(
+  async (_options: {
+    accountDid: string
+    epochId: string
+    descriptor: { epochs?: Array<{ id: string }> }
+  }) => {
+    state.calls.push('savePinFromDescriptor')
+  }
+)
+
+/**
  * A live-session fixture carrying exactly what the ceremony touches.
  */
 function sessionWith(
@@ -264,7 +266,10 @@ function sessionWith(
       ...('ladderSeed' in overrides
         ? { ladderSeed: overrides.ladderSeed }
         : {}),
-      persistence: durableSessionPersistence(),
+      persistence: {
+        ...durableSessionPersistence(),
+        epochPins: { load: epochPinLoad, saveFromDescriptor: epochPinSave }
+      },
       persistClientKeys: vi.fn(async () => {
         state.calls.push('persistClientKeys')
       })
@@ -365,7 +370,7 @@ describe('the ceremony hand-off', () => {
     expect(vi.mocked(cascadeCollections)).toHaveBeenCalledWith({
       remoteStore: session.storage.remoteStore
     })
-    expect(vi.mocked(loadUserKeyEpochPin)).toHaveBeenCalledWith(
+    expect(epochPinLoad).toHaveBeenCalledWith(
       expect.objectContaining({ accountDid: POINTER.did })
     )
   })
@@ -404,7 +409,7 @@ describe('the ceremony hand-off', () => {
       },
       userKey: FRESH_USER_KEY
     })
-    expect(vi.mocked(savePinFromDescriptor)).toHaveBeenCalledWith(
+    expect(epochPinSave).toHaveBeenCalledWith(
       expect.objectContaining({
         accountDid: POINTER.did,
         epochId: FRESH_USER_KEY.id,

@@ -2,8 +2,8 @@
  * Unpartitioned-storage access for the CHAPI popup pages. The popup runs in
  * a third-party iframe, where IndexedDB is partitioned under current
  * browser defaults -- the first-party `freewallet-session` database (this
- * client's key record, the account-pointer and roster-epoch pins) is
- * invisible there, so without help every popup login lands in the
+ * client's key record and the account-pointer cache) is invisible there, so
+ * without help every popup login lands in the
  * not-enrolled state. The Storage Access API's handle extension hands an
  * embedded document its UNPARTITIONED IndexedDB factory after a user
  * gesture, provided the user has interacted with the wallet origin

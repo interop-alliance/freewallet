@@ -6,27 +6,19 @@
  * a minimal in-memory fake.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { accountLogPinId } from '@interop/wallet-core/webvh'
-import { userKeyRosterPinId } from '@interop/wallet-core/keys'
 import {
   deleteAccountDidForSpace,
   deleteKeyringCache,
-  deleteLogPin,
   hasClientKeyRecord,
   saveClientKeyRecord,
   loadAccountDidForSpace,
-  loadKeyringFreshnessPin,
   saveAccountDidForSpace,
-  saveKeyringFreshnessPin,
   deletePasskeySafetyNotice,
   loadKeyringCache,
   loadPasskeySafetyNotice,
-  loadUserKeyEpochPin,
   savePasskeySafetyNotice,
   saveKeyringCache,
-  saveUserKeyEpochPin,
-  sessionDatabaseExists,
-  sessionLogPinStore
+  sessionDatabaseExists
 } from '@/lib/sessionKey'
 import { createFakeSessionIdb } from './fakeSessionIdb'
 
@@ -184,212 +176,6 @@ describe('keyring cache helpers', () => {
     await expect(
       loadKeyringCache({ spaceId: 'space-b', idb })
     ).resolves.toMatchObject({ record: { n: 2 } })
-  })
-})
-
-describe('user key epoch pin helpers', () => {
-  const EPOCH_IDS = ['did:key:z6LSepoch1', 'did:key:z6LSepoch2']
-  const ACCOUNT_DID = 'did:webvh:QmScidA:example.com:space-a'
-
-  it('establishes a first pin and advances it along the epoch order', async () => {
-    const idb = createFakeIdb()
-    await saveUserKeyEpochPin({
-      accountDid: ACCOUNT_DID,
-      epochId: EPOCH_IDS[0]!,
-      epochIds: EPOCH_IDS,
-      idb
-    })
-    await expect(
-      loadUserKeyEpochPin({ accountDid: ACCOUNT_DID, idb })
-    ).resolves.toBe(EPOCH_IDS[0])
-    await saveUserKeyEpochPin({
-      accountDid: ACCOUNT_DID,
-      epochId: EPOCH_IDS[1]!,
-      epochIds: EPOCH_IDS,
-      idb
-    })
-    await expect(
-      loadUserKeyEpochPin({ accountDid: ACCOUNT_DID, idb })
-    ).resolves.toBe(EPOCH_IDS[1])
-  })
-
-  it('refuses to move the pin backward along the served order', async () => {
-    const idb = createFakeIdb()
-    await saveUserKeyEpochPin({
-      accountDid: ACCOUNT_DID,
-      epochId: EPOCH_IDS[1]!,
-      epochIds: EPOCH_IDS,
-      idb
-    })
-    // A rolled-back (authentic, older) roster re-pinning the prior epoch.
-    await saveUserKeyEpochPin({
-      accountDid: ACCOUNT_DID,
-      epochId: EPOCH_IDS[0]!,
-      epochIds: EPOCH_IDS,
-      idb
-    })
-    await expect(
-      loadUserKeyEpochPin({ accountDid: ACCOUNT_DID, idb })
-    ).resolves.toBe(EPOCH_IDS[1])
-  })
-
-  it('refuses a differing write with no epoch order to compare against', async () => {
-    const idb = createFakeIdb()
-    await saveUserKeyEpochPin({
-      accountDid: ACCOUNT_DID,
-      epochId: EPOCH_IDS[1]!,
-      idb
-    })
-    await saveUserKeyEpochPin({
-      accountDid: ACCOUNT_DID,
-      epochId: EPOCH_IDS[0]!,
-      idb
-    })
-    await expect(
-      loadUserKeyEpochPin({ accountDid: ACCOUNT_DID, idb })
-    ).resolves.toBe(EPOCH_IDS[1])
-  })
-
-  it('refuses a served order that omits the stored pin', async () => {
-    const idb = createFakeIdb()
-    await saveUserKeyEpochPin({
-      accountDid: ACCOUNT_DID,
-      epochId: EPOCH_IDS[1]!,
-      epochIds: EPOCH_IDS,
-      idb
-    })
-    // A fabricated roster whose epoch list cannot order the stored pin.
-    await saveUserKeyEpochPin({
-      accountDid: ACCOUNT_DID,
-      epochId: 'did:key:z6LSfabricated',
-      epochIds: ['did:key:z6LSfabricated'],
-      idb
-    })
-    await expect(
-      loadUserKeyEpochPin({ accountDid: ACCOUNT_DID, idb })
-    ).resolves.toBe(EPOCH_IDS[1])
-  })
-})
-
-describe('continuity pin slots', () => {
-  const OTHER_DID = 'did:webvh:QmScidB:example.com:space-z'
-  const EPOCH_IDS = ['did:key:z6LSepoch1', 'did:key:z6LSepoch2']
-  const HEAD = {
-    method: 'did:webvh:1.0',
-    scid: 'QmScidA',
-    head: 'entry-hash-2'
-  }
-
-  it('shares one epoch-pin slot across Space ids under one DID', async () => {
-    // The mirror fork: a host mints a fresh Space id and mirrors the account
-    // into it. The pin is not keyed by the Space, so the mirror inherits the
-    // standing pin instead of a blank trust-on-first-use slot -- and the
-    // rolled-back epoch it serves is refused.
-    const idb = createFakeIdb()
-    const accountDid = 'did:webvh:QmScidA:example.com:space-a'
-    await saveUserKeyEpochPin({
-      accountDid,
-      epochId: EPOCH_IDS[1]!,
-      epochIds: EPOCH_IDS,
-      idb
-    })
-    await saveUserKeyEpochPin({
-      accountDid,
-      epochId: EPOCH_IDS[0]!,
-      epochIds: EPOCH_IDS,
-      idb
-    })
-    await expect(loadUserKeyEpochPin({ accountDid, idb })).resolves.toBe(
-      EPOCH_IDS[1]
-    )
-  })
-
-  it('keeps separate epoch-pin slots for separate DIDs', async () => {
-    // A different account (a different DID) is a fresh continuity slot, which
-    // is what dissolves the same-passphrase collision.
-    const idb = createFakeIdb()
-    const accountDid = 'did:webvh:QmScidA:example.com:space-a'
-    await saveUserKeyEpochPin({
-      accountDid,
-      epochId: EPOCH_IDS[1]!,
-      epochIds: EPOCH_IDS,
-      idb
-    })
-    await expect(
-      loadUserKeyEpochPin({ accountDid: OTHER_DID, idb })
-    ).resolves.toBeNull()
-  })
-
-  it('keeps separate chain-head slots for separate logIds', async () => {
-    // The keyed store: one instance serves every log, each under its own
-    // wallet-core-derived slot key.
-    const idb = createFakeIdb()
-    const store = sessionLogPinStore({ idb })
-    const logId = accountLogPinId({ spaceId: 'space-a' })
-    await store.write({ logId, pin: HEAD })
-    await expect(store.read({ logId })).resolves.toEqual(HEAD)
-    await expect(
-      store.read({ logId: accountLogPinId({ spaceId: 'space-z' }) })
-    ).resolves.toBeNull()
-  })
-
-  it('keeps the account-log and roster-log chain-head pins apart', async () => {
-    // The two account logs of ONE Space land in distinct slots, so one
-    // verification can never clobber the other's pin.
-    const idb = createFakeIdb()
-    const store = sessionLogPinStore({ idb })
-    await store.write({
-      logId: accountLogPinId({ spaceId: 'space-a' }),
-      pin: HEAD
-    })
-    await expect(
-      store.read({ logId: userKeyRosterPinId({ spaceId: 'space-a' }) })
-    ).resolves.toBeNull()
-  })
-
-  it('deletes only the named slot', async () => {
-    const idb = createFakeIdb()
-    const store = sessionLogPinStore({ idb })
-    const accountLogId = accountLogPinId({ spaceId: 'space-a' })
-    const rosterLogId = userKeyRosterPinId({ spaceId: 'space-a' })
-    await store.write({ logId: accountLogId, pin: HEAD })
-    await store.write({ logId: rosterLogId, pin: HEAD })
-    await deleteLogPin({ logId: accountLogId, idb })
-    await expect(store.read({ logId: accountLogId })).resolves.toBeNull()
-    await expect(store.read({ logId: rosterLogId })).resolves.toEqual(HEAD)
-  })
-})
-
-describe('keyring-freshness pin', () => {
-  const SPACE_ID = 'unlock-space-a'
-  const OLDER = '2026-08-01T00:00:00.000Z'
-  const NEWER = '2026-08-02T00:00:00.000Z'
-
-  it('advances the pin on a newer write', async () => {
-    const idb = createFakeIdb()
-    await saveKeyringFreshnessPin({ spaceId: SPACE_ID, createdAt: OLDER, idb })
-    await saveKeyringFreshnessPin({ spaceId: SPACE_ID, createdAt: NEWER, idb })
-    await expect(
-      loadKeyringFreshnessPin({ spaceId: SPACE_ID, idb })
-    ).resolves.toBe(NEWER)
-  })
-
-  it('refuses to move the pin backward', async () => {
-    const idb = createFakeIdb()
-    await saveKeyringFreshnessPin({ spaceId: SPACE_ID, createdAt: NEWER, idb })
-    await saveKeyringFreshnessPin({ spaceId: SPACE_ID, createdAt: OLDER, idb })
-    await expect(
-      loadKeyringFreshnessPin({ spaceId: SPACE_ID, idb })
-    ).resolves.toBe(NEWER)
-  })
-
-  it('restates an equal pin harmlessly', async () => {
-    const idb = createFakeIdb()
-    await saveKeyringFreshnessPin({ spaceId: SPACE_ID, createdAt: NEWER, idb })
-    await saveKeyringFreshnessPin({ spaceId: SPACE_ID, createdAt: NEWER, idb })
-    await expect(
-      loadKeyringFreshnessPin({ spaceId: SPACE_ID, idb })
-    ).resolves.toBe(NEWER)
   })
 })
 

@@ -52,9 +52,8 @@ const log = createLogger('fw:ui:login')
 
 /**
  * The refusal states that offer the forget affordance: the keyring
- * authenticity and replay refusals and the two continuity refusals -- the
- * states where a stale local prior (or a genuinely hostile host) wedges the
- * login with no in-app remedy. The affordance is the no-unlock-material
+ * authenticity refusal and the two continuity refusals -- the states where a
+ * hostile host wedges the login with no in-app remedy. The affordance is the no-unlock-material
  * grade: a whole-database, browser-scoped wipe, never a ceremony -- nothing
  * derived from the typed secret is trusted in these states, so nothing is
  * signed, and each account's standing document client remains (stated in the
@@ -62,7 +61,6 @@ const log = createLogger('fw:ui:login')
  */
 const FORGETTABLE_ERROR_KEYS = new Set([
   'auth.errors.keyringForged',
-  'auth.errors.keyringRolledBack',
   'auth.errors.accountLogContinuity',
   'auth.errors.userKeyRosterContinuity'
 ])
@@ -194,8 +192,8 @@ export function LoginPage() {
       login(session)
       recordWalletLogin({ session })
       // The roster read adopted a rotated user key but could not write this
-      // browser's durable copy (client-key record or epoch pin): the session
-      // is fine, so warn rather than fail the login.
+      // browser's copy of it (the client-key record): the session is fine,
+      // so warn rather than fail the login.
       if (session.userKeyPersistFailed) {
         showToast({
           message: t('auth.login.rememberBrowserWarning'),

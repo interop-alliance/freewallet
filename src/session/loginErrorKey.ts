@@ -7,7 +7,6 @@
  */
 import {
   KeyringRecordForgedError,
-  KeyringRecordRolledBackError,
   KeyringRecordUnusableError
 } from '@/session/keyring'
 import { TransientLoginUnavailableError } from '@/session/transientLogin'
@@ -99,12 +98,6 @@ export function loginErrorKey({
   if (err instanceof KeyringRecordForgedError) {
     log.error('Login refused: keyring record forged', { label, err })
     return { key: 'auth.errors.keyringForged' }
-  }
-  // The replay refusal: a validly signed record, but older than the newest
-  // this browser has accepted for the secret.
-  if (err instanceof KeyringRecordRolledBackError) {
-    log.error('Login refused: keyring record rolled back', { label, err })
-    return { key: 'auth.errors.keyringRolledBack' }
   }
   // The account-log continuity refusal: the served did:webvh log is a
   // rollback, a fork, or an identity switch against the chain head this

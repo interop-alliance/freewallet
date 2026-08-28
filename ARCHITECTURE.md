@@ -22,8 +22,9 @@ src/lib/            Pure business logic (no React)
   kms.ts            WebKMS keystore provisioning (ensureKeystore)
   resolveWalletInput.ts  The one door for free-form text (paste box, QR),
                     over the shared wallet-input classifier
-  sessionKey.ts     freewallet-session IndexedDB caches (keyring, unlock
-                    methods, pins, passkey-safety notices)
+  sessionKey.ts     freewallet-session IndexedDB state (keyring cache,
+                    client-key records, unlock methods, passkey-safety
+                    notices)
   corsProxy.ts      The one CORS-proxy path (`VITE_CORS_PROXY_URL`): the
                     pasted-URL credential fetch and the registries fetch
   viewMappers/      Transform raw credential data into display-ready values
@@ -133,10 +134,10 @@ key unwrapped from the credential's standing wrap. Between the two entries
 the required `onCommitted` seam writes the PENDING-shape client-key record
 (seeds, controller, `pointerDid`, the `pending` group, no user key), so the
 pivot never publishes a client only a live tab could re-derive; completion
-writes the enrolled shape before the epoch pin (a rejecting pin write is
-logged, not a login failure). A later login routes a pending record (the
-discriminator is user-key absence; `pointerDid` is the resume's account
-cross-check, not a routing member) to the
+writes the enrolled shape, then advances the visit's epoch pin (a rejecting
+pin write is logged and the login proceeds). A later login routes a pending
+record (the discriminator is user-key absence; `pointerDid` is the
+resume's account cross-check, not a routing member) to the
 resume (`src/session/pendingEnrollment.ts`), decided from the verified log
 history: a VM-listed record completes; a never-published one re-runs
 seeded with the recorded key set (a log behind the recorded head refuses,
@@ -190,24 +191,21 @@ doubly so since the record carries the recovery bridge (a broken target
 would break login itself).
 
 A signature cannot catch a REPLAY: a record the account has since moved off
-stays authentic forever. So each client keeps a **freshness pin** (plaintext
-local state, per unlock credential): the newest signed `createdAt` it has
-accepted. A record older than the pin is refused as a rollback
-(`KeyringRecordRolledBackError`); an equal or newer one is accepted and
-advances the pin, which only moves forward (a transactional forward-only
-compare-and-set). The stamps are wall-clock, made safe against
-clock skew by advance-past stamping: every write site stamps `max(now,
-fetched record's createdAt + 1ms, local pin + 1ms)`, so a rebind after a
-fast-clock client's bind cannot wedge other clients into the rollback
-refusal. Nothing compares pointers: a validly signed, non-stale
-record naming an account this client has never seen is followed wherever it
-points -- a rebind, a host migration, and a fresh account bound under a
-reused passphrase are all legitimate, and all produce a newer signed record.
-The pin is browser-local, so it is a remembered browser's state. A
-transient login reads and writes none (`fetchTransientKeyring`), which
-makes replay refusal something durable state buys: on the default entry a
-host may serve a record the account has since moved off. Pricing that is
-tracked separately.
+stays authentic forever. Catching one takes a prior from an earlier visit,
+and this wallet keeps none
+(`decisions/0012-no-durable-continuity-pins.md`; the rule and its successor
+are stated once under "Log continuity within a session"). So a replayed
+unlock record is a stated bound rather than a refusal. A login can land in
+an account the user has moved off, showing that account's contents. It is
+visible for exactly that reason, and reversible by logging in again once
+the host serves the current record. Record stamps are still wall-clock and
+still advance past what they replace: every write site stamps `max(now,
+fetched record's createdAt + 1ms)`, so a client whose clock lags another's
+still writes a record that supersedes the one it overwrites. Nothing
+compares pointers either. A validly signed record naming an account this
+client has never seen is followed wherever it points -- a rebind, a host
+migration, and a fresh account bound under a reused passphrase are all
+legitimate, and all produce a newer signed record.
 
 The bound on the whole construction: server-held material the unlock
 credential alone decrypts (the record, and the credential's standing wrap
@@ -451,25 +449,49 @@ public log fetch and delegated PUT. The `did.json` projection PUT stays
 unconditional: it runs only behind a won log CAS, and the log is the
 source of truth.
 
-**The account-log chain-head pin.** Resolving the world-readable log is
+**Log continuity within a session.** Resolving the world-readable log is
 one-shot verification: a valid PREFIX of the real log carries the same
 genesis, so the same SCID and DID, and a ceremony built on it would
 republish erased enrollments and undone revocations. So every
-`verifyAccountLog` read carries a durable chain-head pin
-(`sessionLogPinStore` in the session database, shared with the roster
-log): a served log that is a rollback, a fork, or an SCID/method switch
-against the pinned head is refused (`@interop/vh-resource-log`'s
-`ResourceLogContinuityError`). The pin is established at first contact
-(trust-on-first-use), advanced only by a log verifying past it, never
-regressed. It is browser-local, so it spans logins on a remembered
-browser alone. A transient session's pin store is in-memory and empty at
-visit start, so the default entry is trust-on-first-use afresh every
-visit. The DID cross-check still holds there (a mirror resolves to
-another DID), so what a host gains against such a visit is the prefix
-this pin exists to catch: a stale document view with a revoked client
-still listed or a retired credential still standing. Whether a
-credential-only visit should carry a prior at all is tracked
-separately. It rides the verified-log memo (`src/session/verifiedLog.ts`),
+`verifyAccountLog` read carries a chain-head pin (`persistence.logPins`,
+`@interop/vh-resource-log`'s keyed `ResourceLogPinStore`): a served log
+that is a rollback, a fork, or an SCID/method switch against the pinned
+head is refused (`ResourceLogContinuityError`). The pin is established at
+the visit's first contact, advanced only by a log verifying past it,
+never regressed. One keyed store serves every log this session reads.
+`read` and `write` take a per-log slot key wallet-core derives
+(`accountLogPinId` / `userKeyRosterPinId`, both
+`space/<spaceId>/<collection>/<resource>` under the hood), so two logs
+cannot clobber each other's pin. The slot key is host-free, so a log
+served from a claimed new host is checked against the pin already held.
+
+The pin store is in-memory on both persistence strategies
+(`decisions/0012-no-durable-continuity-pins.md`). The rule that leaves,
+stated once here for the whole document: continuity is checked within a
+session and not across sessions. One login makes many log reads -- a
+transient visit resolves the annex log three times, beside the account
+log and the roster -- and the pin is what catches a host serving
+inconsistent versions across them. Nothing carries a prior from one visit
+to the next, on any browser, so remembered and transient sessions have
+identical continuity properties. The successor to a pin is witnessing, and
+it belongs to the log layer rather than to this wallet.
+`@interop/did-method-webvh` already implements witness proofs and this
+wallet consumes none of them. `@interop/vh-resource-log` would need an
+equivalent before the roster and annex logs were covered. Every other
+continuity claim in this document rests on this paragraph.
+
+The bound that leaves, stated where the refusal used to be: a host
+serving a valid prefix of the account log to a fresh visit is not
+detected. The prefix carries the genuine genesis, so `expectedDid`, the
+entry proofs, and chain verification all pass on it. What such a visit
+sees is a stale document view -- a revoked client still listed, or a
+retired credential still standing -- and a rotation run against that view
+can re-wrap the fresh user key to a client the account has revoked. That
+takes host malice plus a previously-revoked client colluding. Against a
+passphrase account the same malicious host can grind the credential
+offline anyway. That bound is stated in "Session & auth flow".
+
+The pin rides the verified-log memo (`src/session/verifiedLog.ts`),
 the bare-parts roster store's controller resolution, the recovery flows'
 direct reads, and the enrollment completion's first contact; the login
 page renders the refusal (`auth.errors.accountLogContinuity`). A
@@ -477,42 +499,32 @@ page renders the refusal (`auth.errors.accountLogContinuity`). A
 is adopted, and a caller with a cached document view may carry on with it.
 Ceremony-path `did.jsonl` reads additionally check the resolved DID
 against the account pointer (`expectedDid` on the revocation cascade and
-the recovery ceremonies). This repo's own two log-publishing ceremonies,
+the recovery ceremonies). That check is what refuses a mirror: the
+did:webvh id embeds the Space id, so a mirror served under a freshly
+minted Space id resolves to a DIFFERENT DID than the pointer names
+(`verifyAccountLog` makes the same resolved-DID check on its own). This
+repo's own two log-publishing ceremonies,
 `ensureDidWebvh` (login-time provisioning) and `rotateWebvhUpdateKey` (the
 settings-page update-key rotation), read the log under the same pin store
-and the account's DID, so a truncated or substituted log is refused
-before an entry is built on it. Provisioning stays non-fatal (a hiccup
+and the account's DID, so a substituted log is refused before an entry is
+built on it, as is a truncated one once an earlier read in the same login
+has seen past it. Provisioning stays non-fatal (a hiccup
 must not fail login), but a non-`rollback` continuity refusal is logged as
 an error; later account-log reads in the same login hit the same pin and
 surface it to the user.
 
-**The pin inventory.** The session database holds four continuity priors,
-in three shapes. All four are browser-local, so the inventory below is a
-remembered browser's; a transient session builds in-memory stand-ins that
-die with the tab, and holds no freshness pin at all. The two chain-head
-pins (the account log's and the roster log's) live in ONE keyed store
-(`sessionLogPinStore` in `src/lib/sessionKey.ts`, implementing
-`@interop/vh-resource-log`'s keyed `ResourceLogPinStore`): `read` and
-`write` take a per-log slot key
-wallet-core derives (`accountLogPinId` / `userKeyRosterPinId`, both
-`space/<spaceId>/<collection>/<resource>` under the hood), so one store
-serves every log and two logs can never clobber each other's pin. The slot
-key is host-free: a log served from a claimed new host lands in the same
-slot and is checked against the pin already held. A mirror under a freshly
-minted Space id gets a fresh slot, but the did:webvh id embeds the Space
-id, so the mirror resolves to a DIFFERENT DID than the account pointer
-names and every ceremony-path read refuses it (`expectedDid`, and
-`verifyAccountLog`'s own resolved-DID check). The roster-epoch pin is keyed
-by the account DID (it guards a chainless value, and the DID is the one
-identity a substituted pointer cannot change); the keyring-freshness pin by
-the unlock Space. Because the chain-head slot is Space-keyed, the genesis
-ceremony's log read runs under the same slot from first contact, and the
-published DID persists locally keyed by the data Space id so a later
-pre-promotion heal login can state an `expectedDid` before the pointer has
-caught up. Account deletion clears all of it through the shared wipe
-enumeration (below) beside the keyring retirement. Before the account
-Space dies, deletion also walks the unlock-methods registry and deletes
-each entry's unlock Space and local trio best-effort
+**The Space-to-DID mapping.** One browser-local continuity artifact
+outlives the visit, and it is not a pin: the account DID a data Space's
+log published as, recorded by the client that published it
+(`saveAccountDidForSpace` in `src/lib/sessionKey.ts`). It records what
+this browser did rather than a version some host served. A signup torn
+between the log publication and the account-pointer backfill heals at a
+later login whose pointer still names no did:webvh, and this mapping is
+what lets that heal state an `expectedDid` anyway. Account deletion
+clears it through the shared wipe enumeration (below) beside the keyring
+retirement. Before the account Space dies, deletion also walks the
+unlock-methods registry and deletes each entry's unlock Space and
+unlock-local state best-effort
 (`deleteUnlockMethodArtifacts` in `src/session/unlockMethods.ts`, removing
 the dangling existence-oracle Spaces a probe could still find), then
 deletes the auxiliary annex Space in one `space.delete()`. Both run BEFORE
@@ -529,18 +541,18 @@ designed onto the same seam). It is snapshot-first: every target derives
 from the live session before anything is deleted. The client-keyed families
 (the unlock-methods cache, the passkey-safety notice, the replica-database
 prefix, the local-mode cache scope) derive from this browser's own client
-did:key, not the account controller. Each unlock method's local trio
-derives from the registry walked across every method, always including the
-session's own login credential (`profile.unlockMethod` and the standing
-members' unlock Space id), so a registry read lost to a transient server
-error narrows the trio enumeration to the other methods only and is
-reported on the wipe outcome (`unlock-methods-registry`) rather than
+did:key, not the account controller. Each unlock method's unlock-local
+state derives from the registry walked across every method, always
+including the session's own login credential (`profile.unlockMethod` and
+the standing members' unlock Space id), so a registry read lost to a
+transient server error narrows that enumeration to the other methods only
+and is reported on the wipe outcome (`unlock-methods-registry`) rather than
 leaving this browser's client-key record behind a wipe that reads clean.
-The epoch pin derives from the account DID; the chain-head pin slots by
-Space-scoped prefix, which also clears every annex generation's slot
-without needing the generation ids; then the Space-to-DID mapping and the
+Then the Space-to-DID mapping, keyed by the account Space id, and the
 per-account localStorage families (the descriptor and meta caches under
-both scope schemes, the migration markers). Cross-tab teardown precedes the
+both scope schemes, the migration markers). No continuity pin is
+enumerated, because none is stored: every pin store dies with the tab
+(see "Log continuity within a session"). Cross-tab teardown precedes the
 replica delete (a broadcast asks sibling tabs to drop open handles), and
 completion is verified by re-probing rather than resolved while blocked.
 Global UI prefs stay out; the global `writerId` clears only on the forget
@@ -583,7 +595,7 @@ DIFFERENT account than the unlock record points at is stale residue, not a
 forgotten browser -- a prior account under a reused passphrase whose
 account is gone server-side, so no wipe ever touched this browser. The
 stale wipe clears what the record alone derives (the dead account's
-replica, caches, and pins, and the credential's whole local trio, the
+replica and caches, and the credential's whole unlock-local state, the
 record included) and the login re-routes once as a record-less browser, so
 it never reaches the detector at all. A
 pending-shape record is spared for the resume instead (`decisions/0007`),
@@ -746,12 +758,12 @@ ordinary transient composition below. A `rememberBrowser: true` signup (the
 signup form's remember choice, or the e2e seam) instead follows the
 establishment with the ordinary durable login, whose self-enrollment makes
 this browser a durable client from the record the establishment just wrote
--- two loud log entries on top of the establishment's own. The durable
-login's chain-head pin store is seeded by the establishment's own
-publication rather than trust-on-first-use, and the credential-anchored
-bind floors its record stamp over the caller's local keyring-freshness pin
-so a stale pin cannot make the login refuse its own signup's record as a
-rollback. A signup torn before the durable login's self-enrollment is
+-- two loud log entries on top of the establishment's own. That login
+carries nothing over from the establishment: it builds its own pin store
+and meets the account log at first contact, like every other login. The
+credential-anchored bind advances its record stamp past the served
+record's stamp alone. A signup torn before the durable login's
+self-enrollment is
 resumed by a later `rememberBrowser: true` login attempt, which re-runs the
 establishment from the record's own ladder seed and then self-enrolls; see
 "The transient login" below for the same heal's non-remembered entry. The
@@ -824,10 +836,12 @@ write to LOCAL durable storage is decided once, at login, by the typed
 `SessionPersistence` handle carried at `profile.persistence`. Durability is a
 property of the handle's type; a write site consults no flag and takes no
 branch (freewallet `decisions/0001-no-memory-overlay-storage-fork.md`). The
-families riding the handle: the keyed chain-head pin store (the account log's
-and the roster log's), the roster-epoch pin, the unlock-methods registry
-cache, the passkey-safety notice, the descriptor/meta cache pair (one instance
-per scope per session), and the `writerId` mint. The durable variant is the
+families riding the handle: the unlock-methods registry cache, the
+passkey-safety notice, the descriptor/meta cache pair (one instance per
+scope per session), and the `writerId` mint. Two more members ride it
+without varying by durability -- the keyed chain-head pin store and the
+roster-epoch pin, in memory on both variants
+(`decisions/0012-no-durable-continuity-pins.md`). The durable variant is the
 `freewallet-session` database (it alone carries the `idb` factory, so code
 needing that database must hold the durable variant), the localStorage caches,
 and the durable `writerId`. The transient variant -- a public-terminal visit
@@ -903,7 +917,7 @@ remembered (the resume is its one mender); the resume's discard outcome
 deletes it, so the next attempt probes record-less again. The composition
 (`transientSessionFromKeyringHit`): the transient unlock-record
 fetch (`fetchTransientKeyring`, no durable operation), the account log
-verified under the visit's in-memory pins, then the **client-annex
+verified under the visit's pins, then the **client-annex
 generation-readiness stage** (`ensureClientAnnexGenerationReady`, over
 wallet-core's
 `ensureCredentialClientAnnexGeneration`), run on every visit rather than
@@ -976,9 +990,9 @@ retry cannot help), on both paths that state arrives by, the mend's own
 `no-wrap` outcome and the roster read's unwrap throw, which is mapped
 here rather than left to escape into the durable path's
 connect-this-browser copy; a mint the roster arm's preconditions refused
-(a durable roster-epoch pin held for the account, or foreign
-key-agreement entries) refuses `roster-mint-refused`, since every retry
-re-runs the same refusal; and the promotion arm's still-failing retry
+(an account log that did not resolve, a foreign key-agreement entry in
+the document, or a collection already carrying an epoch) refuses
+`roster-mint-refused`, since every retry re-runs the same refusal; and the promotion arm's still-failing retry
 rethrows the original roster error unchanged. Without the derived
 credential in hand (a test double) no arm runs and the refusals stand. A
 partial collection fan-out is not a refusal: the stranded collections are
@@ -986,7 +1000,7 @@ named in a warn, the only trace on a client-less account no login sweep
 revisits. The durable resume of a
 `rememberBrowser: true` signup torn before its self-enrollment runs the
 same mend (`healUnpromotedRememberedAccount`), supplying the registry
-hook and the local keyring-freshness-pin floor; a mend that leaves the
+hook; a mend that leaves the
 pointer naming no did:webvh rethrows the arm's error rather than sending
 a self-enrollment at a pointer it cannot use. Nothing encrypted
 predates the roster arm's mint, so a fresh user key orphans nothing.
@@ -1028,7 +1042,7 @@ The roster is **log-governed**: it lives as the resource log
 `key-map/user-key.jsonl`, with no point-state companion resource.
 wallet-core's `userKeyRosterDescriptorStore` (`@interop/wallet-core/keys`)
 exposes that log as an ordinary descriptor store -- reads resolve only to the
-log's VERIFIED head (chain, entry proofs, and the durable chain-head pin all
+log's VERIFIED head (chain, entry proofs, and the visit's chain-head pin all
 checked first), writes are signed log appends -- so was-client's roster
 machinery (`initRecipients` / `addRecipient` / `removeRecipient`, with their
 compare-and-swap retry loops) drives the log without knowing it. The wiring is
@@ -1038,10 +1052,11 @@ did:webvh), for callers with no session profile (the login-time read and the
 recovery continuation), and `sessionRosterStore` for a live session, which
 resolves the controller view through the profile's verified-log memo so a
 ceremony that just extended the account log anchors its appends at the
-post-edit head. The chain-head pin is durable either way (`sessionLogPinStore`
-in the session database, the keyed store shared with the account-log pin;
-wallet-core derives the roster log's slot key from the Space id), so log
-continuity spans logins.
+post-edit head. Either builder pins on the session's own store
+(`persistence.logPins`, the keyed store the account log rides too;
+wallet-core derives the roster log's slot key from the Space id), so the
+roster's continuity is checked within the visit like every other log's
+(see "Log continuity within a session").
 
 Provisioning initializes the roster idempotently with the account's existing
 user key as the first epoch, as the account-genesis ceremony's roster stage --
@@ -1065,21 +1080,22 @@ resource log itself: roster state is adopted only from a verified head, whose
 entry proofs must be signed by keys the independently verified did:webvh
 document lists under `assertionMethod` at the anchored version
 (`ResourceLogIntegrityError`), and whose chain-head pin refuses rollbacks,
-forks, and SCID or method switches (`ResourceLogContinuityError`). At login
+forks, and SCID or method switches within the visit
+(`ResourceLogContinuityError`; the prefix a fresh visit cannot detect is
+the bound stated under "Log continuity within a session"). At login
 the chain-head `rollback` reason is the carve-out, matching the account-log
 pin's: a head behind the pin may be nothing worse than a lagging replica, so
 wallet-core's login policy degrades it to the transport class (the session
 keeps the cached user key, nothing rolled back is adopted, and the pin never
 regresses) instead of locking the user out of a healthy account. `fork` and
-the SCID/method switches stay session-refusing. Second, the locally pinned
-latest-seen roster epoch (`src/lib/sessionKey.ts`, beside the
-keyring-freshness pin): a served roster that rolls back behind the pin is
-refused (`UserKeyRosterContinuityError`, with no rollback carve-out, since the
-chainless epoch pin cannot tell a rollback from a fork). It is kept because it
-still guards a client whose chain-head pin was lost with a reinstall. Like
-the chain-head pin it is browser-local, and a transient visit's is
-in-memory and empty when the visit begins. Third,
-at rotation time, a recipient resolver backed by the locally verified
+the SCID/method switches stay session-refusing. Second, the visit's
+latest-seen roster epoch (`memoryEpochPinStore` in
+`src/session/persistence.ts`): a served roster that rolls back behind the
+pin is refused (`UserKeyRosterContinuityError`, with no rollback carve-out,
+since the chainless epoch pin cannot tell a rollback from a fork). It is
+kept because one login reads the roster several times, and a chainless
+value needs its own guard against an older epoch arriving at a later read.
+Third, at rotation time, a recipient resolver backed by the locally verified
 did:webvh document: a roster entry with no `keyAgreement` verification method
 marked for that client is dropped and never receives a wrap, so a
 server-injected entry sits ignored.
@@ -1317,8 +1333,8 @@ afterwards, from the superseded epoch's escrow to the fresh credential. The
 epoch cascade and the unlock-methods registry update (spent entry out,
 replacement and new-passphrase entries in, re-sealed to the rotated user
 key) ride the generation delegation, and the visit then enters through the
-ordinary transient composition with zero local residue (the locate step's
-chain-head pin rides in memory too). Two residues remain. A tear inside the
+ordinary transient composition with zero local residue. Two residues
+remain. A tear inside the
 append leaves the spent code dead (its key left the document, so a re-run
 refuses it as spent) and the current epoch wrapped to the removed code
 alone; on a client-less account no login sweep runs, so the mender is a
@@ -2412,15 +2428,18 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   is extend the world-readable log, which keeps credential use loud.
   Re-minted by the revocation cascade and refreshed near expiry by the
   credential's own login.
-- **Unlock trio** -- the three browser-local artifacts one unlock method
-  leaves on a browser, all keyed by its unlock Space id: the keyring cache,
-  the wrapped client-key record, and the keyring-freshness pin. It is the
-  whole of what a credential owns locally, so a fourth per-credential
-  artifact joins it rather than each retiring site. "The trio" is the short
-  form in prose; the code names it the local trio (`deleteUnlockLocalTrio`
-  in `src/lib/sessionKey.ts`, the one deleter). The shared wipe enumeration
-  walks one per registered unlock method (see "The shared wipe
-  enumeration"). Avoid: local state, unlock artifacts, credential residue.
+- **Unlock-local state** -- the browser-local artifacts one unlock method
+  leaves on a browser, all keyed by its unlock Space id: today the keyring
+  cache and the wrapped client-key record. It is the whole of what a
+  credential owns locally, so a further per-credential artifact joins this
+  list rather than each retiring site, and one leaving it is removed here.
+  The term is deliberately count-free: the set was three artifacts while
+  the keyring-freshness pin stood
+  (`decisions/0012-no-durable-continuity-pins.md`). The code names it the
+  same way (`deleteUnlockLocalState` in `src/lib/sessionKey.ts`, the one
+  deleter), and the shared wipe enumeration walks one set per registered
+  unlock method (see "The shared wipe enumeration"). Avoid: unlock trio,
+  local trio, unlock artifacts, credential residue.
 - **Ladder (update-key ladder)** -- the chain of did:webvh update keys
   derived from a standing credential's random ladder seed. Each rung is
   committed ahead of use as a hash in `nextKeyHashes` (the method's
@@ -2555,15 +2574,16 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   (`decisions/0011-durable-names-server-storage-only.md`). Avoid: durable
   session, durable client, durable login, durable pin.
 - **Browser-local** -- persisted in this browser's IndexedDB or
-  localStorage: the client-key record, the four continuity pins, the
-  descriptor and meta caches, the `writerId`, and the replica database.
-  Semi-durable -- it survives a reload but not an eviction, a cleared
+  localStorage: the client-key record, the keyring cache, the Space-to-DID
+  mapping, the descriptor and meta caches, the `writerId`, and the replica
+  database. Semi-durable -- it survives a reload but not an eviction, a cleared
   profile, or a lost machine -- so it is a cache of what the host holds,
   never the only home of anything the account needs. Avoid: durable local
   state, disk, persistent storage.
 - **In-memory** -- held in tab memory and gone when the tab closes: a
-  transient session's whole store family, every session's unlocked key
-  material, and the prefs overlay. The third storage tier.
+  transient session's whole store family, every session's continuity pin
+  stores and unlocked key material, and the prefs overlay. The third
+  storage tier.
 - **Session persistence** -- the axis deciding which storage tier a
   session may write to, fixed once at login by the typed persistence
   strategy (see the section of this name). Two variants, each named for
@@ -2573,10 +2593,13 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   transient axis: a guest session is browser-local and is not remembered.
   Avoid: durability, posture, mode.
 - **Persistence strategy** -- the typed object at `session.persistence`
-  through which every tier-sensitive write travels: the keyed chain-head
-  pin store, the roster-epoch pin, the unlock-methods cache, the
-  passkey-safety notice, the descriptor/meta cache pair, and the
-  `writerId` mint. The variant IS the type, so a write site never branches
+  through which every tier-sensitive write travels: the unlock-methods
+  cache, the passkey-safety notice, the descriptor/meta cache pair, and the
+  `writerId` mint. The two continuity pin stores (the keyed chain-head one
+  and the roster-epoch one) ride it as well, in memory whichever variant
+  it is, so they are carried by the strategy without being decided by it
+  (`decisions/0012-no-durable-continuity-pins.md`). The variant IS the
+  type, so a write site never branches
   -- an in-memory strategy simply has no member reaching the session
   database (`decisions/0001-no-memory-overlay-storage-fork.md`). Avoid:
   persistence handle, durability handle ("handle" in this repo is the

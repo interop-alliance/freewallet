@@ -642,8 +642,7 @@ describe('the standing-establishment success gate', () => {
     state.rosterRecipients = ['everyone-already-escrowed']
 
     const resumed = await resumeRecoverySpend({
-      found: found as KeyringFetchResult,
-      idb
+      found: found as KeyringFetchResult
     })
 
     // The resume's backfill made the standing configuration real and its
@@ -725,7 +724,6 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
     const capture = captureSink()
     addSink(capture.sink)
     const { found, spent, replacement, standingClient } = await makeSpendFound()
-    const { idb } = createFakeSessionIdb()
     // The first roster read finds no wrap for the new client: the entry
     // landed, the escrows did not (the band the unwrap-key carrier closes).
     // The credential's standing wrap already stands, so the standing
@@ -736,7 +734,7 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
       standingClient.recipientKid
     ]
 
-    const result = await resumeRecoverySpend({ found, idb })
+    const result = await resumeRecoverySpend({ found })
 
     // Both escrows ran, owned by the spent code's re-derived KAK.
     expect(state.escrows).toHaveLength(2)
@@ -760,12 +758,11 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
 
   it('backfills the replacement escrow on a between-escrows tear', async () => {
     const { found, replacement, standingClient } = await makeSpendFound()
-    const { idb } = createFakeSessionIdb()
     // The read succeeds (this client's wrap stands) but the current epoch
     // carries no wrap for the replacement code; the standing wrap stands.
     state.rosterRecipients = [standingClient.recipientKid]
 
-    await resumeRecoverySpend({ found, idb })
+    await resumeRecoverySpend({ found })
 
     expect(state.escrows.map(escrow => escrow.recipientId)).toContain(
       replacement.recipientKid
@@ -776,14 +773,13 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
 
   it('backfills the registry mutation when the tail never wrote it', async () => {
     const { found, standingClient } = await makeSpendFound()
-    const { idb } = createFakeSessionIdb()
     state.rosterRecipients = [
       'everyone-already-escrowed',
       standingClient.recipientKid
     ]
     state.registryRecord = null
 
-    await resumeRecoverySpend({ found, idb })
+    await resumeRecoverySpend({ found })
 
     expect(state.calls).toContain('registryMutation')
     const written = state.registryWrites[0] as {
@@ -803,13 +799,12 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
 
   it('gates the record completion on the confirm and clears the carrier there', async () => {
     const { found, persistClientKeys, standingClient } = await makeSpendFound()
-    const { idb } = createFakeSessionIdb()
     state.rosterRecipients = [
       'everyone-already-escrowed',
       standingClient.recipientKid
     ]
 
-    const result = await resumeRecoverySpend({ found, idb })
+    const result = await resumeRecoverySpend({ found })
 
     // Nothing persisted until the confirm.
     expect(persistClientKeys).not.toHaveBeenCalled()
@@ -828,12 +823,11 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
 
   it('backfills the standing establishment (wrap + document entry) when the tail was torn before it', async () => {
     const { found, standingClient } = await makeSpendFound()
-    const { idb } = createFakeSessionIdb()
     // Everything else stands; the credential's standing wrap and document
     // commitment do not (the tail died before the establishment stages).
     state.rosterRecipients = ['everyone-already-escrowed']
 
-    const result = await resumeRecoverySpend({ found, idb })
+    const result = await resumeRecoverySpend({ found })
 
     // The backfill finished both halves, so the prompt reports established.
     expect(result.recoverySpendPrompt?.standing).toBe('established')
@@ -849,7 +843,6 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
 
   it('skips the standing backfill when wrap and commitment already stand', async () => {
     const { found, standingClient } = await makeSpendFound()
-    const { idb } = createFakeSessionIdb()
     state.rosterRecipients = [
       'everyone-already-escrowed',
       standingClient.recipientKid
@@ -873,7 +866,7 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
       nextKeyHashes: []
     } as never)
 
-    await resumeRecoverySpend({ found, idb })
+    await resumeRecoverySpend({ found })
 
     expect(
       state.escrows.some(
@@ -885,7 +878,6 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
 
   it('writes a bare passphrase entry when its own establishment backfill fails', async () => {
     const { found, standingClient } = await makeSpendFound()
-    const { idb } = createFakeSessionIdb()
     // The standing wrap is missing, so the backfill attempts the
     // establishment -- and its document entry publish dies.
     state.rosterRecipients = ['everyone-already-escrowed']
@@ -894,7 +886,7 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
       new Error('document entry publish failed (simulated)')
     )
 
-    const result = await resumeRecoverySpend({ found, idb })
+    const result = await resumeRecoverySpend({ found })
 
     // The failed backfill never fails the resume; the prompt reports the
     // standing as still pending.
@@ -917,11 +909,10 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
 
   it('rethrows a roster refusal other than the unwrap miss unchanged', async () => {
     const { found } = await makeSpendFound()
-    const { idb } = createFakeSessionIdb()
     const refusal = new Error('roster rolled back')
     refusal.name = 'UserKeyRosterContinuityError'
     vi.mocked(readUserKeyRoster).mockRejectedValueOnce(refusal)
 
-    await expect(resumeRecoverySpend({ found, idb })).rejects.toBe(refusal)
+    await expect(resumeRecoverySpend({ found })).rejects.toBe(refusal)
   })
 })

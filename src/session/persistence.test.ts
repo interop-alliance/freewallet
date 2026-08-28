@@ -1,15 +1,16 @@
 /**
- * Coverage for the transient roster-epoch pin (`transientSessionStores()`'s
- * `epochPins` member) against the shared `epochPinWriteAllowed` predicate it
- * shares with the durable variant (`saveUserKeyEpochPin` in
- * `src/lib/sessionKey.ts`). FW-261: a served descriptor that omits the
- * pinned epoch must be refused as a rollback, matching the durable twin,
- * rather than adopted because the stored pin cannot be located in the
- * served order.
+ * Coverage for the in-memory roster-epoch pin (`transientSessionStores()`'s
+ * `epochPins` member, identical to the durable variant's) against the shared
+ * `epochPinWriteAllowed` predicate beside it in `src/session/persistence.ts`.
+ * A served descriptor that omits the pinned epoch must be refused as a
+ * rollback rather than adopted because the stored pin cannot be located in
+ * the served order.
  */
 import { describe, expect, it } from 'vitest'
-import { epochPinWriteAllowed } from '@/lib/sessionKey'
-import { transientSessionStores } from '@/session/persistence'
+import {
+  epochPinWriteAllowed,
+  transientSessionStores
+} from '@/session/persistence'
 
 const ACCOUNT_DID = 'did:webvh:example:account'
 

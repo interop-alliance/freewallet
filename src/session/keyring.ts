@@ -49,13 +49,15 @@
  * prior, and the host never holds the signing key -- a substituted record is
  * refused (`KeyringRecordForgedError`) before it is decrypted, at first contact
  * as much as at the thousandth. What the signature cannot catch is a REPLAY: a
- * record the account has since moved off is authentic forever. So each client
- * pins the newest signed `createdAt` it has accepted for the unlock method, and
- * refuses a record older than the pin (`KeyringRecordRolledBackError`). Between
- * the two, a pointer that differs from anything this client has seen is simply
- * followed: a rebind, a host migration, or a fresh account under a reused
- * passphrase all produce a newer, validly signed record, and the honest answer
- * to one is to log in.
+ * record the account has since moved off is authentic forever, and this
+ * wallet keeps no cross-session prior to catch one with
+ * (`decisions/0012-no-durable-continuity-pins.md`), so a replayed record is
+ * a stated bound: a login can land in an account the user has moved off,
+ * visible and reversible by logging in again once the host serves the
+ * current record. A pointer that differs from anything this client has seen
+ * is simply followed: a rebind, a host migration, or a fresh account under a
+ * reused passphrase all produce a newer, validly signed record, and the
+ * honest answer to one is to log in.
  *
  * A passphrase change re-wraps both records under a new unlock identity, PUTs
  * the keyring record to the new unlock Space, then deletes the old unlock
@@ -114,7 +116,10 @@ import {
   type UnlockRecordProofState
 } from '@interop/wallet-core/unlock'
 import { currentAccountRecordSigners } from '@interop/wallet-core/clients'
-import type { ResourceLogPinStore } from '@interop/vh-resource-log'
+import {
+  memoryResourceLogPinStore,
+  type ResourceLogPinStore
+} from '@interop/vh-resource-log'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import {
   unwrapRecordEnvelope,
@@ -123,15 +128,11 @@ import {
 import {
   deleteClientKeyRecord,
   deleteKeyringCache,
-  deleteKeyringFreshnessPin,
-  deleteUnlockLocalTrio,
+  deleteUnlockLocalState,
   loadClientKeyRecord,
   loadKeyringCache,
-  loadKeyringFreshnessPin,
   saveClientKeyRecord,
-  saveKeyringCache,
-  saveKeyringFreshnessPin,
-  sessionLogPinStore
+  saveKeyringCache
 } from '@/lib/sessionKey'
 import { createLogger } from '@/lib/log'
 
@@ -196,7 +197,7 @@ export interface KeyringFetchResult extends KeyringRecordContents {
   // closure over the unlock identity that produced this hit. In-memory only.
   persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
   // Re-wraps and re-PUTs the keyring record with a changed account pointer
-  // (and refreshes the local cache + freshness pin) without the unlock secret
+  // (and refreshes the local cache) without the unlock secret
   // -- the login-time heal path for a signup whose did:webvh backfill never
   // ran (a KMS hiccup): once a later login's provisioning publishes the log,
   // the pointer can durably adopt the did. In-memory only.
@@ -523,8 +524,8 @@ function clientKeysPersister({
  * Builds the `persistAccountPointer` closure a fetch result carries: re-wraps
  * the keyring record with a changed account pointer under the same unlock
  * identity, signs it with that identity's record signer, PUTs it (when a WAS
- * server is configured), and refreshes the local cache and the freshness pin.
- * The controller and email are restated from
+ * server is configured), and refreshes the local cache. The controller and
+ * email are restated from
  * the fetched record -- only the pointer changes. This is the login-time
  * counterpart of signup's did:webvh pointer backfill, for accounts whose
  * backfill never ran (a provisioning hiccup at signup).
@@ -550,12 +551,7 @@ function accountPointerPersister({
     // both the record being rewritten and this client's local pin, so a
     // client whose clock lags behind whichever client bound last still writes
     // a record that supersedes what everyone has pinned.
-    const createdAt = nextRecordCreatedAt({
-      advancePast: [
-        found.createdAt,
-        await loadKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
-      ]
-    })
+    const createdAt = nextRecordCreatedAt({ advancePast: [found.createdAt] })
     const record = await wrapKeyringRecord({
       controller: found.controller,
       email: found.email,
@@ -573,7 +569,6 @@ function accountPointerPersister({
       })
     }
     await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
-    await saveKeyringFreshnessPin({ spaceId: unlock.spaceId, createdAt, idb })
   }
 }
 
@@ -673,35 +668,6 @@ export class KeyringRecordForgedError extends Error {
     super(`Forged or tampered keyring record.${detail}`)
     this.name = 'KeyringRecordForgedError'
     this.cause = cause
-  }
-}
-
-/**
- * Thrown by `fetchKeyring` when a validly signed keyring record is OLDER than
- * the newest one this client has accepted for the unlock method -- a replay.
- * The proof cannot catch this on its own: a record the account has since moved
- * off stays authentic forever, so a host withholding the current record and
- * re-serving a superseded one would silently send this client at a stale
- * account pointer. The pin is left in place so a later, current record is
- * accepted normally.
- */
-export class KeyringRecordRolledBackError extends Error {
-  pinnedCreatedAt: string
-  servedCreatedAt: string
-  constructor({
-    pinnedCreatedAt,
-    servedCreatedAt
-  }: {
-    pinnedCreatedAt: string
-    servedCreatedAt: string
-  }) {
-    super(
-      `The keyring record served (${servedCreatedAt}) is older than the ` +
-        `newest one this client has accepted (${pinnedCreatedAt}).`
-    )
-    this.name = 'KeyringRecordRolledBackError'
-    this.pinnedCreatedAt = pinnedCreatedAt
-    this.servedCreatedAt = servedCreatedAt
   }
 }
 
@@ -831,24 +797,20 @@ async function unwrapStoredKeyringRecord({
  * @param options.proofState {UnlockRecordProofState}
  * @param options.found {KeyringRecordContents}   the unwrapped contents (the
  *   credential-authenticated pointer names the account to check against)
- * @param [options.idb] {IDBFactory}
  * @param [options.accountLogPinStore] {ResourceLogPinStore}   the chain-head
- *   pin store the account-log read rides; defaults to the durable
- *   session-database store. The transient fetch supplies an in-memory one,
- *   so the settlement stays free of durable state.
+ *   pin store the account-log read rides; defaults to the settlement's own
+ *   in-memory one.
  * @returns {Promise<void>}
  */
 async function settlePendingRecordProof({
   record,
   proofState,
   found,
-  idb,
-  accountLogPinStore = sessionLogPinStore({ idb })
+  accountLogPinStore = memoryResourceLogPinStore()
 }: {
   record: unknown
   proofState: UnlockRecordProofState
   found: KeyringRecordContents
-  idb?: IDBFactory
   accountLogPinStore?: ResourceLogPinStore
 }): Promise<void> {
   if (proofState === 'verified') {
@@ -894,10 +856,9 @@ async function settlePendingRecordProof({
  * The bind timestamp to stamp on a record this client is about to write: now,
  * advanced to one millisecond past the newest of the given timestamps when one
  * is already at or ahead of now. The advance-past timestamps are what the new
- * record must supersede -- the record it replaces, and this client's own
- * freshness pin -- so a client whose clock lags another's does not write a
- * record every client then refuses as a rollback. Absent and unparseable
- * entries are ignored.
+ * record must supersede, chiefly the record it replaces, so a client whose
+ * clock lags another's still writes a record that supersedes it. Absent and
+ * unparseable entries are ignored.
  *
  * @param options {object}
  * @param options.advancePast {Array<string | null | undefined>}   ISO
@@ -917,53 +878,6 @@ function nextRecordCreatedAt({
     }
   }
   return new Date(millis).toISOString()
-}
-
-/**
- * Enforces freshness for a verified, unwrapped record: refuses one whose
- * signed bind timestamp predates the local pin (throws
- * `KeyringRecordRolledBackError`), and otherwise advances the pin. The first
- * accepted record establishes it; it only ever moves forward, so an equal
- * timestamp (the same record, re-read) passes untouched.
- *
- * Nothing here inspects the account pointer: a record naming somewhere this
- * client has never seen is legitimate whenever it is the newest signed one --
- * a rebind, a host migration, or a fresh account bound under a reused
- * passphrase.
- *
- * @param options {object}
- * @param options.unlock {UnlockIdentity}
- * @param options.found {KeyringRecordContents}   the unwrapped remote record
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
- */
-async function enforceRecordFreshness({
-  unlock,
-  found,
-  idb
-}: {
-  unlock: UnlockIdentity
-  found: KeyringRecordContents
-  idb?: IDBFactory
-}): Promise<void> {
-  const pinnedCreatedAt = await loadKeyringFreshnessPin({
-    spaceId: unlock.spaceId,
-    idb
-  })
-  if (
-    pinnedCreatedAt &&
-    Date.parse(found.createdAt) < Date.parse(pinnedCreatedAt)
-  ) {
-    throw new KeyringRecordRolledBackError({
-      pinnedCreatedAt,
-      servedCreatedAt: found.createdAt
-    })
-  }
-  await saveKeyringFreshnessPin({
-    spaceId: unlock.spaceId,
-    createdAt: found.createdAt,
-    idb
-  })
 }
 
 /**
@@ -1007,8 +921,7 @@ async function readCachedRecord({
     await settlePendingRecordProof({
       record: cached.record,
       proofState: unwrapped.proofState,
-      found: unwrapped.found,
-      idb
+      found: unwrapped.found
     })
     return await buildFetchResult({
       unwrapped,
@@ -1029,8 +942,8 @@ async function readCachedRecord({
  * checking it before the cache is what makes a method change (e.g. a
  * passphrase change) on another client take effect here: a found record
  * refreshes the local cache, while a 404-shaped miss (a null record) drops
- * the cached copy and the freshness pin and returns `null` (no account for this
- * secret -- never bound, or retired). The local client-key record is left
+ * the cached copy and returns `null` (no account for this secret -- never
+ * bound, or retired). The local client-key record is left
  * alone on a miss: it is the only copy of this client's keys, and a server
  * answer must never be able to destroy it. When the remote GET fails
  * (network/unreachable), the cache answers as an offline fallback, but only
@@ -1040,9 +953,8 @@ async function readCachedRecord({
  * unlock identity's own signing key throws `KeyringRecordForgedError` (the
  * host forged or tampered with it); one that fails to unwrap or validate for
  * any other reason throws `KeyringRecordUnusableError` (corrupt record -- a
- * state distinct from both "no account" and "server unreachable"); one older
- * than the local freshness pin throws `KeyringRecordRolledBackError` (a
- * replay). None of the three refreshes the cache. With no
+ * state distinct from both "no account" and "server unreachable"). Neither
+ * refreshes the cache. With no
  * WAS server configured the cache is the keyring's only copy, so the lookup
  * is cache-only with no TTL.
  *
@@ -1150,12 +1062,10 @@ export async function fetchKeyring({
   if (!record) {
     // A 404-shaped miss: no keyring for this passphrase (never bound, or
     // retired by a passphrase change on this or another client). Drop the
-    // cached copy so the retired passphrase cannot keep resolving offline,
-    // and the freshness pin -- the continuity prior is stale once this client
-    // has seen "no account". The client-key record stays: it is primary
-    // state, and without a session it is inert anyway.
+    // cached copy so the retired passphrase cannot keep resolving offline.
+    // The client-key record stays: it is primary state, and without a
+    // session it is inert anyway.
     await deleteKeyringCache({ spaceId: unlock.spaceId, idb })
-    await deleteKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
     return null
   }
 
@@ -1178,12 +1088,8 @@ export async function fetchKeyring({
   await settlePendingRecordProof({
     record,
     proofState: unwrapped.proofState,
-    found: unwrapped.found,
-    idb
+    found: unwrapped.found
   })
-  // The freshness check runs before the cache refresh, so a replayed record
-  // is neither followed nor allowed to become tomorrow's offline fallback.
-  await enforceRecordFreshness({ unlock, found: unwrapped.found, idb })
   await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
   return await buildFetchResult({
     unwrapped,
@@ -1230,13 +1136,11 @@ export interface TransientKeyringFetchResult extends KeyringRecordContents {
  * the CALLER-SUPPLIED chain-head pin store -- an in-memory one for a
  * transient login, so the account-log read leaves no trace either.
  *
- * What it deliberately does not do, per the durable `fetchKeyring` contract
- * it parallels: no keyring cache read or write (so no offline fallback -- a
- * network error rethrows unchanged, could-not-check), no freshness pin read,
- * write, or delete (per-visit trust-on-first-use is the transient variant's stated
- * bound: replay protection is what durable state buys, and a transient visit
- * holds none), no client-key record read (a transient session never holds
- * one), and no management zcap mint. The refusal classes are otherwise
+ * What it deliberately does not do, per the `fetchKeyring` contract it
+ * parallels: no keyring cache read or write (so no offline fallback -- a
+ * network error rethrows unchanged, could-not-check), no client-key record
+ * read (a transient session never holds one), and no management zcap mint.
+ * The refusal classes are otherwise
  * `fetchKeyring`'s: a miss is `null`, a forged or tampered record is
  * `KeyringRecordForgedError`, a corrupt one `KeyringRecordUnusableError`.
  *
@@ -1327,12 +1231,11 @@ export async function fetchTransientKeyring({
  * otherwise), everything else -- the controller, the pointer, the email,
  * the ladder seed -- restated verbatim.
  *
- * The one difference between the durable and the transient variant is
- * `local`: a durable hit floors the fresh stamp over this browser's
- * keyring-freshness pin and updates the local cache and pin afterwards,
- * while a transient visit (which holds no durable local state at all)
- * floors over the served record alone and writes nothing locally. The
- * remote record write is the same one either way.
+ * The one difference between the remembered and the transient variant is
+ * `local`: a remembered hit refreshes this browser's keyring cache
+ * afterwards, while a transient visit (which holds no local state at all)
+ * writes nothing locally. Both floor the fresh stamp over the served
+ * record, and the remote record write is the same one either way.
  *
  * @param options {object}
  * @param options.unlock {UnlockIdentity}   the derived unlock identity
@@ -1361,19 +1264,7 @@ function standingRecordRebinder({
   delegatedClients?: IZcap
 }) => Promise<void> {
   return async ({ delegation, delegatedClients }) => {
-    const createdAt = nextRecordCreatedAt({
-      advancePast: [
-        found.createdAt,
-        ...(local
-          ? [
-              await loadKeyringFreshnessPin({
-                spaceId: unlock.spaceId,
-                idb: local.idb
-              })
-            ]
-          : [])
-      ]
-    })
+    const createdAt = nextRecordCreatedAt({ advancePast: [found.createdAt] })
     // A fresh sibling replaces the stored one; absent a fresh one,
     // the record's own sibling is restated verbatim.
     const carriedDelegatedClients =
@@ -1404,11 +1295,6 @@ function standingRecordRebinder({
       await saveKeyringCache({
         spaceId: unlock.spaceId,
         record,
-        idb: local.idb
-      })
-      await saveKeyringFreshnessPin({
-        spaceId: unlock.spaceId,
-        createdAt,
         idb: local.idb
       })
     }
@@ -1616,25 +1502,16 @@ function documentListsVmId({
  * provably safe). Returns the served record's stamp so the bind can advance
  * its own `createdAt` past it (the fetch-and-advance obligation).
  *
- * A served STANDING record is overwritable only on one of two proofs that it
- * is this ceremony's own residue, never on the local pending record alone
- * (a stale pending record must not license destroying a record someone else
- * legitimately established since):
- *
- * - the pin license: an own pending record stands AND the served record's
- *   `createdAt` is not newer than this browser's local freshness pin for
- *   the Space -- our own earlier bind seeded the pin with exactly its
- *   stamp, and any later establishment from another browser is strictly
- *   newer under advance-past stamping;
- * - the document license (`accountDoc` supplied): the credential's
- *   key-agreement publication (commitment or verbatim) is NOT in the
- *   verified account document, so the served record's standing members back
- *   no published inventory -- the inert residue of a torn earlier attempt,
- *   not a live credential. The transient spend's only license (it holds no
- *   pin and reads no local records); the durable spend passes it too, as
- *   the backstop for its own bind's PUT-then-persist window (a tab death
- *   there leaves a served standing record with no pending record and no
- *   pin).
+ * A served STANDING record is overwritable on one proof only, never on the
+ * local pending record alone (a stale pending record must not license
+ * destroying a record someone else legitimately established since): the
+ * document license (`accountDoc` supplied), where the credential's
+ * key-agreement publication (commitment or verbatim) is NOT in the verified
+ * account document, so the served record's standing members back no
+ * published inventory -- the inert residue of a torn earlier attempt, not a
+ * live credential. It is also what covers the durable spend's own
+ * PUT-then-persist window, where a tab death leaves a served standing record
+ * with no pending record behind it.
  *
  * @param options {object}
  * @param options.credential {UnlockCredential}   the new passphrase's derived
@@ -1702,24 +1579,6 @@ export async function probeUnlockSpaceCollision({
   }
   let ownRewriteLicensed = false
   if (unwrapped.standing) {
-    if (ownPending) {
-      // The durable license: the pin proves the served record is our own
-      // earlier write (its stamp seeded the pin), so a strictly newer
-      // served record means another browser established this credential
-      // since -- the stale pending record does not license overwriting it.
-      const pin = await loadKeyringFreshnessPin({
-        spaceId: unlock.spaceId,
-        idb
-      })
-      const servedMillis = unwrapped.found.createdAt
-        ? Date.parse(unwrapped.found.createdAt)
-        : Number.NaN
-      const pinnedMillis = pin ? Date.parse(pin) : Number.NaN
-      ownRewriteLicensed =
-        Number.isFinite(servedMillis) &&
-        Number.isFinite(pinnedMillis) &&
-        servedMillis <= pinnedMillis
-    }
     if (
       !ownRewriteLicensed &&
       accountDoc !== undefined &&
@@ -1777,8 +1636,7 @@ export async function probeUnlockSpaceCollision({
  * Space (when WAS is configured), wraps, signs, and PUTs the account-pointer
  * keyring
  * record, wraps the client seed + user key into the local client-key record,
- * seeds the freshness pin with the timestamp it just signed, and saves the
- * local cache. Throws on failure (the caller
+ * and saves the local cache. Throws on failure (the caller
  * decides fatality -- fatal for signups). With no WAS server configured the
  * keyring is cache-only, so the account is then only recoverable in this
  * browser profile. Returns the unlock Space id so callers (the unlock-methods
@@ -1902,19 +1760,11 @@ export async function bindUnlockSecret({
     })
     servedCreatedAt = probed.servedCreatedAt
   }
-  // The bind timestamp is stamped here rather than left to the codec, so this
-  // client seeds its freshness pin with exactly what it signed. It is
-  // advanced past the served record's stamp (when the read-first probe
-  // fetched one) and the local pin: every rebind site has already fetched
-  // (and pinned) the standing record, so advancing past the pin guarantees
-  // the new record supersedes it even when another client's clock ran ahead
-  // of this one.
-  const createdAt = nextRecordCreatedAt({
-    advancePast: [
-      servedCreatedAt,
-      await loadKeyringFreshnessPin({ spaceId: unlock.spaceId, idb })
-    ]
-  })
+  // The bind timestamp is stamped here rather than left to the codec, and is
+  // advanced past the served record's stamp when the read-first probe fetched
+  // one, so the record this bind writes supersedes the one it read even when
+  // the other client's clock ran ahead of this one.
+  const createdAt = nextRecordCreatedAt({ advancePast: [servedCreatedAt] })
   const record =
     delegation && pointer
       ? await wrapUnlockRecord({
@@ -1985,8 +1835,6 @@ export async function bindUnlockSecret({
     ...(pending ? { pending } : {}),
     idb
   })
-  await saveKeyringFreshnessPin({ spaceId: unlock.spaceId, createdAt, idb })
-
   return {
     unlockSpaceId: unlock.spaceId,
     manageCapability,
@@ -2094,21 +1942,15 @@ export async function bindPassphrase({
 /**
  * The CREDENTIAL-ANCHORED bind: writes a standing unlock record with NO local
  * counterpart at all -- no client-key record (such a signup mints no client
- * seed to persist), no keyring cache, and no freshness-pin write (the
- * default caller is a transient visit whose replay bound is per-visit
- * trust-on-first-use). Everything it writes is remote: the unlock Space, the
+ * seed to persist) and no keyring cache. Everything it writes is remote:
+ * the unlock Space, the
  * standing-layout record (bridge, optional sibling, ladder seed, binding
  * MAC), and the optional management delegation.
  *
  * The record's `controller` is the ladder VM's bare did:key -- the bootstrap
- * identity, re-derivable from the credential alone -- and the freshness stamp
+ * identity, re-derivable from the credential alone -- and the bind stamp
  * advances past the caller-supplied prior stamp (the signup's first bind), so
- * the post-genesis re-bind always supersedes it. A caller holding durable
- * state passes `freshnessPinFloor` to floor the stamp over the local
- * keyring-freshness pin as well: a stale pin left by a fast-clocked prior
- * client must not make the login half refuse the record this bind just
- * wrote as a rollback. The pin is only read here, never saved (the durable
- * login half advances it).
+ * the post-genesis re-bind always supersedes it.
  *
  * @param options {object}
  * @param options.controller {string}   the ladder VM's did:key
@@ -2131,15 +1973,9 @@ export async function bindPassphrase({
  * @param [options.refuseCollidingRecord] {object}   the read-first collision
  *   refusal (see `probeUnlockSpaceCollision`): the bind GETs the served
  *   record first, refuses a colliding one, and advances its stamp past the
- *   served record's. Carries the verified account document -- the transient
- *   caller's inert-residue license, since a transient visit holds no
- *   freshness pin and must not read local records (even a read would
- *   durably create the session database)
- * @param [options.freshnessPinFloor] {object}   present when the caller
- *   holds durable state: the stamp additionally advances past the local
- *   keyring-freshness pin (read-only; `idb` overrides the IndexedDB
- *   factory). Never passed by a transient caller -- even the read durably
- *   creates the session database
+ *   served record's. Carries the verified account document -- the
+ *   inert-residue license, since a transient visit must not read local
+ *   records (even a read would durably create the session database)
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for the same secret
  * @returns {Promise<object>}   the unlock Space id, the management zcap when
@@ -2158,7 +1994,6 @@ export async function bindCredentialAnchoredUnlockSecret({
   delegateManagementTo,
   priorCreatedAt,
   refuseCollidingRecord,
-  freshnessPinFloor,
   credential: derived
 }: {
   controller: string
@@ -2172,7 +2007,6 @@ export async function bindCredentialAnchoredUnlockSecret({
   delegateManagementTo?: string
   priorCreatedAt?: string
   refuseCollidingRecord?: { accountDoc: unknown }
-  freshnessPinFloor?: { idb?: IDBFactory }
   credential?: UnlockCredential
 }): Promise<{
   unlockSpaceId: string
@@ -2213,16 +2047,8 @@ export async function bindCredentialAnchoredUnlockSecret({
     })
     servedCreatedAt = probed.servedCreatedAt
   }
-  // The durable caller's floor: the local pin joins the advance-past list,
-  // read-only (saving stays the durable login half's job).
-  const pinnedFloor = freshnessPinFloor
-    ? await loadKeyringFreshnessPin({
-        spaceId: unlock.spaceId,
-        idb: freshnessPinFloor.idb
-      })
-    : undefined
   const createdAt = nextRecordCreatedAt({
-    advancePast: [priorCreatedAt, servedCreatedAt, pinnedFloor]
+    advancePast: [priorCreatedAt, servedCreatedAt]
   })
   const record = await wrapUnlockRecord({
     controller,
@@ -2471,9 +2297,9 @@ export async function verifyPassphrase({
 
 /**
  * Retires one unlock identity: its unlock Space on the server (best effort)
- * and every local record filed under it (the keyring cache, the client-key
- * record, the keyring-freshness pin). Shared by `deleteUnlockMethod` and the
- * old-identity half of `changePassphrase`.
+ * and every local record filed under it (the keyring cache and the
+ * client-key record). Shared by `deleteUnlockMethod` and the old-identity
+ * half of `changePassphrase`.
  *
  * @param options {object}
  * @param options.unlock {UnlockIdentity}   the identity to retire
@@ -2503,16 +2329,16 @@ async function retireUnlockIdentity({
       unlockSpaceDeleted = false
     }
   }
-  await deleteUnlockLocalTrio({ spaceId: unlock.spaceId, idb })
+  await deleteUnlockLocalState({ spaceId: unlock.spaceId, idb })
   return unlockSpaceDeleted
 }
 
 /**
  * Retires an unlock method's keyring (account deletion, method removal):
  * derives the unlock identity, deletes its unlock Space (when a WAS server is
- * configured), and always clears the local records -- the cache, the
- * freshness pin, and this method's client-key record (an explicit lifecycle
- * flow is the one place a client-key record may be deleted). With no WAS server
+ * configured), and always clears the local records -- the cache and this
+ * method's client-key record (an explicit lifecycle flow is the one place a
+ * client-key record may be deleted). With no WAS server
  * configured there is no Space, so `unlockSpaceDeleted` stays `true`.
  *
  * Performs no verification -- a wrong secret derives a different unlock Space

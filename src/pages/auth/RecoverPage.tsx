@@ -121,10 +121,7 @@ export function RecoverPage() {
     try {
       const data = new FormData(event.currentTarget)
       const typed = (data.get('recovery-code') as string) ?? ''
-      await locateRecoveryAccount({
-        code: typed,
-        rememberBrowser: forcedRememberBrowser()
-      })
+      await locateRecoveryAccount({ code: typed })
       setCode(typed)
       setStep('passphrase')
     } catch (err) {
@@ -167,7 +164,7 @@ export function RecoverPage() {
    * The "I saved this code" confirm: runs the confirm-gated record
    * completion (the durable ceremony's `completeRecovery` closure -- the
    * rotated user key into the client-key record, the pending carrier with
-   * the replacement-code bytes cleared, then the epoch pin), so the
+   * the replacement-code bytes cleared), so the
    * show-once code stays re-displayable until this click. A failed
    * completion does NOT mark the code saved: a retryable error surfaces at
    * the dialog and the confirm can be re-clicked; the record staying

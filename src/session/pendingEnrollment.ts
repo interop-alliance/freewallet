@@ -50,7 +50,8 @@ import {
 } from '@interop/wallet-core/webvh'
 import { unlockClientIdentityFromSeed } from '@interop/wallet-core/unlock'
 import type { ClientKeyRecord } from '@interop/wallet-core/keys'
-import { deleteClientKeyRecord, sessionLogPinStore } from '@/lib/sessionKey'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
+import { deleteClientKeyRecord } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { finishForgottenBrowserWipe } from '@/session/forget'
 import { selfEnrollStandingClient } from '@/session/standingUnlock'
@@ -264,7 +265,7 @@ async function decidePendingResume({
       did: pointerDid,
       spaceId: pointer.spaceId,
       host: pointer.host,
-      pinStore: sessionLogPinStore({ idb })
+      pinStore: memoryResourceLogPinStore()
     })
   } catch (err) {
     if (
@@ -289,13 +290,13 @@ async function decidePendingResume({
         branch: 'spend-complete',
         clientDid
       })
-      return await resumeRecoverySpend({ found, verifiedLog: verified, idb })
+      return await resumeRecoverySpend({ found, verifiedLog: verified })
     }
     log.info('Pending-record resume: completing through the ceremony', {
       branch: 'complete',
       clientDid
     })
-    return await resumeThroughCeremony({ found, idb })
+    return await resumeThroughCeremony({ found })
   }
 
   // A spend record's branches below are decided from log HISTORY, so they
@@ -401,7 +402,7 @@ async function decidePendingResume({
     branch: 'seeded-rerun',
     clientDid
   })
-  return await resumeThroughCeremony({ found, idb })
+  return await resumeThroughCeremony({ found })
 }
 
 /**
@@ -412,15 +413,12 @@ async function decidePendingResume({
  *
  * @param options {object}
  * @param options.found {KeyringFetchResult}
- * @param [options.idb] {IDBFactory}
  * @returns {Promise<object>}
  */
 async function resumeThroughCeremony({
-  found,
-  idb
+  found
 }: {
   found: KeyringFetchResult
-  idb?: IDBFactory
 }): Promise<{
   clientKeys: ClientKeyRecord
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
@@ -436,7 +434,6 @@ async function resumeThroughCeremony({
   }
   return await selfEnrollStandingClient({
     found,
-    idb,
     resume: {
       clientSeed: clientKeys.clientSeed,
       webvhUpdateKeys: clientKeys.webvhUpdateKeys,

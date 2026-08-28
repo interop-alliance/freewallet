@@ -113,8 +113,6 @@ describe('signUpWithPassphrase -- durability routing', () => {
     expect(establishCall.lowEntropy).toBe(true)
     expect(establishCall.pointer.host).toBe('https://was.example.test')
     expect(establishCall.ladderSeed).toHaveLength(32)
-    // The default caller holds no durable state, so no freshness-pin floor.
-    expect(establishCall.freshnessPinFloor).toBeUndefined()
     expect(transientSessionFromKeyringHit).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'passphrase' })
     )
@@ -161,12 +159,10 @@ describe('signUpWithPassphrase -- durability routing', () => {
       rememberBrowser: true
     })
 
-    // The establishment ran, under the durable seams (a freshness-pin floor
-    // is threaded so the login half cannot refuse the fresh record).
+    // The establishment ran under the durable seams.
     const establishCall = vi.mocked(establishCredentialAnchoredAccount).mock
       .calls[0]![0]
     expect(establishCall.lowEntropy).toBe(true)
-    expect(establishCall.freshnessPinFloor).toBeDefined()
     // Then the ordinary durable login, with the derived credential.
     expect(loginWithPassphrase).toHaveBeenCalledWith(
       expect.objectContaining({

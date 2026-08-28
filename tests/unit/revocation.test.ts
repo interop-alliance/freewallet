@@ -63,22 +63,6 @@ vi.mock('@interop/was-client', async importOriginal => ({
   }
 }))
 
-vi.mock('@/lib/sessionKey', () => ({
-  savePinFromDescriptor: vi.fn(async () => {
-    state.calls.push('savePinFromDescriptor')
-  }),
-  loadUserKeyEpochPin: vi.fn(async () => {
-    state.calls.push('loadUserKeyEpochPin')
-    // OLD_USER_KEY.id, restated: the factory is hoisted above the consts.
-    return 'did:key:z6LSOldUserKey'
-  }),
-  // Built eagerly by the durable persistence handle the fixture carries.
-  sessionLogPinStore: vi.fn(() => ({
-    read: async () => null,
-    write: async () => undefined
-  }))
-}))
-
 vi.mock('@/session/rosterStore', () => ({
   sessionRosterStore: vi.fn(() => ({ rosterStore: true }))
 }))
@@ -114,7 +98,6 @@ import {
   clientAnnexLogStore,
   ensureGenerationDelegationCurrent
 } from '@interop/wallet-core/clientAnnex'
-import { loadUserKeyEpochPin, savePinFromDescriptor } from '@/lib/sessionKey'
 import { durableSessionPersistence } from '@/session/persistence'
 import {
   getUnlockMethods,
@@ -233,6 +216,25 @@ function orchestratorDriving({
 }
 
 /**
+ * The visit's in-memory roster-epoch pin, stubbed so the cascade's read and
+ * the adoption stage's write are both observable in `state.calls`.
+ */
+const epochPinLoad = vi.fn(async (_options: { accountDid: string }) => {
+  state.calls.push('loadUserKeyEpochPin')
+  // OLD_USER_KEY.id, restated for readability at the call site.
+  return 'did:key:z6LSOldUserKey' as string | null
+})
+const epochPinSave = vi.fn(
+  async (_options: {
+    accountDid: string
+    epochId: string
+    descriptor: { epochs?: Array<{ id: string }> }
+  }) => {
+    state.calls.push('savePinFromDescriptor')
+  }
+)
+
+/**
  * A live-session fixture carrying exactly what the cascade touches: the
  * remote store (with its roster-store handle), the profile key material, and
  * the storage adoption/history seams. Overrides poke holes for the
@@ -288,7 +290,10 @@ function sessionWith(
       ...(overrides.ladderSeed ? { ladderSeed: overrides.ladderSeed } : {}),
       keyAgreementKey: { id: `${OLD_USER_KEY.id}#kak` },
       keyResolver: async () => ({}),
-      persistence: durableSessionPersistence(),
+      persistence: {
+        ...durableSessionPersistence(),
+        epochPins: { load: epochPinLoad, saveFromDescriptor: epochPinSave }
+      },
       persistClientKeys: vi.fn(async () => {
         state.calls.push('persistClientKeys')
       })
@@ -450,7 +455,7 @@ describe('the cascade, rotated path', () => {
     expect(vi.mocked(cascadeCollections)).toHaveBeenCalledWith({
       remoteStore: session.storage.remoteStore
     })
-    expect(vi.mocked(loadUserKeyEpochPin)).toHaveBeenCalledWith(
+    expect(epochPinLoad).toHaveBeenCalledWith(
       expect.objectContaining({ accountDid: POINTER.did })
     )
   })
@@ -459,7 +464,7 @@ describe('the cascade, rotated path', () => {
     const session = sessionWith()
     await revokeEnrolledClient({ session, client: REVOKED })
 
-    expect(vi.mocked(savePinFromDescriptor)).toHaveBeenCalledWith(
+    expect(epochPinSave).toHaveBeenCalledWith(
       expect.objectContaining({
         accountDid: POINTER.did,
         epochId: FRESH_USER_KEY.id,

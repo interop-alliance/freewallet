@@ -4,7 +4,7 @@
  * collect fan-out over every non-pointed `gen-` collection (see the module
  * header there for the ceremony's stage order and constraints). This module
  * supplies what only a freewallet session knows: the enrolled-client
- * preconditions, the verified-log memo, the durable pin store, the
+ * preconditions, the verified-log memo, the pin store, the
  * GenerationCollect digest write (through the storage facade, id = the
  * generation id verbatim), and the local annex pin-slot cleanup after a
  * generation's delete.
@@ -15,12 +15,8 @@
  * exactly the generations the report still lists.
  */
 import { isWebvhDid } from '@interop/wallet-core/webvh'
-import {
-  clientAnnexLogPinId,
-  runClientAnnexGc
-} from '@interop/wallet-core/clientAnnex'
+import { runClientAnnexGc } from '@interop/wallet-core/clientAnnex'
 import type { ClientAnnexGcReport } from '@interop/wallet-core/clientAnnex'
-import { deleteLogPin } from '@/lib/sessionKey'
 import { pointedClientAnnexReach } from '@/session/annexReach'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import { isDurableSession } from '@/session/persistence'
@@ -68,9 +64,8 @@ export async function sweepClientAnnexGenerations({
     // auxiliary Space to list orphans in.
     return null
   }
-  const { doc, log, was, spaceId: clientAnnexSpaceId } = reach
+  const { doc, log, was } = reach
 
-  const idbFactory = persistence.idb
   const report = await runClientAnnexGc({
     was,
     wasServerUrl: pointer.host,
@@ -84,18 +79,6 @@ export async function sweepClientAnnexGenerations({
       await session.storage.addHistoryGenerationCollected({
         user: session.user,
         ...digest
-      })
-    },
-    onCollected: async ({ generationId }) => {
-      // A collected generation's chain-head pin slot is dropped beside it;
-      // the slot key is generation-scoped and generation ids are never
-      // reused, so a leftover slot would only ever be dead weight.
-      await deleteLogPin({
-        logId: clientAnnexLogPinId({
-          spaceId: clientAnnexSpaceId,
-          generationId
-        }),
-        ...(idbFactory !== undefined ? { idb: idbFactory } : {})
       })
     },
     pinStore: persistence.logPins

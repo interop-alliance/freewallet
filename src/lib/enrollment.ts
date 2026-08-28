@@ -27,9 +27,9 @@ import {
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
 import { setClientLabel } from '@interop/wallet-core/keys'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { WAS_SERVER_URL } from '@/app.config'
 import { sessionRosterStore } from '@/session/rosterStore'
-import { saveUserKeyEpochPin, sessionLogPinStore } from '@/lib/sessionKey'
 import { assertAccountCeremonyAllowed } from '@/session/persistence'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
@@ -156,29 +156,21 @@ export async function completeEnrollment({
     throw new Error('No account was found for this passphrase.')
   }
   const pointer = found.pointer
-  // The continuity pins are keyed by the account DID, and the ceremony core
-  // itself refuses a pointer that names none, so the promoted-account check
-  // is made here rather than left to fail deeper in.
+  // The ceremony core refuses a pointer that names no did:webvh, so the
+  // promoted-account check is made here rather than left to fail deeper in.
   if (!pointer || !isWebvhDid(pointer.did)) {
     throw new Error(
       'The account pointer names no did:webvh; only a promoted account can ' +
         'enroll additional clients.'
     )
   }
-  const accountDid = pointer.did
-
-  const { userKey, latestEpochId } = await completeEnrollmentCore({
+  const { userKey } = await completeEnrollmentCore({
     clientSeed,
     webvhUpdateKeys,
     pointer,
-    // The enrolling browser's first contact with the account log establishes
-    // its chain-head pin (trust-on-first-use); later logins verify against it.
-    accountLogPinStore: sessionLogPinStore({ idb })
-  })
-  await saveUserKeyEpochPin({
-    accountDid,
-    epochId: latestEpochId,
-    idb
+    // The ceremony's own in-memory chain-head pin: one enrollment reads the
+    // log more than once, and nothing about the pin outlives the ceremony.
+    accountLogPinStore: memoryResourceLogPinStore()
   })
 
   // Persist the key set under the unlock layer (this also pins the account

@@ -193,7 +193,6 @@ describe('signUpWithPasskey on a WAS deployment', () => {
       .calls[0]![0]
     // The PRF key is high-entropy and publishes verbatim.
     expect(establishCall.lowEntropy).toBe(false)
-    expect(establishCall.freshnessPinFloor).toBeDefined()
     expect(loginWithPasskey).toHaveBeenCalledWith(
       expect.objectContaining({
         rememberBrowser: true,
