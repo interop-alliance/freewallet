@@ -3,7 +3,7 @@
 - Status: accepted
 - Date: 2026-08-25
 - Driving work: the FW-315 design pass
-  (`_spec/designs/FW-315-standing-before-space.md`, section 6), over
+  (`_spec/designs/implemented/FW-315-standing-before-space.md`, section 6), over
   class C of `_spec/transient-refusal-considerations.md`.
 - Affects: freewallet (`src/session/signup.ts`,
   `src/session/accountSettings.ts`, `src/session/recovery.ts`,

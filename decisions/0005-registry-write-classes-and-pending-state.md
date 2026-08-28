@@ -4,7 +4,7 @@
 - Date: 2026-08-23
 - Driving work: the FW-292 design pass over the unlock-methods
   registry's write protocol
-  (`_spec/designs/FW-292-unlock-registry-write-protocol.md`), run after
+  (`_spec/designs/implemented/FW-292-unlock-registry-write-protocol.md`), run after
   the 2026-08-22 process review found five distinct tears in one week in
   the registry's interaction with the credential-rotation ceremony.
 - Affects: freewallet (`src/session/unlockMethods.ts` and every ceremony

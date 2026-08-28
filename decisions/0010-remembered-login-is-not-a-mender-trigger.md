@@ -8,9 +8,9 @@
   "the next login" or "some login" will finish it.
 - Affects: freewallet's design gate, the tear-mending taxonomy in
   ARCHITECTURE.md's Glossary, and every gated design that states a
-  residue. Re-derivation is owed by FW-354, FW-290, FW-177, FW-356,
+  residue. Re-derivation was owed by FW-354, FW-290, FW-177, FW-356,
   FW-343, and FW-218, whose mender arguments were written under the old
-  reading. No wire contract.
+  reading; FW-364 discharged all six on 2026-08-27. No wire contract.
 - Title: renamed 2026-08-28 from `durable login` to `remembered login`,
   with every citation updated in the same pass. The record number is the
   stable identity; the wording now reads on the settled axes of
@@ -102,7 +102,11 @@ case applies rather than leaving it to the reader.
   classes; FW-177's annex GC, orphan discovery, and generation cleanup,
   all triggered at "the first remembered login"; FW-356's mender for a
   VM-less standing credential; FW-343's "self-healing" bridge; FW-218's
-  cost bound.
+  cost bound. DONE 2026-08-27 (FW-364, archived): all six passed, two
+  residues were promoted into ARCHITECTURE.md's open-gaps paragraph,
+  FW-365 was filed for the annex-GC growth the pass measured, and
+  FW-343's severity moved to `high` while FW-218's premise was checked
+  and did not hold.
 - ARCHITECTURE.md's Ceremony inventory open-gaps paragraph grows as
   remembered-login-only menders are reclassified.
 - Some items get more severe, because a bound they claimed does not
