@@ -1,6 +1,6 @@
 # History
 
-## 0.45.0 - TBD
+## 0.42.0 - 2026-08-28
 
 ### Fixed
 
@@ -33,8 +33,6 @@
   `expires` rather than from the configured TTL constants. Under a generation
   delegation a grant is clamped to its parent, which for the 365-day share
   row is essentially always shorter than the constant.
-
-## 0.44.0 - TBD
 
 ### Changed
 
@@ -74,8 +72,6 @@
   name-stable `LastEnrolledClientForgetError` the Settings dialog routes the
   last-client transition on. Requires `@interop/wallet-core` 0.58.0.
 
-## 0.43.0 - TBD
-
 ### Changed
 
 - Continuity is now checked within a session and not across sessions
@@ -109,8 +105,6 @@
 - The wipe enumeration's epoch-pin and log-pin stages with their now-dead
   targets, and the annex GC's pin-slot deletion. The Space-to-DID mapping
   stays: the pre-promotion heal login needs it to state an `expectedDid`.
-
-## 0.42.0 - TBD
 
 ### Changed
 
