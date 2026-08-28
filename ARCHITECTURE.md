@@ -2155,34 +2155,67 @@ governs. The shared stage orders are canonical in wallet-core's
 ARCHITECTURE.md ("Ceremonies and cascades"); this table lists the
 freewallet-side wrappers and the app-only ceremonies, each row pointing at
 the module that drives it. The mender column names how a torn run gets
-finished (see Tear mending in the Glossary).
+finished (see Tear mending in the Glossary). What it names is a trigger a
+credential-only visit can fire, or a durable-login sweep on a ceremony
+only a durable session runs. A residue left to the durable login chain on
+an account that may never run one is an open gap instead, listed below
+the table.
 
-| Ceremony                                | Entry point                                                                                                              | Module                                                            | Shared half                 | Mender                                                                                                                                                                                                        |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Account genesis (durable)               | no-WAS signup; healed at every login                                                                                     | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                                                                                                                                                |
-| Credential-anchored genesis             | every WAS signup (default entry, non-remembered; the remembered and passkey flavors continue into self-enrollment below) | `src/session/credentialAnchoredGenesis.ts`                        | `/clientAnnex`              | re-run; the transient login's heal branch re-runs it, and mends a remembered signup torn before self-enrollment too                                                                                           |
-| Self-enrollment at login                | durable login on a fresh browser; also the second half of a remembered or passkey signup                                 | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex`              | pending record persisted pre-pivot; the next login's resume finishes it (a remembered signup's own resume entry included)                                                                                     |
-| Client enrollment (two-party)           | Settings > Connected wallets + login page                                                                                | `src/components/EnrolledClientsSection.tsx`                       | `/enrollment`               | re-run with the same connect code                                                                                                                                                                             |
-| Client revocation + epoch cascade       | Settings > Connected wallets                                                                                             | `src/session/revocation.ts`                                       | `/clients`                  | re-run; cascade-completion sweep                                                                                                                                                                              |
-| Recovery-code issuance                  | Settings > Recovery codes                                                                                                | `src/session/recovery.ts`                                         | `/recovery`                 | re-run (nothing binds until the confirm)                                                                                                                                                                      |
-| Recovery spend (durable and transient)  | `/recover`                                                                                                               | `src/session/recovery.ts`                                         | `/recovery`, `/clientAnnex` | durable: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)                                                                                                                        |
-| Recovery-code revocation                | Settings > Recovery codes                                                                                                | `src/session/recovery.ts`                                         | `/recovery`                 | re-run; cascade-completion sweep                                                                                                                                                                              |
-| Unlock-credential rotation              | Settings (passphrase change, passkey removal)                                                                            | `src/session/credentialRotation.ts`                               | `/unlock`                   | torn-retirement repair at next passphrase login; login sweep; re-seal repair; a passphrase change's failed establishment fails the change with the old credential intact (establish-first), mended by a retry |
-| Forget ceremony                         | Settings > Connected wallets, own row                                                                                    | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next login                                                                                                                                              |
-| Last-client transition                  | same row, `lastClient` confirm                                                                                           | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run; the re-mint refusal is a retryable stop; refused outright on a pending passphrase entry or an unrecorded standing credential                                                                          |
-| Update-key rotation                     | Settings                                                                                                                 | `src/session/accountSettings.ts`                                  | `/webvh`                    | re-run (persist-before-publish)                                                                                                                                                                               |
-| Account deletion                        | Settings                                                                                                                 | `src/session/accountSettings.ts` + `wipe.ts`                      | app-side phase order        | re-run; a wipe failure after the unlock-method walk is accepted                                                                                                                                               |
-| Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies                                                                               | `src/session/wipe.ts`                                             | app-side                    | re-probe verification; the `unverified` report                                                                                                                                                                |
-| Step-up ceremony                        | designed, not built                                                                                                      | ---                                                               | ---                         | ---                                                                                                                                                                                                           |
+| Ceremony                                | Entry point                                                                                                              | Module                                                            | Shared half                 | Mender                                                                                                                                                                                                                    |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Account genesis (durable)               | no-WAS signup; healed at every login                                                                                     | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                                                                                                                                                            |
+| Credential-anchored genesis             | every WAS signup (default entry, non-remembered; the remembered and passkey flavors continue into self-enrollment below) | `src/session/credentialAnchoredGenesis.ts`                        | `/clientAnnex`              | re-run; the transient login's heal branch re-runs it, and mends a remembered signup torn before self-enrollment too                                                                                                       |
+| Self-enrollment at login                | durable login on a fresh browser; also the second half of a remembered or passkey signup                                 | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex`              | pending record persisted pre-pivot; the next durable login's resume finishes it (a remembered signup's own resume entry included)                                                                                         |
+| Client enrollment (two-party)           | Settings > Connected wallets + login page                                                                                | `src/components/EnrolledClientsSection.tsx`                       | `/enrollment`               | re-run with the same connect code                                                                                                                                                                                         |
+| Client revocation + epoch cascade       | Settings > Connected wallets                                                                                             | `src/session/revocation.ts`                                       | `/clients`                  | re-run; the durable-login cascade-completion sweep                                                                                                                                                                        |
+| Recovery-code issuance                  | Settings > Recovery codes                                                                                                | `src/session/recovery.ts`                                         | `/recovery`                 | re-run (nothing binds until the confirm)                                                                                                                                                                                  |
+| Recovery spend (durable and transient)  | `/recover`                                                                                                               | `src/session/recovery.ts`                                         | `/recovery`, `/clientAnnex` | durable: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)                                                                                                                                    |
+| Recovery-code revocation                | Settings > Recovery codes                                                                                                | `src/session/recovery.ts`                                         | `/recovery`                 | re-run; the durable-login cascade-completion sweep                                                                                                                                                                        |
+| Unlock-credential rotation              | Settings (passphrase change, passkey removal)                                                                            | `src/session/credentialRotation.ts`                               | `/unlock`                   | torn-retirement repair at the next passphrase login; durable-login sweep; re-seal repair; a passphrase change's failed establishment fails the change with the old credential intact (establish-first), mended by a retry |
+| Forget ceremony                         | Settings > Connected wallets, own row                                                                                    | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next durable login                                                                                                                                                  |
+| Last-client transition                  | same row, `lastClient` confirm                                                                                           | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run; the re-mint refusal is a retryable stop; refused outright on a pending passphrase entry or an unrecorded standing credential                                                                                      |
+| Update-key rotation                     | Settings                                                                                                                 | `src/session/accountSettings.ts`                                  | `/webvh`                    | re-run (persist-before-publish)                                                                                                                                                                                           |
+| Account deletion                        | Settings                                                                                                                 | `src/session/accountSettings.ts` + `wipe.ts`                      | app-side phase order        | re-run; a wipe failure after the unlock-method walk is accepted                                                                                                                                                           |
+| Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies                                                                               | `src/session/wipe.ts`                                             | app-side                    | re-probe verification; the `unverified` report                                                                                                                                                                            |
+| Step-up ceremony                        | designed, not built                                                                                                      | ---                                                               | ---                         | ---                                                                                                                                                                                                                       |
 
-The open gaps (stated residues with no mender yet; see Tear mending in
-the Glossary). Two are unbuilt repairs on client-less accounts, where no
-login sweep will ever run: the transient recovery's roster-append repair,
-and one for a user-key rotation torn mid-fan-out. A third is KMS-specific:
-on a KMS deployment, an establishment torn between the re-bind and the
-promotion leaves the keystore's controller on the ladder's bare did:key,
-outside the current-key-set rule, with no mender yet; the mender is
-designed alongside the did:web-stage collapse work.
+The open gaps come in two classes (see Tear mending in the Glossary): a
+stated residue with no mender built, and one whose only mender is a
+durable login the account may never run.
+
+No mender built. Two are unbuilt repairs on client-less accounts, where
+no durable-login sweep will ever run: the transient recovery's
+roster-append repair, and one for a user-key rotation torn mid-fan-out.
+A third is KMS-specific: on a KMS deployment, an establishment torn
+between the re-bind and the promotion leaves the keystore's controller
+on the ladder's bare did:key, outside the current-key-set rule; the
+mender is designed alongside the did:web-stage collapse work.
+
+Mender unreachable. A self-enrollment strikes every ladder VM in the
+same entry that publishes the new client, so the three artifacts signed
+under it stop verifying at once: the unlock record's bridge delegation,
+the record's `delegatedClients` sibling, and the pointed generation's
+embedded generation delegation. Their replacements are attempted on the
+un-awaited login chain, so a tab closed in that window leaves them dead.
+The strike is account-wide, so it reaches the account's other standing
+credentials too. Nothing a credential-only visit can do mends any of it:
+the rotted bridge is the credential's one log-write path, and with it
+gone the account has no route back except a durable login on a browser
+that already holds a client-key record. FW-354 moves the acting
+credential's reseal into an awaited stage; FW-208 is what would let a
+credential-only visit mend the rest.
+
+The annex generation GC is the same class. It runs from the durable
+login chain only, so on a client-less account the pointed generation's
+log grows by one entry per transient visit with nothing collecting it,
+and every visit resolves that log from genesis. A `gen-` collection
+orphaned by a crashed first visit waits for the same durable sweep; an
+account-log pointer entry left by one is append-only and superseded
+rather than removed; and an auxiliary Space stranded between its mint
+and its pointer entry has no deleter at all. The authority is the
+constraint, not an oversight -- the swap re-points the account log and
+the collect fan-out is controller-tier, neither of which a ladder VM can
+sign. FW-365 owns the bound.
 
 ## What lives elsewhere (do not reimplement here)
 
@@ -2284,11 +2317,17 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   app it is the app key's subject DID above, scoped to
   `(user, origin, appUrl)` and stable across browsers because the wallet
   custodies the seed and re-issues it on a browser-attested origin match (a
-  client-only SPA holds no durable secret of its own). Not a "device": one
-  machine hosts many clients (browser profiles, apps, accounts), and a
-  client is not tied to hardware. "App session" is informal prose for one
-  live session of a client; nothing named `appSessionId` is persisted.
-  Avoid: device, device id.
+  client-only SPA keeps no secret of its own across visits). Not a
+  "device": one machine hosts many clients (browser profiles, apps,
+  accounts), and a client is not tied to hardware. "App session" is
+  informal prose for one live session of a client; nothing named
+  `appSessionId` is persisted. A client is a cache, never the account's
+  durable state: what persists is the unlock credential, the account log,
+  and the server-held roster and records. An enrolled client is an
+  optimization over those -- a local replica plus a document-listed key
+  that saves a self-enrollment -- so state reconstructible from a client
+  alone is a defect rather than a stated limitation. Avoid: device, device
+  id, durable client.
 - **Agent** -- a connected app whose key is agent-held rather than
   wallet-custodied: a CLI or LLM agent that mints its own did:key and asks
   the wallet for scoped, expiring, revocable grants through a standalone
@@ -2355,7 +2394,7 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   is extend the world-readable log, which keeps credential use loud.
   Re-minted by the revocation cascade and refreshed near expiry by the
   credential's own login.
-- **Unlock trio** -- the three durable local artifacts one unlock method
+- **Unlock trio** -- the three browser-local artifacts one unlock method
   leaves on a browser, all keyed by its unlock Space id: the keyring cache,
   the wrapped client-key record, and the keyring-freshness pin. It is the
   whole of what a credential owns locally, so a fourth per-credential
@@ -2404,40 +2443,53 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   prevent: takeover with a phished credential is visible in the log and
   remediable by rotation. A mechanism "fails loudness" when it would let a
   credential exercise authority with no world-visible record.
-- **Ceremony** -- an ordered sequence of durable writes across the
-  account's systems (the account log, the roster, the unlock records,
-  collection epochs, local storage) whose stage order carries an invariant:
-  persist-before-publish, document-edit-first,
+- **Ceremony** -- an ordered sequence of writes across the account's
+  systems (the account log, the roster, the unlock records, collection
+  epochs) and this browser's local state, whose stage order carries an
+  invariant: persist-before-publish, document-edit-first,
   decryption-material-before-authorization. Every stage detects its own
-  completion from durable state, and every tear point has a stated mender
+  completion from stored state, and every tear point has a stated mender
   (see Tear mending). Every ceremony has a **pivot**: the first durable
   write past which backward recovery is impossible. The derivability rule
   governs both sides of it -- a write sits before the pivot and stays
   inert until the pivot lands, or after it and is re-derivable from the
   pivot entry plus durable state alone (canonical in wallet-core's
   `decisions/0010-post-pivot-derivability-rule.md`, checked per-write at
-  the design gate for every new or changed ceremony). The full list is the
-  "Ceremony inventory" section; the shared stage orders are canonical in
+  the design gate for every new or changed ceremony). Each write before
+  the pivot also names its storage tier: a browser-local one owes an
+  answer for a cleared or evicted browser, not only for a tab death (the
+  self-enrollment's pending client-key record against the
+  credential-anchored genesis's server-side unlock record). The full list
+  is the "Ceremony inventory" section; the shared stage orders are canonical in
   wallet-core's ARCHITECTURE.md ("Ceremonies and cascades"). Avoid: flow,
   workflow, wizard.
 - **Tear mending** -- the umbrella for how a ceremony interrupted mid-run
   (a torn ceremony) gets finished. Three menders exist: a converging re-run
   (the same ceremony retried; every stage detects its own completion), a
-  standing sweep (a background login-time pass, e.g. the
-  cascade-completion sweep), and a repair (below). The derivability rule
-  makes these menders sufficient: a post-pivot write is by construction
-  re-derivable, so a re-run, sweep, or repair can always roll it forward
-  from durable state. A write that fails the rule is a defect with its own
-  work item, not a documented limitation. A stated residue with no mender
-  is an open gap. A ceremony family may also expose one taxonomy-spanning
+  standing sweep (a background pass on a login path -- the
+  cascade-completion sweep on the remembered-login chain, or the
+  generation-readiness stage every transient visit runs), and a repair
+  (below). A mender counts only if a credential-only visit can fire it.
+  The default session is transient, so a residue whose one trigger is the
+  remembered-login chain may wait forever on an account that never
+  remembers a browser; it is an open gap rather than a mended tear
+  (`decisions/0010-durable-login-is-not-a-mender-trigger.md`, checked per
+  residue at the design gate). A sweep on `session.registryReady` is
+  called a remembered-login sweep wherever it is offered as a mender. The
+  derivability rule makes these menders sufficient: a post-pivot write is
+  by construction re-derivable, so a re-run, sweep, or repair can always
+  roll it forward from durable state. A write that fails the rule is a
+  defect with its own work item, not a documented limitation. A stated
+  residue with no mender is an open gap. A ceremony family may also expose one taxonomy-spanning
   mend entry point whose arms are these menders, run by whatever context
   holds the needed authority (the credential-anchored establishment's
   `mendCredentialAnchoredAccount`). Avoid: tear closure.
 - **Repair** -- the mender of last resort: code waiting at the one entry
   point where the authority a torn state needs reassembles, detecting that
-  state from durable state alone and finishing the ceremony. Used where
-  neither a re-run nor a login sweep can fire (typically a client-less
-  account, where no durable login ever runs a sweep). Always qualified by
+  state from stored state alone and finishing the ceremony. Used where
+  neither a re-run nor a remembered-login sweep can fire (typically a
+  client-less account, the shape every credential-anchored signup
+  produces, where no remembered login ever runs a sweep). Always qualified by
   its torn state ("the torn-retirement repair",
   `repairTornPassphraseRetirement`), never bare. Avoid: completer, finisher,
   fixup.
@@ -2451,8 +2503,8 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   `<clientAnnexDid>#<vm>`, and the annex itself never appears in the
   account document.
 - **Generation delegation** -- the one Space-scoped zcap per annex
-  generation, delegated to the annex DID by the durable client that mints
-  the generation (or by the ladder VM while the account has no durable
+  generation, delegated to the annex DID by the enrolled client that mints
+  the generation (or by the ladder VM while the account has no enrolled
   client). Transient keys invoke under it, and an App Connect grant from a
   transient session chains one deeper (root, generation delegation, app).
   Its TTL is matched to the generation's GC cycle.
@@ -2473,15 +2525,61 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   a rotated one. Never replicated in unwrapped form and never held by the
   KMS; present for the life of every session. Avoid: PUK.
 - **Session** -- the in-memory object (`src/types/auth.ts`) holding the
-  logged-in user, their `ControllerProfile` (keyAgent + zcapClient), and
-  their `StorageManager` instance.
-- **Session durability** -- the axis deciding what a session may write to
-  LOCAL durable storage, fixed once at login by the typed
-  `SessionPersistence` handle at `profile.persistence` (see "Session
-  persistence"). Two variants: durable (the `freewallet-session` database,
-  the localStorage caches, the durable `writerId`) and transient (in-memory
-  throughout, dies with the tab). A write site consults no flag. Avoid:
-  posture, tier, mode.
+  logged-in user, their `ControllerProfile` (keyAgent + zcapClient), their
+  `StorageManager` instance, and their persistence strategy.
+- **Durable** -- persisted server-side, on the WAS host: the account log,
+  the user key roster, the unlock records, the Collection Descriptions and
+  their key epochs. Durable state survives a cleared browser, an evicted
+  origin, and a lost machine, which is why a ceremony stage may detect its
+  own completion from it. The word names this tier alone. Browser-local
+  state is not durable however long it happens to survive, and neither a
+  session nor a client is ever called durable
+  (`decisions/0011-durable-names-server-storage-only.md`). Avoid: durable
+  session, durable client, durable login, durable pin.
+- **Browser-local** -- persisted in this browser's IndexedDB or
+  localStorage: the client-key record, the four continuity pins, the
+  descriptor and meta caches, the `writerId`, and the replica database.
+  Semi-durable -- it survives a reload but not an eviction, a cleared
+  profile, or a lost machine -- so it is a cache of what the host holds,
+  never the only home of anything the account needs. Avoid: durable local
+  state, disk, persistent storage.
+- **In-memory** -- held in tab memory and gone when the tab closes: a
+  transient session's whole store family, every session's unlocked key
+  material, and the prefs overlay. The third storage tier.
+- **Session persistence** -- the axis deciding which storage tier a
+  session may write to, fixed once at login by the typed persistence
+  strategy (see the section of this name). Two variants, each named for
+  the tier it reaches: browser-local (the `freewallet-session` database,
+  the localStorage caches, the persistent `writerId`) and in-memory (dies
+  with the tab). A write site consults no flag. Not the remembered /
+  transient axis: a guest session is browser-local and is not remembered.
+  Avoid: durability, posture, mode.
+- **Persistence strategy** -- the typed object at `session.persistence`
+  through which every tier-sensitive write travels: the keyed chain-head
+  pin store, the roster-epoch pin, the unlock-methods cache, the
+  passkey-safety notice, the descriptor/meta cache pair, and the
+  `writerId` mint. The variant IS the type, so a write site never branches
+  -- an in-memory strategy simply has no member reaching the session
+  database (`decisions/0001-no-memory-overlay-storage-fork.md`). Avoid:
+  persistence handle, durability handle ("handle" in this repo is the
+  Storage Access API's).
+- **Remembered browser** -- a browser holding a client-key record for an
+  unlock credential, so a login on it proceeds as (or self-enrolls into)
+  an enrolled client. Remembering is a deliberate opt-in
+  (`rememberBrowser`), undone by the forget ceremony, and lost with a
+  cleared profile: it is browser-local state, not a durable property of
+  the account. A login on one is a **remembered login** and its session a
+  **remembered session**; the default entry on a **non-remembered**
+  browser is the transient login. Avoid: durable browser, durable login,
+  trusted browser, persistent login.
+- **Enrolled client** -- a wallet client published in the account
+  document, keyed on `capabilityInvocation` (see "The did:webvh
+  identity"). It holds a client-key record, a wrap in the user key roster,
+  and its own did:webvh update key. Contrast the **transient client**, a
+  per-visit key recorded in a client annex generation and never in the
+  account document. Both are caches (see Client): enrollment buys a local
+  replica and root-tier authority, not permanence. Avoid: durable client,
+  permanent client.
 - **StorageManager** -- the facade class in `src/stores/storageManager.ts`.
   Routes all wallet reads/writes to the session's `SyncedCollectionStore`
   backend (the local `BrowserStore`, or the remote-direct store for a
@@ -2491,8 +2589,8 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
 - **BrowserStore** -- the local active replica of a session that has one,
   using RxDB / IndexedDB (Dexie). Holds every standard wallet collection on
   the generic synced-doc schema. A replica-less session (the transient
-  default, and the durable CHAPI popup) constructs none and reaches the same
-  collections remote-direct.
+  default, and the remembered CHAPI popup) constructs none and reaches the
+  same collections remote-direct.
 - **WASRemoteStore** -- remote storage client. Speaks the WAS protocol via
   `ZcapClient`. Handles the Space lifecycle, the storage-browser
   read-through over arbitrary collections and resources, export/import, and

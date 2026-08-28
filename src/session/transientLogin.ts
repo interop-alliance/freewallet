@@ -109,11 +109,15 @@ import type { WebvhIdStore } from '@interop/wallet-core/webvh'
  *   a materially different state from an absent roster, and often
  *   attack-relevant, so it is not folded into `no-user-key-roster`.
  * - `roster-mint-refused`: the roster reads as absent, but the mend's mint
- *   preconditions refused to create one -- this browser holds a
- *   roster-epoch pin for the account (so a served-absent roster is a
- *   rollback or a tampering signal, not a torn signup), or the account
- *   document carries key-agreement entries this credential does not own. A
- *   retry never helps.
+ *   preconditions refused to create one, so a fabricated-absent roster
+ *   cannot become a single-recipient genesis. This composition holds no
+ *   durable roster-epoch pin and says so (its epoch pins are in-memory and
+ *   empty), so that precondition never fires here and the refusal means one
+ *   of the rest: the account log did not resolve, the verified document
+ *   publishes a key-agreement entry this credential does not own (another
+ *   standing credential holds the account, the common arm), or an encrypted
+ *   collection already carries an epoch or will not prove that it does not.
+ *   A retry never helps.
  *
  * The three annex-family reasons stand only where the ladder-signed mend
  * could not run at all -- an account whose document anchors no ladder VM of
@@ -861,12 +865,14 @@ export async function transientSessionFromKeyringHit({
       })
     }
     if (arm?.outcome === 'mint-refused') {
-      // The mint preconditions refused: this browser holds a roster-epoch
-      // pin for the account (so a served-absent roster reads as a rollback
-      // or tampering, never as a torn signup), or the document publishes
-      // key-agreement entries this credential does not own. Minting over
-      // either would orphan a live account's ciphertext, so the refusal is
-      // its own -- a retry re-runs the same refused preconditions.
+      // The mint preconditions refused. The roster-epoch-pin precondition
+      // cannot fire here (this caller passes `hasRosterEpochPin: false`), so
+      // this is an unresolvable account log, a key-agreement entry in the
+      // document this credential does not own, or a collection already
+      // carrying an epoch: each says the account is live beside a roster
+      // that reads empty. Minting over any of them would orphan that
+      // account's ciphertext, so the refusal is its own -- a retry re-runs
+      // the same refused preconditions.
       throw new TransientLoginUnavailableError({
         reason: 'roster-mint-refused',
         ...(arm.error !== undefined ? { cause: arm.error } : {})

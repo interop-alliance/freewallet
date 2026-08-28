@@ -1,6 +1,6 @@
 # History
 
-## 0.43.0 - TBD
+## 0.42.0 - TBD
 
 ### Changed
 
@@ -40,8 +40,6 @@
   (`__E2E_LOGIN_CHAIN_SETTLED__`) replaces the wait it had been providing
   incidentally, so an e2e fixture can let that chain finish instead of
   tearing its context down mid-pass.
-
-## 0.42.0 - TBD
 
 ### Changed
 
