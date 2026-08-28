@@ -20,7 +20,13 @@
  * list on the enrolled client never grows a row for it.
  */
 import { test, expect, type Browser, type Page } from '@playwright/test'
-import { awaitLoginChain, fillSettled, signupViaWizard } from './helpers'
+import type { IDelegatedZcap } from '@interop/data-integrity-core'
+import {
+  appZcapClient,
+  awaitLoginChain,
+  fillSettled,
+  signupViaWizard
+} from './helpers'
 import {
   captureFrameLocalStorageKeys,
   expectNoFrameStorageResidue
@@ -61,22 +67,34 @@ interface PopupResponse {
   data: {
     holder: string
     proof: { verificationMethod: string; challenge: string; domain: string }
-    zcap: Array<{
-      invocationTarget: string
-      controller: string
-      allowedAction: string[]
-      expires?: string
-      parentCapability?: string
-    }>
+    verifiableCredential: unknown
+    zcap: IDelegatedZcap[]
     appConnect: { firstRun: boolean }
   }
+}
+
+/**
+ * The seed the response's app-key credential carries: what lets the runner
+ * re-derive the app's own key and invoke the grant as the app would.
+ *
+ * @param response {PopupResponse}
+ * @returns {string}
+ */
+function appKeySeed(response: PopupResponse): string {
+  const carried = response.data.verifiableCredential
+  const credential = (Array.isArray(carried) ? carried[0] : carried) as {
+    credentialSubject: { seed: string }
+  }
+  return credential.credentialSubject.seed
 }
 
 /**
  * The App Connect VPR: DID Authentication plus one `AppConnectQuery` asking
  * for a read/write grant over a private collection the wallet provisions.
  */
-function appConnectQuery() {
+function appConnectQuery({
+  wholeSpace = false
+}: { wholeSpace?: boolean } = {}) {
   return [
     { type: 'DIDAuthentication', acceptedMethods: [{ method: 'key' }] },
     {
@@ -90,7 +108,19 @@ function appConnectQuery() {
             type: 'https://w3id.org/byoe#private-collection',
             name: APP_COLLECTION
           }
-        }
+        },
+        // The class a transient session cannot grant: the generation
+        // delegation is scoped to the Space's items subtree, so nothing it
+        // parents can name the Space itself.
+        ...(wholeSpace
+          ? [
+              {
+                referenceId: 'space-read',
+                allowedAction: ['GET', 'HEAD'],
+                invocationTarget: { type: 'https://w3id.org/byoe#space' }
+              }
+            ]
+          : [])
       ]
     }
   ]
@@ -115,13 +145,17 @@ async function coldTerminal(browser: Browser): Promise<{
  */
 async function popupToConsent(
   page: Page,
-  { passphrase, challenge }: { passphrase: string; challenge: string }
+  {
+    passphrase,
+    challenge,
+    query = appConnectQuery()
+  }: { passphrase: string; challenge: string; query?: unknown }
 ) {
   await servePopupHost({ page })
   await injectPopupGetEvent({
     page,
     origin: APP_ORIGIN,
-    query: appConnectQuery(),
+    query,
     challenge,
     domain: APP_DOMAIN
   })
@@ -202,10 +236,98 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
       expect(grant!.expires).toBeDefined()
       expect(Date.parse(grant!.expires!)).toBeGreaterThan(Date.now())
 
+      // And it WORKS: the grant is invoked as the app, not merely inspected.
+      // The annex key signs this delegation under its annex verification
+      // method, so the server admits it only because the annex document
+      // publishes that key under `capabilityDelegation` as well as
+      // `capabilityInvocation` (wallet-core 0.58.0). Under an annex VM
+      // published for invocation alone every one of these calls came back
+      // 404, which is how WAS renders an unauthorized request.
+      const app = await appZcapClient(appKeySeed(response))
+      // The Collection Description: what was-react reads first to build its
+      // epoch-aware cipher.
+      const described = await app.request({
+        url: grant!.invocationTarget,
+        capability: grant,
+        method: 'GET',
+        action: 'GET'
+      })
+      expect(described.status).toBe(200)
+      // The listing: the collection's items path (the trailing slash), which
+      // is what the app's sync pull drives.
+      const listed = await app.request({
+        url: `${grant!.invocationTarget}/`,
+        capability: grant,
+        method: 'GET',
+        action: 'GET'
+      })
+      expect(listed.status).toBe(200)
+      // And a write, the axis the read-only classes never reach. The
+      // collection is EDV-encrypted, and the server fail-closes on a
+      // plaintext body, so the write carries an envelope-SHAPED document:
+      // structurally what the codec produces, with no real ciphertext in it.
+      // The server validates the shape and never decrypts, and what this
+      // assertion measures is the authorization, not the cryptography.
+      const written = await app.request({
+        url: `${grant!.invocationTarget}/e2e-note`,
+        capability: grant,
+        method: 'PUT',
+        action: 'PUT',
+        json: {
+          id: 'e2e-note',
+          jwe: {
+            protected: 'eyJlbmMiOiJYQzIwUCJ9',
+            recipients: [{ header: { alg: 'ECDH-ES+A256KW' } }],
+            iv: 'aXYtZTJl',
+            ciphertext: 'Y2lwaGVydGV4dC1lMmU',
+            tag: 'dGFnLWUyZQ'
+          }
+        }
+      })
+      expect(written.status).toBeGreaterThanOrEqual(200)
+      expect(written.status).toBeLessThan(300)
+
       expect(
         latencyMs,
         `the popup login-to-consent path took ${latencyMs}ms`
       ).toBeLessThan(POPUP_LATENCY_BOUND_MS)
+    } finally {
+      await context.close()
+    }
+  })
+
+  test('refuses a whole-Space grant and connects the rest of the request', async ({
+    browser
+  }) => {
+    const { context, page } = await coldTerminal(browser)
+    try {
+      const { frame } = await popupToConsent(page, {
+        passphrase,
+        challenge: `chal-popup-space-${Date.now()}`,
+        query: appConnectQuery({ wholeSpace: true })
+      })
+
+      // The refusal is decided at grant resolution, before consent renders,
+      // and the row says why in its own words rather than the generic
+      // "cannot fulfill" note. Minting it instead would produce a capability
+      // that verifies nowhere: the generation delegation's own target is the
+      // items subtree, which does not contain the Space URL.
+      await expect(
+        frame.getByText(
+          'cannot grant access to your entire Space when it is signed in on a browser it does not remember',
+          { exact: false }
+        )
+      ).toBeVisible()
+
+      await frame.getByRole('button', { name: 'Connect' }).click()
+      const response = (await awaitPopupResponse({ frame })) as PopupResponse
+
+      // The rest of the request still went through: one grant, the app's own
+      // collection, and nothing addressing the Space.
+      expect(response.data.zcap).toHaveLength(1)
+      expect(response.data.zcap[0].invocationTarget).toMatch(
+        new RegExp(`/${APP_COLLECTION}$`)
+      )
     } finally {
       await context.close()
     }

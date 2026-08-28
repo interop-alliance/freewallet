@@ -1627,21 +1627,23 @@ It uses `currentAccountSigningKeys` (wallet-core's, wrapped in
 did:key and promoted did:webvh forms agree. An app whose recorded signers
 have all left the document shows as orphaned; its grants stopped verifying
 at that client's revocation, and reconnecting through the ordinary App
-Connect flow is the recovery path. Revoking it skips the pointless per-grant
-revocation POSTs but still rotates the app-provisioned collections' epochs
-and deletes the app key. The check is best-effort: with no verified document
-this session (a guest, or the log unreachable) the page lists without the
-marker rather than failing.
+Connect flow is the recovery path. The marker does not gate the revocation.
+Revoking an app POSTs every recorded revocation, rotates the
+app-provisioned collections' epochs, and deletes the app key. "Signer gone"
+does not mean "chain dead": a grant minted in a transient session is signed
+by an annex key the account document never lists, so it derives as orphaned
+while its chain stays alive under the generation delegation. A genuinely
+dead chain comes back as a skipped revocation. The check is best-effort:
+with no verified document this session (a guest, or the log unreachable) the
+page lists without the marker rather than failing.
 
 The panel's agent rows (see "The interaction-URL request page" above) run
 the identical signer check against `currentAccountSigningKeys`, over the
 recorded grant's `controller` instead of an app-key subject, so an agent
-whose signing client was disconnected shows as orphaned too. There the
-marker is display-only: revoking an agent always POSTs the recorded
-revocations, since a grant delegated from a transient session is signed by
-an annex key the document does not list yet chains under a generation
-delegation alive until its own TTL. "Signer gone" does not mean "chain dead"
-there, and a dead chain comes back as a skipped revocation.
+whose signing client was disconnected shows as orphaned too. The marker is
+display-only on both row kinds, for the reason above: revoking an agent
+always POSTs the recorded revocations, and a dead chain comes back as a
+skipped one.
 
 ## Storage model (local-first)
 
@@ -1749,8 +1751,9 @@ steady state. That one uniform fallback is
 construction rather than by a popup arm of the routing. A transient popup
 session composes like any other: the client-annex enrollment, the standing
 roster wrap, the replica-less storage variant. Its App Connect response VP
-holds and signs as the visit key's bare did:key; only WAS invocations take
-the `<clientAnnexDid>#<vm>` form.
+holds and signs as the visit key's bare did:key. The annex verification
+method form (`<clientAnnexDid>#<vm>`) covers two things: the visit's WAS
+invocations, and the grants the visit delegates.
 
 The popup marker is a `popup` option on `loginWithPassphrase`,
 `loginWithPasskey`, `sessionFromKeyringHit`, and `initSessionFromSeed`. It
@@ -1958,11 +1961,16 @@ limitation for the target's class (read-only for a whole Space, a protected
 collection, and a share; the full vocabulary for public collections and
 app-provisioned private collections), and the consent screen shows exactly
 what `resolveGrants` resolved. A grant left with no permitted action is
-unsatisfiable rather than delegated empty. Resolution also consults a
-snapshot of the existing collections' state, fetched once for the consent
-preview and again at delegation time, then kept current as the delegation
-loop provisions, so duplicate names in one request resolve against what the
-request itself created.
+unsatisfiable rather than delegated empty. So is a whole-Space target asked
+for by a session whose grants chain under a generation delegation. That
+delegation is scoped to the Space's items subtree, so it can parent no
+whole-Space grant, and minting one anyway would produce a capability that
+verifies nowhere. The consent screen words that refusal for itself instead
+of showing the generic one. Resolution also consults a snapshot of the
+existing collections' state, fetched once for the consent preview and again
+at delegation time, then kept current as the delegation loop provisions, so
+duplicate names in one request resolve against what the request itself
+created.
 
 The response VP embeds the credential, the `zcap` array, and a
 wallet-provided `appConnect: { firstRun }` member (a JSON-literal term in
@@ -2026,6 +2034,15 @@ ciphertext it already fetched stays readable to it. The blinded-index key is
 not rotated on revoke (see "Client revocation and the epoch cascade" for the
 asymmetry): the revoked app keeps the ability to compute blinded terms,
 while the query endpoint stays behind the revoked pull grant.
+
+A grant minted in a transient session carries a lifetime limitation of its
+own. It ends at its own expiry or when its annex generation is collected,
+whichever comes first, and revocation is available for the whole window in
+which the grant is usable. Collection runs from the remembered-login chain
+alone, so on an account that never remembers a browser it never runs. The
+real bound there is the earlier of the grant's own `expires` and the
+generation delegation's, and the consent screen shows the clamped figure
+rather than the configured TTL.
 
 Two security properties of App Connect are worth stating on their own:
 
@@ -2480,7 +2497,10 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   which the server settles by reading and fully verifying `did.jsonl` out of
   its own storage. Revoking a client is therefore one document edit.
   Log-entry and roster proofs anchor at a version instead, so history never
-  rots. See "The did:webvh identity".
+  rots. The annex is governed the same way, against its own document: an
+  enrolled client's invocation or delegation link settles against the account
+  document, a transient VM's against the current annex document. See "The
+  did:webvh identity".
 - **Standing unlock credential** -- an unlock method (passphrase or passkey)
   in the standing configuration. Beside locating the account through its
   unlock record, it holds a wrap of the user key in the roster and latent
@@ -2539,8 +2559,16 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   log (the account log, or the annex log) before it can read or grant
   anything. It enables detect-and-remediate rather than prevent: a takeover
   with a phished credential is visible in the log and remediable by
-  rotation. A mechanism "fails loudness" when it lets a credential exercise
-  authority with no world-visible record.
+  rotation. The two logs grade differently. The account log is
+  world-readable and append-only, so an exercise recorded there is publicly
+  auditable and permanent. The annex log is capability-gated and
+  garbage-collected, so an exercise recorded there is auditable by
+  capability holders and mortal. A log append confers loudness only where it
+  sits on the critical path of exercising the authority. A per-visit annex
+  entry is loud that the key exists and may delegate; what that key later
+  delegates, to whom, and for how long is minted offline and leaves no entry
+  anywhere. A mechanism "fails loudness" when it lets a credential exercise
+  authority with no logged record at all.
 - **Continuity pin** -- remembered evidence of what this client last saw,
   checked against what the host now serves. Two kinds: a log's verified
   chain head (`persistence.logPins`, one slot per log) and the user key
@@ -2601,13 +2629,22 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   rather than permanent account-log entries ("the annex" in prose). Enrolled
   clients live in the account document; delegated and transient clients live
   in the annex, which never appears in that document. Transient keys invoke
-  as `<clientAnnexDid>#<vm>`.
+  and delegate as `<clientAnnexDid>#<vm>`. A per-visit transient VM
+  publishes under `capabilityInvocation` and `capabilityDelegation`, and
+  under no other relation: a transient session invokes WAS requests and also
+  mints App Connect grants, and a delegation proof verifies against
+  `capabilityDelegation` in the current annex document.
 - **Generation delegation** -- the one Space-scoped zcap per annex
   generation, delegated to the annex DID by the enrolled client that mints
   the generation, or by the ladder VM on an account with no enrolled client.
   Transient keys invoke under it, and an App Connect grant from a transient
-  session chains one deeper (root, generation delegation, app). Its TTL
-  matches the generation's GC cycle.
+  session chains one deeper (root, generation delegation, app). That grant
+  is signed by the visit key under its annex verification method, which is
+  why the transient VM publishes under `capabilityDelegation` beside
+  `capabilityInvocation`. Its `invocationTarget` is the Space's items
+  subtree, so a whole-Space target under it is unsatisfiable, and every
+  grant's `expires` is clamped to its own. Its TTL matches the generation's
+  GC cycle.
 - **CapabilityAgent** -- from `@interop/webkms-client`. Wraps the Ed25519
   key pair derived from the passphrase and exposes `getSigner()`.
 - **ZcapClient** -- from `@interop/ezcap`. Wraps the session's root-key

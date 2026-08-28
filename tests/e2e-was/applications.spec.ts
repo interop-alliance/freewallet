@@ -1,9 +1,11 @@
 import { test, expect, type Browser, type Page } from '@playwright/test'
-import { Buffer } from 'node:buffer'
 import type { IDelegatedZcap } from '@interop/data-integrity-core'
-import { CapabilityAgent } from '@interop/webkms-client'
-import { didKeyZcapClient } from '@interop/wallet-core/webvh'
-import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
+import {
+  appZcapClient,
+  fillSettled,
+  forceRememberBrowser,
+  signupViaWizard
+} from './helpers'
 
 /**
  * The Applications revocation surface e2e (WAS mode), modeled on
@@ -166,22 +168,6 @@ async function connectViaPopup(
 
   const recorded = (await readResponse(page)) as { value: unknown }
   return recorded.value as AppConnectResponse
-}
-
-/**
- * A ZcapClient signing as the app itself: the same seed-to-key derivation the
- * wallet and was-react use (`keyName: 'app-key'`), from the seed the app-key
- * credential carries. Lets the test invoke the delegated grant server-side
- * from the runner, standing in for the connected app.
- */
-async function appZcapClient(seedBase64url: string) {
-  const seed = new Uint8Array(Buffer.from(seedBase64url, 'base64url'))
-  const keyAgent = await CapabilityAgent.fromSeed({
-    seed,
-    handle: 'freewallet-app-key',
-    keyName: 'app-key'
-  })
-  return didKeyZcapClient({ keyAgent })
 }
 
 /**
@@ -419,8 +405,12 @@ test.describe('The Applications revocation surface', () => {
         page.getByText(/was set up from a wallet that has since been/)
       ).toBeVisible()
 
-      // Revoking an orphaned app: the orphaned confirm copy (no live grants
-      // to revoke server-side), then the orphaned toast.
+      // Revoking an orphaned app: the orphaned confirm copy (the recorded
+      // grants stopped verifying with their signing client), then the
+      // ordinary revoked toast. The outcome copy reports what the revocation
+      // actually did rather than what the row was marked: the recorded
+      // revocations are POSTed either way now, and this app's provisioned
+      // collection still re-epochs, so a capability was taken away here.
       await page.getByRole('button', { name: 'Revoke App Access' }).click()
       await expect(
         page.getByText(/already stopped working when the wallet/)
@@ -429,12 +419,9 @@ test.describe('The Applications revocation surface', () => {
         .getByRole('button', { name: 'Revoke access', exact: true })
         .click()
       await expect(page).toHaveURL(/#\/applications$/, { timeout: 60_000 })
-      await expect(
-        page.getByText(
-          'App removed. Its storage access had already ended when its ' +
-            'wallet was disconnected.'
-        )
-      ).toBeVisible({ timeout: 15_000 })
+      await expect(page.getByText('App access revoked.')).toBeVisible({
+        timeout: 15_000
+      })
       await expect(
         page.getByText('No connected applications yet.')
       ).toBeVisible()

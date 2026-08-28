@@ -1,9 +1,12 @@
+import { Buffer } from 'node:buffer'
 import {
   expect,
   type Locator,
   type Page,
   type TestInfo
 } from '@playwright/test'
+import { CapabilityAgent } from '@interop/webkms-client'
+import { didKeyZcapClient } from '@interop/wallet-core/webvh'
 
 /**
  * Fills a form field and verifies the value survived, retrying until it
@@ -261,4 +264,23 @@ export async function submitTransientLogin(
   await fillSettled(page.locator('input[type="password"]'), passphrase)
   await page.getByRole('button', { name: 'Log in', exact: true }).click()
   await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
+}
+
+/**
+ * A ZcapClient signing as a connected app: the same seed-to-key derivation the
+ * wallet and was-react use (`keyName: 'app-key'`), from the seed the app-key
+ * credential carries. Lets a test invoke a delegated grant from the runner,
+ * standing in for the app itself.
+ *
+ * @param seedBase64url {string}   `credentialSubject.seed`, base64url-no-pad
+ * @returns {Promise<ReturnType<typeof didKeyZcapClient>>}
+ */
+export async function appZcapClient(seedBase64url: string) {
+  const seed = new Uint8Array(Buffer.from(seedBase64url, 'base64url'))
+  const keyAgent = await CapabilityAgent.fromSeed({
+    seed,
+    handle: 'freewallet-app-key',
+    keyName: 'app-key'
+  })
+  return didKeyZcapClient({ keyAgent })
 }

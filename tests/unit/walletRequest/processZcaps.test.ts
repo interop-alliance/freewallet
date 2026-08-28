@@ -192,23 +192,34 @@ beforeAll(async () => {
 
   const zcapClient = {
     async delegate({
+      capability,
       invocationTarget,
       controller,
       allowedActions,
       expires
     }: {
+      capability?: string | Record<string, unknown>
       invocationTarget: string
       controller: string
       allowedActions: string[]
       expires: Date | string
     }) {
+      // The parent the caller actually delegated from: the Space root URI for
+      // a remembered session, the generation delegation object for a transient
+      // one. Recording it is what lets a test see which chain a grant hangs
+      // from.
+      const parent =
+        typeof capability === 'string'
+          ? capability
+          : ((capability?.id as string | undefined) ??
+            `urn:zcap:root:${encodeURIComponent(SPACE_URL)}`)
       const zcap = {
         '@context': [
           'https://w3id.org/zcap/v1',
           'https://w3id.org/security/suites/ed25519-2020/v1'
         ],
         id: `urn:zcap:delegated:${encodeURIComponent(invocationTarget)}`,
-        parentCapability: `urn:zcap:root:${encodeURIComponent(SPACE_URL)}`,
+        parentCapability: parent,
         invocationTarget,
         controller,
         allowedAction: allowedActions,
@@ -216,7 +227,7 @@ beforeAll(async () => {
         proof: {
           type: 'Ed25519Signature2020',
           proofPurpose: 'capabilityDelegation',
-          capabilityChain: [`urn:zcap:root:${encodeURIComponent(SPACE_URL)}`],
+          capabilityChain: [parent],
           verificationMethod: `${keyAgent.id}#key`,
           proofValue: 'zFakeDelegationProof'
         }
@@ -1190,6 +1201,78 @@ describe('resolveGrant action vocabulary', () => {
   })
 })
 
+describe('whole-Space grants under a generation delegation', () => {
+  it('refuses the class, with the reason the consent screen words', () => {
+    // A transient session's grants chain under the generation delegation,
+    // whose `invocationTarget` is the Space's items subtree. A whole-Space
+    // target sits outside that subtree, so a minted grant would verify
+    // nowhere; the refusal happens at resolution, before consent renders.
+    const grant = resolveGrant({
+      descriptor: spaceDetail,
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS,
+      generationDelegationParent: true
+    })
+    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.target.unsatisfiableReason).toBe('whole-space-transient')
+    expect(grant.target.invocationTarget).toBeUndefined()
+  })
+
+  it('refuses the bare Space URL form too', () => {
+    const grant = resolveGrant({
+      descriptor: {
+        controller: RP_DID,
+        allowedAction: ['GET'],
+        invocationTarget: SPACE_URL
+      },
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS,
+      generationDelegationParent: true
+    })
+    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.target.unsatisfiableReason).toBe('whole-space-transient')
+  })
+
+  it('grants the same target under the Space root', () => {
+    const grant = resolveGrant({
+      descriptor: spaceDetail,
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS
+    })
+    expect(grant.target.satisfiable).toBe(true)
+    expect(grant.target.unsatisfiableReason).toBeUndefined()
+    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+  })
+
+  it('leaves every other class satisfiable, and refuses only the Space row', () => {
+    const grants = resolveGrants({
+      zcapRequests: [collectionDetail, spaceDetail, publicCollectionDetail],
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS,
+      generationDelegationParent: true
+    })
+    expect(grants.map(grant => grant.target.satisfiable)).toEqual([
+      true,
+      false,
+      true
+    ])
+    expect(grants[1].target.unsatisfiableReason).toBe('whole-space-transient')
+  })
+
+  it('keeps the generic refusal wordless', () => {
+    // Only the whole-Space class carries copy of its own; a foreign target is
+    // still the plain "cannot fulfill" note.
+    const grant = resolveGrant({
+      descriptor: foreignDetail,
+      spaceUrl: SPACE_URL,
+      collections: NO_COLLECTIONS,
+      generationDelegationParent: true
+    })
+    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.target.unsatisfiableReason).toBeUndefined()
+  })
+})
+
 describe('processZcaps', () => {
   const READ_TTL_MS = 720 * 60 * 60 * 1000
   const WRITE_TTL_MS = 168 * 60 * 60 * 1000
@@ -1239,6 +1322,52 @@ describe('processZcaps', () => {
     const expiresMs = new Date(collectionZcap.expires).getTime()
     const expected = before + WRITE_TTL_MS
     expect(Math.abs(expiresMs - expected)).toBeLessThan(60 * 1000)
+  })
+
+  it('under a generation delegation, chains to it and skips the whole-Space row', async () => {
+    delegated.length = 0
+    ensureCalls.length = 0
+    const now = Date.now()
+    // A healthy parent: outside its renewal window, so the blocking renewal
+    // stage does not fire and the mint runs against this one.
+    const generationDelegation = {
+      id: 'urn:zcap:delegated:generation',
+      invocationTarget: `${SPACE_URL}/`,
+      expires: new Date(now + 300 * 24 * 60 * 60 * 1000).toISOString()
+    } as unknown as IZcap
+    const transient = {
+      ...session,
+      profile: {
+        ...session.profile,
+        invocationCapability: generationDelegation
+      }
+    } as unknown as Session
+
+    const zcaps = await processZcaps({
+      zcapRequests: [collectionDetail, spaceDetail, foreignDetail],
+      session: transient,
+      ttlMs: READ_TTL_MS,
+      writeTtlMs: WRITE_TTL_MS
+    })
+
+    // The whole-Space row is refused with the foreign one: the delegation's
+    // target is the items subtree, which can never parent it.
+    expect(zcaps).toHaveLength(1)
+    const zcap = zcaps[0] as unknown as {
+      invocationTarget: string
+      parentCapability: string
+      expires: string
+    }
+    expect(zcap.invocationTarget).toBe(`${SPACE_URL}/example-app-data`)
+    // Chained under the generation delegation rather than the Space root, so
+    // the annex key that signs it is one the annex document lists.
+    expect(zcap.parentCapability).toBe(generationDelegation.id)
+    // And clamped: a child never outlives its parent.
+    expect(Date.parse(zcap.expires)).toBeLessThanOrEqual(
+      Date.parse(
+        (generationDelegation as unknown as { expires: string }).expires
+      )
+    )
   })
 
   it('App Connect: provisions a private collection multi-recipient, a public one plaintext', async () => {

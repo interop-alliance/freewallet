@@ -24,7 +24,9 @@ import { fillSettled, signupViaWizard } from './helpers'
  * Both entry states are covered in one run, since the account signup is the
  * expensive part: the first grant is answered by the session already live in
  * the app, the second by the page's own login-in-place after a reload has
- * dropped the in-memory session.
+ * dropped the in-memory session. A third case brings its own account: the
+ * transient session a non-remembered browser defaults to, whose grants chain
+ * under the generation delegation rather than the Space root.
  */
 
 const WAS_URL = 'http://localhost:3002'
@@ -241,5 +243,51 @@ test.describe('agent grant over an interaction URL', () => {
       collectionName,
       resourceId: 'about.html'
     })
+  })
+
+  test('grants a public collection from a transient session', async ({
+    page
+  }, testInfo) => {
+    test.slow()
+
+    // The default entry: a browser that remembers nothing, on a
+    // credential-anchored account with no enrolled client anywhere. Its
+    // grants are signed by the visit's annex key and chain under the
+    // generation delegation rather than the Space root, so this arm is what
+    // proves that chain verifies at the server -- under an annex VM
+    // published for invocation alone the PUT below came back 404.
+    const agent = await mintAgent()
+    const collectionName = 'web'
+    await signupViaWizard(page, testInfo, { rememberBrowser: false })
+
+    const { exchangeUrl, interactionUrl } = await storeAgentRequest({
+      controller: agent.id,
+      collectionName
+    })
+    await page.goto(`/#${externalRequestPath({ url: interactionUrl })}`)
+    await expect(
+      page.getByRole('button', { name: 'Grant access' })
+    ).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Grant access' }).click()
+    await expect(
+      page.getByText('Access granted', { exact: false })
+    ).toBeVisible({ timeout: 60_000 })
+
+    const zcaps = await grantedZcaps({ exchangeUrl })
+    expect(zcaps.length).toBe(1)
+    const zcap = zcaps[0]!
+    // One deeper than a remembered session's grant: the parent is the
+    // generation delegation rather than the Space root.
+    const { parentCapability } = zcap as { parentCapability?: string }
+    expect(parentCapability).toBeDefined()
+    expect(parentCapability).not.toMatch(/^urn:zcap:root:/)
+
+    const published = await publishAndFetch({
+      agent,
+      zcap,
+      resourceId: 'transient.html'
+    })
+    expect(published.status).toBe(200)
+    expect(await published.text()).toContain('Hello')
   })
 })

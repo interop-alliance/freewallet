@@ -1,5 +1,39 @@
 # History
 
+## 0.45.0 - TBD
+
+### Fixed
+
+- App Connect and agent grants minted in a transient session now verify at
+  the storage server. The per-visit annex verification method signs the grant
+  delegation, and `@interop/wallet-core` 0.58.0 publishes that method under
+  `capabilityDelegation` beside `capabilityInvocation`, so the delegation
+  proof settles against the annex document. Before this, every request the
+  grantee made under such a grant was refused, surfacing as a 404. The fix
+  has effect only against a storage server that threads the webvh context on
+  the WAS routes; against an older deployment the symptom is byte-identical
+  to the bug.
+- Revoking a connected app POSTs its recorded revocations in every case, as
+  an agent row already did, in place of skipping them on the orphaned marker.
+  A grant minted in a transient session derives as orphaned while its chain
+  is still alive, so the skip reported success and left the capability
+  working. The revocation outcome now also reports the collections the epoch
+  rotation re-keyed, so an app whose only grant was withdrawn no longer reads
+  as nothing revoked.
+
+### Changed
+
+- A whole-Space target is refused as unsatisfiable when the session's grants
+  chain under a generation delegation. That delegation is scoped to the
+  Space's items subtree and can parent no whole-Space grant, so the wallet
+  would otherwise consent to and deliver a capability that verifies nowhere.
+  The refusal has its own consent copy in `en` and `es`; individual
+  collections are still grantable.
+- The consent panel derives each grant's shown expiry from the clamped
+  `expires` rather than from the configured TTL constants. Under a generation
+  delegation a grant is clamped to its parent, which for the 365-day share
+  row is essentially always shorter than the constant.
+
 ## 0.44.0 - TBD
 
 ### Changed
