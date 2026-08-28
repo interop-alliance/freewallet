@@ -1,21 +1,21 @@
-# 0006: The durable spend reorders; no repair substitutes for the persist
+# 0006: The remembered spend reorders; no repair substitutes for the persist
 
 - Status: accepted
 - Date: 2026-08-24
 - Driving work: the FW-317 / FW-280 design pass
   (`_spec/designs/FW-317-successor-persist-before-publish.md`), over
   findings F1 and F3 of `_spec/pivot-placement-audit.md`.
-- Affects: freewallet (`src/session/recovery.ts`, the durable spend's
-  tail), `@interop/wallet-core` (`recovery/recoveryWebvh.ts` gains the
-  required `onCommitted` hook); dcw inherits the pattern with its
-  counterpart item.
+- Affects: freewallet (`src/session/recovery.ts`, the remembered
+  spend's tail), `@interop/wallet-core` (`recovery/recoveryWebvh.ts`
+  gains the required `onCommitted` hook); dcw inherits the pattern with
+  its counterpart item.
 
 ## Context
 
-The durable recovery spend published its add-and-retire entry (the
+The remembered recovery spend published its add-and-retire entry (the
 pivot: the spent code's inventory leaves the document) while the new
 client's seeds and the replacement code's record existed only in tab
-memory. On the typical recovery account (no other durable client) a
+memory. On the typical recovery account (no other enrolled client) a
 tab death in that window bricked the account: the re-typed code
 refuses as spent, the replacement code locates nothing, and the
 document's only client is a phantom. The window spanned the whole

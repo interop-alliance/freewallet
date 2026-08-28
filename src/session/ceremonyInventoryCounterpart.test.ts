@@ -22,13 +22,13 @@ const ARCHITECTURE_PATH = path.join(REPO_ROOT, 'ARCHITECTURE.md')
  * of being silently skipped.
  */
 const TITLE_TO_ID: Record<string, string> = {
-  'Account genesis (durable)': 'account-genesis',
+  'Account genesis (plain)': 'account-genesis',
   'Credential-anchored genesis': 'credential-anchored-genesis',
   'Self-enrollment at login': 'self-enrollment',
   'Client enrollment (two-party)': 'client-enrollment',
   'Client revocation + epoch cascade': 'client-revocation',
   'Recovery-code issuance': 'recovery-code-issuance',
-  'Recovery spend (durable and transient)': 'recovery-code-spend',
+  'Recovery spend (remembered and transient)': 'recovery-code-spend',
   'Recovery-code revocation': 'recovery-code-revocation',
   'Unlock-credential rotation': 'unlock-credential-rotation',
   'Forget ceremony': 'forget-client',

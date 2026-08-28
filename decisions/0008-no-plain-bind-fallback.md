@@ -13,14 +13,15 @@
 ## Context
 
 Five flows bound an unlock credential plain (no ladder seed) and
-upgraded it to standing best-effort afterwards: the durable passphrase
-signup, the passkey signup, `addAccountPasskey`, the durable recovery
-spend's tail, and `changePassphrase`. A swallowed establishment failure
-left a plain pointer record. With the browser's client-key record gone
-that state is bricked: no ladder seed to heal from, no did:webvh to
-recover, and the signup probe answers `userExists: true`, so the
-credential is burned too. The failure surfaces only at a fresh
-browser's refused transient login, long after the cause.
+upgraded it to standing best-effort afterwards: the remembered
+passphrase signup, the passkey signup, `addAccountPasskey`, the
+remembered recovery spend's tail, and `changePassphrase`. A swallowed
+establishment failure left a plain pointer record. With the browser's
+client-key record gone that state is bricked: no ladder seed to heal
+from, no did:webvh to recover, and the signup probe answers
+`userExists: true`, so the credential is burned too. The failure
+surfaces only at a fresh browser's refused transient login, long after
+the cause.
 
 ## Decision
 
@@ -37,8 +38,8 @@ do-not-reopen.
 - Keep a plain-bind fallback and warn. It converts a visible failure
   into a record only a fresh browser's refused login ever reveals, with
   the credential burned by then. The rejection covers ALL
-  plain-bind-and-hope sites: the signup and add ceremonies, the durable
-  recovery tail, and `changePassphrase`.
+  plain-bind-and-hope sites: the signup and add ceremonies, the
+  remembered recovery tail, and `changePassphrase`.
 - Write user-facing copy for the `no-standing` refusal and keep the
   reason. The state is unreachable once its producers are gone; copy
   for an unreachable state is dead text (the considerations doc's

@@ -41,12 +41,13 @@ guest session takes the non-transient seam variant but is not a login of
 that kind, which the code already knew and wrote out by hand as
 `!isGuest && isDurableSession(persistence)` at three sites in
 `initSession.ts`. And the first sense was itself split. Counting the 26
-uses in ARCHITECTURE.md, about nine name server-backed state and about
-fourteen name IndexedDB or localStorage -- the client-key record, all four
-continuity pins, the unlock trio, the replica database. IndexedDB survives
-a reload; it does not survive an eviction, a cleared profile, or a lost
-machine. Calling it durable asserts exactly the permanence the transient
-default exists because it cannot assume.
+uses in ARCHITECTURE.md, about nine name server-backed state and the rest
+name IndexedDB or localStorage -- the client-key record, the unlock-local
+state, the replica database. The continuity pins were counted on that side
+too, and `decisions/0012-no-durable-continuity-pins.md` has since removed
+them. IndexedDB survives a reload; it does not survive an eviction, a
+cleared profile, or a lost machine. Calling it durable asserts exactly the
+permanence the transient default exists because it cannot assume.
 
 The root was definitional. The Glossary's Ceremony entry read "an ordered
 sequence of durable writes across the account's systems (the account log,

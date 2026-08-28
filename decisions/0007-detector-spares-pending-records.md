@@ -38,7 +38,7 @@ Two carve-outs are part of the decision, not exceptions to it:
   standing authority on the credential, or the account already lists
   a different client bound under it) is not this rejection's subject:
   it runs only on verified inputs, only as the last branch, and it is
-  what keeps such a browser from wedging (durable refused, transient
+  what keeps such a browser from wedging (remembered refused, transient
   unreachable).
 
 ## Rejected Alternatives

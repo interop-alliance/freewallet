@@ -67,8 +67,8 @@ import { verifiedAccountLog } from '@/session/verifiedLog'
  * @param options.pointer {AccountLogPointer}   the account pointer; its `did`
  *   must name the did:webvh the roster log's entry proofs anchor to
  * @param [options.pinStore] {ResourceLogPinStore}   the chain-head pin store,
- *   overriding the durable default -- the durability seam's log-pin member for a
- *   caller holding a persistence handle
+ *   overriding the fresh in-memory default -- pass the session's own log-pin
+ *   member so this log's continuity is checked alongside the account log's
  * @returns {SealableEncryptionDescriptorStore}
  */
 export function accountRosterStore({

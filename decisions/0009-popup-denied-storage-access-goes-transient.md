@@ -4,7 +4,7 @@
 - Date: 2026-08-26
 - Driving work: FW-203 (the popup and CHAPI transient session). The
   popup follows the browser's ratchet state -- remembered reaches the
-  durable client through the Storage Access API -- and the open case
+  enrolled client through the Storage Access API -- and the open case
   was a remembered browser whose popup cannot actually reach the
   first-party client-key record.
 - Affects: freewallet's CHAPI popup pages and their session routing.
@@ -17,9 +17,9 @@
 
 The CHAPI popup runs in a partitioned third-party iframe under the
 mediator origin, so it cannot see the top-level origin's IndexedDB,
-where the durable client-key record lives. The only bridge is the
-Storage Access API, and the extended `types` argument that can hand an
-iframe unpartitioned IndexedDB is Chromium-only. The classic form
+where the client-key record lives. The only bridge is the Storage
+Access API, and the extended `types` argument that can hand an iframe
+unpartitioned IndexedDB is Chromium-only. The classic form
 unpartitions cookies alone. So "denied" means two different things by
 engine: on Chromium it is an actual user or policy refusal of a
 request the engine supports; on Safari and Firefox it is the permanent
@@ -28,14 +28,14 @@ unpartitioned IndexedDB exists to grant.
 
 ## Decision
 
-A remembered browser whose popup cannot reach the durable client-key
-record -- Storage Access denied, or the engine offering no
+A remembered browser whose popup cannot reach the first-party
+client-key record -- Storage Access denied, or the engine offering no
 unpartitioned-IndexedDB request at all -- falls back to the transient
 session, exactly as a non-remembered browser routes. One uniform
 fallback covers every engine; no per-engine refusal arm exists.
 
 The cost accepted with it: such popup visits enroll a per-visit
-transient key into the client annex even though a durable client
+transient key into the client annex even though an enrolled client
 stands on the same browser. That is judged acceptable because the
 overlap is expected to be rare (a browser that is a remembered
 freewallet client AND logs into was-react apps through the popup), and
@@ -58,16 +58,16 @@ and collected.
 ## Consequences
 
 - On Safari and Firefox, a remembered browser's popup visits routinely
-  run transient sessions; the durable client sits unused in the popup
+  run transient sessions; the enrolled client sits unused in the popup
   context. The App Connect response's holder on those visits is the
-  visit's bare did:key, not the durable client's key (the shape
+  visit's bare did:key, not the enrolled client's key (the shape
   decision 0004 already fixes for transient sessions).
 - Per-visit annex enrollments accrue from popup logins on such
   browsers, bounded by the annex generation GC cycle.
 - The transient fallback requires the account to satisfy the transient
   composition's preconditions (a standing unlock credential, a
   reachable generation or sibling delegation); where those refuse, the
-  popup surfaces the transient refusal copy rather than a durable
+  popup surfaces the transient refusal copy rather than a remembered
   login.
 
 ## Revisit Criteria

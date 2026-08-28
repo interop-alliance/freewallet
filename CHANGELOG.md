@@ -21,10 +21,10 @@
 
 ### Removed
 
-- The four durable continuity pins in the `freewallet-session` database: the
-  keyed chain-head store (the account log's and the roster log's slots), the
-  user key roster-epoch pin, and the unlock record's freshness pin.
-  `src/lib/sessionKey.ts` exports no pin function.
+- The four browser-local continuity pins in the `freewallet-session`
+  database: the keyed chain-head store (the account log's and the roster
+  log's slots), the user key roster-epoch pin, and the unlock record's
+  freshness pin. `src/lib/sessionKey.ts` exports no pin function.
 - `KeyringRecordRolledBackError` and its login-page copy. The other
   authenticity and continuity refusals still reach the login page's forget
   affordance.
@@ -40,10 +40,10 @@
 
 ### Changed
 
-- The CHAPI popup no longer forces a durable login. It runs the same
-  post-KDF durability routing every login runs, with the Storage Access API
-  handle as the client-key record probe's factory. A granted handle finds
-  the first-party record, so a remembered browser logs in as that durable
+- The CHAPI popup no longer forces a remembered login. It runs the same
+  post-KDF routing every login runs, with the Storage Access API handle as
+  the client-key record probe's factory. A granted handle finds the
+  first-party record, so a remembered browser logs in as that enrolled
   client. A denied handle finds none in the partitioned bucket and routes
   transient, as does every engine offering no unpartitioned-IndexedDB
   request at all.
@@ -52,10 +52,11 @@
   so nothing provisions the popup's partitioned bucket.
 - `remoteDirectStorage` is retired as the popup marker. The login entry
   points take a `popup` option instead, which gates only what the
-  partitioning implies: remote-direct storage in the durable arm, and the
-  durable arm's popup refusals (no self-enrollment, no pending-enrollment
-  resume, and the login-time chain passes that already carried the guard).
-- A durable popup session on a WAS deployment no longer persists its
+  partitioning implies: remote-direct storage in the remembered arm, and
+  the remembered arm's popup refusals (no self-enrollment, no
+  pending-enrollment resume, and the login-time chain passes that already
+  carried the guard).
+- A remembered popup session on a WAS deployment no longer persists its
   descriptor and meta caches to localStorage. The Storage Access handle
   unpartitions IndexedDB and does not reach localStorage, so a persisted
   cache would be partitioned residue no top-level wipe can reach; the
@@ -92,8 +93,8 @@
   unpromoted-account refusal, with the failure as its cause. A
   transport-class failure still rethrows unchanged, so an offline start
   keeps its own copy.
-- The durable resume of a remembered signup now rethrows when the mend
-  leaves the pointer naming no did:webvh, instead of continuing into a
+- The remembered-signup resume now rethrows when the mend leaves the
+  pointer naming no did:webvh, instead of continuing into a
   self-enrollment that would fail on it.
 - A registry hook re-fired by the mend now carries the standing entry's
   management zcap forward instead of clearing it (the synthesized

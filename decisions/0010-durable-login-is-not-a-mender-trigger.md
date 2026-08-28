@@ -11,6 +11,10 @@
   residue. Re-derivation is owed by FW-354, FW-290, FW-177, FW-356,
   FW-343, and FW-218, whose mender arguments were written under the old
   reading. No wire contract.
+- Title: kept at the pre-settlement wording. The filename is cited
+  verbatim from ARCHITECTURE.md and from other records, so this record's
+  identity stays stable. The body reads on the settled axes of
+  `decisions/0011-durable-names-server-storage-only.md`.
 
 ## Context
 
@@ -25,20 +29,20 @@ The repo's standing sweeps all live on one promise chain,
 repair, the torn-retirement repair, the bare-passkey rebuild, the
 registry backfill, the standing-delegation and ladder-rung refreshes,
 the pointer heal, and the annex GC sweep. That chain is built only by a
-durable login. A transient login has two standing passes of its own:
+remembered login. A transient login has two standing passes of its own:
 the generation-readiness stage every visit runs, and the mend entry
 point its heal branch runs.
 
 So "the next login mends it" carries two different meanings. On a
 remembered browser it is a real bound, roughly one session away. On the
-default account it is not a bound: the durable chain may never run once
-in the account's life, and the residue is permanent. The same slippage
-priced hazards as low severity ("the window is one login cycle",
-"self-healing") when the window does not close.
+default account it is not a bound: the remembered-login chain may never
+run once in the account's life, and the residue is permanent. The same
+slippage priced hazards as low severity ("the window is one login
+cycle", "self-healing") when the window does not close.
 
 ## Decision
 
-A mender whose only trigger is a durable login does not count as a
+A mender whose only trigger is a remembered login does not count as a
 mender.
 
 A gated design names the trigger for each residue it leaves, and that
@@ -50,37 +54,37 @@ trigger must be one a credential-only visit can fire:
   generation-readiness stage, or the mend entry point);
 - a repair waiting at an entry the credential alone reaches.
 
-A residue whose only trigger is the durable login chain is an open gap.
-It is recorded as one in the design and in ARCHITECTURE.md's Ceremony
-inventory, and it gets its own work item. It is not coverage.
+A residue whose only trigger is the remembered-login chain is an open
+gap. It is recorded as one in the design and in ARCHITECTURE.md's
+Ceremony inventory, and it gets its own work item. It is not coverage.
 
 Two consequences for prose follow. A sweep on `registryReady` is called
-a durable-login sweep wherever it is offered as a mender. And a
-severity argument may not rest on a durable login recurring.
+a remembered-login sweep wherever it is offered as a mender. And a
+severity argument may not rest on a remembered login recurring.
 
 The rule does not require every mender to be duplicated on the
-transient path. It requires the durable-only ones to be counted as
-gaps.
+transient path. It requires the remembered-login-only ones to be
+counted as gaps.
 
 Scope. The rule bites where the torn state can stand on an account with
-no durable client, or where a transient visit can reach the ceremony
-that leaves it. A ceremony only a durable session can run (the Settings
-ceremonies, client revocation, update-key rotation) may name a durable
-trigger as its mender, because the account holding that torn state
-holds a durable client by construction. State which case applies rather
-than leaving it to the reader.
+no enrolled client, or where a transient visit can reach the ceremony
+that leaves it. A ceremony only a remembered session can run (the
+Settings ceremonies, client revocation, update-key rotation) may name a
+remembered-login trigger as its mender, because the account holding
+that torn state holds an enrolled client by construction. State which
+case applies rather than leaving it to the reader.
 
 ## Rejected Alternatives
 
-- Keep the durable login as a mender and note the client-less account
-  as a per-design exception. This is what the audited docs did. The
-  exception is the majority case, so the reading inverts: the stated
+- Keep the remembered login as a mender and note the client-less
+  account as a per-design exception. This is what the audited docs did.
+  The exception is the majority case, so the reading inverts: the stated
   bound holds for the minority and fails silently for everyone else.
 - Require a transient trigger for every mender before a gated item may
   land. Too strong. Some menders need authority a transient visit does
   not hold (an update key, a step-up ceremony's subject), and the rule
-  would block work whose durable-only mender is honest and stated as a
-  gap.
+  would block work whose remembered-login-only mender is honest and
+  stated as a gap.
 - Skip the rule and solve it once with a general transient-login mender
   chain (FW-320). Worth building, but not a substitute. The rule is
   what makes each design state its trigger, it applies while that item
@@ -100,7 +104,7 @@ than leaving it to the reader.
   VM-less standing credential; FW-343's "self-healing" bridge; FW-218's
   cost bound.
 - ARCHITECTURE.md's Ceremony inventory open-gaps paragraph grows as
-  durable-only menders are reclassified.
+  remembered-login-only menders are reclassified.
 - Some items get more severe, because a bound they claimed does not
   exist on the default account shape.
 
@@ -108,10 +112,10 @@ than leaving it to the reader.
 
 Reopen this decision when one or more of the following holds:
 
-1. The transient login gains a standing pass with the durable chain's
-   reach (FW-320's generalization). "Durable login" and "any login"
-   then name the same trigger for the passes it covers, and the rule
-   narrows to whatever stays durable-only.
+1. The transient login gains a standing pass with the remembered-login
+   chain's reach (FW-320's generalization). "Remembered login" and "any
+   login" then name the same trigger for the passes it covers, and the
+   rule narrows to whatever stays remembered-login-only.
 2. Remembering a browser becomes the default entry again, or
-   measurement shows most accounts run a durable login often enough
+   measurement shows most accounts run a remembered login often enough
    for it to be a real bound.
