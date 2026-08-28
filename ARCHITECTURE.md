@@ -203,6 +203,11 @@ refusal. Nothing compares pointers: a validly signed, non-stale
 record naming an account this client has never seen is followed wherever it
 points -- a rebind, a host migration, and a fresh account bound under a
 reused passphrase are all legitimate, and all produce a newer signed record.
+The pin is browser-local, so it is a remembered browser's state. A
+transient login reads and writes none (`fetchTransientKeyring`), which
+makes replay refusal something durable state buys: on the default entry a
+host may serve a record the account has since moved off. Pricing that is
+tracked separately.
 
 The bound on the whole construction: server-held material the unlock
 credential alone decrypts (the record, and the credential's standing wrap
@@ -456,7 +461,15 @@ log): a served log that is a rollback, a fork, or an SCID/method switch
 against the pinned head is refused (`@interop/vh-resource-log`'s
 `ResourceLogContinuityError`). The pin is established at first contact
 (trust-on-first-use), advanced only by a log verifying past it, never
-regressed. It rides the verified-log memo (`src/session/verifiedLog.ts`),
+regressed. It is browser-local, so it spans logins on a remembered
+browser alone. A transient session's pin store is in-memory and empty at
+visit start, so the default entry is trust-on-first-use afresh every
+visit. The DID cross-check still holds there (a mirror resolves to
+another DID), so what a host gains against such a visit is the prefix
+this pin exists to catch: a stale document view with a revoked client
+still listed or a retired credential still standing. Whether a
+credential-only visit should carry a prior at all is tracked
+separately. It rides the verified-log memo (`src/session/verifiedLog.ts`),
 the bare-parts roster store's controller resolution, the recovery flows'
 direct reads, and the enrollment completion's first contact; the login
 page renders the refusal (`auth.errors.accountLogContinuity`). A
@@ -473,11 +486,14 @@ must not fail login), but a non-`rollback` continuity refusal is logged as
 an error; later account-log reads in the same login hit the same pin and
 surface it to the user.
 
-**The pin inventory.** The session database holds four durable continuity
-priors, in three shapes. The two chain-head pins (the account log's and
-the roster log's) live in ONE keyed store (`sessionLogPinStore` in
-`src/lib/sessionKey.ts`, implementing `@interop/vh-resource-log`'s keyed
-`ResourceLogPinStore`): `read` and `write` take a per-log slot key
+**The pin inventory.** The session database holds four continuity priors,
+in three shapes. All four are browser-local, so the inventory below is a
+remembered browser's; a transient session builds in-memory stand-ins that
+die with the tab, and holds no freshness pin at all. The two chain-head
+pins (the account log's and the roster log's) live in ONE keyed store
+(`sessionLogPinStore` in `src/lib/sessionKey.ts`, implementing
+`@interop/vh-resource-log`'s keyed `ResourceLogPinStore`): `read` and
+`write` take a per-log slot key
 wallet-core derives (`accountLogPinId` / `userKeyRosterPinId`, both
 `space/<spaceId>/<collection>/<resource>` under the hood), so one store
 serves every log and two logs can never clobber each other's pin. The slot
@@ -1060,7 +1076,9 @@ latest-seen roster epoch (`src/lib/sessionKey.ts`, beside the
 keyring-freshness pin): a served roster that rolls back behind the pin is
 refused (`UserKeyRosterContinuityError`, with no rollback carve-out, since the
 chainless epoch pin cannot tell a rollback from a fork). It is kept because it
-still guards a client whose chain-head pin was lost with a reinstall. Third,
+still guards a client whose chain-head pin was lost with a reinstall. Like
+the chain-head pin it is browser-local, and a transient visit's is
+in-memory and empty when the visit begins. Third,
 at rotation time, a recipient resolver backed by the locally verified
 did:webvh document: a roster entry with no `keyAgreement` verification method
 marked for that client is dropped and never receives a wrap, so a
