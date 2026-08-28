@@ -303,7 +303,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       window.location.href = '/login'
     } catch (err) {
       const name = (err as { name?: string })?.name
-      if (name === 'LastDurableClientForgetError') {
+      if (name === 'LastEnrolledClientForgetError') {
         setForgetLastClient(true)
         setForgetErrorKey('settings.forget.lastClientNow')
       } else if (name === 'PendingRetirementForgetError') {

@@ -573,7 +573,7 @@ than folded into a clean wipe.
 from an account, in two grades split by whether the unlock credential is in
 hand. From a live remembered session (Settings > Connected wallets, the
 current client's row) it is the **forget ceremony**, wallet-core's
-`forgetDurableClient`: the user key rotates off this client's roster wrap
+`forgetEnrolledClient`: the user key rotates off this client's roster wrap
 and every encrypted collection re-epochs, both under this client's
 still-standing authority (the self-forget inversion of the revocation's
 document-edit-first order, forced by the entry-proof and current-key-set
@@ -608,13 +608,13 @@ invokes (its surviving readers would otherwise find it sealed to a retired
 generation), writes no re-mint stages (a replacement signed by a key that
 dies at the removal entry would rot moments later; the standing self-heals
 cover it), and refuses the account's last enrolled client with
-wallet-core's name-stable `LastDurableClientForgetError`.
+wallet-core's name-stable `LastEnrolledClientForgetError`.
 
 That refusal routes to the **last-client transition** (the same
 `forgetThisBrowser` entry with `lastClient: true`, chosen from the listing
 and confirmed against transition-stating copy; a stale listing's refusal
 flips the dialog to that copy for a second confirm): wallet-core's
-`forgetLastDurableClient`, the two-entry ceremony that lands the account
+`forgetLastEnrolledClient`, the two-entry ceremony that lands the account
 client-less and ladder-anchored, the state a credential-anchored signup and
 a transient recovery produce (wallet-core decision 0004's 2026-08-21
 amendment). The ladder VM's install entry goes first, while the client's

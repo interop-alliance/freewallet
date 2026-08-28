@@ -50,8 +50,8 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => {
   const actual = await importOriginal<object>()
   return {
     ...actual,
-    forgetDurableClient: vi.fn(),
-    forgetLastDurableClient: vi.fn(),
+    forgetEnrolledClient: vi.fn(),
+    forgetLastEnrolledClient: vi.fn(),
     ladderVmAgent: vi.fn(async () => ({ id: 'did:key:zLadderVm' })),
     ladderVmZcapClient: vi.fn(async () => LADDER_ZCAP_CLIENT),
     clientAnnexLogStore: vi.fn(() => ({ annexLogStore: true })),
@@ -65,8 +65,8 @@ const {
   clientAnnexDidParts,
   delegatedClientsDelegationSpaceId,
   delegatedClientsPointer,
-  forgetDurableClient,
-  forgetLastDurableClient,
+  forgetEnrolledClient,
+  forgetLastEnrolledClient,
   ladderVmZcapClient,
   mintDelegatedClientsDelegation
 } = await import('@interop/wallet-core/clientAnnex')
@@ -586,10 +586,10 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       spaceId: 'annex-space',
       generationId: 'gen-1'
     } as never)
-    vi.mocked(forgetDurableClient).mockResolvedValue({
+    vi.mocked(forgetEnrolledClient).mockResolvedValue({
       rotated: true
     } as never)
-    vi.mocked(forgetLastDurableClient).mockResolvedValue({
+    vi.mocked(forgetLastEnrolledClient).mockResolvedValue({
       installed: true
     } as never)
     vi.mocked(executeLocalWipe).mockResolvedValue({
@@ -601,7 +601,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
   it('runs the ordinary ceremony and wipes strictly after it', async () => {
     const { session } = fakeSession()
     const order: string[] = []
-    vi.mocked(forgetDurableClient).mockImplementation(async () => {
+    vi.mocked(forgetEnrolledClient).mockImplementation(async () => {
       order.push('ceremony')
       return { rotated: true } as never
     })
@@ -616,8 +616,8 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       wipeFailed: ['session-db'],
       wipeUnverified: []
     })
-    expect(vi.mocked(forgetDurableClient)).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(forgetEnrolledClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(forgetLastEnrolledClient)).not.toHaveBeenCalled()
     expect(order).toEqual(['ceremony', 'wipe'])
     expect(vi.mocked(executeLocalWipe).mock.calls[0]![0]).toMatchObject({
       targets: WIPE_TARGETS,
@@ -630,9 +630,9 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
   it('rethrows the last-client refusal without wiping anything', async () => {
     const { session } = fakeSession()
     const refusal = Object.assign(new Error('another ceremony applies'), {
-      name: 'LastDurableClientForgetError'
+      name: 'LastEnrolledClientForgetError'
     })
-    vi.mocked(forgetDurableClient).mockRejectedValue(refusal)
+    vi.mocked(forgetEnrolledClient).mockRejectedValue(refusal)
     await expect(forgetThisBrowser({ session })).rejects.toBe(refusal)
     expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
   })
@@ -643,7 +643,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       name: 'RecordRemintFailedError',
       failed: [{ label: 'Other method', outcome: 'failed' }]
     })
-    vi.mocked(forgetLastDurableClient).mockRejectedValue(refusal)
+    vi.mocked(forgetLastEnrolledClient).mockRejectedValue(refusal)
     await expect(forgetThisBrowser({ session, lastClient: true })).rejects.toBe(
       refusal
     )
@@ -656,15 +656,15 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     await expect(
       forgetThisBrowser({ session, lastClient: true })
     ).rejects.toThrow(/record re-bind/)
-    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
-    expect(vi.mocked(forgetDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(forgetLastEnrolledClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(forgetEnrolledClient)).not.toHaveBeenCalled()
     expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
   })
 
   it('runs the last-client transition with the annex reach and wipes after it', async () => {
     const { session } = fakeSession()
     const order: string[] = []
-    vi.mocked(forgetLastDurableClient).mockImplementation(async () => {
+    vi.mocked(forgetLastEnrolledClient).mockImplementation(async () => {
       order.push('ceremony')
       return { installed: true } as never
     })
@@ -679,9 +679,9 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       wipeFailed: [],
       wipeUnverified: []
     })
-    expect(vi.mocked(forgetDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(forgetEnrolledClient)).not.toHaveBeenCalled()
     expect(order).toEqual(['ceremony', 'wipe'])
-    const options = vi.mocked(forgetLastDurableClient).mock.calls[0]![0]
+    const options = vi.mocked(forgetLastEnrolledClient).mock.calls[0]![0]
     expect(options.annex).toMatchObject({
       wasServerUrl: pointer.host,
       accountSpaceId: pointer.spaceId,
@@ -718,7 +718,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       record: registry,
       excludeUnlockSpaceIds: ['unlock-1']
     })
-    const { unlockMethods } = vi.mocked(forgetLastDurableClient).mock
+    const { unlockMethods } = vi.mocked(forgetLastEnrolledClient).mock
       .calls[0]![0]
     expect(unlockMethods).toMatchObject({
       entries: otherEntries,
@@ -764,7 +764,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     // The ordinary forget proceeds, with the wipe snapshot told the read
     // failed (the snapshot itself always enumerates the session's own
     // unlock Space) and the narrowing reported on the outcome.
-    expect(vi.mocked(forgetDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(forgetEnrolledClient)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(snapshotWipeTargets).mock.calls[0]![0]).toMatchObject({
       registry: null,
       registryUnread: true
@@ -840,7 +840,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       forgetThisBrowser({ session, lastClient: true })
     ).rejects.toMatchObject({ name: 'PendingRetirementForgetError' })
     warn.mockRestore()
-    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(forgetLastEnrolledClient)).not.toHaveBeenCalled()
     expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
   })
 
@@ -860,7 +860,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       sealedRecord({ keyAgreementKeyMultibase: 'zUnlockKak' }) as never
     )
     await forgetThisBrowser({ session, lastClient: true })
-    expect(vi.mocked(forgetLastDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(forgetLastEnrolledClient)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledTimes(1)
   })
 
@@ -894,7 +894,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       sealedRecord({ keyAgreementKeyMultibase: 'zNewUnlockKak' }) as never
     )
     await forgetThisBrowser({ session, lastClient: true })
-    expect(vi.mocked(forgetLastDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(forgetLastEnrolledClient)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledTimes(1)
   })
 
@@ -919,7 +919,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     await expect(
       forgetThisBrowser({ session, lastClient: true })
     ).rejects.toThrow(/sign-in record/)
-    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(forgetLastEnrolledClient)).not.toHaveBeenCalled()
     expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
   })
 
@@ -941,7 +941,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     await expect(
       forgetThisBrowser({ session, lastClient: true })
     ).rejects.toThrow(/sign-in record/)
-    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(forgetLastEnrolledClient)).not.toHaveBeenCalled()
     expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
   })
 
@@ -959,7 +959,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     } as never)
     await forgetThisBrowser({ session })
     expect(vi.mocked(getUnlockKeyringWithCapability)).not.toHaveBeenCalled()
-    expect(vi.mocked(forgetDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(forgetEnrolledClient)).toHaveBeenCalledTimes(1)
   })
 
   it('refuses the transition up front when the registry cannot be read', async () => {
@@ -968,7 +968,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     await expect(
       forgetThisBrowser({ session, lastClient: true })
     ).rejects.toThrow(/unlock-methods registry/)
-    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(forgetLastEnrolledClient)).not.toHaveBeenCalled()
     expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
   })
 
@@ -1008,7 +1008,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       forgetThisBrowser({ session, lastClient: true })
     ).rejects.toMatchObject({ name: 'UnrecordedCredentialForgetError' })
     warn.mockRestore()
-    expect(vi.mocked(forgetLastDurableClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(forgetLastEnrolledClient)).not.toHaveBeenCalled()
     expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
   })
 
@@ -1054,7 +1054,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       ]
     } as never)
     await forgetThisBrowser({ session, lastClient: true })
-    expect(vi.mocked(forgetLastDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(forgetLastEnrolledClient)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledTimes(1)
   })
 
@@ -1074,7 +1074,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       }
     } as never)
     await forgetThisBrowser({ session, lastClient: true })
-    expect(vi.mocked(forgetLastDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(forgetLastEnrolledClient)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledTimes(1)
   })
 
@@ -1093,7 +1093,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       }
     } as never)
     await forgetThisBrowser({ session })
-    expect(vi.mocked(forgetDurableClient)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(forgetEnrolledClient)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(executeLocalWipe)).toHaveBeenCalledTimes(1)
   })
 
@@ -1109,7 +1109,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       sibling as never
     )
     await forgetThisBrowser({ session, lastClient: true })
-    const { onBeforeRemoval } = vi.mocked(forgetLastDurableClient).mock
+    const { onBeforeRemoval } = vi.mocked(forgetLastEnrolledClient).mock
       .calls[0]![0]
     await onBeforeRemoval!({
       did: 'did:webvh:scid-a:example.com:space-1',
@@ -1150,7 +1150,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
   it("threads the account log's chain-head pin and slot into the ceremony", async () => {
     const { session } = fakeSession()
     await forgetThisBrowser({ session })
-    const options = vi.mocked(forgetDurableClient).mock.calls[0]![0]
+    const options = vi.mocked(forgetEnrolledClient).mock.calls[0]![0]
     expect(options.pinStore).toBe(session.profile.persistence.logPins)
     expect(options.logId).toBe(accountLogPinId({ spaceId: pointer.spaceId }))
   })
@@ -1159,7 +1159,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     const { session } = fakeSession()
     await forgetThisBrowser({ session })
     const { onUserKeyAdopted } =
-      vi.mocked(forgetDurableClient).mock.calls[0]![0]
+      vi.mocked(forgetEnrolledClient).mock.calls[0]![0]
     const userKey = { id: 'did:key:zFreshUserKey' }
     const descriptor = { currentEpoch: 'epoch-2' }
     await onUserKeyAdopted!({

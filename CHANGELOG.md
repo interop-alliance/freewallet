@@ -25,6 +25,11 @@
   corrected as claims: none says a continuity pin survives a visit, that the
   two strategies differ in their pin members, or that a remembered browser
   gets stronger continuity than a transient one.
+- The forget call sites follow wallet-core's renamed surface:
+  `forgetEnrolledClient`, `forgetLastEnrolledClient`,
+  `EnrolledClientForgetResult`, `LastEnrolledClientForgetResult`, and the
+  name-stable `LastEnrolledClientForgetError` the Settings dialog routes the
+  last-client transition on. Requires `@interop/wallet-core` 0.58.0.
 
 ## 0.43.0 - TBD
 

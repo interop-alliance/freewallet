@@ -3,7 +3,7 @@
  * grades, split by whether the unlock credential is in hand:
  *
  * - **The forget ceremony** (`forgetThisBrowser`, run from a live
- *   remembered session): wallet-core's `forgetDurableClient` -- the roster
+ *   remembered session): wallet-core's `forgetEnrolledClient` -- the roster
  *   rotation off this client's wrap and the collection fan-out under this
  *   client's still-standing authority, then ONE atomic ladder-signed
  *   removal entry through the standing credential's bridge -- followed by
@@ -15,7 +15,7 @@
  * - **The last-client transition** (the same `forgetThisBrowser` entry with
  *   `lastClient: true`, confirmed against transition-stating copy): when
  *   this browser is the account's LAST enrolled client, wallet-core's
- *   `forgetLastDurableClient` runs instead -- the two-entry ceremony that
+ *   `forgetLastEnrolledClient` runs instead -- the two-entry ceremony that
  *   lands the account client-less and ladder-anchored (the state a
  *   credential-anchored signup and a transient recovery produce): the ladder
  *   VM's install entry, the ladder-signed roster rotation anchored there and
@@ -30,7 +30,7 @@
  *   refresh block will ever heal them), the login credential's record
  *   re-bind (bridge and sibling re-signed by the ladder VM through the hit's
  *   re-bind closure, the registry pair refreshed), then the removal entry.
- *   The ordinary ceremony's `LastDurableClientForgetError` (name-stable) is
+ *   The ordinary ceremony's `LastEnrolledClientForgetError` (name-stable) is
  *   the routing signal when the caller's view was stale.
  *   The transition's own name-stable refusal, `RecordRemintFailedError`
  *   (another sign-in method's record could not be re-sealed, so the
@@ -81,15 +81,15 @@ import { WasClient } from '@interop/was-client'
 import {
   clientAnnexLogStore,
   delegatedClientsDelegationSpaceId,
-  forgetDurableClient,
-  forgetLastDurableClient,
+  forgetEnrolledClient,
+  forgetLastEnrolledClient,
   ladderVmAgent,
   ladderVmZcapClient,
   mintDelegatedClientsDelegation
 } from '@interop/wallet-core/clientAnnex'
 import type {
-  DurableClientForgetResult,
-  LastDurableClientForgetResult
+  EnrolledClientForgetResult,
+  LastEnrolledClientForgetResult
 } from '@interop/wallet-core/clientAnnex'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import { getUnlockKeyringWithCapability } from '@interop/wallet-core/keyring'
@@ -245,8 +245,8 @@ export class UnrecordedCredentialForgetError extends Error {
  * verified wipe).
  */
 type ForgetCeremonyOutcome =
-  | { lastClient: false; ceremony: DurableClientForgetResult }
-  | { lastClient: true; ceremony: LastDurableClientForgetResult }
+  | { lastClient: false; ceremony: EnrolledClientForgetResult }
+  | { lastClient: true; ceremony: LastEnrolledClientForgetResult }
 export type ForgetOutcome = ForgetCeremonyOutcome & {
   wipeFailed: string[]
   wipeUnverified: string[]
@@ -261,12 +261,12 @@ export type ForgetOutcome = ForgetCeremonyOutcome & {
  *
  * Which ceremony runs is the caller's `lastClient` choice, because the two
  * carry different consequences the user confirms against: `false` is
- * wallet-core's `forgetDurableClient` (rotation, fan-out, removal entry --
- * the self-forget inversion), and `true` is `forgetLastDurableClient` (the
+ * wallet-core's `forgetEnrolledClient` (rotation, fan-out, removal entry --
+ * the self-forget inversion), and `true` is `forgetLastEnrolledClient` (the
  * two-entry transition to the client-less, ladder-anchored account; see the
  * module doc). A `false` run that turns out to be the last client -- the
  * caller's listing was stale -- refuses with wallet-core's name-stable
- * `LastDurableClientForgetError` before any write, so the caller can
+ * `LastEnrolledClientForgetError` before any write, so the caller can
  * re-confirm against the transition copy; a `true` run on an account with
  * another enrolled client refuses from the ceremony's pre-install read, and
  * one that could not re-seal another sign-in method's record refuses with
@@ -471,14 +471,14 @@ export async function forgetThisBrowser({
   let outcome: ForgetCeremonyOutcome
   try {
     if (!lastClient) {
-      const ceremony = await forgetDurableClient({
+      const ceremony = await forgetEnrolledClient({
         ...shared,
         logId: accountLogPinId({ spaceId: pointer.spaceId }),
         rosterStore: sessionRosterStore({ profile: session.profile })
       })
       outcome = { lastClient: false, ceremony }
     } else {
-      const ceremony = await forgetLastDurableClient({
+      const ceremony = await forgetLastEnrolledClient({
         ...shared,
         rosterStoreFor: await ladderSignedRosterStoreFor({
           session,
@@ -625,7 +625,7 @@ function unlockMethodsRemintReach({
   registry: Parameters<typeof remintEntriesOf>[0]['record']
   loginUnlockSpaceId: string
 }): NonNullable<
-  Parameters<typeof forgetLastDurableClient>[0]['unlockMethods']
+  Parameters<typeof forgetLastEnrolledClient>[0]['unlockMethods']
 > {
   return {
     entries: remintEntriesOf({
