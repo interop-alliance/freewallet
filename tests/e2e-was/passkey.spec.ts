@@ -283,7 +283,7 @@ test.describe('Passkey unlock', () => {
     await page.goto('/#/login')
     await page.reload()
     // The wiped browser is non-remembered, so the default login would be
-    // transient; this spec exercises the durable standing self-enrollment.
+    // transient; this spec exercises the remembered standing self-enrollment.
     await forceRememberBrowser(page)
     await page.getByRole('button', { name: 'Log in with a Passkey' }).click()
     await expect(page).toHaveURL(/#\/dashboard/, { timeout: 45_000 })

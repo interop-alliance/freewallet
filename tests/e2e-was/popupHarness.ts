@@ -3,7 +3,7 @@
  * by driving `/#/wallet/get` as a first-party top-level page, done for real.
  *
  * A CHAPI popup runs as a third-party iframe under the mediator's origin, and
- * everything FW-203 turns on -- which durability the popup routes to, and
+ * everything FW-203 turns on -- which login route the popup takes, and
  * which storage bucket its residue would land in -- is invisible unless the
  * frame is genuinely cross-site. So the harness serves a bare host document
  * on `127.0.0.1` (a different site from `localhost`, and the reason
@@ -117,7 +117,7 @@ export async function injectPopupGetEvent({
  * request (Safari and Firefox today). Under
  * `decisions/0009-popup-denied-storage-access-goes-transient.md` the popup
  * must fall back to the transient session there, even on a browser that IS a
- * remembered durable client -- so this stub is how a Chromium run exercises
+ * remembered enrolled client -- so this stub is how a Chromium run exercises
  * the other engines' default rather than assuming it.
  *
  * @param options {object}

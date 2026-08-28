@@ -1,12 +1,12 @@
 /**
- * The remembered signup e2e (WAS mode): the durable signup rides the
+ * The remembered signup e2e (WAS mode): the remembered signup rides the
  * credential-anchored fold -- the establishment (ladder-anchored genesis plus
- * the `#DelegatedClients` pointer entry) followed by the ordinary durable
+ * the `#DelegatedClients` pointer entry) followed by the ordinary remembered
  * login's self-enrollment (the reveal-and-commit and add entries). The
  * world-readable account log therefore carries exactly four entries and still
- * fully verifies, the session lands on the dashboard as a durable client, a
- * credential stores, and a reload-then-login proves the client-key record
- * persisted (a remembered browser's default login is durable).
+ * fully verifies, the session lands on the dashboard as an enrolled client,
+ * a credential stores, and a reload-then-login proves the client-key record
+ * persisted (a remembered browser's default login is remembered).
  *
  * PBKDF2 unlock derivations and the four-entry ceremony chain make this a
  * slow spec.
@@ -35,13 +35,13 @@ async function readLogUrl(page: Page): Promise<string> {
 }
 
 test.describe('Remembered signup', () => {
-  test('the durable signup rides the fold and persists the client-key record', async ({
+  test('the remembered signup rides the fold and persists the client-key record', async ({
     page
   }, testInfo) => {
     test.slow()
 
-    // The default (remembered) wizard signup lands a durable session on the
-    // dashboard, with the welcome content seeded.
+    // The default (remembered) wizard signup lands a remembered session on
+    // the dashboard, with the welcome content seeded.
     const { passphrase } = await signupViaWizard(page, testInfo)
     await expect(
       page.getByRole('link', { name: 'Your First Credential' })
@@ -77,14 +77,14 @@ test.describe('Remembered signup', () => {
       services.some(entry => entry.id?.endsWith('#delegated-clients'))
     ).toBe(true)
 
-    // The durable session works: a credential stores through the replica.
+    // The remembered session works: a credential stores through the replica.
     // (`readLogUrl` left the page on Settings; the Add Credential link
     // lives on the dashboard.)
     await page.goto('/#/dashboard')
     await addCredentialViaPaste(page)
 
     // A reload-then-login exercises the persisted client-key record: a
-    // remembered browser's DEFAULT login (no seam) proceeds durable and
+    // remembered browser's DEFAULT login (no seam) proceeds remembered and
     // decrypts what the signup session stored.
     await page.goto('/#/login')
     await fillSettled(page.locator('input[type="password"]'), passphrase)

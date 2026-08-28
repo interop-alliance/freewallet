@@ -331,7 +331,7 @@ test.describe('The Applications revocation surface', () => {
     try {
       await secondClient.goto('/#/login')
       // The cold profile is non-remembered, so the default login would be
-      // transient; this spec exercises the durable standing self-enrollment.
+      // transient; this spec exercises the remembered standing self-enrollment.
       await forceRememberBrowser(secondClient)
       await fillSettled(
         secondClient.locator('input[type="password"]'),

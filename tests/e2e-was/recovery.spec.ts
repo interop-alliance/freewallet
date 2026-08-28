@@ -7,21 +7,21 @@ import {
 import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 
 /**
- * The recovery-code flow e2e (WAS mode), end to end -- the DURABLE
- * (remembered-browser) recovery cell: a code issued from
- * Settings (the split configuration: roster wrap, the code's `keyAgreement`
- * VM, `nextKeyHashes` commitment, delegated unlock record), then recovery on
- * a COLD browser profile holding nothing but the code -- the delegated log
- * write enrolls a brand-new client, the user key comes out of the code's standing
- * wrap and is rotated off the spent code, a replacement code is pushed hard,
- * and the recovered session decrypts pre-recovery encrypted writes (the
- * welcome credential) across the rotation. The spent code then fails with
- * wording distinct from "wrong code", and the whole ceremony is verifiable
- * entries on the world-readable log.
+ * The recovery-code flow e2e (WAS mode), end to end -- the REMEMBERED
+ * recovery cell: a code issued from Settings (the split configuration:
+ * roster wrap, the code's `keyAgreement` VM, `nextKeyHashes` commitment,
+ * delegated unlock record), then recovery on a COLD browser profile holding
+ * nothing but the code -- the delegated log write enrolls a brand-new
+ * client, the user key comes out of the code's standing wrap and is rotated
+ * off the spent code, a replacement code is pushed hard, and the recovered
+ * session decrypts pre-recovery encrypted writes (the welcome credential)
+ * across the rotation. The spent code then fails with wording distinct from
+ * "wrong code", and the whole ceremony is verifiable entries on the
+ * world-readable log.
  *
- * The durable continuation runs behind the remember seam: the DEFAULT on a
- * non-remembered browser is the transient variant, whose durability cell is
- * pinned in `recovery-transient.spec.ts`.
+ * The remembered continuation runs behind the remember seam: the DEFAULT on
+ * a non-remembered browser is the transient variant, whose cell is pinned in
+ * `recovery-transient.spec.ts`.
  *
  * Several PBKDF2 unlock derivations run across the flow on top of a full
  * signup -- hence `test.slow()` and the generous timeouts.
@@ -154,8 +154,8 @@ test.describe('Recovery codes', () => {
     const secondClient = await coldClientPage(browser)
     try {
       await secondClient.goto('/#/recover')
-      // This spec pins the DURABLE recovery cell: the remember seam routes
-      // the continuation (and the login after it) durable.
+      // This spec pins the REMEMBERED recovery cell: the remember seam
+      // routes the continuation (and the login after it) remembered.
       await forceRememberBrowser(secondClient)
 
       // A well-formed code for no wallet: the honest "no account" wording,
@@ -309,7 +309,7 @@ test.describe('Recovery codes', () => {
     page,
     browser
   }, testInfo) => {
-    // The persist-before-publish cell: the durable spend's add-and-retire
+    // The persist-before-publish cell: the remembered spend's add-and-retire
     // entry lands and the pending client-key record persists, then the tab
     // dies BEFORE the confirm-gated record completion (a reload drops the
     // in-memory ceremony state while the pending record survives). The next
@@ -319,10 +319,10 @@ test.describe('Recovery codes', () => {
     // decrypts pre-recovery history.
     test.setTimeout(360_000)
 
-    // Minted per attempt, not shared with the durable spend cell: the unlock
-    // Space address derives from the passphrase alone, so a passphrase
-    // another cell (or a prior attempt) already bound is refused by the
-    // spend's collision probe.
+    // Minted per attempt, not shared with the remembered spend cell: the
+    // unlock Space address derives from the passphrase alone, so a
+    // passphrase another cell (or a prior attempt) already bound is refused
+    // by the spend's collision probe.
     const resumePassphrase = `Recovered-resume-42!-${Date.now()}`
 
     const { passphrase } = await signupViaWizard(page, testInfo)
@@ -345,7 +345,7 @@ test.describe('Recovery codes', () => {
       timeout: 60_000
     })
 
-    // The cold profile spends the code durably.
+    // The cold profile spends the code as an enrolled client.
     const secondClient = await coldClientPage(browser)
     try {
       await secondClient.goto('/#/recover')

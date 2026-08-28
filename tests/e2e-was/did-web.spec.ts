@@ -20,9 +20,9 @@ async function signup(page: Page, testInfo: TestInfo) {
   const email = `e2e-${token}@example.com`
 
   await page.goto('/#/signup')
-  // These suites pin the DURABLE signup's artifacts (the KMS keystore, the
-  // per-client update keys), so they force the remember seam: the default
-  // signup on a non-remembered browser is credential-anchored.
+  // These suites pin the REMEMBERED signup's artifacts (the KMS keystore,
+  // the per-client update keys), so they force the remember seam: the
+  // default signup on a non-remembered browser is credential-anchored.
   await forceRememberBrowser(page)
   await fillSettled(page.locator('input[type="password"]'), passphrase)
   const next = page.getByRole('button', { name: 'Next' })
@@ -36,8 +36,8 @@ async function signup(page: Page, testInfo: TestInfo) {
   await expect(page).toHaveURL(/#\/signup\?.*step=storage/)
   await page.getByRole('button', { name: 'Create Wallet' }).click()
   // The remembered signup rides the credential-anchored fold (establishment
-  // plus the durable login's self-enrollment), so it runs well past the old
-  // durable flow's budget.
+  // plus the remembered login's self-enrollment), so it runs well past the
+  // old remembered flow's budget.
   await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
 
   return { passphrase, email }

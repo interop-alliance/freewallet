@@ -7,8 +7,8 @@
  * re-runs the establishment end to end) must upsert, never clobber -- the
  * WebAuthn user id kept, every other entry carried. The two differ in
  * failure semantics: the passphrase hook swallows its own failures (the
- * entry is re-recordable at the next durable login), while the passkey hook
- * throws through and fails the signup (an absent passkey entry has no
+ * entry is re-recordable at the next remembered login), while the passkey
+ * hook throws through and fails the signup (an absent passkey entry has no
  * rebuild). Here the registry is an in-memory double behind the mocked
  * read/write helpers, the real upsert helpers run, and each signup is fired
  * twice.

@@ -367,7 +367,7 @@ describe('the cascade, torn in the collection fan-out', () => {
   it('has already re-sealed the registry when the fan-out dies', async () => {
     // The tear FW-296 closes: the cascade's roster tail adopted the fresh
     // user key -- which persists it into this browser's client-key record,
-    // destroying the durable copy of the old one -- and then the collection
+    // destroying the stored copy of the old one -- and then the collection
     // fan-out died. The registry must already be sealed to the fresh key by
     // then, or nothing anywhere could ever open it again.
     vi.mocked(revokeAccountClient).mockImplementation(async options => {
@@ -411,7 +411,7 @@ describe('the cascade, rotated path', () => {
       'loadUserKeyEpochPin',
       'revokeAccountClient',
       // The in-band adoption: the registry re-seal runs BEFORE this
-      // browser's durable copy of the pre-rotation key dies, so a run torn
+      // browser's stored copy of the pre-rotation key dies, so a run torn
       // in the collection fan-out below leaves a registry the next login
       // can still open.
       'rewrapUnlockMethodsRecord',

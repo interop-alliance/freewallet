@@ -3,9 +3,9 @@
  * Unit tests for the annex GC sweep (`src/session/clientAnnexGc.ts`): the
  * login-time driver of wallet-core's `runClientAnnexGc`. The ceremony itself is
  * mocked at the module seam so what this module actually supplies -- the
- * durable-session and enrolled-client preconditions, the verified-log memo,
- * the options it threads, and the GenerationCollect digest write -- is what
- * runs; the pure annex helpers (`clientAnnexDidParts`,
+ * remembered-session and enrolled-client preconditions, the verified-log
+ * memo, the options it threads, and the GenerationCollect digest write -- is
+ * what runs; the pure annex helpers (`clientAnnexDidParts`,
  * `delegatedClientsPointer`, `isWebvhDid`) run for real against fixture
  * documents.
  */
@@ -87,7 +87,7 @@ function accountDoc({ pointed = true }: { pointed?: boolean } = {}) {
 }
 
 /**
- * A live durable session shaped as much as the sweep reads it: the
+ * A live remembered session shaped as much as the sweep reads it: the
  * persistence handle, the zcap client, the storage facade (a plain mock),
  * and the user the digest is attributed to.
  */

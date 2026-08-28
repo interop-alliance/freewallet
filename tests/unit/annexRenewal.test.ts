@@ -152,10 +152,10 @@ describe('renewTransientGenerationDelegation', () => {
   })
 
   it('refuses to mint when the document anchors no ladder VM of this credential', async () => {
-    // The account the transient login's fallback serves: enrolled durable
-    // clients, the ladder VM struck by the self-enrollment's add entry. A
-    // delegation signed by it would authorize nothing and would poison the
-    // annex log for every later visit.
+    // The account the transient login's fallback serves: enrolled clients,
+    // the ladder VM struck by the self-enrollment's add entry. A delegation
+    // signed by it would authorize nothing and would poison the annex log
+    // for every later visit.
     vi.mocked(verifyAccountLog).mockResolvedValue({
       did: ACCOUNT_DID,
       doc: { id: ACCOUNT_DID, verificationMethod: [] },

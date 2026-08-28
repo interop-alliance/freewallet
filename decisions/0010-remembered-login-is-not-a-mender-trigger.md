@@ -1,19 +1,19 @@
-# 0010: A durable login is not a mender trigger
+# 0010: A remembered login is not a mender trigger
 
 - Status: accepted
 - Date: 2026-08-27
 - Driving work: the 2026-08-27 framing audit run after the default
   transient session landed (FW-203, FW-265, FW-316). It found the same
   argument in several gated designs: a residue is left unmended because
-  "the next login" or "some durable login" will finish it.
+  "the next login" or "some login" will finish it.
 - Affects: freewallet's design gate, the tear-mending taxonomy in
   ARCHITECTURE.md's Glossary, and every gated design that states a
   residue. Re-derivation is owed by FW-354, FW-290, FW-177, FW-356,
   FW-343, and FW-218, whose mender arguments were written under the old
   reading. No wire contract.
-- Title: kept at the pre-settlement wording. The filename is cited
-  verbatim from ARCHITECTURE.md and from other records, so this record's
-  identity stays stable. The body reads on the settled axes of
+- Title: renamed 2026-08-28 from `durable login` to `remembered login`,
+  with every citation updated in the same pass. The record number is the
+  stable identity; the wording now reads on the settled axes of
   `decisions/0011-durable-names-server-storage-only.md`.
 
 ## Context
@@ -97,10 +97,10 @@ case applies rather than leaving it to the reader.
   which session types fire this.
 - Standing arguments in existing designs become invalid and are
   re-derived: FW-354's un-awaited second phase and its "each
-  credential's own next durable login mends it"; FW-290's "a transient
+  credential's own next remembered login mends it"; FW-290's "a transient
   session skips the governed login-time sweeps" invariant and its gap
   classes; FW-177's annex GC, orphan discovery, and generation cleanup,
-  all triggered at "the first durable login"; FW-356's mender for a
+  all triggered at "the first remembered login"; FW-356's mender for a
   VM-less standing credential; FW-343's "self-healing" bridge; FW-218's
   cost bound.
 - ARCHITECTURE.md's Ceremony inventory open-gaps paragraph grows as

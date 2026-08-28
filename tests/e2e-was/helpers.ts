@@ -42,7 +42,7 @@ export async function signupViaWizard(
     rememberBrowser = true
   }: {
     // The credential-anchored (transient-session) signup is the DEFAULT on a
-    // non-remembered browser, so the durable fixtures every other suite
+    // non-remembered browser, so the remembered fixtures every other suite
     // builds on force the remember seam; the credential-anchored signup spec
     // is the one caller passing false.
     rememberBrowser?: boolean
@@ -171,8 +171,8 @@ export async function deleteCredential(page: Page) {
  * they happen to be, and which of them landed decides what the account looks
  * like afterwards.
  *
- * Call it in any fixture that builds a durable account and then hands it to
- * something else. Neither promise rejects, so this resolves whether the
+ * Call it in any fixture that builds a remembered session and then hands it
+ * to something else. Neither promise rejects, so this resolves whether the
  * passes succeeded or warned and skipped.
  *
  * @param page {Page}   a page holding a logged-in session
@@ -226,7 +226,7 @@ export async function awaitLoginChain(
 }
 
 /**
- * Forces the durable login route (the programmatic remember-this-browser
+ * Forces the remembered login route (the programmatic remember-this-browser
  * entry) for login submits on this page. A transient session is the
  * default on a non-remembered browser, so specs exercising the standing
  * self-enrollment set this non-production seam before submitting. The flag
@@ -246,7 +246,7 @@ export async function forceRememberBrowser(page: Page): Promise<void> {
 /**
  * Submits the login form on an already-loaded login page WITHOUT the
  * remember-this-browser seam, so a non-remembered browser takes its default
- * durability -- the transient (public-terminal) login -- and waits for the
+ * login route -- the transient (public-terminal) login -- and waits for the
  * dashboard. Split from the `goto` so a caller can capture a localStorage
  * baseline on the loaded page before anything is typed.
  *

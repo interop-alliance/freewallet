@@ -247,7 +247,7 @@ test.describe('Unlock-method revocation from another client', () => {
     try {
       await secondClient.goto('/#/login')
       // The cold profile is non-remembered, so the default login would be
-      // transient; this spec exercises the durable standing self-enrollment.
+      // transient; this spec exercises the remembered standing self-enrollment.
       await forceRememberBrowser(secondClient)
       await fillSettled(
         secondClient.locator('input[type="password"]'),
@@ -322,9 +322,9 @@ test.describe('Unlock-method revocation from another client', () => {
     const recoveredClient = await coldClientPage(browser)
     try {
       await recoveredClient.goto('/#/recover')
-      // The spec's point is a DURABLE post-recovery client running the
+      // The spec's point is a REMEMBERED post-recovery client running the
       // Settings revocation, so the remember seam routes the recovery (and
-      // the login) durable; the default transient variant's cell lives in
+      // the login) remembered; the default transient variant's cell lives in
       // `recovery-transient.spec.ts`.
       await forceRememberBrowser(recoveredClient)
       await fillSettled(

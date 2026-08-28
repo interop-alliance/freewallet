@@ -1,6 +1,7 @@
 /**
- * The session durability seam: the transient handle's in-memory
- * members and refusals, and the durable handle's cache memoization.
+ * The session persistence seam: the transient strategy's in-memory
+ * members and refusals, and the browser-local strategy's cache
+ * memoization.
  */
 import { describe, expect, it } from 'vitest'
 import type { IZcap } from '@interop/data-integrity-core'
@@ -30,8 +31,8 @@ function transientHandle(): InMemorySessionPersistence {
   })
 }
 
-describe('the transient persistence handle', () => {
-  it('is typed non-durable and carries no idb factory member', () => {
+describe('the transient persistence strategy', () => {
+  it('is typed in-memory and carries no idb factory member', () => {
     const handle = transientHandle()
     expect(isBrowserLocalSession(handle)).toBe(false)
     expect('idb' in handle).toBe(false)
@@ -151,8 +152,8 @@ describe('the transient persistence handle', () => {
   })
 })
 
-describe('the durable persistence handle', () => {
-  it('is typed durable and memoizes one cache pair per scope', () => {
+describe('the browser-local persistence strategy', () => {
+  it('is typed browser-local and memoizes one cache pair per scope', () => {
     const handle = browserLocalSessionPersistence()
     expect(isBrowserLocalSession(handle)).toBe(true)
     const cache = handle.descriptorCache({ scope: 'space-a' })
@@ -172,15 +173,15 @@ describe('the durable persistence handle', () => {
     expect(await cache.readDescriptor({ collectionId: 'contacts' })).toEqual(
       descriptor
     )
-    // The write reached no durable storage.
+    // The write reached no browser-local storage.
     expect(
       localStorage.getItem('freewallet:collection-encryption:space:contacts')
     ).toBeNull()
   })
 })
 
-describe('the durability refusals', () => {
-  it('refuses a durable-subject ceremony from a transient session', () => {
+describe('the tier refusals', () => {
+  it('refuses a browser-local-subject ceremony from a transient session', () => {
     const transient = transientHandle()
     expect(() =>
       assertBrowserLocalSession({

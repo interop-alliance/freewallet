@@ -102,9 +102,9 @@ const ACCOUNT_DID = `did:webvh:QmScid:was.example.test:space:${SPACE_ID}`
 
 /**
  * A session stand-in whose vault keys are the given user key's, on a promoted
- * pointer and a durable persistence handle -- the shape the repair's guards
- * expect. `swapVaultKeys` moves it onto another user key, which is exactly
- * what a rotation whose re-seal was lost leaves behind.
+ * pointer and a browser-local persistence strategy -- the shape the repair's
+ * guards expect. `swapVaultKeys` moves it onto another user key, which is
+ * exactly what a rotation whose re-seal was lost leaves behind.
  *
  * @param options {object}
  * @param options.userKey {UserKey}

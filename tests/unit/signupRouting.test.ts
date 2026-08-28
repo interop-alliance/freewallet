@@ -1,10 +1,11 @@
 // @vitest-environment node
 /**
- * Unit tests for the signup durability routing (`src/session/signup.ts`): a
+ * Unit tests for the signup login routing (`src/session/signup.ts`): a
  * WAS-configured signup ALWAYS runs the credential-anchored establishment --
  * the non-remembered default then enters transiently, while an explicit
- * `rememberBrowser: true` follows the establishment with the ordinary durable
- * login (never the transient composition) and reports `userExists: false`.
+ * `rememberBrowser: true` follows the establishment with the ordinary
+ * remembered login, not the transient composition, and reports
+ * `userExists: false`.
  * The heavy boundaries -- the establishment, the transient composition, the
  * keyring, the login -- are mocked at the module seam; what runs here is the
  * routing and the probe-then-establish-then-enter wiring.
@@ -89,7 +90,7 @@ afterEach(() => {
   state.wasUrl = 'https://was.example.test'
 })
 
-describe('signUpWithPassphrase -- durability routing', () => {
+describe('signUpWithPassphrase -- login routing', () => {
   it('runs credential-anchored by default: probe, establish, transient entry', async () => {
     // The probe misses; the post-establishment fetch hits.
     vi.mocked(fetchTransientKeyring)
@@ -103,7 +104,7 @@ describe('signUpWithPassphrase -- durability routing', () => {
 
     expect(result.userExists).toBe(false)
     expect(result.session).toBeTruthy()
-    // The create-nothing probe, never the durable self-enrolling one.
+    // The create-nothing probe, not the remembered self-enrolling one.
     expect(loginWithPassphrase).not.toHaveBeenCalled()
     expect(fetchTransientKeyring).toHaveBeenCalledTimes(2)
     // One KDF run threads the whole signup.
@@ -138,18 +139,18 @@ describe('signUpWithPassphrase -- durability routing', () => {
     expect(transientSessionFromKeyringHit).not.toHaveBeenCalled()
   })
 
-  it('rememberBrowser: true runs the establishment then the durable login', async () => {
-    // The create-nothing probe misses; the establishment runs; the durable
-    // login self-enrolls this browser.
+  it('rememberBrowser: true runs the establishment then the remembered login', async () => {
+    // The create-nothing probe misses; the establishment runs; the
+    // remembered login self-enrolls this browser.
     vi.mocked(fetchTransientKeyring).mockResolvedValueOnce(null)
-    const durableSession = {
+    const rememberedSession = {
       user: { id: 'did:key:z6MkFirstClient' },
       profile: {},
       storage: {},
       isGuest: false
     }
     vi.mocked(loginWithPassphrase).mockResolvedValue({
-      session: durableSession,
+      session: rememberedSession,
       userExists: true
     } as never)
 
@@ -159,11 +160,11 @@ describe('signUpWithPassphrase -- durability routing', () => {
       rememberBrowser: true
     })
 
-    // The establishment ran under the durable seams.
+    // The establishment ran under the remembered seams.
     const establishCall = vi.mocked(establishCredentialAnchoredAccount).mock
       .calls[0]![0]
     expect(establishCall.lowEntropy).toBe(true)
-    // Then the ordinary durable login, with the derived credential.
+    // Then the ordinary remembered login, with the derived credential.
     expect(loginWithPassphrase).toHaveBeenCalledWith(
       expect.objectContaining({
         rememberBrowser: true,
@@ -175,8 +176,10 @@ describe('signUpWithPassphrase -- durability routing', () => {
     // The inner login's `userExists: true` (the account it just created)
     // does not pass through.
     expect(result.userExists).toBe(false)
-    expect(result.session).toBe(durableSession)
-    expect(seedWelcomeContent).toHaveBeenCalledWith({ session: durableSession })
+    expect(result.session).toBe(rememberedSession)
+    expect(seedWelcomeContent).toHaveBeenCalledWith({
+      session: rememberedSession
+    })
   })
 
   it('rememberBrowser: true still reports an existing account from the probe', async () => {
@@ -194,7 +197,7 @@ describe('signUpWithPassphrase -- durability routing', () => {
     expect(loginWithPassphrase).not.toHaveBeenCalled()
   })
 
-  it('runs the durable flow with no WAS server configured', async () => {
+  it('runs the remembered flow with no WAS server configured', async () => {
     state.wasUrl = undefined
     vi.mocked(loginWithPassphrase).mockResolvedValue({
       session: null,

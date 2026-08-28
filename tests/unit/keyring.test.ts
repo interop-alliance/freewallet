@@ -2535,8 +2535,8 @@ describe('fetchTransientKeyring (FW-215)', () => {
    * A global `indexedDB` stand-in that records every database name opened, so
    * a test can assert (via `databases()`, before and after) that the
    * transient fetch never creates the `freewallet-session` database. Backed
-   * by the ordinary fake factory, so a slipped durable read would succeed --
-   * and be caught by the assertion -- rather than crash.
+   * by the ordinary fake factory, so a slipped browser-local read would
+   * succeed -- and be caught by the assertion -- rather than crash.
    */
   function trackingIdb(): IDBFactory & {
     databases(): Promise<Array<{ name?: string; version?: number }>>
@@ -2586,12 +2586,12 @@ describe('fetchTransientKeyring (FW-215)', () => {
     expect(found!.standing).toBeDefined()
     expect(found!.standing!.delegation).toEqual(DELEGATION)
     expect(found!.standingClient).toBeDefined()
-    // Nothing durable rides the result: no client keys, no persist or enroll
-    // closures, no management zcap. The record re-bind closure DOES ride
-    // along (the visit's annex mend re-seals a fresh sibling delegation
-    // through it), in its transient shape -- a remote record write that
-    // touches no local cache or freshness pin, as the database check below
-    // confirms.
+    // Nothing browser-local rides the result: no client keys, no persist
+    // or enroll closures, no management zcap. The record re-bind closure
+    // DOES ride along (the visit's annex mend re-seals a fresh sibling
+    // delegation through it), in its transient shape -- a remote record
+    // write that touches no local cache or freshness pin, as the database
+    // check below confirms.
     expect(found).not.toHaveProperty('clientKeys')
     expect(found).not.toHaveProperty('persistClientKeys')
     expect(found).not.toHaveProperty('enrollClientKeys')

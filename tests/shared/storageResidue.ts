@@ -17,7 +17,7 @@
  * Shared by the WAS transient-login spec and, verbatim, by the login-form
  * rerun. The CHAPI popup variant uses the frame-scoped twin below: the popup
  * is a third-party iframe, so what has to come back empty is its PARTITIONED
- * bucket, not the origin's first-party one (a remembered browser's durable
+ * bucket, not the origin's first-party one (a remembered browser's own
  * database legitimately stands in the latter). A partitioned bucket has no
  * plain security origin to hand CDP, so that twin reads from inside a fresh
  * document in the same partition instead.

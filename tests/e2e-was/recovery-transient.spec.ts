@@ -1,8 +1,8 @@
 /**
- * The TRANSIENT recovery durability cell, pinned end to end: recovering on a
- * cold terminal WITHOUT the remember seam runs the default (transient)
+ * The TRANSIENT recovery cell, pinned end to end: recovering on a cold
+ * terminal WITHOUT the remember seam runs the default (transient)
  * variant -- the add-and-retire entry publishes the fresh credential's
- * ladder VM in place of a durable client, a fresh annex generation is
+ * ladder VM in place of an enrolled client, a fresh annex generation is
  * minted and pointed, the mandatory rotation seals the spent code out, and
  * the visit continues as an ordinary transient session that leaves zero
  * local residue. A later cold visit then logs in transient with nothing but
@@ -16,7 +16,7 @@
  * typed code is dead and the new credential holds no wrap is the append
  * alone.
  *
- * The DURABLE (remembered) recovery cell is pinned in `recovery.spec.ts`.
+ * The REMEMBERED recovery cell is pinned in `recovery.spec.ts`.
  */
 import { test, expect, type Browser, type Page } from '@playwright/test'
 import {
@@ -78,8 +78,7 @@ async function logOut(page: Page) {
   await expect(page).toHaveURL(/#\/$/, { timeout: 15_000 })
 }
 
-test.describe
-  .serial('transient recovery (the recovery durability cell)', () => {
+test.describe.serial('transient recovery (the login-axis cell)', () => {
   let code: string
   let replacementCode: string
   let logUrl: string
@@ -88,11 +87,11 @@ test.describe
 
   test.beforeAll(async ({ browser }, testInfo) => {
     test.setTimeout(240_000)
-    // The account fixture: a durable signup (the welcome credential is an
+    // The account fixture: a remembered signup (the welcome credential is an
     // encrypted write sealed under the pre-recovery user key), a re-login
     // (issuance gates on the promoted pointer recovered from the keyring),
-    // and a recovery code issued from Settings. The setup context is durable
-    // on purpose and simply discarded.
+    // and a recovery code issued from Settings. The setup context is
+    // remembered on purpose and simply discarded.
     const context = await browser.newContext({ baseURL: APP_URL })
     try {
       const page = await context.newPage()
@@ -231,10 +230,10 @@ test.describe
         verifier: defaultWebvhLogVerifier
       })
       expect(resolved.meta.error).toBeUndefined()
-      // Update authority: the original durable client plus the fresh
+      // Update authority: the original enrolled client plus the fresh
       // credential's ladder rung 0 -- the spent code's key does not stand.
       expect(resolved.meta.updateKeys).toHaveLength(2)
-      // NO new durable client was minted anywhere: the original client's
+      // NO new enrolled client was minted anywhere: the original client's
       // signing key stays the only `capabilityInvocation` entry, and the
       // ladder VM stands under `assertionMethod` and `capabilityDelegation`
       // only.

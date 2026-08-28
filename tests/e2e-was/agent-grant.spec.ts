@@ -216,7 +216,7 @@ test.describe('agent grant over an interaction URL', () => {
     })
 
     // The login-in-place path: a reload drops the in-memory session, so the
-    // page runs the ordinary login itself (durable here -- this browser
+    // page runs the ordinary login itself (remembered here -- this browser
     // holds the client-key record signup wrote) and then consents.
     const second = await storeAgentRequest({
       controller: agent.id,

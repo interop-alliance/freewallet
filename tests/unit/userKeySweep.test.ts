@@ -15,8 +15,8 @@ const state = vi.hoisted(() => ({
   wasUrl: 'https://was.example.test' as string | undefined
 }))
 
-// The visit's in-memory roster-epoch pin, stubbed on the durable handle so
-// the login's read and the adoption's write are both observable.
+// The visit's in-memory roster-epoch pin, stubbed on the browser-local
+// strategy so the login's read and the adoption's write are both observable.
 const epochPins = vi.hoisted(() => ({
   load: vi.fn(
     async (_options: { accountDid: string }) => null as string | null
@@ -490,7 +490,7 @@ describe('a failed user-key persist at login (browser not remembered)', () => {
     })
     expect(session.userKeyPersistFailed).toBe(true)
     // The session still runs on the freshly adopted key; only this browser's
-    // durable copy stayed behind.
+    // stored copy stayed behind.
     expect(session.profile.userKey).toEqual(FRESH_USER_KEY)
   })
 

@@ -45,8 +45,8 @@ vi.mock('@/session/transientLogin', () => ({
   transientSessionFromKeyringHit: vi.fn()
 }))
 vi.mock('@/lib/kms', () => ({ ensureKeystore: vi.fn() }))
-// A full factory: the durable resume heal is the only consumer here, and the
-// real module drags in the whole establishment stack.
+// A full factory: the remembered resume heal is the only consumer here,
+// and the real module drags in the whole establishment stack.
 vi.mock('@/session/credentialAnchoredGenesis', () => ({
   mendCredentialAnchoredAccount: vi.fn(async () => ({
     reenter: true,
@@ -159,7 +159,7 @@ beforeEach(() => {
   vi.mocked(fetchKeyring).mockReset()
   vi.mocked(fetchTransientKeyring).mockReset()
   vi.mocked(transientSessionFromKeyringHit).mockReset()
-  // The durable route by default, matching the pre-routing behavior the
+  // The remembered route by default, matching the pre-routing behavior the
   // branch matrix below exercises.
   vi.mocked(routeUnlockLogin).mockReset()
   vi.mocked(routeUnlockLogin).mockImplementation(async ({ credential }) => ({
@@ -679,7 +679,7 @@ describe('loginWithPassphrase -- pending-record resume routing (FW-280)', () => 
   })
 })
 
-describe('loginWithPassphrase -- durable resume of a torn remembered signup', () => {
+describe('loginWithPassphrase -- remembered resume of a torn signup', () => {
   const CREDENTIAL = {
     unlock: { spaceId: 'unlock-space-test' },
     standing: {}
@@ -760,7 +760,7 @@ describe('loginWithPassphrase -- durable resume of a torn remembered signup', ()
     expect(session!.user.id).toBe(controller)
   })
 
-  it('never fires on the default (non-remembered) durable login', async () => {
+  it('never fires on a login that did not ask rememberBrowser: true', async () => {
     const tornHit = {
       controller: 'did:key:z6MkDataControllerForTests',
       pointer: TORN_POINTER,
@@ -861,7 +861,7 @@ describe('loginWithPassphrase -- fetch failure', () => {
 })
 
 describe('loginWithPassphrase -- the popup session (FW-203)', () => {
-  it('routes the durable popup arm remote-direct with suppressed local caches', async () => {
+  it('routes the remembered popup arm remote-direct with suppressed local caches', async () => {
     state.wasUrl = 'https://was.example.test'
     const clientSeed = randomSeed()
     const controller = await didFromSeed(clientSeed)
@@ -890,7 +890,8 @@ describe('loginWithPassphrase -- the popup session (FW-203)', () => {
     // The Storage Access handle unpartitions IndexedDB, never localStorage,
     // so a persisted descriptor cache would be partitioned residue no
     // top-level wipe can reach. The popup's caches are in-memory instead:
-    // a write reads back within the session and reaches no durable store.
+    // a write reads back within the session and reaches no browser-local
+    // store.
     const cache = session!.profile.persistence.descriptorCache({
       scope: 'space'
     })
@@ -939,7 +940,7 @@ describe('loginWithPassphrase -- the popup session (FW-203)', () => {
     ).toBeUndefined()
   })
 
-  it('persists the caches for an ordinary (non-popup) durable login', async () => {
+  it('persists the caches for an ordinary (non-popup) remembered login', async () => {
     const clientSeed = randomSeed()
     const controller = await didFromSeed(clientSeed)
     vi.mocked(fetchKeyring).mockResolvedValue({
@@ -975,7 +976,7 @@ describe('loginWithPassphrase -- the popup session (FW-203)', () => {
   })
 })
 
-describe('loginWithPassphrase -- durability routing glue', () => {
+describe('loginWithPassphrase -- login routing glue', () => {
   const CREDENTIAL = {
     unlock: { spaceId: 'unlock-space-test' },
     standing: {}
@@ -990,7 +991,8 @@ describe('loginWithPassphrase -- durability routing glue', () => {
       rememberBrowser: true
     })
     // The popup flag is deliberately NOT among them: a popup no longer
-    // forces durability, it only gates what the partitioning implies.
+    // forces the remembered route, it only gates what the partitioning
+    // implies.
     expect(routeUnlockLogin).toHaveBeenCalledWith(
       expect.objectContaining({
         secret: PASSPHRASE,
@@ -1057,7 +1059,7 @@ describe('loginWithPassphrase -- durability routing glue', () => {
     expect(fetchKeyring).not.toHaveBeenCalled()
   })
 
-  it('threads the routing-derived credential into the durable fetch', async () => {
+  it('threads the routing-derived credential into the remembered fetch', async () => {
     const clientSeed = randomSeed()
     const controller = await didFromSeed(clientSeed)
     vi.mocked(fetchKeyring).mockResolvedValue({

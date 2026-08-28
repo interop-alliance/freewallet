@@ -21,6 +21,15 @@
   storage. The browser-local, in-memory, remembered, transient, and enrolled
   uses take their own words, and the persistence object is the persistence
   strategy rather than a seam or a handle.
+- The same triage runs over `tests/`, test titles included: a failing run no
+  longer prints "durable client" or "durable session". The surviving
+  `durable` uses in the suites all name server-backed state.
+- `decisions/0010` is renamed to
+  `0010-remembered-login-is-not-a-mender-trigger.md`, the axis its own rule
+  is stated on. The record number is unchanged and every citation moved
+  with it. AGENTS.md follows the same triage: a design's approval extracts
+  its binding decisions, and the App Connect spec entry says action
+  limitations.
 - Comments that `decisions/0012-no-durable-continuity-pins.md` falsified are
   corrected as claims: none says a continuity pin survives a visit, that the
   two strategies differ in their pin members, or that a remembered browser

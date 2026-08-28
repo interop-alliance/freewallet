@@ -1,13 +1,13 @@
 /**
  * The torn remembered signup e2e (WAS mode): the signup is killed between
- * the credential-anchored establishment and the durable-login half (the
+ * the credential-anchored establishment and the remembered-login half (the
  * `__E2E_TEAR_SIGNUP_AFTER_ESTABLISHMENT__` seam), leaving a fully standing
  * unlock record but no client-key record and no enrolled client. Both later
  * entries must work from that state: a transient login with the same
  * passphrase enters through the ordinary composition (the standing record is
- * complete), and a durable login through the remember seam resumes the fold
- * -- self-enrolling this browser and leaving the same four-entry account log
- * a clean remembered signup produces.
+ * complete), and a remembered login through the remember seam resumes the
+ * fold -- self-enrolling this browser and leaving the same four-entry
+ * account log a clean remembered signup produces.
  */
 import { test, expect, type Browser, type Page } from '@playwright/test'
 import {
@@ -42,7 +42,7 @@ test.describe.serial('Torn remembered signup', () => {
   let passphrase: string
   let email: string
 
-  test('the signup tears between establishment and the durable login', async ({
+  test('the signup tears between establishment and the remembered login', async ({
     page
   }, testInfo) => {
     test.slow()
@@ -51,7 +51,7 @@ test.describe.serial('Torn remembered signup', () => {
     await page.goto('/#/signup')
     await forceRememberBrowser(page)
     // The tear seam: `signUpWithPassphrase` throws right after the
-    // establishment half succeeds, before the durable-login half runs --
+    // establishment half succeeds, before the remembered-login half runs --
     // the simulated tab death of design section 5.1's resume story.
     await page.evaluate(() => {
       ;(
@@ -95,16 +95,16 @@ test.describe.serial('Torn remembered signup', () => {
     }
   })
 
-  test('a durable login resumes the fold and self-enrolls', async ({
+  test('a remembered login resumes the fold and self-enrolls', async ({
     browser
   }) => {
     test.slow()
     const page = await coldPage(browser)
     try {
       await page.goto('/#/login')
-      // The durable resume: the remember seam routes the login durable, and
-      // its `canSelfEnroll` path enrolls this browser from the standing
-      // record -- finishing what the torn signup started.
+      // The remembered resume: the remember seam routes the login
+      // remembered, and its `canSelfEnroll` path enrolls this browser from
+      // the standing record -- finishing what the torn signup started.
       await forceRememberBrowser(page)
       await fillSettled(page.locator('input[type="password"]'), passphrase)
       await page.getByRole('button', { name: 'Log in', exact: true }).click()

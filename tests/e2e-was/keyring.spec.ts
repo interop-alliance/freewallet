@@ -123,7 +123,7 @@ test.describe('Keyring v2', () => {
     try {
       await secondDevice.goto('/#/login')
       // The cold profile is non-remembered, so the default login would be
-      // transient; this spec exercises the durable standing self-enrollment.
+      // transient; this spec exercises the remembered standing self-enrollment.
       await forceRememberBrowser(secondDevice)
       await fillSettled(
         secondDevice.locator('input[type="password"]'),
@@ -214,7 +214,7 @@ test.describe('Keyring v2', () => {
     const newDevice = await coldDevicePage(browser)
     try {
       await newDevice.goto('/#/login')
-      // Force the durable route: the spec exercises the new passphrase's
+      // Force the remembered route: the spec exercises the new passphrase's
       // standing self-enrollment on a non-remembered profile.
       await forceRememberBrowser(newDevice)
       await fillSettled(

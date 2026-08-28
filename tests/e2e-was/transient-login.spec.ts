@@ -9,12 +9,12 @@
  *
  * The transient login needs an annex generation the account document
  * points at and an unlock record carrying the delegated-clients sibling.
- * This suite's fixture is deliberately the DURABLE (remembered) signup --
- * the remembered account whose credential later visits public terminals.
+ * This suite's fixture is deliberately the REMEMBERED signup -- the
+ * account whose credential later visits public terminals.
  * The remembered signup rides the credential-anchored establishment, which
  * itself mints the annex generation and the sibling-carrying standing
  * record, so no fixture seam is needed. The credential-anchored signup path
- * (no durable client anywhere) has its own residue suite in
+ * (no enrolled client anywhere) has its own residue suite in
  * `credential-anchored-signup.spec.ts`.
  */
 import { test, expect, type Browser, type Page } from '@playwright/test'
@@ -67,7 +67,8 @@ test.describe.serial('transient login residue', () => {
   test.beforeAll(async ({ browser }, testInfo) => {
     // The account fixture: a remembered signup, whose establishment half
     // already mints the annex generation and the sibling-carrying unlock
-    // record. The setup context is durable on purpose and simply discarded.
+    // record. The setup context is remembered on purpose and simply
+    // discarded.
     const context = await browser.newContext({ baseURL: APP_URL })
     try {
       const page = await context.newPage()
@@ -100,11 +101,11 @@ test.describe.serial('transient login residue', () => {
     try {
       const baseline = await transientLogin(page, passphrase)
       await addCredentialViaPaste(page)
-      // The logging seam's durability invariant: the visit above ran the
+      // The logging seam's storage-tier invariant: the visit above ran the
       // wired loggers (the dev ring buffer holds events), and exercising
-      // the dev handle's setFilter writes nothing durable -- the filter
-      // override is in-memory only, so the residue assertions below must
-      // still see an unchanged localStorage key set.
+      // the dev handle's setFilter writes nothing browser-local -- the
+      // filter override is in-memory only, so the residue assertions below
+      // must still see an unchanged localStorage key set.
       await page.evaluate(() => {
         const handle = (
           window as unknown as {

@@ -2517,7 +2517,7 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   The default session is transient, so a residue whose one trigger is the
   remembered-login chain may wait forever on an account that never
   remembers a browser; it is an open gap rather than a mended tear
-  (`decisions/0010-durable-login-is-not-a-mender-trigger.md`, checked per
+  (`decisions/0010-remembered-login-is-not-a-mender-trigger.md`, checked per
   residue at the design gate). A sweep on `session.registryReady` is
   called a remembered-login sweep wherever it is offered as a mender. The
   derivability rule makes these menders sufficient: a post-pivot write is

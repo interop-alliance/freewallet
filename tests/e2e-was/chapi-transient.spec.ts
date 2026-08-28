@@ -17,7 +17,7 @@
  * `decisions/0004`), and its grants chain under the generation delegation
  * rather than the Space root (`decisions/0002`), which is what makes the
  * transient client visible nowhere on the account -- the connected-wallets
- * list on the durable client never grows a row for it.
+ * list on the enrolled client never grows a row for it.
  */
 import { test, expect, type Browser, type Page } from '@playwright/test'
 import { awaitLoginChain, fillSettled, signupViaWizard } from './helpers'
@@ -144,7 +144,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
 
   test.beforeAll(async ({ browser }, testInfo) => {
     // The account fixture: the DEFAULT credential-anchored signup, which is
-    // the account an app-first user actually arrives with -- no durable
+    // the account an app-first user actually arrives with -- no enrolled
     // client anywhere, the annex generation and the sibling-carrying
     // standing record established by the signup itself. The setup context
     // is discarded; every popup test below brings its own browser.
@@ -187,7 +187,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
       expect(response.data.proof.verificationMethod).not.toContain('did:webvh:')
 
       // The grant: delegated over the app's collection and chaining one
-      // deeper than a durable session's would -- its parent is the
+      // deeper than a remembered session's would -- its parent is the
       // generation delegation, never the Space root, because the signing key
       // is an annex key the account document does not list.
       const grant = response.data.zcap.find(zcap =>
@@ -250,8 +250,8 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
     const context = await browser.newContext({ baseURL: WALLET_ORIGIN })
     try {
       const page = await context.newPage()
-      // This browser IS a remembered durable client of its own account.
-      const durable = await signupViaWizard(page, testInfo)
+      // This browser IS a remembered enrolled client of its own account.
+      const remembered = await signupViaWizard(page, testInfo)
       // The self-enrollment this signup ran struck the credential's ladder
       // VM, and the replacements for the three members it rotted ride the
       // login-time chain nothing awaits (FW-354). Starting the popup visit
@@ -261,20 +261,20 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
 
       await withoutUnpartitionedStorageAccess({ page })
       const { frame, baseline } = await popupToConsent(page, {
-        passphrase: durable.passphrase,
+        passphrase: remembered.passphrase,
         challenge: `chal-popup-denied-${Date.now()}`
       })
       await frame.getByRole('button', { name: 'Connect' }).click()
       const response = (await awaitPopupResponse({ frame })) as PopupResponse
 
       // It connected -- no refusal screen, on any engine -- and it answered
-      // as a per-visit key rather than as the durable client standing on the
-      // same browser.
+      // as a per-visit key rather than as the enrolled client standing on
+      // the same browser.
       expect(response.data.holder).toMatch(/^did:key:z6Mk/)
       expect(response.data.appConnect.firstRun).toBe(true)
 
-      // The durable client's own first-party database is untouched by any of
-      // this; what has to be clean is the popup's partition.
+      // The enrolled client's own first-party database is untouched by any
+      // of this; what has to be clean is the popup's partition.
       await expectNoFrameStorageResidue({
         frame,
         baselineLocalStorageKeys: baseline
@@ -286,7 +286,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
       await page.goto('/#/login')
       await fillSettled(
         page.locator('input[type="password"]'),
-        durable.passphrase
+        remembered.passphrase
       )
       await page.getByRole('button', { name: 'Log in', exact: true }).click()
       await expect(page).toHaveURL(/#\/dashboard/, { timeout: 60_000 })
@@ -301,7 +301,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
         page.getByText('This browser', { exact: true })
       ).toBeVisible()
 
-      // The aftermath the durable client DOES see: the app the popup
+      // The aftermath the enrolled client DOES see: the app the popup
       // connected, on the Applications page.
       await expect(async () => {
         await page.goto('/#/dashboard')

@@ -3,7 +3,7 @@
 - Status: accepted
 - Date: 2026-08-27
 - Driving work: the domain-modeling pass run after
-  `decisions/0010-durable-login-is-not-a-mender-trigger.md`. Reframing an
+  `decisions/0010-remembered-login-is-not-a-mender-trigger.md`. Reframing an
   enrolled client as a cache exposed the word "durable" as carrying three
   meanings at once, one of which is false.
 - Affects: ARCHITECTURE.md's Glossary and prose, the persistence seam in

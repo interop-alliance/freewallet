@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * Unit tests for the transient login (`src/session/transientLogin.ts`): the
- * post-KDF durability routing (`routeUnlockLogin`) and the public-terminal
+ * post-KDF login routing (`routeUnlockLogin`) and the public-terminal
  * composition (`transientSessionFromKeyringHit`). The wallet-core annex
  * and roster boundaries are mocked at the module seam so the composition's
  * wiring -- what enrolls with which key, what reads under which capability,
@@ -249,7 +249,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('routeUnlockLogin -- the post-KDF durability decision', () => {
+describe('routeUnlockLogin -- the post-KDF login-route decision', () => {
   it('defaults to transient on a non-remembered browser', async () => {
     const routed = await routeUnlockLogin({ kdf: KDF, credential: CREDENTIAL })
     expect(routed.login).toBe('transient')
@@ -263,7 +263,7 @@ describe('routeUnlockLogin -- the post-KDF durability decision', () => {
     })
   })
 
-  it('routes durable when this credential is remembered here (the ratchet)', async () => {
+  it('routes remembered when this credential is remembered here (the ratchet)', async () => {
     vi.mocked(hasClientKeyRecord).mockResolvedValue(true)
     const routed = await routeUnlockLogin({ kdf: KDF, credential: CREDENTIAL })
     expect(routed.login).toBe('remembered')
@@ -280,7 +280,7 @@ describe('routeUnlockLogin -- the post-KDF durability decision', () => {
     ).rejects.toBeInstanceOf(AlreadyRememberedError)
   })
 
-  it('routes durable on rememberBrowser: true without probing', async () => {
+  it('routes remembered on rememberBrowser: true without probing', async () => {
     const routed = await routeUnlockLogin({
       kdf: KDF,
       credential: CREDENTIAL,
@@ -290,7 +290,7 @@ describe('routeUnlockLogin -- the post-KDF durability decision', () => {
     expect(hasClientKeyRecord).not.toHaveBeenCalled()
   })
 
-  it('routes durable with no WAS server, refusing an explicit transient ask', async () => {
+  it('routes remembered with no WAS server, refusing an explicit transient ask', async () => {
     state.wasUrl = undefined
     const routed = await routeUnlockLogin({ kdf: KDF, credential: CREDENTIAL })
     expect(routed.login).toBe('remembered')
@@ -311,7 +311,7 @@ describe('routeUnlockLogin -- the post-KDF durability decision', () => {
   // handle as `idb`, so the two engine cases fall out of the record probe
   // rather than out of a popup arm: a granted handle probes the first-party
   // record, a denied one probes the partitioned bucket and finds none.
-  it('routes a popup durable when the unpartitioned handle finds the record', async () => {
+  it('routes a popup remembered when the unpartitioned handle finds the record', async () => {
     const unpartitioned = {} as IDBFactory
     vi.mocked(hasClientKeyRecord).mockResolvedValue(true)
     const routed = await routeUnlockLogin({
@@ -375,7 +375,7 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
 
   it('refuses a record without the sibling when the ladder cannot mend', async () => {
     // The one state the mend cannot reach: the account document anchors no
-    // ladder VM of this credential's (an account with enrolled durable
+    // ladder VM of this credential's (an account with enrolled
     // clients), so nothing ladder-signed verifies and the record's own
     // sibling was all the visit could use.
     primeHappyPath()
@@ -638,10 +638,10 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
       clientKeyAgreementKey: found.standingClient.agents.keyAgreementKey
     })
 
-    // The session assembly: the transient handle composed over the routed
-    // stores carries the annex identity (durability declared once), the
-    // record's email defers to the typed one, and the stamps the durable
-    // tail applies follow.
+    // The session assembly: the transient strategy composed over the
+    // routed stores carries the annex identity (the storage tier declared
+    // once), the record's email defers to the typed one, and the stamps
+    // the remembered tail applies follow.
     expect(initSessionFromSeed).toHaveBeenCalledWith(
       expect.objectContaining({
         accountPointer: POINTER,
@@ -1047,7 +1047,7 @@ describe('transientSessionFromKeyringHit -- the shared mend ceremony', () => {
     expect(err).toBe(offline)
   })
 
-  it('states that it holds no durable roster-epoch pin', async () => {
+  it('states that it holds no roster-epoch pin', async () => {
     const torn = makeFound({
       pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
     })

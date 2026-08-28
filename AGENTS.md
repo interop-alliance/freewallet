@@ -80,7 +80,7 @@ that file's header; the rules that apply when working an item:
   [isomorphic-lib-template's `designs/`](https://github.com/interop-alliance/isomorphic-lib-template/tree/main/designs);
   the freewallet specifics live in the roadmap file's header and the
   `designs/` directory beside it. Approval extracts the design's
-  durable decisions -- contract-binding ones, and do-not-reopen rejections
+  binding decisions -- contract-binding ones, and do-not-reopen rejections
   of an approach -- into tracked `decisions/` records (see "Ecosystem
   conventions" below); the design doc itself stays a working artifact.
 
@@ -146,7 +146,7 @@ it locally instead of fetching.)
   the zCap authorization profile.
 - [app-connect-spec](https://github.com/interop-alliance/app-connect-spec)
   -- the App Connect companion spec: the `AppConnectQuery`, the app-key
-  credential, descriptor vocabulary and action ceilings, and the response
+  credential, descriptor vocabulary and action limitations, and the response
   presentation. The normative wire contract for `src/lib/walletRequest/`.
 - [encrypted-collections-spec](https://github.com/interop-alliance/encrypted-collections-spec)
   -- the WAS Encrypted Collections profile: envelope cryptography, key

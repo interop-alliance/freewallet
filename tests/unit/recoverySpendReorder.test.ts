@@ -1,11 +1,11 @@
 // @vitest-environment node
 /**
- * The durable recovery spend's persist-before-publish reorder
+ * The remembered recovery spend's persist-before-publish reorder
  * (`recoverAccountWithCode` in `src/session/recovery.ts`) and its
  * spend-completion resume (`resumeRecoverySpend`):
  *
  * - the persist hook fires between the reveal entry and the add-and-retire
- *   entry, and everything the successors need is durable before the pivot;
+ *   entry, and everything the successors need is written before the pivot;
  * - a throwing hook withholds the pivot (the code stays unspent and no
  *   post-entry stage runs);
  * - a pre-entry tear's re-run with the same code reuses the pending
@@ -328,7 +328,7 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('the durable spend reorder -- the persist hook', () => {
+describe('the remembered spend reorder -- the persist hook', () => {
   it('persists the successors between the reveal entry and the add entry', async () => {
     const { code } = await storeRecordForCode()
     const { idb } = createFakeSessionIdb()
@@ -350,8 +350,8 @@ describe('the durable spend reorder -- the persist hook', () => {
     expect(add).toBeGreaterThan(reveal)
     expect(state.recordPutSpaceIds).toContain(passphraseSpaceId)
     expect(state.recordPutSpaceIds.length).toBeGreaterThanOrEqual(2)
-    // The pending client-key record is durable and PENDING (no user key,
-    // the carrier present) until the confirm-gated completion runs.
+    // The pending client-key record is browser-local and PENDING (no user
+    // key, the carrier present) until the confirm-gated completion runs.
     const found = await fetchKeyring({ passphrase: NEW_PASSPHRASE, idb })
     expect(found?.clientKeys?.userKey).toBeUndefined()
     expect(found?.clientKeys?.pending).toMatchObject({
@@ -508,7 +508,7 @@ describe('the durable spend reorder -- the persist hook', () => {
   })
 })
 
-describe('the durable spend reorder -- the colliding-passphrase pre-flight', () => {
+describe('the remembered spend reorder -- the colliding-passphrase pre-flight', () => {
   it('refuses a standing record at the target Space before any entry publishes', async () => {
     const { code } = await storeRecordForCode()
     const { idb } = createFakeSessionIdb()

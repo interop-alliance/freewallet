@@ -1,7 +1,7 @@
 /**
- * The credential-anchored signup's durability cell, pinned end to end: a fresh
+ * The credential-anchored signup's login-axis cell, pinned end to end: a fresh
  * browser context runs the DEFAULT signup through the real wizard (no
- * remember seam), which mints no durable client anywhere -- the account's
+ * remember seam), which mints no enrolled client anywhere -- the account's
  * genesis is anchored on the passphrase's ladder, the visit lands on the
  * dashboard as a transient session over the replica-less remote-direct
  * variant, and the browser holds zero trace afterwards (the shared
@@ -39,7 +39,7 @@ async function coldTerminal(browser: Browser): Promise<{
 test.describe.serial('credential-anchored signup', () => {
   let passphrase: string
 
-  test('the default signup mints no durable client and leaves zero residue', async ({
+  test('the default signup mints no enrolled client and leaves zero residue', async ({
     browser
   }, testInfo) => {
     const { context, page } = await coldTerminal(browser)

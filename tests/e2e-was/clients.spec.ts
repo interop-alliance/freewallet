@@ -61,7 +61,7 @@ test.describe('The Settings connected-wallets surface', () => {
     await page.goto('/#/settings')
     await expect(page.getByText('Connected wallets')).toBeVisible()
     await expect(walletCards(page)).toHaveCount(1, { timeout: 30_000 })
-    // Exact: the folded signup's durable session also renders the "Forget
+    // Exact: the folded signup's remembered session also renders the "Forget
     // this browser" button, which a substring match would collide with.
     await expect(page.getByText('This browser', { exact: true })).toBeVisible()
     await expect(
@@ -88,7 +88,7 @@ test.describe('The Settings connected-wallets surface', () => {
     try {
       await secondClient.goto('/#/login')
       // The cold profile is non-remembered, so the default login would be
-      // transient; this spec exercises the durable standing self-enrollment.
+      // transient; this spec exercises the remembered standing self-enrollment.
       await forceRememberBrowser(secondClient)
       await fillSettled(
         secondClient.locator('input[type="password"]'),
@@ -187,10 +187,10 @@ test.describe('The Settings connected-wallets surface', () => {
   }, testInfo) => {
     test.slow()
 
-    // Client 1: a durable (remembered) signup. Its establishment half
-    // already mints the annex generation, so the shared unlock record
-    // carries the `delegatedClients` sibling from the start -- the record
-    // the enrollee's rebind must re-state whole.
+    // Client 1: a remembered signup. Its establishment half already mints
+    // the annex generation, so the shared unlock record carries the
+    // `delegatedClients` sibling from the start -- the record the
+    // enrollee's rebind must re-state whole.
     const { passphrase } = await signupViaWizard(page, testInfo)
 
     const enrollee = await coldClientPage(browser)

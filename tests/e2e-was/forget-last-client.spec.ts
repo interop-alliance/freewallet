@@ -1,15 +1,15 @@
 /**
- * The last-durable-client forget transition, end to end (WAS mode): an
+ * The last-enrolled-client forget transition, end to end (WAS mode): an
  * account that has exactly one connected browser forgets it, and lands
  * client-less -- anchored on the sign-in credential's ladder alone, the same
  * shape a credential-anchored signup starts in.
  *
- * The walk: a credential-anchored signup (no durable client anywhere), a
- * second cold browser that self-enrolls durably and is therefore the
- * account's ONLY durable client, then that browser's Settings forget with
+ * The walk: a credential-anchored signup (no enrolled client anywhere), a
+ * second cold browser that self-enrolls and is therefore the account's
+ * ONLY enrolled client, then that browser's Settings forget with
  * the transition copy confirmed. Afterwards the browser holds no wallet
  * database, the world-readable account log has grown by the transition's
- * entries and resolves with no durable client in `capabilityInvocation`
+ * entries and resolves with no enrolled client in `capabilityInvocation`
  * while the ladder VM still stands under `assertionMethod` and
  * `capabilityDelegation`, a third cold terminal still reaches the
  * account -- and its stored credential -- with the passphrase alone, and a
@@ -159,14 +159,14 @@ async function readSessionDatabaseKeys(page: Page): Promise<string[]> {
   })
 }
 
-test.describe('The last-durable-client forget transition', () => {
+test.describe('The last-enrolled-client forget transition', () => {
   test('forgetting the only connected browser leaves the account ladder-anchored', async ({
     browser
   }, testInfo) => {
     test.slow()
     test.setTimeout(540_000)
 
-    // --- Terminal A: the credential-anchored signup (no durable client). ---
+    // --- Terminal A: the credential-anchored signup (no enrolled client). ---
     const first = await coldTerminal(browser)
     let passphrase: string
     let recoveryCode: string
@@ -184,7 +184,7 @@ test.describe('The last-durable-client forget transition', () => {
       await first.context.close()
     }
 
-    // --- Terminal B: the durable self-enrollment, then the forget. ---
+    // --- Terminal B: the remembered self-enrollment, then the forget. ---
     const second = await coldTerminal(browser)
     try {
       // The ceremony runs several ladder-signed WAS writes with no UI of its
@@ -202,7 +202,8 @@ test.describe('The last-durable-client forget transition', () => {
 
       await second.page.goto('/#/login')
       // The cold profile is non-remembered, so the default login would be
-      // transient; the standing passphrase self-enrolls this browser durably.
+      // transient; the standing passphrase self-enrolls this browser as an
+      // enrolled client.
       await forceRememberBrowser(second.page)
       await fillSettled(
         second.page.locator('input[type="password"]'),
@@ -240,7 +241,7 @@ test.describe('The last-durable-client forget transition', () => {
       const logBefore = await fetchLog(second.page, logUrl)
 
       // Exactly one wallet card, and it is this browser: the account's only
-      // durable client, so its exit is the transition rather than an
+      // enrolled client, so its exit is the transition rather than an
       // ordinary forget.
       await expect(walletCards(second.page)).toHaveCount(1, {
         timeout: 30_000
@@ -297,7 +298,7 @@ test.describe('The last-durable-client forget transition', () => {
         assertionMethod?: unknown[]
         capabilityDelegation?: unknown[]
       }
-      // No durable client is left: the invocation relation the client
+      // No enrolled client is left: the invocation relation the client
       // listing keys on is empty (or absent altogether).
       expect(document.capabilityInvocation ?? []).toHaveLength(0)
       // The account stays anchored by the credential's ladder VM.
@@ -311,7 +312,7 @@ test.describe('The last-durable-client forget transition', () => {
     const third = await coldTerminal(browser)
     try {
       // The ordinary default transient login -- deliberately no remember
-      // seam, and no durable client exists on the account to ride.
+      // seam, and no enrolled client exists on the account to ride.
       await third.page.goto('/#/login')
       const baseline = await captureLocalStorageKeys({ page: third.page })
       await fillSettled(

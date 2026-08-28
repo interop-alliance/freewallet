@@ -3,13 +3,13 @@
  * Unit tests for the folded WAS signups (`src/session/signup.ts`, design
  * section 7): on a WAS deployment `signUpWithPassphrase` never binds a plain
  * record (`bindPassphrase` is unreachable there); the remembered branch runs
- * the credential-anchored establishment and then the ordinary durable login,
- * reporting `userExists: false` with the login's durable session; the
+ * the credential-anchored establishment and then the ordinary remembered
+ * login, reporting `userExists: false` with that login's session; the
  * passkey signup runs the same fold under the PRF credential with exactly
  * one WebAuthn ceremony (the login half takes the derived credential and
- * skips its own PRF assertion); and neither durable branch ever enters the
- * transient composition (no annex enrollment write). The module seams are
- * mocked the way `signupRouting.test.ts` mocks them.
+ * skips its own PRF assertion); and neither remembered branch ever enters
+ * the transient composition (no annex enrollment write). The module seams
+ * are mocked the way `signupRouting.test.ts` mocks them.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -91,9 +91,9 @@ import { transientSessionFromKeyringHit } from '@/session/transientLogin'
 import { signUpWithPassphrase, signUpWithPasskey } from '@/session/signup'
 
 /**
- * The durable session the mocked login halves hand back.
+ * The remembered session the mocked login halves hand back.
  */
-function durableSession() {
+function rememberedSession() {
   return {
     user: { id: 'did:key:z6MkFirstClient' },
     profile: {
@@ -110,11 +110,11 @@ beforeEach(() => {
     .mockResolvedValueOnce(null)
     .mockResolvedValueOnce({ unlockSpaceId: 'unlock-space-1' } as never)
   vi.mocked(loginWithPassphrase).mockResolvedValue({
-    session: durableSession(),
+    session: rememberedSession(),
     userExists: true
   } as never)
   vi.mocked(loginWithPasskey).mockResolvedValue({
-    session: durableSession(),
+    session: rememberedSession(),
     userExists: true
   } as never)
 })
@@ -139,7 +139,7 @@ describe('signUpWithPassphrase on a WAS deployment', () => {
     expect(bindPassphrase).not.toHaveBeenCalled()
   })
 
-  it('remembered: establishment, then the durable login, userExists: false', async () => {
+  it('remembered: establishment, then the remembered login, userExists: false', async () => {
     const result = await signUpWithPassphrase({
       passphrase: 'correct horse',
       email: 'a@example.test',
@@ -161,7 +161,7 @@ describe('signUpWithPassphrase on a WAS deployment', () => {
         credential: expect.anything()
       })
     )
-    // The durable session, and the result contract: the inner login's
+    // The remembered session, and the result contract: the inner login's
     // `userExists: true` never passes through.
     expect(result.session).toBeTruthy()
     expect(result.userExists).toBe(false)
