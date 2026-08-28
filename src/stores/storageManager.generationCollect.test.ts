@@ -9,7 +9,7 @@
  * @vitest-environment node
  */
 import { describe, expect, it, vi } from 'vitest'
-import { durableSessionPersistence } from '@/session/persistence'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 import type { User } from '@/types/auth'
 import type { BrowserStore } from './browserStore'
 import { StorageManager } from './storageManager'
@@ -30,7 +30,7 @@ function makeStorage(): {
   const addHistoryItem = vi.fn(async () => undefined)
   const storage = new StorageManager({
     localStore: { addHistoryItem } as unknown as BrowserStore,
-    persistence: durableSessionPersistence()
+    persistence: browserLocalSessionPersistence()
   })
   return { storage, addHistoryItem }
 }

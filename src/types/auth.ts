@@ -141,9 +141,9 @@ export interface ControllerProfile {
   // that write the annex mid-session -- the revocation cascade's
   // generation-delegation re-mint and the rotation's strike-or-swap -- read
   // it from here. A transient session stamps it too: it is what lets the
-  // grant path's renewal stage sign as the ladder VM with no durable signer
-  // in hand. In-memory only, same trust class as `clientSeed`; absent for
-  // guests and for records without standing authority.
+  // grant path's renewal stage sign as the ladder VM with no enrolled-client
+  // signer in hand. In-memory only, same trust class as `clientSeed`; absent
+  // for guests and for records without standing authority.
   ladderSeed?: Uint8Array
   // The login credential's other standing members, stamped from the keyring
   // hit beside `ladderSeed`: the pre-minted PUT-on-`did.jsonl` bridge
@@ -172,7 +172,7 @@ export interface ControllerProfile {
   // The invocation capability the session's WAS requests ride, when the
   // session's authority over the data Space is a delegated Space-subtree
   // zcap rather than the root capability -- the transient session's
-  // generation delegation. Absent for durable sessions, whose invocations
+  // generation delegation. Absent for remembered sessions, whose invocations
   // root on the Space controller. Re-stamped in place when the grant path's
   // renewal stage installs a fresh delegation. In-memory only, never
   // persisted.
@@ -183,13 +183,15 @@ export interface ControllerProfile {
   // ceremony that extends the log. Created on first use; absent until then,
   // and on sessions that never read the log (guests, no-WAS).
   verifiedLog?: VerifiedLogCache
-  // The typed persistence handle chosen at login (`src/session/persistence.ts`):
-  // every durability-sensitive local write -- the continuity pins, the
-  // descriptor/meta caches, the writer id -- travels through it, so a write's
-  // durability is a property of the handle's type, never a flag a write site
-  // consults. The durable variant alone reaches the `freewallet-session`
-  // database (it carries the `idb` factory); the transient variant is
-  // in-memory throughout and dies with the tab.
+  // The typed persistence strategy chosen at login
+  // (`src/session/persistence.ts`): every tier-sensitive local write -- the
+  // descriptor/meta caches, the writer id -- travels through it, so the
+  // storage tier a write lands in is a property of the strategy's type
+  // rather than a flag a write site consults. The browser-local variant
+  // alone reaches the `freewallet-session` database (it carries the `idb`
+  // factory); the in-memory variant dies with the tab. The continuity pin
+  // stores ride the strategy on both variants, in memory either way, so the
+  // strategy carries them without deciding them.
   persistence: SessionPersistence
 }
 
@@ -251,7 +253,7 @@ export interface Session {
   // The annex GC sweep fired by the keyring logins: the quarterly
   // generation swap (when due and the pointed generation is GC-quiet) plus
   // the collect fan-out over every non-pointed `gen-` collection. Chained
-  // behind `storageReady` (durable sessions only), strictly best-effort --
+  // behind `storageReady` (remembered sessions only), strictly best-effort --
   // resolves wallet-core's per-pass report, or `null` when the session
   // cannot run it or the pass itself failed (it never rejects).
   clientAnnexGcSweep?: Promise<ClientAnnexGcReport | null>

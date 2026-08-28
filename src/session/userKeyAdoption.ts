@@ -8,7 +8,7 @@
  *
  * The in-band form (`adoptRotatedUserKeyInBand`) is the one every ceremony
  * runs, from inside the roster tail's `onUserKeyAdopted`: the re-seal must
- * happen while a durable copy of the PRE-rotation user key still exists, and
+ * happen while a stored copy of the PRE-rotation user key still exists, and
  * the client-key record write inside that same callback is what destroys it
  * on a single-client account. A ceremony that re-sealed only afterwards
  * stranded the registry whenever the collection fan-out in between was torn.
@@ -134,7 +134,7 @@ export async function resealUnlockRegistryForRotation({
  *
  * 1. The unlock-methods registry is re-sealed to the adopted key. It is the
  *    only stage that needs the pre-rotation vault keys, and step 2 destroys
- *    this browser's durable copy of them, so it goes first: a run torn
+ *    this browser's stored copy of them, so it goes first: a run torn
  *    anywhere after this point leaves a registry the surviving keys open.
  * 2. The client-key record persists the adopted key, and the visit's epoch
  *    pin advances with it -- the pin must never advance without the key that

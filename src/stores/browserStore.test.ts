@@ -15,7 +15,7 @@ import { BrowserStore } from './browserStore'
 import { UnknownEpochError, type DocCipher } from '@interop/was-client/edv'
 import { KeyUnwrapError } from '@interop/was-client'
 import type { ContactRevisionPayload } from '@interop/social-core'
-import { durableSessionPersistence } from '@/session/persistence'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 import { PublicCopyRetractionError, StorageManager } from './storageManager'
 import { RemoteDirectStore } from './remoteDirectStore'
 import type { WASRemoteStore } from './wasRemoteStore'
@@ -1242,7 +1242,7 @@ describe('StorageManager (local-first facade)', () => {
       : undefined
     return {
       storage: new StorageManager({
-        persistence: durableSessionPersistence(),
+        persistence: browserLocalSessionPersistence(),
         localStore,
         remoteStore
       }),
@@ -1331,7 +1331,7 @@ describe('StorageManager (local-first facade)', () => {
       deleteSyncedResource: async () => {}
     } as unknown as WASRemoteStore
     const storage = new StorageManager({
-      persistence: durableSessionPersistence(),
+      persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore
     })
@@ -1371,7 +1371,7 @@ describe('StorageManager (local-first facade)', () => {
       deleteSyncedResource: async () => {}
     } as unknown as WASRemoteStore
     const storage = new StorageManager({
-      persistence: durableSessionPersistence(),
+      persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore
     })
@@ -1402,7 +1402,7 @@ describe('StorageManager (local-first facade)', () => {
       deleteSyncedResource: async () => {}
     } as unknown as WASRemoteStore
     const storage = new StorageManager({
-      persistence: durableSessionPersistence(),
+      persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore
     })
@@ -1434,7 +1434,7 @@ describe('StorageManager (local-first facade)', () => {
     const ciphers = encryptedCiphers()
     const { localStore, user } = await initLocalStore({ ciphers })
     const storage = new StorageManager({
-      persistence: durableSessionPersistence(),
+      persistence: browserLocalSessionPersistence(),
       localStore,
       ciphers
     })
@@ -1608,7 +1608,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { localStore, user } = await initLocalStore({ ciphers })
     const { remoteStore, collections } = makeFakeRemoteStore()
     const storage = new StorageManager({
-      persistence: durableSessionPersistence(),
+      persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1633,7 +1633,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { localStore, user } = await initLocalStore({ ciphers })
     const { remoteStore, collections } = makeFakeRemoteStore()
     const storage = new StorageManager({
-      persistence: durableSessionPersistence(),
+      persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1654,7 +1654,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { localStore, user } = await initLocalStore({ ciphers })
     // remoteDirect requested but no remote store: effective mode is off.
     const storage = new StorageManager({
-      persistence: durableSessionPersistence(),
+      persistence: browserLocalSessionPersistence(),
       localStore,
       ciphers,
       remoteDirect: true
@@ -1677,7 +1677,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { localStore, user } = await initLocalStore({ ciphers })
     const { remoteStore, collections, epochs } = makeFakeRemoteStore()
     const storage = new StorageManager({
-      persistence: durableSessionPersistence(),
+      persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,
@@ -1698,7 +1698,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { localStore, user } = await initLocalStore({ ciphers })
     const { remoteStore, collections } = makeFakeRemoteStore()
     const storage = new StorageManager({
-      persistence: durableSessionPersistence(),
+      persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
       ciphers,

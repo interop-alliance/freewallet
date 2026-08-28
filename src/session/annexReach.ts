@@ -274,8 +274,8 @@ export async function ensureGenerationDelegation({
  * (`ladderSignedGenerationDelegationMinter`), which is the one licensed
  * delegator on a ladder-anchored account -- and the renewal must not depend
  * on the very delegation it replaces. Its callers are the sessions that hold
- * no durable signer at all: the transient visit's grant-approval renewal
- * stage.
+ * no enrolled-client signer at all: the transient visit's grant-approval
+ * renewal stage.
  *
  * @param options {object}
  * @param options.accountDid {string}   the account did:webvh, whose ladder
@@ -370,8 +370,8 @@ async function runEnsureGenerationDelegation({
  * the current-key-set rule authorizes nothing under -- and, worse, it would
  * be embedded in the annex log, where every later transient visit adopts it
  * as the generation's delegation until a GC swap. The account this guards is
- * exactly the one the transient login's fallback serves: enrolled durable
- * clients, no ladder VM in the document.
+ * exactly the one the transient login's fallback serves: enrolled clients,
+ * no ladder VM in the document.
  *
  * Best-effort by contract, `null` by return: a session that is not transient
  * (no invocation capability, no ladder members), a document that does not

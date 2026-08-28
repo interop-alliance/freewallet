@@ -6,26 +6,22 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/auth'
-import {
-  DURABILITY_IN_MEMORY,
-  DURABILITY_INDEXEDDB
-} from '@/session/persistence'
+import { STORAGE_IN_MEMORY, STORAGE_INDEXEDDB } from '@/session/persistence'
 
 const { backfillPassphraseUnlockMethod } =
   await import('@/session/unlockMethods')
 
 /**
  * A minimal session shaped as `backfillPassphraseUnlockMethod` reads it: the
- * durability handle under test, plus just enough of `profile` and
- * `persistence` for the durable path to reach its first registry read (a
- * local-cache load, since no `VITE_WAS_SERVER_URL` is set in tests) without
- * throwing.
+ * storage tier under test, plus just enough of `profile` and `persistence`
+ * for the browser-local path to reach its first registry read (a local-cache
+ * load, since no `VITE_WAS_SERVER_URL` is set in tests) without throwing.
  *
  * @param options {object}
- * @param options.durability {string}
+ * @param options.storage {string}
  * @returns {{ session: Session, cacheLoad: ReturnType<typeof vi.fn> }}
  */
-function fakeSession({ durability }: { durability: string }): {
+function fakeSession({ storage }: { storage: string }): {
   session: Session
   cacheLoad: ReturnType<typeof vi.fn>
 } {
@@ -38,7 +34,7 @@ function fakeSession({ durability }: { durability: string }): {
       keyResolver: { resolve: vi.fn() },
       unlockMethod: undefined,
       persistence: {
-        durability,
+        storage,
         unlockMethodsCache: {
           load: cacheLoad,
           save: vi.fn(),
@@ -53,7 +49,7 @@ function fakeSession({ durability }: { durability: string }): {
 describe('backfillPassphraseUnlockMethod (FW-295 transient gate)', () => {
   it('makes no registry call on a transient session', async () => {
     const { session, cacheLoad } = fakeSession({
-      durability: DURABILITY_IN_MEMORY
+      storage: STORAGE_IN_MEMORY
     })
 
     const result = await backfillPassphraseUnlockMethod({ session })
@@ -62,9 +58,9 @@ describe('backfillPassphraseUnlockMethod (FW-295 transient gate)', () => {
     expect(cacheLoad).not.toHaveBeenCalled()
   })
 
-  it('proceeds to the read on a durable session', async () => {
+  it('proceeds to the read on a browser-local session', async () => {
     const { session, cacheLoad } = fakeSession({
-      durability: DURABILITY_INDEXEDDB
+      storage: STORAGE_INDEXEDDB
     })
 
     const result = await backfillPassphraseUnlockMethod({ session })

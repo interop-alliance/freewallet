@@ -57,8 +57,8 @@ import {
 import { sessionRosterStore } from '@/session/rosterStore'
 import {
   assertAccountCeremonyAllowed,
-  assertDurableSession,
-  isDurableSession
+  assertBrowserLocalSession,
+  isBrowserLocalSession
 } from '@/session/persistence'
 import { pointedClientAnnexReach } from '@/session/annexReach'
 import {
@@ -104,9 +104,9 @@ export async function readLoginHandle({
  * the caller can show a non-blocking load error while the rest of the section
  * keeps working.
  *
- * A transient session makes no registry call at all: the registry is
- * durable-session state, so this returns `null` immediately rather than
- * calling the backfill or the plain read.
+ * A transient session makes no registry call at all: this surface is gated
+ * on the browser-local persistence strategy, so it returns `null`
+ * immediately rather than calling the backfill or the plain read.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -117,7 +117,7 @@ export async function loadUnlockRegistry({
 }: {
   session: Session
 }): Promise<UnlockMethodsRecord | null> {
-  if (!isDurableSession(session.profile.persistence)) {
+  if (!isBrowserLocalSession(session.profile.persistence)) {
     return null
   }
   try {
@@ -1453,7 +1453,8 @@ export async function addAccountPassphrase({
  *
  * Ordering: every changed seed set is persisted into the wrapped client-key
  * record (and the in-memory profile) before and after the log extends, so a
- * crash mid-rotation resumes from durable state.
+ * crash mid-rotation resumes from stored state -- the browser-local record
+ * beside the published log.
  *
  * The read the rotation builds on runs under this browser's account-log
  * chain-head pin and the account's own DID, so a truncated or substituted log
@@ -1468,13 +1469,14 @@ export async function rotateAccountUpdateKey({
 }: {
   session: Session
 }): Promise<void> {
-  // The subject of this ceremony is durable by nature: it rotates THIS
+  // The subject of this ceremony is this browser's own state: it rotates THIS
   // browser's did:webvh update key, and its persist-before-publish ordering
-  // needs a durable client-key record to persist the rolled seeds into. So it
-  // asserts durability outright. The other account-management ceremonies here
-  // are reachable from a transient session, but only inside a step-up, so
-  // they carry the step-up gate instead.
-  assertDurableSession({
+  // needs a browser-local client-key record to persist the rolled seeds into.
+  // So it asserts the browser-local strategy outright. The other
+  // account-management ceremonies here are reachable from a transient
+  // session, but only inside a step-up, so they carry the step-up gate
+  // instead.
+  assertBrowserLocalSession({
     persistence: session.profile.persistence,
     ceremony: 'Update-key rotation'
   })
@@ -1623,7 +1625,7 @@ export async function deleteAccount({
   // The Storage Access seam: a session begun from the CHAPI popup carries the
   // unpartitioned factory here, so every session-database delete below lands
   // in the first-party bucket the records actually live in.
-  const idb = isDurableSession(session.profile.persistence)
+  const idb = isBrowserLocalSession(session.profile.persistence)
     ? session.profile.persistence.idb
     : undefined
   if (!isGuest) {

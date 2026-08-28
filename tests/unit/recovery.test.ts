@@ -137,7 +137,7 @@ import {
   RecoveryCodeNotFoundError,
   RecoveryRecordForgedError
 } from '@/session/recovery'
-import { durableSessionPersistence } from '@/session/persistence'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
 
@@ -376,7 +376,7 @@ describe('canIssueRecoveryCode', () => {
       isGuest: overrides.isGuest ?? false,
       storage: { remoteStore: overrides.remoteStore ?? {} },
       profile: {
-        persistence: durableSessionPersistence(),
+        persistence: browserLocalSessionPersistence(),
         accountPointer: {
           did: overrides.pointerDid ?? POINTER.did,
           spaceId: POINTER.spaceId,
@@ -483,7 +483,7 @@ describe('checkRecoveryHealth and the current-key-set rule', () => {
       isGuest: false,
       storage: { remoteStore: {} },
       profile: {
-        persistence: durableSessionPersistence(),
+        persistence: browserLocalSessionPersistence(),
         accountPointer: POINTER
       }
     } as unknown as Session

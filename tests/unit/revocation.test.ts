@@ -98,7 +98,7 @@ import {
   clientAnnexLogStore,
   ensureGenerationDelegationCurrent
 } from '@interop/wallet-core/clientAnnex'
-import { durableSessionPersistence } from '@/session/persistence'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 import {
   getUnlockMethods,
   rewrapUnlockMethodsRecord
@@ -291,7 +291,7 @@ function sessionWith(
       keyAgreementKey: { id: `${OLD_USER_KEY.id}#kak` },
       keyResolver: async () => ({}),
       persistence: {
-        ...durableSessionPersistence(),
+        ...browserLocalSessionPersistence(),
         epochPins: { load: epochPinLoad, saveFromDescriptor: epochPinSave }
       },
       persistClientKeys: vi.fn(async () => {

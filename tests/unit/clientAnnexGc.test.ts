@@ -38,8 +38,8 @@ import { runClientAnnexGc } from '@interop/wallet-core/clientAnnex'
 import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
 import { enrolledClientContext } from '@/session/enrolledContext'
 import {
-  durableSessionPersistence,
-  transientSessionPersistence,
+  browserLocalSessionPersistence,
+  inMemorySessionPersistence,
   transientSessionStores
 } from '@/session/persistence'
 import type { SessionPersistence } from '@/session/persistence'
@@ -92,7 +92,7 @@ function accountDoc({ pointed = true }: { pointed?: boolean } = {}) {
  * and the user the digest is attributed to.
  */
 function makeSession({
-  persistence = durableSessionPersistence()
+  persistence = browserLocalSessionPersistence()
 }: { persistence?: SessionPersistence } = {}): Session {
   return {
     user: { id: 'did:key:z6MkClient', email: 'user@example.test' },
@@ -144,7 +144,7 @@ afterEach(() => {
 describe('sweepClientAnnexGenerations -- the preconditions', () => {
   it('skips a transient session', async () => {
     const session = makeSession({
-      persistence: transientSessionPersistence({
+      persistence: inMemorySessionPersistence({
         stores: transientSessionStores(),
         clientAnnex: {
           clientAnnexDid: 'did:webvh:example:annex',
@@ -196,7 +196,7 @@ describe('sweepClientAnnexGenerations -- the preconditions', () => {
 
 describe('sweepClientAnnexGenerations -- the pass', () => {
   it('runs one pass with the account, the id store, and this client keys', async () => {
-    const persistence = durableSessionPersistence()
+    const persistence = browserLocalSessionPersistence()
     const session = makeSession({ persistence })
     const ladderSeed = new Uint8Array(32).fill(7)
 

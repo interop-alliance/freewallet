@@ -1103,8 +1103,9 @@ export async function fetchKeyring({
  * What `fetchTransientKeyring` returns on a hit: the record contents plus the
  * derived unlock Space id, the standing-credential members when the record is
  * in the standing layout, and the credential's own client identity. Nothing
- * durable rides along -- no local client keys, no persist or enroll closures,
- * no management zcap: a transient session holds none of them.
+ * a remembered session carries rides along -- no local client keys, no
+ * persist or enroll closures, no management zcap: a transient session holds
+ * none of them.
  */
 export interface TransientKeyringFetchResult extends KeyringRecordContents {
   unlockSpaceId: string
@@ -1128,13 +1129,13 @@ export interface TransientKeyringFetchResult extends KeyringRecordContents {
 
 /**
  * The transient unlock-record fetch: `fetchKeyring`'s public-terminal
- * sibling, which performs no durable operation at all. Remote-only (the
- * transient login presupposes a WAS server -- with none configured it
- * throws), it fetches the record, verifies its proof and, for a standing
- * record, the credential-authenticated account binding, and settles a
- * pending proof (a cascade-re-minted record) against the account log under
- * the CALLER-SUPPLIED chain-head pin store -- an in-memory one for a
- * transient login, so the account-log read leaves no trace either.
+ * sibling, which writes nothing -- not on this browser, and not on the
+ * server. Remote-only (the transient login presupposes a WAS server -- with
+ * none configured it throws), it fetches the record, verifies its proof and,
+ * for a standing record, the credential-authenticated account binding, and
+ * settles a pending proof (a cascade-re-minted record) against the account
+ * log under the CALLER-SUPPLIED chain-head pin store -- an in-memory one for
+ * a transient login, so the account-log read leaves no trace either.
  *
  * What it deliberately does not do, per the `fetchKeyring` contract it
  * parallels: no keyring cache read or write (so no offline fallback -- a
@@ -1183,7 +1184,8 @@ export async function fetchTransientKeyring({
   const { unlock, standing: standingClient } = credential
 
   // No cache fallback on a network error, and no cache or pin cleanup on a
-  // miss: a transient visit holds no durable state to fall back on or clear.
+  // miss: a transient visit holds no browser-local state to fall back on or
+  // clear.
   const record = await getUnlockKeyring({
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: unlock.zcapClient,
@@ -1243,7 +1245,7 @@ export async function fetchTransientKeyring({
  *   own client identity (its binding MAC key authenticates the account core)
  * @param options.found {KeyringRecordContents}   the served record's contents
  * @param options.standing {object}   the record's standing members
- * @param [options.local] {object}   the durable variant's local state (the
+ * @param [options.local] {object}   the remembered variant's local state (the
  *   `freewallet-session` IndexedDB factory); absent for a transient visit
  * @returns {Function}   `({ delegation, delegatedClients }) => Promise<void>`
  */
@@ -1509,7 +1511,7 @@ function documentListsVmId({
  * key-agreement publication (commitment or verbatim) is NOT in the verified
  * account document, so the served record's standing members back no
  * published inventory -- the inert residue of a torn earlier attempt, not a
- * live credential. It is also what covers the durable spend's own
+ * live credential. It is also what covers the remembered spend's own
  * PUT-then-persist window, where a tab death leaves a served standing record
  * with no pending record behind it.
  *
@@ -1523,8 +1525,8 @@ function documentListsVmId({
  *   document, enabling the transient license above
  * @param [options.readLocalRecord] {boolean}   consult the local client-key
  *   record for the own-pending residue (default true); the transient spend
- *   passes false, since even a read would durably create the session
- *   database
+ *   passes false, since even a read would create the session database on
+ *   this browser
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<{ ownPending?: ClientKeyRecordPending,
  *   servedCreatedAt?: string }>}
@@ -1589,7 +1591,7 @@ export async function probeUnlockSpaceCollision({
       // record's standing members, so it is a torn attempt's inert residue
       // (a genuinely standing credential's commitment IS in the document).
       // The transient spend's only license (it holds no pin and reads no
-      // local records), and the durable spend's backstop for the window its
+      // local records), and the remembered spend's backstop for the window its
       // own bind order creates: a tab death between the remote record PUT
       // and the local persists leaves a served standing record with no
       // pending record and no pin, which the pin license alone would refuse
@@ -1975,7 +1977,7 @@ export async function bindPassphrase({
  *   record first, refuses a colliding one, and advances its stamp past the
  *   served record's. Carries the verified account document -- the
  *   inert-residue license, since a transient visit must not read local
- *   records (even a read would durably create the session database)
+ *   records (even a read would create the session database on this browser)
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for the same secret
  * @returns {Promise<object>}   the unlock Space id, the management zcap when
@@ -2077,9 +2079,9 @@ export async function bindCredentialAnchoredUnlockSecret({
   })
   let manageCapability: IZcap | undefined
   if (delegateManagementTo) {
-    // The standing widening (PUT beside GET/DELETE), exactly as the durable
-    // standing bind delegates it: the revocation cascade must be able to
-    // re-PUT this record with a re-minted bridge.
+    // The standing widening (PUT beside GET/DELETE), exactly as the
+    // remembered path's standing bind delegates it: the revocation cascade
+    // must be able to re-PUT this record with a re-minted bridge.
     manageCapability = await delegateUnlockManagement({
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId,

@@ -252,10 +252,10 @@ afterEach(() => {
 describe('routeUnlockLogin -- the post-KDF durability decision', () => {
   it('defaults to transient on a non-remembered browser', async () => {
     const routed = await routeUnlockLogin({ kdf: KDF, credential: CREDENTIAL })
-    expect(routed.durability).toBe('transient')
-    if (routed.durability === 'transient') {
+    expect(routed.login).toBe('transient')
+    if (routed.login === 'transient') {
       expect(routed.credential).toBe(CREDENTIAL)
-      expect(routed.persistence.durability).toBe('in-memory')
+      expect(routed.persistence.storage).toBe('in-memory')
     }
     expect(hasClientKeyRecord).toHaveBeenCalledWith({
       spaceId: 'unlock-space-1',
@@ -266,7 +266,7 @@ describe('routeUnlockLogin -- the post-KDF durability decision', () => {
   it('routes durable when this credential is remembered here (the ratchet)', async () => {
     vi.mocked(hasClientKeyRecord).mockResolvedValue(true)
     const routed = await routeUnlockLogin({ kdf: KDF, credential: CREDENTIAL })
-    expect(routed.durability).toBe('durable')
+    expect(routed.login).toBe('remembered')
   })
 
   it('refuses rememberBrowser: false on a remembered browser', async () => {
@@ -286,14 +286,14 @@ describe('routeUnlockLogin -- the post-KDF durability decision', () => {
       credential: CREDENTIAL,
       rememberBrowser: true
     })
-    expect(routed.durability).toBe('durable')
+    expect(routed.login).toBe('remembered')
     expect(hasClientKeyRecord).not.toHaveBeenCalled()
   })
 
   it('routes durable with no WAS server, refusing an explicit transient ask', async () => {
     state.wasUrl = undefined
     const routed = await routeUnlockLogin({ kdf: KDF, credential: CREDENTIAL })
-    expect(routed.durability).toBe('durable')
+    expect(routed.login).toBe('remembered')
     expect(hasClientKeyRecord).not.toHaveBeenCalled()
     await expect(
       routeUnlockLogin({
@@ -319,7 +319,7 @@ describe('routeUnlockLogin -- the post-KDF durability decision', () => {
       credential: CREDENTIAL,
       idb: unpartitioned
     })
-    expect(routed.durability).toBe('durable')
+    expect(routed.login).toBe('remembered')
     expect(hasClientKeyRecord).toHaveBeenCalledWith({
       spaceId: 'unlock-space-1',
       idb: unpartitioned
@@ -330,7 +330,7 @@ describe('routeUnlockLogin -- the post-KDF durability decision', () => {
     // A denied grant resolves no handle, so the probe runs against the
     // partitioned bucket, where no client-key record can exist.
     const routed = await routeUnlockLogin({ kdf: KDF, credential: CREDENTIAL })
-    expect(routed.durability).toBe('transient')
+    expect(routed.login).toBe('transient')
     expect(hasClientKeyRecord).toHaveBeenCalledWith({
       spaceId: 'unlock-space-1',
       idb: undefined
@@ -647,7 +647,7 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
         accountPointer: POINTER,
         email: 'typed@example.test',
         persistence: expect.objectContaining({
-          durability: persistence.durability,
+          storage: persistence.storage,
           logPins: persistence.logPins,
           clientAnnex: {
             clientAnnexDid: CLIENT_ANNEX_DID,

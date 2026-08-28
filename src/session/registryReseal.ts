@@ -4,7 +4,7 @@
  * re-sealed to the account's current one.
  *
  * The state it mends is a torn rotation. Every ceremony that rotates the user
- * key now re-seals the registry in band, while this browser's durable copy of
+ * key now re-seals the registry in band, while this browser's stored copy of
  * the pre-rotation key still exists (`adoptRotatedUserKeyInBand`), but a run
  * torn before that -- or one from a client that never had the duty -- leaves
  * the record sealed to a key no login derives any more. Nothing else can open
@@ -26,7 +26,7 @@ import {
 import { isWebvhDid } from '@interop/wallet-core/webvh'
 import { WAS_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
-import { isDurableSession } from '@/session/persistence'
+import { isBrowserLocalSession } from '@/session/persistence'
 import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
 import {
   getUnlockMethods,
@@ -40,11 +40,12 @@ const log = createLogger('fw:session:reseal')
 /**
  * Detects and mends a stale-sealed unlock-methods registry.
  *
- * Runs only for a durable session on a promoted account with a WAS server and
- * a successful login roster read (the escrow's source). Detection is the
- * ordinary read: a `UnlockRegistryStaleSealError` is the stale seal, and every
- * other outcome -- a registry that opened, an absent registry, a version or
- * frame refusal, a network failure -- rethrows or returns untouched.
+ * Runs only for a session on the browser-local strategy, on a promoted
+ * account with a WAS server and a successful login roster read (the escrow's
+ * source). Detection is the ordinary read: a `UnlockRegistryStaleSealError`
+ * is the stale seal, and every other outcome -- a registry that opened, an
+ * absent registry, a version or frame refusal, a network failure -- rethrows
+ * or returns untouched.
  *
  * The mend tries each superseded generation the roster escrows, newest first
  * (the likeliest is the one the lost rotation superseded), until the record
@@ -81,7 +82,7 @@ export async function repairStaleUnlockRegistrySeal({
   const { clientKeyAgreementKey, userKey } = session.profile
   if (
     !WAS_SERVER_URL ||
-    !isDurableSession(session.profile.persistence) ||
+    !isBrowserLocalSession(session.profile.persistence) ||
     !pointer ||
     !isWebvhDid(pointer.did) ||
     !spaceId ||

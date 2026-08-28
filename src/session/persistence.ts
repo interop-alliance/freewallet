@@ -1,20 +1,21 @@
 /**
- * The session persistence seam: one typed handle, chosen at login, through
- * which every durability-sensitive local write travels. Durability is a property
- * of the handle's TYPE, never a flag a write site consults -- the durable
- * variant reaches the `freewallet-session` IndexedDB database (it alone
- * carries the `idb` factory), durable localStorage caches, and the durable
- * `writerId` mint, while the transient variant holds a per-visit in-memory
- * `writerId` and one in-memory descriptor/meta cache pair -- and no
- * sessionKey factory at all, so code needing the durable database must hold
- * (and assert for) the durable variant. The two continuity pin stores are
- * the exception both variants share: they are in-memory whatever the
- * durability, since continuity is checked within a session and not across
- * sessions (`decisions/0012-no-durable-continuity-pins.md`). The transient variant also carries the session's
- * client-annex identity (the annex DID and the generation delegation every
- * request rides), so durability -- and the annex signing that comes with it
- * -- is declared once, in the handle's type, never half-declared through a
- * second option. This is the typed seam
+ * The session persistence strategy: one typed object, chosen at login,
+ * through which every tier-sensitive local write travels. The storage tier
+ * is a property of the strategy's TYPE rather than a flag a write site
+ * consults -- the browser-local variant reaches the `freewallet-session`
+ * IndexedDB database (it alone carries the `idb` factory), the localStorage
+ * caches, and the persistent `writerId` mint, while the in-memory variant
+ * holds a per-visit `writerId` and one in-memory descriptor/meta cache pair
+ * -- and no sessionKey factory at all, so code needing that database must
+ * hold (and assert for) the browser-local variant. The two continuity pin
+ * stores are the exception both variants share: they are in memory
+ * whichever tier the strategy reaches, since continuity is checked within a
+ * session and not across sessions
+ * (`decisions/0012-no-durable-continuity-pins.md`). The in-memory variant
+ * also carries the session's client-annex identity (the annex DID and the
+ * generation delegation every request rides), so the tier -- and the annex
+ * signing that comes with it -- is declared once, in the strategy's type,
+ * rather than half-declared through a second option. This is the typed seam
  * `decisions/0001-no-memory-overlay-storage-fork.md` requires in place of a
  * transparent in-memory storage fork.
  */
@@ -37,14 +38,14 @@ import {
 } from '@/lib/sessionKey'
 
 /**
- * The two durability variants, as the handle's type discriminant. Write
- * sites never compare these directly -- they use {@link isDurableSession}
- * or the asserts below.
+ * The two storage tiers, as the strategy's type discriminant. Write sites
+ * never compare these directly -- they use {@link isBrowserLocalSession} or
+ * the asserts below.
  */
-export const DURABILITY_INDEXEDDB = 'indexeddb'
-export const DURABILITY_IN_MEMORY = 'in-memory'
+export const STORAGE_INDEXEDDB = 'indexeddb'
+export const STORAGE_IN_MEMORY = 'in-memory'
 
-// The localStorage key prefixes for the durable cache pair. Established
+// The localStorage key prefixes for the browser-local cache pair. Established
 // key names -- existing browsers hold entries under them.
 const DESCRIPTOR_CACHE_PREFIX = 'freewallet:collection-encryption'
 const META_CACHE_PREFIX = 'freewallet:collection-meta'
@@ -63,7 +64,7 @@ export const LOCAL_CACHE_FAMILY_PREFIXES = [
 /**
  * The cache for a collection's stored `/meta` value (the `custom` envelope
  * carrying the persisted blinded-index schema), beside the encryption
- * descriptor cache and under the same durability.
+ * descriptor cache and on the same storage tier.
  */
 export interface CollectionMetaCache {
   readMeta(options: {
@@ -77,7 +78,7 @@ export interface CollectionMetaCache {
 
 /**
  * The user key roster-epoch pin, behind the seam: an in-memory map guarding
- * the visit alone, whichever durability the handle carries.
+ * the visit alone, whichever tier the strategy reaches.
  */
 export interface UserKeyEpochPinStore {
   load(options: { accountDid: string }): Promise<string | null>
@@ -101,9 +102,9 @@ export interface UnlockMethodsCache {
 
 /**
  * The passkey-safety notice (a device-bound-passkey warning captured at
- * registration) behind the seam. Only durable flows write one -- passkey
- * registration is itself a durable ceremony -- so the transient variant
- * serves an empty in-memory store.
+ * registration) behind the seam. Only a remembered browser ever writes one
+ * -- registering a passkey remembers the browser by construction -- so the
+ * in-memory variant serves an empty store.
  */
 export interface PasskeySafetyNoticeStore {
   load(options: { controller: string }): Promise<{
@@ -120,7 +121,7 @@ export interface PasskeySafetyNoticeStore {
 }
 
 /**
- * The members both variants carry -- what a durability-agnostic write site is
+ * The members both variants carry -- what a tier-agnostic write site is
  * allowed to depend on.
  */
 interface SessionPersistenceBase {
@@ -140,7 +141,7 @@ interface SessionPersistenceBase {
   // This session's writer id for history attribution and LWW tie-breaks.
   getWriterId(): string
   // The per-scope encryption-descriptor cache (the offline fallback). One
-  // instance per scope per session; a handle that persists no caches (a
+  // instance per scope per session; a strategy that persists no caches (a
   // guest's mint-only descriptors) serves a session-lifetime in-memory one.
   descriptorCache(options: { scope: string }): EncryptionDescriptorCache
   // The collection-metadata cache beside it, same lifecycle.
@@ -148,12 +149,13 @@ interface SessionPersistenceBase {
 }
 
 /**
- * The durable variant: today's behavior. Alone in carrying `idb` -- the
- * first-party `freewallet-session` factory (the Storage Access seam threads
- * through it) -- so sessionKey access is structurally durable-only.
+ * The browser-local variant: this browser's IndexedDB and localStorage.
+ * Alone in carrying `idb` -- the first-party `freewallet-session` factory
+ * (the Storage Access seam threads through it) -- so sessionKey access is
+ * structurally browser-local-only.
  */
-export interface DurableSessionPersistence extends SessionPersistenceBase {
-  durability: typeof DURABILITY_INDEXEDDB
+export interface BrowserLocalSessionPersistence extends SessionPersistenceBase {
+  storage: typeof STORAGE_INDEXEDDB
   idb?: IDBFactory
 }
 
@@ -163,33 +165,34 @@ export interface DurableSessionPersistence extends SessionPersistenceBase {
  * and the composition's epoch pin ride the same stores the session will.
  * Nothing it serves outlives the tab, and it has no member reaching the
  * session database. Deliberately NOT a member of {@link SessionPersistence}:
- * a session's handle must declare the whole transient shape, the client-annex
- * identity included.
+ * a session's strategy must declare the whole in-memory shape, the
+ * client-annex identity included.
  */
 export interface TransientSessionStores extends SessionPersistenceBase {
-  durability: typeof DURABILITY_IN_MEMORY
+  storage: typeof STORAGE_IN_MEMORY
 }
 
 /**
- * A transient session's handle: a public-terminal visit. Beside the
+ * A transient session's strategy: a public-terminal visit. Beside the
  * in-memory stores it carries the session's client-annex identity -- every
  * WAS request signs as `<clientAnnexDid>#<vm>` and rides the generation
- * delegation -- so durability cannot be half-declared: a caller that supplies
- * a transient handle has, by type, already declared the annex identity, and
- * the durable-only members (the KMS keystore, the login-time roster read,
- * the account-document keyId) are structurally out of reach.
+ * delegation -- so the tier cannot be half-declared: a caller that supplies
+ * the in-memory variant has, by type, already declared the annex identity,
+ * and the members only a remembered login reaches (the KMS keystore, the
+ * login-time roster read, the account-document keyId) are structurally out
+ * of reach.
  */
-export interface TransientSessionPersistence extends TransientSessionStores {
+export interface InMemorySessionPersistence extends TransientSessionStores {
   // Session assembly only: the annex zcap spelling and the
   // `profile.invocationCapability` stamp. Never thread the delegation into
   // the unlock-methods registry helpers -- a delegated registry read/write
   // from a transient session would clobber the registry from a public
-  // terminal (the registry stays durable-session-only).
+  // terminal (the registry stays remembered-session-only).
   clientAnnex: { clientAnnexDid: string; invocationCapability: IZcap }
 }
 
 export type SessionPersistence =
-  DurableSessionPersistence | TransientSessionPersistence
+  BrowserLocalSessionPersistence | InMemorySessionPersistence
 
 /**
  * The localStorage-backed `EncryptionDescriptorCache` for one scope (an
@@ -238,7 +241,7 @@ export function localStorageDescriptorCache({
 
 /**
  * The localStorage cache for a collection's stored `/meta` value, under
- * `freewallet:collection-meta:<scope>:<collectionId>`. Same durability as the
+ * `freewallet:collection-meta:<scope>:<collectionId>`. Same tier as the
  * descriptor cache: the offline fallback, with a corrupt entry (or a
  * non-browser environment) read as absent and writes no-oping without
  * localStorage.
@@ -431,8 +434,8 @@ export function memoryEpochPinStore(): UserKeyEpochPinStore {
 }
 
 /**
- * Builds the durable persistence handle -- today's behavior, and the default
- * every login constructs unless the caller supplies a transient handle.
+ * Builds the browser-local persistence strategy -- the default every login
+ * constructs unless the routing decision supplies the in-memory variant.
  *
  * @param options {object}
  * @param [options.idb] {IDBFactory}   first-party IndexedDB (CHAPI popups
@@ -440,19 +443,19 @@ export function memoryEpochPinStore(): UserKeyEpochPinStore {
  * @param [options.persistCaches] {boolean}   false for a guest: the cache
  *   pair is in-memory for the session and never persisted (a guest's
  *   identity is random and its data dies with the session); default true
- * @returns {DurableSessionPersistence}
+ * @returns {BrowserLocalSessionPersistence}
  */
-export function durableSessionPersistence({
+export function browserLocalSessionPersistence({
   idb,
   persistCaches = true
 }: {
   idb?: IDBFactory
   persistCaches?: boolean
-} = {}): DurableSessionPersistence {
+} = {}): BrowserLocalSessionPersistence {
   const descriptorCaches = new Map<string, EncryptionDescriptorCache>()
   const metaCaches = new Map<string, CollectionMetaCache>()
   return {
-    durability: DURABILITY_INDEXEDDB,
+    storage: STORAGE_INDEXEDDB,
     ...(idb ? { idb } : {}),
     logPins: memoryResourceLogPinStore(),
     epochPins: memoryEpochPinStore(),
@@ -513,9 +516,9 @@ export function durableSessionPersistence({
  * Builds the transient visit's in-memory store family, whose every member
  * dies with the tab. There is deliberately no member reaching the
  * `freewallet-session` database -- a transient session must never create it,
- * even on a read (the versioned open is durable). The session's full handle
- * is composed over these stores once the annex identity exists
- * ({@link transientSessionPersistence}).
+ * even on a read (the versioned open creates the database). The session's
+ * full strategy is composed over these stores once the annex identity exists
+ * ({@link inMemorySessionPersistence}).
  *
  * @returns {TransientSessionStores}
  */
@@ -527,7 +530,7 @@ export function transientSessionStores(): TransientSessionStores {
   const metas = memoryMetaCache()
   const writerId = uuidv7()
   return {
-    durability: DURABILITY_IN_MEMORY,
+    storage: STORAGE_IN_MEMORY,
     logPins: memoryResourceLogPinStore(),
     epochPins: memoryEpochPinStore(),
     unlockMethodsCache: {
@@ -541,8 +544,8 @@ export function transientSessionStores(): TransientSessionStores {
         unlockMethods.delete(controller)
       }
     },
-    // A transient visit never registers a passkey (registration is a durable
-    // ceremony), so the store starts and stays empty: reads answer null,
+    // A transient visit never registers a passkey (registering one remembers
+    // the browser), so the store starts and stays empty: reads answer null,
     // writes are visit-scoped no-ops kept only for interface uniformity.
     passkeyNotices: {
       async load() {
@@ -564,41 +567,44 @@ export function transientSessionStores(): TransientSessionStores {
 }
 
 /**
- * Composes the transient session's handle over an already-built store family
+ * Composes the transient session's strategy over an already-built store family
  * and the client-annex identity the composition just enrolled. The spread
  * copies the store methods, which close over the same in-memory maps, so
  * pins established before the session (the record fetch's account-log pins,
- * the login-time epoch pin) carry into the handle unchanged.
+ * the login-time epoch pin) carry into the strategy unchanged.
  *
  * @param options {object}
  * @param options.stores {TransientSessionStores}   the visit's store family
  * @param options.clientAnnex {object}   the annex DID this session invokes as
  *   and the generation delegation every request rides
- * @returns {TransientSessionPersistence}
+ * @returns {InMemorySessionPersistence}
  */
-export function transientSessionPersistence({
+export function inMemorySessionPersistence({
   stores,
   clientAnnex
 }: {
   stores: TransientSessionStores
   clientAnnex: { clientAnnexDid: string; invocationCapability: IZcap }
-}): TransientSessionPersistence {
+}): InMemorySessionPersistence {
   return { ...stores, clientAnnex }
 }
 
 /**
- * Thrown when a ceremony that publishes durable state was invoked from a
- * transient session and no step-up applies: update-key rotation, whose
- * persist-before-publish invariant needs a durable client-key record to
- * persist into (and whose subject -- this browser's durable update key --
- * does not exist in a transient session).
+ * Thrown when a ceremony whose persist half is browser-local was invoked
+ * from a session on the in-memory strategy and no step-up applies:
+ * update-key rotation, whose persist-before-publish invariant needs a
+ * client-key record to persist into (and whose subject -- this browser's
+ * own update key -- does not exist in a transient session).
  */
-export class DurableSessionRequiredError extends Error {
+export class BrowserLocalSessionRequiredError extends Error {
   ceremony: string
 
   constructor({ ceremony }: { ceremony: string }) {
-    super(`${ceremony} requires a durable session on a remembered browser.`)
-    this.name = 'DurableSessionRequiredError'
+    super(
+      `${ceremony} requires a remembered browser, whose session writes to ` +
+        'browser-local storage.'
+    )
+    this.name = 'BrowserLocalSessionRequiredError'
     this.ceremony = ceremony
   }
 }
@@ -623,39 +629,63 @@ export class StepUpRequiredError extends Error {
 }
 
 /**
- * Whether this session's persistence is the durable variant -- the one
- * predicate gating sites use in place of comparing the discriminant.
+ * Whether this session's persistence reaches browser-local storage -- the
+ * one predicate gating sites use in place of comparing the discriminant.
  *
  * @param persistence {SessionPersistence}
  * @returns {boolean}
  */
-export function isDurableSession(
+export function isBrowserLocalSession(
   persistence: SessionPersistence
-): persistence is DurableSessionPersistence {
-  return persistence.durability === DURABILITY_INDEXEDDB
+): persistence is BrowserLocalSessionPersistence {
+  return persistence.storage === STORAGE_INDEXEDDB
 }
 
 /**
- * Refuses a ceremony whose subject or persist half is structurally durable
- * (update-key rotation). A caller needing the narrowed type uses
- * {@link isDurableSession} (a destructured option cannot carry an `asserts`
- * predicate).
+ * Refuses a ceremony whose subject or persist half is structurally
+ * browser-local (update-key rotation). A caller needing the narrowed type
+ * uses {@link isBrowserLocalSession} (a destructured option cannot carry an
+ * `asserts` predicate).
  *
  * @param options {object}
  * @param options.persistence {SessionPersistence}
  * @param options.ceremony {string}   names the ceremony in the refusal
  * @returns {void}
  */
-export function assertDurableSession({
+export function assertBrowserLocalSession({
   persistence,
   ceremony
 }: {
   persistence: SessionPersistence
   ceremony: string
 }): void {
-  if (!isDurableSession(persistence)) {
-    throw new DurableSessionRequiredError({ ceremony })
+  if (!isBrowserLocalSession(persistence)) {
+    throw new BrowserLocalSessionRequiredError({ ceremony })
   }
+}
+
+/**
+ * Whether this is a remembered session: a non-guest session on the
+ * browser-local strategy, so it holds (or has just self-enrolled into) an
+ * enrolled client's client-key record. The login path's remembered-only
+ * stages gate on this -- KMS keystore provisioning, the client-seed stamp,
+ * and the login-time roster read the registry chain hangs off. A guest is
+ * browser-local and is never remembered, which is why the guest check
+ * belongs inside the predicate rather than beside each use.
+ *
+ * @param options {object}
+ * @param options.persistence {SessionPersistence}
+ * @param options.isGuest {boolean}
+ * @returns {boolean}
+ */
+export function isRememberedSession({
+  persistence,
+  isGuest
+}: {
+  persistence: SessionPersistence
+  isGuest: boolean
+}): boolean {
+  return !isGuest && isBrowserLocalSession(persistence)
 }
 
 /**
@@ -677,7 +707,7 @@ export function assertAccountCeremonyAllowed({
   persistence: SessionPersistence
   ceremony: string
 }): void {
-  if (!isDurableSession(persistence)) {
+  if (!isBrowserLocalSession(persistence)) {
     throw new StepUpRequiredError({ ceremony })
   }
 }

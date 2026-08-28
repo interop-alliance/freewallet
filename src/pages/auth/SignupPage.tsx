@@ -150,7 +150,7 @@ export function SignupPage() {
       const { session, userExists } = await signUpWithPassphrase({
         passphrase,
         email: email || undefined,
-        // The e2e seam forces the durable flow; without it a WAS-configured
+        // The e2e seam forces the remembered flow; without it a WAS-configured
         // signup on this (by definition non-remembered) browser runs
         // credential-anchored and ends in a transient session.
         ...(forcedRememberBrowser() ? { rememberBrowser: true } : {})

@@ -1,20 +1,20 @@
 /**
  * The transient login: the public-terminal composition over the transient
  * unlock-record fetch and the capability-bound replica-less storage variant.
- * Nothing here performs a durable local write -- the whole flow rides one
- * in-memory persistence handle (trust-on-first-use pins, per-visit writer id)
- * and dies with the tab.
+ * Nothing here performs a browser-local write -- the whole flow rides one
+ * in-memory persistence strategy (a per-visit writer id, and the pin stores
+ * every session keeps in memory) and dies with the tab.
  *
- * Two exports drive it. `routeUnlockLogin` is the post-KDF durability decision
+ * Two exports drive it. `routeUnlockLogin` is the post-KDF routing decision
  * both keyring login entry points run: a browser already holding this
- * credential's client-key record proceeds durable (the mechanical ratchet --
- * silent until the remember-this-browser UX lands), a browser holding none
+ * credential's client-key record proceeds remembered (the mechanical ratchet
+ * -- silent until the remember-this-browser UX lands), a browser holding none
  * defaults to the transient session, and an explicit `rememberBrowser` input
- * forces either side (true runs the durable standing self-enrollment; false
- * on a remembered browser refuses rather than forking the durability decision, per
- * `decisions/0001`). `transientSessionFromKeyringHit` is the composition
- * itself: verify the account log, ensure the credential can reach a live
- * client annex generation with a current generation delegation (the
+ * forces either side (true runs the remembered standing self-enrollment;
+ * false on a remembered browser refuses rather than forking the routing
+ * decision, per `decisions/0001`). `transientSessionFromKeyringHit` is the
+ * composition itself: verify the account log, ensure the credential can reach
+ * a live client annex generation with a current generation delegation (the
  * ladder-signed mint-or-renew, a no-op on a healthy account), enroll a
  * per-visit key into that generation through the record's sibling delegation
  * (the loud entry `decisions/0002` requires before any authority is
@@ -72,7 +72,7 @@ import {
   type CredentialAnchoredMendReport
 } from '@/session/credentialAnchoredGenesis'
 import {
-  transientSessionPersistence,
+  inMemorySessionPersistence,
   transientSessionStores,
   type TransientSessionStores
 } from '@/session/persistence'
@@ -166,11 +166,11 @@ export class TransientLoginUnavailableError extends Error {
 /**
  * A login that asked NOT to be remembered on a browser that already holds
  * this credential's client-key record. Honoring it would mean either a
- * dual-durability fork (`decisions/0001` forbids one) or a destructive wipe, so
+ * storage-tier fork (`decisions/0001` forbids one) or a destructive wipe, so
  * the routing refuses; the remember-this-browser UX turns this refusal into
  * a loud coerce-and-notify. A PENDING-shape record counts as remembered too
- * (the probe cannot tell the shapes apart, and the durable route's resume is
- * that record's one mender); the resume's discard outcome deletes a
+ * (the probe cannot tell the shapes apart, and the remembered route's resume
+ * is that record's one mender); the resume's discard outcome deletes a
  * provably worthless pending record, so the NEXT attempt probes record-less
  * and this refusal stops firing.
  */
@@ -182,24 +182,25 @@ export class AlreadyRememberedError extends Error {
 }
 
 /**
- * The post-KDF durability decision both keyring login entry points run, BEFORE
- * any fetch: durable (today's `fetchKeyring` path) or transient. The check is
- * create-nothing -- the credential is derived once (threaded onward so the
- * KDF never re-runs) and the client-key record probe never creates the
- * session database.
+ * The post-KDF routing decision both keyring login entry points run, BEFORE
+ * any fetch: a remembered login (today's `fetchKeyring` path) or a transient
+ * one. The check is create-nothing -- the credential is derived once
+ * (threaded onward so the KDF never re-runs) and the client-key record probe
+ * never creates the session database.
  *
- * The decision table: no WAS server is always durable (transient login is
- * unreachable there); `rememberBrowser: true` is durable (the programmatic
+ * The decision table: no WAS server is always remembered (transient login is
+ * unreachable there); `rememberBrowser: true` is remembered (the programmatic
  * standing self-enrollment entry); a browser holding this credential's
- * client-key record is durable (the ratchet -- with `rememberBrowser: false`
- * refused as `AlreadyRememberedError` rather than silently coerced);
- * everything else -- a non-remembered browser -- is transient, the default.
+ * client-key record is remembered (the ratchet -- with
+ * `rememberBrowser: false` refused as `AlreadyRememberedError` rather than
+ * silently coerced); everything else -- a non-remembered browser -- is
+ * transient, the default.
  *
  * The CHAPI popup runs this same table, with the Storage Access API handle
- * threaded in as `idb`: a granted handle probes the FIRST-PARTY record and a
- * remembered browser routes durable, while a denied one (and every engine
- * offering no unpartitioned-IndexedDB request at all) finds no record in the
- * partitioned bucket and routes transient. That is
+ * threaded in as `idb`: a granted handle probes the FIRST-PARTY record, so a
+ * remembered browser takes the remembered route, while a denied one (and
+ * every engine offering no unpartitioned-IndexedDB request at all) finds no
+ * record in the partitioned bucket and routes transient. That is
  * `decisions/0009-popup-denied-storage-access-goes-transient.md`'s uniform
  * fallback, reached by construction rather than by a popup arm of its own.
  *
@@ -210,13 +211,14 @@ export class AlreadyRememberedError extends Error {
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for the same secret
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the probe
- * @param [options.rememberBrowser] {boolean}   the explicit durability input;
- *   absent means route on the record probe
- * @returns {Promise<object>}   `{ durability: 'durable', credential? }` or
- *   `{ durability: 'transient', credential, persistence }` -- the transient arm
+ * @param [options.rememberBrowser] {boolean}   forces the remembered or
+ *   transient route; absent means route on the record probe
+ * @returns {Promise<object>}   `{ login: 'remembered', credential? }` or
+ *   `{ login: 'transient', credential, persistence }` -- the transient arm
  *   carries the visit's in-memory store family so every later stage (the
  *   record fetch's account-log pins included) shares it; the composition
- *   folds the annex identity over these stores into the session's handle
+ *   folds the annex identity over these stores into the session's
+ *   persistence strategy
  */
 export async function routeUnlockLogin({
   secret,
@@ -231,9 +233,9 @@ export async function routeUnlockLogin({
   idb?: IDBFactory
   rememberBrowser?: boolean
 }): Promise<
-  | { durability: 'durable'; credential?: UnlockCredential }
+  | { login: 'remembered'; credential?: UnlockCredential }
   | {
-      durability: 'transient'
+      login: 'transient'
       credential: UnlockCredential
       persistence: TransientSessionStores
     }
@@ -242,10 +244,10 @@ export async function routeUnlockLogin({
     if (rememberBrowser === false) {
       throw new TransientLoginUnavailableError({ reason: 'no-was-server' })
     }
-    return { durability: 'durable', ...(credential ? { credential } : {}) }
+    return { login: 'remembered', ...(credential ? { credential } : {}) }
   }
   if (rememberBrowser === true) {
-    return { durability: 'durable', ...(credential ? { credential } : {}) }
+    return { login: 'remembered', ...(credential ? { credential } : {}) }
   }
   const derived =
     credential ??
@@ -261,10 +263,10 @@ export async function routeUnlockLogin({
     if (rememberBrowser === false) {
       throw new AlreadyRememberedError()
     }
-    return { durability: 'durable', credential: derived }
+    return { login: 'remembered', credential: derived }
   }
   return {
-    durability: 'transient',
+    login: 'transient',
     credential: derived,
     persistence: transientSessionStores()
   }
@@ -308,7 +310,7 @@ function refuseMissingGeneration(
  * what gives the renew-precedes-mint behavior the grant path depends on.
  *
  * Everything it writes is ladder-signed, so an account whose document does
- * not anchor this credential's ladder VM (one with enrolled durable clients,
+ * not anchor this credential's ladder VM (one with enrolled clients,
  * or one anchored on another credential's ladder) is refused by wallet-core
  * before anything is written. That refusal is resolved as a value rather
  * than thrown: such an account may still be perfectly reachable through the
@@ -417,8 +419,8 @@ async function ensureClientAnnexGenerationReady({
  *    Deliberately no escrow -- a transient client never joins the roster.
  * 5. Assemble the session on the replica-less storage variant: the annex
  *    identity and the generation delegation are folded over the visit's
- *    stores into the transient persistence handle
- *    (`transientSessionPersistence`), and that one handle tells
+ *    stores into the in-memory persistence strategy
+ *    (`inMemorySessionPersistence`), and that one strategy tells
  *    `initSessionFromSeed` everything -- annex signing, the delegation as
  *    `profile.invocationCapability`, no KMS, no second roster read, no
  *    sweeps.
@@ -553,9 +555,9 @@ export async function transientSessionFromKeyringHit({
   const accountPointer = pointer
 
   // The account log, verified under the visit's in-memory pins
-  // (trust-on-first-use for this visit; nothing durable protects or is
-  // protected here). The verified log is retained: the roster read below
-  // resolves its controller view from it.
+  // (trust-on-first-use for this visit; the pin store dies with the tab, as
+  // it does on every session). The verified log is retained: the roster read
+  // below resolves its controller view from it.
   let verified = await verifyAccountLog({
     did: accountDid,
     spaceId: pointer.spaceId,
@@ -910,9 +912,10 @@ export async function transientSessionFromKeyringHit({
     descriptor: rosterRead.descriptor
   })
 
-  // The session's handle: the annex identity folded over the visit's stores,
-  // so durability and the annex signing arrive as one typed declaration.
-  const sessionPersistence = transientSessionPersistence({
+  // The session's persistence strategy: the annex identity folded over the
+  // visit's stores, so the storage tier and the annex signing arrive as one
+  // typed declaration.
+  const sessionPersistence = inMemorySessionPersistence({
     stores: persistence,
     clientAnnex: {
       clientAnnexDid,
@@ -926,8 +929,8 @@ export async function transientSessionFromKeyringHit({
     email: email ?? found.email,
     persistence: sessionPersistence
   })
-  // Stamp what the durable tail stamps, minus what a transient session does
-  // not hold (no management zcap was minted). The standing members ride
+  // Stamp what the remembered tail stamps, minus what a transient session
+  // does not hold (no management zcap was minted). The standing members ride
   // along: the ladder seed is what lets a mid-session stage sign as the
   // ladder VM (the App Connect grant path's generation-delegation renewal),
   // and the sibling delegation beside it is the authority that renewal's

@@ -2,18 +2,19 @@
  * The forget affordance: removing this browser from a wallet account. Two
  * grades, split by whether the unlock credential is in hand:
  *
- * - **The forget ceremony** (`forgetThisBrowser`, run from a live durable
- *   session): wallet-core's `forgetDurableClient` -- the roster rotation off
- *   this client's wrap and the collection fan-out under this client's
- *   still-standing authority, then ONE atomic ladder-signed removal entry
- *   through the standing credential's bridge -- followed by the shared local
- *   wipe (the FW-199 enumeration, `clearWriter: true`). The wipe runs LAST,
- *   so a tear anywhere before the removal entry reads as "not forgotten" and
- *   a re-click resumes; the ceremony is convergent under a naive re-run.
+ * - **The forget ceremony** (`forgetThisBrowser`, run from a live
+ *   remembered session): wallet-core's `forgetDurableClient` -- the roster
+ *   rotation off this client's wrap and the collection fan-out under this
+ *   client's still-standing authority, then ONE atomic ladder-signed
+ *   removal entry through the standing credential's bridge -- followed by
+ *   the shared local wipe (the FW-199 enumeration, `clearWriter: true`).
+ *   The wipe runs LAST, so a tear anywhere before the removal entry reads
+ *   as "not forgotten" and a re-click resumes; the ceremony is convergent
+ *   under a naive re-run.
  *
  * - **The last-client transition** (the same `forgetThisBrowser` entry with
  *   `lastClient: true`, confirmed against transition-stating copy): when
- *   this browser is the account's LAST enrolled durable client, wallet-core's
+ *   this browser is the account's LAST enrolled client, wallet-core's
  *   `forgetLastDurableClient` runs instead -- the two-entry ceremony that
  *   lands the account client-less and ladder-anchored (the state a
  *   credential-anchored signup and a transient recovery produce): the ladder
@@ -25,11 +26,12 @@
  *   recovery code's bridge and sibling re-signed by the ladder VM and its
  *   record re-sealed through the entry's management zcap -- the revocation
  *   cascade's re-mint pass over the registry, this client's last window of
- *   registry authority, since on a client-less account no durable login's
+ *   registry authority, since on a client-less account no remembered login's
  *   refresh block will ever heal them), the login credential's record
  *   re-bind (bridge and sibling re-signed by the ladder VM through the hit's
- *   re-bind closure, the registry pair refreshed), then the removal entry. The ordinary ceremony's `LastDurableClientForgetError`
- *   (name-stable) is the routing signal when the caller's view was stale.
+ *   re-bind closure, the registry pair refreshed), then the removal entry.
+ *   The ordinary ceremony's `LastDurableClientForgetError` (name-stable) is
+ *   the routing signal when the caller's view was stale.
  *   The transition's own name-stable refusal, `RecordRemintFailedError`
  *   (another sign-in method's record could not be re-sealed, so the
  *   removal entry was withheld), propagates before the wipe: this browser
@@ -37,8 +39,8 @@
  *   it runs, the transition refuses on a pending-shaped passphrase registry
  *   entry (`PendingRetirementForgetError`): a passphrase change torn before
  *   its retirement landed is mended only by the torn-retirement repair,
- *   which needs a durable enrolled login -- the very thing this ceremony
- *   ends forever. It refuses just as early when the registry does not cover
+ *   which needs a remembered login -- the very thing this ceremony ends
+ *   forever. It refuses just as early when the registry does not cover
  *   every standing credential the account document publishes
  *   (`UnrecordedCredentialForgetError`): the re-mint pass walks the
  *   registry, so an unrecorded credential's bridge would rot at the removal
@@ -50,11 +52,12 @@
  *   ("forget all wallet data on this browser"): the `freewallet-session`
  *   database and every replica database are deleted wholesale, with the
  *   cross-account blast radius stated in the calling surface's copy (other
- *   remembered accounts lose their continuity pins; none is lost -- a
- *   standing credential self-enrolls at the next login). The standing
- *   document client gets NO flag anywhere: with no unlock material nothing
- *   can be signed, and the honest residue is stated in the copy, pointing at
- *   the Connected wallets disconnect from a logged-in client.
+ *   accounts remembered on this browser lose their client-key records; no
+ *   account is lost -- a standing credential self-enrolls at the next
+ *   login). The standing document client gets NO flag anywhere: with no
+ *   unlock material nothing can be signed, and the honest residue is
+ *   stated in the copy, pointing at the Connected wallets disconnect from a
+ *   logged-in client.
  *
  * The login-time detector (`assertClientStillEnrolled`) maps the
  * removal-published-but-wipe-torn state -- an ENROLLED-shape local client-key
@@ -194,7 +197,7 @@ export class BrowserForgottenError extends Error {
  * management zcap name one credential while its identity members name
  * another, the state a passphrase change torn before its retirement leaves.
  * The transition is refused because it would destroy that state's only
- * mender -- the torn-retirement repair runs from a durable enrolled login,
+ * mender -- the torn-retirement repair runs from a remembered login,
  * which the transition ends forever, leaving the half-retired credential
  * standing and decryptable with nothing left to finish the change. Matched
  * on `name` by the settings surface.
@@ -218,7 +221,7 @@ export class PendingRetirementForgetError extends Error {
  * removal entry's latent-hash vouching, the recovery health sweep -- so an
  * unrecorded credential's bridge delegation would rot un-re-minted at the
  * removal entry and its self-enrollment would brick silently, on an account
- * no durable login will ever heal again. Matched on `name` by the settings
+ * no remembered login will ever heal again. Matched on `name` by the settings
  * surface.
  */
 export class UnrecordedCredentialForgetError extends Error {
@@ -250,7 +253,7 @@ export type ForgetOutcome = ForgetCeremonyOutcome & {
 }
 
 /**
- * Runs the forget for this browser, from a live durable session: snapshot
+ * Runs the forget for this browser, from a live remembered session: snapshot
  * the wipe targets first, then the ceremony, then the shared local wipe with
  * `clearWriter: true`. The caller logs the session out once this resolves;
  * there is no audit record, because this client's invocations die with the
@@ -265,7 +268,7 @@ export type ForgetOutcome = ForgetCeremonyOutcome & {
  * caller's listing was stale -- refuses with wallet-core's name-stable
  * `LastDurableClientForgetError` before any write, so the caller can
  * re-confirm against the transition copy; a `true` run on an account with
- * another durable client refuses from the ceremony's pre-install read, and
+ * another enrolled client refuses from the ceremony's pre-install read, and
  * one that could not re-seal another sign-in method's record refuses with
  * the name-stable `RecordRemintFailedError` before its removal entry (the
  * local wipe never runs on a refusal, so the browser stays connected and
@@ -380,8 +383,8 @@ export async function forgetThisBrowser({
 
   // The transition's pending-retirement guard, before anything is written:
   // a passphrase change torn before its retirement landed leaves a registry
-  // entry only a durable enrolled login can finish, and this ceremony ends
-  // durable logins on this account forever.
+  // entry only a remembered login can finish, and this ceremony ends
+  // remembered logins on this account forever.
   if (lastClient) {
     await assertNoPendingPassphraseEntry({ session, pointer, registry })
     await assertRegistryCoversStandingCredentials({
@@ -443,10 +446,11 @@ export async function forgetThisBrowser({
     }) =>
       // The in-band adoption. The registry is sealed to the vault keys, so it
       // is re-sealed to the rotated key -- first, while this browser's
-      // durable copy of the old one still exists -- and the live session
-      // swapped onto it, so the later registry writes below read under the
-      // current key; the surviving readers -- other durable clients,
-      // transient logins -- would otherwise find it sealed to a retired
+      // browser-local copy of the old one still exists -- and the live
+      // session swapped onto it, so the later registry writes below read
+      // under the current key; the surviving readers -- other enrolled
+      // clients, transient logins -- would otherwise find it sealed to a
+      // retired
       // generation. The client-key record persists behind it, so a run torn
       // before the removal entry leaves this browser consistent for the
       // resuming re-click.
@@ -721,17 +725,17 @@ async function rebindLoginCredentialRecord({
 }
 
 /**
- * The login-time finish-the-wipe detector: called on the durable login path
- * when the keyring hit carries this browser's client keys and the pointer
- * names a did:webvh. A cleanly verified account document that no longer
- * lists this client's verification method means the removal entry landed
- * (a forget torn before its wipe, or a disconnect from another client), so
- * the local residue is wiped -- targets derived from the hit alone, since
- * the registry is unreachable without account authority -- and the typed
+ * The login-time finish-the-wipe detector: called on the remembered login path
+ * when the keyring hit carries this browser's client keys and the pointer names
+ * a did:webvh. A cleanly verified account document that no longer lists this
+ * client's verification method means the removal entry landed (a forget torn
+ * before its wipe, or a disconnect from another client), so the local residue
+ * is wiped -- targets derived from the hit alone, since the registry is
+ * unreachable without account authority -- and the typed
  * `BrowserForgottenError` surfaces the state. Every verification failure
- * (network, a missing log, a continuity refusal) skips detection and lets
- * the ordinary login proceed to its own handling: only a VERIFIED document
- * may trigger a wipe.
+ * (network, a missing log, a continuity refusal) skips detection and lets the
+ * ordinary login proceed to its own handling: only a VERIFIED document may
+ * trigger a wipe.
  *
  * Returns the verification it performed, so the session being built can
  * seed its verified-log memo with it instead of fetching and re-verifying
@@ -1258,7 +1262,7 @@ async function assertNoPendingPassphraseEntry({
  * re-mint, the removal entry's latent-hash vouching, and the recovery health
  * sweep all read the registry, so a credential no entry names keeps a bridge
  * delegation the removal entry rots and gets no replacement -- and on the
- * client-less account this ceremony produces, no durable login will ever run
+ * client-less account this ceremony produces, no remembered login will run
  * the repairs that would notice.
  *
  * The credential entries are the `keyAgreement` methods that carry no client

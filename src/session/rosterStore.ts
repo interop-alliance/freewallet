@@ -21,8 +21,8 @@
  * the shared orchestrator from the document edit's own post-edit log) reaches
  * the store as-is.
  *
- * The chain-head pin is in-memory whatever the session's durability: the
- * session builder takes it from the profile's persistence handle, and the
+ * The chain-head pin is in-memory on either persistence variant: the
+ * session builder takes it from the profile's persistence strategy, and the
  * bare-parts builder mints its own unless a `pinStore` is supplied. It
  * guards one visit's several roster reads against a host serving
  * inconsistent versions across them, and remembers nothing past the tab. The
@@ -118,7 +118,7 @@ export function accountRosterStore({
  * @param options {object}
  * @param options.profile {ControllerProfile}   the live session's profile; it
  *   must hold a key agent and an account pointer naming a did:webvh. The
- *   chain-head pin rides the profile's persistence handle.
+ *   chain-head pin rides the profile's persistence strategy.
  * @returns {SealableEncryptionDescriptorStore}
  */
 export function sessionRosterStore({

@@ -248,7 +248,7 @@ beforeEach(() => {
   }: {
     credential?: unknown
   }) => ({
-    durability: 'durable',
+    login: 'remembered',
     ...(credential ? { credential } : {})
   })) as never)
 })

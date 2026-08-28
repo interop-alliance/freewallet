@@ -9,9 +9,9 @@
  * generation id verbatim), and the local annex pin-slot cleanup after a
  * generation's delete.
  *
- * Durable sessions only, best-effort, and resumable: the caller chains it
+ * Remembered sessions only, best-effort, and resumable: the caller chains it
  * behind `session.storageReady` beside the other login-time sweeps, a failed
- * pass never fails the login, and the next durable login's pass picks up
+ * pass never fails the login, and the next remembered login's pass picks up
  * exactly the generations the report still lists.
  */
 import { isWebvhDid } from '@interop/wallet-core/webvh'
@@ -19,17 +19,17 @@ import { runClientAnnexGc } from '@interop/wallet-core/clientAnnex'
 import type { ClientAnnexGcReport } from '@interop/wallet-core/clientAnnex'
 import { pointedClientAnnexReach } from '@/session/annexReach'
 import { enrolledClientContext } from '@/session/enrolledContext'
-import { isDurableSession } from '@/session/persistence'
+import { isBrowserLocalSession } from '@/session/persistence'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import type { Session } from '@/types/auth'
 
 /**
- * One annex GC pass for a live durable session. Resolves null when the
- * session cannot run it (not durable, not an enrolled did:webvh account) --
- * the same silent-skip policy as the other login-time sweeps -- and
- * otherwise returns wallet-core's per-pass report. A pass that swapped the
- * generation invalidates the session's verified-log memo (the account log
- * gained the pointer-update entry).
+ * One annex GC pass for a live remembered session. Resolves null when the
+ * session cannot run it (not on the browser-local strategy, not an enrolled
+ * did:webvh account) -- the same silent-skip policy as the other login-time
+ * sweeps -- and otherwise returns wallet-core's per-pass report. A pass that
+ * swapped the generation invalidates the session's verified-log memo (the
+ * account log gained the pointer-update entry).
  *
  * @param options {object}
  * @param options.session {Session}   a live session
@@ -46,7 +46,7 @@ export async function sweepClientAnnexGenerations({
   ladderSeed?: Uint8Array
 }): Promise<ClientAnnexGcReport | null> {
   const persistence = session.profile.persistence
-  if (!persistence || !isDurableSession(persistence)) {
+  if (!persistence || !isBrowserLocalSession(persistence)) {
     return null
   }
   const context = enrolledClientContext({ session })

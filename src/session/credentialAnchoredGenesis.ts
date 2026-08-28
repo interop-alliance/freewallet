@@ -363,7 +363,7 @@ export async function establishCredentialAnchoredAccount({
  * passphrase entry into the standing registry (only a true absent starts
  * fresh -- a re-fired hook on a fresh base would clobber the first run's
  * record), and a THROWN read or write is swallowed with a warn, since the
- * miss stays re-recordable by the later durable recorders.
+ * miss stays re-recordable at the next remembered login.
  *
  * A passkey entry has no shared hook: its registry record carries WebAuthn
  * registration members (the credential id, the user handle) only the
@@ -421,7 +421,7 @@ export function passphraseRegistryUpsertHook({
       })
     } catch (err) {
       log.warn(
-        'Could not update the unlock-methods registry; skipping the passphrase entry (re-recordable at the next durable login)',
+        'Could not update the unlock-methods registry; skipping the passphrase entry (re-recordable at the next remembered login)',
         { err }
       )
     }

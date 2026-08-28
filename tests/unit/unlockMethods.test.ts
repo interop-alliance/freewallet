@@ -152,7 +152,7 @@ import { PreconditionFailedError } from '@interop/was-client'
 import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
 import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
-import { durableSessionPersistence } from '@/session/persistence'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 import {
   ensureUnlockMethodsCollection,
   getUnlockMethodsRecord,
@@ -269,7 +269,7 @@ async function makeSession(idb?: IDBFactory): Promise<Session> {
       keyAgreementKey,
       keyResolver,
       zcapClient: {},
-      persistence: durableSessionPersistence({ idb })
+      persistence: browserLocalSessionPersistence({ idb })
     },
     storage: { spaceId: DATA_SPACE_ID },
     isGuest: false

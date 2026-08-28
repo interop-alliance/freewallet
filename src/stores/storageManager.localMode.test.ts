@@ -26,7 +26,7 @@ import type { CollectionEncryption } from '@interop/was-client'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { ControllerProfile, User } from '@/types/auth'
-import { durableSessionPersistence } from '@/session/persistence'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 import { StorageManager } from './storageManager'
 
 /**
@@ -63,8 +63,8 @@ async function generateKey(): Promise<{
 
 /**
  * A local-only session profile: the vault keys, the truthy `keyAgent` a full
- * session carries, and the durable persistence handle a login builds -- with
- * the caches off for a guest, exactly as `initSession` does.
+ * session carries, and the browser-local persistence strategy a login builds
+ * -- with the caches off for a guest, exactly as `initSession` does.
  * No `zcapClient` -- nothing on this path signs.
  *
  * @param options {object}
@@ -83,7 +83,7 @@ function makeProfile({
     keyAgreementKey: owner.keyAgreementKey,
     keyResolver: owner.keyResolver,
     keyAgent: { id: 'did:key:z6MkLocalModeAgent' },
-    persistence: durableSessionPersistence({ persistCaches: !isGuest })
+    persistence: browserLocalSessionPersistence({ persistCaches: !isGuest })
   } as unknown as ControllerProfile
 }
 

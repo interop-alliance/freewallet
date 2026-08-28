@@ -570,8 +570,8 @@ export class SelfEnrollmentSkewError extends Error {
  * (inside the conflict retry, so it re-fires per attempt): the pending-shape
  * client-key record -- seeds, controller, `pointerDid`, and the `pending`
  * group (`ceremony: 'self-enrollment'`, the built-on head), no `userKey` --
- * becomes durable BEFORE the pivot entry publishes the client, so a tab
- * closing anywhere after the add entry leaves a record the next login's
+ * is written browser-local BEFORE the pivot entry publishes the client, so a
+ * tab closing anywhere after the add entry leaves a record the next login's
  * resume finishes rather than a phantom client only Disconnect could
  * remove. After the core returns, the completion overwrites the record with
  * the enrolled shape (the user key in, `pending` cleared).
@@ -628,15 +628,17 @@ export async function selfEnrollStandingClient({
       delegation: standing.delegation,
       zcapClient: standingClient.agents.zcapClient
     }),
-    // A fresh browser normally has no pin yet -- this first contact is the
-    // pin's trust-on-first-use establishment; later logins verify against it.
+    // Every visit starts pin-less: this first contact establishes the
+    // chain-head pin, the later reads in this same login check against it,
+    // and it dies with the tab.
     accountLogPinStore: memoryResourceLogPinStore(),
     ...(resume ? { resume } : {}),
-    // The persist-before-publish seam: the pending-shape record becomes
-    // durable on the head the add entry is about to be built on, before that
-    // entry publishes a client only this tab could re-derive. Idempotent per
-    // attempt (the conflict retry re-fires it); on a resume the seeds handed
-    // back are the record's own, so the write restates what already stands.
+    // The persist-before-publish seam: the pending-shape record is written
+    // browser-local, stamped with the head the add entry is about to be
+    // built on, before that entry publishes a client only this tab could
+    // re-derive. Idempotent per attempt (the conflict retry re-fires it); on
+    // a resume the seeds handed back are the record's own, so the write
+    // restates what already stands.
     onCommitted: async ({ builtOnHead, clientSeed, webvhUpdateKeys }) => {
       hookFires += 1
       if (hookFires > 1) {

@@ -8,22 +8,23 @@
  * differs per page (credential selection vs credential offer), so that stays
  * in the pages.
  *
- * The popup does NOT choose its own durability. It runs the ordinary
- * post-KDF routing with the Storage Access handle threaded in, so the
- * browser's own ratchet state decides: a granted handle lets the record probe
- * see the first-party client-key record and a remembered browser proceeds as
- * that durable client, while a denied handle -- and every engine that offers
- * no unpartitioned-IndexedDB request at all, which is Safari's and Firefox's
- * steady state -- finds no record in the partitioned bucket and falls back to
- * the transient session, exactly as a non-remembered browser does. That is
+ * The popup does NOT choose between the remembered and transient entries.
+ * It runs the ordinary post-KDF routing with the Storage Access handle
+ * threaded in, so the browser's own ratchet state decides: a granted handle
+ * lets the record probe see the first-party client-key record and a
+ * remembered browser proceeds as that enrolled client. A denied handle --
+ * and every engine that offers no unpartitioned-IndexedDB request at all,
+ * which is Safari's and Firefox's steady state -- finds no record in the
+ * partitioned bucket and falls back to the transient session, exactly as a
+ * non-remembered browser does. That is
  * `decisions/0009-popup-denied-storage-access-goes-transient.md`'s one
  * uniform fallback, and it arrives by construction rather than as a popup arm
  * of its own.
  *
  * What the popup flag still gates is only what the partitioning implies:
- * remote-direct storage in the durable arm (the partitioned replica no sync
- * controller drives), the localStorage caches suppressed where they are
- * genuinely caches, and the durable arm's popup refusals (no
+ * remote-direct storage in the remembered arm (the partitioned replica no
+ * sync controller drives), the localStorage caches suppressed where they are
+ * genuinely caches, and the remembered arm's popup refusals (no
  * self-enrollment, no pending resume). A transient popup session needs none
  * of them -- it is replica-less and in-memory by construction.
  *
@@ -85,7 +86,7 @@ export async function completePopupLogin({
     // unpartitioned factory first (the Storage Access API handle extension,
     // still inside the submit gesture), so the keyring caches and this
     // client's key record resolve to their first-party home and a remembered
-    // browser can log in from the popup as its durable client. Browsers
+    // browser can log in from the popup as its enrolled client. Browsers
     // without the extension resolve undefined and the routing sees a
     // record-less browser -- the transient fallback, not a refusal.
     const idb = await requestUnpartitionedIdb()

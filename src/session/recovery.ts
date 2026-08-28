@@ -23,7 +23,7 @@
  *   (the spent code presumed compromised), the epoch cascade re-keying every
  *   encrypted collection off the spent code's reach, a replacement code
  *   issued hard, and the fresh passphrase bound. The continuation enrolls
- *   what the browser's durability decision would enroll at login: a new durable client
+ *   what the browser's login routing would enroll: a new enrolled client
  *   with `rememberBrowser`, and otherwise (the default) the fresh
  *   credential's LADDER VM -- the transient variant, which lands the account
  *   client-less and ladder-anchored with zero local residue.
@@ -770,8 +770,8 @@ export async function locateRecoveryAccount({
 
 /**
  * What `recoverAccountWithCode` hands back for the page to finish on: the
- * replacement code to push hard (shown exactly once), the spent code's
- * roster kid (the registry backfill drops its entry), and -- on the durable
+ * replacement code to push hard (shown exactly once), the spent code's roster
+ * kid (the registry backfill drops its entry), and -- on the remembered
  * variant -- the confirm-gated record completion: the page runs it on the
  * "I saved this code" confirm, before the login, so the show-once code stays
  * re-displayable from the pending record's persisted bytes until the user
@@ -782,7 +782,7 @@ export async function locateRecoveryAccount({
  * and the document entry), `'pending'` when it did not. Pending means the
  * account IS recovered and the new passphrase IS live; only its setup for
  * logging in from other browsers is outstanding, and it completes at a later
- * resume or durable-login mend. The continuation never fails for a pending
+ * resume or remembered-login mend. The continuation never fails for a pending
  * standing.
  */
 export interface RecoveryOutcome {
@@ -797,28 +797,28 @@ export interface RecoveryOutcome {
  * The whole recovery flow on a fresh browser, from a typed code to a
  * recovered account under a new passphrase (the caller then performs an
  * ordinary passphrase login). The continuation enrolls what this browser's
- * durability decision would enroll at login: with `rememberBrowser` a new DURABLE client
- * (today's flow -- the client-key record persists and the login is durable),
- * and otherwise -- the default, a public terminal -- the TRANSIENT variant:
- * the fresh credential's ladder VM stands in for a durable client, the
- * account lands client-less and ladder-anchored, and the visit continues as
- * an ordinary transient session with zero local residue. See the module doc
- * for the shared sequence; every stage is idempotent or convergent, so
- * re-running with the same code after a tear makes progress rather than
- * forking anything (past the add-and-retire entry the typed code correctly
- * fails as spent, and the pending-record spend resume -- or the replacement
- * code -- finishes the tail).
+ * login routing would enroll: with `rememberBrowser` a new ENROLLED client
+ * (today's flow -- the client-key record persists and the browser is
+ * remembered), and otherwise -- the default, a public terminal -- the
+ * TRANSIENT variant: the fresh credential's ladder VM stands in for an
+ * enrolled client, the account lands client-less and ladder-anchored, and
+ * the visit continues as an ordinary transient session with zero local
+ * residue. See the module doc for the shared sequence; every stage is
+ * idempotent or convergent, so re-running with the same code after a tear
+ * makes progress rather than forking anything (past the add-and-retire
+ * entry the typed code correctly fails as spent, and the pending-record
+ * spend resume -- or the replacement code -- finishes the tail).
  *
- * The durable variant is persist-before-publish end to end. The required
+ * The remembered variant is persist-before-publish end to end. The required
  * `onCommitted` seam fires between the reveal entry (the loud validation of
- * the typed code) and the add-and-retire entry, and durably writes
- * everything whose only holder would otherwise be tab memory once the pivot
- * lands: the new passphrase's STANDING-layout unlock record (bridge,
- * best-effort annex sibling, fresh ladder seed, management zcap), the local
- * PENDING client-key record (seeds, controller, `pointerDid`, and the
- * pending group -- the ceremony discriminator, the built-on head, the spent
- * code's unwrap key, the replacement code's bytes -- no user key), and the
- * replacement code's record and bridge. The tail (escrows, rotation,
+ * the typed code) and the add-and-retire entry, and persists everything
+ * whose only holder would otherwise be tab memory once the pivot lands: the
+ * new passphrase's STANDING-layout unlock record (bridge, best-effort annex
+ * sibling, fresh ladder seed, management zcap), the local PENDING
+ * client-key record (seeds, controller, `pointerDid`, and the pending
+ * group -- the ceremony discriminator, the built-on head, the spent
+ * code's unwrap key, the replacement code's bytes -- no user key), and
+ * the replacement code's record and bridge. The tail (escrows, rotation,
  * registry mutation, cascade, spent-Space delete) stays post-entry --
  * structurally, since every write signs as the just-published client -- and
  * the final record completion is CONFIRM-GATED through the returned
@@ -840,7 +840,7 @@ export interface RecoveryOutcome {
  * @param options.code {string}   the typed recovery code
  * @param options.newPassphrase {string}   the passphrase to bind the new
  *   client under
- * @param [options.rememberBrowser] {boolean}   `true` runs the durable
+ * @param [options.rememberBrowser] {boolean}   `true` runs the remembered
  *   continuation (a new enrolled client, persisted locally); the default is
  *   the transient variant, which writes nothing local
  * @param [options.idb] {IDBFactory}
@@ -872,9 +872,9 @@ export async function recoverAccountWithCode({
     return recoverAccountTransient({ recovered, newPassphrase })
   }
   // Verify the world-readable log locally before invoking anything. The
-  // recovering browser normally holds no account-log chain-head pin yet
-  // (this read is its first contact), which is exactly the pin's
-  // trust-on-first-use establishment.
+  // recovering browser holds no account-log chain-head pin yet (this read
+  // is its first contact), which is exactly the pin's trust-on-first-use
+  // establishment.
   const verifiedLog = await verifyAccountLog({
     did: pointer.did,
     spaceId: pointer.spaceId,
@@ -920,8 +920,9 @@ export async function recoverAccountWithCode({
   })
 
   // Mint the NEW ordinary client and the replacement code -- in memory only
-  // until the persist hook below makes them durable, right before the
-  // add-and-retire entry publishes them.
+  // until the persist hook below writes them (the unlock records
+  // server-side, the pending client-key record browser-local), right before
+  // the add-and-retire entry publishes them.
   const newClientSeed = crypto.getRandomValues(new Uint8Array(32))
   const newClientAgents = await agentsFromSeed({ seed: newClientSeed })
   const newClientUpdateSeeds = await mintClientWebvhUpdateKeys()
@@ -1006,7 +1007,7 @@ export async function recoverAccountWithCode({
     // add-and-retire entry publishes the successors. Idempotent per attempt
     // -- a conflict retry re-invokes it, overwriting the same records.
     // Everything whose only holder would otherwise be tab memory once the
-    // pivot lands becomes durable here.
+    // pivot lands is written here.
     onCommitted: async ({ builtOnHead }) => {
       hookFires += 1
       if (hookFires > 1) {
@@ -1130,12 +1131,13 @@ export async function recoverAccountWithCode({
   if ((continuation as { committed?: unknown }).committed === false) {
     // The completed branch, named explicitly: `committed: false` means the
     // continuation found both entries already standing and skipped the hook
-    // by design -- a state a durable spend cannot legitimately produce (a
+    // by design -- a state a remembered spend cannot legitimately produce (a
     // spent code refuses at the reveal attribution long before this point),
     // so nothing was persisted and nothing can be derived. Refused loudly
     // rather than guessed at.
     log.error(
-      'The recovery continuation reported already-complete (committed: false); a durable spend cannot produce that state'
+      'The recovery continuation reported already-complete ' +
+        '(committed: false); a remembered spend cannot produce that state'
     )
     throw new RecoverySpendSkewError({
       message:
@@ -1301,9 +1303,9 @@ export async function recoverAccountWithCode({
     throw new Error('The user key roster vanished during recovery.')
   }
   const newUserKey = postRotation.userKey
-  // The epoch pin deliberately does NOT persist here: it follows the record
-  // completion (the persist-before-pin order), inside the confirm-gated
-  // closure below.
+  // No roster epoch pin is written here or by the confirm-gated closure
+  // below: the epoch pin is in-memory on every session and dies with the
+  // tab, so a recovery has nothing to carry into the next visit.
 
   // Re-seal the unlock-methods registry to the rotated user key: its record is a
   // single-recipient envelope to the vault KAK, and the registry mutation
@@ -1479,10 +1481,10 @@ export async function recoverAccountWithCode({
  * persist hook having fired: `committed` absent from the return (a build
  * skew -- a stale hook-less wallet-core body running under new app code
  * would silently reinstate the publish-then-persist phantom window), or the
- * explicit completed branch (`committed: false`, which a durable spend
+ * explicit completed branch (`committed: false`, which a remembered spend
  * cannot legitimately produce -- distinct copy via `message`). Either way
  * the run is refused instead of trusted; when the hook did fire, the
- * pending record is already durable, so the refusal strands nothing the
+ * pending record is already written, so the refusal strands nothing the
  * spend resume cannot finish.
  */
 export class RecoverySpendSkewError extends Error {
@@ -1546,8 +1548,8 @@ export interface RecoverySpendPrompt {
   // The credential's standing state, from the resume's own backfill:
   // 'established' when both halves (roster wrap and document entry) are
   // confirmed or completed, 'pending' when the backfill could not finish
-  // them. Pending never fails the resume; a later resume or durable-login
-  // mend completes it.
+  // them. Pending never fails the resume; a later resume or
+  // remembered-login mend completes it.
   standing: 'established' | 'pending'
   // The confirm-gated completion. A caller with a live session passes its
   // CURRENT vault user key, so a sweep rotation during the show-once
@@ -1556,7 +1558,7 @@ export interface RecoverySpendPrompt {
 }
 
 /**
- * The spend-completion resume: finishes a durable recovery spend whose
+ * The spend-completion resume: finishes a remembered recovery spend whose
  * add-and-retire entry landed but whose tail was torn, from the pending
  * client-key record alone, at the new passphrase's next login (the
  * pending-enrollment router's VM-listed spend branch). Every stage detects
@@ -2025,10 +2027,10 @@ async function unwrapPriorEpochUserKey({
 /**
  * The TRANSIENT recovery variant (the default on a non-remembered browser):
  * `recoverWebvhLadderAnchored` publishes the fresh credential's ladder VM in
- * place of a durable client, so the account lands client-less and
- * ladder-anchored, and nothing touches local durable storage -- every log
- * read pins in memory and dies with the tab. The freewallet wiring around the
- * shared continuation:
+ * place of an enrolled client, so the account lands client-less and
+ * ladder-anchored, and nothing touches browser-local storage (the visit's
+ * log pins are in memory, as on every session, and die with the tab). The
+ * freewallet wiring around the shared continuation:
  *
  * 1. Inside the continuation's `onCommitted` seam (after the reveal entry
  *    validates the code, BEFORE the add entry publishes the ladder VM): a
@@ -2119,8 +2121,8 @@ async function recoverAccountTransient({
   // The read-first collision probe, BEFORE the reveal entry: a served
   // record at the new passphrase's unlock Space that names another account,
   // or a live standing credential's record, refuses here and surfaces at
-  // the new-passphrase form. A transient visit must not read local records
-  // (even a read durably creates the session database), so the own-residue
+  // the new-passphrase form. A transient visit must not read browser-local
+  // records (even a read creates the session database), so the own-residue
   // license is the verified document: a
   // same-account standing record whose credential inventory the document
   // does not publish is a torn earlier attempt's inert residue, safe to
@@ -2406,8 +2408,8 @@ async function recoverAccountTransient({
   // The epoch cascade under the generation delegation: every encrypted
   // collection takes a fresh epoch naming the rotated user key. Best-effort
   // per collection; a stranded collection stays keyed to the spent code
-  // until the next durable login or a spend re-run (the documented residue
-  // -- the transient completion is its own follow-up).
+  // until the next remembered login or a spend re-run (the documented
+  // residue -- the transient completion is its own follow-up).
   const remoteStore = new WASRemoteStore({
     storageServerUrl: host,
     zcapClient: transientZcapClient,
@@ -2422,12 +2424,12 @@ async function recoverAccountTransient({
     userKey: newUserKey
   })
 
-  // The registry, one read-modify-write (the durable flow's re-seal and
+  // The registry, one read-modify-write (the remembered flow's re-seal and
   // post-login updates folded into the ceremony, since a transient session
   // cannot run them later): the spent code's entry out, the replacement's
   // and the new passphrase's in, the record re-sealed to the rotated user
   // key. Best-effort -- the account is recovered without it, and the next
-  // durable login surfaces a stale registry as a warning.
+  // remembered login surfaces a stale registry as a warning.
   // Captured consts: the guard above already proved these present, and the
   // narrowing of a `let` does not survive into the mutate closure below.
   const recordBind = newRecordBind
@@ -2539,14 +2541,15 @@ export async function listRecoveryCodeEntries({
 }
 
 /**
- * The post-login half a durable recovery still owes, now that the registry
- * mutation AND the new passphrase's standing establishment both run in the
- * ceremony tail (and are backfilled by the spend resume): one best-effort
- * backfill of the recovery entries -- the mender when the tail's registry
- * write was torn AND the pending record was already completed, the one
- * state the resume can no longer reach. It re-establishes nothing: running
- * the full establishment here would mint a second ladder seed and publish a
- * second document entry over a healthy tail's.
+ * The post-login half a remembered recovery still owes, now that the
+ * registry mutation AND the new passphrase's standing establishment both
+ * run in the ceremony tail (and are backfilled by the spend resume): one
+ * best-effort backfill of the recovery entries -- the mender when the
+ * tail's registry write was torn AND the pending record was already
+ * completed, the one state the resume can no longer reach. It
+ * re-establishes nothing: running the full establishment here would mint a
+ * second ladder seed and publish a second document entry over a healthy
+ * tail's.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -2655,10 +2658,11 @@ export async function revokeRecoveryCode({
   if (read) {
     if (read.rotated) {
       // The in-band adoption: the registry is re-sealed to the rotated key
-      // while this browser's durable copy of the old one still exists, the
-      // key and the epoch pin persist, and the live session swaps onto both
-      // -- all before the long collection fan-out below, so a tab death in
-      // it cannot strand the registry. Then re-epoch every encrypted
+      // while this browser's browser-local copy of the old one still
+      // exists, the key persists into the client-key record, the visit's
+      // epoch pin advances, and the live session swaps onto both -- all
+      // before the long collection fan-out below, so a tab death in it
+      // cannot strand the registry. Then re-epoch every encrypted
       // collection (best-effort per collection; the completion sweep
       // backstops a partial run).
       await adoptRotatedUserKeyInBand({

@@ -163,7 +163,7 @@ beforeEach(() => {
   // branch matrix below exercises.
   vi.mocked(routeUnlockLogin).mockReset()
   vi.mocked(routeUnlockLogin).mockImplementation(async ({ credential }) => ({
-    durability: 'durable',
+    login: 'remembered',
     ...(credential ? { credential } : {})
   }))
   vi.mocked(canSelfEnroll).mockReset()
@@ -370,14 +370,14 @@ describe('loginWithPassphrase -- stale client-key record from another account', 
     }
     vi.mocked(fetchKeyring).mockResolvedValue(staleHit as never)
     vi.mocked(routeUnlockLogin).mockReset()
-    vi.mocked(routeUnlockLogin).mockResolvedValueOnce({ durability: 'durable' })
+    vi.mocked(routeUnlockLogin).mockResolvedValueOnce({ login: 'remembered' })
     const persistence = transientSessionStores()
     const transientCredential = {
       unlock: { spaceId: 'unlock-space-test' },
       standing: {}
     } as never
     vi.mocked(routeUnlockLogin).mockResolvedValueOnce({
-      durability: 'transient',
+      login: 'transient',
       credential: transientCredential,
       persistence
     })
@@ -420,9 +420,9 @@ describe('loginWithPassphrase -- stale client-key record from another account', 
     }
     vi.mocked(fetchKeyring).mockResolvedValue(staleHit as never)
     vi.mocked(routeUnlockLogin).mockReset()
-    vi.mocked(routeUnlockLogin).mockResolvedValueOnce({ durability: 'durable' })
+    vi.mocked(routeUnlockLogin).mockResolvedValueOnce({ login: 'remembered' })
     vi.mocked(routeUnlockLogin).mockResolvedValueOnce({
-      durability: 'transient',
+      login: 'transient',
       credential: {
         unlock: { spaceId: 'unlock-space-test' },
         standing: {}
@@ -469,7 +469,7 @@ describe('loginWithPassphrase -- stale client-key record from another account', 
       .mockResolvedValueOnce(staleHit as never)
       .mockResolvedValueOnce(notEnrolledHit as never)
     vi.mocked(routeUnlockLogin).mockReset()
-    vi.mocked(routeUnlockLogin).mockResolvedValue({ durability: 'durable' })
+    vi.mocked(routeUnlockLogin).mockResolvedValue({ login: 'remembered' })
     vi.mocked(canSelfEnroll).mockReturnValue(true)
     const persist = vi.fn(async () => {})
     vi.mocked(selfEnrollStandingClient).mockResolvedValue({
@@ -505,7 +505,7 @@ describe('loginWithPassphrase -- stale client-key record from another account', 
     }
     vi.mocked(fetchKeyring).mockResolvedValue(staleHit as never)
     vi.mocked(routeUnlockLogin).mockReset()
-    vi.mocked(routeUnlockLogin).mockResolvedValue({ durability: 'durable' })
+    vi.mocked(routeUnlockLogin).mockResolvedValue({ login: 'remembered' })
 
     await expect(
       loginWithPassphrase({ passphrase: PASSPHRASE })
@@ -1006,7 +1006,7 @@ describe('loginWithPassphrase -- durability routing glue', () => {
   it('runs the transient route over the shared in-memory handle', async () => {
     const persistence = transientSessionStores()
     vi.mocked(routeUnlockLogin).mockResolvedValue({
-      durability: 'transient',
+      login: 'transient',
       credential: CREDENTIAL,
       persistence
     })
@@ -1045,7 +1045,7 @@ describe('loginWithPassphrase -- durability routing glue', () => {
 
   it('reports no account on a transient keyring miss', async () => {
     vi.mocked(routeUnlockLogin).mockResolvedValue({
-      durability: 'transient',
+      login: 'transient',
       credential: CREDENTIAL,
       persistence: transientSessionStores()
     })

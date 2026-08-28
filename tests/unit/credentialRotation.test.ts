@@ -100,7 +100,7 @@ import {
   retireClientAnnexRung,
   swapClientAnnexGeneration
 } from '@interop/wallet-core/clientAnnex'
-import { durableSessionPersistence } from '@/session/persistence'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { cascadeCollections } from '@/session/userKeyCascade'
 import {
@@ -267,7 +267,7 @@ function sessionWith(
         ? { ladderSeed: overrides.ladderSeed }
         : {}),
       persistence: {
-        ...durableSessionPersistence(),
+        ...browserLocalSessionPersistence(),
         epochPins: { load: epochPinLoad, saveFromDescriptor: epochPinSave }
       },
       persistClientKeys: vi.fn(async () => {

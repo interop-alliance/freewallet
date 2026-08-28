@@ -542,7 +542,7 @@ const { deleteUnlockMethod } = await import('@/session/keyring')
 const { establishStandingUnlock } = await import('@/session/standingUnlock')
 const { registerPasskey } = await import('@/lib/passkey')
 const { executeLocalWipe, snapshotWipeTargets } = await import('@/session/wipe')
-const { durableSessionPersistence } = await import('@/session/persistence')
+const { browserLocalSessionPersistence } = await import('@/session/persistence')
 
 const ACCOUNT_DID = 'did:webvh:QmScid:was.example.test:space:space-123:id'
 const CLIENT_ANNEX_SPACE_ID = 'clientAnnex-space-1'
@@ -635,7 +635,7 @@ function makeSession() {
     isGuest: false,
     profile: {
       persistence: {
-        ...durableSessionPersistence(),
+        ...browserLocalSessionPersistence(),
         // The add ceremonies clear the passkey-only safety notice; the store
         // itself reaches IndexedDB, which this node-environment suite has
         // none of.
@@ -905,7 +905,7 @@ describe('deleteAccount', () => {
     state.registry = registryWithTwoMethods()
     const session = makeSession()
     ;(session.profile as unknown as { persistence: unknown }).persistence =
-      durableSessionPersistence({ idb })
+      browserLocalSessionPersistence({ idb })
     const result = await deleteAccount({
       session,
       passphrase: 'correct horse battery staple'

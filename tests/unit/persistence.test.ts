@@ -6,22 +6,22 @@ import { describe, expect, it } from 'vitest'
 import type { IZcap } from '@interop/data-integrity-core'
 import {
   assertAccountCeremonyAllowed,
-  assertDurableSession,
-  DurableSessionRequiredError,
-  durableSessionPersistence,
-  isDurableSession,
+  assertBrowserLocalSession,
+  BrowserLocalSessionRequiredError,
+  browserLocalSessionPersistence,
+  isBrowserLocalSession,
   StepUpRequiredError,
-  transientSessionPersistence,
+  inMemorySessionPersistence,
   transientSessionStores,
-  type TransientSessionPersistence
+  type InMemorySessionPersistence
 } from '@/session/persistence'
 
 /**
  * A full transient handle over fresh stores, with a stub annex identity --
  * what the composition hands the session once the enrollment has run.
  */
-function transientHandle(): TransientSessionPersistence {
-  return transientSessionPersistence({
+function transientHandle(): InMemorySessionPersistence {
+  return inMemorySessionPersistence({
     stores: transientSessionStores(),
     clientAnnex: {
       clientAnnexDid: 'did:webvh:example:annex',
@@ -33,7 +33,7 @@ function transientHandle(): TransientSessionPersistence {
 describe('the transient persistence handle', () => {
   it('is typed non-durable and carries no idb factory member', () => {
     const handle = transientHandle()
-    expect(isDurableSession(handle)).toBe(false)
+    expect(isBrowserLocalSession(handle)).toBe(false)
     expect('idb' in handle).toBe(false)
   })
 
@@ -45,7 +45,7 @@ describe('the transient persistence handle', () => {
       epochId: 'epoch-0',
       descriptor: { epochs: [{ id: 'epoch-0' }] }
     })
-    const handle = transientSessionPersistence({
+    const handle = inMemorySessionPersistence({
       stores,
       clientAnnex: {
         clientAnnexDid: 'did:webvh:example:annex',
@@ -153,8 +153,8 @@ describe('the transient persistence handle', () => {
 
 describe('the durable persistence handle', () => {
   it('is typed durable and memoizes one cache pair per scope', () => {
-    const handle = durableSessionPersistence()
-    expect(isDurableSession(handle)).toBe(true)
+    const handle = browserLocalSessionPersistence()
+    expect(isBrowserLocalSession(handle)).toBe(true)
     const cache = handle.descriptorCache({ scope: 'space-a' })
     expect(cache).toBeDefined()
     expect(handle.descriptorCache({ scope: 'space-a' })).toBe(cache)
@@ -162,7 +162,7 @@ describe('the durable persistence handle', () => {
   })
 
   it('serves in-memory caches for a guest (persistCaches: false)', async () => {
-    const handle = durableSessionPersistence({ persistCaches: false })
+    const handle = browserLocalSessionPersistence({ persistCaches: false })
     const cache = handle.descriptorCache({ scope: 'space' })
     const descriptor = { currentEpoch: 'epoch-0', epochs: [] }
     await cache.writeDescriptor({
@@ -183,14 +183,14 @@ describe('the durability refusals', () => {
   it('refuses a durable-subject ceremony from a transient session', () => {
     const transient = transientHandle()
     expect(() =>
-      assertDurableSession({
+      assertBrowserLocalSession({
         persistence: transient,
         ceremony: 'Update-key rotation'
       })
-    ).toThrow(DurableSessionRequiredError)
+    ).toThrow(BrowserLocalSessionRequiredError)
     expect(() =>
-      assertDurableSession({
-        persistence: durableSessionPersistence(),
+      assertBrowserLocalSession({
+        persistence: browserLocalSessionPersistence(),
         ceremony: 'Update-key rotation'
       })
     ).not.toThrow()
@@ -206,7 +206,7 @@ describe('the durability refusals', () => {
     ).toThrow(StepUpRequiredError)
     expect(() =>
       assertAccountCeremonyAllowed({
-        persistence: durableSessionPersistence(),
+        persistence: browserLocalSessionPersistence(),
         ceremony: 'Deleting the account'
       })
     ).not.toThrow()

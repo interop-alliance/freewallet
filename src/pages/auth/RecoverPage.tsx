@@ -45,12 +45,13 @@ const log = createLogger('fw:ui:recover')
  * a replacement code is pushed hard -- the typed code is a spent credential.
  * The final step is an ordinary passphrase login.
  *
- * The continuation follows the browser's login durability: by default (a
+ * The continuation follows the browser's remembered state: by default (a
  * non-remembered browser) the TRANSIENT variant runs -- the fresh
- * credential's ladder VM stands in for a durable client, nothing local
+ * credential's ladder VM stands in for an enrolled client, nothing local
  * persists, and the login lands a transient session -- while the
  * remember-this-browser entry (today the programmatic e2e seam, the form
- * choice when it lands) runs the durable continuation and a durable login.
+ * choice when it lands) runs the remembered continuation and a remembered
+ * login.
  */
 export function RecoverPage() {
   const { t } = useTranslation()
@@ -162,7 +163,7 @@ export function RecoverPage() {
 
   /**
    * The "I saved this code" confirm: runs the confirm-gated record
-   * completion (the durable ceremony's `completeRecovery` closure -- the
+   * completion (the remembered ceremony's `completeRecovery` closure -- the
    * rotated user key into the client-key record, the pending carrier with
    * the replacement-code bytes cleared), so the
    * show-once code stays re-displayable until this click. A failed
@@ -201,10 +202,11 @@ export function RecoverPage() {
     setBusy(true)
     setErrorKey(null)
     try {
-      // The login follows the recovery variant that just ran: the durable
+      // The login follows the recovery variant that just ran: the remembered
       // continuation persisted a fresh client-key record, so a remembered
-      // recovery logs in durable; the transient variant persisted nothing,
-      // and the default routing lands the ordinary transient composition.
+      // recovery takes the remembered login; the transient variant persisted
+      // nothing, and the default routing lands the ordinary transient
+      // composition.
       const remembered = forcedRememberBrowser()
       const { session } = await loginWithPassphrase({
         passphrase,

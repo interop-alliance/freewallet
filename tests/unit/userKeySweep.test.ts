@@ -77,9 +77,11 @@ vi.mock('@/session/persistence', async importOriginal => {
   const actual = await importOriginal<typeof import('@/session/persistence')>()
   return {
     ...actual,
-    durableSessionPersistence: vi.fn(
-      (options?: Parameters<typeof actual.durableSessionPersistence>[0]) => ({
-        ...actual.durableSessionPersistence(options),
+    browserLocalSessionPersistence: vi.fn(
+      (
+        options?: Parameters<typeof actual.browserLocalSessionPersistence>[0]
+      ) => ({
+        ...actual.browserLocalSessionPersistence(options),
         epochPins
       })
     )

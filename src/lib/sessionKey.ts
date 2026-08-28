@@ -25,9 +25,9 @@
  */
 
 /**
- * The session database's name -- the one durable IndexedDB database this
- * module owns. Exported so the wipe grades delete it by the same name the
- * opens use, rather than restating the string.
+ * The session database's name -- the one browser-local IndexedDB database
+ * this module owns. Exported so the wipe grades delete it by the same name
+ * the opens use, rather than restating the string.
  */
 export const SESSION_DB_NAME = 'freewallet-session'
 const SESSION_STORE = 'session'
@@ -234,9 +234,9 @@ export async function saveClientKeyRecord({
 
 /**
  * Whether this browser holds a client-key record for an unlock method,
- * WITHOUT durably creating the session database. Any read through
- * `openSessionDb` creates `freewallet-session` on a miss (the versioned open
- * runs `onupgradeneeded`), so the login durability routing -- which must decide
+ * WITHOUT creating the session database. Any read through `openSessionDb`
+ * creates `freewallet-session` on a miss (the versioned open runs
+ * `onupgradeneeded`), so the login routing -- which must decide
  * "remembered here?" while remaining free to leave no trace -- first runs the
  * create-nothing existence probe (`sessionDatabaseExists`: the enumeration
  * API, or a versionless open whose upgrade is aborted) and only opens a
@@ -410,7 +410,8 @@ export async function loadAccountDidForSpace({
 
 /**
  * Deletes the local Space-to-account-DID mapping -- account deletion and Space
- * wipes, beside the pins.
+ * wipes. No pin is deleted beside it: every pin store is in-memory and dies
+ * with the tab.
  *
  * @param options {object}
  * @param options.spaceId {string}   the data Space id
@@ -632,16 +633,16 @@ export async function deletePasskeySafetyNotice({
 }
 
 /**
- * Whether the session database exists at all, WITHOUT durably creating it.
+ * Whether the session database exists at all, WITHOUT creating it.
  * The probe has two tiers, because any VERSIONED open creates the database
  * on a miss: `indexedDB.databases()` answers directly where the engine has
  * it, and where it does not, a VERSIONLESS `open(SESSION_DB_NAME)` answers
  * the same question -- a versionless open of an absent database still fires
  * `onupgradeneeded` (with `oldVersion === 0`), and aborting that
  * versionchange transaction leaves nothing behind. Used by the login
- * durability routing (`hasClientKeyRecord`) and by the shared wipe
- * enumeration, so a wipe on a browser that never held session state does
- * not create the very database it set out to remove.
+ * routing (`hasClientKeyRecord`) and by the shared wipe enumeration, so a
+ * wipe on a browser that never held session state does not create the very
+ * database it set out to remove.
  *
  * The abort surfaces as the request's `onerror` (an `AbortError`), which is
  * this probe's "no" rather than a failure.

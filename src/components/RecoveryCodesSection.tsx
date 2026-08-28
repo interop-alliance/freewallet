@@ -1,7 +1,7 @@
 /**
  * Settings section for recovery codes: lists the account's issued
  * codes from the unlock-methods registry, generates a new code inside a
- * confirm-once dialog (nothing is durable until "I saved this code" -- only
+ * confirm-once dialog (nothing is written until "I saved this code" -- only
  * the confirm runs the issuance ceremony), revokes codes (a REAL revocation:
  * the document entry, the roster wrap, and the unlock Space all go, so the
  * code resolves to nothing afterwards), and surfaces the recovery health

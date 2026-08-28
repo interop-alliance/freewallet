@@ -511,9 +511,9 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
   }
 
   /**
-   * A minimal live durable session, shaped as the forget prelude reads it:
+   * A minimal live remembered session, shaped as the forget prelude reads it:
    * the standing members, the ladder seed, this client's key-agreement
-   * multibase, and the persistence handle's pin stores.
+   * multibase, and the persistence strategy's pin stores.
    *
    * @param options {object}
    * @param [options.withRebind] {boolean}   carry the hit's record re-bind

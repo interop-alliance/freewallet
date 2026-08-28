@@ -83,7 +83,7 @@ function documentAnchoring({ vmId }: { vmId: string }) {
 function transientSession() {
   const adoptInvocationCapability = vi.fn()
   const handle = {
-    durability: 'in-memory',
+    storage: 'in-memory',
     logPins: { isLogPinStore: true },
     clientAnnex: {
       clientAnnexDid: CLIENT_ANNEX_DID,

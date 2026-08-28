@@ -31,7 +31,7 @@
  * race against a concurrent writer re-applies on the fresh head instead of
  * silently clobbering it), and revisions are direct content-addressed appends
  * to `contacts-history` -- both byte-identical to what background replication
- * would have pushed, so durable replicas pull transient contact edits cleanly.
+ * would have pushed, so local replicas pull transient contact edits cleanly.
  */
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import {
@@ -902,7 +902,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
    * Adds a contact to the remote `contacts` collection under the cipher's
    * freshly minted stable row id (the collection spec's
    * `idDerivation: 'random'`), with the same head payload and epoch stamp the
-   * local store's write would replicate -- so a durable replica pulls this
+   * local store's write would replicate -- so a local replica pulls this
    * transient add verbatim. Created with `If-None-Match: *`; the row id is
    * fresh randomness, so `created: false` normally cannot happen -- except
    * when the transport retried a PUT whose success response was lost (the
@@ -1067,7 +1067,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
 
   /**
    * Hard-deletes a contact's remote head row (the server keeps a tombstone
-   * its `changes` feed serves, so durable replicas pull the removal), as a
+   * its `changes` feed serves, so local replicas pull the removal), as a
    * compare-and-swap on the ETag of the read that decided the delete: a `412`
    * re-reads and retries (bounded), and a row already gone -- a `404`, or a
    * fresh read finding nothing -- counts as deleted. A read served without an

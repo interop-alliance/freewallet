@@ -902,7 +902,7 @@ export async function processZcaps({
   // A transient session holds its Space authority as a delegated zcap (the
   // generation delegation), so its grants chain under THAT, signed by the
   // annex key the delegation names -- a grant delegated off the root by a
-  // key the account document never lists would verify nowhere. A durable
+  // key the account document never lists would verify nowhere. A remembered
   // session delegates off the root as before.
   let invocationCapability = session.profile.invocationCapability
 

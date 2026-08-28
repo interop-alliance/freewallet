@@ -139,7 +139,7 @@ async function recordLoginActivity({
  *
  * Ordering: history/zcap persistence precedes every external delivery, so the
  * relying party can never hold live delegated capabilities that lack a
- * revocation hook. The Login activity is the durable record App Connect
+ * revocation hook. The Login activity is the stored record App Connect
  * revocation re-reads the zcap documents from, and both the exchange POST and
  * the CHAPI response hand the relying party the VP with its embedded,
  * already-signed `zcap` array. Persisting last would let a delivered grant
@@ -205,7 +205,7 @@ export async function composeAndDeliverResponse({
   }
   const grantedZcaps = response.zcaps ?? []
 
-  // The Login activity is the durable record App Connect revocation re-reads
+  // The Login activity is the stored record App Connect revocation re-reads
   // the zcap documents from, so it must be persisted BEFORE any external
   // delivery -- both the exchange POST below and the CHAPI response hand the
   // relying party the VP with its embedded, already-signed `zcap` array, so

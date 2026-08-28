@@ -10,7 +10,7 @@
  * public-terminal composition in `src/session/transientLogin.ts`, which
  * persists nothing locally. A STANDING credential -- one whose unlock record
  * carries the bridge delegation and update-key ladder seed -- self-enrolls
- * an ordinary durable client in place on the programmatic
+ * an ordinary enrolled client in place on the programmatic
  * `rememberBrowser: true` entry (loud log entries first, then the first
  * roster read through the credential's standing wrap); a plain pointer
  * record -- which only a no-WAS bind produces, since every WAS signup writes
@@ -56,8 +56,9 @@ import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import { sweepStrandedAppKeys } from '@/session/appKeySweep'
 import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
 import {
-  durableSessionPersistence,
-  isDurableSession,
+  browserLocalSessionPersistence,
+  isBrowserLocalSession,
+  isRememberedSession,
   type SessionPersistence
 } from '@/session/persistence'
 import { StorageManager } from '@/stores/storageManager'
@@ -215,12 +216,12 @@ export async function initGuestSession() {
  *   the third-party partitioned iframe. Two consequences, both of the
  *   partitioning: credential + history operations route straight to the
  *   remote WAS collections (the local replica there is a bucket no sync
- *   controller ever drives), and the durable handle's localStorage cache
- *   families are suppressed for the visit on a WAS deployment (the Storage
- *   Access handle unpartitions IndexedDB and does not reach localStorage, so
- *   a persisted cache would be partitioned residue no top-level wipe can
- *   reach -- see the shared wipe enumeration's stated limits; the local-mode
- *   carve-out is at the call below). Default false
+ *   controller ever drives), and the browser-local variant's localStorage
+ *   cache families are suppressed for the visit on a WAS deployment (the
+ *   Storage Access handle unpartitions IndexedDB and does not reach
+ *   localStorage, so a persisted cache would be partitioned residue no
+ *   top-level wipe can reach -- see the shared wipe enumeration's stated
+ *   limits; the local-mode carve-out is at the call below). Default false
  * @param [options.provisionStorage] {boolean}   fire `ensureUserCollections`
  *   from session creation and expose it as `session.storageReady`; default
  *   true. Set false for the new-wallet flows that provision explicitly.
@@ -228,15 +229,15 @@ export async function initGuestSession() {
  *   `freewallet-session` database (CHAPI popups thread the Storage Access
  *   API handle here)
  * @param [options.persistence] {SessionPersistence}   the typed persistence
- *   handle for this session; defaults to the durable one built over `idb`
- *   (with cache persistence off for guests). A transient login supplies the
- *   transient handle here, which carries the client-annex identity: the
- *   annex DID whose generation holds this visit's verification method
- *   (every WAS request signs as `<clientAnnexDid>#<vm>` in place of the
- *   account-document spelling) and the generation delegation every request
- *   rides (stamped as `profile.invocationCapability`). The non-durable
- *   variant also skips the KMS keystore, the login-time roster read (the
- *   standing-wrap read already happened), `profile.clientSeed`,
+ *   strategy for this session; defaults to the browser-local variant built
+ *   over `idb` (with cache persistence off for guests). A transient login
+ *   supplies the in-memory variant here, which carries the client-annex
+ *   identity: the annex DID whose generation holds this visit's
+ *   verification method (every WAS request signs as `<clientAnnexDid>#<vm>`
+ *   in place of the account-document form) and the generation delegation
+ *   every request rides (stamped as `profile.invocationCapability`). The
+ *   in-memory variant also skips the KMS keystore, the login-time roster
+ *   read (the standing-wrap read already happened), `profile.clientSeed`,
  *   provisioning and the login-time sweeps.
  * @returns {Promise<{ session: Session, userExists: boolean,
  *   rosterRead: UserKeyRosterReadResult | null }>}   `rosterRead` is this
@@ -279,7 +280,7 @@ export async function initSessionFromSeed({
   const suppressPopupCaches = popup && !!WAS_SERVER_URL
   const persistence =
     suppliedPersistence ??
-    durableSessionPersistence({
+    browserLocalSessionPersistence({
       idb,
       persistCaches: !isGuest && !suppressPopupCaches
     })
@@ -290,13 +291,13 @@ export async function initSessionFromSeed({
   // been promoted: every data-Space request must be signed with this
   // client's verification method in the did:webvh document
   // (`<did:webvh>#<multibase>`), not its did:key. Same key, promoted keyId.
-  // A transient handle's verification method lives in the annex
-  // generation's document instead (the handle carries the annex DID), so
+  // An in-memory strategy's verification method lives in the annex
+  // generation's document instead (the strategy carries the annex DID), so
   // its requests sign as `<clientAnnexDid>#<multibase>` and ride the
-  // generation delegation -- the account-document spelling is structurally
+  // generation delegation -- the account-document form is structurally
   // out of a transient session's reach.
   const accountDid = accountPointer?.did
-  const sessionZcapClient = !isDurableSession(persistence)
+  const sessionZcapClient = !isBrowserLocalSession(persistence)
     ? webvhZcapClient({ keyAgent, did: persistence.clientAnnex.clientAnnexDid })
     : isWebvhDid(accountDid)
       ? webvhZcapClient({ keyAgent, did: accountDid })
@@ -310,10 +311,11 @@ export async function initSessionFromSeed({
   // keystore, so the independent trips need not be serialized.
   // Failure is non-fatal for now: no wallet feature depends on
   // the keystore yet, so a KMS outage must not lock users out -- the settings
-  // page surfaces the unprovisioned state. A non-durable handle skips the
-  // KMS whole: keystore provisioning is durable account bootstrap.
+  // page surfaces the unprovisioned state. Gated on `isRememberedSession`:
+  // a guest and a transient visit both skip the KMS whole, since keystore
+  // provisioning is account bootstrap rather than per-visit state.
   const keystorePromise =
-    !isGuest && isDurableSession(persistence) && KMS_SERVER_URL
+    isRememberedSession({ persistence, isGuest }) && KMS_SERVER_URL
       ? ensureKeystore({
           kmsServerUrl: KMS_SERVER_URL,
           keyAgent,
@@ -346,7 +348,7 @@ export async function initSessionFromSeed({
   // descriptor feeds the cascade-completion sweep fired further down.
   // Gated on a promoted pointer: the log-governed roster anchors its entry
   // proofs in the did:webvh document, so an unpromoted account has no roster
-  // to read. A non-durable handle skips it too -- its user key just came
+  // to read. A transient session skips it too -- its user key just came
   // out of the credential's standing wrap, so a second read would be the
   // same read again.
   let activeUserKey = userKey
@@ -354,8 +356,7 @@ export async function initSessionFromSeed({
   let userKeyPersistFailed = false
   if (
     userKey &&
-    !isGuest &&
-    isDurableSession(persistence) &&
+    isRememberedSession({ persistence, isGuest }) &&
     WAS_SERVER_URL &&
     accountPointer &&
     isWebvhDid(accountPointer.did)
@@ -409,15 +410,16 @@ export async function initSessionFromSeed({
     ...(persistClientKeys ? { persistClientKeys } : {}),
     ...(accountPointer ? { accountPointer } : {}),
     // Every remote request a transient session makes rides the generation
-    // delegation the handle carries (WASRemoteStore invokes it in place of
+    // delegation the strategy carries (WASRemoteStore invokes it in place of
     // the root capability).
-    ...(!isDurableSession(persistence)
+    ...(!isBrowserLocalSession(persistence)
       ? { invocationCapability: persistence.clientAnnex.invocationCapability }
       : {})
   }
-  if (!isGuest && isDurableSession(persistence)) {
-    // The client seed backs the unlock-method re-bind ceremonies, all of
-    // them durable; a transient session's per-visit seed must never be one.
+  if (isRememberedSession({ persistence, isGuest })) {
+    // The client seed backs the unlock-method re-bind ceremonies, which
+    // only a remembered session runs; a transient session's per-visit seed
+    // must not back one.
     profile.clientSeed = seed
   }
   if (isWebvhDid(accountDid)) {
@@ -456,8 +458,9 @@ export async function initSessionFromSeed({
   // A transient session skips provisioning and every login-time sweep: the
   // sweeps perform governed writes (roster convergence, epoch rotation, the
   // app-key deletes) a transient session must not run, and provisioning's
-  // bare-Space-URL reads and promotion PUTs are the durable bootstrap's.
-  if (provisionStorage && isDurableSession(persistence)) {
+  // bare-Space-URL reads and promotion PUTs belong to the remembered
+  // login's account bootstrap.
+  if (provisionStorage && isBrowserLocalSession(persistence)) {
     const storageReady = storage.ensureUserCollections({ user, profile, idb })
     session.storageReady = storageReady
 
@@ -564,7 +567,7 @@ export async function initSessionFromSeed({
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) KAK -- its roster entry
  * @param options.persistence {SessionPersistence}   the session's persistence
- *   handle (the pins ride it)
+ *   strategy (the pins ride it)
  * @returns {Promise<{ userKey: UserKey, rosterDescriptor: CollectionEncryption }>}
  *   the key and roster descriptor the collection fan-out should use
  */
@@ -588,8 +591,8 @@ async function convergeRosterToDocument({
     return { userKey, rosterDescriptor: descriptor }
   }
   // The did:webvh check above is what makes the pins' account DID available:
-  // the three continuity pins are keyed by it, and an unpromoted account
-  // returned early.
+  // the roster-epoch pin is keyed by it, and an unpromoted account returned
+  // early.
   const accountDid = pointer.did
   const { userKey: convergedUserKey, descriptor: convergedDescriptor } =
     await convergeUserKeyRosterToAccount({
@@ -605,7 +608,7 @@ async function convergeRosterToDocument({
       pinnedEpochId: await persistence.epochPins.load({ accountDid }),
       accountLogPinStore: persistence.logPins,
       // Adoption is app-side and in band: the unlock-methods registry is
-      // re-sealed to the adopted key first (while this browser's durable
+      // re-sealed to the adopted key first (while this browser's local
       // copy of the pre-rotation one still exists), then the key is
       // persisted for the next login, pinned, and swapped into the live
       // session -- all before the collection fan-out runs against it. A
@@ -653,23 +656,24 @@ async function convergeRosterToDocument({
  * server, offline) warns and returns `null`, so offline logins keep working
  * from the cached user key.
  *
- * A failed PIN persist is reported, not thrown: the adopted key
+ * A failed pin advance is reported, not thrown: the adopted key
  * authenticated against the verified roster, so the session is fine -- only
- * this browser's durable state did not advance, which the caller surfaces as
- * "this browser could not be remembered" rather than a login failure.
+ * this visit's in-memory epoch pin stayed behind. The caller's own
+ * client-key record write is non-fatal the same way, surfaced as "this
+ * browser could not be remembered" rather than a login failure.
  *
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the session's root signing client
  * @param options.keyAgent {ICapabilityAgent}   this client's signing key
  *   agent, for the store's log appends and pin custody
  * @param options.pointer {AccountPointer & { did: string }}   the promoted
- *   account pointer; its `did` keys the continuity pins
+ *   account pointer; its `did` keys the roster-epoch pin
  * @param options.userKey {UserKey}   the cached per-user key
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) KAK -- its roster entry
  * @param options.persistence {SessionPersistence}   the session's persistence
- *   handle: both continuity pins (the chain-head pin and the epoch pin) ride
- *   it, and both guard this visit alone
+ *   strategy: both continuity pins (the chain-head pin and the epoch pin)
+ *   ride it, in memory on either variant, and both guard this visit alone
  * @returns {Promise<UserKeyRosterReadResult | null>}   the roster read, or
  *   null
  */
@@ -716,7 +720,7 @@ async function checkUserKeyRosterAtLogin({
 }
 
 /**
- * The durable resume of a remembered (or passkey) signup torn before the
+ * The remembered resume of a remembered (or passkey) signup torn before the
  * establishment's re-bind: a keyring hit whose record carries a ladder seed
  * but whose pointer names no did:webvh yet. Runs the shared mend ceremony's
  * establishment arm (the establishment re-run from the record's own ladder
@@ -726,8 +730,8 @@ async function checkUserKeyRosterAtLogin({
  * keyring so the caller continues into the ordinary self-enrollment. One attempt only:
  * a run that does not converge hands the original hit back (the arm's error
  * is warned, not thrown) and the existing routing stands. Reached only on
- * the explicit `rememberBrowser: true` entry; the default durable login
- * never runs it.
+ * the explicit `rememberBrowser: true` entry; a remembered login reached by
+ * the silent ratchet never runs it.
  *
  * @param options {object}
  * @param options.found {KeyringFetchResult}   the torn hit (ladder seed
@@ -782,9 +786,10 @@ async function healUnpromotedRememberedAccount({
         }
       : {})
   })
-  // A `reenterRepairShaped` report needs no re-entry glue here: the durable
-  // login continues into the self-enrollment, whose own login-time registry
-  // backfill records the passphrase entry the arm left unwritten.
+  // A `reenterRepairShaped` report needs no re-entry glue here: the
+  // remembered login continues into the self-enrollment, whose own
+  // login-time registry backfill records the passphrase entry the arm left
+  // unwritten.
   const refreshed = report.reenter
     ? await fetchKeyring({
         credential,
@@ -817,17 +822,17 @@ async function healUnpromotedRememberedAccount({
  * passphrase derives an unlock identity that locates the account and unwraps
  * this client's local key set.
  *
- * The post-KDF durability routing runs first (`routeUnlockLogin`): with a WAS
+ * The post-KDF login routing runs first (`routeUnlockLogin`): with a WAS
  * server configured and no client-key record held for this credential, the
  * DEFAULT is the transient login -- the public-terminal composition in
  * `src/session/transientLogin.ts`, which persists nothing locally -- and the
- * durable branches below are reached on a remembered browser (the silent
+ * remembered branches below are reached on a remembered browser (the silent
  * ratchet), with `rememberBrowser: true` (the programmatic standing
  * self-enrollment entry), or with no WAS server. The CHAPI popup runs the
  * same routing: a granted Storage Access handle lets the probe see the
- * first-party record and a remembered browser proceeds durable, while a
+ * first-party record and a remembered browser proceeds remembered, while a
  * denied one routes transient like any non-remembered browser
- * (`decisions/0009`). The durable branches:
+ * (`decisions/0009`). The remembered branches:
  *
  * - **Enrolled hit**: the keyring record was found AND this client holds a
  *   key set under the passphrase's unlock method; the session is built from
@@ -851,7 +856,7 @@ async function healUnpromotedRememberedAccount({
  *   transient long before here. On the
  *   explicit `rememberBrowser: true` entry, a standing record whose pointer
  *   names no did:webvh yet (a remembered signup torn before the
- *   establishment's re-bind) first runs the durable resume heal
+ *   establishment's re-bind) first runs the remembered resume heal
  *   (`healUnpromotedRememberedAccount`) and then self-enrolls from the
  *   refreshed record.
  * - **Miss**: no keyring anywhere, so there is no account. Returns
@@ -868,12 +873,13 @@ async function healUnpromotedRememberedAccount({
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the keyring
  *   cache (CHAPI popups thread the Storage Access API handle here)
  * @param [options.popup] {boolean}   this login runs in the CHAPI popup's
- *   partitioned iframe. It no longer forces durability -- the routing decides
- *   that from the record probe over the Storage Access handle -- and gates
- *   only what the partitioning actually implies: remote-direct storage,
- *   suppressed localStorage caches on a WAS deployment, and the durable
- *   arm's popup refusals (no self-enrollment, no pending resume, and the
- *   login-time chain passes that carry the guard). Default false
+ *   partitioned iframe. It no longer forces the remembered route -- the
+ *   routing decides that from the record probe over the Storage Access
+ *   handle -- and gates only what the partitioning actually implies:
+ *   remote-direct storage, suppressed localStorage caches on a WAS
+ *   deployment, and the remembered arm's popup refusals (no
+ *   self-enrollment, no pending resume, and the login-time chain passes
+ *   that carry the guard). Default false
  * @param [options.provisionStorage] {boolean}   fire `ensureUserCollections`
  *   from session creation and expose it as `session.storageReady`; default
  *   true. Signup's existence probe passes false (it discards the session after
@@ -881,13 +887,13 @@ async function healUnpromotedRememberedAccount({
  * @param [options.credential] {UnlockCredential}   an already-derived unlock
  *   credential for this passphrase, so a caller that has just unlocked (the
  *   enrollment ceremony) does not run the KDF again
- * @param [options.rememberBrowser] {boolean}   the explicit durability input:
- *   `true` proceeds durable (running the standing self-enrollment on a fresh
+ * @param [options.rememberBrowser] {boolean}   the explicit routing input:
+ *   `true` proceeds remembered (running the standing self-enrollment on a fresh
  *   browser -- the programmatic entry the signup probe, the recovery tail,
  *   and tests use until the login form grows the choice); `false` demands
  *   the transient session (refused as `AlreadyRememberedError` on a browser
  *   already holding this credential's client-key record). Absent, the
- *   routing decides: record present -> durable (the silent ratchet), absent
+ *   routing decides: record present -> remembered (the silent ratchet), absent
  *   -> transient, the default on a non-remembered browser
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
@@ -914,7 +920,7 @@ export async function loginWithPassphrase({
   // record-less browser -- transient by default, self-enrolling under
   // `rememberBrowser: true`. A credential the routing derived (the probed
   // default path) is carried across the retry so the KDF does not re-run
-  // there; the explicit-durability arms derive inside `fetchKeyring` as
+  // there; the explicit-`rememberBrowser` arms derive inside `fetchKeyring` as
   // before.
   let derived = credential
   for (let staleRetries = 0; ; staleRetries++) {
@@ -925,7 +931,7 @@ export async function loginWithPassphrase({
       idb,
       rememberBrowser
     })
-    if (routed.durability === 'transient') {
+    if (routed.login === 'transient') {
       const found = await fetchTransientKeyring({
         credential: routed.credential,
         accountLogPinStore: routed.persistence.logPins
@@ -954,7 +960,7 @@ export async function loginWithPassphrase({
       return { session: null, userExists: false }
     }
 
-    // The durable resume entry: only under the explicit remember input, and
+    // The remembered resume entry: only under the explicit remember input, and
     // only for a standing record whose pointer names no did:webvh (a
     // remembered signup torn before its re-bind).
     if (
@@ -1034,8 +1040,8 @@ export async function loginWithPassphrase({
  * @param options.type {'passphrase' | 'passkey'}   the method that unlocked
  * @param [options.email] {string}   caller-supplied email, when any
  * @param [options.popup] {boolean}   the CHAPI popup's partitioned iframe:
- *   remote-direct storage, suppressed localStorage caches, and the durable
- *   arm's popup refusals
+ *   remote-direct storage, suppressed localStorage caches, and the
+ *   remembered arm's popup refusals
  * @param [options.provisionStorage] {boolean}
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the
  *   `freewallet-session` database
@@ -1081,7 +1087,7 @@ async function sessionFromKeyringHit({
     // first roster read through the credential's standing wrap -- and the
     // login proceeds enrolled. A remote-direct session (the partitioned
     // CHAPI popup) deliberately does not: its storage bucket is ephemeral,
-    // and a durable client minted per popup visit would litter the account
+    // and an enrolled client minted per popup visit would litter the account
     // log. Without standing authority (a plain pointer record -- the no-WAS
     // reduced path; every WAS signup writes the standing layout) the caller
     // surfaces the not-enrolled state and offers the connect-another-wallet
@@ -1111,7 +1117,7 @@ async function sessionFromKeyringHit({
   // record alone derives -- the dead account's replica and caches, its
   // Space-to-DID mapping, and the credential's whole local state, the
   // record included (keeping the
-  // record would route every later login durable onto the same dead end) --
+  // record would route every later login remembered onto the same dead end) --
   // and the entry points catch the typed signal and re-route once as a
   // record-less browser. A pending-shape record is the resume's to route
   // (its `pointerDid` discard branch covers the foreign-account case).
@@ -1332,7 +1338,7 @@ async function sessionFromKeyringHit({
   // An existing registry not yet materialized stays that way (no
   // `createIfMissing`). The remote-direct popup is excluded, as it always
   // was; a transient session has no `registryReady` and so no backfill,
-  // which is the durable-only rule the registry lives under.
+  // which is the remembered-session-only rule the registry lives under.
   if (session.registryReady && !popup) {
     session.registryReady = session.registryReady.then(async () => {
       try {
@@ -1598,12 +1604,12 @@ async function sessionFromKeyringHit({
   // pointed generation is GC-quiet) plus the collect fan-out over every
   // non-pointed `gen-` collection -- revoke, digest, delete. Chained behind
   // the registryReady tail (so a sibling re-mint above lands first),
-  // durable-only for free (`registryReady` only exists then), and strictly
-  // best-effort like the sweeps beside it: a failed pass never fails the
-  // login, and the next durable login resumes from durable state alone. The
-  // remote-direct popup deliberately does not run it: a popup visit is a
-  // constrained, latency-sensitive context, and the next top-level durable
-  // login sweeps the same durable state.
+  // remembered-only for free (`registryReady` only exists then), and
+  // strictly best-effort like the sweeps beside it: a failed pass never
+  // fails the login, and the next remembered login resumes from durable
+  // state alone. The remote-direct popup deliberately does not run it: a
+  // popup visit is a constrained, latency-sensitive context, and the next
+  // top-level remembered login sweeps the same durable state.
   if (session.registryReady && !popup) {
     session.clientAnnexGcSweep = session.registryReady
       .catch(() => {})
@@ -1659,7 +1665,7 @@ async function sessionFromKeyringHit({
  *   from session creation and expose it as `session.storageReady`; default
  *   true
  * @param [options.signal] {AbortSignal}   aborts the WebAuthn ceremony
- * @param [options.rememberBrowser] {boolean}   the explicit durability input,
+ * @param [options.rememberBrowser] {boolean}   the explicit routing input,
  *   exactly as on `loginWithPassphrase`
  * @param [options.credential] {UnlockCredential}   an already-derived unlock
  *   credential for this passkey's PRF output, which SKIPS the PRF assertion
@@ -1699,7 +1705,7 @@ export async function loginWithPasskey({
       idb,
       rememberBrowser
     })
-    if (routed.durability === 'transient') {
+    if (routed.login === 'transient') {
       const found = await fetchTransientKeyring({
         credential: routed.credential,
         accountLogPinStore: routed.persistence.logPins
@@ -1727,7 +1733,7 @@ export async function loginWithPasskey({
       return { session: null, userExists: false }
     }
 
-    // The durable resume entry, exactly as on the passphrase path: a
+    // The remembered resume entry, exactly as on the passphrase path: a
     // standing record whose pointer names no did:webvh yet (a passkey
     // signup torn before the establishment's re-bind) is healed and
     // re-fetched before the self-enrollment.

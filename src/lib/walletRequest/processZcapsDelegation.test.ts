@@ -187,7 +187,7 @@ describe('processZcaps delegation parent', () => {
     ).toBeLessThan(listCollectionPublicStates.mock.invocationCallOrder[0]!)
   })
 
-  it('delegates off the Space root with the unclamped TTL for a durable session', async () => {
+  it('delegates off the Space root with the unclamped TTL for a remembered session', async () => {
     vi.useFakeTimers({ now: NOW })
     const { session, delegate } = fakeSession()
     await processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })

@@ -235,14 +235,15 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
    * the shared local wipe -- and ends at the logout page, since the session's
    * local footing is gone. A torn run reads as "not forgotten" (the wipe
    * runs last), so the dialog's retry copy is honest: a re-click resumes.
-   * The account's last durable client runs the two-entry transition instead
+   * The account's last enrolled client runs the two-entry transition instead
    * (confirmed against its own copy); a listing that turned out stale -- the
    * ordinary ceremony's name-stable refusal -- flips the dialog to the
    * transition copy for a second confirm rather than running it unconfirmed.
    * The transition also refuses up front, name-stably
    * (`PendingRetirementForgetError`), when a passphrase change on the
-   * account was torn before its retirement landed: only a durable login can
-   * finish that change, and the transition ends durable logins forever. Its
+   * account was torn before its retirement landed: only a remembered login
+   * can finish that change, and the transition ends remembered logins
+   * forever. Its
    * sibling refusal (`UnrecordedCredentialForgetError`) fires when the
    * account document publishes a sign-in method the unlock-methods registry
    * does not name: every walk after the transition is registry-driven, so

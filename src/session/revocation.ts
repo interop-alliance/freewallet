@@ -186,7 +186,7 @@ export async function revokeEnrolledClient({
     pinnedEpochId,
     onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) =>
       // The in-band adoption: the registry is re-sealed to the rotated key
-      // BEFORE this browser's durable copy of the old one dies, so a tab
+      // BEFORE this browser's stored copy of the old one dies, so a tab
       // death during the collection fan-out below cannot strand it.
       await adoptRotatedUserKeyInBand({
         session,
@@ -240,7 +240,7 @@ export async function revokeEnrolledClient({
 
 /**
  * The cascade's generation-delegation re-mint stage: when the revoked
- * durable client is the one whose key signed the current generation's
+ * enrolled client is the one whose key signed the current generation's
  * embedded delegation, the document edit just rotted it under the
  * current-key-set rule -- silently, mid-generation, with no registry entry
  * tracking it. This closure runs `ensureGenerationDelegationCurrent` with

@@ -79,7 +79,7 @@ export function LoginPage() {
   const [errorKey, setErrorKey] = useState<string | null>(null)
   // The enrollment (connect-this-browser) flow off the not-enrolled state:
   // the passphrase that located the account, then the locally minted key set
-  // and its connect code. In-memory only -- nothing is durable until
+  // and its connect code. In-memory only -- nothing is written until
   // `completeEnrollment` succeeds.
   const [notEnrolledPassphrase, setNotEnrolledPassphrase] = useState<
     string | null
@@ -113,8 +113,8 @@ export function LoginPage() {
     }
   })
 
-  // Handler registration runs on mount, before the durability decision, so a
-  // transient visit registers too: an unregistered handler never appears in
+  // Handler registration runs on mount, before the login routing decides, so
+  // a transient visit registers too: an unregistered handler never appears in
   // the mediator's chooser, and a public-terminal session that cannot answer
   // a CHAPI request is the same as no wallet at all. It writes nothing to
   // this origin (the registration bit lives on the mediator's), so it leaves
@@ -165,7 +165,7 @@ export function LoginPage() {
       })
       if (!session && userExists) {
         // The passphrase located the account, but this browser holds no
-        // client key set for it and the durable route had nothing to
+        // client key set for it and the remembered route had nothing to
         // self-enroll with. Only a no-WAS deployment produces this state:
         // its bind is the plain pointer record, while every WAS signup
         // writes the standing layout, and on a WAS server the non-remembered
@@ -225,7 +225,7 @@ export function LoginPage() {
     } catch (err) {
       const { key } = loginErrorKey({ err, label: 'Login' })
       setErrorKey(key)
-      // A torn enrollment (the durable path's own two-client state):
+      // A torn enrollment (the remembered path's own two-client state):
       // connecting this browser mints a fresh key set and redoes the wrap,
       // so offer that flow. A transient-login refusal never opens the card
       // (a remedy that presupposes a second client is no remedy there).

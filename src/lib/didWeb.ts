@@ -148,9 +148,10 @@ async function publishDidDocument({
 }
 
 /**
- * Generates one KMS key for a DID relationship and returns its durable
- * binding. The publicAliasTemplate makes the key's id the did:web
- * verification-method URL (fragment = multibase fingerprint).
+ * Generates one KMS key for a DID relationship and returns its binding: the
+ * verification-method id and the KMS key id. The publicAliasTemplate makes
+ * the key's id the did:web verification-method URL (fragment = multibase
+ * fingerprint).
  */
 async function generateDidKey({
   keystoreAgent,

@@ -17,7 +17,7 @@ import type { ContactData } from '@interop/social-core'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { ControllerProfile, User } from '@/types/auth'
-import { durableSessionPersistence } from '@/session/persistence'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 import { StorageManager } from './storageManager'
 
 let userCounter = 0
@@ -66,8 +66,10 @@ async function initLocalSession(): Promise<{
     keyAgreementKey: owner.keyAgreementKey,
     keyResolver: owner.keyResolver,
     keyAgent: { id: 'did:key:z6MkContactsAgent' },
-    // A guest login's handle: durable pins, and no descriptor caches.
-    persistence: durableSessionPersistence({ persistCaches: false })
+    // A guest login's persistence strategy: the browser-local variant with
+    // the descriptor caches off. Its pin stores are in memory, as on every
+    // variant.
+    persistence: browserLocalSessionPersistence({ persistCaches: false })
   } as unknown as ControllerProfile
   const { storage } = await StorageManager.initStorageClients({
     user,

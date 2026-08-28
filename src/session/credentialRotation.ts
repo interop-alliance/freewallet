@@ -18,7 +18,7 @@
  *
  * The rotated key is adopted in band, inside the roster tail's
  * `onUserKeyAdopted`: the unlock-methods registry is re-sealed to it while
- * this browser's durable copy of the pre-rotation key still exists, and the
+ * this browser's stored copy of the pre-rotation key still exists, and the
  * live session swaps onto it in the same step, so the callers' registry
  * teardown writes afterwards go out under the key the record now carries.
  * Their post-ceremony `adoptRotatedUserKey` call is then a no-op.
@@ -190,7 +190,7 @@ export async function rotateOffUnlockCredential({
     pinnedEpochId,
     onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) =>
       // The in-band adoption: the registry is re-sealed to the rotated key
-      // BEFORE this browser's durable copy of the old one dies, so a tab
+      // BEFORE this browser's stored copy of the old one dies, so a tab
       // death during the collection fan-out below cannot strand it. The live
       // session swaps onto the key too, so the caller's registry teardown
       // writes go out under the key the record is now sealed to.

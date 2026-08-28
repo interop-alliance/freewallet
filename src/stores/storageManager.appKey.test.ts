@@ -38,7 +38,7 @@ import {
   AppKeyRefusedError,
   mintAppKeyCredential
 } from '@interop/wallet-core/request'
-import { durableSessionPersistence } from '@/session/persistence'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 import { BrowserStore } from './browserStore'
 import { StorageManager } from './storageManager'
 
@@ -103,7 +103,7 @@ async function makeStorage(): Promise<{ storage: StorageManager; user: User }> {
     ciphers,
     vaultKeys: { keyAgreementKey: key, keyResolver },
     descriptors: {},
-    persistence: durableSessionPersistence()
+    persistence: browserLocalSessionPersistence()
   })
   return { storage, user }
 }

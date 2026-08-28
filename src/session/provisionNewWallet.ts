@@ -131,10 +131,10 @@ const SEED_WELCOME_TIMEOUT_MS = 15_000
  * Best-effort welcome-content seeding for the WAS signup tails: the welcome
  * credential and the two new-account history records, written through the
  * session's own storage (the replica-less remote-direct variant a transient
- * session carries, or the durable replica of a remembered/passkey signup's
+ * session carries, or the local replica of a remembered/passkey signup's
  * self-enrolled session). The two contact seeds ride the same storage (the
  * remote-direct backend serves contacts too); the first-client label, where
- * one applies, is the durable tail's own write. The whole function is
+ * one applies, is the remembered tail's own write. The whole function is
  * best-effort: the account is fully established before it runs, so a torn
  * seed costs only cosmetic content -- a failure is logged and never
  * rethrown, and a seed still pending after `SEED_WELCOME_TIMEOUT_MS` is
@@ -174,8 +174,8 @@ export async function seedWelcomeContent({
     // Alliance Team, and a self-contact carrying the account DIDs the
     // establishment published (the account pointer's did:webvh stands in
     // where the profile carries no resolved `didWebvh`, as on a transient
-    // tail) plus the signup email -- gated on `isGuest` like the durable
-    // seed, though no guest reaches this WAS-only tail.
+    // tail) plus the signup email -- gated on `isGuest` the same way,
+    // though no guest reaches this WAS-only tail.
     const selfDids = [
       profile.didWeb?.did,
       profile.didWebvh?.did ?? profile.accountPointer?.did

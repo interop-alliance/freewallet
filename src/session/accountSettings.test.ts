@@ -5,10 +5,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/auth'
-import {
-  DURABILITY_IN_MEMORY,
-  DURABILITY_INDEXEDDB
-} from '@/session/persistence'
+import { STORAGE_IN_MEMORY, STORAGE_INDEXEDDB } from '@/session/persistence'
 
 vi.mock('@/session/unlockMethods', () => ({
   backfillPassphraseUnlockMethod: vi.fn(),
@@ -22,22 +19,22 @@ const { loadUnlockRegistry } = await import('@/session/accountSettings')
 
 /**
  * @param options {object}
- * @param options.durability {string}
+ * @param options.storage {string}
  * @returns {Session}
  */
-function fakeSession({ durability }: { durability: string }): Session {
+function fakeSession({ storage }: { storage: string }): Session {
   return {
     user: { id: 'did:key:zClientA' },
     isGuest: false,
     profile: {
-      persistence: { durability }
+      persistence: { storage }
     }
   } as unknown as Session
 }
 
 describe('loadUnlockRegistry (FW-295 transient gate)', () => {
   it('makes no registry call on a transient session', async () => {
-    const session = fakeSession({ durability: DURABILITY_IN_MEMORY })
+    const session = fakeSession({ storage: STORAGE_IN_MEMORY })
 
     const result = await loadUnlockRegistry({ session })
 
@@ -46,8 +43,8 @@ describe('loadUnlockRegistry (FW-295 transient gate)', () => {
     expect(vi.mocked(getUnlockMethods)).not.toHaveBeenCalled()
   })
 
-  it('backfills with createIfMissing on a durable session', async () => {
-    const session = fakeSession({ durability: DURABILITY_INDEXEDDB })
+  it('backfills with createIfMissing on a browser-local session', async () => {
+    const session = fakeSession({ storage: STORAGE_INDEXEDDB })
     const record = { methods: [] }
     vi.mocked(backfillPassphraseUnlockMethod).mockResolvedValue(record as never)
 
@@ -70,7 +67,7 @@ describe('the registry-writing ceremonies gate on session.registryReady (FW-300)
     vi.mocked(updateUnlockMethods).mockResolvedValue(record as never)
     let releaseChain!: () => void
     const session = {
-      ...fakeSession({ durability: DURABILITY_INDEXEDDB }),
+      ...fakeSession({ storage: STORAGE_INDEXEDDB }),
       registryReady: new Promise<void>(resolve => {
         releaseChain = resolve
       })
@@ -104,7 +101,7 @@ describe('the registry-writing ceremonies gate on session.registryReady (FW-300)
       throw new Error('halt before the log read')
     })
     const session = {
-      ...fakeSession({ durability: DURABILITY_INDEXEDDB }),
+      ...fakeSession({ storage: STORAGE_INDEXEDDB }),
       storage: { remoteStore: { webvhIdStore } },
       registryReady: new Promise<void>(resolve => {
         releaseChain = resolve

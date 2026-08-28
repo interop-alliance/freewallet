@@ -1,5 +1,31 @@
 # History
 
+## 0.44.0 - TBD
+
+### Changed
+
+- The session persistence seam is named for the storage tier each variant
+  reaches. `durableSessionPersistence` is now `browserLocalSessionPersistence`
+  and `transientSessionPersistence` is `inMemorySessionPersistence`, with the
+  types, the `isBrowserLocalSession` predicate, the
+  `assertBrowserLocalSession` refusal, and `BrowserLocalSessionRequiredError`
+  following the axis. The discriminant is `persistence.storage`
+  (`STORAGE_INDEXEDDB` / `STORAGE_IN_MEMORY`); the stored values are
+  unchanged.
+- `routeUnlockLogin` reports its decision as
+  `{ login: 'remembered' | 'transient' }` in place of a `durability` member.
+- `isRememberedSession({ persistence, isGuest })` replaces the three
+  hand-written predicates in the login path: KMS keystore provisioning, the
+  login-time roster read, and the client-seed stamp.
+- Comments and JSDoc across `src/` now say `durable` only of server-backed
+  storage. The browser-local, in-memory, remembered, transient, and enrolled
+  uses take their own words, and the persistence object is the persistence
+  strategy rather than a seam or a handle.
+- Comments that `decisions/0012-no-durable-continuity-pins.md` falsified are
+  corrected as claims: none says a continuity pin survives a visit, that the
+  two strategies differ in their pin members, or that a remembered browser
+  gets stronger continuity than a transient one.
+
 ## 0.43.0 - TBD
 
 ### Changed

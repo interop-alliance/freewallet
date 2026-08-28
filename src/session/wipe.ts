@@ -1,5 +1,5 @@
 /**
- * The shared wipe enumeration: the ONE list of durable local state a wallet
+ * The shared wipe enumeration: the ONE list of browser-local state a wallet
  * account leaves on a browser, and the one executor that deletes it. Its
  * consumers are the deletion-shaped ceremonies -- account deletion, the guest
  * wipe, the forget ceremony and its login-time detector
@@ -42,7 +42,7 @@ import { createLogger } from '@/lib/log'
 const log = createLogger('fw:session:wipe')
 
 /**
- * Every durable local target the wipe deletes, derived up front. The members
+ * Every browser-local target the wipe deletes, derived up front. The members
  * keyed by this browser's own client did:key (`clientDid`, and the
  * `dbPrefix` / cache scopes derived from it) deliberately come from
  * `session.user.id` -- the identity the client-key record established --
@@ -247,10 +247,10 @@ export async function executeLocalWipe({
 }
 
 /**
- * The guest-wipe consumer: a guest session's whole durable residue is its
- * replica databases, the migration markers, and (in principle) local-mode
- * cache families, all derived from the guest's random client did:key. The
- * guest holds no keyring and no registry, so those families
+ * The guest-wipe consumer: a guest session's whole browser-local residue is
+ * its replica databases, the migration markers, and (in principle)
+ * local-mode cache families, all derived from the guest's random client
+ * did:key. The guest holds no keyring and no registry, so those families
  * enumerate empty by construction.
  *
  * @param options {object}

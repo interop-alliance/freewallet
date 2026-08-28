@@ -66,7 +66,7 @@ import {
   verifiedAccountLog
 } from '@/session/verifiedLog'
 import { listAccountClients, renameAccountClient } from '@/session/clients'
-import { durableSessionPersistence } from '@/session/persistence'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 
 const POINTER = {
   did: 'did:webvh:QmScid:was.example.test:space:space-123:id',
@@ -89,7 +89,7 @@ function sessionWith({ pointer = POINTER } = {}): Session {
       }
     },
     profile: {
-      persistence: durableSessionPersistence(),
+      persistence: browserLocalSessionPersistence(),
       accountPointer: pointer,
       clientWebvhKeys: {
         updateSeed: new Uint8Array(32),
@@ -159,7 +159,7 @@ describe('the verified-log memo', () => {
 
   it('refuses a session holding no promoted pointer', async () => {
     const cache = createVerifiedLogCache({
-      pinStore: durableSessionPersistence().logPins
+      pinStore: browserLocalSessionPersistence().logPins
     })
     expect(cache.invalidate()).toBeUndefined()
     await expect(

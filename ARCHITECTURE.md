@@ -848,9 +848,9 @@ storage provisioning, the login-time sweeps, and the bare-Space-URL
 `userExists` probe. The in-memory variant also carries the visit's
 client-annex identity -- the annex DID every WAS request signs under and the
 generation delegation every request rides -- as a required member of its type
-(`TransientSessionPersistence`), built from the pre-session in-memory store
+(`InMemorySessionPersistence`), built from the pre-session in-memory store
 family (`TransientSessionStores`, from `transientSessionStores()`) plus that
-identity (`transientSessionPersistence({ stores, clientAnnex })`). Session
+identity (`inMemorySessionPersistence({ stores, clientAnnex })`). Session
 assembly reads both off the strategy rather than a separate option, so the
 storage tier and the annex signing that comes with it are declared exactly
 once; they still surface to the storage layer as
@@ -1001,7 +1001,7 @@ a self-enrollment at a pointer it cannot use. Nothing encrypted
 predates the roster arm's mint, so a fresh user key orphans nothing.
 
 The strategy also carries the tier refusals. Update-key rotation requires the
-browser-local variant outright (`DurableSessionRequiredError`): its subject is
+browser-local variant outright (`BrowserLocalSessionRequiredError`): its subject is
 this browser's own update key, and its persist-before-publish invariant needs
 a client-key record to persist into. The account-management ceremonies
 (passphrase change, passphrase/passkey add and remove, client revocation,

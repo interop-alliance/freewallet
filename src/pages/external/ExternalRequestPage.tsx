@@ -10,7 +10,7 @@
  *
  * The page lives outside `ProtectedRoute` like the popups. A session already
  * live in the app is used directly; otherwise the page runs the ordinary
- * login in place (the same durability decision `/login` makes) and adopts
+ * login in place (the same login routing `/login` runs) and adopts
  * the session app-wide. Everything the entry point refuses -- the exchange
  * states, DID Auth, a `domain`, an `AppConnectQuery`, a delivery endpoint on
  * another origin, a grant class outside the allowlist -- is decided in

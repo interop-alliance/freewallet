@@ -1,5 +1,5 @@
 /**
- * The pending-enrollment resume: what a durable login does with a
+ * The pending-enrollment resume: what a remembered login does with a
  * PENDING-shape client-key record (`userKey` absent) -- one a
  * self-enrollment's persist-before-publish hook wrote and a tab death left
  * uncompleted. The record is the resume's only key set, so the
@@ -448,7 +448,7 @@ async function resumeThroughCeremony({
  * never-published branch, after the complete and wipe branches are ruled
  * out (`decisions/0007`'s discard-last ordering) -- a pre-pivot
  * pending key set grants nothing, and keeping it would wedge the browser
- * (durable refused, transient unreachable, the `rememberBrowser: false`
+ * (remembered refused, transient unreachable, the `rememberBrowser: false`
  * refusal answering with the wrong copy).
  *
  * @param options {object}

@@ -22,7 +22,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { Json } from '@/lib/sync'
-import { durableSessionPersistence } from '@/session/persistence'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 import type { User } from '@/types/auth'
 import { BrowserStore } from './browserStore'
 import { PublicCopyRetractionError, StorageManager } from './storageManager'
@@ -114,7 +114,7 @@ async function makeStorage(
     ...(remoteStore && { remoteStore }),
     ciphers: {},
     descriptors: {},
-    persistence: durableSessionPersistence()
+    persistence: browserLocalSessionPersistence()
   })
 }
 

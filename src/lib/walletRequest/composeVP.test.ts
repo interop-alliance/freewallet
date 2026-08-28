@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
 import type { Session } from '@/types/auth'
 import {
-  transientSessionPersistence,
+  inMemorySessionPersistence,
   transientSessionStores
 } from '@/session/persistence'
 import { composeVP } from './composeVP'
@@ -97,14 +97,14 @@ describe('composeVP from a transient session', () => {
       handle: 'transient-visit'
     })
     // The shape `transientSessionFromKeyringHit` assembles: a per-visit key
-    // agent, the annex identity declared on the persistence handle (never on
-    // the profile's signing identity), and no KMS keystore -- so the
+    // agent, the annex identity declared on the persistence strategy (rather
+    // than on the profile's signing identity), and no KMS keystore -- so the
     // did:web arm of `presentationSignerFor` is structurally out of reach.
     transient = {
       user: { id: keyAgent.id },
       profile: {
         keyAgent,
-        persistence: transientSessionPersistence({
+        persistence: inMemorySessionPersistence({
           stores: transientSessionStores(),
           clientAnnex: {
             clientAnnexDid: CLIENT_ANNEX_DID,

@@ -1,10 +1,10 @@
 /**
  * Coverage for the in-memory roster-epoch pin (`transientSessionStores()`'s
- * `epochPins` member, identical to the durable variant's) against the shared
- * `epochPinWriteAllowed` predicate beside it in `src/session/persistence.ts`.
- * A served descriptor that omits the pinned epoch must be refused as a
- * rollback rather than adopted because the stored pin cannot be located in
- * the served order.
+ * `epochPins` member, the same in-memory pin the browser-local variant
+ * carries) against the shared `epochPinWriteAllowed` predicate beside it in
+ * `src/session/persistence.ts`. A served descriptor that omits the pinned
+ * epoch must be refused as a rollback rather than adopted because the
+ * stored pin cannot be located in the served order.
  */
 import { describe, expect, it } from 'vitest'
 import {

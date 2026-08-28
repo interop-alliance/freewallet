@@ -86,7 +86,7 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
 }))
 
 import { mintUserKey, userKeyVaultKeys } from '@interop/wallet-core/keys'
-import { durableSessionPersistence } from '@/session/persistence'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 import {
   getUnlockMethods,
   updateUnlockMethods,
@@ -125,7 +125,7 @@ function makeSession({ userKey }: { userKey: UserKey }): Session {
         spaceId: SPACE_ID,
         host: 'https://was.example.test'
       },
-      persistence: durableSessionPersistence({
+      persistence: browserLocalSessionPersistence({
         idb: createFakeSessionIdb().idb
       })
     },

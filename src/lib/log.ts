@@ -13,7 +13,7 @@
  * The dev wiring is gated on `import.meta.env.MODE === 'development'`,
  * never bare `DEV` (true under vitest, which would start flush timers and
  * POST batches inside unit tests). The filter source is the package's own
- * guarded localStorage READ; nothing here writes durable state, so the
+ * guarded localStorage READ; nothing here writes stored state, so the
  * module is safe in a transient session.
  */
 import {

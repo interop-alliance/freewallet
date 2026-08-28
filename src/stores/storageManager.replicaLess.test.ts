@@ -7,10 +7,10 @@
  *   sites directly. Absent the option, every handle and request carries no
  *   capability (root invocations, byte-identical to before).
  * - `StorageManager.initStorageClients` in a transient session constructs
- *   no `BrowserStore` (the versioned RxDB open alone durably creates the
- *   per-user database), routes every synced-collection operation through the
+ *   no `BrowserStore` (the versioned RxDB open alone creates the per-user
+ *   database), routes every synced-collection operation through the
  *   remote-direct backend, starts no replication (no local end exists), and
- *   keeps the descriptor/meta caches on the persistence handle's in-memory
+ *   keeps the descriptor/meta caches on the persistence strategy's in-memory
  *   pair -- localStorage gains no key.
  *
  * The WAS layer is faked at two seams matching the two subjects: a recording
@@ -38,7 +38,7 @@ import { ensureFirstEpoch, ownerRecipient } from '@interop/was-client/edv'
 import { cidFrom } from '@interop/was-client/sync'
 import type { Json } from '@/lib/sync'
 import {
-  transientSessionPersistence,
+  inMemorySessionPersistence,
   transientSessionStores
 } from '@/session/persistence'
 import type { ControllerProfile, User } from '@/types/auth'
@@ -390,12 +390,12 @@ function makeFakeRemote(): {
 }
 
 describe('replica-less remote-direct StorageManager', () => {
-  it('serves credential and history reads/writes with no local replica and no durable residue', async () => {
+  it('serves credential and history reads/writes with no local replica and no browser-local residue', async () => {
     const owner = await generateKey()
     const { remoteStore, provision } = makeFakeRemote()
     await provision(owner)
 
-    const persistence = transientSessionPersistence({
+    const persistence = inMemorySessionPersistence({
       stores: transientSessionStores(),
       clientAnnex: {
         clientAnnexDid: 'did:webvh:example:annex',
@@ -444,7 +444,7 @@ describe('replica-less remote-direct StorageManager', () => {
       const items = await storage.listHistoryItems()
       expect(items.length).toBeGreaterThan(0)
 
-      // The descriptor cache rode the handle's in-memory pair, seeded at
+      // The descriptor cache rode the strategy's in-memory pair, seeded at
       // login-time acquisition...
       const cached = await persistence
         .descriptorCache({ scope: remoteStore.spaceId })
@@ -466,7 +466,7 @@ describe('replica-less remote-direct StorageManager', () => {
     const { remoteStore, provision } = makeFakeRemote()
     await provision(owner)
 
-    const persistence = transientSessionPersistence({
+    const persistence = inMemorySessionPersistence({
       stores: transientSessionStores(),
       clientAnnex: {
         clientAnnexDid: 'did:webvh:example:annex',
@@ -510,7 +510,7 @@ describe('replica-less remote-direct StorageManager', () => {
       expect(head.contact).toEqual({ displayName: 'Alicia' })
 
       // The facade paired each mutation with a contacts-history revision,
-      // attributed to the transient handle's in-memory writerId.
+      // attributed to the in-memory strategy's own writerId.
       const writerId = persistence.getWriterId()
       const revisions = await storage.listContactRevisions({
         contactId: stored.contactId
@@ -543,7 +543,7 @@ describe('replica-less remote-direct StorageManager', () => {
     expect(
       () =>
         new StorageManager({
-          persistence: transientSessionPersistence({
+          persistence: inMemorySessionPersistence({
             stores: transientSessionStores(),
             clientAnnex: {
               clientAnnexDid: 'did:webvh:example:annex',

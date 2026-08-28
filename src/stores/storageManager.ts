@@ -83,8 +83,8 @@ import {
 } from '@/lib/sessionKey'
 import {
   assertAccountCeremonyAllowed,
-  assertDurableSession,
-  isDurableSession,
+  assertBrowserLocalSession,
+  isBrowserLocalSession,
   type CollectionMetaCache,
   type SessionPersistence
 } from '@/session/persistence'
@@ -231,7 +231,7 @@ const ENCRYPTED_COLLECTION_IDS = ENCRYPTED_STANDARD_COLLECTIONS.map(
  * session's descriptor cache, scoped by the user's DID in place of a Space
  * id, so a returning local login rebuilds the same epoch and keeps
  * decrypting its own rows. A guest's identity is random per session and its
- * data dies with it, so a guest's persistence handle supplies an in-memory
+ * data dies with it, so a guest's persistence strategy supplies an in-memory
  * cache and its descriptors die with the session.
  *
  * @param options {object}
@@ -359,8 +359,9 @@ export class PublicCopyRetractionError extends Error {
  */
 export class StorageManager {
   // The local active replica -- absent in the replica-less (transient)
-  // variant, where constructing one would durably create the per-user RxDB
-  // database and every synced-collection operation is served remote-direct.
+  // variant, where constructing one would create the per-user RxDB database
+  // in this browser and every synced-collection operation is served
+  // remote-direct.
   #localStore?: BrowserStore
   #remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
   // The backend every synced-collection read/write routes through, chosen once
@@ -391,12 +392,13 @@ export class StorageManager {
   // installed onto the ciphers at every (re)build so wallet writes emit
   // blinded `indexed` entries. Acquired and refreshed beside the descriptors.
   #metas: Record<string, { custom?: unknown }>
-  // The durable (localStorage) descriptor cache for this account's Space -- the
-  // offline fallback descriptor acquisition falls back to. Only set with a remote
-  // store (a guest / no-WAS session has no descriptors to cache).
+  // The descriptor cache for this account's Space -- localStorage or
+  // in-memory by the session's persistence strategy -- the offline fallback
+  // descriptor acquisition falls back to. Only set with a remote store (a
+  // guest / no-WAS session has no descriptors to cache).
   #descriptorCache?: EncryptionDescriptorCache
-  // The durable (localStorage) collection-metadata cache, beside the
-  // descriptor cache and under the same durability.
+  // The collection-metadata cache, beside the descriptor cache and on the
+  // same storage tier.
   #metaCache?: CollectionMetaCache
   // The once-per-collection-per-session unknown-epoch refresh guard, shared by
   // the standard and the app-provisioned encrypted collections, so a genuinely
@@ -424,8 +426,9 @@ export class StorageManager {
   // The descriptors the `#appCiphers` entries were built from, keyed by WAS
   // collection id -- the offline/lazy source for an app collection's cipher.
   #appDescriptors: Record<string, CollectionEncryption> = {}
-  // The session's typed persistence handle: the writer id and the cache pair
-  // come from it, so their durability is the handle's, never a flag here.
+  // The session's typed persistence strategy: the writer id and the cache
+  // pair come from it, so their storage tier is the strategy's rather than a
+  // flag here.
   #persistence: SessionPersistence
 
   constructor({
@@ -457,10 +460,10 @@ export class StorageManager {
     this.#descriptors = descriptors ?? {}
     this.#metas = metas ?? {}
     this.#persistence = persistence
-    // The cache pair rides the persistence handle: one instance per scope per
-    // session (the handle memoizes), durable-localStorage or in-memory by the
-    // handle's durability, and absent only when there is no remote Space to
-    // cache for.
+    // The cache pair rides the persistence strategy: one instance per scope
+    // per session (the strategy memoizes), localStorage or in-memory by the
+    // strategy's storage tier, and absent only when there is no remote Space
+    // to cache for.
     this.#descriptorCache = remoteStore
       ? persistence.descriptorCache({ scope: remoteStore.spaceId })
       : undefined
@@ -948,13 +951,14 @@ export class StorageManager {
       metas
     })
 
-    // The local store is the active replica -- for a durable session. A
-    // transient session is replica-less: constructing a BrowserStore durably
-    // creates the per-user RxDB database (the versioned open alone is a
-    // durable write), so none is built and the remote-direct backend serves
-    // every synced-collection operation instead.
+    // The local store is the active replica -- for a session on the
+    // browser-local strategy. A transient session is replica-less:
+    // constructing a BrowserStore creates the per-user RxDB database (the
+    // versioned open alone is a browser-local write), so none is built and
+    // the remote-direct backend serves every synced-collection operation
+    // instead.
     let localStore: BrowserStore | undefined
-    if (isDurableSession(persistence)) {
+    if (isBrowserLocalSession(persistence)) {
       ;({ localStore } = await BrowserStore.initClient({
         user,
         storage: rxStorage,
@@ -965,9 +969,9 @@ export class StorageManager {
       // remote-direct, and its preconditions guarantee a promoted account
       // the account-genesis ceremony already provisioned -- so bind the
       // collection map here (pure, no network) without provisioning twice.
-      // A durable session's map stays bound by `ensureUserCollections` at
-      // the right time: its first signup runs before provisioning, where
-      // an unbound map is a real signal.
+      // A session with a local replica keeps its map bound by
+      // `ensureUserCollections` at the right time: its first signup runs
+      // before provisioning, where an unbound map is a real signal.
       remoteStore.bindCollectionMap()
     }
     let userExists = localStore ? await localStore.userExists() : false
@@ -979,7 +983,7 @@ export class StorageManager {
       // proceeds from a keyring hit naming the account).
       userExists =
         userExists ||
-        !isDurableSession(persistence) ||
+        !isBrowserLocalSession(persistence) ||
         (await remoteStore.userExists())
     }
     const storage = new StorageManager({
@@ -1141,8 +1145,8 @@ export class StorageManager {
     const cid = await cidFrom({ doc: credential })
     const inserted = await this.#store.addCredential({ cid, credential })
     if (inserted) {
-      // Best-effort: the credential is already durably stored, and losing a
-      // log line beats reporting the whole store as failed (in remote-direct
+      // Best-effort: the credential is already stored, and losing a log
+      // line beats reporting the whole store as failed (in remote-direct
       // mode the history entry is its own remote write and can fail alone).
       try {
         await this.addHistoryCredentialCreated({
@@ -1813,11 +1817,11 @@ export class StorageManager {
     profile?: ControllerProfile
     idb?: IDBFactory
   }): Promise<void> {
-    // Provisioning is the durable bootstrap: it creates the local replica
-    // durably and makes the bare-Space-URL reads and promotion PUTs a
+    // Provisioning is the browser-local bootstrap: it creates the local
+    // replica and makes the bare-Space-URL reads and promotion PUTs a
     // transient session must not make. The transient login path never calls
     // this; the assert keeps that structural rather than convention.
-    assertDurableSession({
+    assertBrowserLocalSession({
       persistence: this.#persistence,
       ceremony: 'Provisioning storage'
     })
@@ -1980,7 +1984,8 @@ export class StorageManager {
     const localStore = this.#localStore
     if (!localStore) {
       // Unreachable by construction: session creation fires provisioning only
-      // for durable sessions, which always carry the local replica.
+      // for sessions on the browser-local strategy, which always carry the
+      // local replica.
       throw new Error(
         'Storage provisioning requires the local replica; a replica-less ' +
           'session must not provision.'
@@ -3520,7 +3525,7 @@ export class StorageManager {
 
   /**
    * Adds a contact and appends its `create` revision to `contacts-history`
-   * (best-effort: the contact is already durably stored either way).
+   * (best-effort: the contact is already stored either way).
    *
    * @param options {object}
    * @param options.contact {ContactData}

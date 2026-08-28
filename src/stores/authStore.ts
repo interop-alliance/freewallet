@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Session } from '@/types/auth'
-import { isDurableSession } from '@/session/persistence'
+import { isBrowserLocalSession } from '@/session/persistence'
 import { setTransientPrefs } from '@/lib/prefsStorage'
 import { syncController } from '@/stores/syncController'
 import { createLogger } from '@/lib/log'
@@ -68,11 +68,11 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ session })
     publishStorageSeam(session)
     publishLoginChainSeam(session)
-    // The UI-prefs half of the durability seam: while a transient session is
-    // live, theme/language toggles land in an in-memory overlay instead of
-    // localStorage (`src/lib/prefsStorage.ts`).
+    // The UI-prefs sibling of the persistence strategy: while a transient
+    // session is live, theme/language toggles land in an in-memory overlay
+    // instead of localStorage (`src/lib/prefsStorage.ts`).
     setTransientPrefs({
-      active: !isDurableSession(session.profile.persistence)
+      active: !isBrowserLocalSession(session.profile.persistence)
     })
     // Kick off background replication (no-op for guests / no remote replica).
     // `restart` (not `start`) so a controller left running by a previous

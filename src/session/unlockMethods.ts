@@ -43,7 +43,7 @@ import {
   WAS_SERVER_URL
 } from '@/app.config'
 import type { Session } from '@/types/auth'
-import { isDurableSession } from '@/session/persistence'
+import { isBrowserLocalSession } from '@/session/persistence'
 import {
   assertPasskeyPrf,
   registerPasskey,
@@ -1104,7 +1104,7 @@ export async function revokeUnlockMethod({
 }
 
 /**
- * Deletes one unlock method's durable artifacts, ceremony-free -- the
+ * Deletes one unlock method's artifacts, ceremony-free -- the
  * account-deletion walk's per-entry unit. Server-side, the entry's unlock
  * Space (holding its unlock record, and with it the sealed bridge and
  * `delegatedClients` delegations) goes through the recorded management zcap;
@@ -1458,8 +1458,8 @@ function shouldAdoptFreshCapability({
  * can use this as their load-plus-backfill entry point for any session.
  *
  * A transient session makes no registry call at all and returns `null`
- * immediately, before even a read: the registry is durable-session state,
- * the transient handle's annex-signed root invocation could never have
+ * immediately, before even a read: the registry is remembered-session state,
+ * a transient session's annex-signed root invocation could never have
  * authorized it anyway, and threading the generation delegation into these
  * helpers must not turn this into a registry clobber from a public
  * terminal.
@@ -1484,7 +1484,7 @@ export async function backfillPassphraseUnlockMethod({
   session: Session
   createIfMissing?: boolean
 }): Promise<UnlockMethodsRecord | null> {
-  if (!isDurableSession(session.profile.persistence)) {
+  if (!isBrowserLocalSession(session.profile.persistence)) {
     return null
   }
   const { unlockMethod, keyAgreementKey, keyResolver } = session.profile
