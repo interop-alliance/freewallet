@@ -363,6 +363,8 @@ async function decidePendingResume({
       const spentIdentity = await unlockClientIdentityFromSeed({
         clientSeed: unwrapKey
       })
+      // The spent code's inventory is a `keyAgreement` entry under no
+      // delegation relation, so this is the coarse membership test by intent.
       const published = documentKeyMultibases({
         doc: verified.doc as Parameters<typeof documentKeyMultibases>[0]['doc']
       })

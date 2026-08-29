@@ -1352,8 +1352,10 @@ async function sessionFromKeyringHit({
   // re-mints its bridge delegation -- and the annex-Space sibling, where
   // the record carries one -- when either is stale on either axis: expired
   // or inside the renewal window (the same annual clock and shared predicate
-  // as the recovery delegations), or its signer no longer in the verified
-  // account document (the current-key-set rot a self-enrollment's window
+  // as the recovery delegations), or its signer no longer listed under
+  // `capabilityDelegation` in the verified account document (the relation a
+  // delegation proof verifies against, and the current-key-set rot a
+  // self-enrollment's window
   // close inflicts on ladder-VM-signed members -- the ceremony tail below
   // reseals them in the same login, and this predicate is what makes a torn
   // tail heal at the next login). One pass reseals both. Best-effort, behind

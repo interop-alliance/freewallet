@@ -4,6 +4,12 @@
 
 ### Changed
 
+- The standing-delegation refresh, the generation-delegation heals, and the
+  recovery health check report signer rot when the signing key has left
+  `capabilityDelegation`, through `@interop/wallet-core` 0.61.0. The shared
+  predicate matched the key anywhere in the account document, so a key kept
+  under another relation and dropped from `capabilityDelegation` read as
+  healthy while the server refused everything it signed.
 - A signup provisions the account Space once instead of once per collection,
   through `@interop/wallet-core` 0.59.0 and `@interop/was-client` 0.45.0. The
   nine-collection fan-out each ensured the same Space through its own handle,

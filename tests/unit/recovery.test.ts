@@ -65,6 +65,9 @@ const registryState = vi.hoisted(() => ({
 
 const logState = vi.hoisted(() => ({
   verificationMethod: [] as Array<{ id: string; publicKeyMultibase: string }>,
+  // The relation a delegation proof verifies against; the health check's
+  // signer test reads this list rather than plain document membership.
+  capabilityDelegation: [] as string[],
   nextKeyHashes: [] as string[],
   verifications: 0
 }))
@@ -74,7 +77,10 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
   verifyAccountLog: vi.fn(async () => {
     logState.verifications += 1
     return {
-      doc: { verificationMethod: logState.verificationMethod },
+      doc: {
+        verificationMethod: logState.verificationMethod,
+        capabilityDelegation: logState.capabilityDelegation
+      },
       log: [],
       updateKeys: [],
       nextKeyHashes: logState.nextKeyHashes
@@ -247,6 +253,7 @@ beforeEach(() => {
   clientsState.signingKeys = []
   clientsState.signingKeysError = undefined
   logState.verificationMethod = []
+  logState.capabilityDelegation = []
   logState.nextKeyHashes = []
   logState.verifications = 0
 })
@@ -512,6 +519,7 @@ describe('checkRecoveryHealth and the current-key-set rule', () => {
         publicKeyMultibase: entry.keyAgreementKeyMultibase
       }
     ]
+    logState.capabilityDelegation = [`${POINTER.did}#${SIGNING_KEY}`]
     logState.nextKeyHashes = [await deriveNextKeyHash(entry.updateKeyMultibase)]
     return entry
   }

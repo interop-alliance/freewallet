@@ -179,8 +179,11 @@ On a ladder-anchored account the add entry removes the ladder VM, so the
 still-unexpired bridge delegation and the `delegatedClients` sibling it
 signed stop verifying. That same login's refresh block catches it, its
 predicate covering signer rot beside expiry (`delegationKeyInDocument`,
-against the memoized verified account document), re-signs both with the
-enrolled client's account key, and reseals the record. A remembered login
+against the memoized verified account document). Rot is tested under
+`capabilityDelegation` specifically, the relation a delegation proof
+verifies against, so a key kept under another relation and dropped from
+that one reads as rotted. The block re-signs both with the enrolled
+client's account key, and reseals the record. A remembered login
 self-heals a rotted embedded generation delegation the same way
 (`ensureGenerationDelegationCurrent`, account-document axis), signing with
 the login credential's ladder seed held on `profile.ladderSeed`.
@@ -1500,7 +1503,8 @@ dependency order:
    closure, module-level in `src/session/revocation.ts`): an embedded
    generation delegation the revoked client had signed also stopped chaining
    at step 1. The closure runs `ensureGenerationDelegationCurrent` against
-   the post-edit document (the stale-signer axis beside expiry) and replaces
+   the post-edit document (the stale-signer axis beside expiry, tested under
+   `capabilityDelegation`) and replaces
    the delegation in place: same fragment, no revocation POST, since the
    rotted chain no longer verifies. It signs with the login credential's
    ladder seed (`profile.ladderSeed`, in-memory) and skips with a report

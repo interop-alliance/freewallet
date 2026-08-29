@@ -2875,8 +2875,9 @@ export interface RecoveryHealthFlag {
 /**
  * The login-time recovery health check: for each recovery-code
  * registry entry, tests that the stored delegation still chains against the
- * current document (its signing client's verification method is still
- * listed -- the current-key-set rule), that it is not expired or inside the
+ * current document (its signing client's verification method still stands
+ * under `capabilityDelegation`, the relation a delegation proof verifies
+ * against -- the current-key-set rule), that it is not expired or inside the
  * renewal window (the one-year TTL lapses within a code's expected
  * lifetime), and that the code's inventory (its `keyAgreement` VM and
  * committed update-key hash) still stands. A stale delegation bricks
@@ -2924,6 +2925,9 @@ export async function checkRecoveryHealth({
     profile: session.profile,
     pointer
   })
+  // A code's `keyAgreement` inventory carries no delegation relation, so its
+  // standing is the coarse membership test rather than the
+  // `capabilityDelegation` one the delegation-signer check above uses.
   const publishedMultibases = documentKeyMultibases({ doc })
   // Each entry's update-key hash is an independent derivation; run them
   // together rather than one per loop turn.

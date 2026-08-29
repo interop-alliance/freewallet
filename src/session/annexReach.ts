@@ -217,7 +217,8 @@ export async function pointedClientAnnexReach({
  * Runs wallet-core's `ensureGenerationDelegationCurrent` over a reached
  * generation: the embedded generation delegation is installed when the annex
  * document carries none, and renewed when it is expiring or its signer has
- * left the account document. The fresh delegation is minted against the
+ * left the account document's `capabilityDelegation` relation (the relation a
+ * delegation proof verifies against). The fresh delegation is minted against the
  * account Space the pointer names, signed by this session's own key; the
  * annex entry that embeds it is signed by the supplied ladder seed's rung.
  *
