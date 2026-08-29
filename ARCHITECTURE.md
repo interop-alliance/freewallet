@@ -57,10 +57,14 @@ src/session/        Session bootstrap and the account ceremonies -- the
                     ordered sequences pages drive but do not own (React
                     components keep rendering and confirmation callbacks
                     only). Grouped by role:
-  Login             initSession.ts, keyring.ts, transientLogin.ts,
-                    persistence.ts, verifiedLog.ts, loginErrorKey.ts
-  Signup            signup.ts, provisionNewWallet.ts,
-                    credentialAnchoredGenesis.ts, standingUnlock.ts
+  Login             transientLogin.ts (the default login's routing and
+                    composition), initSession.ts, keyring.ts,
+                    verifiedLog.ts, loginErrorKey.ts
+  Signup            credentialAnchoredGenesis.ts and standingUnlock.ts
+                    (the default signup, every WAS deployment),
+                    signup.ts, provisionNewWallet.ts
+  Persistence       persistence.ts -- the typed strategy both the default
+                    and the remembered path ride
   Settings          accountSettings.ts, credentialRotation.ts,
                     unlockMethods.ts, clients.ts, shares.ts, applications.ts
   Ceremonies        recovery.ts, revocation.ts, forget.ts, wipe.ts,
@@ -81,17 +85,35 @@ src/app.config.ts   Environment variable exports + app-wide constants
 ## Session & auth flow
 
 There is no external identity provider, and nothing about the account
-derives from the passphrase. Each wallet client (a browser profile) mints a
-random 32-byte **client seed** locally on first run: the Ed25519 pair behind
-its did:key, plus the X25519 twin. The private halves stay on the client.
+derives from the passphrase. The passphrase (or a passkey PRF output)
+derives only an **unlock identity** (the keyring v2 seam,
+`src/session/keyring.ts`), which locates the account's **unlock record** in
+its own minimal unlock Space. The unlock record carries none of the
+account's content keys.
 
-The passphrase (or a passkey PRF output) derives only an **unlock identity**
-(the keyring v2 seam, `src/session/keyring.ts`). At login it fetches the
-**unlock record** from its own minimal unlock Space, and unwraps the local
-**client-key record** in the `freewallet-session` IndexedDB, which holds
-this client's seed, a cached copy of the user key, and its did:webvh
-update-key seeds. The unlock record carries none of the account's content
-keys.
+One post-KDF question decides the rest, on a WAS deployment and with no
+explicit `rememberBrowser`: does this browser hold a client-key record for
+this credential (`routeUnlockLogin` in `src/session/transientLogin.ts`)? A
+no-WAS deployment always proceeds on the browser-local tier.
+
+A browser holding none takes the transient composition, the default. It
+mints a per-visit key in tab memory, enrolls that key into the account's
+client annex generation, unwraps the user key from the credential's standing
+roster wrap (see "standing credential" below), and runs on the replica-less
+storage tier. It writes nothing to this browser and ends with the tab. "The
+transient login" under "Session persistence" walks the composition through
+its own stages and its refusals.
+
+A browser holding a client-key record proceeds as the **enrolled client**
+that record names. An enrolled client mints a random 32-byte **client seed**
+locally on first run, at the step that enrolled it: the Ed25519 pair behind
+the client's did:key, plus the X25519 twin. The private halves stay on the
+client. The record gets there through an opt-in remembering step: the
+`rememberBrowser: true` entry's self-enrollment (see "The remembered branch"
+below), the two-party client enrollment ceremony, or a remembered recovery
+spend. A later login unwraps that record from the `freewallet-session`
+IndexedDB, which holds this client's seed, a cached copy of the user key,
+and its did:webvh update-key seeds.
 
 ```
 unlock secret (passphrase | passkey PRF output)
@@ -106,26 +128,44 @@ unlock secret (passphrase | passkey PRF output)
                                     (credential-derived, deterministic;
                                      NOT the enrolled client's randomly
                                      minted seed below)
-  -> unwrap local client-key record -> { clientSeed, userKey, webvhUpdateKeys }
-     (or, on a fresh browser: self-enroll through the record's bridge, then
-      persist the freshly minted key set as this record)
-  -> agentsFromSeed(clientSeed)   -> keyAgent (keyAgent.id === a did:key DID)
-  -> ZcapClient(invocationSigner) -> zcapClient (signs HTTP requests with ZCap)
-  -> { user: { id: did:key }, profile: { keyAgent, zcapClient, userKey } }
+  -> routeUnlockLogin: this browser holds a client-key record?
+
+     no (the default) -> transient composition
+       mint a per-visit key in tab memory
+       -> enroll it into the client annex generation (one loud annex entry)
+       -> unwrap the user key from the credential's standing roster wrap
+       -> keyAgent + zcapClient signing as <clientAnnexDid>#<vm>, under
+          the generation delegation
+       -> in-memory persistence strategy, replica-less storage
+
+     yes, or rememberBrowser: true -> enrolled client
+       unwrap local client-key record
+         -> { clientSeed, userKey, webvhUpdateKeys }
+       (or, on a fresh browser with rememberBrowser: true: self-enroll
+        through the record's bridge, then persist the freshly minted key
+        set as this record)
+       -> agentsFromSeed(clientSeed) -> keyAgent (keyAgent.id === a did:key)
+       -> ZcapClient(invocationSigner) -> zcapClient (ZCap-signed HTTP)
+       -> browser-local persistence strategy, local replica
+
+  -> { user: { id }, profile: { keyAgent, zcapClient, userKey } }
   -> StorageManager.initStorageClients()
   -> Session { user, profile, storage, isGuest }
 ```
 
-When the account pointer names a did:webvh (every promoted account; see "The
-did:webvh identity"), `zcapClient` signs with the same client Ed25519 key
-under its verification-method id in that document
-(`<did:webvh>#<multibase>`) rather than the did:key form. The data Space's
-controller is the did:webvh, and under the current-key-set rule only a keyId
-the resolved document lists can authorize anything. `user.id` stays the
-client did:key, also the App Connect response VP's holder that app-side
-loaders must resolve.
+An enrolled client's signing follows the account pointer. When the pointer
+names a did:webvh (every promoted account; see "The did:webvh identity"),
+`zcapClient` signs with the same client Ed25519 key under its
+verification-method id in that document (`<did:webvh>#<multibase>`) rather
+than the did:key form. The data Space's controller is the did:webvh, and
+under the current-key-set rule only a keyId the resolved document lists can
+authorize anything. `user.id` stays the client did:key, also the App
+Connect response VP's holder that app-side loaders must resolve. A
+transient visit signs as its annex verification method instead, and its
+response VP holds as the visit key's bare did:key.
 
-On a WAS deployment with a promoted account, every unlock method is a
+Both branches rest on the same property of the credential. On a WAS
+deployment with a promoted account, every unlock method is a
 **standing credential**: the recovery-code configuration minus spend-on-use.
 Three cases cannot be standing, and their records stay plain account
 pointers with none of what follows: a no-WAS deployment, a guest, and an
@@ -142,22 +182,40 @@ without it the credential could not enter a transient session until the next
 generation swap. Best-effort: an acting rung the generation does not commit
 is skipped.
 
-**Self-enrollment.** A fresh browser holding only the credential can
-self-enroll at login as an ordinary full client, no second browser involved.
-It runs today through the programmatic `rememberBrowser: true` entry, since
-a non-remembered browser defaults to the transient session (see "Session
-persistence"); a login-form choice is a planned follow-up. Two loud entries
-extend the world-readable log through the bridge: a reveal-and-commit entry
-signed by the ladder's current rung, then an add entry publishing the minted
-client. Only then does the user key unwrap from the credential's standing
-wrap.
+The document carries a passphrase-derived `keyAgreement` key only as a hash
+commitment (`MultikeyCommitment`), which the roster's recipient resolver
+verifies the roster-carried key against. A passkey's PRF-derived key is
+high-entropy and publishes verbatim (the hash-commitment rule under
+"Recovery codes").
+
+The connect-another-wallet ceremony (see "The client enrollment ceremony")
+survives for records without standing authority (a no-WAS bind), for the
+rendezvous onboarding flow, and as the future opt-in step-up approval
+policy. The storage-partitioned CHAPI popup takes the transient session
+rather than becoming an enrolled client, since an enrolled client per popup
+visit would litter the log.
+
+**The remembered branch.** Everything from here to "Record authenticity" is
+the opt-in path's detail: how a browser becomes an enrolled client, and
+what a later login on it does. A reader after the default path can skip to
+"Record authenticity".
+
+Self-enrollment is how the branch starts. A fresh browser holding only the
+credential can self-enroll at login as an enrolled client, no second
+browser involved. It runs today through the programmatic `rememberBrowser:
+true` entry, since a non-remembered browser takes the transient session
+(see "Session persistence"); a login-form choice is a planned follow-up.
+Two loud entries extend the world-readable log through the bridge: a
+reveal-and-commit entry signed by the ladder's current rung, then an add
+entry publishing the minted client. Only then does the user key unwrap from
+the credential's standing wrap.
 
 Before standing credentials, the unlock credential alone could not make a
-browser a client. A login on a fresh browser stopped at a not-enrolled
-state, and enrolling it took a second browser already enrolled on the
-account. Detection replaces that gate: a self-enrollment is visible in the
-log and remediable by rotation, rather than prevented by requiring another
-browser (see Loudness in the Glossary).
+browser a client. A login on a fresh browser stopped at a state with no
+client of its own, and enrolling it took a second browser already enrolled
+on the account. Detection replaces that gate: a self-enrollment is visible
+in the log and remediable by rotation, rather than prevented by requiring
+another browser (see Loudness in the Glossary).
 
 Between the two entries the required `onCommitted` seam writes the
 pending-shape client-key record (seeds, controller, `pointerDid`, the
@@ -187,19 +245,6 @@ client's account key, and reseals the record. A remembered login
 self-heals a rotted embedded generation delegation the same way
 (`ensureGenerationDelegationCurrent`, account-document axis), signing with
 the login credential's ladder seed held on `profile.ladderSeed`.
-
-The document carries a passphrase-derived `keyAgreement` key only as a hash
-commitment (`MultikeyCommitment`), which the roster's recipient resolver
-verifies the roster-carried key against. A passkey's PRF-derived key is
-high-entropy and publishes verbatim (the hash-commitment rule under
-"Recovery codes").
-
-The connect-another-wallet ceremony (see "The client enrollment ceremony")
-survives for records without standing authority (a no-WAS bind), for the
-rendezvous onboarding flow, and as the future opt-in step-up approval
-policy. The storage-partitioned CHAPI popup takes the transient session
-instead of self-enrolling, since an enrolled client per popup visit would
-litter the log.
 
 **Record authenticity.** The unlock identity's own Ed25519 key signs the
 unlock record; the proof is verified before decryption, and a record whose
@@ -247,9 +292,9 @@ the user key in the roster) is only as strong as that credential's entropy.
 Against a malicious storage host running an offline KDF grind, zcap scoping,
 TTLs, and revocation are worth nothing, so the unlock credential's custodian
 must not be the storage host, and a wallet's security is limited by its
-weakest standing unlock method. Logging in from a public terminal is a core
-supported case (nothing need persist locally to reach the account), which is
-why the record must stay server-held and self-authenticating. Client
+weakest standing unlock method. A login that persists nothing locally is the
+default case, so nothing need be on the browser to reach the account, which
+is why the record must stay server-held and self-authenticating. Client
 revocation does not bound an attacker who holds the credential itself, since
 they re-derive and self-enroll again. Credential rotation is that remedy.
 
@@ -600,7 +645,7 @@ Limits no enumeration reaches: deleted IndexedDB data stays forensically
 recoverable, plaintext `public-credentials` rows included; the CHAPI popup's
 partitioned third-party buckets are unreachable from any top-level wipe; and
 the mediator-origin (authn.io) handler-registration bit records that a
-wallet was used on the terminal. Only clearing the browser profile removes
+wallet was used in this browser. Only clearing the browser profile removes
 those.
 
 **The forget affordance** (`src/session/forget.ts`) removes this browser
@@ -711,7 +756,8 @@ The transition's refusals:
   record itself is the detector, since an entry naming another credential is
   also what a superseded passphrase's own login sees on a healthy account.
   That state's only mender is the torn-retirement repair, which needs a
-  remembered login, and the transition ends remembered logins forever.
+  remembered login, and the transition leaves the account client-less,
+  where no remembered login runs.
 - A registry that does not name every standing credential the account
   document publishes refuses with `UnrecordedCredentialForgetError`. Each
   document `keyAgreement` entry carrying no enrolled-client controller
@@ -750,9 +796,9 @@ several Spaces on the host, a feature rather than a check to add.
 
 Every WAS signup bootstraps the Space under the ladder VM's bare did:key
 inside the credential-anchored establishment (see "The credential-anchored
-variant" below), publishes the log, and PUTs the Space Description carrying
-`controller: <did:webvh>` as one of the establishment's own stages, before
-any enrolled client exists. `StorageManager.ensurePromotedController`
+establishment" below), publishes the log, and PUTs the Space Description
+carrying `controller: <did:webvh>` as one of the establishment's own stages,
+before any enrolled client exists. `StorageManager.ensurePromotedController`
 remains the login-time healer: it swaps the live session's signing to the
 promoted keyId and re-runs the promotion PUT when a session finds it
 missing. Only a no-WAS deployment's plain genesis still promotes on that
@@ -763,35 +809,15 @@ current-key-set rule (see Glossary).
 
 ## Account genesis (`@interop/wallet-core/genesis`)
 
-Shared with the mobile wallet. `mintAccountKeySet` mints the whole key set
-locally: Space id, client seed, user key, did:webvh update-key seeds.
-`ensureAccountGenesis` runs the ordered ceremony: Space provisioning under
-this client's did:key, the did:web key map, the did:webvh genesis, the user
-key roster (strictly after the DID publication), and key epoch[0] on every
-encrypted collection. Every stage detects its own completion from durable
-state, so a torn run heals by re-running at the next login.
+Every WAS signup runs the credential-anchored establishment below, whose
+genesis order promotes the Space controller inline. It mints no enrolled
+client, so the account lands ladder-anchored and is reachable by the
+credential alone from any browser. The plain genesis
+(`ensureAccountGenesis`) is the other path: a no-WAS deployment's signup,
+and the login-time heal for any account it provisioned. It is described at
+the end of this section.
 
-`StorageManager.#provisionUserCollections` is the one caller. It supplies
-did:web provisioning as the ceremony's `provideDidWebKeys` closure and the
-roster store builder as `rosterStoreFor`, adopts the published DID in
-`onDidPublished` (which also drops the verified-log memo), and maps
-per-stage failures onto warns. A session with no did:webvh (the flag off, no
-keystore agent, or no client update keys / user key) keeps the reduced path:
-Space provisioning, key epochs, did:web. A Space that never came up is the
-one fatal stage: `AccountGenesisSpaceError` is rethrown and login fails.
-
-Freewallet's own flow keeps the keyring bind before any data Space exists.
-That path is now the no-WAS deployment's plain signup plus the login-time
-heal for any account this ceremony provisioned. Every WAS signup runs the
-credential-anchored establishment below instead, whose genesis order
-promotes the controller inline. `ensureAccountGenesis` is called with
-`promoteController: false`, and `ensurePromotedController` promotes and
-heals on that reduced path. The plain passphrase signup's own `userExists`
-probe and its pointer-backfill step are gone. The establishment's
-create-nothing probe (`fetchTransientKeyring`) is the one signup-time
-existence check left on a WAS deployment.
-
-**The credential-anchored variant.** Every WAS signup -- passphrase or
+**The credential-anchored establishment.** Every WAS signup -- passphrase or
 passkey, remembered or not -- runs this establishment first, through
 wallet-core's `establishCredentialAnchoredAccount`
 (`@interop/wallet-core/clientAnnex`, wrapping
@@ -806,23 +832,23 @@ orchestrator, supplying only the app-specific hooks: the unlock-record codec
 builder, the KMS/did:web thunk and keystore-promotion closure, and the
 callers' registry-write `beforePromotion` hook.
 
-Entry paths. A non-remembered browser continues into the ordinary transient
+Entry paths. A non-remembered browser continues into the transient
 composition below, with zero local residue. A `rememberBrowser: true` signup
 (the e2e seam today; the signup form's remember choice when it lands)
-follows the establishment with the ordinary remembered login, whose
-self-enrollment makes this browser an enrolled client from the record just
-written -- two loud log entries on top of the establishment's own. That
-login carries nothing over: it builds its own pin store and meets the
-account log at first contact, like every other login. The
-credential-anchored bind advances its record stamp past the served record's
-stamp alone. A signup torn before the self-enrollment is resumed by a later
-`rememberBrowser: true` attempt, which re-runs the establishment from the
-record's own ladder seed and then self-enrolls; "The transient login" below
-covers the same heal's non-remembered entry. The passkey signup is the
-identical fold under the WebAuthn PRF-derived credential: WebAuthn `create`,
-then this establishment, then the remembered passkey login. Registering a
-passkey remembers the browser by construction, so that flow already ran
-remembered outright, and it too begins here now.
+follows the establishment with the remembered login, whose self-enrollment
+makes this browser an enrolled client from the record just written -- two
+loud log entries on top of the establishment's own. That login carries
+nothing over: it builds its own pin store and meets the account log at first
+contact, like every other login. The credential-anchored bind advances its
+record stamp past the served record's stamp alone. A signup torn before the
+self-enrollment is resumed by a later `rememberBrowser: true` attempt, which
+re-runs the establishment from the record's own ladder seed and then
+self-enrolls; "The transient login" below covers the same heal's
+non-remembered entry. The passkey signup is the identical fold under the
+WebAuthn PRF-derived credential: WebAuthn `create`, then this establishment,
+then the remembered passkey login. Registering a passkey remembers the
+browser by construction, so that flow already ran remembered outright, and
+it too begins here now.
 
 The Space is bootstrapped under the ladder VM's bare did:key
 (`ladderVmAgent`), re-derivable from the record's ladder seed, so a tab
@@ -869,17 +895,48 @@ mirroring the Space's. The stage is best-effort with a timeout: a failed or
 hung KMS leaves the account keystore-less, Settings shows the state, and a
 later keystore-creation pass heals it.
 
+**The plain genesis.** `ensureAccountGenesis` is shared with the mobile
+wallet. `mintAccountKeySet` mints the whole key set locally: Space id,
+client seed, user key, did:webvh update-key seeds. The ceremony runs in
+order: Space provisioning under this client's did:key, the did:web key map,
+the did:webvh genesis, the user key roster (strictly after the DID
+publication), and key epoch[0] on every encrypted collection. Every stage
+detects its own completion from durable state, so a torn run heals by
+re-running at the next login.
+
+`StorageManager.#provisionUserCollections` is the one caller. It supplies
+did:web provisioning as the ceremony's `provideDidWebKeys` closure and the
+roster store builder as `rosterStoreFor`, adopts the published DID in
+`onDidPublished` (which also drops the verified-log memo), and maps
+per-stage failures onto warns. A session with no did:webvh (the flag off, no
+keystore agent, or no client update keys / user key) keeps the reduced path:
+Space provisioning, key epochs, did:web. A Space that never came up is the
+one fatal stage: `AccountGenesisSpaceError` is rethrown and login fails.
+
+Freewallet's own flow keeps the keyring bind before any data Space exists.
+That path is now the no-WAS deployment's plain signup plus the login-time
+heal for any account this ceremony provisioned. `ensureAccountGenesis` is
+called with `promoteController: false`, and `ensurePromotedController`
+promotes and heals on that reduced path. The plain passphrase signup's own
+`userExists` probe and its pointer-backfill step are gone. The
+establishment's create-nothing probe (`fetchTransientKeyring`) is the one
+signup-time existence check left on a WAS deployment.
+
 ## Session persistence
 
-Sessions are in-memory only. A fresh login builds the whole `Session`: the
-root `keyAgent` (from this client's stored seed), the user-key-backed vault
-KAK, and the `zcapClient` signing every WAS request with the root key.
-Nothing live is written to disk unwrapped -- the client seed and user key
-persist only inside the wrapped client-key record -- so a reload drops the
-session. The vault is unlocked while a session exists and gone once it ends;
-there is no "locked vault" state. Navigation to the dashboard is gated on
-`session.storageReady` alone; the login-time registry passes run afterward
-on `session.registryReady` (see "Session & auth flow").
+Sessions are in-memory only. A fresh login builds the whole `Session`: a
+`keyAgent`, the user-key-backed vault KAK, and the `zcapClient` signing
+every WAS request. A transient login, the default, builds it from a
+per-visit key minted in tab memory and the user key unwrapped from the
+credential's standing roster wrap, and persists none of it. A remembered
+login builds it from this client's stored seed and the cached user key, and
+its `zcapClient` signs with that root key. Nothing live is written to disk
+unwrapped: the client seed and user key persist only inside the wrapped
+client-key record, so a reload drops the session. The vault is unlocked
+while a session exists and gone once it ends; there is no "locked vault"
+state. Navigation to the dashboard is gated on `session.storageReady` alone;
+the login-time registry passes run afterward on `session.registryReady` (see
+"Session & auth flow").
 
 **The persistence strategy** (`src/session/persistence.ts`). Which storage
 tier a session may write to is decided once at login, by the typed
@@ -892,13 +949,11 @@ descriptor/meta cache pair (one instance per scope per session), and the
 ride it too, without varying by tier: they are in memory on both variants
 (`decisions/0012-no-durable-continuity-pins.md`).
 
-The browser-local variant is the `freewallet-session` database, the
-localStorage caches, and the persistent `writerId`. It alone carries the
-`idb` factory, so code needing that database must hold it. The in-memory
-variant, a public-terminal visit, dies with the tab: no member reaches the
-session database, and the login carrying it skips storage provisioning, the
-KMS keystore, the login-time roster read, every login-time sweep, and the
-bare-Space-URL `userExists` probe.
+The in-memory variant is the default, carried by every transient login. Its
+whole reach is the pre-session in-memory store family, and it dies with the
+tab. No member reaches the session database. The login carrying it skips
+storage provisioning, the KMS keystore, the login-time roster read, every
+login-time sweep, and the bare-Space-URL `userExists` probe.
 
 The in-memory variant also carries the visit's client-annex identity -- the
 annex DID every WAS request signs under, and the generation delegation every
@@ -909,6 +964,12 @@ plus that identity (`inMemorySessionPersistence({ stores, clientAnnex })`).
 Session assembly reads both off the strategy rather than a separate option,
 so the storage tier and its annex signing are declared exactly once. They
 surface to the storage layer as `profile.invocationCapability`.
+
+The browser-local variant is the opt-in one, carried by a login on a
+browser that holds a client-key record and by a guest session. It is the
+`freewallet-session` database, the localStorage caches, and the persistent
+`writerId`. It alone carries the `idb` factory, so code needing that
+database must hold it.
 
 Global UI prefs (theme, language) are not session state and ride a sibling
 seam (`src/lib/prefsStorage.ts`): during a transient session, pref writes
@@ -929,9 +990,9 @@ per-user database. `StorageManager.initStorageClients` builds one only for a
 session on the browser-local strategy, and a replica-less session serves
 every synced-collection operation through the remote-direct backend, over
 the remote WAS collections. The sync controller never starts for a session
-with no local replica; `StorageManager.hasLocalReplica` is its gate. A
-transient CHAPI popup session is this same shape, so nothing provisions a
-replica in the popup's partitioned bucket.
+with no local replica; `StorageManager.hasLocalReplica` is its gate. The
+transient CHAPI popup is this same shape; see "Remote-direct popup
+storage".
 
 The remote stack also takes a delegated authority. `WASRemoteStore` accepts
 an optional invocation capability, threaded from
@@ -945,13 +1006,13 @@ option, every request invokes the root capability.
 **The transient login (the default on a non-remembered browser).** Both
 keyring login entry points run one post-KDF routing decision
 (`routeUnlockLogin` in `src/session/transientLogin.ts`). With a WAS server
-configured, a browser holding this credential's client-key record proceeds
-remembered; one holding none takes the transient composition. A record whose
-stamped `pointerDid` names a different account than the unlock record points
-at is stale residue of a prior account under a reused passphrase: it is
-wiped and the login re-routes once as if the browser held none. A
-PENDING-shape record counts as remembered, the resume being its one mender;
-the resume's discard outcome deletes it, so the next attempt probes
+configured, a browser holding no client-key record for this credential takes
+the transient composition; one holding such a record proceeds remembered. A
+record whose stamped `pointerDid` names a different account than the unlock
+record points at is stale residue of a prior account under a reused
+passphrase: it is wiped and the login re-routes once as if the browser held
+none. A PENDING-shape record counts as remembered, the resume being its one
+mender; the resume's discard outcome deletes it, so the next attempt probes
 record-less again.
 
 The record probe is create-nothing. `hasClientKeyRecord` checks
@@ -964,7 +1025,7 @@ browser holding the record proceeds remembered with no notice (FW-214).
 The CHAPI popup runs this same table with the Storage Access API handle as
 the probe's factory, so a remembered browser takes the remembered route from
 the popup and a denied or unsupported handle routes transient (see "The
-popup follows the browser's ratchet state").
+popup follows the browser's routing").
 
 An explicit `rememberBrowser` input forces either side. `true` is the
 programmatic remembered entry, the standing self-enrollment: a remembered
@@ -1077,12 +1138,19 @@ The strategy also carries the tier refusals. Update-key rotation requires
 the browser-local variant outright (`BrowserLocalSessionRequiredError`): its
 subject is this browser's own update key, and its persist-before-publish
 invariant needs a client-key record to persist into. The account-management
-ceremonies (passphrase change, passphrase/passkey add and remove, client
+ceremonies refuse from a transient session with `StepUpRequiredError`:
+passphrase change, passphrase add, passkey add, passkey remove, client
 revocation, enrollment approval, recovery-code issuance and revocation,
-account deletion, Space export and import) refuse from a transient session
-with `StepUpRequiredError`. They are reachable from a public terminal only
-inside the step-up ceremony, a loudly enrolled in-memory client bracketed by
-ladder-signed enroll and retire entries, designed but not yet built.
+account deletion, the forget ceremony and the last-client transition, and
+Space export and import.
+
+That is what the default session type cannot reach today. None of those
+ceremonies can be performed from a transient session at all, so performing
+one takes a remembered login on an enrolled client. On an account that
+never remembers a browser they are unreachable. The planned answer is the
+step-up ceremony (FW-208), a loudly enrolled in-memory client bracketed by
+ladder-signed enroll and retire entries. It is designed and not yet built,
+so it closes none of this today.
 
 Contacts ARE reachable in a transient session: the remote-direct backend
 serves all seven contact operations directly against the remote `contacts`
@@ -1187,9 +1255,9 @@ wrap and the document VM inherit that point-to-point verification.
 
 The flow, quorum-of-one (any single enrolled client can enroll):
 
-1. **Enrollee** (login page, from the not-enrolled state): "Connect this
-   browser" mints the key set (`mintEnrollmentRequest`) and shows the code.
-   Nothing is written yet.
+1. **Enrollee** (the login page's connect-this-browser card, on a
+   non-remembered browser): "Connect this browser" mints the key set
+   (`mintEnrollmentRequest`) and shows the code. Nothing is written yet.
 2. **Enrolling client** (Settings > Connect another wallet): pastes the
    code, compares the fingerprint, approves (`approveEnrollment`). Writes
    push rather than pull, in the recovery-anchor order of decryption
@@ -1208,7 +1276,7 @@ The flow, quorum-of-one (any single enrolled client can enroll):
    `<did:webvh>#<multibase>` key, unwraps the user key, persists the key set
    into the local client-key record under the passphrase's unlock layer
    (stamping the account controller, so the login-time identity check binds
-   the record to it), and logs in as an ordinary enrolled client.
+   the record to it), and logs in as an enrolled client.
 
 **The connect code's keys must be canonical.** The enrolling client refuses
 a code whose key-agreement key is not the canonical X25519 twin of its
@@ -1339,33 +1407,11 @@ and the delegation writes the self-enrolling continuation. That is a
 **add-and-retire** entry. The continuation enrolls what the login's routing
 decision would.
 
-With `rememberBrowser` (the programmatic remember entry) a fresh ordinary
-client key set is minted. The continuation's required `onCommitted` seam,
-between the two entries, writes the successors: the new passphrase's unlock
-record in the standing LAYOUT (bridge, ladder seed, its standing property
-completing post-pivot), the browser-local PENDING client-key record (seeds,
-controller, `pointerDid`, the pending group of built-on head, unwrap key and
-replacement-code bytes; no user key), and the replacement code's record and
-bridge. A colliding unlock record (another credential's) refuses up front.
-The add-and-retire entry then brings in the new client, retires the spent
-code's inventory, and adds the replacement code's. The tail then makes the
-passphrase standing: roster wrap, then commitment and rung-0 entry, before
-the rotation. The user key unwraps from the code's wrap and mandatorily
-rotates off it. The registry mutation (spent entry out, successors in) runs
-between the re-seal and the cascade. The replacement code is pushed hard,
-its save confirm completing the local record and clearing the carrier. The
-spent code's unlock Space is deleted, so a spent code thereafter fails
-distinctly. An ordinary enrolled login follows. A post-entry tab death
-leaves the pending record for the next login's spend resume: escrows
-re-derived from the unwrap key, standing and registry backfilled, the code
-re-displayed until confirmed saved, the sweep completing rotation and
-cascade.
-
-The DEFAULT on a non-remembered browser is the **transient recovery
-variant** (wallet-core's `recoverWebvhLadderAnchored`): no enrolled client
-is minted anywhere. The add-and-retire entry publishes the fresh
-credential's ladder VM in the new client's place (`assertionMethod` and
-`capabilityDelegation` only), beside the new passphrase's `keyAgreement`
+On a non-remembered browser, the default, the continuation is the
+**transient recovery** (wallet-core's `recoverWebvhLadderAnchored`). No
+enrolled client is minted anywhere. The add-and-retire entry publishes the
+fresh credential's ladder VM in the new client's place (`assertionMethod`
+and `capabilityDelegation` only), beside the new passphrase's `keyAgreement`
 commitment and the replacement code's inventory, and retires every standing
 ladder VM (the stale-third-party retirement no other ceremony performs). The
 account lands client-less and ladder-anchored.
@@ -1411,6 +1457,28 @@ sibling). It would run the same append under the ceremony-tail license's
 still-unused shot, and is not built yet. A rotation torn mid-fan-out on a
 client-less account has no repair either, and a stranded collection stays
 keyed to the spent code until the next remembered login or a spend re-run.
+
+The remembered spend, the `rememberBrowser` entry, differs from here on. Its
+continuation mints a fresh enrolled-client key set instead. The
+continuation's required `onCommitted` seam, between the two entries, writes
+the successors: the new passphrase's unlock record in the standing LAYOUT
+(bridge, ladder seed, its standing property completing post-pivot), the
+browser-local PENDING client-key record (seeds, controller, `pointerDid`,
+the pending group of built-on head, unwrap key and replacement-code bytes;
+no user key), and the replacement code's record and bridge. A colliding
+unlock record (another credential's) refuses up front. The add-and-retire
+entry then brings in the new client, retires the spent code's inventory, and
+adds the replacement code's. The tail then makes the passphrase standing:
+roster wrap, then commitment and rung-0 entry, before the rotation. The user
+key unwraps from the code's wrap and mandatorily rotates off it. The
+registry mutation (spent entry out, successors in) runs between the re-seal
+and the cascade. The replacement code is pushed hard, its save confirm
+completing the local record and clearing the carrier. The spent code's
+unlock Space is deleted, so a spent code thereafter fails distinctly. A
+remembered login follows. A post-entry tab death leaves the pending record
+for the next login's spend resume: escrows re-derived from the unwrap key,
+standing and registry backfilled, the code re-displayed until confirmed
+saved, the sweep completing rotation and cascade.
 
 Revoking a code from Settings is the issuance reversal and is REAL, since
 the secret was only ever a pointer to the record: document entry out, the
@@ -1745,16 +1813,14 @@ Flow:
 The CHAPI pages (`src/pages/chapi/`) are not wrapped in `ProtectedRoute` and
 do not use the main app layout.
 
-**The popup follows the browser's ratchet state.** The popup does not choose
-between the remembered and transient entries. It runs the same post-KDF
+**The popup follows the browser's routing.** The popup does not choose
+between the transient and remembered entries. It runs the same post-KDF
 routing every login runs (`routeUnlockLogin`, see "Session persistence"),
 with the Storage Access API handle threaded in as the record probe's `idb`
-factory. A granted handle probes the FIRST-PARTY client-key record, so a
-remembered browser proceeds as that enrolled client. A denied handle probes
-the partitioned bucket instead, finds no record, and routes transient,
-exactly as a non-remembered browser does. So does every engine that offers
-no unpartitioned-IndexedDB request at all, which is Safari's and Firefox's
-steady state. That one uniform fallback is
+factory. A denied handle probes the partitioned bucket, finds no record,
+and routes transient, exactly as a non-remembered browser does. So does
+every engine that offers no unpartitioned-IndexedDB request at all, which
+is Safari's and Firefox's steady state. That one uniform routing is
 `decisions/0009-popup-denied-storage-access-goes-transient.md`, reached by
 construction rather than by a popup arm of the routing. A transient popup
 session composes like any other: the client-annex enrollment, the standing
@@ -1762,6 +1828,9 @@ roster wrap, the replica-less storage variant. Its App Connect response VP
 holds and signs as the visit key's bare did:key. The annex verification
 method form (`<clientAnnexDid>#<vm>`) covers two things: the visit's WAS
 invocations, and the grants the visit delegates.
+
+A granted handle is the other arm. It probes the FIRST-PARTY client-key
+record, so a remembered browser proceeds as that enrolled client.
 
 The popup marker is a `popup` option on `loginWithPassphrase`,
 `loginWithPasskey`, `sessionFromKeyringHit`, and `initSessionFromSeed`. It
@@ -1792,15 +1861,15 @@ top-level wipe reaches.
 **Remote-direct popup storage.** The popup runs in a third-party iframe, so
 its own IndexedDB is a partitioned bucket no `SyncController` ever drives: a
 credential stored there would be stranded and a credential list would always
-come back empty. A remembered popup session therefore routes every
-synced-collection operation to a `RemoteDirectStore`
-(`src/stores/remoteDirectStore.ts`, selected via `remoteDirect`, threaded
-from the `popup` option) rather than to the local `BrowserStore`. It is on
-the browser-local strategy, so it still constructs that `BrowserStore`, and
-the partitioned RxDB database is created even though nothing is ever routed
-to it. A transient session is replica-less and reaches the same backend that
-way, so a transient popup visit provisions nothing in the partitioned
-bucket.
+come back empty. A transient popup session is replica-less, so it reaches
+the remote-direct backend the way every transient session does, and
+provisions nothing in the partitioned bucket. A remembered popup session
+gets there by routing: every synced-collection operation goes to a
+`RemoteDirectStore` (`src/stores/remoteDirectStore.ts`, selected via
+`remoteDirect`, threaded from the `popup` option) rather than to the local
+`BrowserStore`. It is on the browser-local strategy, so it still constructs
+that `BrowserStore`, and the partitioned RxDB database is created even
+though nothing is ever routed to it.
 
 That backend serves credential, history, and public-link reads and writes
 straight over the remote WAS collections
@@ -2281,18 +2350,18 @@ account that may never run one is an open gap instead, listed below.
 
 | Ceremony                      | Entry point                                | Module                                                            | Shared half                 | Mender                                                                                      |
 | ----------------------------- | ------------------------------------------ | ----------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------- |
-| Account genesis (plain)       | no-WAS signup; healed at every login       | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                              |
-| Credential-anchored genesis   | every WAS signup (the default entry, non-remembered) | `src/session/credentialAnchoredGenesis.ts`                        | `/clientAnnex`              | re-run; the transient login's heal branch                                                   |
+| Credential-anchored genesis   | every WAS signup, remembered or not (the default) | `src/session/credentialAnchoredGenesis.ts`                        | `/clientAnnex`              | re-run; the transient login's heal branch                                                   |
+| Recovery spend (remembered and transient) | `/recover`                                 | `src/session/recovery.ts`                                         | `/recovery`, `/clientAnnex` | remembered: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)                    |
 | Self-enrollment at login      | remembered login on a fresh browser        | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex`              | pending record pre-pivot; the next remembered login's resume                                |
 | Client enrollment (two-party) | Settings > Connected wallets, login page   | `src/components/EnrolledClientsSection.tsx`                       | `/enrollment`               | re-run with the same connect code                                                           |
 | Client revocation + epoch cascade | Settings > Connected wallets               | `src/session/revocation.ts`                                       | `/clients`                  | re-run; the cascade-completion sweep                                                        |
 | Recovery-code issuance        | Settings > Recovery codes                  | `src/session/recovery.ts`                                         | `/recovery`                 | re-run before the confirm; a tear after the document entry has no mender                    |
-| Recovery spend (remembered and transient) | `/recover`                                 | `src/session/recovery.ts`                                         | `/recovery`, `/clientAnnex` | remembered: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)                    |
 | Recovery-code revocation      | Settings > Recovery codes                  | `src/session/recovery.ts`                                         | `/recovery`                 | re-run; the cascade-completion sweep                                                        |
 | Unlock-credential rotation    | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts`                               | `/unlock`                   | torn-retirement repair at the next passphrase login; remembered-login sweep; re-seal repair |
 | Forget ceremony               | Settings > Connected wallets, own row      | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next remembered login                                            |
 | Last-client transition        | same row, `lastClient` confirm             | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run; the re-mint refusal is a retryable stop                                              |
 | Update-key rotation           | Settings                                   | `src/session/accountSettings.ts`                                  | `/webvh`                    | re-run (persist-before-publish)                                                             |
+| Account genesis (plain)       | a no-WAS deployment's signup only; healed at every login | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                              |
 | Account deletion              | Settings                                   | `src/session/accountSettings.ts` + `wipe.ts`                      | app-side phase order        | re-run; a wipe failure after the unlock-method walk is accepted                              |
 | Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies | `src/session/wipe.ts`                                             | app-side                    | re-probe verification; the `unverified` report                                              |
 | Step-up ceremony              | designed, not built                        | ---                                                               | ---                         | ---                                                                                         |
@@ -2641,21 +2710,21 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   client-less account. Always qualified by its torn state ("the
   torn-retirement repair", `repairTornPassphraseRetirement`), never bare.
   Avoid: completer, finisher, fixup.
-- **Client annex** (`clientAnnex`) -- the transient-session counterpart of
-  an enrolled client for the public-computer case: a did:webvh whose log
-  lives in a capability-gated auxiliary Space beside the account Space,
-  recording per-visit transient verification methods in GC'd **generations**
-  rather than permanent account-log entries ("the annex" in prose). Enrolled
-  clients live in the account document; delegated and transient clients live
-  in the annex, which never appears in that document. Transient keys invoke
-  and delegate as `<clientAnnexDid>#<vm>`. A per-visit transient VM
-  publishes under `capabilityInvocation` and `capabilityDelegation`, and
-  under no other relation: a transient session invokes WAS requests and also
-  mints App Connect grants, and a delegation proof verifies against
+- **Client annex** (`clientAnnex`) -- the transient session's counterpart of
+  an enrolled client: a did:webvh whose log lives in a capability-gated
+  auxiliary Space beside the account Space, recording per-visit transient
+  verification methods in GC'd **generations** rather than permanent
+  account-log entries ("the annex" in prose). Enrolled clients live in the
+  account document; delegated and transient clients live in the annex, which
+  never appears in that document. Transient keys invoke and delegate as
+  `<clientAnnexDid>#<vm>`. A per-visit transient VM publishes under
+  `capabilityInvocation` and `capabilityDelegation`, and under no other
+  relation: a transient session invokes WAS requests and also mints App
+  Connect grants, and a delegation proof verifies against
   `capabilityDelegation` in the current annex document.
 - **Generation delegation** -- the one Space-scoped zcap per annex
   generation, delegated to the annex DID by the enrolled client that mints
-  the generation, or by the ladder VM on an account with no enrolled client.
+  the generation, or by the ladder VM on a credential-anchored account.
   Transient keys invoke under it, and an App Connect grant from a transient
   session chains one deeper (root, generation delegation, app). That grant
   is signed by the visit key under its annex verification method, which is
@@ -2709,8 +2778,9 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   the section of this name). Two variants, each named for the tier it
   reaches: browser-local (the `freewallet-session` database and the
   localStorage caches) and in-memory. A write site consults no flag. Not the
-  remembered / transient axis: a guest session is browser-local and is not
-  remembered. Avoid: durability, posture, mode.
+  remembered / transient axis, though the two usually agree: a transient
+  session is always in-memory, while a guest session is browser-local and
+  is not remembered. Avoid: durability, posture, mode.
 - **Persistence strategy** -- the typed object at `profile.persistence`
   (FW-369 moves it onto the session) through which every tier-sensitive
   write travels. The variant IS the type, so a write site never branches: an
@@ -2718,24 +2788,49 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   (`decisions/0001-no-memory-overlay-storage-fork.md`). Both continuity pin
   stores ride it in memory whichever variant it is, so the strategy carries
   them without deciding them
-  (`decisions/0012-no-durable-continuity-pins.md`). See "Session
-  persistence". Avoid: persistence handle, durability handle ("handle" in
-  this repo is the Storage Access API's).
+  (`decisions/0012-no-durable-continuity-pins.md`). A transient session
+  carries the in-memory variant, which also holds the visit's client-annex
+  identity. See "Session persistence". Avoid: persistence handle, durability
+  handle ("handle" in this repo is the Storage Access API's).
+- **Transient session** -- the default session. On a WAS deployment, with no
+  explicit `rememberBrowser`, a login on a browser that holds no client-key
+  record for the credential typed takes it; a no-WAS deployment always
+  proceeds on the browser-local tier. It mints a per-visit key in tab
+  memory, enrolls that key into the account's client annex generation,
+  unwraps the user key from the credential's standing roster wrap, and runs
+  on the in-memory storage tier with no local replica. It writes nothing to
+  this browser and ends with the tab. It is a complete state rather than a
+  step toward enrollment: an account can serve nothing but transient
+  sessions for its whole life. See "The transient login" under "Session
+  persistence", and the tier refusals there for the ceremonies it cannot
+  reach. Avoid: ephemeral session, temporary session, and any name for a
+  physical setting.
+- **Credential-anchored account** -- an account whose authority is anchored
+  in a standing unlock credential's ladder rather than in an enrolled
+  client. Every WAS signup produces one (see "The credential-anchored
+  establishment" under "Account genesis"), a transient recovery returns an
+  account to that shape, and the last-client transition takes an enrolled
+  account there. Its document publishes the credential's ladder VM and no
+  enrolled client, so its log state is **ladder-anchored** and every visit
+  to it is a transient session unless someone opts into remembering a
+  browser. Avoid: client-less signup, transitional account.
 - **Remembered browser** -- a browser holding a client-key record for an
   unlock credential, so a login on it proceeds as (or self-enrolls into) an
   enrolled client. Remembering is a deliberate opt-in (`rememberBrowser`),
   undone by the forget ceremony, and lost with a cleared profile:
   browser-local state rather than a durable property of the account. A login
   on one is a **remembered login**, its session a **remembered session**; a
-  **non-remembered** browser defaults to the transient login. Avoid: durable
-  browser, durable login, trusted browser, persistent login.
+  **non-remembered** browser takes the transient session (see Transient
+  session), which is the default. Avoid: durable browser, durable login,
+  trusted browser, persistent login.
 - **Enrolled client** -- a wallet client published in the account document,
   keyed on `capabilityInvocation` (see "The did:webvh identity"). It holds a
   client-key record, a wrap in the user key roster, and its own did:webvh
   update key. Contrast the **transient client**, a per-visit key recorded in
-  a client annex generation. Both are caches (see Client): enrollment buys a
-  local replica and root-tier authority, not permanence. Avoid: durable
-  client, permanent client.
+  a client annex generation and held by the default session (see Transient
+  session). Both are caches (see Client): enrollment buys a local replica
+  and root-tier authority, not permanence. Avoid: durable client, permanent
+  client.
 - **StorageManager** -- the facade class in `src/stores/storageManager.ts`.
   Routes all wallet reads and writes to the session's
   `SyncedCollectionStore` backend (the local `BrowserStore`, or the

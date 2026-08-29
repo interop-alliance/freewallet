@@ -4,6 +4,12 @@
 
 ### Changed
 
+- ARCHITECTURE.md teaches the transient login and the credential-anchored
+  establishment as the defaults. Session and auth flow, Session persistence,
+  Account genesis, Recovery codes, CHAPI integration, and the Ceremony
+  inventory each lead with them. The Glossary gains entries for the transient
+  session and the credential-anchored account, and definitions no longer name
+  a physical setting such as "public computer". Documentation only.
 - A transient visit's readiness stage renews the unlock record's bridge
   delegation, through `@interop/wallet-core` 0.62.0's
   `ensureCredentialClientAnnexGeneration`: the same expiry-or-signer-rot
