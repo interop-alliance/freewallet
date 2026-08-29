@@ -302,11 +302,13 @@ function refuseMissingGeneration(
 
 /**
  * The composition's client-annex generation-readiness stage: one converging
- * ensure over the four durable states that make the annex unreachable from
+ * ensure over the five durable states that make the annex unreachable from
  * a credential-only visit (no `#DelegatedClients` pointer, a collected or
  * never-minted generation, a stale generation delegation, a missing or
- * misaimed sibling delegation). It is run on every visit, not only a broken
- * one: on a healthy account it is a pure no-op report, and running it is
+ * misaimed sibling delegation, and a bridge delegation that is expired,
+ * inside its renewal window, or signed by a key the account document no
+ * longer lists under `capabilityDelegation`). It is run on every visit, not
+ * only a broken one: on a healthy account it is a pure no-op report, and running it is
  * what gives the renew-precedes-mint behavior the grant path depends on.
  *
  * Everything it writes is ladder-signed, so an account whose document does
@@ -363,25 +365,31 @@ async function ensureClientAnnexGenerationReady({
           serverUrl: pointer.host,
           zcapClient: didKeyZcapClient({ keyAgent })
         }),
-      // The account log through the record's own bridge delegation: pointer
-      // entries publish with `logOnly: true`, which is all the bridge can do.
-      idStore: unlockLogStore({
-        pointer,
-        delegation: standing.delegation,
-        zcapClient
-      }) as WebvhIdStore,
-      onRebindRecord: async ({ delegatedClients }) => {
+      // The bridge the record carries today. The ensure renews it in place
+      // when it has expired, entered its renewal window, or lost its
+      // signer, and hands the usable one back on the outcome.
+      delegation: standing.delegation,
+      // The account log through whichever bridge delegation is usable:
+      // pointer entries publish with `logOnly: true`, which is all a bridge
+      // can do.
+      idStoreFor: ({ delegation }) =>
+        unlockLogStore({
+          pointer,
+          delegation,
+          zcapClient
+        }) as WebvhIdStore,
+      onRebindRecord: async ({ delegation, delegatedClients }) => {
         const rebind = found.rebindStandingRecord
         if (!rebind) {
           // Invariant, not a user state: every standing hit carries the
-          // re-bind closure, and a fresh sibling nothing re-seals into the
-          // record would strand the credential that just minted it.
+          // re-bind closure, and a fresh bridge or sibling nothing re-seals
+          // into the record would strand the credential that just minted it.
           throw new Error(
             'Invariant violated: the transient keyring hit carries no record ' +
               're-bind closure, so a fresh sibling delegation cannot be sealed.'
           )
         }
-        await rebind({ delegation: standing.delegation, delegatedClients })
+        await rebind({ delegation, delegatedClients })
       },
       ...(standing.delegatedClients
         ? { delegatedClients: standing.delegatedClients }
@@ -405,7 +413,9 @@ async function ensureClientAnnexGenerationReady({
  * 2. Verify the account log under the visit's in-memory pins, then run the
  *    client-annex generation-readiness stage
  *    (`ensureClientAnnexGenerationReady`): the
- *    ladder-signed ensure that mints or renews what the visit needs, with
+ *    ladder-signed ensure that mints or renews what the visit needs (the
+ *    record's own bridge delegation included, re-sealed into the record),
+ *    with
  *    the pointed-generation-and-record-sibling fallback behind it and the
  *    typed refusals behind that.
  * 3. Mint a per-visit key set in memory and enroll it into the generation
@@ -579,6 +589,18 @@ export async function transientSessionFromKeyringHit({
     persistence
   })
   const healedGenerationDelegation = readiness.outcome?.generationDelegation
+  // The bridge this visit may still write the log through: the renewed one
+  // when the readiness stage re-minted it, the record's own otherwise.
+  const usableBridge = readiness.outcome?.delegation ?? standing.delegation
+  if (readiness.outcome?.bridgeResealError !== undefined) {
+    // A bridge-only re-seal failure denies this visit nothing: the fresh
+    // bridge is minted offline and already served the pointer writes above.
+    log.warn(
+      'Could not re-seal the renewed bridge delegation into the unlock ' +
+        'record; the next visit retries',
+      { err: readiness.outcome.bridgeResealError }
+    )
+  }
   let siblingDelegation: IZcap
   let annexSpaceId: string
   if (readiness.outcome) {
@@ -778,7 +800,7 @@ export async function transientSessionFromKeyringHit({
       rosterStore: rosterStoreSignedBy(await ladderVmAgent({ ladderSeed })),
       registry: {
         unlockSpaceId: found.unlockSpaceId,
-        delegation: standing.delegation,
+        delegation: usableBridge,
         delegatedClients: siblingDelegation,
         ...(found.unlockKeyAgreementKeyId
           ? { unlockKeyAgreementKeyId: found.unlockKeyAgreementKeyId }
@@ -942,7 +964,7 @@ export async function transientSessionFromKeyringHit({
   }
   session.profile.ladderSeed = ladderSeed
   session.profile.standingUnlock = {
-    delegation: standing.delegation,
+    delegation: usableBridge,
     delegatedClients: siblingDelegation,
     standingClient: found.standingClient,
     unlockSpaceId: found.unlockSpaceId,

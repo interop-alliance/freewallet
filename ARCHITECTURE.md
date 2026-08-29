@@ -983,15 +983,19 @@ The readiness stage (`ensureClientAnnexGenerationReady`, over wallet-core's
 `ensureCredentialClientAnnexGeneration`) runs on every visit rather than
 only a broken one: a no-op report on a healthy ladder-anchored account,
 otherwise a ladder-signed mend that mints a missing generation, renews an
-expiring or expired generation delegation, and re-mints a missing or
-misaimed sibling delegation. It re-seals the fresh sibling into the unlock
-record through its re-bind closure (`standingRecordRebinder`, shared between
-the remembered and transient shapes; the transient shape writes the remote
-record only, nothing local). A mend that moves the account-log pointer
-re-verifies the log before enrollment. On an account whose document anchors
-no ladder VM of this credential's (enrolled clients, or another credential's
-ladder) the stage refuses with `ClientAnnexGenerationUnavailableError`,
-resolved as a value: the composition falls back to the prior path, the
+expiring or expired generation delegation, re-mints a missing or misaimed
+sibling delegation, and renews the record's own bridge delegation when it
+has expired, entered its 30-day renewal window, or lost its signer (the key
+left `capabilityDelegation`). It re-seals the fresh bridge and sibling into
+the unlock record through its re-bind closure (`standingRecordRebinder`,
+shared between the remembered and transient shapes; the transient shape
+writes the remote record only, nothing local). The visit then writes and
+stamps the renewed bridge rather than the served one. A mend that moves the
+account-log pointer re-verifies the log before enrollment. On an account
+whose document anchors no ladder VM of this credential's (enrolled clients,
+or another credential's ladder) the stage refuses with
+`ClientAnnexGenerationUnavailableError`, resolved as a value: the
+composition falls back to the prior path, the
 record's own `delegatedClients` sibling delegation and the pointed
 generation's embedded delegation.
 
@@ -2315,12 +2319,7 @@ document entry leaves a saved code that locates no account, plus a document
 `keyAgreement` entry and a roster wrap nothing names. The login sweep
 rotates the orphan wrap away, but the registry-driven health check cannot
 see the code, so the retire-and-reissue mender for the orphaned document
-entry is still unbuilt (see "Recovery codes"). A fifth is the bridge
-delegation's own one-year expiry on a client-less account: the readiness
-stage carries the bridge through verbatim while re-minting the sibling, and
-no remembered login runs there, so the credential's one log-write path
-simply lapses. The ladder VM stands on exactly those accounts and could sign
-the replacement, so this gap is missing code rather than missing authority.
+entry is still unbuilt (see "Recovery codes").
 
 Mender unreachable. A self-enrollment strikes every ladder VM in the entry
 that publishes the new client. Three artifacts signed under it stop

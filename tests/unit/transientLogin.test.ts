@@ -125,7 +125,10 @@ const CLIENT_ANNEX_DID =
 const GENERATION_DELEGATION = { id: 'urn:zcap:generation' }
 const SIBLING_DELEGATION = { id: 'urn:zcap:sibling' }
 
+const RECORD_BRIDGE = { id: 'urn:zcap:bridge' }
+
 const FRESH_SIBLING = { id: 'urn:zcap:sibling-fresh' }
+const FRESH_BRIDGE = { id: 'urn:zcap:bridge-fresh' }
 const FRESH_DELEGATION = { id: 'urn:zcap:generation-fresh' }
 
 /**
@@ -139,10 +142,12 @@ function ensureOutcome(
     clientAnnexDid: CLIENT_ANNEX_DID,
     generationDelegation: GENERATION_DELEGATION,
     delegatedClients: SIBLING_DELEGATION,
+    delegation: RECORD_BRIDGE,
     generationMinted: false,
     spaceMinted: false,
     delegationRenewed: false,
     siblingReminted: false,
+    bridgeReminted: false,
     ...overrides
   }
 }
@@ -174,7 +179,7 @@ function makeFound(
     createdAt: new Date().toISOString(),
     unlockSpaceId: 'unlock-space-1',
     standing: {
-      delegation: { id: 'urn:zcap:bridge' },
+      delegation: RECORD_BRIDGE,
       delegatedClients: SIBLING_DELEGATION,
       ladderSeed: new Uint8Array(32).fill(7)
     },
@@ -747,7 +752,10 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
     delete (found.standing as { delegatedClients?: unknown }).delegatedClients
     vi.mocked(ensureCredentialClientAnnexGeneration).mockImplementation(
       async ({ onRebindRecord }) => {
-        await onRebindRecord({ delegatedClients: FRESH_SIBLING as never })
+        await onRebindRecord({
+          delegation: RECORD_BRIDGE as never,
+          delegatedClients: FRESH_SIBLING as never
+        })
         return ensureOutcome({
           delegatedClients: FRESH_SIBLING,
           siblingReminted: true
@@ -824,6 +832,71 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
         })
       })
     )
+  })
+
+  it('hands the ensure the record bridge and a log-store factory', async () => {
+    primeHappyPath()
+    const { ensureCall, found } = await runComposition()
+    expect(ensureCall.delegation).toBe(found.standing!.delegation)
+    expect(typeof ensureCall.idStoreFor).toBe('function')
+    // The factory builds the account-log store over whichever bridge it is
+    // handed, not over the one the record happened to carry.
+    const store = ensureCall.idStoreFor({ delegation: FRESH_BRIDGE as never })
+    expect(typeof store.getIdResourceRaw).toBe('function')
+    expect(typeof store.putIdResource).toBe('function')
+  })
+
+  it('re-seals a renewed bridge and carries it into the session', async () => {
+    primeHappyPath()
+    const found = makeFound()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockImplementation(
+      async ({ onRebindRecord }) => {
+        await onRebindRecord({
+          delegation: FRESH_BRIDGE as never,
+          delegatedClients: SIBLING_DELEGATION as never
+        })
+        return ensureOutcome({
+          delegation: FRESH_BRIDGE,
+          bridgeReminted: true
+        }) as never
+      }
+    )
+    const { session } = await runComposition(found)
+    expect(found.rebindStandingRecord).toHaveBeenCalledWith({
+      delegation: FRESH_BRIDGE,
+      delegatedClients: SIBLING_DELEGATION
+    })
+    // The session stamps the bridge the outcome reports usable, so a
+    // mid-session stage writes the log through the renewed one.
+    expect(session.profile.standingUnlock!.delegation).toBe(FRESH_BRIDGE)
+  })
+
+  it('warns and proceeds when a bridge-only re-seal failed', async () => {
+    primeHappyPath()
+    const resealError = new Error('the unlock Space PUT failed')
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+      ensureOutcome({
+        delegation: FRESH_BRIDGE,
+        bridgeReminted: true,
+        bridgeResealError: resealError
+      }) as never
+    )
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+
+    const { session } = await runComposition()
+
+    // The visit needs nothing from the re-seal, so the login still assembles
+    // and stamps the fresh bridge the ensure reports usable.
+    expect(session.profile.standingUnlock!.delegation).toBe(FRESH_BRIDGE)
+    expect(capture.events).toContainEqual(
+      expect.objectContaining({
+        ns: 'fw:session:transient',
+        level: 'warn',
+        msg: expect.stringContaining('re-seal the renewed bridge delegation')
+      })
+    )
+    removeSink()
   })
 })
 

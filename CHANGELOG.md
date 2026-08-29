@@ -4,6 +4,13 @@
 
 ### Changed
 
+- A transient visit's readiness stage renews the unlock record's bridge
+  delegation, through `@interop/wallet-core` 0.62.0's
+  `ensureCredentialClientAnnexGeneration`: the same expiry-or-signer-rot
+  predicate the sibling delegation uses, signed by the ladder VM, re-sealed
+  into the record beside the sibling. A credential-anchored account's one
+  log-write path used to lapse at its own one-year expiry, since no
+  remembered login runs there to refresh it.
 - The standing-delegation refresh, the generation-delegation heals, and the
   recovery health check report signer rot when the signing key has left
   `capabilityDelegation`, through `@interop/wallet-core` 0.61.0. The shared
