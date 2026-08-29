@@ -591,21 +591,34 @@ describe('WASRemoteStore.ensureUserCollections', () => {
       name?: string
       encryption?: { scheme: string }
       force?: boolean
+      current?: unknown
     }> = []
     const setPublics: string[] = []
     // The 0.29.x ensure is non-clobbering: it describes first (a `null` here
     // means "absent", so every collection takes its creation path) and checks
     // the public policy before granting it.
+    //
+    // `configure` returns the description it wrote, as the real
+    // `Space.configure` does. That return is what `provisionWalletSpace`
+    // threads into every collection branch so the Space is ensured once
+    // rather than once per collection; a fake returning `undefined` sends
+    // each branch back to ensuring the Space itself, which passes while
+    // exercising the behavior the hoist replaced.
     const was = {
-      space: () => ({
+      space: (spaceId: string) => ({
         describe: async () => null,
-        configure: async () => undefined,
+        configure: async (opts: { name?: string; controller?: string }) => ({
+          id: spaceId,
+          type: ['Space'],
+          ...opts
+        }),
         collection: (id: string) => ({
           describe: async () => null,
           configure: async (opts: {
             name?: string
             encryption?: { scheme: string }
             force?: boolean
+            current?: unknown
           }) => {
             if (fail(id)) {
               throw new Error('boom')
@@ -641,16 +654,21 @@ describe('WASRemoteStore.ensureUserCollections', () => {
 
     // Both system collections are plaintext (a descriptor-less `force`
     // upsert), under their shared display names; only `id` goes public.
+    // `current` is the description the provisioner already read, threaded in
+    // so the fail-closed guard runs without a second read (was-client
+    // 0.45.0); `null` here is this fake's "absent".
     expect(configures.find(({ id }) => id === 'id')).toEqual({
       id: 'id',
       name: 'Identity',
-      force: true
+      force: true,
+      current: null
     })
     expect(setPublics).toContain('id')
     expect(configures.find(({ id }) => id === 'key-map')).toEqual({
       id: 'key-map',
       name: 'Key Map',
-      force: true
+      force: true,
+      current: null
     })
     expect(setPublics).not.toContain('key-map')
     // The synced standard collections are provisioned alongside them.

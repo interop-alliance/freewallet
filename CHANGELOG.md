@@ -1,5 +1,25 @@
 # History
 
+## 0.43.0 - TBD
+
+### Changed
+
+- A signup provisions the account Space once instead of once per collection,
+  through `@interop/wallet-core` 0.59.0 and `@interop/was-client` 0.45.0. The
+  nine-collection fan-out each ensured the same Space through its own handle,
+  so a fresh signup issued eighteen Space reads and nine racing Space
+  Description writes where one read and one write do. Every login reached the
+  same provisioning and inherits the fix.
+- The credential-anchored establishment's stage timings measure the stages
+  they name. Two marks previously covered nine stages between them, so both
+  reported figures named one operation while measuring everything since the
+  last mark. Every boundary is marked now: wallet-core reports the stages it
+  runs through a new optional `onStage` notifier, and the three stages whose
+  body is a closure this app supplies -- the KMS/did:web thunk, the
+  pre-promotion registry write, the keystore promotion -- mark themselves.
+  The mend entry point reports per arm the same way. Development-only
+  telemetry; nothing about the ceremony changed.
+
 ## 0.42.0 - 2026-08-28
 
 ### Fixed

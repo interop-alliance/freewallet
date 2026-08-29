@@ -66,6 +66,23 @@ ceremonies, sweeps -- e.g. `fw:session:sweep`, `fw:session:forget`),
 `fw:ui:*` (pages/components), `fw:enrollment`, `fw:registries`,
 `fw:verify`. Wallet-core events arrive under `wc`.
 
+## Stage timings
+
+A long ceremony profiles itself: each boundary logs one info event
+`Stage timing` carrying `{ ceremony, stage, ms, totalMs }`. `ms` is the
+span that ENDED at that mark, so a name is only honest when the boundary
+before it is marked too. Pull one run with
+`jq -c 'select(.msg=="Stage timing")' .dev-logs/app.ndjson`, and read the
+last event's `totalMs` as the ceremony's wall clock.
+
+Ceremony labels today: `credential-anchored-signup` (the signup's own
+outer timer), `credential-anchored-establishment`, and
+`credential-anchored-mend`. The establishment's stages come from two
+places -- wallet-core reports the ones it runs through its `onStage`
+notifier, and freewallet marks the three whose body is a closure it
+supplies (`did-web-keys`, `registry-write`, `keystore-promotion`) -- and
+both write into the one timer, so the profile reads as a single sequence.
+
 ## In tests
 
 - Unit tests assert on logs with `captureSink()` / `captureLogger()`

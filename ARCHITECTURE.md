@@ -2311,19 +2311,35 @@ document entry leaves a saved code that locates no account, plus a document
 `keyAgreement` entry and a roster wrap nothing names. The login sweep
 rotates the orphan wrap away, but the registry-driven health check cannot
 see the code, so the retire-and-reissue mender for the orphaned document
-entry is still unbuilt (see "Recovery codes").
+entry is still unbuilt (see "Recovery codes"). A fifth is the bridge
+delegation's own one-year expiry on a client-less account: the readiness
+stage carries the bridge through verbatim while re-minting the sibling, and
+no remembered login runs there, so the credential's one log-write path
+simply lapses. The ladder VM stands on exactly those accounts and could sign
+the replacement, so this gap is missing code rather than missing authority.
 
 Mender unreachable. A self-enrollment strikes every ladder VM in the entry
 that publishes the new client. Three artifacts signed under it stop
 verifying at once: the unlock record's bridge delegation, its
 `delegatedClients` sibling, and the pointed generation's embedded generation
 delegation. Replacements are attempted on the un-awaited login chain, so a
-tab closed in that window leaves them dead. The strike is account-wide, so
-it reaches the account's other standing credentials too. No credential-only
-visit can mend this: the rotted bridge is the credential's one log-write
-path, leaving only a remembered login on a browser that already holds a
-client-key record. FW-354 moves the acting credential's reseal into an
-awaited stage; FW-208 would let a credential-only visit mend the rest.
+tab closed in that window leaves the acting credential's dead. The strike is
+account-wide but that refresh is not: it handles the login credential alone,
+so every other standing credential's bridge and sibling stay rotted until
+that credential's own remembered login, a revocation cascade, or the
+last-client transition runs. A plain forget re-mints nothing by design, and
+a cascade skips a pending or failed entry, so both leave the same state.
+
+No credential-only visit mends any of it. The rotted bridge is the
+credential's one log-write path, and on an account with enrolled clients the
+readiness stage refuses at its ladder-VM gate before writing anything, so
+the sibling has no credential-only mender there either. What is left is a
+remembered login on a browser that already holds a client-key record.
+FW-354 moves the acting credential's reseal into an awaited stage. FW-208
+does not reach the rest: the step-up ceremony writes its entries through the
+same bridge, so it cannot start on an account whose bridge is dead and whose
+ladder VM is struck. Only a mender that keeps the ladder VM standing, or a
+log-write path that does not depend on one, reaches these states.
 
 The annex generation GC is the same class: it runs from the remembered-login
 chain only. On a client-less account the pointed generation's log grows by

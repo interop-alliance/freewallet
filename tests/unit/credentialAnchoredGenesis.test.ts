@@ -215,7 +215,38 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
 
     expect(options.expectedDid).toBe(ACCOUNT_DID)
     expect(options.priorCreatedAt).toBe('2026-08-20T00:00:00.000Z')
-    expect(options.beforePromotion).toBe(beforePromotion)
+    // The tail is WRAPPED rather than passed through by identity: the
+    // wrapper closes the registry write's own timing span around it, since
+    // wallet-core knows the hook only as "the caller's tail".
+    expect(options.beforePromotion).not.toBe(beforePromotion)
+    const context = { did: ACCOUNT_DID }
+    await (options.beforePromotion as (tail: unknown) => Promise<void>)(context)
+    expect(beforePromotion).toHaveBeenCalledWith(context)
+  })
+
+  it('marks every stage boundary the app owns, and hands wallet-core the rest', async () => {
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+    const beforePromotion = vi.fn(async () => undefined)
+
+    const { options } = await establish({ beforePromotion })
+    // wallet-core reports its own stages through the same timer, so the app
+    // and the library write into one profile.
+    ;(options.onStage as (stage: string) => void)('space-provisioning')
+    await (options.beforePromotion as (tail: unknown) => Promise<void>)({})
+
+    const timings = capture.events.filter(
+      event => event.ns === 'fw:session:genesis' && event.msg === 'Stage timing'
+    )
+    expect(
+      timings.map(event => (event.data as { stage: string }).stage)
+    ).toEqual(['bootstrap-wiring', 'space-provisioning', 'registry-write'])
+    for (const event of timings) {
+      const data = event.data as { ceremony: string; totalMs: number }
+      expect(data.ceremony).toBe('credential-anchored-establishment')
+      expect(data.totalMs).toBeGreaterThanOrEqual(0)
+    }
+    removeSink()
   })
 
   it('closes the bindRecord hook over the credential and the email', async () => {

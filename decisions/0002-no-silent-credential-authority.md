@@ -81,3 +81,35 @@ Reopen this decision when one or more of the following holds:
 
 If revisited, the replacement must state what a phished credential's
 holder can do silently, and how the owner would ever learn of it.
+
+## Amendment (2026-08-28)
+
+The Revisit Criteria's closing requirement -- that a replacement state
+what a phished credential's holder can do silently, and how the owner
+would ever learn of it -- is answered PARTIALLY by the FW-356 design
+doc, section 5.6, approved 2026-08-28.
+
+What that section answers is the first half, restated against the state
+FW-359 left. A ladder verification method still carries no
+`capabilityInvocation`, so it cannot act alone, and its delegation to
+the annex DID still costs an annex-log entry to exercise. But the
+per-visit annex key it delegates to now publishes under
+`capabilityDelegation`, so that key can sub-delegate onward to any
+grantee, offline, leaving no entry anywhere. The annex append is
+therefore not the loudness backstop this record treated it as. One
+smaller exception was found in the same pass: the server's
+delegated-clients disjunct admits a `GET` directly, so a ladder key can
+self-delegate and read the annex bookkeeping with nothing appended. So
+this record's Consequences claim that "there is no code path by which a
+key derived from an unlock credential grants or reads anything without a
+prior log entry" is not exactly true, and the reach of what a phished
+holder can delegate is bounded by a wallet-side convention rather than
+by the server until was-teaching-server WAS-67 lands.
+
+The second half, which surface shows the owner it happened, is not
+answered here. Client listings key on `capabilityInvocation`, so
+standing ladder verification methods render nowhere, and the annex log's
+per-visit entries are surfaced by nothing and are deleted at the next
+garbage collection. That half is FW-358's.
+
+The decision itself is unchanged.

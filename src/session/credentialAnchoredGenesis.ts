@@ -16,8 +16,14 @@
  * - the KMS/did:web thunk (`provideDidWebKeys`, best-effort with a local
  *   timeout) and the keystore-controller promotion closure it arms;
  * - the caller's pre-promotion tail (`beforePromotion`, the signup's
- *   registry write) passed through unchanged;
- * - logging: the ceremony's collected best-effort failures are warned here.
+ *   registry write), wrapped only to close its own timing span;
+ * - logging: the ceremony's collected best-effort failures are warned here,
+ *   and its stage timings are collected on one timer. wallet-core's
+ *   `onStage` notifier closes the span of every stage it runs; the three
+ *   stages whose body is a closure supplied here -- the KMS/did:web thunk,
+ *   the pre-promotion registry write, the keystore promotion -- close their
+ *   own, so each reported figure is the stage it is named after rather than
+ *   everything that happened since the last name.
  *
  * One function serves the fresh signup and the login-time re-run alike --
  * every stage is an ensure, so a signup torn at any point converges by
@@ -98,7 +104,10 @@ const DID_WEB_KEYS_TIMEOUT_MS = 30_000
  * @param options.pointer {AccountPointer}
  * @param [options.email] {string}
  * @param options.logPins {ResourceLogPinStore}
- * @param options.mark {Function}   the caller's stage timer
+ * @param options.mark {Function}   the caller's stage timer. Two of the
+ *   ceremony's stages ARE hooks built here -- the KMS/did:web thunk and the
+ *   keystore promotion -- so each closes its own span rather than leaving
+ *   wallet-core to name work only this module knows the shape of
  * @returns {Promise<object>}   the hook members, spreadable into either
  *   wallet-core call
  */
@@ -173,7 +182,6 @@ async function establishmentHooks({
               },
               did: didWebFromSpace({ wasServerUrl: host, spaceId })
             })
-            mark('did-web-keys')
             return keys as DidWebKeyMapV2
           })()
           // Keep a late rejection handled once the timeout has won the race.
@@ -197,6 +205,11 @@ async function establishmentHooks({
             ])
           } finally {
             clearTimeout(timer)
+            // In the `finally`, so a thunk the timeout won still closes its
+            // own span: the stage cost is what it cost, failure included,
+            // and leaving it unmarked would fold it into the genesis stage
+            // that follows.
+            mark('did-web-keys')
           }
         }
 
@@ -328,6 +341,7 @@ export async function establishCredentialAnchoredAccount({
     logPins: persistence.logPins,
     mark
   })
+  mark('bootstrap-wiring')
   const establishment = await runEstablishment({
     wasServerUrl: pointer.host,
     spaceId: pointer.spaceId,
@@ -336,10 +350,22 @@ export async function establishCredentialAnchoredAccount({
     ...(pointer.did !== undefined ? { expectedDid: pointer.did } : {}),
     lowEntropy,
     ...(priorCreatedAt !== undefined ? { priorCreatedAt } : {}),
-    ...(beforePromotion ? { beforePromotion } : {}),
+    // The pre-promotion hook is the signup's registry write, so its span is
+    // named here rather than by wallet-core, which only knows it as "the
+    // caller's tail".
+    ...(beforePromotion
+      ? {
+          beforePromotion: async (
+            context: Parameters<NonNullable<typeof beforePromotion>>[0]
+          ) => {
+            await beforePromotion(context)
+            mark('registry-write')
+          }
+        }
+      : {}),
+    onStage: mark,
     pinStore: persistence.logPins
   })
-  mark('establishment')
 
   // The best-effort stages' collected failures: warned here (wallet-core
   // reports them on the result), never fatal. A keystore-less account is
@@ -543,6 +569,7 @@ export async function mendCredentialAnchoredAccount({
     logPins: persistence.logPins,
     mark
   })
+  mark('bootstrap-wiring')
   const report = await runMend({
     account: { controller, pointer, ladderSeed },
     ...hooks,
@@ -558,8 +585,8 @@ export async function mendCredentialAnchoredAccount({
     ...(userKey ? { userKey } : {}),
     ...(repairShaped !== undefined ? { repairShaped } : {}),
     collectionIds,
+    onStage: mark,
     pinStore: persistence.logPins
   })
-  mark('mend')
   return report
 }

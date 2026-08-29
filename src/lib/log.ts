@@ -35,6 +35,13 @@ export { createLogger }
  * `event: 'Stage timing'` to pull a ceremony's whole profile out of the
  * ring buffer or the NDJSON file.
  *
+ * The figure is the span that ENDED at the mark, so a mark names its stage
+ * truthfully only when it sits at that stage's end AND the stage before it
+ * is marked too. An unmarked boundary silently attaches its whole span to
+ * the next name: two marks around a nine-stage ceremony reported two
+ * plausible, wrong figures until FW-385. Mark every boundary, or accept
+ * that a name covers everything since the previous one.
+ *
  * @param options {object}
  * @param options.log {Logger}   the calling module's namespaced logger
  * @param options.ceremony {string}   a label naming the timed sequence
