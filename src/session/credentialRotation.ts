@@ -218,6 +218,16 @@ export async function rotateOffUnlockCredential({
     }
   }).finally(() => invalidateVerifiedLog({ profile: session.profile }))
 
+  // A ladder VM the seedless walk could not attribute stays standing, and a
+  // retired credential then keeps a live delegation signer. Nothing here
+  // can mend that, so the state is at least visible.
+  if (result.ladderVm.unclaimed.length > 0) {
+    log.warn(
+      "The retired credential's ladder VM could not be attributed and stands unstruck",
+      { unclaimed: result.ladderVm.unclaimed }
+    )
+  }
+
   return {
     rotated: result.rotated,
     collections: result.collections,

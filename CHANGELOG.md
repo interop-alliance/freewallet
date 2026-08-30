@@ -4,6 +4,12 @@
 
 ### Changed
 
+- `rotateOffUnlockCredential` logs a warning when the retirement reports a
+  ladder VM it could not attribute (`ladderVm.unclaimed`), since that VM
+  stays standing as a live delegation signer of the retired credential.
+  wallet-core's WC-155 fix makes the report empty on the two shapes that
+  produced it; the warning keeps any remaining case visible.
+
 - ARCHITECTURE.md teaches the transient login and the credential-anchored
   establishment as the defaults. Session and auth flow, Session persistence,
   Account genesis, Recovery codes, CHAPI integration, and the Ceremony
