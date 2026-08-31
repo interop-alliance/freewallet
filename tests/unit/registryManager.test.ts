@@ -1,37 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const { lookupIssuersForMock, registryClientUseMock } = vi.hoisted(() => ({
-  lookupIssuersForMock: vi.fn(
-    async (): Promise<{
-      matchingIssuers: Record<string, unknown>[]
-      uncheckedRegistries: Record<string, unknown>[]
-    }> => ({
-      matchingIssuers: [],
-      uncheckedRegistries: []
-    })
-  ),
-  registryClientUseMock: vi.fn()
-}))
-
-vi.mock('@digitalcredentials/issuer-registry-client', () => ({
-  RegistryClient: class {
-    use = registryClientUseMock
-    lookupIssuersFor = lookupIssuersForMock
-  }
-}))
-
 const DIRECT_REGISTRIES_URL =
   'https://digitalcredentials.github.io/dcc-known-registries/known-did-registries.json'
 const PROXY_BASE_URL = 'https://was.example/api/cors'
 const TRUST_ANCHOR_EC = 'https://registry.example/.well-known/openid-federation'
 const FEDERATION_FETCH = 'https://registry.example/fetch'
-const REGISTRY_PAYLOAD = [
-  {
-    type: 'dcc-legacy',
-    name: 'Example Registry',
-    url: 'https://example.org/registry.json'
-  }
-]
+const DID = 'did:key:z123'
+
+const LEGACY_URL = 'https://example.org/registry.json'
+const FALLBACK_URL = 'https://example.org/fallback.json'
+
+const LEGACY_REGISTRY = {
+  type: 'dcc-legacy',
+  name: 'Example Registry',
+  url: LEGACY_URL
+}
+const REGISTRY_PAYLOAD = [LEGACY_REGISTRY]
 const OIDF_REGISTRY = {
   type: 'oidf',
   name: 'Example Federation Registry',
@@ -41,9 +25,37 @@ const FALLBACK_REGISTRIES = [
   {
     type: 'dcc-legacy',
     name: 'Fallback Registry',
-    url: 'https://example.org/fallback.json'
+    url: FALLBACK_URL
   }
 ]
+
+/**
+ * A `dcc-legacy` registry file listing one issuer under the DID every case
+ * looks up. The client remaps this into the `federation_entity` shape below.
+ */
+const LEGACY_BODY = {
+  registry: {
+    [DID]: {
+      name: 'Example University',
+      url: 'https://example.edu',
+      location: 'Cambridge, MA, USA'
+    }
+  }
+}
+const LEGACY_MATCH = {
+  issuer: {
+    federation_entity: {
+      organization_name: 'Example University',
+      homepage_uri: 'https://example.edu',
+      location: 'Cambridge, MA, USA'
+    }
+  },
+  registry: {
+    type: 'dcc-legacy',
+    federation_entity: { organization_name: 'Example Registry' },
+    institution_additional_information: { legacy_list: LEGACY_URL }
+  }
+}
 
 const REGISTRY_METADATA = {
   federation_entity: {
@@ -74,10 +86,16 @@ function registriesResponse(payload: unknown = REGISTRY_PAYLOAD) {
   })
 }
 
+function jsonResponse(payload: unknown) {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  })
+}
+
 /**
- * Builds an unsigned entity statement: the registry client and this module
- * both read only the payload, so the header and signature segments are inert
- * filler.
+ * Builds an unsigned entity statement: the registry client reads only the
+ * payload, so the header and signature segments are inert filler.
  */
 function entityStatement(payload: unknown): string {
   const encode = (value: unknown) =>
@@ -90,15 +108,34 @@ function entityStatement(payload: unknown): string {
   return `${encode({ alg: 'ES256' })}.${encode(payload)}.signature`
 }
 
+function jwtResponse(payload: unknown) {
+  return new Response(entityStatement(payload), {
+    status: 200,
+    headers: { 'content-type': 'application/entity-statement+jwt' }
+  })
+}
+
 function proxied(url: string): string {
   return `${PROXY_BASE_URL}?url=${encodeURIComponent(url)}`
 }
 
-function jwtResponse(payload: unknown, status = 200) {
-  return new Response(entityStatement(payload), {
-    status,
-    headers: { 'content-type': 'application/entity-statement+jwt' }
+type Route = () => Response | Promise<Response>
+
+/**
+ * Stubs the global fetch against an exact-URL route table, answering anything
+ * unrouted with a 404 so an unexpected direct (unproxied) request shows up as
+ * a failed expectation rather than a silent pass.
+ */
+function stubFetch(routes: Record<string, Route>) {
+  const fetchMock = vi.fn(async (url: URL | RequestInfo) => {
+    const route = routes[String(url)]
+    if (!route) {
+      return new Response('unrouted', { status: 404 })
+    }
+    return route()
   })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
 }
 
 describe('registryManager', () => {
@@ -108,25 +145,22 @@ describe('registryManager', () => {
     vi.clearAllMocks()
   })
 
-  it('loads registries directly from KNOWN_REGISTRIES_URL, no proxy', async () => {
-    const fetchMock = vi.fn(async (url: URL | RequestInfo) => {
-      expect(url).toBe(DIRECT_REGISTRIES_URL)
-      return registriesResponse()
+  it('fetches the registries list and the legacy registries directly', async () => {
+    const fetchMock = stubFetch({
+      [DIRECT_REGISTRIES_URL]: () => registriesResponse(),
+      [LEGACY_URL]: () => jsonResponse(LEGACY_BODY)
     })
-    vi.stubGlobal('fetch', fetchMock)
 
     const { registryManager } = await loadRegistryManager()
+    const result = await registryManager.lookupDid(DID)
 
-    await registryManager.lookupDid('did:key:z123')
-
-    expect(fetchMock).toHaveBeenCalledOnce()
     expect(fetchMock).toHaveBeenCalledWith(
       DIRECT_REGISTRIES_URL,
       expect.anything()
     )
-    expect(registryClientUseMock).toHaveBeenCalledWith({
-      registries: REGISTRY_PAYLOAD
-    })
+    expect(fetchMock).toHaveBeenCalledWith(LEGACY_URL, expect.anything())
+    expect(result.matchingIssuers).toEqual([LEGACY_MATCH])
+    expect(result.uncheckedRegistries).toEqual([])
   })
 
   it('falls back when the load stalls past the deadline', async () => {
@@ -143,134 +177,133 @@ describe('registryManager', () => {
 
     const { registryManager, LOAD_TIMEOUT_MS } = await loadRegistryManager()
 
-    const lookup = registryManager.lookupDid('did:key:z123')
+    const lookup = registryManager.lookupDid(DID)
+    // First deadline aborts the registries load, second the lookup itself.
     await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS)
-    await lookup
+    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS)
+    const result = await lookup
 
-    expect(registryClientUseMock).toHaveBeenCalledWith({
-      registries: FALLBACK_REGISTRIES
-    })
+    expect(fetchMock).toHaveBeenCalledWith(FALLBACK_URL, expect.anything())
+    expect(result.uncheckedRegistries).toEqual(FALLBACK_REGISTRIES)
   })
 
   it('uses fallback KnownDidRegistries when the direct fetch fails', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
+    const fetchMock = stubFetch({
+      [DIRECT_REGISTRIES_URL]: () => {
         throw new TypeError('Failed to fetch')
-      })
-    )
+      },
+      [FALLBACK_URL]: () => jsonResponse(LEGACY_BODY)
+    })
 
     const { registryManager } = await loadRegistryManager()
+    const result = await registryManager.lookupDid(DID)
 
-    await registryManager.lookupDid('did:key:z123')
-
-    expect(registryClientUseMock).toHaveBeenCalledWith({
-      registries: FALLBACK_REGISTRIES
-    })
+    expect(fetchMock).toHaveBeenCalledWith(FALLBACK_URL, expect.anything())
+    expect(result.matchingIssuers).toHaveLength(1)
   })
 
   it('does not cache the fallback: a later lookup retries the fetch', async () => {
     let attempt = 0
-    const fetchMock = vi.fn(async () => {
-      attempt += 1
-      if (attempt === 1) {
-        throw new TypeError('Failed to fetch')
-      }
-      return registriesResponse()
+    const fetchMock = stubFetch({
+      [DIRECT_REGISTRIES_URL]: () => {
+        attempt += 1
+        if (attempt === 1) {
+          throw new TypeError('Failed to fetch')
+        }
+        return registriesResponse()
+      },
+      [FALLBACK_URL]: () => jsonResponse({ registry: {} }),
+      [LEGACY_URL]: () => jsonResponse(LEGACY_BODY)
     })
-    vi.stubGlobal('fetch', fetchMock)
 
     const { registryManager } = await loadRegistryManager()
 
-    await registryManager.lookupDid('did:key:z123')
-    expect(registryClientUseMock).toHaveBeenLastCalledWith({
-      registries: FALLBACK_REGISTRIES
-    })
+    await registryManager.lookupDid(DID)
+    expect(fetchMock).toHaveBeenCalledWith(FALLBACK_URL, expect.anything())
 
-    await registryManager.lookupDid('did:key:z456')
+    const result = await registryManager.lookupDid(DID)
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(registryClientUseMock).toHaveBeenLastCalledWith({
-      registries: REGISTRY_PAYLOAD
-    })
+    expect(attempt).toBe(2)
+    expect(result.matchingIssuers).toEqual([LEGACY_MATCH])
   })
 
   it('retries after a non-ok response too', async () => {
     let attempt = 0
-    const fetchMock = vi.fn(async () => {
-      attempt += 1
-      if (attempt === 1) {
-        return new Response('nope', { status: 502 })
-      }
-      return registriesResponse()
+    const fetchMock = stubFetch({
+      [DIRECT_REGISTRIES_URL]: () => {
+        attempt += 1
+        if (attempt === 1) {
+          return new Response('nope', { status: 502 })
+        }
+        return registriesResponse()
+      },
+      [FALLBACK_URL]: () => jsonResponse({ registry: {} }),
+      [LEGACY_URL]: () => jsonResponse(LEGACY_BODY)
     })
-    vi.stubGlobal('fetch', fetchMock)
 
     const { registryManager } = await loadRegistryManager()
 
-    await registryManager.lookupDid('did:key:z123')
-    await registryManager.lookupDid('did:key:z456')
+    await registryManager.lookupDid(DID)
+    await registryManager.lookupDid(DID)
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(registryClientUseMock).toHaveBeenLastCalledWith({
-      registries: REGISTRY_PAYLOAD
-    })
+    expect(attempt).toBe(2)
+    expect(fetchMock).toHaveBeenCalledWith(LEGACY_URL, expect.anything())
   })
 
-  it('caches a successful load: a later lookup does not refetch', async () => {
-    const fetchMock = vi.fn(async () => registriesResponse())
-    vi.stubGlobal('fetch', fetchMock)
+  it('caches a successful load: a later lookup does not refetch the list', async () => {
+    let listFetches = 0
+    stubFetch({
+      [DIRECT_REGISTRIES_URL]: () => {
+        listFetches += 1
+        return registriesResponse()
+      },
+      [LEGACY_URL]: () => jsonResponse(LEGACY_BODY)
+    })
 
     const { registryManager } = await loadRegistryManager()
 
-    await registryManager.lookupDid('did:key:z123')
+    await registryManager.lookupDid(DID)
     await registryManager.lookupDid('did:key:z456')
 
-    expect(fetchMock).toHaveBeenCalledOnce()
-    expect(registryClientUseMock).toHaveBeenCalledOnce()
+    expect(listFetches).toBe(1)
+  })
+
+  it('answers an empty DID without touching the network', async () => {
+    const fetchMock = stubFetch({})
+
+    const { registryManager } = await loadRegistryManager()
+    const result = await registryManager.lookupDid('')
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result).toEqual({ matchingIssuers: [], uncheckedRegistries: [] })
   })
 
   describe('oidf registries', () => {
-    /**
-     * Stubs the registries list plus both oidf hops, routing anything that is
-     * not one of the three known URLs to a 404 so an unexpected direct request
-     * fails the case loudly.
-     */
-    function stubOidfFetch(
-      overrides: Record<string, () => Response | Promise<Response>> = {}
-    ) {
-      const routes: Record<string, () => Response | Promise<Response>> = {
+    function stubOidfFetch(overrides: Record<string, Route> = {}) {
+      return stubFetch({
         [DIRECT_REGISTRIES_URL]: () =>
           registriesResponse([...REGISTRY_PAYLOAD, OIDF_REGISTRY]),
+        [LEGACY_URL]: () => jsonResponse({ registry: {} }),
         [proxied(TRUST_ANCHOR_EC)]: () =>
           jwtResponse({ metadata: REGISTRY_METADATA }),
-        [proxied(`${FEDERATION_FETCH}?sub=did%3Akey%3Az123`)]: () =>
+        [proxied(`${FEDERATION_FETCH}?sub=${DID}`)]: () =>
           jwtResponse({ metadata: ISSUER_METADATA }),
         ...overrides
-      }
-      const fetchMock = vi.fn(async (url: URL | RequestInfo) => {
-        const route = routes[String(url)]
-        if (!route) {
-          return new Response('unrouted', { status: 404 })
-        }
-        return route()
       })
-      vi.stubGlobal('fetch', fetchMock)
-      return fetchMock
     }
 
     it('looks oidf registries up through the CORS proxy, both hops', async () => {
       const fetchMock = stubOidfFetch()
 
       const { registryManager } = await loadRegistryManager()
-      const result = await registryManager.lookupDid('did:key:z123')
+      const result = await registryManager.lookupDid(DID)
 
       expect(fetchMock).toHaveBeenCalledWith(
         proxied(TRUST_ANCHOR_EC),
         expect.anything()
       )
       expect(fetchMock).toHaveBeenCalledWith(
-        proxied(`${FEDERATION_FETCH}?sub=did%3Akey%3Az123`),
+        proxied(`${FEDERATION_FETCH}?sub=${DID}`),
         expect.anything()
       )
       expect(result.matchingIssuers).toEqual([
@@ -279,25 +312,30 @@ describe('registryManager', () => {
       expect(result.uncheckedRegistries).toEqual([])
     })
 
-    it('withholds oidf entries from the RegistryClient, which cannot reach them', async () => {
-      stubOidfFetch()
+    it('checks the oidf and legacy registries in the same lookup', async () => {
+      const fetchMock = stubOidfFetch({
+        [LEGACY_URL]: () => jsonResponse(LEGACY_BODY)
+      })
 
       const { registryManager } = await loadRegistryManager()
-      await registryManager.lookupDid('did:key:z123')
+      const result = await registryManager.lookupDid(DID)
 
-      expect(registryClientUseMock).toHaveBeenCalledWith({
-        registries: REGISTRY_PAYLOAD
-      })
+      expect(fetchMock).toHaveBeenCalledWith(LEGACY_URL, expect.anything())
+      // Results come back in registry-list order: the legacy entry, then oidf.
+      expect(result.matchingIssuers).toEqual([
+        LEGACY_MATCH,
+        { issuer: ISSUER_METADATA, registry: REGISTRY_METADATA }
+      ])
     })
 
     it('reads a 404 from the federation fetch as not-registered, not unchecked', async () => {
       stubOidfFetch({
-        [proxied(`${FEDERATION_FETCH}?sub=did%3Akey%3Az123`)]: () =>
+        [proxied(`${FEDERATION_FETCH}?sub=${DID}`)]: () =>
           new Response('', { status: 404 })
       })
 
       const { registryManager } = await loadRegistryManager()
-      const result = await registryManager.lookupDid('did:key:z123')
+      const result = await registryManager.lookupDid(DID)
 
       expect(result.matchingIssuers).toEqual([])
       expect(result.uncheckedRegistries).toEqual([])
@@ -307,47 +345,47 @@ describe('registryManager', () => {
       stubOidfFetch({
         [proxied(TRUST_ANCHOR_EC)]: () => {
           throw new TypeError('Failed to fetch')
-        }
-      })
-      lookupIssuersForMock.mockResolvedValueOnce({
-        matchingIssuers: [{ issuer: { name: 'Legacy hit' }, registry: {} }],
-        uncheckedRegistries: []
+        },
+        [LEGACY_URL]: () => jsonResponse(LEGACY_BODY)
       })
 
       const { registryManager } = await loadRegistryManager()
-      const result = await registryManager.lookupDid('did:key:z123')
+      const result = await registryManager.lookupDid(DID)
 
-      expect(result.matchingIssuers).toEqual([
-        { issuer: { name: 'Legacy hit' }, registry: {} }
-      ])
+      expect(result.matchingIssuers).toEqual([LEGACY_MATCH])
       expect(result.uncheckedRegistries).toEqual([OIDF_REGISTRY])
     })
 
-    it('reports an entity configuration naming no fetch endpoint as unchecked', async () => {
+    it('reports an entity configuration with no metadata as unchecked', async () => {
       stubOidfFetch({
-        [proxied(TRUST_ANCHOR_EC)]: () =>
-          jwtResponse({ metadata: { federation_entity: {} } })
+        [proxied(TRUST_ANCHOR_EC)]: () => jwtResponse({})
       })
 
       const { registryManager } = await loadRegistryManager()
-      const result = await registryManager.lookupDid('did:key:z123')
+      const result = await registryManager.lookupDid(DID)
 
       expect(result.matchingIssuers).toEqual([])
       expect(result.uncheckedRegistries).toEqual([OIDF_REGISTRY])
     })
   })
 
-  it('__resetRegistryCacheForTests clears the cached client', async () => {
-    const fetchMock = vi.fn(async () => registriesResponse())
-    vi.stubGlobal('fetch', fetchMock)
+  it('__resetRegistryCacheForTests clears the cached list', async () => {
+    let listFetches = 0
+    stubFetch({
+      [DIRECT_REGISTRIES_URL]: () => {
+        listFetches += 1
+        return registriesResponse()
+      },
+      [LEGACY_URL]: () => jsonResponse(LEGACY_BODY)
+    })
 
     const { registryManager, __resetRegistryCacheForTests } =
       await loadRegistryManager()
 
-    await registryManager.lookupDid('did:key:z123')
+    await registryManager.lookupDid(DID)
     __resetRegistryCacheForTests()
     await registryManager.lookupDid('did:key:z456')
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(listFetches).toBe(2)
   })
 })

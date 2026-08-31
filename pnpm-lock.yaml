@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@digitalcredentials/issuer-registry-client':
-        specifier: ^4.0.0
-        version: 4.0.0
+        specifier: ^4.1.0
+        version: 4.1.0
       '@emotion/cache':
         specifier: ^11.14.0
         version: 11.14.0
@@ -393,8 +393,8 @@ packages:
     resolution: {integrity: sha512-n+zBS+fYlKfvDmt8jdpB6n6p2JRLo6v6A2BGLVmbqzHFvfdQZXS+t489TWipFmi5g3FV12/bDCILUpCrqswDvg==}
     engines: {node: '>=18'}
 
-  '@digitalcredentials/issuer-registry-client@4.0.0':
-    resolution: {integrity: sha512-L8QI/7E9TrHp3ivnNjQRQ86VWC6RyKa5VxPfpOBUSUim+mNAkxiOn0m1idOIpnAaP6LG9AMC4lwTc4dmFHoGpA==}
+  '@digitalcredentials/issuer-registry-client@4.1.0':
+    resolution: {integrity: sha512-+0/v6bcWH/z7P4dgKyDR0cUqv/BFEpyJySVWaelLmhF6caa80SSfmNicwXrWjginfAt6omAojVy4SG2N5IASaA==}
     engines: {node: '>=24.0'}
 
   '@digitalcredentials/open-badges-context@3.0.0':
@@ -3683,7 +3683,7 @@ snapshots:
 
   '@digitalcredentials/credentials-v2-context@1.0.0': {}
 
-  '@digitalcredentials/issuer-registry-client@4.0.0':
+  '@digitalcredentials/issuer-registry-client@4.1.0':
     dependencies:
       core-js: 3.50.0
       jwt-decode: 4.0.0
