@@ -8,3 +8,4 @@ allowedDeprecatedVersions:
 minimumReleaseAgeExclude:
   - '@interop/*'
   - 'byoe-context*'
+  - '@digitalcredentials/issuer-registry-client@4.1.0'

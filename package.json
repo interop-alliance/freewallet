@@ -25,7 +25,7 @@
     "node": ">=24"
   },
   "dependencies": {
-    "@digitalcredentials/issuer-registry-client": "^4.0.0",
+    "@digitalcredentials/issuer-registry-client": "^4.1.0",
     "@emotion/cache": "^11.14.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
