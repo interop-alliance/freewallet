@@ -27,10 +27,13 @@ src/lib/            Pure business logic (no React)
   sessionKey.ts     freewallet-session IndexedDB state (keyring cache,
                     client-key records, unlock methods, passkey-safety
                     notices)
-  registryManager.ts     The unlock-methods registry read/write protocol
+  registryManager.ts     The known-issuer registries client used during
+                    credential verification
   storageAccess.ts  Storage Access API handle for the CHAPI popup
   corsProxy.ts      The one CORS-proxy path (`VITE_CORS_PROXY_URL`): the
-                    pasted-URL credential fetch and the registries fetch
+                    pasted-URL credential fetch, the `oidf` issuer-registry
+                    lookups, and the retry behind a blocked direct registry
+                    fetch
   writerId.ts, prefsStorage.ts, log.ts   The writerId mint, the global UI
                     prefs seam, the @interop/logger wiring
   connectedApps.ts  Connected-app and agent listings for the Applications page
@@ -1322,10 +1325,11 @@ consequence (an enrolled wallet reads and changes everything in the Space,
 connects apps, onboards or disconnects other wallets, issues and revokes
 recovery codes); the disconnect limitation; and an editable label prefilled
 from the envelope's suggestion. Approval drives the same `approveEnrollment`
-+ `setClientLabel` path as the paste dialog, and the enrollee completes the
-ceremony off the world-readable log. The channel carries only the four
-public key multibases and the label; the account pointer rides inside the
-stored request, bounded in confidentiality by the exchange URL.
+
+- `setClientLabel` path as the paste dialog, and the enrollee completes the
+  ceremony off the world-readable log. The channel carries only the four
+  public key multibases and the label; the account pointer rides inside the
+  stored request, bounded in confidentiality by the exchange URL.
 
 ## Recovery codes (`@interop/wallet-core/recovery`)
 
@@ -2306,36 +2310,36 @@ recipient identity per app, whoever owns the collection.
 Every row below `/external/request` is protected. `DocsPage` renders
 `public/docs/*.md`.
 
-| Path                                                    | Component                |
-| ------------------------------------------------------- | ------------------------ |
-| `/`                                                     | `LandingPage`            |
-| `/login`                                                | `LoginPage`              |
-| `/signup`                                               | `SignupPage`             |
-| `/recover`                                              | `RecoverPage`            |
-| `/guest-login`                                          | `GuestLoginPage`         |
-| `/logout`                                               | `LogoutPage`             |
-| `/wallet/get`                                           | `WalletGetPage`          |
-| `/wallet/store`                                         | `WalletStorePage`        |
-| `/external/request`                                     | `ExternalRequestPage`    |
-| `/dashboard`                                            | `DashboardPage`          |
-| `/credential/:cid`                                      | `CredentialDetailPage`   |
-| `/credential/:cid/issuer`                               | `IssuerDetailPage`       |
-| `/add-credential`                                       | `AddCredentialPage`      |
-| `/accept-credentials`                                   | `AcceptCredentialsPage`  |
-| `/contacts`                                             | `ContactsPage`           |
-| `/contacts/new`                                         | `ContactFormPage`        |
-| `/contacts/:contactId`                                  | `ContactDetailPage`      |
-| `/contacts/:contactId/edit`                             | `ContactFormPage`        |
-| `/contacts/:contactId/history`                          | `ContactHistoryPage`     |
-| `/applications`                                         | `ApplicationsPage`       |
-| `/applications/:cid`                                    | `ApplicationDetailPage`  |
-| `/storage`                                              | `StoragePage`            |
-| `/storage/collections/:collectionId`                    | `CollectionContentsPage` |
+| Path                                                       | Component                |
+| ---------------------------------------------------------- | ------------------------ |
+| `/`                                                        | `LandingPage`            |
+| `/login`                                                   | `LoginPage`              |
+| `/signup`                                                  | `SignupPage`             |
+| `/recover`                                                 | `RecoverPage`            |
+| `/guest-login`                                             | `GuestLoginPage`         |
+| `/logout`                                                  | `LogoutPage`             |
+| `/wallet/get`                                              | `WalletGetPage`          |
+| `/wallet/store`                                            | `WalletStorePage`        |
+| `/external/request`                                        | `ExternalRequestPage`    |
+| `/dashboard`                                               | `DashboardPage`          |
+| `/credential/:cid`                                         | `CredentialDetailPage`   |
+| `/credential/:cid/issuer`                                  | `IssuerDetailPage`       |
+| `/add-credential`                                          | `AddCredentialPage`      |
+| `/accept-credentials`                                      | `AcceptCredentialsPage`  |
+| `/contacts`                                                | `ContactsPage`           |
+| `/contacts/new`                                            | `ContactFormPage`        |
+| `/contacts/:contactId`                                     | `ContactDetailPage`      |
+| `/contacts/:contactId/edit`                                | `ContactFormPage`        |
+| `/contacts/:contactId/history`                             | `ContactHistoryPage`     |
+| `/applications`                                            | `ApplicationsPage`       |
+| `/applications/:cid`                                       | `ApplicationDetailPage`  |
+| `/storage`                                                 | `StoragePage`            |
+| `/storage/collections/:collectionId`                       | `CollectionContentsPage` |
 | `/storage/collections/:collectionId/resources/:resourceId` | `CollectionResourcePage` |
-| `/history`                                              | `HistoryPage`            |
-| `/settings`                                             | `SettingsPage`           |
-| `/docs/:fileName`                                       | `DocsPage`               |
-| `*`                                                     | `NotFoundPage`           |
+| `/history`                                                 | `HistoryPage`            |
+| `/settings`                                                | `SettingsPage`           |
+| `/docs/:fileName`                                          | `DocsPage`               |
+| `*`                                                        | `NotFoundPage`           |
 
 ## Ceremony inventory
 
@@ -2348,23 +2352,23 @@ trigger a credential-only visit can fire, or a remembered-login sweep on a
 ceremony only a remembered session runs. A residue left to that chain on an
 account that may never run one is an open gap instead, listed below.
 
-| Ceremony                      | Entry point                                | Module                                                            | Shared half                 | Mender                                                                                      |
-| ----------------------------- | ------------------------------------------ | ----------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------- |
-| Credential-anchored genesis   | every WAS signup, remembered or not (the default) | `src/session/credentialAnchoredGenesis.ts`                        | `/clientAnnex`              | re-run; the transient login's heal branch                                                   |
-| Recovery spend (remembered and transient) | `/recover`                                 | `src/session/recovery.ts`                                         | `/recovery`, `/clientAnnex` | remembered: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)                    |
-| Self-enrollment at login      | remembered login on a fresh browser        | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex`              | pending record pre-pivot; the next remembered login's resume                                |
-| Client enrollment (two-party) | Settings > Connected wallets, login page   | `src/components/EnrolledClientsSection.tsx`                       | `/enrollment`               | re-run with the same connect code                                                           |
-| Client revocation + epoch cascade | Settings > Connected wallets               | `src/session/revocation.ts`                                       | `/clients`                  | re-run; the cascade-completion sweep                                                        |
-| Recovery-code issuance        | Settings > Recovery codes                  | `src/session/recovery.ts`                                         | `/recovery`                 | re-run before the confirm; a tear after the document entry has no mender                    |
-| Recovery-code revocation      | Settings > Recovery codes                  | `src/session/recovery.ts`                                         | `/recovery`                 | re-run; the cascade-completion sweep                                                        |
-| Unlock-credential rotation    | Settings (passphrase change, passkey removal) | `src/session/credentialRotation.ts`                               | `/unlock`                   | torn-retirement repair at the next passphrase login; remembered-login sweep; re-seal repair |
-| Forget ceremony               | Settings > Connected wallets, own row      | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next remembered login                                            |
-| Last-client transition        | same row, `lastClient` confirm             | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run; the re-mint refusal is a retryable stop                                              |
-| Update-key rotation           | Settings                                   | `src/session/accountSettings.ts`                                  | `/webvh`                    | re-run (persist-before-publish)                                                             |
-| Account genesis (plain)       | a no-WAS deployment's signup only; healed at every login | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                              |
-| Account deletion              | Settings                                   | `src/session/accountSettings.ts` + `wipe.ts`                      | app-side phase order        | re-run; a wipe failure after the unlock-method walk is accepted                              |
-| Shared wipe (executor, not user-facing) | consumed by the deletion-shaped ceremonies | `src/session/wipe.ts`                                             | app-side                    | re-probe verification; the `unverified` report                                              |
-| Step-up ceremony              | designed, not built                        | ---                                                               | ---                         | ---                                                                                         |
+| Ceremony                                  | Entry point                                              | Module                                                            | Shared half                 | Mender                                                                                      |
+| ----------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------- |
+| Credential-anchored genesis               | every WAS signup, remembered or not (the default)        | `src/session/credentialAnchoredGenesis.ts`                        | `/clientAnnex`              | re-run; the transient login's heal branch                                                   |
+| Recovery spend (remembered and transient) | `/recover`                                               | `src/session/recovery.ts`                                         | `/recovery`, `/clientAnnex` | remembered: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)   |
+| Self-enrollment at login                  | remembered login on a fresh browser                      | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex`              | pending record pre-pivot; the next remembered login's resume                                |
+| Client enrollment (two-party)             | Settings > Connected wallets, login page                 | `src/components/EnrolledClientsSection.tsx`                       | `/enrollment`               | re-run with the same connect code                                                           |
+| Client revocation + epoch cascade         | Settings > Connected wallets                             | `src/session/revocation.ts`                                       | `/clients`                  | re-run; the cascade-completion sweep                                                        |
+| Recovery-code issuance                    | Settings > Recovery codes                                | `src/session/recovery.ts`                                         | `/recovery`                 | re-run before the confirm; a tear after the document entry has no mender                    |
+| Recovery-code revocation                  | Settings > Recovery codes                                | `src/session/recovery.ts`                                         | `/recovery`                 | re-run; the cascade-completion sweep                                                        |
+| Unlock-credential rotation                | Settings (passphrase change, passkey removal)            | `src/session/credentialRotation.ts`                               | `/unlock`                   | torn-retirement repair at the next passphrase login; remembered-login sweep; re-seal repair |
+| Forget ceremony                           | Settings > Connected wallets, own row                    | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next remembered login                 |
+| Last-client transition                    | same row, `lastClient` confirm                           | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run; the re-mint refusal is a retryable stop                                             |
+| Update-key rotation                       | Settings                                                 | `src/session/accountSettings.ts`                                  | `/webvh`                    | re-run (persist-before-publish)                                                             |
+| Account genesis (plain)                   | a no-WAS deployment's signup only; healed at every login | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                              |
+| Account deletion                          | Settings                                                 | `src/session/accountSettings.ts` + `wipe.ts`                      | app-side phase order        | re-run; a wipe failure after the unlock-method walk is accepted                             |
+| Shared wipe (executor, not user-facing)   | consumed by the deletion-shaped ceremonies               | `src/session/wipe.ts`                                             | app-side                    | re-probe verification; the `unverified` report                                              |
+| Step-up ceremony                          | designed, not built                                      | ---                                                               | ---                         | ---                                                                                         |
 
 Claims the cells cannot hold. A WAS signup's remembered and passkey flavors
 continue into the self-enrollment row. The credential-anchored genesis heal
@@ -2875,4 +2879,3 @@ yet RFC 9421). The `Authorization` header signs `(key-id) (created)
 digest` when there's a body. The `Digest` header is a multihash (`mh=`,
 sha256). See the [zCap Developer
 Guide](https://github.com/interop-alliance/zcap-developer-guide).
-

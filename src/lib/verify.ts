@@ -1,7 +1,8 @@
 /**
  * Adapter from @interop/verifier-core to the legacy `log[]` payload consumed by
  * the verification UI. Issuer recognition uses `issuerDetailsSuite` +
- * `registryManager` (every registry request goes through the CORS proxy); the
+ * `registryManager` (which routes each registry request direct or through the
+ * CORS proxy by what a browser can reach); the
  * built-in registry suite is disabled (`registries: []`).
  *
  * Unpublished status lists (`STATUS_LIST_NOT_FOUND`) are dropped rather than
