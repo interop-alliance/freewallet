@@ -202,6 +202,9 @@ function ceremonyDriving({
         failed: []
       },
       document: document ?? { id: POINTER.did },
+      // The real outcome always carries the inventory edit's ladder VM
+      // report; a clean strike claims its own VM and leaves none unclaimed.
+      ladderVm: { struck: [], unclaimed: [] },
       userKey,
       rosterDescriptor: ROSTER_DESCRIPTOR,
       ...(clientAnnex ? { clientAnnex } : {})
@@ -246,7 +249,7 @@ function sessionWith(
   return {
     user: { id: 'did:key:z6MkRetiringClient' },
     isGuest: false,
-    storage: { remoteStore },
+    storage: { remoteStore, adoptRotatedVaultKeys: vi.fn(async () => {}) },
     profile: {
       accountPointer:
         'pointerDid' in overrides && overrides.pointerDid === undefined
@@ -486,6 +489,7 @@ describe('the document-edit landed signal', () => {
         rotated: true,
         collections: { outcomes: {}, failed: [] },
         document: { id: POINTER.did },
+        ladderVm: { struck: [], unclaimed: [] },
         userKey: FRESH_USER_KEY,
         rosterDescriptor: ROSTER_DESCRIPTOR
       } as never

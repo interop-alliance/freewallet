@@ -1249,6 +1249,7 @@ export async function recoverAccountWithCode({
         },
         updateKeyMultibase: newRung0.keyMultibase
       },
+      ladderSeed: newLadderSeed,
       expectedDid: pointer.did,
       pinStore: memoryResourceLogPinStore(),
       logId: accountLogPinId({ spaceId: pointer.spaceId })
@@ -1810,6 +1811,7 @@ export async function resumeRecoverySpend({
             keyAgreement: { commitment },
             updateKeyMultibase: rung0.keyMultibase
           },
+          ladderSeed: standingLadderSeed,
           expectedDid: did,
           pinStore: memoryResourceLogPinStore(),
           logId: accountLogPinId({ spaceId: pointer.spaceId })

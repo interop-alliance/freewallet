@@ -562,7 +562,12 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(requireEnrolledClientContext).mockReturnValue({
-      remoteStore: { remoteStore: true },
+      remoteStore: {
+        remoteStore: true,
+        // The last-client transition publishes the ladder VM's strike and
+        // reinstall through this client's own account-log store.
+        webvhIdStore: () => ({ webvhIdStore: true })
+      },
       pointer,
       clientWebvhKeys: { updateSeed: new Uint8Array(32).fill(1) },
       keyAgent: { id: 'did:key:zClientA' }

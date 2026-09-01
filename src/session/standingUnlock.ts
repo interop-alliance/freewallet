@@ -242,6 +242,7 @@ export async function establishStandingUnlock({
         : { publicKeyMultibase: standing.keyAgreementKeyMultibase },
       updateKeyMultibase: rung0.keyMultibase
     },
+    ladderSeed,
     expectedDid: pointer.did,
     pinStore: session.profile.persistence.logPins,
     logId: accountLogPinId({ spaceId: pointer.spaceId })

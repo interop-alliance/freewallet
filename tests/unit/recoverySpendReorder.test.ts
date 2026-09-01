@@ -488,7 +488,13 @@ describe('the remembered spend reorder -- the persist hook', () => {
       await opts.onCommitted({
         builtOnHead: { scid: 'QmScidForTests', versionId: '1-head' }
       })
-      return { did: POINTER.did!, committed: true }
+      return {
+        did: POINTER.did!,
+        committed: true,
+        retiredCredentialVmIds: [],
+        struckRungHashes: [],
+        unclaimedCredentialVmIds: []
+      }
     })
 
     await recoverAccountWithCode({

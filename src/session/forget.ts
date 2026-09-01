@@ -480,6 +480,12 @@ export async function forgetThisBrowser({
     } else {
       const ceremony = await forgetLastEnrolledClient({
         ...shared,
+        // The ladder VM's strike-and-reinstall pair publishes under this
+        // still-standing client's root authority: the credential's bridge in
+        // `logStore` is signed by the VM the strike removes, so a
+        // bridge-invoked reinstall would be refused under the
+        // current-key-set rule.
+        clientLogStore: remoteStore.webvhIdStore(),
         rosterStoreFor: await ladderSignedRosterStoreFor({
           session,
           pointer,
