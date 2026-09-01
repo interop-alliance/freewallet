@@ -45,6 +45,7 @@ import {
 import { ensureIndexedFirstEpoch } from '@interop/wallet-core/keys'
 import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
+import { isUnknownEpochError } from '@interop/wallet-core/sync'
 import {
   ENABLE_DID_WEBVH,
   ENCRYPTED_STANDARD_COLLECTIONS,
@@ -75,6 +76,7 @@ import {
   acquireDescriptor,
   acquireDescriptors,
   DescriptorRefreshPolicy,
+  isKeyUnwrapError,
   type EncryptionDescriptorCache
 } from '@interop/wallet-core/descriptors'
 import {
@@ -108,8 +110,6 @@ import {
   RemoteDirectStore,
   type SyncedCollectionStore
 } from '@/stores/remoteDirectStore'
-import { UnknownEpochError } from '@interop/was-client/edv'
-import { KeyUnwrapError } from '@interop/was-client'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
 import { uuidv7 } from 'uuidv7'
 import {
@@ -198,10 +198,10 @@ async function decryptEnvelope({
   try {
     return { value: await cipher.decrypt({ envelope }), unknownEpoch: false }
   } catch (err) {
-    if (err instanceof UnknownEpochError) {
+    if (isUnknownEpochError(err)) {
       return { value: undefined, unknownEpoch: true }
     }
-    if (err instanceof KeyUnwrapError) {
+    if (isKeyUnwrapError(err)) {
       log.warn(
         'This wallet is not a recipient of the key epoch of a resource',
         {

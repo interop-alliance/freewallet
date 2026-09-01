@@ -46,12 +46,9 @@ import {
 } from '@/lib/sync'
 import { createContactsConflictHandler } from '@/stores/contactsConflictHandler'
 import { compareContactRevisionsNewestFirst } from '@/lib/contactRevisions'
-import {
-  isEncryptedEnvelope,
-  UnknownEpochError,
-  type DocCipher
-} from '@interop/was-client/edv'
-import { KeyUnwrapError } from '@interop/was-client'
+import { isEncryptedEnvelope, type DocCipher } from '@interop/was-client/edv'
+import { isUnknownEpochError } from '@interop/wallet-core/sync'
+import { isKeyUnwrapError } from '@interop/wallet-core/descriptors'
 import type { StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'
@@ -482,12 +479,12 @@ export class BrowserStore {
    * A row whose envelope will not decrypt under the current KAK (corrupted,
    * replicated verbatim from another identity, or written under a mismatched
    * KAK) is collected in `undecryptableRowIds` -- purgeable garbage. A row whose
-   * envelope names an UNKNOWN key epoch ({@link UnknownEpochError}) is collected
+   * envelope names an UNKNOWN key epoch (`UnknownEpochError`) is collected
    * separately in `unknownEpochRowIds` and NOT cached: it is possibly-fresh data
    * behind a stale descriptor, so a caller can refresh the descriptor (rebuild the cipher
    * via {@link setCiphers}) and re-read rather than deleting it. A row whose
    * epoch IS on the descriptor but which this wallet holds no key for
-   * ({@link KeyUnwrapError} -- never a recipient, or removed and the epoch
+   * (`KeyUnwrapError` -- never a recipient, or removed and the epoch
    * rotated) is collected in `noEpochKeyRowIds` and likewise NOT cached: it is
    * real data belonging to someone else's read set, so it is never purged, and
    * a descriptor refresh cannot help it (only a later key grant can).
@@ -560,12 +557,12 @@ export class BrowserStore {
     )
     for (const { id, plaintext, fromEnvelope, err } of rows) {
       if (err) {
-        if (err instanceof UnknownEpochError) {
+        if (isUnknownEpochError(err)) {
           // Possibly-fresh data behind a stale descriptor: skip it (uncached) so a
           // descriptor refresh can pick it up, never purge it.
           log.warn('Skipping unknown-epoch row', { logicalKey, id, err })
           unknownEpochRowIds.push(id)
-        } else if (err instanceof KeyUnwrapError) {
+        } else if (isKeyUnwrapError(err)) {
           // This wallet is not a recipient of the row's key epoch. Real data,
           // permanently unreadable here: skip it (uncached) but never purge it,
           // and keep it out of the refresh signal -- a descriptor refresh cannot
@@ -1662,10 +1659,10 @@ export class BrowserStore {
    * most once ever per browser.
    *
    * Per-row tolerance mirrors {@link #decryptedRows}: a plaintext (legacy or
-   * cipher-less) body passes through; an {@link UnknownEpochError} row is
+   * cipher-less) body passes through; an `UnknownEpochError` row is
    * skipped uncached AND left unindexed, since it is possibly-fresh data
    * behind a stale descriptor that must stay retryable after a descriptor
-   * refresh; a {@link KeyUnwrapError} row (no key for its epoch on this wallet)
+   * refresh; a `KeyUnwrapError` row (no key for its epoch on this wallet)
    * is skipped the same way, retryable after a later key grant; any other
    * decrypt failure is warned, skipped, and likewise left unindexed.
    *
@@ -1721,11 +1718,11 @@ export class BrowserStore {
         continue
       }
       if (err) {
-        if (err instanceof UnknownEpochError) {
+        if (isUnknownEpochError(err)) {
           // Possibly-fresh data behind a stale descriptor: skip it uncached and
           // unindexed so a descriptor refresh can pick it up on a later read.
           log.warn('Skipping unknown-epoch contactsHistory row', { id, err })
-        } else if (err instanceof KeyUnwrapError) {
+        } else if (isKeyUnwrapError(err)) {
           // Not a recipient of this row's key epoch: skip it uncached and
           // unindexed, so a later key grant can still surface it.
           log.warn(

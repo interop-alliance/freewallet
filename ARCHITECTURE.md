@@ -1989,6 +1989,17 @@ path; hence the report rather than an assumption. Undecryptable rows are
 purgeable from the Applications page; the other two kinds are real data and
 stay unpurged.
 
+Which of the three buckets a row lands in is decided by the error's NAME, never
+by `instanceof`: `isUnknownEpochError` (`@interop/wallet-core/sync`) and
+`isKeyUnwrapError` (`@interop/wallet-core/descriptors`), the shared predicates
+every scan in `browserStore`, `remoteDirectStore`, and `storageManager` calls.
+The cipher is an injected seam, so in a wallet whose `@interop/was-client`
+resolves to a second copy the class it throws is not the class the store
+imported, and a missed `KeyUnwrapError` puts another reader's real data in the
+purgeable bucket. The push handler classifies its `412` the same way
+(`isSyncConflictError`), where a miss turns a conflict to reconcile into a
+fatal cycle error.
+
 There is no migration from the old in-`private-credentials` placement and no
 legacy (pre-`appUrl`) re-issue path. An idempotent login-time sweep deletes
 stranded app-key rows from `private-credentials`, marker-typed or matching

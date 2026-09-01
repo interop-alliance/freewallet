@@ -20,6 +20,17 @@
 - `@digitalcredentials/issuer-registry-client` to `^4.1.0`, for the `fetch`
   seam the routing above rides.
 
+### Fixed
+
+- The row scans and the push handler classify what an injected seam throws by
+  the error's name rather than by `instanceof`, through the shared predicates
+  `isUnknownEpochError` / `isKeyUnwrapError` / `isSyncConflictError`. In a
+  wallet whose `@interop/was-client` resolved to a second copy, the class a
+  cipher or sync port threw was not the class the store imported: a row this
+  wallet holds no epoch key for fell through to the undecryptable bucket, where
+  the credential purge would delete another reader's real data, and every push
+  `412` became a fatal cycle error instead of a conflict to reconcile.
+
 ## 0.43.0 - TBD
 
 ### Changed

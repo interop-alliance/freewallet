@@ -813,12 +813,27 @@ function makeEpochCipher(epoch: string): DocCipher {
 }
 
 /**
+ * The same refusal as it arrives from a SECOND copy of `@interop/was-client`:
+ * the `name` contract intact, an unrelated constructor. A cipher is an
+ * injected seam, so this is the shape a `link:` dev setup or a dedupe miss
+ * produces, and the shape no `instanceof` can match.
+ */
+function foreignRealmError(name: string): Error {
+  const err = new Error(`${name} raised by another copy of the package.`)
+  err.name = name
+  return err
+}
+
+/**
  * A fake cipher whose `decrypt` always throws `UnknownEpochError` -- standing
  * in for a row stamped with a key epoch this cipher's cached descriptor has never
  * seen (a rekey emits no change-feed entry). `encrypt` still produces a normal
  * fake envelope, so a caller can seed rows with it.
+ *
+ * @param [options.foreignRealm] {boolean}   raise the refusal from a second
+ *   copy of the package instead of this one
  */
-function makeUnknownEpochCipher(): DocCipher {
+function makeUnknownEpochCipher({ foreignRealm = false } = {}): DocCipher {
   return {
     async encrypt({ data }: { data: Json }) {
       fakeCipherCounter += 1
@@ -837,6 +852,9 @@ function makeUnknownEpochCipher(): DocCipher {
         (
           envelope as { jwe?: { recipients?: { header?: { kid?: string } }[] } }
         )?.jwe?.recipients?.map(recipient => recipient.header?.kid ?? '') ?? []
+      if (foreignRealm) {
+        throw foreignRealmError('UnknownEpochError')
+      }
       throw new UnknownEpochError({ collectionId: 'private-credentials', kids })
     }
   }
@@ -847,8 +865,11 @@ function makeUnknownEpochCipher(): DocCipher {
  * for a row whose key epoch IS on the collection's descriptor but which this
  * wallet holds no key for (it was never a recipient, or was removed and the
  * epoch rotated). `encrypt` still produces a normal fake envelope.
+ *
+ * @param [options.foreignRealm] {boolean}   raise the refusal from a second
+ *   copy of the package instead of this one
  */
-function makeNoEpochKeyCipher(): DocCipher {
+function makeNoEpochKeyCipher({ foreignRealm = false } = {}): DocCipher {
   return {
     async encrypt({ data }: { data: Json }) {
       fakeCipherCounter += 1
@@ -863,6 +884,9 @@ function makeNoEpochKeyCipher(): DocCipher {
       }
     },
     async decrypt() {
+      if (foreignRealm) {
+        throw foreignRealmError('KeyUnwrapError')
+      }
       throw new KeyUnwrapError(
         'No epoch key for collection "private-credentials".'
       )
@@ -933,6 +957,49 @@ describe('BrowserStore (key epochs)', () => {
     expect(
       await localStore.rxCollection('privateCredentials').find().exec()
     ).toHaveLength(1)
+  })
+
+  it('classifies both cipher refusals raised from a second copy of the package', async () => {
+    // The whole point of matching these by `err.name`: the cipher is an
+    // injected seam, so in a wallet whose `@interop/was-client` resolves twice
+    // the class it throws is not the class this file imported. Missing the
+    // `KeyUnwrapError` branch drops another reader's real data into the
+    // undecryptable bucket, which `purgeUndecryptableCredentials` then
+    // destroys.
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        privateCredentials: makeNoEpochKeyCipher({ foreignRealm: true }),
+        walletActivity: makeNoEpochKeyCipher({ foreignRealm: true })
+      }
+    })
+    await localStore.rxCollection('privateCredentials').insert({
+      id: 'z6ForeignNoKey',
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: {
+        id: 'z6ForeignNoKey',
+        sequence: 0,
+        jwe: { ciphertext: JSON.stringify(makeCredential('Alice')) }
+      } as Json
+    })
+
+    expect(await localStore.listCredentials()).toHaveLength(0)
+    expect(localStore.noEpochKeyCredentials).toBe(1)
+    expect(localStore.undecryptableCredentials).toBe(0)
+    expect(await localStore.purgeUndecryptableCredentials()).toBe(0)
+    expect(
+      await localStore.rxCollection('privateCredentials').find().exec()
+    ).toHaveLength(1)
+
+    // The unknown-epoch half of the pair, same realm, same requirement: it is
+    // a descriptor-refresh signal, not garbage.
+    localStore.setCiphers({
+      privateCredentials: makeUnknownEpochCipher({ foreignRealm: true }),
+      walletActivity: makeUnknownEpochCipher({ foreignRealm: true })
+    })
+    expect(await localStore.listCredentials()).toHaveLength(0)
+    expect(localStore.unknownEpochCredentials).toBe(1)
+    expect(localStore.undecryptableCredentials).toBe(0)
   })
 
   it('never purges a row this wallet holds no epoch key for', async () => {

@@ -29,8 +29,8 @@
  */
 import type { WithDeleted } from 'rxdb/plugins/core'
 import { canonicalize as jcsCanonicalize } from 'json-canonicalize'
+import { isSyncConflictError } from '@interop/wallet-core/sync'
 import type { Json, MasterState, SyncedDoc, WasSyncPort } from './types.js'
-import { WasSyncConflictError } from './types.js'
 
 /**
  * Formats a master revision (`version` or `metaVersion`) as the quoted strong
@@ -155,10 +155,7 @@ async function deleteContent({
     })
     return
   } catch (err) {
-    if (
-      !(err instanceof WasSyncConflictError) ||
-      assumedVersion === undefined
-    ) {
+    if (!isSyncConflictError(err) || assumedVersion === undefined) {
       throw err
     }
     const master = await port.get({ id })
@@ -243,7 +240,7 @@ async function pushRow({
 
     return null
   } catch (err) {
-    if (err instanceof WasSyncConflictError) {
+    if (isSyncConflictError(err)) {
       return assembleConflict({
         port,
         id,

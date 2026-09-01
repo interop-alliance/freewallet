@@ -44,12 +44,9 @@ import {
 import { cidFrom, errorStatus } from '@interop/was-client/sync'
 import { compareContactRevisionsNewestFirst } from '@/lib/contactRevisions'
 import type { Json } from '@/lib/sync'
-import {
-  isEncryptedEnvelope,
-  UnknownEpochError,
-  type DocCipher
-} from '@interop/was-client/edv'
-import { KeyUnwrapError } from '@interop/was-client'
+import { isEncryptedEnvelope, type DocCipher } from '@interop/was-client/edv'
+import { isUnknownEpochError } from '@interop/wallet-core/sync'
+import { isKeyUnwrapError } from '@interop/wallet-core/descriptors'
 import { uuidv7 } from 'uuidv7'
 import type { StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
@@ -308,7 +305,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       const { id: resourceId } = resources[position]
       const { vc, fromEnvelope, err } = decrypted[position]
       if (err) {
-        if (err instanceof UnknownEpochError) {
+        if (isUnknownEpochError(err)) {
           // Possibly-fresh data behind a stale descriptor: skip it so a descriptor
           // refresh can pick it up, never purge it.
           log.warn('Skipping unknown-epoch remote resource', {
@@ -317,7 +314,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
             err
           })
           unknownEpoch += 1
-        } else if (err instanceof KeyUnwrapError) {
+        } else if (isKeyUnwrapError(err)) {
           // This wallet is not a recipient of the resource's key epoch: skip it,
           // but never purge it -- a purge here would delete it from the server.
           log.warn(
@@ -665,11 +662,11 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       const { id: resourceId } = resources[position]
       const { activity, err } = decrypted[position]
       if (err) {
-        if (err instanceof UnknownEpochError) {
+        if (isUnknownEpochError(err)) {
           unknownEpoch += 1
           continue
         }
-        if (err instanceof KeyUnwrapError) {
+        if (isKeyUnwrapError(err)) {
           // Not a recipient of this resource's key epoch: skip it, and keep it
           // out of the refresh signal -- a descriptor refresh cannot help.
           log.warn(
@@ -800,7 +797,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
         head: upgradeContactHeadPayload(raw as unknown as ContactHeadPayload)
       }
     } catch (err) {
-      if (err instanceof UnknownEpochError) {
+      if (isUnknownEpochError(err)) {
         return { unknownEpoch: true, err }
       }
       return { err }

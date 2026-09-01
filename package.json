@@ -45,7 +45,7 @@
     "@interop/vc-display": "^0.1.0",
     "@interop/verifier-core": "^3.5.5",
     "@interop/vh-resource-log": "^0.4.1",
-    "@interop/wallet-core": "^0.62.0",
+    "@interop/wallet-core": "link:../wallet-core",
     "@interop/was-client": "^0.46.1",
     "@interop/webkms-client": "^14.7.4",
     "@interop/x25519-key-agreement-key": "^5.2.2",
