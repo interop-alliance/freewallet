@@ -1,5 +1,25 @@
 # History
 
+## 0.44.0 - TBD
+
+### Changed
+
+- Known-issuer registry requests are routed by what a browser can actually
+  reach. The registries list and each `dcc-legacy` registry file are fetched
+  directly, since they are served with `Access-Control-Allow-Origin: *`; an
+  `oidf` registry's two hops go through the CORS proxy, which its trust
+  anchors require. A direct fetch that the browser blocks is retried once
+  through the proxy, so a registry host that stops sending that header is not
+  silently reported as unchecked.
+- Registry network requests carry a deadline. The budget is per hop
+  (`HOP_TIMEOUT_MS`, 12s) rather than per lookup, since an `oidf` registry
+  makes two sequential requests and the CORS proxy bounds each of its own
+  upstream hops at 10s; a shorter lookup-wide deadline would abort a hop the
+  proxy was still willing to serve. Registries are checked concurrently, so a
+  whole lookup stays bounded at two hops.
+- `@digitalcredentials/issuer-registry-client` to `^4.1.0`, for the `fetch`
+  seam the routing above rides.
+
 ## 0.43.0 - TBD
 
 ### Changed

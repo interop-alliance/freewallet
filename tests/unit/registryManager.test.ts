@@ -175,16 +175,61 @@ describe('registryManager', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const { registryManager, LOAD_TIMEOUT_MS } = await loadRegistryManager()
+    const { registryManager, HOP_TIMEOUT_MS } = await loadRegistryManager()
 
     const lookup = registryManager.lookupDid(DID)
-    // First deadline aborts the registries load, second the lookup itself.
-    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS)
-    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS)
+    // One deadline per hop: the registries load, then the fallback registry.
+    await vi.advanceTimersByTimeAsync(HOP_TIMEOUT_MS)
+    await vi.advanceTimersByTimeAsync(HOP_TIMEOUT_MS)
     const result = await lookup
 
     expect(fetchMock).toHaveBeenCalledWith(FALLBACK_URL, expect.anything())
     expect(result.uncheckedRegistries).toEqual(FALLBACK_REGISTRIES)
+    // A hop the deadline aborted is not retried through the proxy.
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      proxied(FALLBACK_URL),
+      expect.anything()
+    )
+  })
+
+  it('retries a blocked legacy registry through the CORS proxy', async () => {
+    const fetchMock = stubFetch({
+      [DIRECT_REGISTRIES_URL]: () => registriesResponse(),
+      [LEGACY_URL]: () => {
+        // What a browser does when the host stops sending `ACAO: *`.
+        throw new TypeError('Failed to fetch')
+      },
+      [proxied(LEGACY_URL)]: () => jsonResponse(LEGACY_BODY)
+    })
+
+    const { registryManager } = await loadRegistryManager()
+    const result = await registryManager.lookupDid(DID)
+
+    expect(fetchMock).toHaveBeenCalledWith(LEGACY_URL, expect.anything())
+    expect(fetchMock).toHaveBeenCalledWith(
+      proxied(LEGACY_URL),
+      expect.anything()
+    )
+    expect(result.matchingIssuers).toEqual([LEGACY_MATCH])
+    expect(result.uncheckedRegistries).toEqual([])
+  })
+
+  it('reports a legacy registry unchecked when the proxy retry fails too', async () => {
+    stubFetch({
+      [DIRECT_REGISTRIES_URL]: () => registriesResponse(),
+      [LEGACY_URL]: () => {
+        throw new TypeError('Failed to fetch')
+      },
+      [proxied(LEGACY_URL)]: () => {
+        throw new TypeError('Failed to fetch')
+      }
+    })
+
+    const { registryManager } = await loadRegistryManager()
+    const result = await registryManager.lookupDid(DID)
+
+    expect(result.matchingIssuers).toEqual([])
+    expect(result.uncheckedRegistries).toEqual([LEGACY_REGISTRY])
   })
 
   it('uses fallback KnownDidRegistries when the direct fetch fails', async () => {
