@@ -84,6 +84,7 @@ import {
   type TransientKeyringFetchResult,
   type UnlockCredential
 } from '@/session/keyring'
+import { refreshTransientManageCapability } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
@@ -446,6 +447,9 @@ async function ensureClientAnnexGenerationReady({
  *   credential, when the caller holds one -- what arms the torn
  *   credential-anchored-signup heal (the establishment re-run needs the unlock
  *   identity, not just the record)
+ * @param [options.popup] {boolean}   this visit runs in the CHAPI popup's
+ *   partitioned iframe, which skips the management-zcap registry refresh
+ *   below, the guard the login-time registry passes carry
  * @param [options.healAttempted] {boolean}   internal: the re-entry marker of
  *   the unpromoted-account heal, so a heal that did not converge refuses
  *   instead of looping
@@ -462,6 +466,7 @@ export async function transientSessionFromKeyringHit({
   email,
   persistence,
   credential,
+  popup = false,
   healAttempted = false,
   repairShaped = false
 }: {
@@ -470,6 +475,7 @@ export async function transientSessionFromKeyringHit({
   email?: string
   persistence: TransientSessionStores
   credential?: UnlockCredential
+  popup?: boolean
   healAttempted?: boolean
   repairShaped?: boolean
 }): Promise<{ session: Session; userExists: boolean }> {
@@ -532,6 +538,7 @@ export async function transientSessionFromKeyringHit({
             email,
             persistence,
             credential,
+            popup,
             healAttempted: true,
             repairShaped: report.reenterRepairShaped === true
           })
@@ -952,7 +959,9 @@ export async function transientSessionFromKeyringHit({
     persistence: sessionPersistence
   })
   // Stamp what the remembered tail stamps, minus what a transient session
-  // does not hold (no management zcap was minted). The standing members ride
+  // does not hold. The management zcap IS stamped: this visit minted one, and
+  // the refresh below is the only thing keeping it alive on an account that
+  // never remembers a browser. The standing members ride
   // along: the ladder seed is what lets a mid-session stage sign as the
   // ladder VM (the App Connect grant path's generation-delegation renewal),
   // and the sibling delegation beside it is the authority that renewal's
@@ -960,7 +969,10 @@ export async function transientSessionFromKeyringHit({
   session.profile.accountController = found.controller
   session.profile.unlockMethod = {
     type,
-    unlockSpaceId: found.unlockSpaceId
+    unlockSpaceId: found.unlockSpaceId,
+    ...(found.manageCapability
+      ? { manageCapability: found.manageCapability }
+      : {})
   }
   session.profile.ladderSeed = ladderSeed
   session.profile.standingUnlock = {
@@ -971,6 +983,33 @@ export async function transientSessionFromKeyringHit({
     ...(found.rebindStandingRecord
       ? { rebindRecord: found.rebindStandingRecord }
       : {})
+  }
+  // The one registry write an ordinary transient login makes: the acting
+  // credential's own management zcap, refreshed when the stored copy is
+  // absent, expiring, retargeted, or narrower than the fresh mint. Nothing
+  // else on the registry is touched, nothing is created, and a failed read
+  // warns and skips rather than failing the login.
+  //
+  // Deliberately not awaited: it is a once-a-year write behind a registry
+  // GET, and the session is complete without it, so no login (and no CHAPI
+  // popup visit) waits on that round trip. The helper holds its own
+  // catch-and-warn, so the floating promise can never reject. A popup skips
+  // it outright, the guard the other registry passes carry.
+  if (found.manageCapability && !popup) {
+    void refreshTransientManageCapability({
+      zcapClient: transientZcapClient,
+      spaceId: accountSpaceId,
+      userKey: rosterRead.userKey,
+      capability: generationDelegation,
+      unlockSpaceId: found.unlockSpaceId,
+      manageCapability: found.manageCapability,
+      ...(found.standingClient?.keyAgreementKeyMultibase
+        ? {
+            keyAgreementKeyMultibase:
+              found.standingClient.keyAgreementKeyMultibase
+          }
+        : {})
+    })
   }
   return { session, userExists }
 }

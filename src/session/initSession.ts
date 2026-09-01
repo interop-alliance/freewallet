@@ -944,7 +944,8 @@ export async function loginWithPassphrase({
         type: 'passphrase',
         email,
         persistence: routed.persistence,
-        credential: routed.credential
+        credential: routed.credential,
+        popup
       })
     }
     derived = routed.credential ?? derived
@@ -1719,7 +1720,8 @@ export async function loginWithPasskey({
         found,
         type: 'passkey',
         persistence: routed.persistence,
-        credential: routed.credential
+        credential: routed.credential,
+        popup
       })
     }
     derived = routed.credential ?? derived

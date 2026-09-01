@@ -1545,8 +1545,10 @@ export type AccountDeletionResult =
  * artifacts -- its unlock Space, and with it the sealed bridge and
  * `delegatedClients` delegations -- plus each method's local state,
  * best-effort per entry: this is what removes the dangling existence-oracle
- * Spaces a probe could still find after the account is gone (an entry
- * recording no management capability keeps its Space, stated residue);
+ * Spaces a probe could still find after the account is gone. Each Space goes
+ * through a DELETE-only child of the entry's management zcap; an entry
+ * recording none, or one whose capability has expired, keeps its Space
+ * (stated residue, named on the per-entry outcome);
  * (b1) tear down the auxiliary annex Space beside the account Space --
  * one recursive Space delete, run BEFORE the data-Space wipe because the
  * server resolves the auxiliary Space's did:webvh controller by reading the
@@ -1655,11 +1657,25 @@ export async function deleteAccount({
     // (b0) The registry walk: every unlock method's unlock Space (holding
     // its record with the sealed bridge and sibling delegations) and local
     // state, best-effort per entry. Run before the data-Space wipe only for
-    // ordering hygiene -- each delete rides the entry's own management zcap,
-    // whose unlock Space is its own root.
+    // ordering hygiene -- each delete rides a DELETE-only child of the entry's
+    // own management zcap, whose unlock Space is its own root.
     for (const entry of registry?.methods ?? []) {
       try {
-        await deleteUnlockMethodArtifacts({ session, entry, idb })
+        const { space } = await deleteUnlockMethodArtifacts({
+          session,
+          entry,
+          idb
+        })
+        if (space === 'not-found') {
+          // The server answers 404 for an absent Space AND for one this
+          // capability does not authorize, so this line records what was
+          // said rather than concluding the Space is gone.
+          log.warn(
+            "An unlock method's Space answered 404: already gone, or this " +
+              'capability does not authorize the delete',
+            { methodType: entry.type, unlockSpaceId: entry.unlockSpaceId }
+          )
+        }
       } catch (err) {
         log.warn("Could not delete an unlock method's artifacts", {
           methodType: entry.type,

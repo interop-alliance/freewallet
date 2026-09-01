@@ -9,10 +9,20 @@
  * against a minimal in-memory `IDBFactory` (node has no IndexedDB). The real
  * EDV cipher and CapabilityAgent / X25519 derivations run unmocked.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi
+} from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
 import { CapabilityAgent } from '@interop/webkms-client'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import type {
+  IDelegatedZcap,
   IKeyAgreementKey,
   IKeyResolver,
   IZcap
@@ -35,6 +45,9 @@ const wasState = vi.hoisted(() => ({
   records: new Map<string, unknown>(),
   versions: new Map<string, number>(),
   getError: undefined as unknown,
+  // What the mocked Space delete reports: `not-found` is the server's masked
+  // 404 (absent OR unauthorized).
+  deleteOutcome: 'deleted' as 'deleted' | 'not-found',
   // A one-shot hook fired at the START of the next PUT -- the seam the CAS
   // tests use to land a concurrent write between a read and its PUT.
   beforePut: undefined as (() => void | Promise<void>) | undefined,
@@ -107,6 +120,7 @@ vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keyring')>()),
   deleteUnlockSpaceWithCapability: vi.fn(async () => {
     wasState.calls.push('deleteUnlockSpace')
+    return { outcome: wasState.deleteOutcome }
   })
 }))
 
@@ -137,12 +151,15 @@ import {
   backfillPassphraseUnlockMethod,
   deleteUnlockMethodArtifacts,
   getUnlockMethods,
+  getUnlockMethodsWithClient,
   managementZcapClient,
+  refreshTransientManageCapability,
   refreshStandingDelegationFields,
   revokeUnlockMethod,
   revokeUnlockMethodByCeremony,
   rewrapUnlockMethodsRecord,
   updateUnlockMethods,
+  updateUnlockMethodsWithClient,
   upsertPassphraseUnlockMethod,
   type PasskeyUnlockMethod,
   type PassphraseUnlockMethod,
@@ -153,6 +170,10 @@ import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
 import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { browserLocalSessionPersistence } from '@/session/persistence'
+import { zcapClientForSigner } from '@interop/wallet-core/identity'
+import { rootCapabilityId } from '@interop/was-client/paths'
+import { DELETION_ZCAP_TTL_MS } from '@interop/wallet-core/clientAnnex'
+import { mintUserKey, type UserKey } from '@interop/wallet-core/keys'
 import {
   ensureUnlockMethodsCollection,
   getUnlockMethodsRecord,
@@ -241,8 +262,9 @@ function createFakeIdb(): IDBFactory {
 /**
  * Builds a `Session` stand-in carrying a real (deterministic) vault
  * KAK + resolver -- so the EDV cipher can genuinely wrap and unwrap -- plus the
- * data controller / Space id the registry addresses. The `zcapClient` is inert:
- * every remote helper is mocked, so its value is never dereferenced.
+ * data controller / Space id the registry addresses. The `zcapClient` is real
+ * too: the unlock-Space deletion mints a DELETE-only child of the entry's
+ * management zcap, which is an actual delegation signature.
  *
  * @returns {Promise<Session>}
  */
@@ -266,9 +288,10 @@ async function makeSession(idb?: IDBFactory): Promise<Session> {
   return {
     user: { id: DATA_CONTROLLER },
     profile: {
+      keyAgent: agent,
       keyAgreementKey,
       keyResolver,
-      zcapClient: {},
+      zcapClient: zcapClientForSigner({ signer: agent.getSigner() }),
       persistence: browserLocalSessionPersistence({ idb })
     },
     storage: { spaceId: DATA_SPACE_ID },
@@ -300,10 +323,21 @@ function sampleRecord(): UnlockMethodsRecord {
  * the value is only ever passed through and compared by reference -- its shape
  * is never validated.
  */
-const FAKE_CAP = {
-  id: 'urn:zcap:test-management',
-  invocationTarget: 'https://was.example.test/space/unlock-space-abc'
-} as unknown as IZcap
+const UNLOCK_SPACE_URL = 'https://was.example.test/space/unlock-space-abc'
+
+/**
+ * A REAL management zcap on the unlock Space: GET/PUT/DELETE, a year out,
+ * delegated from the Space's root. It has to be real rather than a
+ * stand-in object now that the deletion path delegates a DELETE-only child
+ * from it -- the delegation library computes the child's capability chain
+ * from the parent's own proof.
+ */
+let FAKE_CAP: IZcap
+
+/**
+ * The did:key this suite's session signs management invocations as.
+ */
+let SESSION_CLIENT_DID: string
 
 /**
  * A stand-in management zcap expiring the given interval from now, for the
@@ -401,11 +435,26 @@ async function seedRegistry({
   await updateUnlockMethods({ session, mutate: () => record })
 }
 
+beforeAll(async () => {
+  const { profile } = await makeSession()
+  // Delegated to the identity this session's signer acts as, which is what
+  // the deletion path's read-only pre-flight checks.
+  SESSION_CLIENT_DID = profile.keyAgent!.id
+  FAKE_CAP = (await profile.zcapClient.delegate({
+    capability: rootCapabilityId(UNLOCK_SPACE_URL),
+    invocationTarget: UNLOCK_SPACE_URL,
+    controller: SESSION_CLIENT_DID,
+    allowedActions: ['GET', 'PUT', 'DELETE'],
+    expires: new Date(Date.now() + 365 * 24 * 3600 * 1000)
+  })) as IZcap
+})
+
 beforeEach(() => {
   wasState.url = 'https://was.example.test'
   wasState.records.clear()
   wasState.versions.clear()
   wasState.getError = undefined
+  wasState.deleteOutcome = 'deleted'
   wasState.beforePut = undefined
   wasState.calls = []
   vi.clearAllMocks()
@@ -548,11 +597,15 @@ describe('revokeUnlockMethod', () => {
 
     await revokeUnlockMethod({ session, entry, idb })
 
-    // The Space delete was invoked with the entry's capability + spaceId.
+    // The Space delete was invoked with a DELETE-only CHILD of the entry's
+    // capability, never the stored three-verb capability itself.
     expect(deleteUnlockSpaceWithCapability).toHaveBeenCalledOnce()
     const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
     expect(args.spaceId).toBe(entry.unlockSpaceId)
-    expect(args.capability).toBe(FAKE_CAP)
+    const child = args.capability as IDelegatedZcap
+    expect(child).not.toBe(FAKE_CAP)
+    expect(child.allowedAction).toEqual(['DELETE'])
+    expect(child.parentCapability).toBe((FAKE_CAP as IDelegatedZcap).id)
 
     // The keyring cache for the unlock Space is gone.
     await expect(
@@ -570,6 +623,27 @@ describe('revokeUnlockMethod', () => {
     const entry = passkeyEntry()
 
     await expect(revokeUnlockMethod({ session, entry, idb })).rejects.toThrow()
+    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    // The refusal is read-only and comes BEFORE the retirement: the advice to
+    // tap the passkey is only possible while the credential still stands, and
+    // a retry must still find a removable entry.
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+  })
+
+  it('refuses an expired capability before retiring the credential', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({
+      manageCapability: {
+        ...(FAKE_CAP as unknown as Record<string, unknown>),
+        expires: new Date(Date.now() - 60_000).toISOString()
+      } as unknown as IZcap
+    })
+
+    await expect(revokeUnlockMethod({ session, entry, idb })).rejects.toThrow(
+      /expired-capability/
+    )
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
     expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
   })
 
@@ -628,7 +702,15 @@ describe('deleteUnlockMethodArtifacts', () => {
     expect(deleteUnlockSpaceWithCapability).toHaveBeenCalledOnce()
     const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
     expect(args.spaceId).toBe(entry.unlockSpaceId)
-    expect(args.capability).toBe(FAKE_CAP)
+    const child = args.capability as IDelegatedZcap
+    // The DELETE-only child: the parent's target unchanged, one action, and
+    // a ten-minute lifetime under the parent's own expiry.
+    expect(child.allowedAction).toEqual(['DELETE'])
+    expect(child.invocationTarget).toBe(UNLOCK_SPACE_URL)
+    expect(child.controller).toBe(SESSION_CLIENT_DID)
+    expect(Date.parse(child.expires) - Date.now()).toBeLessThanOrEqual(
+      DELETION_ZCAP_TTL_MS + 1000
+    )
     await expect(
       loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
     ).resolves.toBeNull()
@@ -639,7 +721,7 @@ describe('deleteUnlockMethodArtifacts', () => {
     expect(after!.methods).toHaveLength(1)
   })
 
-  it('skips the server delete for an entry with no management zcap', async () => {
+  it('reports the residue for an entry with no management zcap', async () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
     const entry = passkeyEntry()
@@ -649,13 +731,115 @@ describe('deleteUnlockMethodArtifacts', () => {
       idb
     })
 
-    await deleteUnlockMethodArtifacts({ session, entry, idb })
+    const outcome = await deleteUnlockMethodArtifacts({ session, entry, idb })
 
-    // Stated residue: the unlock Space survives, the local trio does not.
+    // Stated residue, named rather than silently skipped: the unlock Space
+    // survives, the local state does not.
+    expect(outcome).toEqual({
+      unlockSpaceId: entry.unlockSpaceId,
+      space: 'no-capability'
+    })
     expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
     await expect(
       loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
     ).resolves.toBeNull()
+  })
+
+  it('reports the residue for an entry whose management zcap has expired', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({
+      manageCapability: {
+        ...(FAKE_CAP as unknown as Record<string, unknown>),
+        expires: new Date(Date.now() - 60_000).toISOString()
+      } as unknown as IZcap
+    })
+
+    const outcome = await deleteUnlockMethodArtifacts({ session, entry, idb })
+
+    // A child of an expired parent would verify nowhere, so nothing is minted
+    // and nothing is sent -- and the walk still continues.
+    expect(outcome.space).toBe('expired-capability')
+    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+  })
+
+  it('refuses a capability naming a delegatee this session cannot act as', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({
+      manageCapability: {
+        ...(FAKE_CAP as unknown as Record<string, unknown>),
+        controller: 'did:key:z6MkSomeOtherEnrolledClient'
+      } as unknown as IZcap
+    })
+
+    const outcome = await deleteUnlockMethodArtifacts({ session, entry, idb })
+
+    // A child signed by a delegator the parent does not name comes back as a
+    // masked 404, which the walk would read as "already gone" and drop the
+    // entry around a Space that still stands. Refused locally instead.
+    expect(outcome.space).toBe('foreign-controller')
+    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+  })
+
+  it("refuses a capability naming another deployment's Space URL", async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({
+      manageCapability: {
+        ...(FAKE_CAP as unknown as Record<string, unknown>),
+        invocationTarget: 'https://was.example.test/was/space/unlock-space-abc'
+      } as unknown as IZcap
+    })
+
+    const outcome = await deleteUnlockMethodArtifacts({ session, entry, idb })
+
+    expect(outcome.space).toBe('stale-target')
+    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+  })
+
+  it("reports the server's masked 404 as not-found", async () => {
+    wasState.deleteOutcome = 'not-found'
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({ manageCapability: FAKE_CAP })
+
+    const outcome = await deleteUnlockMethodArtifacts({ session, entry, idb })
+
+    // Absent OR unauthorized -- the server masks the two, so the walk records
+    // what it was told rather than concluding the Space is gone.
+    expect(outcome.space).toBe('not-found')
+    await expect(
+      loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
+    ).resolves.toBeNull()
+  })
+
+  it('signs the child with a caller-supplied delegator and delegatee', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({ manageCapability: FAKE_CAP })
+    const seed = new Uint8Array(32)
+    seed.fill(9)
+    const ladderAgent = await CapabilityAgent.fromSeed({
+      seed,
+      handle: 'ladder-vm',
+      keyName: 'ladder-vm-key'
+    })
+
+    await deleteUnlockMethodArtifacts({
+      session,
+      entry,
+      idb,
+      signer: {
+        zcapClient: zcapClientForSigner({ signer: ladderAgent.getSigner() }),
+        controller: ladderAgent.id
+      }
+    })
+
+    const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
+    const child = args.capability as IDelegatedZcap
+    expect(child.controller).toBe(ladderAgent.id)
+    expect(child.allowedAction).toEqual(['DELETE'])
   })
 
   it('skips the server delete with no WAS server configured', async () => {
@@ -675,6 +859,223 @@ describe('deleteUnlockMethodArtifacts', () => {
     await expect(
       loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
     ).resolves.toBeNull()
+  })
+})
+
+describe('refreshTransientManageCapability', () => {
+  /**
+   * Seeds the registry the way a session-less writer does, sealed to the
+   * given user key.
+   *
+   * @param options {object}
+   * @param options.userKey {UserKey}
+   * @param options.record {UnlockMethodsRecord}
+   * @returns {Promise<void>}
+   */
+  async function seedViaClient({
+    userKey,
+    record
+  }: {
+    userKey: UserKey
+    record: UnlockMethodsRecord
+  }): Promise<void> {
+    await updateUnlockMethodsWithClient({
+      zcapClient: {} as never,
+      spaceId: DATA_SPACE_ID,
+      userKey,
+      mutate: () => record
+    })
+  }
+
+  /**
+   * Runs the refresh with this suite's fixed identifiers.
+   *
+   * @param options {object}
+   * @param options.userKey {UserKey}
+   * @param [options.keyAgreementKeyMultibase] {string}
+   * @returns {Promise<void>}
+   */
+  async function refresh({
+    userKey,
+    keyAgreementKeyMultibase
+  }: {
+    userKey: UserKey
+    keyAgreementKeyMultibase?: string
+  }): Promise<void> {
+    await refreshTransientManageCapability({
+      zcapClient: {} as never,
+      spaceId: DATA_SPACE_ID,
+      userKey,
+      capability: FAKE_CAP,
+      unlockSpaceId: 'unlock-space-abc',
+      manageCapability: FAKE_CAP,
+      ...(keyAgreementKeyMultibase ? { keyAgreementKeyMultibase } : {})
+    })
+  }
+
+  /**
+   * A one-entry registry whose passphrase entry names this suite's unlock
+   * Space.
+   *
+   * @param [entry] {Partial<PassphraseUnlockMethod>}
+   * @returns {UnlockMethodsRecord}
+   */
+  function registryWith(
+    entry: Partial<PassphraseUnlockMethod> = {}
+  ): UnlockMethodsRecord {
+    return {
+      version: 1,
+      webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
+      methods: [
+        {
+          type: 'passphrase',
+          createdAt: '2026-08-19T00:00:00.000Z',
+          unlockSpaceId: 'unlock-space-abc',
+          ...entry
+        } as PassphraseUnlockMethod
+      ]
+    }
+  }
+
+  it('writes the fresh capability to an entry carrying none', async () => {
+    const userKey = await mintUserKey()
+    await seedViaClient({ userKey, record: registryWith() })
+    vi.clearAllMocks()
+
+    await refresh({ userKey })
+
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+    const after = await getUnlockMethodsWithClient({
+      zcapClient: {} as never,
+      spaceId: DATA_SPACE_ID,
+      userKey
+    })
+    expect(after!.methods[0].manageCapability).toEqual(FAKE_CAP)
+  })
+
+  it('writes when the stored capability is expiring or narrower', async () => {
+    const userKey = await mintUserKey()
+    await seedViaClient({
+      userKey,
+      record: registryWith({
+        manageCapability: capExpiringIn({ msFromNow: 24 * 3600 * 1000 })
+      })
+    })
+    vi.clearAllMocks()
+
+    await refresh({ userKey })
+
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+
+    // And the widening case: a stored GET/DELETE capability, still fresh, is
+    // replaced by the GET/PUT/DELETE mint.
+    await seedViaClient({
+      userKey,
+      record: registryWith({
+        manageCapability: capExpiringIn({
+          msFromNow: ONE_YEAR_MS,
+          allowedAction: ['GET', 'DELETE']
+        })
+      })
+    })
+    vi.clearAllMocks()
+
+    await refresh({ userKey })
+
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+  })
+
+  it("writes when the stored capability names another deployment's target", async () => {
+    const userKey = await mintUserKey()
+    await seedViaClient({
+      userKey,
+      record: registryWith({
+        manageCapability: {
+          ...(capExpiringIn({
+            msFromNow: ONE_YEAR_MS,
+            allowedAction: ['GET', 'PUT', 'DELETE']
+          }) as unknown as Record<string, unknown>),
+          // A root-anchored target minted before the mint moved onto
+          // was-client's path helpers: unusable on a sub-path deployment, and
+          // neither expiring nor narrower, so only the target comparison
+          // catches it.
+          invocationTarget: 'https://was.example.test/space/other-space'
+        } as unknown as IZcap
+      })
+    })
+    vi.clearAllMocks()
+
+    await refresh({ userKey })
+
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+    const after = await getUnlockMethodsWithClient({
+      zcapClient: {} as never,
+      spaceId: DATA_SPACE_ID,
+      userKey
+    })
+    expect(after!.methods[0].manageCapability).toEqual(FAKE_CAP)
+  })
+
+  it('writes nothing when the stored capability is neither expiring nor narrower', async () => {
+    const userKey = await mintUserKey()
+    await seedViaClient({
+      userKey,
+      record: registryWith({
+        manageCapability: capExpiringIn({
+          msFromNow: ONE_YEAR_MS,
+          allowedAction: ['GET', 'PUT', 'DELETE']
+        })
+      })
+    })
+    vi.clearAllMocks()
+
+    await refresh({ userKey })
+
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+  })
+
+  it('creates nothing when no registry exists', async () => {
+    const userKey = await mintUserKey()
+    vi.clearAllMocks()
+
+    await refresh({ userKey })
+
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+    expect(ensureUnlockMethodsCollection).not.toHaveBeenCalled()
+  })
+
+  it("skips an entry recording another credential's key-agreement key", async () => {
+    const userKey = await mintUserKey()
+    await seedViaClient({
+      userKey,
+      record: registryWith({ keyAgreementKeyMultibase: 'zOtherCredentialKak' })
+    })
+    vi.clearAllMocks()
+
+    // The pending-retirement shape: the entry names the NEW unlock Space
+    // while recording the OLD credential's members, so it is not this
+    // credential's to write.
+    await refresh({ userKey, keyAgreementKeyMultibase: 'zThisCredentialKak' })
+
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+  })
+
+  it('warns and skips when the registry read throws', async () => {
+    const userKey = await mintUserKey()
+    wasState.getError = new Error('the registry record will not decrypt')
+    const capture = captureSink()
+    addSink(capture.sink)
+
+    await refresh({ userKey })
+
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+    expect(capture.events).toContainEqual(
+      expect.objectContaining({
+        ns: 'fw:session:methods',
+        level: 'warn',
+        msg: expect.stringContaining('Could not refresh the management zcap')
+      })
+    )
   })
 })
 
@@ -866,7 +1267,10 @@ describe('the credential rotation inside a revocation', () => {
       type: 'recovery-code',
       label: 'Recovery code',
       createdAt: '2026-08-01T00:00:00.000Z',
-      unlockSpaceId: 'unlock-space-code',
+      // The suite's one management zcap targets this Space, and the deletion
+      // pre-flight now checks that the recorded target is the one this
+      // deployment addresses.
+      unlockSpaceId: 'unlock-space-abc',
       manageCapability: FAKE_CAP,
       recoveryKid: 'did:key:z6LSCode#kak',
       keyAgreementKeyMultibase: 'z6LSCodeKak',

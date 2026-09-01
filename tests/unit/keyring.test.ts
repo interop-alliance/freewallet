@@ -2220,6 +2220,27 @@ describe('management zcap delegation', () => {
       expect(Math.abs(expiresMs - expectedMs)).toBeLessThan(60_000)
     })
 
+    it('keeps a sub-path deployment prefix in the invocation target', async () => {
+      // The DELETE this capability parents is addressed with was-client's
+      // path helpers against the server URL, so a hand-built root-anchored
+      // target would drop the base path and the server would refuse every
+      // child of it.
+      wasState.url = 'https://host.example.test/was'
+      const idb = createFakeIdb()
+      const { manageCapability, unlockSpaceId } = await bindUnlockSecret({
+        clientSeed: randomSeed(),
+        controller: DATA_CONTROLLER,
+        secret: 'sub-path deployment passphrase',
+        kdf: KDF,
+        delegateManagementTo: DATA_CONTROLLER,
+        idb
+      })
+
+      expect((manageCapability as IDelegatedZcap).invocationTarget).toBe(
+        `https://host.example.test/was/space/${unlockSpaceId}`
+      )
+    })
+
     it('returns no capability without delegateManagementTo', async () => {
       const idb = createFakeIdb()
       const { manageCapability } = await bindUnlockSecret({
@@ -2587,15 +2608,21 @@ describe('fetchTransientKeyring (FW-215)', () => {
     expect(found!.standing!.delegation).toEqual(DELEGATION)
     expect(found!.standingClient).toBeDefined()
     // Nothing browser-local rides the result: no client keys, no persist
-    // or enroll closures, no management zcap. The record re-bind closure
+    // or enroll closures. The record re-bind closure
     // DOES ride along (the visit's annex mend re-seals a fresh sibling
     // delegation through it), in its transient shape -- a remote record
     // write that touches no local cache or freshness pin, as the database
-    // check below confirms.
+    // check below confirms. So does a freshly minted management zcap, a
+    // local signature costing no request: the transient login is the only
+    // refresher of that capability on a credential-anchored account.
     expect(found).not.toHaveProperty('clientKeys')
     expect(found).not.toHaveProperty('persistClientKeys')
     expect(found).not.toHaveProperty('enrollClientKeys')
-    expect(found).not.toHaveProperty('manageCapability')
+    const minted = found!.manageCapability as IDelegatedZcap
+    expect(minted.allowedAction).toEqual(['GET', 'PUT', 'DELETE'])
+    expect(minted.invocationTarget).toBe(
+      `${wasState.url}/space/${found!.unlockSpaceId}`
+    )
     expect(typeof found!.rebindStandingRecord).toBe('function')
     // And no IndexedDB database was created at any point.
     expect(await idb.databases()).toEqual([])

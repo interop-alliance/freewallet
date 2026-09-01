@@ -606,7 +606,19 @@ the unlock-methods registry, deleting each entry's unlock Space and
 unlock-local state best-effort (`deleteUnlockMethodArtifacts` in
 `src/session/unlockMethods.ts`, removing the dangling existence-oracle
 Spaces a probe could still find), then deletes the auxiliary annex Space in
-one `space.delete()`. Both run BEFORE the fatal wipe, because resolving the
+one `space.delete()`. Each sibling Space goes through a freshly minted
+DELETE-only child of that entry's management zcap: the parent's
+`invocationTarget` copied verbatim, `allowedAction` exactly `['DELETE']`, a
+ten-minute expiry clamped to the parent's, and nothing stored, so a torn run
+owes no revocation. Four states refuse locally before anything is minted and
+are reported as named residues rather than refusing the run or skipping in
+silence: an entry recording no management zcap, one already expired, one
+naming a delegatee this session cannot act as (an entry bound before
+promotion), and one whose target is not the URL this deployment addresses.
+That credential's own next login re-delegates. A `not-found` from the delete
+is the server's masked 404, absent OR unauthorized; the walk warns on it
+today, and the rule that decides what a clean deletion may claim from it is
+the deletion ceremony's. Both run BEFORE the fatal wipe, because resolving the
 auxiliary Space's controller reads the account log out of the account Space.
 A wipe failure after them leaves other methods' logins already destroyed,
 accepted since the intent was deletion.
@@ -1085,6 +1097,28 @@ the credential's standing members, the same fields a remembered login
 stamps, so a mid-session ceremony (the App Connect grant path's
 generation-delegation renewal below) can sign as the ladder with no
 enrolled-client signer in hand.
+
+**The management-zcap mint and refresh.** The record fetch also mints the
+unlock Space's management zcap, a local signature by the unlock identity's
+own client that costs no request. The visit then writes it to the acting
+credential's registry entry when the stored copy is absent, expiring, or
+narrower than the mint (`refreshTransientManageCapability` in
+`src/session/unlockMethods.ts`). Without this pass no credential's
+management zcap would ever be refreshed on an account that never remembers a
+browser, and every one would lapse a year after its bind -- on the default
+account shape, taking the account's own deletion path with it.
+
+This is the one registry write an ordinary transient login makes, and every
+constraint on it narrows. It creates no registry and no entry, touches no
+entry but the acting credential's (matched on unlock Space id), skips a
+pending-shaped entry recording another credential's key-agreement multibase,
+rides the visit's generation delegation as the annex VM inside the
+registry's own compare-and-swap, and warns and skips on a read that throws
+(a stale registry seal included) rather than failing the login. It is not
+awaited: the session is complete without it, so no login waits on the round
+trip. A CHAPI popup visit skips it, the guard the login-time registry passes
+carry. On a healthy account it fires about once a year per credential, and
+once more for an entry whose stored target predates the path-helper mint.
 
 The tears a torn credential-anchored signup can leave are mended by the
 shared mend ceremony, wallet-core's `mendCredentialAnchoredAccount`

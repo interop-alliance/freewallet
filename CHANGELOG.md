@@ -1,5 +1,51 @@
 # History
 
+## 0.45.0 - TBD
+
+### Changed
+
+- An unlock Space is deleted through a freshly minted DELETE-only child of the
+  entry's management zcap, rather than by invoking that stored three-verb
+  capability directly (`deleteUnlockSpaceForEntry`, over wallet-core's
+  `mintSpaceVerbCapability`). The child carries the parent's own
+  `invocationTarget` bytes, `allowedAction` exactly `['DELETE']`, and a
+  ten-minute expiry clamped to the parent's, and nothing stores it. A caller
+  may supply its own delegator and delegatee, for a session with no
+  enrolled-client key. The caller-side preconditions the mint documents are
+  checked first (`unlockSpaceDeletionRefusal`), so a parent naming a delegatee
+  this session cannot act as, or a target other than the deployment's own
+  Space URL, refuses locally instead of sending a child the server answers
+  404 to.
+- `deleteUnlockMethodArtifacts` returns what became of the entry's unlock
+  Space. An entry with no usable management zcap -- absent, expired, foreign
+  controller, stale target -- is reported as a named residue and the walk
+  continues; a `not-found` is the server's masked 404 (absent OR
+  unauthorized) rather than proof of absence, and the walk warns on it.
+- `revokeUnlockMethod` checks the entry's management zcap read-only BEFORE
+  the credential rotation. A refusal after the retirement left an entry whose
+  copy advised tapping a passkey that no longer unlocks anything.
+- The registry adopts a fresh management zcap whose `invocationTarget`
+  differs from the stored one, beside the expiry and widening cases. Without
+  it a stored root-anchored target on a sub-path deployment survived until
+  its year ran out and the mint fix never reached existing entries.
+- The unlock Space's management zcap targets the URL was-client's path helpers
+  build. A sub-path deployment (a server URL like `https://host/was`) kept its
+  base path in the DELETE but lost it in the hand-built target, so every child
+  of that capability named a URL the server refuses.
+
+### Added
+
+- The transient login mints the unlock Space's management zcap and refreshes
+  the acting credential's registry entry with it when the stored copy is
+  absent, expiring, retargeted, or narrower
+  (`refreshTransientManageCapability`). Without
+  it no credential's management zcap is ever refreshed on an account that
+  never remembers a browser, and every one lapses a year after its bind. The
+  pass creates no registry and no entry, touches no other entry, skips a
+  pending-shaped one, rides the visit's generation delegation inside the
+  registry's compare-and-swap, warns and skips on a read that throws, is not
+  awaited (no login blocks on it), and is skipped in the CHAPI popup.
+
 ## 0.44.0 - TBD
 
 ### Changed

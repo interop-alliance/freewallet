@@ -72,11 +72,16 @@ import {
   unwrapRecordEnvelope,
   wrapRecordEnvelope
 } from '@/session/recordEnvelope'
+import { spacePath, toUrl } from '@interop/was-client/paths'
 import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:methods')
 import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
+import {
+  DELETION_ZCAP_TTL_MS,
+  mintSpaceVerbCapability
+} from '@interop/wallet-core/clientAnnex'
 import {
   ensureUnlockMethodsCollection,
   getUnlockMethodsRecord,
@@ -1032,12 +1037,206 @@ export function managementZcapClient({
 }
 
 /**
+ * What one unlock Space's deletion did, so a best-effort walk can name what it
+ * left standing instead of failing or skipping in silence:
+ *
+ * - `deleted` -- the server accepted the DELETE.
+ * - `not-found` -- the server answered 404, which is absent OR unauthorized
+ *   (it masks the two), so this is never proof the Space is gone.
+ * - `no-server` -- no WAS server is configured, so there is no Space at all.
+ * - `no-capability` -- the entry records no management zcap, or one naming no
+ *   delegatee. Nothing can be minted from it and the Space stays; that
+ *   credential's own next login re-delegates.
+ * - `expired-capability` -- the recorded management zcap has already expired,
+ *   so a child of it would verify nowhere. Same residue, same mender.
+ * - `foreign-controller` -- the recorded management zcap names a delegatee
+ *   this session's signer cannot act as (an entry bound before promotion
+ *   names the account did:key, and a later enrolled client signs as the
+ *   account did:webvh). Same residue, same mender.
+ * - `stale-target` -- the recorded management zcap names a Space URL other
+ *   than the one this deployment addresses (an entry minted before the target
+ *   was built with was-client's path helpers carries a root-anchored URL on a
+ *   sub-path deployment). Same residue, same mender.
+ *
+ * The last four are refused locally, before anything is minted or sent. A
+ * child the server would refuse comes back as a 404 like an absent Space,
+ * and a walk reading that as `not-found` would drop the entry and its local
+ * state around a Space that in fact still stands.
+ */
+export type UnlockSpaceDeletionOutcome =
+  | 'deleted'
+  | 'not-found'
+  | 'no-server'
+  | 'no-capability'
+  | 'expired-capability'
+  | 'foreign-controller'
+  | 'stale-target'
+
+/**
+ * The identities this session's own management-zcap signer can act as: this
+ * client's did:key (which `managementZcapClient` signs under directly), and
+ * the account's did:webvh when the pointer names one (which the session's
+ * root zcapClient signs under as `<did:webvh>#<multibase>`). A stored parent
+ * naming anything else cannot be delegated from here.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {Set<string>}
+ */
+function sessionDelegatorIdentities({
+  session
+}: {
+  session: Session
+}): Set<string> {
+  const { keyAgent, accountPointer } = session.profile
+  const identities = new Set<string>()
+  if (keyAgent?.id) {
+    identities.add(keyAgent.id)
+  }
+  if (accountPointer?.did?.startsWith('did:webvh:')) {
+    identities.add(accountPointer.did)
+  }
+  return identities
+}
+
+/**
+ * The read-only pre-flight of an unlock Space deletion: the caller-side
+ * preconditions `mintSpaceVerbCapability` leaves to its caller, checked
+ * before anything is minted or any credential is retired. Returns the residue
+ * outcome that refuses the delete, or `undefined` when the recorded
+ * capability is usable.
+ *
+ * The delegator check is skipped when the caller supplies its own signer: it
+ * states the identity it acts as, which this module cannot second-guess.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.entry {UnlockMethod}
+ * @param [options.signer] {object}   an explicit delegator and delegatee
+ * @param options.signer.zcapClient {ZcapClient}
+ * @param options.signer.controller {string}
+ * @returns {UnlockSpaceDeletionOutcome | undefined}
+ */
+export function unlockSpaceDeletionRefusal({
+  session,
+  entry,
+  signer
+}: {
+  session: Session
+  entry: UnlockMethod
+  signer?: { zcapClient: ZcapClient; controller: string }
+}): UnlockSpaceDeletionOutcome | undefined {
+  const parent = entry.manageCapability as
+    | { controller?: string; invocationTarget?: string; expires?: string }
+    | undefined
+  if (!parent?.controller || !parent.invocationTarget) {
+    return 'no-capability'
+  }
+  const expires = Date.parse(parent.expires ?? '')
+  if (!Number.isNaN(expires) && expires <= Date.now()) {
+    return 'expired-capability'
+  }
+  if (
+    !signer &&
+    !sessionDelegatorIdentities({ session }).has(parent.controller)
+  ) {
+    return 'foreign-controller'
+  }
+  const target = toUrl({
+    serverUrl: WAS_SERVER_URL as string,
+    path: spacePath(entry.unlockSpaceId)
+  })
+  if (parent.invocationTarget !== target) {
+    return 'stale-target'
+  }
+  return undefined
+}
+
+/**
+ * Deletes one unlock Space through a freshly minted DELETE-only child of the
+ * entry's management zcap, rather than by invoking that three-verb capability
+ * directly. The storage server admits a delegated Space DELETE only when the
+ * capability's `invocationTarget` is exactly the Space URL and its
+ * `allowedAction` is exactly `['DELETE']`, so the stored GET/PUT/DELETE
+ * capability is a parent to delegate from, never a capability to invoke. The
+ * child's target is the parent's own bytes, its lifetime the deletion TTL
+ * clamped to the parent's `expires`, and nothing stores it: it is minted
+ * immediately before its one request and dropped, so a torn run owes no
+ * revocation.
+ *
+ * The delegatee is the delegator itself -- the account DID the parent already
+ * names -- unless the caller supplies its own signer, which is how a session
+ * with no enrolled-client key (the ladder VM's bare did:key) deletes.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.entry {UnlockMethod}   the method whose Space to delete
+ * @param [options.signer] {object}   an explicit delegator and delegatee, for
+ *   a caller not signing as an enrolled client
+ * @param options.signer.zcapClient {ZcapClient}
+ * @param options.signer.controller {string}
+ * @returns {Promise<UnlockSpaceDeletionOutcome>}
+ */
+export async function deleteUnlockSpaceForEntry({
+  session,
+  entry,
+  signer
+}: {
+  session: Session
+  entry: UnlockMethod
+  signer?: { zcapClient: ZcapClient; controller: string }
+}): Promise<UnlockSpaceDeletionOutcome> {
+  if (!WAS_SERVER_URL) {
+    return 'no-server'
+  }
+  const refusal = unlockSpaceDeletionRefusal({
+    session,
+    entry,
+    ...(signer ? { signer } : {})
+  })
+  if (refusal) {
+    return refusal
+  }
+  const parent = entry.manageCapability as IZcap
+  const controller =
+    signer?.controller ?? (parent as { controller?: string }).controller
+  const zcapClient =
+    signer?.zcapClient ?? managementZcapClient({ session, capability: parent })
+  let capability
+  try {
+    capability = await mintSpaceVerbCapability({
+      zcapClient,
+      parent,
+      verb: 'DELETE',
+      controller: controller as string,
+      ttlMs: DELETION_ZCAP_TTL_MS
+    })
+  } catch (err) {
+    // Matched by name: the refusal is raised in wallet-core, whose class this
+    // module's copy need not be identical to.
+    if ((err as Error).name === 'ExpiredParentCapabilityError') {
+      return 'expired-capability'
+    }
+    throw err
+  }
+  const { outcome } = await deleteUnlockSpaceWithCapability({
+    storageServerUrl: WAS_SERVER_URL,
+    zcapClient,
+    spaceId: entry.unlockSpaceId,
+    capability
+  })
+  return outcome
+}
+
+/**
  * Revokes an unlock method tap-free: deletes its unlock Space with the entry's
  * management zcap (invoked by the session's ROOT zcapClient), drops the local
  * keyring cache for that Space, then removes the entry from the registry. This
  * is the path for a LOST passkey -- no ceremony on the authenticator being
- * removed. With a WAS server configured it requires `entry.manageCapability`
- * (callers gate on `canRevokeWithoutCeremony` first); a 404 from the Space
+ * removed. With a WAS server configured it requires a usable
+ * `entry.manageCapability` (callers gate on `canRevokeWithoutCeremony`
+ * first), checked read-only BEFORE the retirement below so a refusal leaves
+ * the credential standing and the entry removable; a 404 from the Space
  * delete is tolerated (already gone). With no WAS server there is no Space to
  * delete, so only the cache and the registry entry are cleaned up.
  *
@@ -1065,6 +1264,22 @@ export async function revokeUnlockMethod({
   idb?: IDBFactory
   verb?: string
 }): Promise<CredentialRotationOutcome | null> {
+  // The read-only pre-flight, BEFORE the rotation below: a capability this
+  // session cannot delegate a usable child from refuses the whole revocation
+  // with the credential still standing, so the "tap the passkey being
+  // removed" fallback the copy names is still available and a retry still
+  // finds a removable entry. Refusing after the retirement would leave an
+  // entry nothing can remove.
+  if (WAS_SERVER_URL) {
+    const refusal = unlockSpaceDeletionRefusal({ session, entry })
+    if (refusal) {
+      throw new Error(
+        `This unlock method's management capability is unusable from this ` +
+          `session (${refusal}); it can only be revoked by tapping the ` +
+          'passkey being removed.'
+      )
+    }
+  }
   // A standing passphrase or passkey is retired for real: its document
   // inventory out, the user key rotated off its roster wrap, every encrypted
   // collection re-epoch'd. Run BEFORE the Space delete and the registry drop
@@ -1077,21 +1292,16 @@ export async function revokeUnlockMethod({
       ? await rotateOffUnlockCredential({ session, method: entry, verb })
       : null
   if (WAS_SERVER_URL) {
-    if (!entry.manageCapability) {
-      throw new Error(
-        'This unlock method has no management capability; it can only be ' +
-          'revoked by tapping the passkey being removed.'
-      )
+    const outcome = await deleteUnlockSpaceForEntry({ session, entry })
+    if (outcome === 'not-found') {
+      // Already gone, or this capability no longer authorizes the delete --
+      // the server masks the two as one 404. Retiring the method is
+      // idempotent either way, and the local state and registry entry below
+      // are what the caller is really after.
+      log.info('The unlock Space was already gone (or unreachable)', {
+        unlockSpaceId: entry.unlockSpaceId
+      })
     }
-    await deleteUnlockSpaceWithCapability({
-      storageServerUrl: WAS_SERVER_URL,
-      zcapClient: managementZcapClient({
-        session,
-        capability: entry.manageCapability
-      }),
-      spaceId: entry.unlockSpaceId,
-      capability: entry.manageCapability
-    })
   }
   // Retiring the method also retires this client's local records under it:
   // the keyring cache and the client-key wrap (other methods keep their own
@@ -1107,10 +1317,12 @@ export async function revokeUnlockMethod({
  * Deletes one unlock method's artifacts, ceremony-free -- the
  * account-deletion walk's per-entry unit. Server-side, the entry's unlock
  * Space (holding its unlock record, and with it the sealed bridge and
- * `delegatedClients` delegations) goes through the recorded management zcap;
- * an entry recording none keeps its Space -- the walk is best-effort by
- * design, and the account behind the record is dead either way. Client-side,
- * the entry's local state (keyring cache, client-key record) is dropped.
+ * `delegatedClients` delegations) goes through a DELETE-only child of the
+ * recorded management zcap; an entry recording none, or one whose recorded
+ * capability has expired, keeps its Space and says so on the returned outcome
+ * -- the walk is best-effort by design, and the account behind the record is
+ * dead either way. Client-side, the entry's local state (keyring cache,
+ * client-key record) is dropped whatever the server did.
  * Deliberately NO rotation and NO registry rewrite: the registry
  * and the roster die with the account Space the caller is about to wipe.
  *
@@ -1118,29 +1330,42 @@ export async function revokeUnlockMethod({
  * @param options.session {Session}
  * @param options.entry {UnlockMethod}
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<void>}
+ * @param [options.signer] {object}   an explicit delegator and delegatee for
+ *   the DELETE-only child, for a caller not signing as an enrolled client
+ * @param options.signer.zcapClient {ZcapClient}
+ * @param options.signer.controller {string}
+ * @returns {Promise<{ unlockSpaceId: string, space: UnlockSpaceDeletionOutcome }>}
+ *   what became of the entry's unlock Space
  */
 export async function deleteUnlockMethodArtifacts({
   session,
   entry,
-  idb
+  idb,
+  signer
 }: {
   session: Session
   entry: UnlockMethod
   idb?: IDBFactory
-}): Promise<void> {
-  if (WAS_SERVER_URL && entry.manageCapability) {
-    await deleteUnlockSpaceWithCapability({
-      storageServerUrl: WAS_SERVER_URL,
-      zcapClient: managementZcapClient({
-        session,
-        capability: entry.manageCapability
-      }),
-      spaceId: entry.unlockSpaceId,
-      capability: entry.manageCapability
+  signer?: { zcapClient: ZcapClient; controller: string }
+}): Promise<{ unlockSpaceId: string; space: UnlockSpaceDeletionOutcome }> {
+  const space = await deleteUnlockSpaceForEntry({
+    session,
+    entry,
+    ...(signer ? { signer } : {})
+  })
+  if (space === 'no-capability' || space === 'expired-capability') {
+    // Not a refusal and not a silent skip: the Space survives the run and is
+    // named on the outcome, mended by that credential's own next login (which
+    // re-delegates the management zcap) or by its next use once the account
+    // behind it is gone.
+    log.warn('An unlock method keeps its Space: no usable management zcap', {
+      methodType: entry.type,
+      unlockSpaceId: entry.unlockSpaceId,
+      reason: space
     })
   }
   await deleteUnlockLocalState({ spaceId: entry.unlockSpaceId, idb })
+  return { unlockSpaceId: entry.unlockSpaceId, space }
 }
 
 /**
@@ -1406,6 +1631,13 @@ function capabilityWidensStored({
  * replacement that narrows it is logged as an error, since no login can
  * re-widen what its own mint does not carry.
  *
+ * A fresh capability naming a DIFFERENT `invocationTarget` is adopted
+ * whatever its actions. The target is the deployment's own Space URL, so a
+ * stored one that differs is unusable here (a root-anchored target minted
+ * before the mint moved onto was-client's path helpers, on a sub-path
+ * deployment); keeping it on an action comparison alone would strand the
+ * entry until its year ran out.
+ *
  * @param options {object}
  * @param options.stored {IZcap}
  * @param options.fresh {IZcap}
@@ -1425,6 +1657,18 @@ function shouldAdoptFreshCapability({
     expires: (stored as { expires?: string }).expires
   })
   const covers = capabilityCoversStored({ stored, fresh })
+  const retargeted =
+    (stored as { invocationTarget?: string }).invocationTarget !==
+    (fresh as { invocationTarget?: string }).invocationTarget
+  if (retargeted) {
+    log.info(
+      "Adopting a fresh management zcap naming this deployment's target",
+      {
+        label
+      }
+    )
+    return true
+  }
   if (expiring) {
     if (!covers) {
       log.error(
@@ -1457,12 +1701,13 @@ function shouldAdoptFreshCapability({
  * registry when it can be read, so callers (the Settings passkeys section)
  * can use this as their load-plus-backfill entry point for any session.
  *
- * A transient session makes no registry call at all and returns `null`
- * immediately, before even a read: the registry is remembered-session state,
- * a transient session's annex-signed root invocation could never have
- * authorized it anyway, and threading the generation delegation into these
- * helpers must not turn this into a registry clobber from a public
- * terminal.
+ * A transient session makes no call from HERE and returns `null` immediately,
+ * before even a read: the registry is remembered-session state, a transient
+ * session's annex-signed root invocation could never have authorized it
+ * anyway, and threading the generation delegation into these helpers must not
+ * turn this into a registry clobber from a public terminal. Its one registry
+ * write is `refreshTransientManageCapability`, which creates nothing and
+ * touches only the acting credential's own management zcap.
  *
  * The registry is created only when `createIfMissing` is set (a fresh 16-byte
  * webAuthnUserId is minted): the lazy-creation points are first passkey
@@ -1583,6 +1828,109 @@ export async function backfillPassphraseUnlockMethod({
       })
     }
   })
+}
+
+/**
+ * Refreshes the acting credential's management zcap in the registry from a
+ * TRANSIENT visit -- the one registry write an ordinary transient login makes.
+ * The remembered login mints a fresh one-year delegation every time and the
+ * backfill stores it; without this pass, no credential's management zcap would
+ * ever be refreshed on an account that never remembers a browser, and every
+ * one of them would lapse a year after its bind -- on the default account
+ * shape.
+ *
+ * Every constraint here narrows it. It refreshes only: no registry is created,
+ * no entry is created, and no entry but the acting credential's is touched
+ * (matched on unlock Space id, the same match the passkey own-entry refresh
+ * makes). The write rides the visit's generation delegation as the annex VM,
+ * the only authority a transient visit holds, inside the shared
+ * compare-and-swap loop, so a concurrent writer conflicts and re-applies. A
+ * pending-shaped entry -- one recording another credential's key-agreement
+ * multibase, the residue of a passphrase change torn before its retirement --
+ * is skipped, and so is an entry whose stored capability is neither expiring
+ * nor narrower than the fresh one. A read that throws (a stale registry seal
+ * included) warns and skips: a login must not fail over a capability refresh.
+ *
+ * @param options {object}
+ * @param options.zcapClient {ZcapClient}   the visit's annex-VM client
+ * @param options.spaceId {string}   the data Space id
+ * @param options.userKey {UserKey}   the user key the stored record is sealed
+ *   to
+ * @param options.capability {IZcap}   the generation delegation every request
+ *   rides
+ * @param options.unlockSpaceId {string}   the acting credential's unlock Space
+ * @param options.manageCapability {IZcap}   the freshly minted capability
+ * @param [options.keyAgreementKeyMultibase] {string}   the acting
+ *   credential's key-agreement multibase; a matched entry recording a
+ *   different one is another credential's and is left alone
+ * @returns {Promise<void>}
+ */
+export async function refreshTransientManageCapability({
+  zcapClient,
+  spaceId,
+  userKey,
+  capability,
+  unlockSpaceId,
+  manageCapability,
+  keyAgreementKeyMultibase
+}: {
+  zcapClient: ZcapClient
+  spaceId: string
+  userKey: UserKey
+  capability: IZcap
+  unlockSpaceId: string
+  manageCapability: IZcap
+  keyAgreementKeyMultibase?: string
+}): Promise<void> {
+  try {
+    await updateUnlockMethodsWithClient({
+      zcapClient,
+      spaceId,
+      userKey,
+      capability,
+      mutate: record => {
+        if (!record) {
+          return null
+        }
+        const stored = record.methods.find(
+          method =>
+            (method.type === 'passphrase' || method.type === 'passkey') &&
+            method.unlockSpaceId === unlockSpaceId
+        )
+        if (!stored) {
+          return null
+        }
+        if (
+          keyAgreementKeyMultibase !== undefined &&
+          stored.keyAgreementKeyMultibase !== undefined &&
+          stored.keyAgreementKeyMultibase !== keyAgreementKeyMultibase
+        ) {
+          return null
+        }
+        const stale =
+          !stored.manageCapability ||
+          shouldAdoptFreshCapability({
+            stored: stored.manageCapability,
+            fresh: manageCapability,
+            label: stored.type
+          })
+        if (!stale) {
+          return null
+        }
+        return {
+          ...record,
+          methods: record.methods.map(method =>
+            method === stored ? { ...stored, manageCapability } : method
+          )
+        }
+      }
+    })
+  } catch (err) {
+    log.warn('Could not refresh the management zcap from a transient visit', {
+      unlockSpaceId,
+      err
+    })
+  }
 }
 
 /**

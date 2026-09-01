@@ -72,6 +72,7 @@
  * Space.
  */
 import type { ZcapClient } from '@interop/ezcap'
+import { spacePath, toUrl } from '@interop/was-client/paths'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import {
   KEYRING_CACHE_TTL_MS,
@@ -352,10 +353,13 @@ export async function delegateUnlockManagement({
   controller: string
   allowedActions?: string[]
 }): Promise<IZcap> {
-  const invocationTarget = new URL(
-    `/space/${spaceId}`,
-    WAS_SERVER_URL
-  ).toString()
+  // Built with was-client's path helpers rather than by hand: a sub-path
+  // deployment (a server URL like `https://host/was`) keeps its base path,
+  // so the target matches byte for byte what the DELETE and the GET address.
+  const invocationTarget = toUrl({
+    serverUrl: WAS_SERVER_URL as string,
+    path: spacePath(spaceId)
+  })
   return await zcapClient.delegate({
     invocationTarget,
     controller,
@@ -1102,13 +1106,22 @@ export async function fetchKeyring({
 /**
  * What `fetchTransientKeyring` returns on a hit: the record contents plus the
  * derived unlock Space id, the standing-credential members when the record is
- * in the standing layout, and the credential's own client identity. Nothing
- * a remembered session carries rides along -- no local client keys, no
- * persist or enroll closures, no management zcap: a transient session holds
- * none of them.
+ * in the standing layout, the credential's own client identity, and a freshly
+ * minted management zcap on the unlock Space. Nothing browser-local rides
+ * along -- no client keys and no persist or enroll closures: a transient
+ * session holds none of them.
+ *
+ * The management zcap is the one exception to "a transient visit carries
+ * nothing a remembered login carries". It is a local signature costing no
+ * request, and without it no credential's management zcap would ever be
+ * refreshed on an account that never remembers a browser -- every one of them
+ * would lapse a year after its bind, on the default account shape. The
+ * transient login writes it to the acting credential's registry entry when
+ * the stored copy is stale (`refreshTransientManageCapability`).
  */
 export interface TransientKeyringFetchResult extends KeyringRecordContents {
   unlockSpaceId: string
+  manageCapability?: IZcap
   standing?: {
     delegation: IZcap
     delegatedClients?: IZcap
@@ -1140,8 +1153,10 @@ export interface TransientKeyringFetchResult extends KeyringRecordContents {
  * What it deliberately does not do, per the `fetchKeyring` contract it
  * parallels: no keyring cache read or write (so no offline fallback -- a
  * network error rethrows unchanged, could-not-check), no client-key record
- * read (a transient session never holds one), and no management zcap mint.
- * The refusal classes are otherwise
+ * read (a transient session never holds one). It DOES mint the unlock Space's
+ * management zcap, a local signature costing no request: the transient login
+ * is the only refresher of that capability on an account that never remembers
+ * a browser. The refusal classes are otherwise
  * `fetchKeyring`'s: a miss is `null`, a forged or tampered record is
  * `KeyringRecordForgedError`, a corrupt one `KeyringRecordUnusableError`.
  *
@@ -1207,9 +1222,22 @@ export async function fetchTransientKeyring({
     found: unwrapped.found,
     accountLogPinStore
   })
+  // The management zcap this visit may refresh the registry entry with: the
+  // same mint the remembered login makes (`buildFetchResult`), with PUT for a
+  // standing record so a refresh never narrows what the bind delegated.
+  const manageCapability = await delegateUnlockManagement({
+    zcapClient: unlock.zcapClient,
+    spaceId: unlock.spaceId,
+    controller: unlockManagementGrantee({
+      pointer: unwrapped.found.pointer,
+      controller: unwrapped.found.controller
+    }),
+    ...(unwrapped.standing ? { allowedActions: ['GET', 'PUT', 'DELETE'] } : {})
+  })
   return {
     ...unwrapped.found,
     unlockSpaceId: unlock.spaceId,
+    manageCapability,
     standingClient,
     ...(unwrapped.standing
       ? {

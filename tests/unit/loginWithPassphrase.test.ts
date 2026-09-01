@@ -1040,8 +1040,11 @@ describe('loginWithPassphrase -- login routing glue', () => {
       email: undefined,
       persistence,
       // The credential rides along so the composition can arm the torn
-      // credential-anchored-signup heal (the establishment re-run needs it).
-      credential: CREDENTIAL
+      // credential-anchored-signup heal (the establishment re-run needs it),
+      // and the popup marker so the composition can skip its registry
+      // refresh in the partitioned iframe.
+      credential: CREDENTIAL,
+      popup: false
     })
   })
 
