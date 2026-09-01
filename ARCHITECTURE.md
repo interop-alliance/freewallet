@@ -1,8 +1,8 @@
 # Architecture
 
-How Freewallet is structured -- the layer map, session and auth flow,
-storage model, CHAPI and App Connect flows, the domain model, where shared
-logic lives, and the ZCap authorization structure. For contribution
+How Freewallet is structured -- layer map, session and auth flow,
+storage model, CHAPI and App Connect flows, domain model, where shared
+logic lives, and ZCap authorization structure. For contribution
 conventions see [CONTRIBUTING.md](CONTRIBUTING.md); for agent-facing rules
 (tech stack, env vars) see [AGENTS.md](AGENTS.md).
 
@@ -169,7 +169,7 @@ deployment with a promoted account, every unlock method is a
 **standing credential**: the recovery-code configuration minus spend-on-use.
 Three cases cannot be standing, and their records stay plain account
 pointers with none of what follows: a no-WAS deployment, a guest, and an
-account not yet promoted. Beside locating the account a standing record
+account not yet promoted. Besides locating the account, a standing record
 holds a user-key roster wrap (escrowed into every epoch, kept alive by
 rotation fan-out) and latent self-enrollment authority: a pre-minted
 PUT-on-`did.jsonl` bridge delegation and a random update-key ladder seed
