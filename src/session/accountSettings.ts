@@ -67,7 +67,11 @@ import {
 } from '@/session/enrolledContext'
 import { documentListsCredential } from '@/session/pendingRetirement'
 import { executeLocalWipe, snapshotWipeTargets } from '@/session/wipe'
-import { rotateOffUnlockCredential } from '@/session/credentialRotation'
+import {
+  isUnclaimedLadderVmRefusal,
+  preflightCredentialRetirement,
+  rotateOffUnlockCredential
+} from '@/session/credentialRotation'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
 import {
   invalidateVerifiedLog,
@@ -228,6 +232,10 @@ export async function loadUnlockRegistry({
  * @throws {SamePassphraseError}   the new passphrase is the current one
  * @throws {PendingPassphraseRetirementError}   the registry still names an
  *   earlier passphrase whose retirement did not finish
+ * @throws {UnclaimedLadderVmRetirementError}   the old credential's ladder VM
+ *   cannot be claimed, so retiring it would leave it standing. Raised by the
+ *   read-only pre-flight before anything is written; the same refusal from
+ *   the retirement itself propagates rather than writing a pending entry
  * @throws {Error}   the new passphrase could not be established as a
  *   standing credential; the old passphrase is unchanged
  */
@@ -341,6 +349,23 @@ export async function changeAccountPassphrase({
       passphrase: oldPassphrase,
       credential: oldCredential
     }))
+    // The retirement gate, read-only and before the establishment below. A
+    // retirement that cannot claim the old credential's ladder VM refuses,
+    // and refusing here is what keeps that refusal from landing after the
+    // change has already established the new credential and torn the old
+    // unlock Space down -- a state whose only registry record would be the
+    // pending-shaped entry naming a credential that is still standing, which
+    // no seedless repair can clear. The seed the verification just captured
+    // is what the attribution needs, so the pre-flight is as strong as the
+    // retirement it stands in for.
+    await preflightCredentialRetirement({
+      session,
+      method: {
+        type: 'passphrase',
+        ...oldStanding,
+        ...(oldLadderSeed ? { ladderSeed: oldLadderSeed } : {})
+      }
+    })
     // The establishment, first and fatal (roster wrap, commitment document
     // entry, bridge delegation, standing-layout record at the new unlock
     // Space): a failure leaves the old credential fully intact -- record,
@@ -487,6 +512,15 @@ export async function changeAccountPassphrase({
         })
       }
     } catch (err) {
+      if (isUnclaimedLadderVmRefusal(err)) {
+        // The gate, firing where the pre-flight above already ran: a log
+        // entry landed between the two reads. It propagates rather than
+        // reporting `failed`, because `failed` writes the pending-shaped
+        // entry naming the OLD credential, and that entry is exactly what
+        // locks the passphrase change, the last-client transition, and the
+        // torn-retirement repair for good.
+        throw err
+      }
       log.error('Could not retire the old passphrase credential', { err })
       rotation = 'failed'
     }
@@ -1149,6 +1183,25 @@ async function recoverFailedPasskeyEstablishment({
       }
     }
   } catch (err) {
+    if (isUnclaimedLadderVmRefusal(err)) {
+      // The gate, named rather than reported as a transport tear: the
+      // retirement published nothing, and the credential keeps a ladder VM
+      // that no seedless retry can claim. The residue is the same either
+      // way -- the bare entry and the record stand -- but only this arm says
+      // that a retry cannot mend it on its own.
+      log.error(
+        'Could not retire the partially established passkey credential: its ladder VM could not be claimed, so the retirement refused before publishing anything',
+        {
+          err,
+          unclaimedLadderVmIds: (err as { unclaimedLadderVmIds?: string[] })
+            .unclaimedLadderVmIds,
+          retryableWithLadderSeed: (
+            err as { retryableWithLadderSeed?: boolean }
+          ).retryableWithLadderSeed
+        }
+      )
+      return null
+    }
     // The retirement tore: the bare entry and the record stay standing --
     // the state the standing menders already own.
     log.error(

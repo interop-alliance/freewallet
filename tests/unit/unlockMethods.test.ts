@@ -51,6 +51,8 @@ const wasState = vi.hoisted(() => ({
   // A one-shot hook fired at the START of the next PUT -- the seam the CAS
   // tests use to land a concurrent write between a read and its PUT.
   beforePut: undefined as (() => void | Promise<void>) | undefined,
+  // Whether the read-only retirement gate refuses (WC-187).
+  preflightRefuses: false,
   calls: [] as string[]
 }))
 
@@ -125,6 +127,20 @@ vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
 }))
 
 vi.mock('@/session/credentialRotation', () => ({
+  preflightCredentialRetirement: vi.fn(async () => {
+    wasState.calls.push('preflightCredentialRetirement')
+    if (wasState.preflightRefuses) {
+      const err = new Error(
+        "did:webvh: the credential's ladder VM could not be claimed."
+      )
+      err.name = 'UnclaimedLadderVmRetirementError'
+      Object.assign(err, {
+        unclaimedLadderVmIds: ['did:webvh:account#z6MkStandingLadderVm'],
+        retryableWithLadderSeed: true
+      })
+      throw err
+    }
+  }),
   rotateOffUnlockCredential: vi.fn(async () => {
     wasState.calls.push('rotateOffUnlockCredential')
     return { rotated: true, collections: { outcomes: {}, failed: [] } }
@@ -456,6 +472,7 @@ beforeEach(() => {
   wasState.getError = undefined
   wasState.deleteOutcome = 'deleted'
   wasState.beforePut = undefined
+  wasState.preflightRefuses = false
   wasState.calls = []
   vi.clearAllMocks()
 })
@@ -1308,12 +1325,56 @@ describe('the credential rotation inside a revocation', () => {
 
     expect(wasState.calls).toEqual([
       'assertPasskeyPrf',
+      'preflightCredentialRetirement',
       'rotateOffUnlockCredential',
       'deleteUnlockMethod'
     ])
     expect(outcome?.rotated).toBe(true)
     const after = await getUnlockMethods({ session })
     expect(after!.methods).toHaveLength(0)
+  })
+})
+
+describe('the retirement gate on the tap-confirmed removal (WC-187)', () => {
+  it('refuses before any write, leaving the passkey standing', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry: PasskeyUnlockMethod = {
+      ...passkeyEntry({ manageCapability: FAKE_CAP }),
+      keyAgreementKeyMultibase: 'z6LSStandingPasskeyKak',
+      updateKeyMultibase: 'z6MkStandingPasskeyRung'
+    }
+    await seedRegistry({
+      session,
+      record: {
+        version: 1,
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [entry]
+      }
+    })
+    wasState.calls = []
+    wasState.preflightRefuses = true
+
+    const thrown = await revokeUnlockMethodByCeremony({
+      session,
+      entry,
+      idb
+    }).catch((err: unknown) => err)
+
+    expect(thrown).toMatchObject({
+      name: 'UnclaimedLadderVmRetirementError',
+      unclaimedLadderVmIds: ['did:webvh:account#z6MkStandingLadderVm'],
+      retryableWithLadderSeed: true
+    })
+    // The tap happened; nothing after it did. The entry is still there, so
+    // the removal is still available once the refusal is answered.
+    expect(wasState.calls).toEqual([
+      'assertPasskeyPrf',
+      'preflightCredentialRetirement'
+    ])
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+    const after = await getUnlockMethods({ session })
+    expect(after!.methods).toHaveLength(1)
   })
 })
 

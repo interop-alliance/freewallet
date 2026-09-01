@@ -315,6 +315,25 @@ passphrase change and the tap-confirmed passkey removal), that entry also
 strikes the seed's ladder VM when one stands, the residue of a last-client
 forget torn after its install entry.
 
+A retirement that cannot claim the retired credential's ladder VM refuses
+instead of completing. wallet-core raises the name-stable
+`UnclaimedLadderVmRetirementError` before its entry publishes, so the log is
+unchanged and the credential still stands. The refusal carries the unclaimed
+verification method ids and a hint saying whether the credential's ladder
+seed would let the attribution succeed. A leftover VM is not inert: it stays
+a live delegation signer, and delegation now includes a DELETE-only
+capability on the account Space. The passphrase change and the tap-confirmed
+passkey removal run the same gate read-only as a pre-flight
+(`preflightUnlockCredentialRetirement`, wrapped by
+`preflightCredentialRetirement`), before establishment and before any write,
+so a refusal never leaves the pending-shaped registry entry that only a
+seeded run could clear. The in-retirement gate stays as defense in depth,
+and a refusal there propagates rather than being recorded as a failed
+retirement. Every caller matches it by name. The torn-retirement repair logs
+it and leaves the entry pending, since it runs unattended on the login
+chain and holds no retired ladder seed. Recovery-code revocation is
+unaffected: a code carries no ladder, so it has no VM to claim.
+
 The annex inventory follows, between the document edit and the roster tail
 (wallet-core's `retireClientAnnexInventory` closure). A strike entry on the
 annex log drops the retired credential's revealed rung and standing hash
@@ -618,7 +637,16 @@ promotion), and one whose target is not the URL this deployment addresses.
 That credential's own next login re-delegates. A `not-found` from the delete
 is the server's masked 404, absent OR unauthorized; the walk warns on it
 today, and the rule that decides what a clean deletion may claim from it is
-the deletion ceremony's. Both run BEFORE the fatal wipe, because resolving the
+the deletion ceremony's. The server admits the child under the client-annex
+clause's third predicate: a ladder-signed delegation whose target is a bare
+Space URL equal to its parent's unchanged (the parent a delegated
+capability or the Space's own root) and whose action set is exactly
+`['DELETE']` or exactly `['GET']`. The clause's locked property, restated
+with it: every ladder delegation either needs a loud companion entry to
+resolve, can only write a log, or is a target-exact single-verb read or
+delete of one Space of the delegator's own account. That delete is the one
+ladder authority whose exercise leaves no record, the trade the account
+deletion design states. Both run BEFORE the fatal wipe, because resolving the
 auxiliary Space's controller reads the account log out of the account Space.
 A wipe failure after them leaves other methods' logins already destroyed,
 accepted since the intent was deletion.

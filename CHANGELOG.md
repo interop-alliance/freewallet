@@ -4,6 +4,17 @@
 
 ### Changed
 
+- A standing credential's retirement refuses when it cannot claim the retired
+  credential's ladder VM (wallet-core's name-stable
+  `UnclaimedLadderVmRetirementError`, raised before anything publishes). The
+  passphrase change and the tap-confirmed passkey removal run wallet-core's
+  read-only pre-flight first, before establishment and before any write, so
+  the refusal lands like an invalid-input check; the generic removal, the
+  torn passkey-add cleanup, and the torn-retirement repair match it by name.
+  A gate refusal never writes the pending-shaped registry entry: inside the
+  passphrase change it propagates instead of being reported as a failed
+  retirement. The repair arm logs it and leaves the entry pending, since it
+  runs unattended on the login chain. Recovery-code revocation is unaffected.
 - An unlock Space is deleted through a freshly minted DELETE-only child of the
   entry's management zcap, rather than by invoking that stored three-verb
   capability directly (`deleteUnlockSpaceForEntry`, over wallet-core's

@@ -61,6 +61,11 @@ const state = vi.hoisted(() => ({
     userHandle?: Uint8Array
     excludeCredentialIds?: Uint8Array[]
   } | null,
+  // The retirement gate's two firing points: the read-only pre-flight the
+  // passphrase change runs before establishment, and the ceremony itself
+  // (defense in depth, a log entry having landed between the two reads).
+  preflightRefuses: false,
+  rotationRefusesByGate: false,
   // Whether a failing retirement fires `onInventoryRemoved` first (its document
   // edit landed and it died afterwards) or not (it failed at the edit).
   inventoryRemovedBeforeFailure: false,
@@ -94,10 +99,38 @@ const FRESH_USER_KEY = { id: 'did:key:z6LSFreshUserKey' }
 const NEW_LADDER_SEED = new Uint8Array(32).fill(7)
 const OLD_LADDER_SEED = new Uint8Array(32).fill(3)
 
+/**
+ * wallet-core's retirement-gate refusal, carrying the two members the callers
+ * read. Built here rather than imported: every caller matches it by NAME.
+ *
+ * @returns {Error}
+ */
+function gateRefusal(): Error {
+  const err = new Error(
+    "did:webvh: the credential's ladder VM could not be claimed."
+  )
+  err.name = 'UnclaimedLadderVmRetirementError'
+  Object.assign(err, {
+    unclaimedLadderVmIds: ['did:webvh:account#z6MkStandingLadderVm'],
+    retryableWithLadderSeed: true
+  })
+  return err
+}
+
 vi.mock('@/session/credentialRotation', () => ({
+  isUnclaimedLadderVmRefusal: (err: unknown) =>
+    (err as { name?: string })?.name === 'UnclaimedLadderVmRetirementError',
+  preflightCredentialRetirement: vi.fn(async () => {
+    if (state.preflightRefuses) {
+      throw gateRefusal()
+    }
+  }),
   rotateOffUnlockCredential: vi.fn(
     async (options: { onInventoryRemoved?: () => void }) => {
       state.calls.push('rotateOffUnlockCredential')
+      if (state.rotationRefusesByGate) {
+        throw gateRefusal()
+      }
       if (state.rotation === 'failed') {
         if (state.inventoryRemovedBeforeFailure) {
           options.onInventoryRemoved?.()
@@ -523,7 +556,7 @@ const {
   PendingPassphraseRetirementError,
   SamePassphraseError
 } = await import('@/session/accountSettings')
-const { rotateOffUnlockCredential } =
+const { preflightCredentialRetirement, rotateOffUnlockCredential } =
   await import('@/session/credentialRotation')
 const { adoptRotatedUserKey } = await import('@/session/userKeyAdoption')
 const {
@@ -687,6 +720,8 @@ beforeEach(() => {
   state.rosterRead = null
   state.registerPasskeyOptions = null
   state.inventoryRemovedBeforeFailure = false
+  state.preflightRefuses = false
+  state.rotationRefusesByGate = false
   state.puts = []
   state.boundUnlockSpaceId = 'space-bound'
   state.passkeyCredentialId = 'Y3JlZC1uZXc'
@@ -1145,6 +1180,71 @@ describe('changeAccountPassphrase', () => {
       })
     )
     error.mockRestore()
+  })
+
+  it('refuses on the retirement gate before anything is established', async () => {
+    state.registry = registryWithPassphraseStanding({
+      keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+    })
+    state.oldLadderSeed = OLD_LADDER_SEED
+    state.preflightRefuses = true
+
+    const thrown = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    }).catch((err: unknown) => err)
+
+    // The refusal keeps its identity and its two members all the way out to
+    // the dialog, which reads them to decide what to offer (FW-404).
+    expect(thrown).toMatchObject({
+      name: 'UnclaimedLadderVmRetirementError',
+      unclaimedLadderVmIds: ['did:webvh:account#z6MkStandingLadderVm'],
+      retryableWithLadderSeed: true
+    })
+    // Nothing was written: the old passphrase was only verified, and the
+    // establishment, the teardown, the retirement and the registry write all
+    // stayed behind the refusal. A refusal after establishment would leave
+    // the pending-shaped entry no seedless repair can clear.
+    expect(state.calls).toEqual(['verifyPassphrase'])
+    expect(state.puts).toEqual([])
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+    // The pre-flight asks with the seed the verification just captured, so
+    // it is as strong as the retirement it stands in for.
+    expect(vi.mocked(preflightCredentialRetirement)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: expect.objectContaining({
+          type: 'passphrase',
+          keyAgreementKeyMultibase: 'z6LSOldPassphraseKak',
+          updateKeyMultibase: 'z6MkOldPassphraseUpdateKey',
+          ladderSeed: OLD_LADDER_SEED
+        })
+      })
+    )
+  })
+
+  it('writes no pending entry when the gate fires inside the retirement', async () => {
+    state.registry = registryWithPassphraseStanding({
+      keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+    })
+    state.rotationRefusesByGate = true
+
+    const thrown = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    }).catch((err: unknown) => err)
+
+    expect(thrown).toMatchObject({
+      name: 'UnclaimedLadderVmRetirementError',
+      retryableWithLadderSeed: true
+    })
+    // A `failed` report here would write the entry naming the OLD credential
+    // under the NEW unlock Space -- the pending shape that locks the next
+    // passphrase change, the last-client transition, and the torn-retirement
+    // repair for good.
+    expect(vi.mocked(upsertPassphraseUnlockMethod)).not.toHaveBeenCalled()
+    expect(state.puts).toEqual([])
   })
 
   it('treats a registry that resolves to null as nothing to retire', async () => {

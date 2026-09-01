@@ -37,7 +37,8 @@ vi.mock('@/app.config', async importOriginal => ({
 }))
 
 vi.mock('@interop/wallet-core/unlock', () => ({
-  retireUnlockCredential: vi.fn()
+  retireUnlockCredential: vi.fn(),
+  preflightUnlockCredentialRetirement: vi.fn()
 }))
 
 vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
@@ -91,8 +92,14 @@ vi.mock('@/session/verifiedLog', () => ({
 }))
 
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
-import { retireUnlockCredential } from '@interop/wallet-core/unlock'
-import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
+import {
+  preflightUnlockCredentialRetirement,
+  retireUnlockCredential
+} from '@interop/wallet-core/unlock'
+import {
+  accountLogPinId,
+  keyAgreementCommitment
+} from '@interop/wallet-core/webvh'
 import {
   clientAnnexLogPinId,
   clientAnnexLogStore,
@@ -107,7 +114,11 @@ import {
   invalidateVerifiedLog,
   verifiedAccountLog
 } from '@/session/verifiedLog'
-import { rotateOffUnlockCredential } from '@/session/credentialRotation'
+import {
+  isUnclaimedLadderVmRefusal,
+  preflightCredentialRetirement,
+  rotateOffUnlockCredential
+} from '@/session/credentialRotation'
 import type { Session } from '@/types/auth'
 
 const POINTER = {
@@ -920,5 +931,114 @@ describe('the ladder-seed settlement (the login seed with no retired seed in han
         actingLadderSeed: LOGIN_SEED
       })
     )
+  })
+})
+
+describe('the retirement gate (WC-187)', () => {
+  const LOGIN_SEED = new Uint8Array(32).fill(7)
+  const RETIRED_SEED = new Uint8Array(32).fill(8)
+
+  /**
+   * The refusal wallet-core raises when the retirement cannot claim the
+   * retired credential's ladder VM, carrying the two members the callers
+   * read.
+   *
+   * @returns {Error}
+   */
+  function gateRefusal(): Error {
+    const err = new Error(
+      "did:webvh: the credential's ladder VM could not be claimed."
+    )
+    err.name = 'UnclaimedLadderVmRetirementError'
+    Object.assign(err, {
+      unclaimedLadderVmIds: [`${POINTER.did}#z6MkStandingLadderVm`],
+      retryableWithLadderSeed: true
+    })
+    return err
+  }
+
+  it("runs the pre-flight over the retirement's own reader", async () => {
+    const session = sessionWith()
+    await preflightCredentialRetirement({
+      session,
+      method: { ...PASSPHRASE_METHOD, ladderSeed: RETIRED_SEED }
+    })
+
+    const commitment = await keyAgreementCommitment({
+      keyAgreementKeyMultibase: PASSPHRASE_METHOD.keyAgreementKeyMultibase
+    })
+    expect(vi.mocked(preflightUnlockCredentialRetirement)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idStore: { isWebvhIdStore: true },
+        unlockKeys: {
+          keyAgreement: { commitment },
+          updateKeyMultibase: PASSPHRASE_METHOD.updateKeyMultibase
+        },
+        ladderSeed: RETIRED_SEED,
+        expectedDid: POINTER.did,
+        logId: accountLogPinId({ spaceId: POINTER.spaceId })
+      })
+    )
+    // The visit's own chain-head pins, not a second store: a pre-flight
+    // reading past the pinned head would accept a log the retirement itself
+    // refuses.
+    expect(
+      vi.mocked(preflightUnlockCredentialRetirement).mock.calls[0]![0].pinStore
+    ).toBe(session.profile.persistence.logPins)
+  })
+
+  it('checks nothing when there is nothing to retire', async () => {
+    await preflightCredentialRetirement({
+      session: sessionWith(),
+      method: { type: 'passphrase' }
+    })
+    await preflightCredentialRetirement({
+      session: sessionWith({ pointerDid: undefined }),
+      method: PASSPHRASE_METHOD
+    })
+    expect(
+      vi.mocked(preflightUnlockCredentialRetirement)
+    ).not.toHaveBeenCalled()
+  })
+
+  it("propagates the pre-flight's refusal with its members intact", async () => {
+    vi.mocked(preflightUnlockCredentialRetirement).mockRejectedValueOnce(
+      gateRefusal()
+    )
+    await expect(
+      preflightCredentialRetirement({
+        session: sessionWith(),
+        method: PASSPHRASE_METHOD
+      })
+    ).rejects.toMatchObject({
+      name: 'UnclaimedLadderVmRetirementError',
+      unclaimedLadderVmIds: [`${POINTER.did}#z6MkStandingLadderVm`],
+      retryableWithLadderSeed: true
+    })
+  })
+
+  it("propagates the ceremony's refusal with its members intact", async () => {
+    vi.mocked(retireUnlockCredential).mockRejectedValueOnce(gateRefusal())
+
+    const thrown = await rotateOffUnlockCredential({
+      session: sessionWith({ ladderSeed: LOGIN_SEED }),
+      method: { ...PASSKEY_METHOD, ladderSeed: RETIRED_SEED },
+      verb: 'removing a passkey'
+    }).catch((err: unknown) => err)
+
+    // The wrapper reports no outcome for a refusal and swallows nothing: the
+    // callers decide what to do with it, and they match it by name.
+    expect(isUnclaimedLadderVmRefusal(thrown)).toBe(true)
+    expect(thrown).toMatchObject({
+      unclaimedLadderVmIds: [`${POINTER.did}#z6MkStandingLadderVm`],
+      retryableWithLadderSeed: true
+    })
+    // The memo is still dropped on both sides of the call.
+    expect(vi.mocked(invalidateVerifiedLog)).toHaveBeenCalledTimes(2)
+  })
+
+  it('is false for every other failure', () => {
+    expect(isUnclaimedLadderVmRefusal(new Error('log conflict'))).toBe(false)
+    expect(isUnclaimedLadderVmRefusal(undefined)).toBe(false)
   })
 })

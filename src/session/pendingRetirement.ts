@@ -59,7 +59,10 @@ import {
   enrolledClientContext,
   type EnrolledClientContext
 } from '@/session/enrolledContext'
-import { rotateOffUnlockCredential } from '@/session/credentialRotation'
+import {
+  isUnclaimedLadderVmRefusal,
+  rotateOffUnlockCredential
+} from '@/session/credentialRotation'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
 import {
   establishStandingUnlock,
@@ -238,11 +241,36 @@ export async function repairTornPassphraseRetirement({
     // The entry's own ladder seed is unknown here (only its holder derives
     // it), so the annex stage signs with this login credential's seed,
     // already on the profile as the surviving one.
-    const outcome = await rotateOffUnlockCredential({
-      session,
-      method: entry,
-      verb: 'finishing a passphrase change'
-    })
+    let outcome
+    try {
+      outcome = await rotateOffUnlockCredential({
+        session,
+        method: entry,
+        verb: 'finishing a passphrase change'
+      })
+    } catch (err) {
+      if (!isUnclaimedLadderVmRefusal(err)) {
+        throw err
+      }
+      // The retirement gate. This repair holds no retired ladder seed, so it
+      // can never claim the named credential's ladder VM, and the retirement
+      // refused before publishing anything. Logged and skipped: the entry
+      // stays pending for a run that holds the seed, and this login -- which
+      // is unattended, on the registry chain -- carries on. Rewriting the
+      // entry here would un-name a credential that is still standing.
+      log.warn(
+        "A pending passphrase retirement was refused: the named credential's ladder VM could not be claimed, so the entry stays pending",
+        {
+          err,
+          unclaimedLadderVmIds: (err as { unclaimedLadderVmIds?: string[] })
+            .unclaimedLadderVmIds,
+          retryableWithLadderSeed: (
+            err as { retryableWithLadderSeed?: boolean }
+          ).retryableWithLadderSeed
+        }
+      )
+      return
+    }
     if (outcome?.rotated && outcome.userKey) {
       // Already adopted in band by the retirement's roster tail, so this
       // returns on its id guard; it retries the registry re-seal only when

@@ -63,6 +63,7 @@ import {
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
 import {
+  preflightCredentialRetirement,
   rotateOffUnlockCredential,
   type CredentialRotationOutcome
 } from '@/session/credentialRotation'
@@ -1252,6 +1253,11 @@ export async function deleteUnlockSpaceForEntry({
  *   rotation's pending-rotation refusal message
  * @returns {Promise<CredentialRotationOutcome | null>}   the rotation
  *   outcome, or null when nothing standing was retired
+ * @throws {UnclaimedLadderVmRetirementError}   the credential's ladder VM
+ *   cannot be claimed, so the retirement refused before publishing anything.
+ *   It propagates: the Space delete, the local state and the registry entry
+ *   below all stay, so the entry is still removable once the refusal is
+ *   answered
  */
 export async function revokeUnlockMethod({
   session,
@@ -1388,6 +1394,8 @@ export async function deleteUnlockMethodArtifacts({
  *   rotation's pending-rotation refusal message
  * @returns {Promise<CredentialRotationOutcome | null>}   the rotation
  *   outcome, or null when nothing standing was retired
+ * @throws {UnclaimedLadderVmRetirementError}   the credential's ladder VM
+ *   cannot be claimed; nothing was written
  */
 export async function revokeUnlockMethodByCeremony({
   session,
@@ -1419,9 +1427,16 @@ export async function revokeUnlockMethodByCeremony({
     controller: session.profile.accountController ?? session.user.id,
     idb
   })
+  const method = { ...entry, ...(ladderSeed ? { ladderSeed } : {}) }
+  // The retirement gate, read-only and before the first write: a credential
+  // whose ladder VM the attribution cannot claim refuses here, with the
+  // passkey still standing and its entry still removable, rather than after
+  // the removal has begun. The tap put the seed in hand, so this pre-flight
+  // asks exactly what the retirement below will.
+  await preflightCredentialRetirement({ session, method })
   const rotation = await rotateOffUnlockCredential({
     session,
-    method: { ...entry, ...(ladderSeed ? { ladderSeed } : {}) },
+    method,
     verb
   })
   await deleteUnlockMethod({

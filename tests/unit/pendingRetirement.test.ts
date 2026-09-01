@@ -8,6 +8,7 @@
  * sibling that rebuilds a bare passkey entry.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
 
 const MY_KAK = 'z6LSgJbFbAEq4zhHZ7FrQKqF6ja8tcjNpVu8ZbhnxmunPkN7'
 const OTHER_KAK = 'z6LStRqthDcQTuohXDkypMe9aQ2ZCLWrV7u79pB25oza2u7D'
@@ -38,6 +39,9 @@ const state = vi.hoisted(() => ({
   // torn run's document edit landed and only its registry write was lost.
   namedCredentialStanding: true,
   rotationThrows: false,
+  // Whether the retirement refuses on the ladder-VM gate (WC-187) rather
+  // than tearing on transport.
+  rotationRefusesByGate: false,
   establishThrows: false
 }))
 
@@ -48,8 +52,21 @@ vi.mock('@/session/enrolledContext', () => ({
 }))
 
 vi.mock('@/session/credentialRotation', () => ({
+  isUnclaimedLadderVmRefusal: (err: unknown) =>
+    (err as { name?: string })?.name === 'UnclaimedLadderVmRetirementError',
   rotateOffUnlockCredential: vi.fn(async () => {
     state.calls.push('rotateOffUnlockCredential')
+    if (state.rotationRefusesByGate) {
+      const err = new Error(
+        "did:webvh: the credential's ladder VM could not be claimed."
+      )
+      err.name = 'UnclaimedLadderVmRetirementError'
+      Object.assign(err, {
+        unclaimedLadderVmIds: [`${POINTER.did}#z6MkStandingLadderVm`],
+        retryableWithLadderSeed: false
+      })
+      throw err
+    }
     if (state.rotationThrows) {
       throw new Error('log conflict')
     }
@@ -268,6 +285,7 @@ beforeEach(() => {
   state.loginCredentialStanding = true
   state.namedCredentialStanding = true
   state.rotationThrows = false
+  state.rotationRefusesByGate = false
   state.establishThrows = false
   vi.clearAllMocks()
 })
@@ -598,6 +616,38 @@ describe('repairTornPassphraseRetirement', () => {
       found: makeFound()
     })
     expect(state.calls).toEqual([])
+  })
+
+  it('logs and skips a gate refusal, leaving the entry pending', async () => {
+    state.rotationRefusesByGate = true
+    const capture = captureSink()
+    const remove = addSink(capture.sink)
+
+    // Unattended, on the login chain: the refusal never surfaces to the
+    // login page, and it never reaches the entry rewrite below, which would
+    // un-name a credential that is still standing.
+    await expect(
+      repairTornPassphraseRetirement({
+        session: makeSession(),
+        found: makeFound()
+      })
+    ).resolves.toBeUndefined()
+
+    expect(state.calls).toEqual([
+      'getUnlockMethods',
+      'verifiedAccountLog',
+      'rotateOffUnlockCredential'
+    ])
+    expect(state.calls).not.toContain('putUnlockMethods')
+    const warned = capture.events.find(
+      event => event.level === 'warn' && event.msg.includes('stays pending')
+    )
+    expect(warned).toBeDefined()
+    expect(warned!.data).toMatchObject({
+      unclaimedLadderVmIds: [`${POINTER.did}#z6MkStandingLadderVm`],
+      retryableWithLadderSeed: false
+    })
+    remove()
   })
 
   it('leaves the entry alone when the retirement throws', async () => {

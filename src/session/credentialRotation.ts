@@ -29,13 +29,19 @@
  * future reads.
  */
 import { equalBytes } from '@noble/ciphers/utils.js'
-import { retireUnlockCredential } from '@interop/wallet-core/unlock'
+import {
+  preflightUnlockCredentialRetirement,
+  retireUnlockCredential
+} from '@interop/wallet-core/unlock'
 import type {
   ClientAnnexInventoryRetirement,
   StandingUnlockKeys
 } from '@interop/wallet-core/unlock'
 import type { UserKey } from '@interop/wallet-core/keys'
-import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
+import {
+  accountLogPinId,
+  keyAgreementCommitment
+} from '@interop/wallet-core/webvh'
 import {
   attributeLadderRung,
   ladderRung,
@@ -114,6 +120,13 @@ export interface CredentialRotationOutcome {
  * @param options.verb {string}   what the caller is doing, for the
  *   pending-rotation refusal message (e.g. `'changing the passphrase'`)
  * @returns {Promise<CredentialRotationOutcome | null>}
+ * @throws {UnclaimedLadderVmRetirementError}   the retirement could not claim
+ *   the retired credential's ladder VM, so it refused before publishing
+ *   anything. Raised in wallet-core and matched by NAME everywhere in this
+ *   repo: the class this module imports need not be the class that copy of
+ *   the package threw. A caller that swallows it reports a credential retired
+ *   while its ladder VM still stands, which is the whole state the gate
+ *   exists to keep out
  */
 export async function rotateOffUnlockCredential({
   session,
@@ -144,15 +157,10 @@ export async function rotateOffUnlockCredential({
   const { remoteStore, pointer, clientWebvhKeys, clientKeyAgreementKey } =
     context
 
-  // A low-entropy passphrase publishes only a hash commitment of its
-  // key-agreement key; a passkey's PRF-derived key publishes verbatim. The
-  // inventory the document carries is what the removal must name.
-  const keyAgreement: StandingUnlockKeys['keyAgreement'] =
-    method.type === 'passphrase'
-      ? {
-          commitment: await keyAgreementCommitment({ keyAgreementKeyMultibase })
-        }
-      : { publicKeyMultibase: keyAgreementKeyMultibase }
+  const keyAgreement = await standingKeyAgreementOf({
+    type: method.type,
+    keyAgreementKeyMultibase
+  })
 
   const { epochPins } = session.profile.persistence
   const pinnedEpochId = await epochPins.load({ accountDid: pointer.did })
@@ -234,6 +242,106 @@ export async function rotateOffUnlockCredential({
     ...(result.userKey ? { userKey: result.userKey } : {}),
     ...(result.clientAnnex ? { clientAnnex: result.clientAnnex } : {})
   }
+}
+
+/**
+ * Whether an error is wallet-core's retirement gate refusing: the retired
+ * credential's ladder VM could not be claimed, so the retirement published
+ * nothing. Matched by name rather than by `instanceof`, because the class may
+ * resolve to a second copy of the package.
+ *
+ * @param err {unknown}
+ * @returns {boolean}
+ */
+export function isUnclaimedLadderVmRefusal(err: unknown): boolean {
+  return (err as { name?: string })?.name === 'UnclaimedLadderVmRetirementError'
+}
+
+/**
+ * The retirement gate, run read-only before anything is written. A caller
+ * that establishes a replacement credential before retiring the old one (the
+ * passphrase change, the tap-confirmed passkey removal) runs this first, so a
+ * refusal lands the way an invalid-input check does -- nothing established,
+ * nothing torn down, and no pending-shaped registry entry naming a credential
+ * that is still standing. The in-ceremony gate stays as defense in depth.
+ *
+ * Resolves without checking anything -- there is nothing to retire -- under
+ * the same two conditions {@link rotateOffUnlockCredential} returns `null`
+ * for: a method recording no standing configuration, and a session that
+ * cannot act as an enrolled client on a promoted account.
+ *
+ * The reader is the retirement's own: the session's `id` collection store,
+ * the account pointer's DID, and the visit's chain-head pins.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.method {object}   the credential's recorded public
+ *   inventory, as {@link rotateOffUnlockCredential} takes it
+ * @param options.method.type {'passphrase' | 'passkey'}
+ * @param [options.method.keyAgreementKeyMultibase] {string}
+ * @param [options.method.updateKeyMultibase] {string}
+ * @param [options.method.ladderSeed] {Uint8Array}   the credential's ladder
+ *   seed, when the caller holds it; it is what lets the attribution claim the
+ *   VM at all
+ * @returns {Promise<void>}
+ * @throws {UnclaimedLadderVmRetirementError}
+ */
+export async function preflightCredentialRetirement({
+  session,
+  method
+}: {
+  session: Session
+  method: {
+    type: 'passphrase' | 'passkey'
+    keyAgreementKeyMultibase?: string
+    updateKeyMultibase?: string
+    ladderSeed?: Uint8Array
+  }
+}): Promise<void> {
+  const { keyAgreementKeyMultibase, updateKeyMultibase } = method
+  if (!keyAgreementKeyMultibase || !updateKeyMultibase) {
+    return
+  }
+  const context = enrolledClientContext({ session })
+  if (!context) {
+    return
+  }
+  const { remoteStore, pointer } = context
+  const keyAgreement = await standingKeyAgreementOf({
+    type: method.type,
+    keyAgreementKeyMultibase
+  })
+  await preflightUnlockCredentialRetirement({
+    idStore: remoteStore.webvhIdStore(),
+    unlockKeys: { keyAgreement, updateKeyMultibase },
+    ...(method.ladderSeed ? { ladderSeed: method.ladderSeed } : {}),
+    expectedDid: pointer.did,
+    pinStore: session.profile.persistence.logPins,
+    logId: accountLogPinId({ spaceId: pointer.spaceId })
+  })
+}
+
+/**
+ * How the credential's key-agreement key stands in the account document: a
+ * low-entropy passphrase publishes only a hash commitment of it, while a
+ * passkey's PRF-derived key publishes verbatim. The inventory the document
+ * carries is what a removal, and its pre-flight, must name.
+ *
+ * @param options {object}
+ * @param options.type {'passphrase' | 'passkey'}
+ * @param options.keyAgreementKeyMultibase {string}
+ * @returns {Promise<StandingUnlockKeys['keyAgreement']>}
+ */
+async function standingKeyAgreementOf({
+  type,
+  keyAgreementKeyMultibase
+}: {
+  type: 'passphrase' | 'passkey'
+  keyAgreementKeyMultibase: string
+}): Promise<StandingUnlockKeys['keyAgreement']> {
+  return type === 'passphrase'
+    ? { commitment: await keyAgreementCommitment({ keyAgreementKeyMultibase }) }
+    : { publicKeyMultibase: keyAgreementKeyMultibase }
 }
 
 /**
