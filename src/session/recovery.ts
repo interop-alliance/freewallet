@@ -2258,9 +2258,16 @@ async function recoverAccountTransient({
           })
         })
         clientAnnexDoc = enrolled.doc
-        await bootstrapWas
-          .space(clientAnnexSpaceId)
-          .configure({ controller: did, force: true })
+        // The description the annex Space's own ensure just read (present
+        // exactly when that ensure ran); nothing between it and this flip
+        // writes the Space Description.
+        await bootstrapWas.space(clientAnnexSpaceId).configure({
+          controller: did,
+          force: true,
+          ...(minted.spaceDescription !== undefined
+            ? { current: minted.spaceDescription }
+            : {})
+        })
         clientAnnexDid = minted.did
       }
       // The new credential's bridge and sibling, ladder-VM-signed: they

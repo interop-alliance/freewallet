@@ -74,16 +74,13 @@
   minted from as before; one allowing DELETE but not GET is deleted unprobed
   rather than refusing the run, and one allowing no DELETE is reported as a
   named residue (`unsupported-capability`) beside the other four.
-- Settings takes a second confirm, scoped to what the discovery stage found:
-  the other unlock methods by label and kind, the enrolled clients, the Space
-  count, and every Space the walk cannot reach. The dialog adds the
-  shared-computer hazard sentence, per-phase progress with keep-this-tab-open
-  copy, an unload guard, and a catch that renders every refusal in place
-  rather than letting it escape as an unhandled rejection. The confirm field
-  ships with autofill disabled. A guest and a no-WAS run keep the single
-  ungated confirm, having enumerated nothing. Every outcome past the pivot
-  logs out; one carrying residue shows its copy first and logs out on the
-  acknowledge, and a replica this browser could not confirm gone is offered
+- Settings runs the walk behind its single confirm. The dialog adds
+  per-phase progress with keep-this-tab-open copy, an unload guard, and a
+  catch that renders every refusal in place rather than letting it escape as
+  an unhandled rejection. The confirm field ships with autofill disabled.
+  Every Space the walk cannot reach is reported on the outcome beside the
+  other residues. Every outcome past the pivot logs out; one carrying residue
+  shows its copy first and logs out on the acknowledge, and a replica this browser could not confirm gone is offered
   the browser-scoped forget beside it.
 - `WASRemoteStore.wipeStorage` and `StorageManager.wipeRemoteStorage` report
   `deleted` or `not-found` and accept an explicit DELETE capability with the
@@ -132,6 +129,12 @@
   build. A sub-path deployment (a server URL like `https://host/was`) kept its
   base path in the DELETE but lost it in the hand-built target, so every child
   of that capability named a URL the server refuses.
+- The encrypted-collection ensure, the login-time controller promotion, and
+  the transient recovery's annex controller flip pass the description they
+  just read (or, for the flip, the one wallet-core's annex Space ensure
+  returns) to was-client's `configure()` as `current`, so it skips its
+  pre-merge re-describe. `force: true` never skipped that read; only a
+  supplied `current` does.
 
 ### Added
 

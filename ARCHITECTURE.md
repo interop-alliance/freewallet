@@ -639,20 +639,14 @@ Spaces the account can no longer name once its own registry is gone; a
 registry sealed to a superseded user key is repaired in place instead of
 refusing. A pending-shaped passphrase entry, and a standing credential the
 registry never recorded, are not refusals either: each names an unlock
-Space the walk cannot reach, so it is reported as a residue instead, named
-again at the confirm below, and left for that credential's own next login
-to remove. Discovery also enumerates every `#DelegatedClients` value the
+Space the walk cannot reach, so it is reported as a residue on the run's
+outcome instead, and left for that credential's own next login to remove.
+Discovery also enumerates every `#DelegatedClients` value the
 account log's history ever published, unioned with the acting record's own
 sibling target, since a superseded pointer entry is append-only and its
 Space can still be live. Every Space discovery finds gets its own probe, so
 the deletes that follow have a basis for reading a 404 as already-deleted
 rather than as a masked refusal.
-
-Once discovery is done, a second confirm names what was found before
-anything is deleted: every other standing unlock method by label and kind,
-the enrolled clients, and the count of Spaces. The first confirm speaks for
-the account; this one speaks for the credentials and clients nobody there
-was asked about.
 
 The walk then deletes, in this order: the auxiliary annex Space(s); the KMS
 keystore, when one exists, through its own route once that route exists

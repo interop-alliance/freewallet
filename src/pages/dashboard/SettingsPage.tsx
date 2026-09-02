@@ -1,5 +1,4 @@
 import Alert from '@mui/material/Alert'
-import AlertTitle from '@mui/material/AlertTitle'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -45,8 +44,7 @@ import {
   readLoginHandle,
   removeAccountPasskey,
   renameAccountPasskey,
-  rotateAccountUpdateKey,
-  type AccountDeletionScope
+  rotateAccountUpdateKey
 } from '@/session/accountSettings'
 import {
   PasskeyCancelledError,
@@ -60,7 +58,7 @@ import { formatDate } from '@/lib/viewMappers/formatDate'
 import { RecoveryCodesSection } from '@/components/RecoveryCodesSection'
 import { EnrolledClientsSection } from '@/components/EnrolledClientsSection'
 import { dashboardStyles } from '@/styles/appStyles'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { DATE_FMT, KMS_SERVER_URL, PASSWORD_RULES } from '@/app.config'
@@ -144,12 +142,6 @@ export function SettingsPage() {
   // state with an acknowledge button, and that button logs out.
   const [deleteFarewell, setDeleteFarewell] = useState(false)
   const [forgettingBrowser, setForgettingBrowser] = useState(false)
-  // The scoped second confirm: what (a2) found, held while the ceremony
-  // awaits the user's answer through `deleteScopeDecision`.
-  const [deleteScope, setDeleteScope] = useState<AccountDeletionScope | null>(
-    null
-  )
-  const deleteScopeDecision = useRef<((approved: boolean) => void) | null>(null)
   const hasRemoteStorage = !!session?.storage?.hasRemoteStorage
   const [handle, setHandle] = useState('')
   const [savedHandle, setSavedHandle] = useState('')
@@ -613,7 +605,6 @@ export function SettingsPage() {
     setDeleteActingResidue(false)
     setDeleteRefusalDeleted([])
     setDeleteFarewell(false)
-    setDeleteScope(null)
     setDeletePhase(null)
     setDeleteDialogOpen(true)
   }
@@ -633,25 +624,6 @@ export function SettingsPage() {
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [deleting])
-
-  const answerDeleteScope = (approved: boolean) => {
-    const decide = deleteScopeDecision.current
-    deleteScopeDecision.current = null
-    setDeleteScope(null)
-    decide?.(approved)
-  }
-
-  // An unmount with the scoped confirm still pending answers it `false`, so
-  // `deleteAccount` settles (with nothing deleted) instead of leaving an
-  // unresolved promise, a stuck `deleting` flag, and an unload guard nothing
-  // removes.
-  useEffect(() => {
-    return () => {
-      const decide = deleteScopeDecision.current
-      deleteScopeDecision.current = null
-      decide?.(false)
-    }
-  }, [])
 
   /**
    * The post-pivot exit: clear the session and leave for the landing page.
@@ -707,12 +679,7 @@ export function SettingsPage() {
       const outcome = await deleteAccount({
         session,
         passphrase: deletePassphrase,
-        onPhase: phase => setDeletePhase(phase.phase),
-        confirmScope: scope =>
-          new Promise<boolean>(resolve => {
-            deleteScopeDecision.current = resolve
-            setDeleteScope(scope)
-          })
+        onPhase: phase => setDeletePhase(phase.phase)
       })
       const residue = outcome.spaces.filter(
         space => space.kind === 'unlock' && space.outcome !== 'deleted'
@@ -724,9 +691,6 @@ export function SettingsPage() {
       setDeleteActingResidue(actingResidue)
       if (outcome.result === 'wrong-passphrase') {
         setDeletePassphraseIncorrect(true)
-        return
-      }
-      if (outcome.result === 'cancelled') {
         return
       }
       if (outcome.result === 'refused') {
@@ -770,7 +734,6 @@ export function SettingsPage() {
       log.error('The account deletion ceremony failed', { err })
       setDeleteRefusalKey('settings.deleteError')
     } finally {
-      answerDeleteScope(false)
       setDeletePhase(null)
       setDeleting(false)
     }
@@ -1385,11 +1348,6 @@ export function SettingsPage() {
                 <DialogContentText>
                   {t('settings.deleteConfirm')}
                 </DialogContentText>
-                {!session?.isGuest && (
-                  <Alert severity="warning" sx={{ mt: 2 }}>
-                    {t('settings.deleteHazard')}
-                  </Alert>
-                )}
                 {!session?.isGuest && isPasskeySession && (
                   <DialogContentText sx={{ mt: 2 }}>
                     {t('settings.deleteConfirmPasskey')}
@@ -1403,9 +1361,8 @@ export function SettingsPage() {
                     label={t('settings.deletePassphraseLabel')}
                     // Autofill disabled deliberately: the confirm IS the
                     // ceremony's authentication, and a manager that saved the
-                    // passphrase at login would otherwise hand it to whoever holds
-                    // the tab -- on exactly the shared machine the hazard copy
-                    // above is about.
+                    // passphrase at login would otherwise hand it to whoever
+                    // holds the tab.
                     autoComplete="off"
                     name="freewallet-delete-confirm"
                     slotProps={{
@@ -1442,42 +1399,6 @@ export function SettingsPage() {
                     )}
                   </Alert>
                 )}
-                {deleteScope && (
-                  <Alert severity="warning" sx={{ mt: 2 }}>
-                    <AlertTitle>{t('settings.deleteScopeTitle')}</AlertTitle>
-                    <Stack component="ul" sx={{ pl: 3, m: 0 }}>
-                      {deleteScope.otherMethods.length > 0 && (
-                        <li>
-                          {t('settings.deleteScopeMethods', {
-                            count: deleteScope.otherMethods.length,
-                            list: deleteScope.otherMethods
-                              .map(method => method.label ?? method.type)
-                              .join(', ')
-                          })}
-                        </li>
-                      )}
-                      {deleteScope.enrolledClients > 0 && (
-                        <li>
-                          {t('settings.deleteScopeClients', {
-                            count: deleteScope.enrolledClients
-                          })}
-                        </li>
-                      )}
-                      <li>
-                        {t('settings.deleteScopeSpaces', {
-                          count: deleteScope.spaceCount
-                        })}
-                      </li>
-                      {deleteScope.unreachable.length > 0 && (
-                        <li>
-                          {t('settings.deleteScopeUnreachable', {
-                            count: deleteScope.unreachable.length
-                          })}
-                        </li>
-                      )}
-                    </Stack>
-                  </Alert>
-                )}
                 {deleting && deletePhase && (
                   <DialogContentText sx={{ mt: 2 }}>
                     {t(`settings.deletePhase.${deletePhaseKey(deletePhase)}`)}{' '}
@@ -1509,40 +1430,24 @@ export function SettingsPage() {
             ) : (
               <>
                 <Button
-                  onClick={() => {
-                    if (deleteScope) {
-                      answerDeleteScope(false)
-                      return
-                    }
-                    setDeleteDialogOpen(false)
-                  }}
-                  disabled={deleting && !deleteScope}
+                  onClick={() => setDeleteDialogOpen(false)}
+                  disabled={deleting}
                 >
                   {t('common.cancel')}
                 </Button>
-                {deleteScope ? (
-                  <Button
-                    variant="contained"
-                    color="error"
-                    onClick={() => answerDeleteScope(true)}
-                  >
-                    {t('settings.deleteScopeConfirmAction')}
-                  </Button>
-                ) : (
-                  <Button
-                    variant="contained"
-                    color="error"
-                    onClick={handleDeleteAccount}
-                    loading={deleting}
-                    disabled={
-                      !session?.isGuest &&
-                      !isPasskeySession &&
-                      deletePassphrase.length === 0
-                    }
-                  >
-                    {t('settings.deleteConfirmAction')}
-                  </Button>
-                )}
+                <Button
+                  variant="contained"
+                  color="error"
+                  onClick={handleDeleteAccount}
+                  loading={deleting}
+                  disabled={
+                    !session?.isGuest &&
+                    !isPasskeySession &&
+                    deletePassphrase.length === 0
+                  }
+                >
+                  {t('settings.deleteConfirmAction')}
+                </Button>
               </>
             )}
           </DialogActions>

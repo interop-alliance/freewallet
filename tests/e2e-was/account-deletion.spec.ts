@@ -198,7 +198,7 @@ async function buildLadderAnchoredAccount(
 
 /**
  * What the deletion walk saw, dumped when it refuses where the spec expects
- * the scoped confirm. The refusal that matters here is
+ * a completed run. The refusal that matters here is
  * `ladder-vm-not-anchored`, whose whole basis is a comparison between the
  * ladder VM ids the resolved account document lists and the multibase the
  * acting credential derives, so the dump names both sides: the document's
@@ -353,9 +353,6 @@ test.describe.serial('Account deletion from a transient session', () => {
       )
       const dialog = openDeleteDialog(page)
 
-      // The hazard copy leads: deleting from a shared terminal is a session
-      // stealer's highest-value move.
-      await expect(dialog.getByText(/highest-value move/)).toBeVisible()
       // The confirm IS the ceremony's authentication, so a manager that saved
       // the passphrase at login must not offer to fill it.
       const confirmField = dialog.locator(
@@ -368,34 +365,20 @@ test.describe.serial('Account deletion from a transient session', () => {
         .getByRole('button', { name: 'Delete account', exact: true })
         .click()
 
-      // The scoped second confirm, after discovery and before the first
-      // irreversible write: it names the parties this deletion evicts who
-      // were never asked. A pre-flight refusal renders here instead, so the
-      // wait dumps what the walk saw rather than reporting a bare timeout.
+      // A clean run ends in a logout and a hard reload onto the landing page.
+      // A pre-flight refusal renders in the dialog instead, so the wait dumps
+      // what the walk saw rather than reporting a bare timeout.
       try {
-        await expect(
-          dialog.getByText('This deletes more than this sign-in')
-        ).toBeVisible({ timeout: 180_000 })
+        await expect(page).toHaveURL(/\/#?\/?$/, { timeout: 300_000 })
       } catch (err) {
         throw new Error(
-          `The deletion did not reach the scoped confirm.\n${await deletionDiagnostics(
-            { page, logUrl: account.logUrl }
-          )}`,
+          `The deletion did not complete.\n${await deletionDiagnostics({
+            page,
+            logUrl: account.logUrl
+          })}`,
           { cause: err }
         )
       }
-      await expect(
-        dialog.getByText(/Other sign-in methods removed \(1\): Recovery code 1/)
-      ).toBeVisible()
-      await expect(
-        dialog.getByText(/Storage spaces deleted: \d+/)
-      ).toBeVisible()
-      await dialog
-        .getByRole('button', { name: 'Yes, delete all of it' })
-        .click()
-
-      // A clean run ends in a logout and a hard reload onto the landing page.
-      await expect(page).toHaveURL(/\/#?\/?$/, { timeout: 300_000 })
 
       await expectSpacesGone({ spaceIds: account.spaceIds })
       await expectNoStorageResidue({
@@ -456,12 +439,6 @@ test.describe.serial('Account deletion torn after the pivot', () => {
       )
       await dialog
         .getByRole('button', { name: 'Delete account', exact: true })
-        .click()
-      await expect(
-        dialog.getByText('This deletes more than this sign-in')
-      ).toBeVisible({ timeout: 180_000 })
-      await dialog
-        .getByRole('button', { name: 'Yes, delete all of it' })
         .click()
 
       // Past the pivot, so (b6) reports rather than failing. The account is

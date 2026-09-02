@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest'
 import type { ZcapClient } from '@interop/ezcap'
-import type { WasClient } from '@interop/was-client'
+import type { SpaceDescription, WasClient } from '@interop/was-client'
 import { mintSpaceId, WASRemoteStore } from '../../src/stores/wasRemoteStore'
 import { deriveSpaceId } from '@interop/was-client/sync'
 import type { ControllerProfile, User } from '../../src/types/auth'
@@ -571,6 +571,111 @@ describe('WASRemoteStore.ensureCollection', () => {
     await expect(
       store.ensureCollection({ id: 'example-app-public', isPublic: true })
     ).rejects.toThrow(/Error provisioning collection/)
+  })
+})
+
+describe('WASRemoteStore.ensureEncryptedCollection', () => {
+  it('passes the absent read through as `current` on a fresh create', async () => {
+    const configure = vi.fn().mockResolvedValue(undefined)
+    const describeCollection = vi.fn().mockResolvedValue(null)
+    const collection = vi
+      .fn()
+      .mockReturnValue({ configure, describe: describeCollection })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collection })
+    })
+
+    await expect(
+      store.ensureEncryptedCollection({ id: 'example-app-data' })
+    ).resolves.toBeUndefined()
+    // `null` is the answer "absent", not a request for a second read: the
+    // pre-merge describe `configure` would otherwise make is skipped.
+    expect(configure).toHaveBeenCalledWith({
+      name: 'example-app-data',
+      encryption: { scheme: 'edv' },
+      force: true,
+      current: null
+    })
+    expect(describeCollection).toHaveBeenCalledOnce()
+  })
+
+  it('passes the read description through on a late in-place declaration', async () => {
+    const current = { id: 'example-app-data', name: 'Example App Data' }
+    const configure = vi.fn().mockResolvedValue(undefined)
+    const describeCollection = vi.fn().mockResolvedValue(current)
+    const collection = vi
+      .fn()
+      .mockReturnValue({ configure, describe: describeCollection })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collection })
+    })
+
+    await expect(
+      store.ensureEncryptedCollection({ id: 'example-app-data' })
+    ).resolves.toBeUndefined()
+    expect(configure).toHaveBeenCalledWith({
+      name: 'Example App Data',
+      encryption: { scheme: 'edv' },
+      force: true,
+      current
+    })
+  })
+
+  it('leaves an existing encryption descriptor untouched', async () => {
+    const encryption = { scheme: 'edv', currentEpoch: 'epoch-0' }
+    const configure = vi.fn().mockResolvedValue(undefined)
+    const describeCollection = vi
+      .fn()
+      .mockResolvedValue({ name: 'Example App Data', encryption })
+    const collection = vi
+      .fn()
+      .mockReturnValue({ configure, describe: describeCollection })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collection })
+    })
+
+    await expect(
+      store.ensureEncryptedCollection({ id: 'example-app-data' })
+    ).resolves.toEqual(encryption)
+    expect(configure).not.toHaveBeenCalled()
+  })
+})
+
+describe('WASRemoteStore.promoteSpaceController', () => {
+  it('forwards a supplied `current` to the Space configure', async () => {
+    const current: SpaceDescription = {
+      id: 'space-id',
+      type: ['Space'],
+      controller: 'did:key:test'
+    }
+    const configure = vi.fn().mockResolvedValue(undefined)
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ configure })
+    })
+
+    await store.promoteSpaceController({
+      controller: 'did:webvh:promoted',
+      current
+    })
+    expect(configure).toHaveBeenCalledWith({
+      name: 'Wallet Space',
+      controller: 'did:webvh:promoted',
+      current
+    })
+    expect(store.controller).toBe('did:webvh:promoted')
+  })
+
+  it('omits `current` when the caller holds no read', async () => {
+    const configure = vi.fn().mockResolvedValue(undefined)
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ configure })
+    })
+
+    await store.promoteSpaceController({ controller: 'did:webvh:promoted' })
+    expect(configure).toHaveBeenCalledWith({
+      name: 'Wallet Space',
+      controller: 'did:webvh:promoted'
+    })
   })
 })
 

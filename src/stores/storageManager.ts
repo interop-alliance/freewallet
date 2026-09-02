@@ -36,7 +36,8 @@ import type { RxCollection, RxStorage } from 'rxdb/plugins/core'
 import {
   ValidationError,
   type CollectionEncryption,
-  type IDelegatedZcap
+  type IDelegatedZcap,
+  type SpaceDescription
 } from '@interop/was-client'
 import {
   addRecipient,
@@ -1902,11 +1903,9 @@ export class StorageManager {
       // on a hiccup would be wrong, and this is the one provisioning step
       // awaited un-guarded -- so a transport failure warns and skips like
       // the neighbouring steps, and the next login re-checks.
-      let description: { controller?: string } | null
+      let description: SpaceDescription | null
       try {
-        description = (await remote.spaceHandle().describe()) as {
-          controller?: string
-        } | null
+        description = await remote.spaceHandle().describe()
       } catch (err) {
         log.warn('Could not confirm the promoted Space controller', { err })
         return
@@ -1920,7 +1919,16 @@ export class StorageManager {
         controller: keyAgent.id
       })
       try {
-        await remote.promoteSpaceController({ controller: did })
+        // A non-null read is the description this method just made through
+        // the same Space handle, so it rides along and `configure` skips its
+        // own pre-merge describe. A null one does not: it came from a read
+        // under the promoted signer, where an unauthorized answer is masked
+        // as the same 404 an absent description returns, so the truthful
+        // read is the one `configure` makes under the did:key client.
+        await remote.promoteSpaceController({
+          controller: did,
+          ...(description !== null ? { current: description } : {})
+        })
       } finally {
         remote.rebindController({
           zcapClient: profile.zcapClient,

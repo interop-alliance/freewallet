@@ -1617,7 +1617,6 @@ export async function rotateAccountUpdateKey({
  * - `refused` -- a pre-flight refused before the first irreversible write,
  *   with nothing deleted. The reason rides on the outcome and carries its own
  *   copy key.
- * - `cancelled` -- the scoped second confirm was declined; nothing deleted.
  * - `failed` -- a phase before the pivot failed. The account is still there,
  *   the caller stays put, and a retry re-runs the walk. A guest and a no-WAS
  *   run, which have no pivot, also report a surviving local replica this
@@ -1631,12 +1630,7 @@ export async function rotateAccountUpdateKey({
  *   user their account survived.
  */
 export type AccountDeletionResult =
-  | 'wrong-passphrase'
-  | 'refused'
-  | 'cancelled'
-  | 'failed'
-  | 'deleted'
-  | 'deleted-unverified'
+  'wrong-passphrase' | 'refused' | 'failed' | 'deleted' | 'deleted-unverified'
 
 /**
  * Why a pre-flight refused the whole ceremony, with nothing deleted. Each
@@ -1707,25 +1701,6 @@ export interface UnnamedUnlockSpace {
   reason: 'pending-entry' | 'unrecorded-credential'
   /** the pending entry's method type, where an entry names one */
   method?: string
-}
-
-/**
- * What the discovery walk found, for the scoped second confirm: the parties
- * this deletion evicts who were never asked.
- */
-export interface AccountDeletionScope {
-  /** every unlock method other than the one confirming this deletion */
-  otherMethods: Array<{ type: string; label?: string; unlockSpaceId: string }>
-  /** how many enrolled clients the account document lists */
-  enrolledClients: number
-  /** how many Spaces the walk is about to delete */
-  spaceCount: number
-  /** unlock Spaces the walk cannot reach or cannot name */
-  unreachable: Array<{
-    method?: string
-    unlockSpaceId?: string
-    reason: string
-  }>
 }
 
 /**
@@ -1938,7 +1913,7 @@ function labelOf(entry: UnlockMethod): { label?: string } {
  * enumerate every auxiliary annex Space the log's `#DelegatedClients` pointer
  * history names unioned with the acting record's own sibling target, and
  * probe every Space so the 404 rule has a basis. Every failure here refuses
- * the run with nothing deleted, then the caller's scoped confirm runs;
+ * the run with nothing deleted;
  * (b3) the auxiliary annex Space(s), each under a DELETE-only child of its
  * own Space root minted immediately before its own request;
  * (b2) the KMS keystore -- shipped skipped and reported;
@@ -1958,9 +1933,6 @@ function labelOf(entry: UnlockMethod): { label?: string } {
  * @param options.session {Session}
  * @param options.passphrase {string}   ignored for a guest and for a passkey
  *   session, which re-asserts instead
- * @param [options.confirmScope] {Function}   the scoped second confirm, run
- *   after (a2) and before the first irreversible write; returning false
- *   abandons the run with nothing deleted
  * @param [options.onPhase] {Function}   per-phase progress
  * @param [options.signal] {AbortSignal}   aborts the passkey assertion
  * @returns {Promise<AccountDeletionOutcome>}
@@ -1968,13 +1940,11 @@ function labelOf(entry: UnlockMethod): { label?: string } {
 export async function deleteAccount({
   session,
   passphrase,
-  confirmScope,
   onPhase,
   signal
 }: {
   session: Session
   passphrase: string
-  confirmScope?: (scope: AccountDeletionScope) => boolean | Promise<boolean>
   onPhase?: (phase: AccountDeletionPhase) => void
   signal?: AbortSignal
 }): Promise<AccountDeletionOutcome> {
@@ -2204,7 +2174,6 @@ export async function deleteAccount({
     refusalReason?: UnlockSpaceDeletionOutcome
   }> = []
   let actingDiscovery: 'present' | 'absent' | 'unknown' = 'unknown'
-  let enrolledClients = 0
   // Every enrolled client's own did:key, read off the verified document, so
   // the local wipe can name each one's replica database and cache families.
   const enrolledClientDids: string[] = []
@@ -2255,10 +2224,6 @@ export async function deleteAccount({
         }
       }
       if (!accountAlreadyGone) {
-        enrolledClients = relationIds(
-          (doc as { capabilityInvocation?: Array<string | { id?: string }> })
-            .capabilityInvocation
-        ).length
         // Every enrolled client's own did:key, for the local wipe: its
         // signing method is `<accountDid>#<multibase>` and its client
         // did:key is `did:key:<multibase>`, which is what its replica
@@ -2532,46 +2497,6 @@ export async function deleteAccount({
         err
       })
       return refuse('discovery-failed')
-    }
-  }
-
-  // The scoped second confirm: after (a2), before the first irreversible
-  // write. The consent surface is what stands in for the log entry a
-  // credential-signed deletion never writes. A guest and a no-WAS deployment
-  // ran no enumeration and evict no party that was never asked, so they keep
-  // the single ungated confirm.
-  if (confirmScope && remote && !accountAlreadyGone) {
-    const approved = await confirmScope({
-      otherMethods: siblingEntries.map(({ entry }) => ({
-        type: entry.type,
-        ...labelOf(entry),
-        unlockSpaceId: entry.unlockSpaceId
-      })),
-      enrolledClients,
-      spaceCount:
-        annexSpaces.length +
-        siblingEntries.filter(sibling => !sibling.refusalReason).length +
-        (remote ? 1 : 0) +
-        (credential ? 1 : 0),
-      unreachable: [
-        ...siblingEntries
-          .filter(sibling => sibling.refusalReason)
-          .map(sibling => ({
-            method: sibling.entry.type,
-            unlockSpaceId: sibling.entry.unlockSpaceId,
-            reason: sibling.refusalReason as string
-          })),
-        ...unnamed.map(entry => ({
-          ...(entry.method ? { method: entry.method } : {}),
-          reason: entry.reason
-        })),
-        ...spaces
-          .filter(space => space.outcome === 'unreachable')
-          .map(space => ({ reason: space.reason ?? 'unreachable' }))
-      ]
-    })
-    if (!approved) {
-      return done('cancelled')
     }
   }
 

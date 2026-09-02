@@ -833,8 +833,6 @@ const {
   PendingPassphraseRetirementError,
   SamePassphraseError
 } = await import('@/session/accountSettings')
-type AccountDeletionScope =
-  import('@/session/accountSettings').AccountDeletionScope
 const { deleteSpaceWithCapability } =
   await import('@interop/wallet-core/clientAnnex')
 const { deleteUnlockLocalState } = await import('@/lib/sessionKey')
@@ -1563,49 +1561,6 @@ describe('deleteAccount (coverage residues and the scoped confirm)', () => {
     expect(outcome.result).toBe('refused')
     expect(outcome.refusal).toBe('discovery-failed')
     expect(state.calls).not.toContain('wipeRemoteStorage')
-  })
-
-  it('names every other method, every client, and every Space in the confirm', async () => {
-    state.pendingEntries = ['passphrase']
-    let scope: AccountDeletionScope | undefined
-    const outcome = await deleteAccount({
-      session: makeSession({ transient: true }),
-      passphrase: PASSPHRASE,
-      confirmScope: seen => {
-        scope = seen
-        return true
-      }
-    })
-    expect(outcome.result).toBe('deleted')
-    expect(scope?.otherMethods).toEqual([
-      {
-        type: 'passkey',
-        label: 'Phone passkey',
-        unlockSpaceId: PASSKEY_SPACE
-      }
-    ])
-    expect(scope?.enrolledClients).toBe(1)
-    // One annex Space, one sibling unlock Space, the account Space, and the
-    // acting credential's own.
-    expect(scope?.spaceCount).toBe(4)
-    expect(scope?.unreachable).toContainEqual({
-      method: 'passphrase',
-      reason: 'pending-entry'
-    })
-  })
-
-  it('abandons the run with nothing deleted when the confirm is declined', async () => {
-    const outcome = await deleteAccount({
-      session: makeSession({ transient: true }),
-      passphrase: PASSPHRASE,
-      confirmScope: () => false
-    })
-    expect(outcome.result).toBe('cancelled')
-    expect(state.calls.filter(call => call.startsWith('spaceDelete:'))).toEqual(
-      []
-    )
-    expect(state.calls).not.toContain('wipeRemoteStorage')
-    expect(state.calls).not.toContain('executeLocalWipe')
   })
 
   it('reports each phase it enters', async () => {

@@ -27,7 +27,8 @@ import {
   type CollectionEncryption,
   type IZcap,
   type Resource,
-  type Space
+  type Space,
+  type SpaceDescription
 } from '@interop/was-client'
 import { createEdvEncryption } from '@interop/was-client/edv'
 import { publicCredentialUrl as buildPublicCredentialUrl } from '@interop/wallet-core/space'
@@ -437,14 +438,25 @@ export class WASRemoteStore {
    *
    * @param options {object}
    * @param options.controller {string}   the account's did:webvh DID
+   * @param [options.current] {SpaceDescription | null}   the caller's own
+   *   just-made read of this same Space, with no Description write in
+   *   between; supplying it skips `configure`'s pre-merge re-describe.
+   *   Omit it (rather than passing `null`) when no such read is in hand, so
+   *   `configure` makes the read itself under this store's signing client.
    * @returns {Promise<void>}
    */
   async promoteSpaceController({
-    controller
+    controller,
+    current
   }: {
     controller: string
+    current?: SpaceDescription | null
   }): Promise<void> {
-    await this.#space().configure({ name: 'Wallet Space', controller })
+    await this.#space().configure({
+      name: 'Wallet Space',
+      controller,
+      ...(current !== undefined ? { current } : {})
+    })
     this.controller = controller
   }
 
@@ -630,7 +642,12 @@ export class WASRemoteStore {
         await collection.configure({
           name: name ?? current?.name ?? id,
           encryption: { scheme: 'edv' },
-          force: true
+          force: true,
+          // The description this method just read through the same handle,
+          // with no Description write in between -- `null` is the answer
+          // "absent", not a request to look again. Supplying it skips
+          // `configure`'s own pre-merge describe, which `force` does not.
+          current
         })
       } catch (err) {
         log.error('Error declaring collection encrypted', { id, err })
