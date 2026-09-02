@@ -44,6 +44,35 @@
     "deletePassphraseIncorrect": "Esa frase de contraseña es incorrecta.",
     "deleteError": "No se pudieron eliminar los datos de su cuenta. Inténtelo de nuevo.",
     "deleteUnverified": "Su cuenta se eliminó, pero este navegador no pudo confirmar que sus datos locales de billetera hayan desaparecido. Cierre las demás pestañas y luego borre los datos del sitio en este navegador.",
+    "deleteHazard": "Eliminar una cuenta desde una computadora compartida o no confiable es la jugada más valiosa para quien robe una sesión. Si esta terminal no es suya, ciérrela y vuelva a conectarse desde su propio navegador.",
+    "deleteConfirmPasskey": "Confirme con la llave de acceso con la que inició sesión.",
+    "deleteScopeTitle": "Esto elimina más que este inicio de sesión",
+    "deleteScopeMethods": "Otros métodos de inicio de sesión eliminados ({{count}}): {{list}}",
+    "deleteScopeClients": "Billeteras conectadas que pierden el acceso: {{count}}",
+    "deleteScopeSpaces": "Espacios de almacenamiento eliminados: {{count}}",
+    "deleteScopeUnreachable": "Espacios de inicio de sesión que este navegador no puede alcanzar, quedan en el servidor: {{count}}",
+    "deleteScopeConfirmAction": "Sí, eliminarlo todo",
+    "deleteKeepTabOpen": "Mantenga esta pestaña abierta hasta que termine.",
+    "deletePhase": {
+      "authenticate": "Comprobando su inicio de sesión...",
+      "quiesce": "Deteniendo la sincronización en segundo plano...",
+      "discover": "Buscando todo lo que posee esta cuenta...",
+      "annexSpace": "Eliminando un espacio de claves de billetera...",
+      "keystore": "Comprobando el servidor de gestión de claves...",
+      "unlockSpace": "Eliminando un espacio de inicio de sesión...",
+      "accountSpace": "Eliminando los datos de su cuenta...",
+      "actingUnlockSpace": "Eliminando este inicio de sesión...",
+      "localWipe": "Limpiando este navegador..."
+    },
+    "deleteRefusal": {
+      "ladderVmNotAnchored": "Este inicio de sesión no puede eliminar la cuenta desde este navegador: la identidad publicada de la cuenta no contiene la clave de firma de este método. Inicie sesión en un navegador que haya conectado a esta cuenta y elimínela desde allí.",
+      "registryUnreadable": "No se pudo leer la lista de métodos de inicio de sesión de esta cuenta, así que la eliminación dejaría algunos en el servidor. No se eliminó nada. Inténtelo de nuevo.",
+      "registryStaleSeal": "La lista de métodos de inicio de sesión de esta cuenta está sellada con una clave que este navegador no pudo recuperar, así que la eliminación dejaría algunos en el servidor. No se eliminó nada.",
+      "discoveryFailed": "No se pudo leer todo lo que posee esta cuenta, así que la eliminación dejaría parte atrás. No se eliminó nada. Inténtelo de nuevo.",
+      "spaceDeleteFailed": "La eliminación se detuvo a mitad. Su cuenta sigue existiendo y todo lo que no se indica abajo quedó intacto. Inténtelo de nuevo; continúa donde se detuvo."
+    },
+    "deleteResidue": "Espacios de inicio de sesión que siguen en el servidor: {{count}}. Iniciar sesión una vez con cada método los elimina.",
+    "deleteActingResidue": "Su cuenta está eliminada. Los datos de inicio de sesión de este método siguen en el servidor; el próximo inicio de sesión con él ofrecerá eliminarlos.",
     "about": "Acerca de",
     "version": "Freewallet versión {{version}}",
     "unpromotedAccount": "Esta cuenta no ha terminado de configurar su identidad publicada (un paso de configuración falló anteriormente). Las billeteras conectadas y los códigos de recuperación no estarán disponibles hasta que se complete; se reintenta automáticamente en cada inicio de sesión.",
@@ -209,7 +238,11 @@
       "confirmSaved": "Guardé este código",
       "saveError": "No se pudo crear el código de recuperación. No se guardó nada: inténtalo de nuevo.",
       "revokeError": "No se pudo revocar el código de recuperación. Inténtalo de nuevo."
-    }
+    },
+    "deleteFarewellTitle": "Su cuenta ha sido eliminada",
+    "deleteFarewellAction": "Cerrar sesión",
+    "deleteForgetBrowserAction": "Olvidar todos los datos de la billetera en este navegador",
+    "deleteRefusalDeleted": "Ya eliminado antes de detenerse ({{count}}): {{list}}"
   },
   "landing": {
     "title": "Freewallet",

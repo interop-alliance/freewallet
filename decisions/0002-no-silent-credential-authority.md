@@ -113,3 +113,41 @@ per-visit entries are surfaced by nothing and are deleted at the next
 garbage collection. That half is FW-358's.
 
 The decision itself is unchanged.
+
+## Amendment (2026-09-01)
+
+FW-400 (account deletion from a transient session, approved 2026-09-01)
+is a second, deliberate amendment rather than a case this record's
+existing text covers. Deleting an account or its auxiliary annex Space
+needs a Space-root DELETE the transient session's per-visit key cannot
+reach, so the ceremony mints a DELETE-only capability, delegated to and
+invoked by the ladder VM's own bare did:key, immediately before each
+DELETE it sends (`decisions/0014`). That capability is grant authority
+the ladder VM exercises with no log entry: the ceremony writes no
+account-log entry for it and claims no loud record.
+
+This is an amendment with a stated scope, not a retreat from the
+decision. The scope is exactly one capability shape (a single-verb,
+target-exact DELETE on a Space's own URL) minted only by the deletion
+ceremony. The reason no entry is owed is structural rather than a
+convenience: the account-Space DELETE destroys the very log any such
+entry would live in, and leaves no reader behind to remediate from it.
+Everything the ceremony deletes before the account Space -- the
+auxiliary annex Space, the sibling unlock Spaces -- still destroys
+Spaces while the account log survives and stays unmarked, so an
+abandoned run in that window is a co-credential eviction with no
+record: every other standing credential and every recovery code can
+lose its unlock Space with nothing in the log to say so. The consent
+surface this design adds (a fresh re-derivation of the credential at
+its own confirm, and a second confirm scoped to what the discovery
+phase found) stands in for the log entry that this scope does without.
+
+Stated plainly, as the design does: every ladder VM the account
+document lists may destroy the account, because DELETE is inside what
+it may delegate. That population is bounded to the ladder VMs rather
+than to every `capabilityDelegation` member on the deployment, and the
+credential-retirement gate (wallet-core's decision) closes the one part
+of that population loudness had no other answer for: a retired
+credential's ladder VM left standing by an unattributed strike. It does
+not reach a client-less account's other standing ladder VMs, each a
+whole-account kill switch bounded only by its own credential's entropy.

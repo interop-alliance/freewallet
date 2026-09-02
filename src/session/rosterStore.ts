@@ -30,6 +30,7 @@
  * for the account-log chain-head pin; the session builder's read gets it
  * inside the verified-log memo.
  */
+import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import {
   userKeyRosterDescriptorStore,
@@ -119,12 +120,17 @@ export function accountRosterStore({
  * @param options.profile {ControllerProfile}   the live session's profile; it
  *   must hold a key agent and an account pointer naming a did:webvh. The
  *   chain-head pin rides the profile's persistence strategy.
+ * @param [options.capability] {IZcap}   an invocation capability every request
+ *   rides (a transient session's generation delegation, the only authority
+ *   that session holds); the root capability is invoked otherwise
  * @returns {SealableEncryptionDescriptorStore}
  */
 export function sessionRosterStore({
-  profile
+  profile,
+  capability
 }: {
   profile: ControllerProfile
+  capability?: IZcap
 }): SealableEncryptionDescriptorStore {
   const pointer = profile.accountPointer
   const { keyAgent } = profile
@@ -144,6 +150,7 @@ export function sessionRosterStore({
       return webvhResourceLogController({ did: pointer.did!, log })
     },
     pinStore: profile.persistence.logPins,
-    signer: userKeyRosterLogSigner({ keyAgent })
+    signer: userKeyRosterLogSigner({ keyAgent }),
+    ...(capability ? { capability } : {})
   })
 }

@@ -18,7 +18,8 @@ import {
   loadPasskeySafetyNotice,
   savePasskeySafetyNotice,
   saveKeyringCache,
-  sessionDatabaseExists
+  sessionDatabaseExists,
+  deleteUnlockLocalState
 } from '@/lib/sessionKey'
 import { createFakeSessionIdb } from './fakeSessionIdb'
 
@@ -299,6 +300,33 @@ describe('sessionDatabaseExists (the two-tier create-nothing probe)', () => {
     })
     expect(databaseNames.has('freewallet-session')).toBe(true)
     await expect(sessionDatabaseExists({ idb })).resolves.toBe(true)
+  })
+})
+
+describe('deleteUnlockLocalState (the create-nothing guard)', () => {
+  it('creates no session database on a browser that holds none', async () => {
+    const { idb, databaseNames } = createFakeSessionIdb()
+    await deleteUnlockLocalState({ spaceId: 'unlock-space-1', idb })
+    // A residue-zero visit deleting an account must not leave behind the one
+    // database it never had.
+    expect(databaseNames.has('freewallet-session')).toBe(false)
+  })
+
+  it('deletes both families from a database that exists', async () => {
+    const { idb, sessionStore } = createFakeSessionIdb()
+    await saveKeyringCache({
+      spaceId: 'unlock-space-1',
+      record: { r: 1 },
+      idb
+    })
+    await saveClientKeyRecord({
+      spaceId: 'unlock-space-1',
+      record: { wrapped: true },
+      idb
+    })
+    await deleteUnlockLocalState({ spaceId: 'unlock-space-1', idb })
+    expect(sessionStore.has('keyring/unlock-space-1')).toBe(false)
+    expect(sessionStore.has('client-keys/unlock-space-1')).toBe(false)
   })
 })
 

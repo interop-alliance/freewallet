@@ -165,7 +165,7 @@ vi.mock('@/session/keyring', async importOriginal => ({
 import {
   adoptPassphraseRebind,
   backfillPassphraseUnlockMethod,
-  deleteUnlockMethodArtifacts,
+  deleteUnlockMethodSpace,
   getUnlockMethods,
   getUnlockMethodsWithClient,
   managementZcapClient,
@@ -694,7 +694,7 @@ describe('revokeUnlockMethod', () => {
   })
 })
 
-describe('deleteUnlockMethodArtifacts', () => {
+describe('deleteUnlockMethodSpace', () => {
   it('deletes the unlock Space and the local trio, leaving the registry alone', async () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
@@ -714,7 +714,7 @@ describe('deleteUnlockMethodArtifacts', () => {
     })
     vi.clearAllMocks()
 
-    await deleteUnlockMethodArtifacts({ session, entry, idb })
+    await deleteUnlockMethodSpace({ session, entry })
 
     expect(deleteUnlockSpaceWithCapability).toHaveBeenCalledOnce()
     const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
@@ -728,9 +728,11 @@ describe('deleteUnlockMethodArtifacts', () => {
     expect(Date.parse(child.expires) - Date.now()).toBeLessThanOrEqual(
       DELETION_ZCAP_TTL_MS + 1000
     )
+    // The REMOTE half only: the keyring cache is the caller's local-wipe
+    // stage to remove, past the pivot.
     await expect(
       loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
-    ).resolves.toBeNull()
+    ).resolves.not.toBeNull()
     // No rotation, and no registry rewrite: both die with the account Space
     // the caller is about to wipe.
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
@@ -748,18 +750,14 @@ describe('deleteUnlockMethodArtifacts', () => {
       idb
     })
 
-    const outcome = await deleteUnlockMethodArtifacts({ session, entry, idb })
+    const outcome = await deleteUnlockMethodSpace({ session, entry })
 
-    // Stated residue, named rather than silently skipped: the unlock Space
-    // survives, the local state does not.
+    // Stated residue, named rather than silently skipped.
     expect(outcome).toEqual({
       unlockSpaceId: entry.unlockSpaceId,
       space: 'no-capability'
     })
     expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
-    await expect(
-      loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
-    ).resolves.toBeNull()
   })
 
   it('reports the residue for an entry whose management zcap has expired', async () => {
@@ -772,7 +770,7 @@ describe('deleteUnlockMethodArtifacts', () => {
       } as unknown as IZcap
     })
 
-    const outcome = await deleteUnlockMethodArtifacts({ session, entry, idb })
+    const outcome = await deleteUnlockMethodSpace({ session, entry })
 
     // A child of an expired parent would verify nowhere, so nothing is minted
     // and nothing is sent -- and the walk still continues.
@@ -790,7 +788,7 @@ describe('deleteUnlockMethodArtifacts', () => {
       } as unknown as IZcap
     })
 
-    const outcome = await deleteUnlockMethodArtifacts({ session, entry, idb })
+    const outcome = await deleteUnlockMethodSpace({ session, entry })
 
     // A child signed by a delegator the parent does not name comes back as a
     // masked 404, which the walk would read as "already gone" and drop the
@@ -809,7 +807,7 @@ describe('deleteUnlockMethodArtifacts', () => {
       } as unknown as IZcap
     })
 
-    const outcome = await deleteUnlockMethodArtifacts({ session, entry, idb })
+    const outcome = await deleteUnlockMethodSpace({ session, entry })
 
     expect(outcome.space).toBe('stale-target')
     expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
@@ -821,14 +819,11 @@ describe('deleteUnlockMethodArtifacts', () => {
     const session = await makeSession(idb)
     const entry = passkeyEntry({ manageCapability: FAKE_CAP })
 
-    const outcome = await deleteUnlockMethodArtifacts({ session, entry, idb })
+    const outcome = await deleteUnlockMethodSpace({ session, entry })
 
     // Absent OR unauthorized -- the server masks the two, so the walk records
     // what it was told rather than concluding the Space is gone.
     expect(outcome.space).toBe('not-found')
-    await expect(
-      loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
-    ).resolves.toBeNull()
   })
 
   it('signs the child with a caller-supplied delegator and delegatee', async () => {
@@ -843,10 +838,9 @@ describe('deleteUnlockMethodArtifacts', () => {
       keyName: 'ladder-vm-key'
     })
 
-    await deleteUnlockMethodArtifacts({
+    await deleteUnlockMethodSpace({
       session,
       entry,
-      idb,
       signer: {
         zcapClient: zcapClientForSigner({ signer: ladderAgent.getSigner() }),
         controller: ladderAgent.id
@@ -857,6 +851,59 @@ describe('deleteUnlockMethodArtifacts', () => {
     const child = args.capability as IDelegatedZcap
     expect(child.controller).toBe(ladderAgent.id)
     expect(child.allowedAction).toEqual(['DELETE'])
+  })
+
+  it('mints as the delegator and sends as the invoker', async () => {
+    // Two different keys, and mixing them is a masked 404: the child's parent
+    // must be signed by the parent's own controller (the ladder VM under its
+    // account verification method), while the DELETE must be SENT by the
+    // child's own controller -- the ladder VM's bare did:key, which the
+    // account document lists under no `capabilityInvocation` relation.
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({ manageCapability: FAKE_CAP })
+    const seed = new Uint8Array(32)
+    seed.fill(9)
+    const ladderAgent = await CapabilityAgent.fromSeed({
+      seed,
+      handle: 'ladder-vm',
+      keyName: 'ladder-vm-key'
+    })
+    const delegator = zcapClientForSigner({
+      signer: ladderAgent.getSigner()
+    })
+    const invoker = zcapClientForSigner({ signer: ladderAgent.getSigner() })
+
+    await deleteUnlockMethodSpace({
+      session,
+      entry,
+      signer: { zcapClient: delegator, invoker, controller: ladderAgent.id }
+    })
+
+    const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
+    expect(args.zcapClient).toBe(invoker)
+    expect(args.zcapClient).not.toBe(delegator)
+    // The child is still the delegator's signature, delegated to the invoker.
+    const child = args.capability as IDelegatedZcap
+    expect(child.controller).toBe(ladderAgent.id)
+  })
+
+  it('reports a management zcap that allows no DELETE as a residue', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({
+      manageCapability: {
+        ...(FAKE_CAP as unknown as Record<string, unknown>),
+        allowedAction: ['GET', 'PUT']
+      } as unknown as IZcap
+    })
+
+    const outcome = await deleteUnlockMethodSpace({ session, entry })
+
+    // A child of it would verify nowhere, so nothing is minted and nothing is
+    // sent; the walk names the Space and carries on.
+    expect(outcome.space).toBe('unsupported-capability')
+    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
   })
 
   it('skips the server delete with no WAS server configured', async () => {
@@ -870,12 +917,29 @@ describe('deleteUnlockMethodArtifacts', () => {
       idb
     })
 
-    await deleteUnlockMethodArtifacts({ session, entry, idb })
+    await deleteUnlockMethodSpace({ session, entry })
 
     expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+  })
+
+  it('leaves the entry local state for the caller local wipe', async () => {
+    // The DELETEs run before the pivot, so a run refused at the account Space
+    // must leave this browser exactly as it found it rather than having
+    // quietly un-remembered every other credential on it.
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({ manageCapability: FAKE_CAP })
+    await saveKeyringCache({
+      spaceId: entry.unlockSpaceId,
+      record: { version: 1, wrapped: {} },
+      idb
+    })
+
+    await deleteUnlockMethodSpace({ session, entry })
+
     await expect(
       loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
-    ).resolves.toBeNull()
+    ).resolves.not.toBeNull()
   })
 })
 

@@ -8,19 +8,42 @@
  */
 import { base64urlnopad } from '@scure/base'
 import type { IZcap } from '@interop/data-integrity-core'
-import type { WasClient } from '@interop/was-client'
+import type { ZcapClient } from '@interop/ezcap'
+import { WasClient } from '@interop/was-client'
+import type { DIDLog } from '@interop/did-method-webvh'
 import {
   accountLogPinId,
+  clientKeyAgreementController,
+  didKeyZcapClient,
   isWebvhDid,
+  ladderVmIds,
+  relationIds,
   rotateWebvhUpdateKey
 } from '@interop/wallet-core/webvh'
 import {
+  DELETION_ZCAP_TTL_MS,
+  delegatedClientsDelegationSpaceId,
+  delegatedClientsSpaceHistory,
+  deleteSpaceWithCapability,
   generateLadderSeed,
-  ladderRung
+  ladderRung,
+  ladderVmAgent,
+  ladderVmKeyMultibase,
+  ladderVmZcapClient,
+  mintSpaceRootVerbCapability,
+  mintSpaceVerbCapability
 } from '@interop/wallet-core/clientAnnex'
+import { readUserKeyRoster } from '@interop/wallet-core/keys'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
-import { DATE_FMT, PASSKEY_KDF } from '@/app.config'
-import { registerPasskey } from '@/lib/passkey'
+import { resourcePath, spacePath, toUrl } from '@interop/was-client/paths'
+import {
+  DATE_FMT,
+  DID_LOG_RESOURCE,
+  ID_COLLECTION,
+  PASSKEY_KDF,
+  WAS_SERVER_URL
+} from '@/app.config'
+import { assertPasskeyPrf, registerPasskey } from '@/lib/passkey'
 import {
   establishStandingUnlock,
   standingFieldsOfKeyringHit
@@ -34,6 +57,7 @@ import {
   fetchKeyring,
   unlockKeyAgreementMembers,
   verifyPassphrase,
+  verifyUnlockSecret,
   WrongPassphraseError,
   type KeyringFetchResult,
   type UnlockCredential
@@ -43,16 +67,21 @@ import {
   emptyUnlockMethodsRegistry,
   backfillPassphraseUnlockMethod,
   canRevokeWithoutCeremony,
-  deleteUnlockMethodArtifacts,
+  deleteUnlockMethodSpace,
   getUnlockMethods,
+  managementZcapClient,
   revokeUnlockMethod,
+  UnlockRegistryStaleSealError,
+  unlockSpaceDeletionRefusal,
   updateUnlockMethods,
   revokeUnlockMethodByCeremony,
   upsertPasskeyUnlockMethod,
   upsertPassphraseUnlockMethod,
   type PassphraseUnlockMethod,
   type PasskeyUnlockMethod,
-  type UnlockMethodsRecord
+  type UnlockMethod,
+  type UnlockMethodsRecord,
+  type UnlockSpaceDeletionOutcome
 } from '@/session/unlockMethods'
 import { sessionRosterStore } from '@/session/rosterStore'
 import {
@@ -60,7 +89,14 @@ import {
   assertBrowserLocalSession,
   isBrowserLocalSession
 } from '@/session/persistence'
-import { pointedClientAnnexReach } from '@/session/annexReach'
+import { renewTransientGenerationDelegation } from '@/session/annexReach'
+import {
+  findPendingPassphraseEntries,
+  findUnrecordedCredentials
+} from '@/session/credentialCoverage'
+import { resealRegistryFromEscrow } from '@/session/registryReseal'
+import { deleteUnlockLocalState } from '@/lib/sessionKey'
+import { syncController } from '@/stores/syncController'
 import {
   enrolledClientContext,
   type EnrolledClientContext
@@ -1574,235 +1610,1382 @@ export async function rotateAccountUpdateKey({
 }
 
 /**
- * How an account-deletion attempt ended: the passphrase did not verify, the
- * ceremony failed before anything was wiped, the account is gone and the
- * caller should now clear the session and leave the app, or the account is
- * gone but this browser could not CONFIRM its local replica is deleted (it
- * cannot enumerate its databases). The last is not a failure -- the remote
- * account really is deleted -- and not a plain success either, so it stays
- * its own outcome for the caller's copy.
+ * How an account-deletion attempt ended.
+ *
+ * - `wrong-passphrase` -- the confirm did not authenticate; nothing was
+ *   touched.
+ * - `refused` -- a pre-flight refused before the first irreversible write,
+ *   with nothing deleted. The reason rides on the outcome and carries its own
+ *   copy key.
+ * - `cancelled` -- the scoped second confirm was declined; nothing deleted.
+ * - `failed` -- a phase before the pivot failed. The account is still there,
+ *   the caller stays put, and a retry re-runs the walk. A guest and a no-WAS
+ *   run, which have no pivot, also report a surviving local replica this
+ *   way: there the replica IS the account.
+ * - `deleted` -- the account Space is gone and the caller should clear the
+ *   session and leave the app.
+ * - `deleted-unverified` -- the account is gone, but this browser's local
+ *   replica did not verifiably go with it: either the delete failed, or it
+ *   ran and could not be CONFIRMED (the engine cannot enumerate its
+ *   databases). Past the pivot this REPLACES `failed`, which would tell the
+ *   user their account survived.
  */
 export type AccountDeletionResult =
-  'wrong-passphrase' | 'failed' | 'deleted' | 'deleted-unverified'
+  | 'wrong-passphrase'
+  | 'refused'
+  | 'cancelled'
+  | 'failed'
+  | 'deleted'
+  | 'deleted-unverified'
 
 /**
- * Deletes the account, in the order that keeps a failure recoverable:
+ * Why a pre-flight refused the whole ceremony, with nothing deleted. Each
+ * reason renders its own copy ({@link accountDeletionRefusalKey}).
+ */
+export type AccountDeletionRefusalReason =
+  | 'ladder-vm-not-anchored'
+  | 'registry-unreadable'
+  | 'registry-stale-seal'
+  | 'discovery-failed'
+  | 'space-delete-failed'
+
+/**
+ * The Settings copy key for a pre-flight refusal, in the tone
+ * `transientRefusalKey` sets for the transient session's own refusals.
  *
- * (a) confirm the passphrase before wiping anything -- a wrong passphrase must
- * not delete data (guests have no keyring, so this is skipped);
- * (a2) snapshot what only the live account can still answer: the
- * unlock-methods registry (it lives in the data Space the wipe destroys) and
- * the auxiliary annex Space's id and `gen-` collection listing (found
- * through the account document's delegated-clients pointer);
- * (b0) walk the registry and delete EVERY unlock method's server-side
- * artifacts -- its unlock Space, and with it the sealed bridge and
- * `delegatedClients` delegations -- plus each method's local state,
- * best-effort per entry: this is what removes the dangling existence-oracle
- * Spaces a probe could still find after the account is gone. Each Space goes
- * through a DELETE-only child of the entry's management zcap; an entry
- * recording none, or one whose capability has expired, keeps its Space
- * (stated residue, named on the per-entry outcome);
- * (b1) tear down the auxiliary annex Space beside the account Space --
- * one recursive Space delete, run BEFORE the data-Space wipe because the
- * server resolves the auxiliary Space's did:webvh controller by reading the
- * account log out of the account Space; warn-only, and a failure leaves an
- * orphan the server can identify by its `DelegatedClientsSpace` type;
- * (b) wipe the remote data Space -- on failure the caller keeps the old
- * semantics: surface the error, do NOT log out, the data is still there;
- * (c) retire the passphrase keyring only after a successful wipe -- if the
- * keyring died first and the wipe then failed, the data Space would be
- * orphaned unrecoverably; non-fatal, since the data is already gone;
- * (w) run the shared wipe enumeration (`src/session/wipe.ts`) over the
- * targets snapshotted at (a2): every unlock method's local state, the
- * Space-keyed bookkeeping, the unlock-methods cache, the replica databases,
- * and the per-account localStorage families -- a surviving replica is the one fatal stage, and
- * a replica delete that could not be confirmed ends as
- * `'deleted-unverified'` rather than as a clean deletion.
+ * @param reason {AccountDeletionRefusalReason}
+ * @returns {string}
+ */
+export function accountDeletionRefusalKey(
+  reason: AccountDeletionRefusalReason
+): string {
+  switch (reason) {
+    // The account document anchors no ladder VM of this credential, so no
+    // DELETE this walk mints would verify anywhere. A remembered browser is
+    // the way through until the credential-keyed ladder VM lands.
+    case 'ladder-vm-not-anchored':
+      return 'settings.deleteRefusal.ladderVmNotAnchored'
+    case 'registry-unreadable':
+      return 'settings.deleteRefusal.registryUnreadable'
+    case 'registry-stale-seal':
+      return 'settings.deleteRefusal.registryStaleSeal'
+    case 'discovery-failed':
+      return 'settings.deleteRefusal.discoveryFailed'
+    case 'space-delete-failed':
+    default:
+      return 'settings.deleteRefusal.spaceDeleteFailed'
+  }
+}
+
+/**
+ * What became of one Space the walk named.
  *
- * (d) clearing the session and (e) leaving for the landing page stay with the
- * caller, which owns the app shell.
+ * `unconfirmed` is the 404 rule's honest grade: the server masks an
+ * authorization refusal as a 404, so a DELETE that 404'd with no independent
+ * evidence of absence is not reported as a clean deletion.
+ */
+export interface SpaceDeletionReport {
+  kind: 'annex' | 'unlock' | 'acting-unlock' | 'account'
+  spaceId: string
+  outcome: 'deleted' | 'unconfirmed' | 'unreachable'
+  /** the unlock method the Space belongs to, when it belongs to one */
+  method?: string
+  /** the method's display label, when it carries one */
+  label?: string
+  /** why an `unreachable` Space was not deleted */
+  reason?: string
+}
+
+/**
+ * An unlock Space the walk could not NAME: one behind a pending-shaped
+ * passphrase entry, or a standing credential the account document publishes
+ * that the registry does not record. Reported rather than refused: the
+ * account Space's own deletion is the mender, since that credential's next
+ * login meets a dead account log and is offered the removal.
+ */
+export interface UnnamedUnlockSpace {
+  reason: 'pending-entry' | 'unrecorded-credential'
+  /** the pending entry's method type, where an entry names one */
+  method?: string
+}
+
+/**
+ * What the discovery walk found, for the scoped second confirm: the parties
+ * this deletion evicts who were never asked.
+ */
+export interface AccountDeletionScope {
+  /** every unlock method other than the one confirming this deletion */
+  otherMethods: Array<{ type: string; label?: string; unlockSpaceId: string }>
+  /** how many enrolled clients the account document lists */
+  enrolledClients: number
+  /** how many Spaces the walk is about to delete */
+  spaceCount: number
+  /** unlock Spaces the walk cannot reach or cannot name */
+  unreachable: Array<{
+    method?: string
+    unlockSpaceId?: string
+    reason: string
+  }>
+}
+
+/**
+ * The ceremony's progress, for the dialog's keep-this-tab-open copy.
+ */
+export type AccountDeletionPhase =
+  | { phase: 'authenticate' }
+  | { phase: 'quiesce' }
+  | { phase: 'discover' }
+  | { phase: 'annex-space'; spaceId: string }
+  | { phase: 'keystore' }
+  | { phase: 'unlock-space'; spaceId: string }
+  | { phase: 'account-space'; spaceId: string }
+  | { phase: 'acting-unlock-space'; spaceId: string }
+  | { phase: 'local-wipe' }
+
+/**
+ * Everything the run left behind, beside its result.
+ */
+export interface AccountDeletionOutcome {
+  result: AccountDeletionResult
+  /** set when `result` is `refused` */
+  refusal?: AccountDeletionRefusalReason
+  /** one entry per Space the walk named */
+  spaces: SpaceDeletionReport[]
+  /** unlock Spaces the walk could not name */
+  unnamed: UnnamedUnlockSpace[]
+  /**
+   * The KMS keystore stage. Shipped skipped and reported: a keystore's
+   * server-side deletion route is its own item, and an orphaned keystore is a
+   * stated per-account residue until it lands.
+   */
+  keystore: 'skipped'
+}
+
+/**
+ * The single-verb capability mints the walk needs, plus the identity that
+ * invokes them. A remembered session holds none of this: it root-invokes.
+ */
+interface LadderDeleter {
+  /** the delegating signer: the ladder VM under `<accountDid>#<multibase>` */
+  zcapClient: ZcapClient
+  /** the delegatee and invoker: the ladder VM's own bare did:key */
+  invoker: ZcapClient
+  /** the delegatee DID */
+  controller: string
+}
+
+/**
+ * Probes one Space for existence, so the 404 rule has a basis. A Space
+ * Description read comes back `null` for a 404 (absent OR unauthorized, the
+ * server masks the two), and every other failure propagates: a transport or
+ * 5xx failure must refuse the run rather than pass as absence.
+ *
+ * @param options {object}
+ * @param options.zcapClient {ZcapClient}
+ * @param options.spaceId {string}
+ * @param [options.capability] {IZcap}   a GET capability on the Space's own
+ *   URL; the root capability is invoked otherwise
+ * @returns {Promise<'present' | 'absent'>}
+ */
+async function probeSpace({
+  zcapClient,
+  spaceId,
+  capability
+}: {
+  zcapClient: ZcapClient
+  spaceId: string
+  capability?: IZcap
+}): Promise<'present' | 'absent'> {
+  // Status-exact deliberately, rather than was-client's `Space.describe()`:
+  // that read resolves `null` for a 404 AND for a 2xx whose body did not
+  // parse (`dataOrNull`), so a live Space could be recorded absent, and an
+  // absence recorded here is what lets a later 404 grade as a deletion. Only
+  // a 404 is absence; every other failure propagates and refuses the run.
+  try {
+    await zcapClient.read({
+      url: toUrl({
+        serverUrl: WAS_SERVER_URL as string,
+        path: spacePath(spaceId)
+      }),
+      ...(capability ? { capability } : {})
+    })
+  } catch (err) {
+    if (httpStatusOf(err) === 404) {
+      return 'absent'
+    }
+    throw err
+  }
+  return 'present'
+}
+
+/**
+ * The HTTP status a thrown request error carries, or `undefined` when it
+ * carries none (a transport failure). Mirrors was-client's own `httpStatus`,
+ * which its export map does not reach.
+ *
+ * @param err {unknown}
+ * @returns {number | undefined}
+ */
+function httpStatusOf(err: unknown): number | undefined {
+  const raw = err as { status?: number; response?: { status?: number } }
+  return raw?.status ?? raw?.response?.status
+}
+
+/**
+ * Whether the account Space's world-readable DID log still answers.
+ *
+ * This is the 404 rule's one INDEPENDENT absence probe: `did.jsonl` is served
+ * to anyone, so no capability gates it and its answer cannot be a masked
+ * authorization refusal. While it answers, the account Space is alive and a
+ * 404 on a DELETE reads as a refusal; once it stops, the Space is genuinely
+ * gone.
+ *
+ * A fetch that fails for any other reason reports the log as still answering:
+ * the walk must never read an unreachable host as corroborated absence.
+ *
+ * @param options {object}
+ * @param options.pointer {object}
+ * @param options.pointer.spaceId {string}
+ * @param options.pointer.host {string}
+ * @returns {Promise<boolean>}
+ */
+async function accountLogAnswers({
+  pointer
+}: {
+  pointer: { spaceId: string; host: string }
+}): Promise<boolean> {
+  const url = toUrl({
+    serverUrl: pointer.host,
+    path: resourcePath(pointer.spaceId, ID_COLLECTION.id, DID_LOG_RESOURCE)
+  })
+  try {
+    const response = await fetch(url)
+    return response.status !== 404
+  } catch (err) {
+    log.warn(
+      'Could not re-read the account log to corroborate a 404; treating the ' +
+        'account as still there',
+      { err }
+    )
+    return true
+  }
+}
+
+/**
+ * The 404 rule's grade for one Space DELETE that came back `not-found`.
+ *
+ * A 404 is already-deleted only where the discovery read of that same Space
+ * already found it absent AND that absence is corroborated independently --
+ * the account Space's world-readable log, which no capability gates: while it
+ * answers, the account is alive and the refusal reading stands. Everything
+ * else is a masked authorization refusal, which must never report as a clean
+ * deletion.
+ *
+ * @param options {object}
+ * @param options.discovery {'present' | 'absent' | 'unknown'}
+ * @param options.accountGone {boolean}   the account Space is known deleted
+ * @returns {'deleted' | 'unconfirmed' | 'refuse'}
+ */
+function grade404({
+  discovery,
+  accountGone
+}: {
+  discovery: 'present' | 'absent' | 'unknown'
+  accountGone: boolean
+}): 'deleted' | 'unconfirmed' | 'refuse' {
+  if (discovery === 'present') {
+    return 'refuse'
+  }
+  if (discovery === 'absent') {
+    return accountGone ? 'deleted' : 'unconfirmed'
+  }
+  return 'unconfirmed'
+}
+
+/**
+ * The display label a registry entry carries, as a spreadable fragment. A
+ * passphrase entry carries none, so the fragment is empty for it.
+ *
+ * @param entry {UnlockMethod}
+ * @returns {{ label?: string }}
+ */
+function labelOf(entry: UnlockMethod): { label?: string } {
+  const label = (entry as { label?: string }).label
+  return label ? { label } : {}
+}
+
+/**
+ * Deletes the account and every Space it owns, from a remembered session or
+ * from the default transient one.
+ *
+ * The run order is (a), (a1), (a2), (b3), (b2), (b1), (b5), (b6), (w):
+ *
+ * (a) authenticate and derive FRESH from the typed passphrase (or the
+ * passkey's re-asserted PRF output): the credential, its unlock record, and
+ * the ladder seed that signs every delegation downstream. Deriving rather
+ * than reading the session's stamped seed is what makes the confirm
+ * cryptographically load-bearing -- a session stealer holding the live tab
+ * but not the secret cannot sign a single DELETE. The passkey arm asserts
+ * against THIS session's own credential id and re-checks the account
+ * controller, so a second account's passkey on the same authenticator cannot
+ * be picked;
+ * (a1) quiesce: stop background replication and close the local replica
+ * before the first destructive phase (a remembered session only);
+ * (a2) discover, under the visit's own authority: verify the account log,
+ * require this credential's ladder VM in the resolved document, renew a stale
+ * generation delegation, read the unlock-methods registry (repairing a stale
+ * seal in place), report the two coverage states the registry cannot name,
+ * enumerate every auxiliary annex Space the log's `#DelegatedClients` pointer
+ * history names unioned with the acting record's own sibling target, and
+ * probe every Space so the 404 rule has a basis. Every failure here refuses
+ * the run with nothing deleted, then the caller's scoped confirm runs;
+ * (b3) the auxiliary annex Space(s), each under a DELETE-only child of its
+ * own Space root minted immediately before its own request;
+ * (b2) the KMS keystore -- shipped skipped and reported;
+ * (b1) the sibling unlock Spaces, each under a DELETE-only child of that
+ * entry's management zcap. A failure with a live capability refuses; an entry
+ * with no usable capability is a reported residue and the run continues;
+ * (b5) the account Space, the pivot;
+ * (b6) the acting credential's own unlock Space, a root invocation under the
+ * credential's own unlock identity. Past the pivot, so it reports rather than
+ * refuses and never returns `'failed'`;
+ * (w) the shared wipe enumeration.
+ *
+ * Clearing the session and leaving for the landing page stay with the caller,
+ * which owns the app shell.
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.passphrase {string}   ignored for a guest session
- * @returns {Promise<AccountDeletionResult>}
+ * @param options.passphrase {string}   ignored for a guest and for a passkey
+ *   session, which re-asserts instead
+ * @param [options.confirmScope] {Function}   the scoped second confirm, run
+ *   after (a2) and before the first irreversible write; returning false
+ *   abandons the run with nothing deleted
+ * @param [options.onPhase] {Function}   per-phase progress
+ * @param [options.signal] {AbortSignal}   aborts the passkey assertion
+ * @returns {Promise<AccountDeletionOutcome>}
  */
 export async function deleteAccount({
   session,
-  passphrase
+  passphrase,
+  confirmScope,
+  onPhase,
+  signal
 }: {
   session: Session
   passphrase: string
-}): Promise<AccountDeletionResult> {
-  assertAccountCeremonyAllowed({
-    persistence: session.profile.persistence,
-    ceremony: 'Deleting the account'
-  })
+  confirmScope?: (scope: AccountDeletionScope) => boolean | Promise<boolean>
+  onPhase?: (phase: AccountDeletionPhase) => void
+  signal?: AbortSignal
+}): Promise<AccountDeletionOutcome> {
   // Wait out the login-time registry passes rather than racing their
   // read-modify-writes (deletion walks the registry); on a settled session
   // the chain resolved long ago, and a guest session carries no chain.
   await session.registryReady
   const isGuest = !!session.isGuest
-  // One derivation for both unlock-layer steps below (the confirmation and
-  // the retirement), rather than running the 600k-iteration KDF twice.
-  const credential = isGuest
-    ? undefined
-    : await deriveUnlockCredential({ secret: passphrase, kdf: KEYRING_KDF })
-  // (a) Confirm the passphrase before wiping anything -- a wrong passphrase
-  // must not delete data. Guests have no keyring, so this is skipped.
-  if (!isGuest) {
-    try {
-      // Match against the ACCOUNT controller the keyring record was bound
-      // under (differs from `user.id` on an enrolled second client).
-      await verifyPassphrase({
-        controller: session.profile.accountController ?? session.user.id,
-        passphrase,
-        credential
-      })
-    } catch (err) {
-      if (err instanceof WrongPassphraseError) {
-        return 'wrong-passphrase'
-      }
-      // Any other failure (e.g. the remote is unreachable) is a generic
-      // delete failure -- do not touch the user's data.
-      log.error('Could not verify the passphrase for deletion', { err })
-      return 'failed'
-    }
-  }
-  // (a2) Snapshot what only the live account can still answer, before
-  // anything is deleted: the registry rides in the data Space and unwraps
-  // with the session's vault keys, and the auxiliary Space is found through
-  // the account document's pointer. Both best-effort -- an unreadable
-  // registry or log narrows the teardown, never blocks the deletion.
-  let registry: UnlockMethodsRecord | null = null
-  let registryUnread = false
-  let clientAnnex: { was: WasClient; spaceId: string } | undefined
+  const { profile } = session
+  const persistence = profile.persistence
+  const browserLocal = isBrowserLocalSession(persistence)
   // The Storage Access seam: a session begun from the CHAPI popup carries the
   // unpartitioned factory here, so every session-database delete below lands
   // in the first-party bucket the records actually live in.
-  const idb = isBrowserLocalSession(session.profile.persistence)
-    ? session.profile.persistence.idb
-    : undefined
-  if (!isGuest) {
-    try {
-      registry = await getUnlockMethods({ session })
-    } catch (err) {
-      registryUnread = true
-      log.warn(
-        "Could not read the unlock-methods registry for deletion; other methods' unlock Spaces survive",
-        { err }
-      )
+  const idb = browserLocal ? persistence.idb : undefined
+  // Read at each use rather than captured: (a2)'s renewal REPLACES
+  // `profile.invocationCapability` in place, and every read after it must
+  // ride the renewed delegation rather than the one the walk opened with.
+  const visitCapability = (): IZcap | undefined => profile.invocationCapability
+  const spaces: SpaceDeletionReport[] = []
+  const unnamed: UnnamedUnlockSpace[] = []
+  const done = (result: AccountDeletionResult): AccountDeletionOutcome => ({
+    result,
+    spaces,
+    unnamed,
+    keystore: 'skipped'
+  })
+  const refuse = (
+    refusal: AccountDeletionRefusalReason
+  ): AccountDeletionOutcome => ({
+    result: 'refused',
+    refusal,
+    spaces,
+    unnamed,
+    keystore: 'skipped'
+  })
+
+  const pointer = profile.accountPointer
+  const accountSpaceId = session.storage.spaceId
+  // The WAS-scoped arms. A guest and a no-WAS deployment skip them BY SCOPE
+  // rather than reaching them and catching: neither owns a Space, so neither
+  // may be made undeletable by a refusal about one.
+  const remote = !isGuest && !!WAS_SERVER_URL && !!accountSpaceId
+  // Whether the account pointer names a did:webvh. The ladder-signed arms --
+  // the (a2) ladder-VM gate, (b3), and the transient shapes of (b1) and (b5)
+  // -- all verify against that document, so they need a promoted account; an
+  // unpromoted one reaches its Spaces by root invocation, which only an
+  // enrolled client holds.
+  const promoted = !!pointer?.did && isWebvhDid(pointer.did)
+
+  // (a) Authenticate and derive.
+  onPhase?.({ phase: 'authenticate' })
+  const controller = profile.accountController ?? session.user.id
+  const methodType = profile.unlockMethod?.type ?? 'passphrase'
+  let credential: UnlockCredential | undefined
+  let ladderSeed: Uint8Array | undefined
+  let registry: UnlockMethodsRecord | null = null
+  let registryLoaded = false
+
+  /**
+   * The registry read, once per run: under the visit's own authority (a
+   * transient session holds no root invocation), with a stale seal repaired
+   * in place from the roster's escrow rather than refused.
+   */
+  const loadRegistry = async (): Promise<UnlockMethodsRecord | null> => {
+    if (registryLoaded) {
+      return registry
     }
+    // The delegation the read rides must be current before it is read
+    // under: a dead or GC-swapped generation delegation comes back as the
+    // server's masked 404, which the registry read maps to `null`.
+    await renewVisitDelegation()
     try {
-      const pointer = session.profile.accountPointer
-      if (pointer && isWebvhDid(pointer.did)) {
-        const reach = await pointedClientAnnexReach({ session, pointer })
-        if (reach !== null) {
-          clientAnnex = { was: reach.was, spaceId: reach.spaceId }
-        }
-      }
+      registry = await getUnlockMethods({
+        session,
+        ...(visitCapability() ? { capability: visitCapability() } : {})
+      })
     } catch (err) {
-      log.warn('Could not locate the auxiliary annex Space for deletion', {
-        err
+      if (!(err instanceof UnlockRegistryStaleSealError)) {
+        throw err
+      }
+      const repaired = await repairRegistrySealForDeletion({
+        session,
+        ...(visitCapability() ? { capability: visitCapability() } : {})
+      })
+      if (repaired !== 'repaired') {
+        throw new UnlockRegistryStaleSealError({ cause: err })
+      }
+      registry = await getUnlockMethods({
+        session,
+        ...(visitCapability() ? { capability: visitCapability() } : {})
       })
     }
+    // The 404 rule, applied to the registry. `getUnlockMethods` maps the
+    // server's masked 404 to `null`, so on an account that MUST carry a
+    // registry -- a promoted account whose log answered at (a2) -- `null` is
+    // an authorization refusal, not an absence. Treating it as "no registry"
+    // would empty the sibling walk: (b1) would delete nothing, (b5) would
+    // still succeed, and every sibling unlock Space would be stranded behind
+    // a dead account while the run reported a clean deletion. A genuinely
+    // registry-less account is only established where no registry can be
+    // demanded: an unpromoted account, or a no-WAS deployment.
+    if (registry === null && remote && promoted) {
+      throw new Error(
+        "The account's unlock-methods registry read came back empty on a " +
+          'promoted account, which the server masks an authorization refusal ' +
+          'as; refusing rather than walking an empty sibling list.'
+      )
+    }
+    registryLoaded = true
+    return registry
+  }
 
-    // (b0) The registry walk: every unlock method's unlock Space (holding
-    // its record with the sealed bridge and sibling delegations) and local
-    // state, best-effort per entry. Run before the data-Space wipe only for
-    // ordering hygiene -- each delete rides a DELETE-only child of the entry's
-    // own management zcap, whose unlock Space is its own root.
-    for (const entry of registry?.methods ?? []) {
+  /**
+   * (a2)'s generation-delegation renewal, run at most once and before the
+   * first read that rides it. A transient session that carries every member
+   * the renewal needs and still gets `null` back has a delegation that could
+   * not be renewed, and every read past it would ride a dead one -- so the
+   * walk refuses rather than reading through it.
+   */
+  let renewalDone = false
+  const renewVisitDelegation = async (): Promise<void> => {
+    if (renewalDone || browserLocal || !remote || !promoted) {
+      return
+    }
+    renewalDone = true
+    const renewable =
+      !!profile.ladderSeed &&
+      !!profile.standingUnlock?.delegatedClients &&
+      'clientAnnex' in persistence
+    const renewed = await renewTransientGenerationDelegation({ session })
+    if (!renewed && renewable) {
+      throw new Error(
+        "The visit's generation delegation could not be renewed, so every " +
+          'read of this walk would ride a delegation the server may already ' +
+          'refuse.'
+      )
+    }
+  }
+
+  if (!isGuest) {
+    let secret: string | Uint8Array = passphrase
+    let kdf = KEYRING_KDF
+    if (methodType === 'passkey') {
+      // The confirm asserts against THIS session's own credential rather than
+      // any discoverable passkey for the origin: with an empty
+      // `allowCredentials` a second account's passkey on the same
+      // authenticator could be picked, and (a) would derive that account's
+      // ladder seed while the session is this one's.
+      let entry: PasskeyUnlockMethod | undefined
       try {
-        const { space } = await deleteUnlockMethodArtifacts({
-          session,
-          entry,
-          idb
-        })
-        if (space === 'not-found') {
-          // The server answers 404 for an absent Space AND for one this
-          // capability does not authorize, so this line records what was
-          // said rather than concluding the Space is gone.
-          log.warn(
-            "An unlock method's Space answered 404: already gone, or this " +
-              'capability does not authorize the delete',
-            { methodType: entry.type, unlockSpaceId: entry.unlockSpaceId }
-          )
-        }
+        const record = await loadRegistry()
+        entry = (record?.methods ?? []).find(
+          (method): method is PasskeyUnlockMethod =>
+            method.type === 'passkey' &&
+            method.unlockSpaceId === profile.unlockMethod?.unlockSpaceId
+        )
       } catch (err) {
-        log.warn("Could not delete an unlock method's artifacts", {
-          methodType: entry.type,
+        log.warn('Could not read the unlock-methods registry for deletion', {
           err
         })
-      }
-    }
-
-    // (b1) The auxiliary annex Space, before the account Space: its
-    // controller is the account did:webvh, which the server resolves by
-    // reading the account log out of the account Space -- once that is
-    // wiped, no authority can reach the auxiliary Space again. One recursive
-    // delete covers the generation collections and the embedded delegations.
-    if (clientAnnex) {
-      try {
-        await clientAnnex.was.space(clientAnnex.spaceId).delete()
-      } catch (err) {
-        log.warn(
-          'Could not tear down the auxiliary annex Space; it survives as a typed orphan',
-          { err }
+        return refuse(
+          err instanceof UnlockRegistryStaleSealError
+            ? 'registry-stale-seal'
+            : 'registry-unreadable'
         )
+      }
+      if (!entry) {
+        log.error(
+          'This passkey session has no unlock-methods entry of its own; ' +
+            'refusing to assert against a discoverable credential'
+        )
+        return refuse('registry-unreadable')
+      }
+      const { prfOutput } = await assertPasskeyPrf({
+        credentialIds: [base64urlnopad.decode(entry.credentialId)],
+        ...(signal ? { signal } : {})
+      })
+      secret = prfOutput
+      kdf = PASSKEY_KDF
+    }
+    credential = await deriveUnlockCredential({ secret, kdf })
+    try {
+      // Match against the ACCOUNT controller the unlock record was bound
+      // under (differs from `user.id` on an enrolled second client, and on
+      // every transient visit).
+      const verified = await verifyUnlockSecret({
+        controller,
+        secret,
+        kdf,
+        idb,
+        credential
+      })
+      ladderSeed = verified.ladderSeed
+    } catch (err) {
+      if (err instanceof WrongPassphraseError) {
+        return done('wrong-passphrase')
+      }
+      // Any other failure (e.g. the remote is unreachable) is a generic
+      // delete failure -- do not touch the user's data.
+      log.error('Could not verify the unlock secret for deletion', { err })
+      return done('failed')
+    }
+  }
+
+  // (a1) Quiesce: stop background replication and close the local replica
+  // before the first destructive phase, so replication does not race the
+  // replica delete at (w). A transient session drives neither.
+  if (browserLocal) {
+    onPhase?.({ phase: 'quiesce' })
+    try {
+      await syncController.stop()
+    } catch (err) {
+      log.warn('Could not stop background replication before deletion', { err })
+    }
+  }
+
+  // (a2) Discover.
+  let deleter: LadderDeleter | undefined
+  const annexSpaces: Array<{
+    spaceId: string
+    discovery: 'present' | 'absent'
+  }> = []
+  const siblingEntries: Array<{
+    entry: UnlockMethod
+    discovery: 'present' | 'absent' | 'unknown'
+    refusalReason?: UnlockSpaceDeletionOutcome
+  }> = []
+  let actingDiscovery: 'present' | 'absent' | 'unknown' = 'unknown'
+  let enrolledClients = 0
+  // Every enrolled client's own did:key, read off the verified document, so
+  // the local wipe can name each one's replica database and cache families.
+  const enrolledClientDids: string[] = []
+  // The already-deleted arm: the account log answers 404, so the remote half
+  // is finished before it started and the run carries straight to (b6)/(w).
+  let accountAlreadyGone = false
+  // Set once the account Space is known gone, by this run's own corroborated
+  // DELETE or by the already-deleted arm. It gates (b6) and the 404 grades.
+  let accountGone = false
+  // The verified account document and log, and the DID they resolved for --
+  // absent on an unpromoted account, which publishes neither.
+  const accountDid = promoted ? (pointer?.did as string) : undefined
+  let doc: object | undefined
+  let logEntries: DIDLog | undefined
+
+  if (remote && credential && !accountAlreadyGone) {
+    onPhase?.({ phase: 'discover' })
+    if (accountDid && pointer) {
+      try {
+        // FRESH, not the session-lifetime memo: a Settings session verified
+        // its log at login, and reusing that would hide the one state this
+        // arm exists for -- an account deleted since, from another tab or by
+        // an earlier run of this same walk whose 2xx was lost.
+        invalidateVerifiedLog({ profile })
+        const verified = await verifiedAccountLog({ profile, pointer })
+        doc = verified.doc
+        logEntries = verified.log
+      } catch (err) {
+        if ((err as Error).name === 'AccountLogMissingError') {
+          // The account log answers 404: this account is already gone (a
+          // second tab, or a re-click after a (b5) whose 2xx was lost). The
+          // remote half is finished, and the credential is already derived,
+          // so the run continues into (b6) and (w) rather than refusing and
+          // stranding this credential's own unlock Space and local state.
+          log.info(
+            'The account log is already gone; finishing the local half only'
+          )
+          accountAlreadyGone = true
+          accountGone = true
+          spaces.push({
+            kind: 'account',
+            spaceId: accountSpaceId as string,
+            outcome: 'deleted'
+          })
+        } else {
+          log.error('Could not verify the account log for deletion', { err })
+          return refuse('discovery-failed')
+        }
+      }
+      if (!accountAlreadyGone) {
+        enrolledClients = relationIds(
+          (doc as { capabilityInvocation?: Array<string | { id?: string }> })
+            .capabilityInvocation
+        ).length
+        // Every enrolled client's own did:key, for the local wipe: its
+        // signing method is `<accountDid>#<multibase>` and its client
+        // did:key is `did:key:<multibase>`, which is what its replica
+        // database prefix and its client-keyed cache families derive from.
+        for (const vmId of relationIds(
+          (doc as { capabilityInvocation?: Array<string | { id?: string }> })
+            .capabilityInvocation
+        )) {
+          enrolledClientDids.push(
+            clientKeyAgreementController({
+              signingKeyMultibase: vmId.slice(vmId.lastIndexOf('#') + 1)
+            })
+          )
+        }
       }
     }
   }
-  // The wipe targets, snapshotted from the session and the discovery above
-  // before any local state is deleted.
+
+  if (remote && credential && !accountAlreadyGone) {
+    // The ladder-VM gate. Without this credential's ladder VM in the resolved
+    // document, no delegation the walk mints verifies anywhere -- so the run
+    // refuses here with nothing deleted rather than 404ing its way through.
+    // An unpromoted account has no document at all, so a transient session,
+    // which holds nothing but ladder-signed authority, refuses the same way.
+    if (!browserLocal) {
+      if (!ladderSeed || !accountDid || !doc) {
+        return refuse('ladder-vm-not-anchored')
+      }
+      const vmKeyMultibase = await ladderVmKeyMultibase({ ladderSeed })
+      if (!ladderVmIds({ doc }).includes(`${accountDid}#${vmKeyMultibase}`)) {
+        log.warn(
+          'Account deletion refused: the account document anchors no ladder ' +
+            "VM of this credential's",
+          { accountDid }
+        )
+        return refuse('ladder-vm-not-anchored')
+      }
+      // The generation delegation every (a2) read rides must outlive the
+      // walk: renew it BEFORE anything destructive runs. Already run when
+      // the passkey arm's own registry read needed it.
+      try {
+        await renewVisitDelegation()
+      } catch (err) {
+        log.error('Could not renew the visit generation delegation', { err })
+        return refuse('discovery-failed')
+      }
+      const zcapClient = await ladderVmZcapClient({ accountDid, ladderSeed })
+      const agent = await ladderVmAgent({ ladderSeed })
+      deleter = {
+        zcapClient,
+        invoker: didKeyZcapClient({ keyAgent: agent }),
+        controller: agent.id
+      }
+    }
+
+    // The registry, under the visit's own authority. A failed read refuses:
+    // a best-effort walk over an incomplete registry strands oracle Spaces
+    // the account can no longer name once its own registry is gone.
+    try {
+      registry = await loadRegistry()
+    } catch (err) {
+      log.warn('Could not read the unlock-methods registry for deletion', {
+        err
+      })
+      return refuse(
+        err instanceof UnlockRegistryStaleSealError
+          ? 'registry-stale-seal'
+          : 'registry-unreadable'
+      )
+    }
+
+    // The registry is not the set of unlock Spaces. Both coverage states
+    // REPORT rather than refuse: the account Space's deletion is their
+    // mender, since the credential behind each meets a dead account log at
+    // its next login and is offered the removal there. A record the detector
+    // could NOT settle is a different matter and refuses the run, since a
+    // walk that cannot tell a pending entry from a healthy one names neither.
+    const deploymentHost = new URL(WAS_SERVER_URL as string).host
+    const annexIds = new Set<string>()
+    if (doc && accountDid && pointer) {
+      try {
+        const pending = await findPendingPassphraseEntries({
+          registry,
+          host: pointer.host,
+          readerFor: async entry => {
+            const parent = entry.manageCapability as IZcap
+            if (!deleter) {
+              return {
+                zcapClient: managementZcapClient({
+                  session,
+                  capability: parent
+                }),
+                capability: parent
+              }
+            }
+            if (
+              unlockSpaceDeletionRefusal({
+                session,
+                entry,
+                signer: deleter,
+                verb: 'GET'
+              })
+            ) {
+              return undefined
+            }
+            return {
+              zcapClient: deleter.invoker,
+              capability: await mintSpaceVerbCapability({
+                zcapClient: deleter.zcapClient,
+                parent,
+                verb: 'GET',
+                controller: deleter.controller,
+                ttlMs: DELETION_ZCAP_TTL_MS
+              })
+            }
+          }
+        })
+        for (const entry of pending) {
+          unnamed.push({ reason: 'pending-entry', method: entry.type })
+        }
+      } catch (err) {
+        log.error(
+          'Could not settle the registry passphrase entries; nothing was deleted',
+          { err }
+        )
+        return refuse('discovery-failed')
+      }
+      let unrecorded: string[]
+      try {
+        unrecorded = await findUnrecordedCredentials({
+          doc,
+          did: accountDid,
+          registry
+        })
+      } catch (err) {
+        // Its sibling detector's rule: a coverage check the walk could not
+        // settle names no unlock Space either way, so it refuses rather than
+        // reporting a clean run over a set it never established.
+        log.error(
+          'Could not settle the document credentials against the registry; nothing was deleted',
+          { err }
+        )
+        return refuse('discovery-failed')
+      }
+      for (let index = 0; index < unrecorded.length; index++) {
+        unnamed.push({ reason: 'unrecorded-credential' })
+      }
+
+      // The auxiliary annex Space(s): every `#DelegatedClients` value the log
+      // history names -- a superseded pointer entry is append-only and its
+      // Space survives the move -- unioned with the acting record's own
+      // sibling target, which a torn establishment can converge on without any
+      // pointer entry naming it.
+      for (const space of delegatedClientsSpaceHistory({
+        log: logEntries ?? []
+      })) {
+        if (space.host !== deploymentHost) {
+          // An account that has migrated hosts leaves entries this deployment
+          // cannot address; deleting that id here would address a different
+          // Space, and its 404 would read as a clean deletion.
+          spaces.push({
+            kind: 'annex',
+            spaceId: space.spaceId,
+            outcome: 'unreachable',
+            reason: 'foreign-host'
+          })
+          continue
+        }
+        annexIds.add(space.spaceId)
+      }
+      const sibling = profile.standingUnlock?.delegatedClients as
+        IZcap | undefined
+      const siblingSpaceId = sibling
+        ? delegatedClientsDelegationSpaceId({ delegation: sibling })
+        : undefined
+      // Host-filtered like the pointer history above: a sibling delegation
+      // carried over from another deployment names a Space id this host would
+      // resolve to something else entirely.
+      if (
+        siblingSpaceId &&
+        targetHost({
+          target: (sibling as { invocationTarget?: string })?.invocationTarget
+        }) === deploymentHost
+      ) {
+        annexIds.add(siblingSpaceId)
+      }
+    }
+
+    // Per Space, the discovery outcome the 404 rule rests on. A read that
+    // fails for a non-404 reason refuses the run; a 404 is recorded as absent.
+    try {
+      for (const spaceId of annexIds) {
+        const discovery = deleter
+          ? await probeSpace({
+              zcapClient: deleter.invoker,
+              spaceId,
+              capability: await mintSpaceRootVerbCapability({
+                zcapClient: deleter.zcapClient,
+                storageServerUrl: WAS_SERVER_URL as string,
+                spaceId,
+                verb: 'GET',
+                controller: deleter.controller,
+                ttlMs: DELETION_ZCAP_TTL_MS
+              })
+            })
+          : await probeSpace({ zcapClient: profile.zcapClient, spaceId })
+        annexSpaces.push({ spaceId, discovery })
+      }
+      actingDiscovery = await probeSpace({
+        zcapClient: credential.unlock.zcapClient,
+        spaceId: credential.unlock.spaceId
+      })
+      for (const entry of (registry?.methods ?? []) as UnlockMethod[]) {
+        if (entry.unlockSpaceId === credential.unlock.spaceId) {
+          continue
+        }
+        const refusalReason = unlockSpaceDeletionRefusal({
+          session,
+          entry,
+          ...(deleter ? { signer: deleter } : {})
+        })
+        if (refusalReason) {
+          siblingEntries.push({ entry, discovery: 'unknown', refusalReason })
+          continue
+        }
+        // A management zcap that allows DELETE but not GET is deletable and
+        // unprobeable: the probe is skipped rather than minted (the mint
+        // would throw and refuse the whole run), and the entry keeps an
+        // `unknown` discovery, which the 404 rule already grades honestly.
+        if (
+          unlockSpaceDeletionRefusal({
+            session,
+            entry,
+            ...(deleter ? { signer: deleter } : {}),
+            verb: 'GET'
+          })
+        ) {
+          log.warn(
+            "An unlock method's management zcap allows no GET; its Space is " +
+              'deleted unprobed',
+            { methodType: entry.type, unlockSpaceId: entry.unlockSpaceId }
+          )
+          siblingEntries.push({ entry, discovery: 'unknown' })
+          continue
+        }
+        const parent = entry.manageCapability as IZcap
+        const delegator = deleter
+          ? deleter.zcapClient
+          : managementZcapClient({ session, capability: parent })
+        const probeClient = deleter ? deleter.invoker : delegator
+        const capability = await mintSpaceVerbCapability({
+          zcapClient: delegator,
+          parent,
+          verb: 'GET',
+          controller:
+            deleter?.controller ??
+            (parent as { controller: string }).controller,
+          ttlMs: DELETION_ZCAP_TTL_MS
+        })
+        siblingEntries.push({
+          entry,
+          discovery: await probeSpace({
+            zcapClient: probeClient,
+            spaceId: entry.unlockSpaceId,
+            capability
+          })
+        })
+      }
+    } catch (err) {
+      log.error('A deletion discovery read failed; nothing was deleted', {
+        err
+      })
+      return refuse('discovery-failed')
+    }
+  }
+
+  // The scoped second confirm: after (a2), before the first irreversible
+  // write. The consent surface is what stands in for the log entry a
+  // credential-signed deletion never writes. A guest and a no-WAS deployment
+  // ran no enumeration and evict no party that was never asked, so they keep
+  // the single ungated confirm.
+  if (confirmScope && remote && !accountAlreadyGone) {
+    const approved = await confirmScope({
+      otherMethods: siblingEntries.map(({ entry }) => ({
+        type: entry.type,
+        ...labelOf(entry),
+        unlockSpaceId: entry.unlockSpaceId
+      })),
+      enrolledClients,
+      spaceCount:
+        annexSpaces.length +
+        siblingEntries.filter(sibling => !sibling.refusalReason).length +
+        (remote ? 1 : 0) +
+        (credential ? 1 : 0),
+      unreachable: [
+        ...siblingEntries
+          .filter(sibling => sibling.refusalReason)
+          .map(sibling => ({
+            method: sibling.entry.type,
+            unlockSpaceId: sibling.entry.unlockSpaceId,
+            reason: sibling.refusalReason as string
+          })),
+        ...unnamed.map(entry => ({
+          ...(entry.method ? { method: entry.method } : {}),
+          reason: entry.reason
+        })),
+        ...spaces
+          .filter(space => space.outcome === 'unreachable')
+          .map(space => ({ reason: space.reason ?? 'unreachable' }))
+      ]
+    })
+    if (!approved) {
+      return done('cancelled')
+    }
+  }
+
+  // (b3) The auxiliary annex Space(s). Per Space: mint the DELETE-only child
+  // of THAT Space's root, then send its recursive DELETE, which takes the
+  // generation collections with it. Minting immediately before the request
+  // spends the ten-minute window on the one request it exists for.
+  for (const { spaceId, discovery } of annexSpaces) {
+    onPhase?.({ phase: 'annex-space', spaceId })
+    let outcome: 'deleted' | 'not-found'
+    try {
+      if (deleter) {
+        const capability = await mintSpaceRootVerbCapability({
+          zcapClient: deleter.zcapClient,
+          storageServerUrl: WAS_SERVER_URL as string,
+          spaceId,
+          verb: 'DELETE',
+          controller: deleter.controller,
+          ttlMs: DELETION_ZCAP_TTL_MS
+        })
+        ;({ outcome } = await deleteSpaceWithCapability({
+          storageServerUrl: WAS_SERVER_URL as string,
+          zcapClient: deleter.invoker,
+          spaceId,
+          capability
+        }))
+      } else {
+        ;({ outcome } = await new WasClient({
+          serverUrl: WAS_SERVER_URL as string,
+          zcapClient: profile.zcapClient
+        })
+          .space(spaceId)
+          .deleteWithOutcome())
+      }
+    } catch (err) {
+      // Pre-pivot: refuse. A failed (b3) that proceeded to the pivot would
+      // orphan the annex Space permanently, while one that stops leaves the
+      // account alive, enterable, and re-runnable with every unlock method
+      // still standing.
+      log.error('Could not delete an auxiliary annex Space', { spaceId, err })
+      return refuse('space-delete-failed')
+    }
+    if (outcome === 'deleted') {
+      spaces.push({ kind: 'annex', spaceId, outcome: 'deleted' })
+      continue
+    }
+    const grade = grade404({ discovery, accountGone })
+    if (grade === 'refuse') {
+      log.error(
+        'An auxiliary annex Space this run read successfully answered 404: a masked authorization refusal',
+        { spaceId }
+      )
+      return refuse('space-delete-failed')
+    }
+    spaces.push({ kind: 'annex', spaceId, outcome: grade })
+  }
+
+  // (b2) The KMS keystore. Shipped skipped and reported.
+  if (remote) {
+    onPhase?.({ phase: 'keystore' })
+  }
+
+  // (b1) The sibling unlock Spaces, immediately before the pivot: their
+  // DELETEs are the run's first eviction of a party that was never asked, so
+  // the irreversible region stays two phases long. The REMOTE half only --
+  // every sibling's browser-local state is left to (w), past the pivot, so a
+  // run refused at (b5) has not quietly un-remembered this browser for every
+  // other credential while its copy says the account is untouched.
+  for (const { entry, discovery, refusalReason } of siblingEntries) {
+    onPhase?.({ phase: 'unlock-space', spaceId: entry.unlockSpaceId })
+    if (refusalReason) {
+      // A reported residue, not a refusal and not a silent skip: that
+      // credential's own next login re-delegates, or removes the Space once
+      // the account behind it is gone.
+      spaces.push({
+        kind: 'unlock',
+        spaceId: entry.unlockSpaceId,
+        outcome: 'unreachable',
+        method: entry.type,
+        ...labelOf(entry),
+        reason: refusalReason
+      })
+      continue
+    }
+    let space: UnlockSpaceDeletionOutcome
+    try {
+      ;({ space } = await deleteUnlockMethodSpace({
+        session,
+        entry,
+        ...(deleter ? { signer: deleter } : {})
+      }))
+    } catch (err) {
+      log.error("Could not delete an unlock method's Space", {
+        methodType: entry.type,
+        unlockSpaceId: entry.unlockSpaceId,
+        err
+      })
+      return refuse('space-delete-failed')
+    }
+    if (space === 'deleted') {
+      spaces.push({
+        kind: 'unlock',
+        spaceId: entry.unlockSpaceId,
+        outcome: 'deleted',
+        method: entry.type,
+        ...labelOf(entry)
+      })
+      continue
+    }
+    if (space !== 'not-found') {
+      spaces.push({
+        kind: 'unlock',
+        spaceId: entry.unlockSpaceId,
+        outcome: 'unreachable',
+        method: entry.type,
+        ...labelOf(entry),
+        reason: space
+      })
+      continue
+    }
+    const grade = grade404({ discovery, accountGone })
+    if (grade === 'refuse') {
+      log.error(
+        'An unlock Space this run read successfully answered 404 on its DELETE: a masked authorization refusal',
+        { unlockSpaceId: entry.unlockSpaceId }
+      )
+      return refuse('space-delete-failed')
+    }
+    spaces.push({
+      kind: 'unlock',
+      spaceId: entry.unlockSpaceId,
+      outcome: grade,
+      method: entry.type,
+      ...labelOf(entry)
+    })
+  }
+
+  // (b5) The account Space: the pivot. Everything the walk needs from the
+  // account document has happened; what follows needs nothing from it.
+  if (remote && accountSpaceId && !accountAlreadyGone) {
+    onPhase?.({ phase: 'account-space', spaceId: accountSpaceId })
+    // The account's own world-readable log is the corroboration the 404 rule
+    // rests on, and reading it costs one unauthenticated GET; memoized so a
+    // path that consults it twice fetches once.
+    let logGone: boolean | undefined
+    const accountLogIsGone = async (): Promise<boolean> => {
+      if (logGone === undefined) {
+        if (promoted && pointer) {
+          logGone = !(await accountLogAnswers({
+            pointer: { spaceId: pointer.spaceId, host: pointer.host }
+          }))
+        } else {
+          // An unpromoted account publishes no log, so its corroborator is
+          // the root invocation itself: the Space's controller is this
+          // client's own did:key, and the server can mask no refusal for the
+          // controller -- a 404 to it is absence. Only a remembered session
+          // reaches here (a transient one refused at the ladder gate), so
+          // the root invocation is always available.
+          try {
+            logGone =
+              (await probeSpace({
+                zcapClient: profile.zcapClient,
+                spaceId: accountSpaceId
+              })) === 'absent'
+          } catch (err) {
+            log.warn(
+              'Could not re-probe an unpromoted account Space; treating it ' +
+                'as still there',
+              { err }
+            )
+            logGone = false
+          }
+        }
+      }
+      return logGone
+    }
+    let outcome: 'deleted' | 'not-found' | undefined
+    try {
+      if (deleter) {
+        const capability = await mintSpaceRootVerbCapability({
+          zcapClient: deleter.zcapClient,
+          storageServerUrl: WAS_SERVER_URL as string,
+          spaceId: accountSpaceId,
+          verb: 'DELETE',
+          controller: deleter.controller,
+          ttlMs: DELETION_ZCAP_TTL_MS
+        })
+        ;({ outcome } = await session.storage.wipeRemoteStorage({
+          capability,
+          zcapClient: deleter.invoker
+        }))
+      } else {
+        ;({ outcome } = await session.storage.wipeRemoteStorage())
+      }
+    } catch (err) {
+      // A DELETE whose 2xx was lost to the network has already landed, and
+      // concluding "pre-pivot, data still there" from a transport error would
+      // skip (b6) and (w) while the account is gone. Re-probe before
+      // surfacing -- under a freshly minted GET-only child on a transient
+      // session, since the visit's generation delegation is scoped to the
+      // items subtree and can never name the bare Space URL.
+      log.error('Error wiping user data', { err })
+      let probed: 'present' | 'absent' | 'unknown' = 'unknown'
+      try {
+        probed = deleter
+          ? await probeSpace({
+              zcapClient: deleter.invoker,
+              spaceId: accountSpaceId,
+              capability: await mintSpaceRootVerbCapability({
+                zcapClient: deleter.zcapClient,
+                storageServerUrl: WAS_SERVER_URL as string,
+                spaceId: accountSpaceId,
+                verb: 'GET',
+                controller: deleter.controller,
+                ttlMs: DELETION_ZCAP_TTL_MS
+              })
+            })
+          : await probeSpace({
+              zcapClient: profile.zcapClient,
+              spaceId: accountSpaceId
+            })
+      } catch (probeErr) {
+        log.warn('Could not re-probe the account Space after a failed wipe', {
+          err: probeErr
+        })
+      }
+      // The probe's own 404 is the same ambiguity the DELETE's is, so it
+      // corroborates nothing on its own: only the world-readable log settles
+      // it. Anything but a corroborated absence stays a pre-pivot failure,
+      // which does not log out because the data is still there.
+      if (probed !== 'absent' || !(await accountLogIsGone())) {
+        return done('failed')
+      }
+      outcome = 'not-found'
+    }
+    if (outcome === 'deleted') {
+      accountGone = true
+      spaces.push({
+        kind: 'account',
+        spaceId: accountSpaceId,
+        outcome: 'deleted'
+      })
+    } else if (await accountLogIsGone()) {
+      // The log stopped answering, so the DELETE landed and only its response
+      // was lost. That is the 404 rule's corroborated absence.
+      accountGone = true
+      spaces.push({
+        kind: 'account',
+        spaceId: accountSpaceId,
+        outcome: 'deleted'
+      })
+    } else {
+      // (a2) read this Space successfully and its log still answers, so the
+      // 404 is a masked authorization refusal. Reporting a clean deletion
+      // here would destroy every unlock record over a living account: refuse
+      // instead, before (b6) and (w) run.
+      log.error(
+        'The account Space answered 404 on its DELETE while its log still ' +
+          'answers: a masked authorization refusal',
+        { spaceId: accountSpaceId }
+      )
+      spaces.push({
+        kind: 'account',
+        spaceId: accountSpaceId,
+        outcome: 'unconfirmed'
+      })
+      return refuse('space-delete-failed')
+    }
+  }
+
+  // (b6) The acting credential's own unlock Space: a root invocation under
+  // the credential's own unlock identity, which needs nothing the account
+  // held. Past the pivot, so it reports rather than refuses -- and never
+  // returns 'failed', which would tell the user their account survived.
+  if (credential && (accountGone || !remote)) {
+    const { spaceId, zcapClient } = credential.unlock
+    onPhase?.({ phase: 'acting-unlock-space', spaceId })
+    if (WAS_SERVER_URL && remote) {
+      let outcome: 'deleted' | 'not-found' | undefined
+      // The in-run recourse comes first: the credential is derived and in
+      // memory, so one bounded retry costs nothing and mends the common tear
+      // (a dropped connection on the last request of the walk). Only a THROW
+      // is retried -- a 404 is an answer, and the 404 rule grades it.
+      for (let attempt = 0; attempt < 2 && outcome === undefined; attempt++) {
+        try {
+          ;({ outcome } = await new WasClient({
+            serverUrl: WAS_SERVER_URL,
+            zcapClient
+          })
+            .space(spaceId)
+            .deleteWithOutcome())
+        } catch (err) {
+          if (attempt === 0) {
+            log.warn('Retrying the acting unlock Space delete', { err })
+            continue
+          }
+          log.warn(
+            'Could not delete the acting unlock Space; it stands over a dead account until the next login with this credential',
+            { err }
+          )
+        }
+      }
+      spaces.push({
+        kind: 'acting-unlock',
+        spaceId,
+        method: methodType,
+        outcome:
+          outcome === 'deleted'
+            ? 'deleted'
+            : outcome === 'not-found'
+              ? grade404({ discovery: actingDiscovery, accountGone }) ===
+                'deleted'
+                ? 'deleted'
+                : 'unconfirmed'
+              : 'unreachable'
+      })
+    }
+    await deleteUnlockLocalState({ spaceId, idb })
+  }
+
+  // (w) The local half: the shared wipe enumeration, for guests and full
+  // accounts alike. Past the pivot a surviving replica is a residue rather
+  // than a failure: the remote account is gone, and returning 'failed' would
+  // tell the user it survived -- and send a retry into a re-derivation whose
+  // record fetch finds nothing at the deleted unlock Space, which reads as a
+  // wrong passphrase on the account they just destroyed. A run that never
+  // reached the pivot (a guest, a no-WAS deployment) keeps the fatal reading,
+  // since there the local replica IS the account.
+  onPhase?.({ phase: 'local-wipe' })
   const targets = snapshotWipeTargets({
     session,
     registry,
-    registryUnread
+    enrolledClientDids
   })
-  // (b) Wipe the remote data Space. On failure keep the old semantics:
-  // surface the error, do not log out (the data is still there).
-  try {
-    log.info('Wiping remote user data')
-    await session.storage?.wipeRemoteStorage()
-  } catch (err) {
-    log.error('Error wiping user data', { err })
-    return 'failed'
-  }
-  // (c) Retire the passphrase keyring only after a successful wipe -- if the
-  // keyring died first and the wipe then failed, the data Space would be
-  // orphaned unrecoverably. Non-fatal: the data is already gone, so a
-  // leftover record is only a hygiene residue. Guests have no keyring.
-  if (!isGuest) {
-    try {
-      const { unlockSpaceDeleted } = await deleteKeyring({
-        passphrase,
-        credential,
-        idb
-      })
-      if (!unlockSpaceDeleted) {
-        log.warn('Could not delete the unlock Space during account deletion')
-      }
-    } catch (err) {
-      log.warn('Could not retire the passphrase keyring', { err })
-    }
-  }
-  // The local half: the shared wipe enumeration, for guests and full
-  // accounts alike -- every unlock method's local state, the Space-keyed
-  // bookkeeping, the caches, the replica databases, and the per-account
-  // localStorage families. A surviving replica keeps the
-  // old fatal semantics (the local data is still there, so do not log out);
-  // every other stage failure is hygiene residue on an account already gone.
   const { failed, unverified } = await executeLocalWipe({
     targets,
     storage: session.storage ?? undefined,
     idb
   })
   if (failed.includes('replica')) {
-    return 'failed'
+    return done(accountGone ? 'deleted-unverified' : 'failed')
   }
   if (unverified.includes('replica')) {
-    return 'deleted-unverified'
+    return done('deleted-unverified')
   }
-  return 'deleted'
+  return done('deleted')
+}
+
+/**
+ * The host a capability's `invocationTarget` addresses, or `undefined` when
+ * the target is absent or not a URL. The deletion walk compares it against
+ * the deployment's own host, so a delegation carried over from another
+ * deployment contributes no Space id: the same id under this host names a
+ * different Space, and its DELETE's 404 would read as a clean deletion.
+ *
+ * @param options {object}
+ * @param [options.target] {string}
+ * @returns {string | undefined}
+ */
+function targetHost({ target }: { target?: string }): string | undefined {
+  if (!target) {
+    return undefined
+  }
+  try {
+    return new URL(target).host
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The deletion walk's in-place stale-seal repair: the login-time repair's
+ * core, run from whichever session type is deleting. A transient session's
+ * escrow unwrap key is the credential's own standing key-agreement key rather
+ * than an enrolled client's, and every request rides the visit's generation
+ * delegation.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param [options.capability] {IZcap}
+ * @returns {Promise<'repaired' | 'unrepaired' | 'reseal-failed'>}
+ */
+async function repairRegistrySealForDeletion({
+  session,
+  capability
+}: {
+  session: Session
+  capability?: IZcap
+}): Promise<'repaired' | 'unrepaired' | 'reseal-failed'> {
+  const { profile } = session
+  const spaceId = session.storage.spaceId
+  const { userKey } = profile
+  const unwrapKey =
+    profile.clientKeyAgreementKey ??
+    profile.standingUnlock?.standingClient?.agents?.keyAgreementKey
+  if (!spaceId || !userKey || !unwrapKey) {
+    return 'unrepaired'
+  }
+  const rosterRead = await readUserKeyRoster({
+    store: sessionRosterStore({
+      profile,
+      ...(capability ? { capability } : {})
+    }),
+    clientKeyAgreementKey: unwrapKey
+  })
+  if (!rosterRead) {
+    return 'unrepaired'
+  }
+  return await resealRegistryFromEscrow({
+    zcapClient: profile.zcapClient,
+    spaceId,
+    userKey,
+    descriptor: rosterRead.descriptor,
+    unwrapKey,
+    ...(capability ? { capability } : {})
+  })
 }

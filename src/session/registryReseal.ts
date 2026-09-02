@@ -18,9 +18,12 @@
  * that opens under the current key is one read and no write, and a failure
  * leaves the state exactly as it was for the next login.
  */
+import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
+import type { ZcapClient } from '@interop/ezcap'
 import {
   unwrapUserKeyGenerations,
   userKeyVaultKeys,
+  type UserKey,
   type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
 import { isWebvhDid } from '@interop/wallet-core/webvh'
@@ -100,10 +103,74 @@ export async function repairStaleUnlockRegistrySeal({
     }
   }
 
+  const repaired = await resealRegistryFromEscrow({
+    zcapClient: session.profile.zcapClient,
+    spaceId,
+    userKey,
+    descriptor: rosterRead.descriptor,
+    unwrapKey: clientKeyAgreementKey
+  })
+  if (repaired === 'repaired') {
+    // Refresh the local cache from the record as served, the way an ordinary
+    // read does.
+    await getUnlockMethods({ session })
+  }
+  return repaired
+}
+
+/**
+ * The repair's core, without a session: each prior user key generation the
+ * roster still escrows is tried, newest first, until one opens the registry
+ * record, and the record is then re-sealed to the current key.
+ *
+ * The account-deletion walk runs it too, from a transient session, before it
+ * reads the registry it is about to walk: that session's escrow unwrap key is
+ * the credential's own standing key-agreement key rather than an enrolled
+ * client's, and every request rides the visit's generation delegation.
+ *
+ * The two failure modes are kept apart. A generation that does not open the
+ * record is the expected outcome for every candidate but one, so the walk
+ * moves on; a failure AFTER the record opened (the re-wrap, or the PUT) stops
+ * the walk -- the right generation has been found and the mend is one
+ * transient error away, so retrying the remaining generations would only
+ * report the wrong thing.
+ *
+ * @param options {object}
+ * @param options.zcapClient {ZcapClient}   the client the reads and the PUT
+ *   invoke with
+ * @param options.spaceId {string}   the data Space id
+ * @param options.userKey {UserKey}   the account's CURRENT user key, whose
+ *   vault keys the record is re-sealed to
+ * @param options.descriptor {CollectionEncryption}   the verified roster read's
+ *   descriptor, holding the escrowed generations
+ * @param options.unwrapKey {IKeyAgreementKey}   the key-agreement key the
+ *   escrowed generations are wrapped to
+ * @param [options.capability] {IZcap}   an invocation capability every request
+ *   rides
+ * @returns {Promise<'repaired' | 'unrepaired' | 'reseal-failed'>}
+ */
+export async function resealRegistryFromEscrow({
+  zcapClient,
+  spaceId,
+  userKey,
+  descriptor,
+  unwrapKey,
+  capability
+}: {
+  zcapClient: ZcapClient
+  spaceId: string
+  userKey: UserKey
+  descriptor: UserKeyRosterReadResult['descriptor']
+  unwrapKey: IKeyAgreementKey
+  capability?: IZcap
+}): Promise<'repaired' | 'unrepaired' | 'reseal-failed'> {
+  if (!WAS_SERVER_URL) {
+    return 'unrepaired'
+  }
   const to = userKeyVaultKeys({ userKey })
   const generations = await unwrapUserKeyGenerations({
-    descriptor: rosterRead.descriptor,
-    clientKeyAgreementKey
+    descriptor,
+    clientKeyAgreementKey: unwrapKey
   })
   // Oldest first from the roster; the superseded generation a lost rotation
   // left the seal on is the newest of them.
@@ -114,10 +181,11 @@ export async function repairStaleUnlockRegistrySeal({
     try {
       await rewrapUnlockMethodsRecord({
         storageServerUrl: WAS_SERVER_URL,
-        zcapClient: session.profile.zcapClient,
+        zcapClient,
         spaceId,
         from: userKeyVaultKeys({ userKey: generation }),
-        to
+        to,
+        ...(capability ? { capability } : {})
       })
     } catch (err) {
       if (err instanceof RecordEnvelopeDecryptError) {
@@ -139,9 +207,6 @@ export async function repairStaleUnlockRegistrySeal({
       )
       return 'reseal-failed'
     }
-    // Refresh the local cache from the record as served, the way an ordinary
-    // read does.
-    await getUnlockMethods({ session })
     return 'repaired'
   }
   return 'unrepaired'

@@ -30,6 +30,7 @@ import type {
   IZcap
 } from '@interop/data-integrity-core'
 import { generateZcapUri } from '@interop/ezcap'
+import type { ZcapClient } from '@interop/ezcap'
 import type { ContactData, ContactRevisionPayload } from '@interop/social-core'
 import type { RxCollection, RxStorage } from 'rxdb/plugins/core'
 import {
@@ -1408,16 +1409,37 @@ export class StorageManager {
 
   /**
    * Wipes the remote data Space only (a no-op without a remote store).
-   * Account deletion runs this first, so a remote failure surfaces while
-   * the local data (and session) are still intact, and hands the local half
-   * to the shared wipe enumeration.
+   * Account deletion's pivot: everything the ceremony still needs from the
+   * account document happens before this call, and the local half is the
+   * shared wipe enumeration's.
    *
-   * @returns {Promise<void>}
+   * A session whose bound invocation capability cannot name the bare Space
+   * URL -- a transient session's generation delegation is scoped to the
+   * Space's items subtree -- supplies its own single-verb DELETE capability
+   * and the client that capability names as its delegatee.
+   *
+   * @param [options] {object}
+   * @param [options.capability] {IZcap}   an explicit DELETE capability on
+   *   the Space's own URL
+   * @param [options.zcapClient] {ZcapClient}   the client invoking it
+   * @returns {Promise<{ outcome: 'deleted' | 'not-found' }>}   `not-found`
+   *   when the server answered 404 (absent OR unauthorized), or when there is
+   *   no remote store to wipe
    */
-  async wipeRemoteStorage() {
-    if (this.#remoteStore) {
-      await this.#remoteStore.wipeStorage()
+  async wipeRemoteStorage({
+    capability,
+    zcapClient
+  }: {
+    capability?: IZcap
+    zcapClient?: ZcapClient
+  } = {}): Promise<{ outcome: 'deleted' | 'not-found' }> {
+    if (!this.#remoteStore) {
+      return { outcome: 'deleted' }
     }
+    return await this.#remoteStore.wipeStorage({
+      ...(capability ? { capability } : {}),
+      ...(zcapClient ? { zcapClient } : {})
+    })
   }
 
   /**

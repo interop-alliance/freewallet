@@ -1,4 +1,5 @@
 import Alert from '@mui/material/Alert'
+import AlertTitle from '@mui/material/AlertTitle'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -38,12 +39,14 @@ import {
   PasskeyNotEstablishedError,
   PendingPassphraseRetirementError,
   SamePassphraseError,
+  accountDeletionRefusalKey,
   deleteAccount,
   loadUnlockRegistry,
   readLoginHandle,
   removeAccountPasskey,
   renameAccountPasskey,
-  rotateAccountUpdateKey
+  rotateAccountUpdateKey,
+  type AccountDeletionScope
 } from '@/session/accountSettings'
 import {
   PasskeyCancelledError,
@@ -51,17 +54,31 @@ import {
   PasskeyPrfUnsupportedError,
   passkeySupported
 } from '@/lib/passkey'
+import { forgetBrowserWalletData } from '@/session/forget'
 import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { RecoveryCodesSection } from '@/components/RecoveryCodesSection'
 import { EnrolledClientsSection } from '@/components/EnrolledClientsSection'
 import { dashboardStyles } from '@/styles/appStyles'
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { DATE_FMT, KMS_SERVER_URL, PASSWORD_RULES } from '@/app.config'
 import { setLoginHandle } from '@/lib/loginCredential'
 import { createLogger } from '@/lib/log'
+
+/**
+ * The i18n suffix for one deletion phase: the ceremony's kebab phase names
+ * map onto the camelCase copy keys under `settings.deletePhase`.
+ *
+ * @param phase {string}
+ * @returns {string}
+ */
+function deletePhaseKey(phase: string): string {
+  return phase.replace(/-([a-z])/g, (_match, letter: string) =>
+    letter.toUpperCase()
+  )
+}
 
 const log = createLogger('fw:ui:settings')
 
@@ -115,6 +132,24 @@ export function SettingsPage() {
   const [deletePassphraseIncorrect, setDeletePassphraseIncorrect] =
     useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [deletePhase, setDeletePhase] = useState<string | null>(null)
+  const [deleteRefusalKey, setDeleteRefusalKey] = useState<string | null>(null)
+  const [deleteResidueCount, setDeleteResidueCount] = useState(0)
+  const [deleteActingResidue, setDeleteActingResidue] = useState(false)
+  // The Spaces a refused run had already deleted, for the refusal's own copy:
+  // "nothing was removed" is false once (b3) or part of (b1) has run.
+  const [deleteRefusalDeleted, setDeleteRefusalDeleted] = useState<string[]>([])
+  // The post-pivot farewell: the account is gone, so the run MUST log out --
+  // but not before the residue copy has been read. The dialog holds this
+  // state with an acknowledge button, and that button logs out.
+  const [deleteFarewell, setDeleteFarewell] = useState(false)
+  const [forgettingBrowser, setForgettingBrowser] = useState(false)
+  // The scoped second confirm: what (a2) found, held while the ceremony
+  // awaits the user's answer through `deleteScopeDecision`.
+  const [deleteScope, setDeleteScope] = useState<AccountDeletionScope | null>(
+    null
+  )
+  const deleteScopeDecision = useRef<((approved: boolean) => void) | null>(null)
   const hasRemoteStorage = !!session?.storage?.hasRemoteStorage
   const [handle, setHandle] = useState('')
   const [savedHandle, setSavedHandle] = useState('')
@@ -573,7 +608,85 @@ export function SettingsPage() {
     setDeleteError(false)
     setDeletePassphrase('')
     setDeletePassphraseIncorrect(false)
+    setDeleteRefusalKey(null)
+    setDeleteResidueCount(0)
+    setDeleteActingResidue(false)
+    setDeleteRefusalDeleted([])
+    setDeleteFarewell(false)
+    setDeleteScope(null)
+    setDeletePhase(null)
     setDeleteDialogOpen(true)
+  }
+
+  const isPasskeySession = session?.profile.unlockMethod?.type === 'passkey'
+
+  // The unload guard: the deletion walk sends one request per Space, and a
+  // tab closed mid-walk leaves whatever it had not reached yet.
+  useEffect(() => {
+    if (!deleting) {
+      return
+    }
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [deleting])
+
+  const answerDeleteScope = (approved: boolean) => {
+    const decide = deleteScopeDecision.current
+    deleteScopeDecision.current = null
+    setDeleteScope(null)
+    decide?.(approved)
+  }
+
+  // An unmount with the scoped confirm still pending answers it `false`, so
+  // `deleteAccount` settles (with nothing deleted) instead of leaving an
+  // unresolved promise, a stuck `deleting` flag, and an unload guard nothing
+  // removes.
+  useEffect(() => {
+    return () => {
+      const decide = deleteScopeDecision.current
+      deleteScopeDecision.current = null
+      decide?.(false)
+    }
+  }, [])
+
+  /**
+   * The post-pivot exit: clear the session and leave for the landing page.
+   * Every outcome past the pivot takes it, the ones carrying residue only
+   * after the user has acknowledged the residue copy.
+   *
+   * @returns {Promise<void>}
+   */
+  const leaveDeletedAccount = async () => {
+    // The button's handler is not awaited, so a rejecting `logout` would
+    // surface as an unhandled rejection and strand the user on a dialog for
+    // an account that is already gone. Leaving is what matters here.
+    try {
+      await logout()
+    } catch (err) {
+      log.warn('Could not clear the session after account deletion', { err })
+    }
+    window.location.href = '/'
+  }
+
+  /**
+   * The browser-scoped wipe offered beside a `deleted-unverified` outcome:
+   * the login page's no-unlock-material forget grade, run from here because
+   * this browser could not confirm its own replica is gone.
+   *
+   * @returns {Promise<void>}
+   */
+  const handleForgetBrowserAfterDelete = async () => {
+    setForgettingBrowser(true)
+    try {
+      await forgetBrowserWalletData()
+    } catch (err) {
+      log.warn('Could not forget this browser after account deletion', { err })
+    }
+    await leaveDeletedAccount()
   }
 
   const handleDeleteAccount = async () => {
@@ -583,37 +696,82 @@ export function SettingsPage() {
     setDeleteError(false)
     setDeleteUnverified(false)
     setDeletePassphraseIncorrect(false)
+    setDeleteRefusalKey(null)
     setDeleting(true)
     try {
-      // Phases (a) confirm the passphrase, (b) wipe the data, and (c) retire
-      // the keyring run in `deleteAccount`, which states the order they must
-      // keep. A failure in (a) or (b) leaves the data intact, so the page
-      // reports it and stays put.
-      const result = await deleteAccount({
+      // The ceremony states the order that keeps a failure recoverable: every
+      // phase before the account Space refuses with nothing deleted, and
+      // everything past it reports rather than failing. The catch below is
+      // what keeps a refusal in the dialog instead of escaping as an
+      // unhandled rejection.
+      const outcome = await deleteAccount({
         session,
-        passphrase: deletePassphrase
+        passphrase: deletePassphrase,
+        onPhase: phase => setDeletePhase(phase.phase),
+        confirmScope: scope =>
+          new Promise<boolean>(resolve => {
+            deleteScopeDecision.current = resolve
+            setDeleteScope(scope)
+          })
       })
-      if (result === 'wrong-passphrase') {
+      const residue = outcome.spaces.filter(
+        space => space.kind === 'unlock' && space.outcome !== 'deleted'
+      ).length
+      const actingResidue = outcome.spaces.some(
+        space => space.kind === 'acting-unlock' && space.outcome !== 'deleted'
+      )
+      setDeleteResidueCount(residue + outcome.unnamed.length)
+      setDeleteActingResidue(actingResidue)
+      if (outcome.result === 'wrong-passphrase') {
         setDeletePassphraseIncorrect(true)
         return
       }
-      if (result === 'failed') {
+      if (outcome.result === 'cancelled') {
+        return
+      }
+      if (outcome.result === 'refused') {
+        // A pre-pivot refusal leaves the account alive, but not necessarily
+        // untouched: (b3) and part of (b1) may already have run, so the
+        // dialog names what the run did delete before it stopped.
+        setDeleteRefusalDeleted(
+          outcome.spaces
+            .filter(space => space.outcome === 'deleted')
+            .map(space => space.label ?? space.method ?? space.kind)
+        )
+        setDeleteRefusalKey(
+          accountDeletionRefusalKey(outcome.refusal ?? 'space-delete-failed')
+        )
+        return
+      }
+      if (outcome.result === 'failed') {
         setDeleteError(true)
         setDeleteDialogOpen(false)
         return
       }
-      if (result === 'deleted-unverified') {
-        // The account is gone, but this browser could not confirm its local
-        // replica is deleted. Staying put with the warning visible is the
-        // honest exit: the hard reload below would take the copy with it.
-        setDeleteUnverified(true)
-        setDeleteDialogOpen(false)
+      // Past the pivot: the account is gone, so every remaining outcome logs
+      // out. One with residue -- a standing unlock Space, an unnamed
+      // credential, a failed (b6), or a replica this browser could not
+      // confirm gone -- shows its copy first and logs out on the
+      // acknowledge, since the hard reload would otherwise take the copy
+      // with it.
+      const unverified = outcome.result === 'deleted-unverified'
+      setDeleteUnverified(unverified)
+      if (
+        unverified ||
+        actingResidue ||
+        residue > 0 ||
+        outcome.unnamed.length > 0
+      ) {
+        setDeleteFarewell(true)
         return
       }
-      // (d) Clear the session, then (e) hard-reload to the landing page.
-      await logout()
-      window.location.href = '/'
+      await leaveDeletedAccount()
+    } catch (err) {
+      log.error('The account deletion ceremony failed', { err })
+      setDeleteRefusalKey('settings.deleteError')
     } finally {
+      answerDeleteScope(false)
+      setDeletePhase(null)
       setDeleting(false)
     }
   }
@@ -657,9 +815,6 @@ export function SettingsPage() {
 
         {deleteError && (
           <Alert severity="error">{t('settings.deleteError')}</Alert>
-        )}
-        {deleteUnverified && (
-          <Alert severity="warning">{t('settings.deleteUnverified')}</Alert>
         )}
 
         <Divider />
@@ -1194,51 +1349,202 @@ export function SettingsPage() {
         <Dialog
           open={deleteDialogOpen}
           onClose={() => {
-            if (!deleting) {
+            if (!deleting && !deleteFarewell) {
               setDeleteDialogOpen(false)
             }
           }}
         >
-          <DialogTitle>{t('settings.deleteConfirmTitle')}</DialogTitle>
+          <DialogTitle>
+            {deleteFarewell
+              ? t('settings.deleteFarewellTitle')
+              : t('settings.deleteConfirmTitle')}
+          </DialogTitle>
           <DialogContent>
-            <DialogContentText>{t('settings.deleteConfirm')}</DialogContentText>
-            {!session?.isGuest && (
-              <TextField
-                fullWidth
-                size="small"
-                type="password"
-                label={t('settings.deletePassphraseLabel')}
-                autoComplete="current-password"
-                value={deletePassphrase}
-                onChange={event => {
-                  setDeletePassphrase(event.target.value)
-                  setDeletePassphraseIncorrect(false)
-                }}
-                sx={{ mt: 2 }}
-              />
-            )}
-            {deletePassphraseIncorrect && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {t('settings.deletePassphraseIncorrect')}
-              </Alert>
+            {deleteFarewell ? (
+              <Stack sx={{ gap: 2, mt: 1 }}>
+                {deleteResidueCount > 0 && (
+                  <Alert severity="warning">
+                    {t('settings.deleteResidue', {
+                      count: deleteResidueCount
+                    })}
+                  </Alert>
+                )}
+                {deleteActingResidue && (
+                  <Alert severity="warning">
+                    {t('settings.deleteActingResidue')}
+                  </Alert>
+                )}
+                {deleteUnverified && (
+                  <Alert severity="warning">
+                    {t('settings.deleteUnverified')}
+                  </Alert>
+                )}
+              </Stack>
+            ) : (
+              <>
+                <DialogContentText>
+                  {t('settings.deleteConfirm')}
+                </DialogContentText>
+                {!session?.isGuest && (
+                  <Alert severity="warning" sx={{ mt: 2 }}>
+                    {t('settings.deleteHazard')}
+                  </Alert>
+                )}
+                {!session?.isGuest && isPasskeySession && (
+                  <DialogContentText sx={{ mt: 2 }}>
+                    {t('settings.deleteConfirmPasskey')}
+                  </DialogContentText>
+                )}
+                {!session?.isGuest && !isPasskeySession && (
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type="password"
+                    label={t('settings.deletePassphraseLabel')}
+                    // Autofill disabled deliberately: the confirm IS the
+                    // ceremony's authentication, and a manager that saved the
+                    // passphrase at login would otherwise hand it to whoever holds
+                    // the tab -- on exactly the shared machine the hazard copy
+                    // above is about.
+                    autoComplete="off"
+                    name="freewallet-delete-confirm"
+                    slotProps={{
+                      htmlInput: {
+                        autoComplete: 'off',
+                        'data-1p-ignore': true,
+                        'data-lpignore': 'true',
+                        'data-form-type': 'other'
+                      }
+                    }}
+                    value={deletePassphrase}
+                    onChange={event => {
+                      setDeletePassphrase(event.target.value)
+                      setDeletePassphraseIncorrect(false)
+                    }}
+                    sx={{ mt: 2 }}
+                  />
+                )}
+                {deletePassphraseIncorrect && (
+                  <Alert severity="error" sx={{ mt: 2 }}>
+                    {t('settings.deletePassphraseIncorrect')}
+                  </Alert>
+                )}
+                {deleteRefusalKey && (
+                  <Alert severity="error" sx={{ mt: 2 }}>
+                    {t(deleteRefusalKey)}
+                    {deleteRefusalDeleted.length > 0 && (
+                      <Box component="span" sx={{ display: 'block', mt: 1 }}>
+                        {t('settings.deleteRefusalDeleted', {
+                          count: deleteRefusalDeleted.length,
+                          list: deleteRefusalDeleted.join(', ')
+                        })}
+                      </Box>
+                    )}
+                  </Alert>
+                )}
+                {deleteScope && (
+                  <Alert severity="warning" sx={{ mt: 2 }}>
+                    <AlertTitle>{t('settings.deleteScopeTitle')}</AlertTitle>
+                    <Stack component="ul" sx={{ pl: 3, m: 0 }}>
+                      {deleteScope.otherMethods.length > 0 && (
+                        <li>
+                          {t('settings.deleteScopeMethods', {
+                            count: deleteScope.otherMethods.length,
+                            list: deleteScope.otherMethods
+                              .map(method => method.label ?? method.type)
+                              .join(', ')
+                          })}
+                        </li>
+                      )}
+                      {deleteScope.enrolledClients > 0 && (
+                        <li>
+                          {t('settings.deleteScopeClients', {
+                            count: deleteScope.enrolledClients
+                          })}
+                        </li>
+                      )}
+                      <li>
+                        {t('settings.deleteScopeSpaces', {
+                          count: deleteScope.spaceCount
+                        })}
+                      </li>
+                      {deleteScope.unreachable.length > 0 && (
+                        <li>
+                          {t('settings.deleteScopeUnreachable', {
+                            count: deleteScope.unreachable.length
+                          })}
+                        </li>
+                      )}
+                    </Stack>
+                  </Alert>
+                )}
+                {deleting && deletePhase && (
+                  <DialogContentText sx={{ mt: 2 }}>
+                    {t(`settings.deletePhase.${deletePhaseKey(deletePhase)}`)}{' '}
+                    {t('settings.deleteKeepTabOpen')}
+                  </DialogContentText>
+                )}
+              </>
             )}
           </DialogContent>
           <DialogActions>
-            <Button
-              onClick={() => setDeleteDialogOpen(false)}
-              disabled={deleting}
-            >
-              {t('common.cancel')}
-            </Button>
-            <Button
-              variant="contained"
-              color="error"
-              onClick={handleDeleteAccount}
-              loading={deleting}
-              disabled={!session?.isGuest && deletePassphrase.length === 0}
-            >
-              {t('settings.deleteConfirmAction')}
-            </Button>
+            {deleteFarewell ? (
+              <>
+                {deleteUnverified && (
+                  <Button
+                    onClick={handleForgetBrowserAfterDelete}
+                    loading={forgettingBrowser}
+                  >
+                    {t('settings.deleteForgetBrowserAction')}
+                  </Button>
+                )}
+                <Button
+                  variant="contained"
+                  onClick={leaveDeletedAccount}
+                  disabled={forgettingBrowser}
+                >
+                  {t('settings.deleteFarewellAction')}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  onClick={() => {
+                    if (deleteScope) {
+                      answerDeleteScope(false)
+                      return
+                    }
+                    setDeleteDialogOpen(false)
+                  }}
+                  disabled={deleting && !deleteScope}
+                >
+                  {t('common.cancel')}
+                </Button>
+                {deleteScope ? (
+                  <Button
+                    variant="contained"
+                    color="error"
+                    onClick={() => answerDeleteScope(true)}
+                  >
+                    {t('settings.deleteScopeConfirmAction')}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="contained"
+                    color="error"
+                    onClick={handleDeleteAccount}
+                    loading={deleting}
+                    disabled={
+                      !session?.isGuest &&
+                      !isPasskeySession &&
+                      deletePassphrase.length === 0
+                    }
+                  >
+                    {t('settings.deleteConfirmAction')}
+                  </Button>
+                )}
+              </>
+            )}
           </DialogActions>
         </Dialog>
 

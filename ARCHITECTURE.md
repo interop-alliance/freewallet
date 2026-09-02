@@ -236,15 +236,16 @@ published-then-removed one wipes, since a revoked client is never
 re-published; an unresumable one is discarded and the browser routes
 record-less. Fail-closed, and transport failures keep the record.
 
-On a ladder-anchored account the add entry removes the ladder VM, so the
-still-unexpired bridge delegation and the `delegatedClients` sibling it
-signed stop verifying. That same login's refresh block catches it, its
-predicate covering signer rot beside expiry (`delegationKeyInDocument`,
-against the memoized verified account document). Rot is tested under
-`capabilityDelegation` specifically, the relation a delegation proof
-verifies against, so a key kept under another relation and dropped from
-that one reads as rotted. The block re-signs both with the enrolled
-client's account key, and reseals the record. A remembered login
+On a ladder-anchored account the add entry leaves the credential's ladder
+VM standing, so its bridge delegation and `delegatedClients` sibling keep
+verifying after self-enrollment. That same login's refresh block still
+renews both near expiry (`delegationKeyInDocument`, against the memoized
+verified account document), a predicate that also covers signer rot from
+other causes: rot is tested under `capabilityDelegation` specifically, the
+relation a delegation proof verifies against, so a key kept under another
+relation and dropped from that one reads as rotted. The block re-signs
+both with the enrolled client's account key, and reseals the record. A
+remembered login
 self-heals a rotted embedded generation delegation the same way
 (`ensureGenerationDelegationCurrent`, account-document axis), signing with
 the login credential's ladder seed held on `profile.ladderSeed`.
@@ -619,37 +620,105 @@ as, recorded by the client that published it (`saveAccountDidForSpace` in
 version some host served. A signup torn between the log publication and the
 account-pointer backfill heals at a later login whose pointer still names no
 did:webvh, and this mapping lets that heal state an `expectedDid` anyway.
-Account deletion clears it through the shared wipe enumeration below, beside
-the keyring retirement. Before the account Space dies, deletion also walks
-the unlock-methods registry, deleting each entry's unlock Space and
-unlock-local state best-effort (`deleteUnlockMethodArtifacts` in
-`src/session/unlockMethods.ts`, removing the dangling existence-oracle
-Spaces a probe could still find), then deletes the auxiliary annex Space in
-one `space.delete()`. Each sibling Space goes through a freshly minted
-DELETE-only child of that entry's management zcap: the parent's
-`invocationTarget` copied verbatim, `allowedAction` exactly `['DELETE']`, a
-ten-minute expiry clamped to the parent's, and nothing stored, so a torn run
-owes no revocation. Four states refuse locally before anything is minted and
-are reported as named residues rather than refusing the run or skipping in
-silence: an entry recording no management zcap, one already expired, one
-naming a delegatee this session cannot act as (an entry bound before
-promotion), and one whose target is not the URL this deployment addresses.
-That credential's own next login re-delegates. A `not-found` from the delete
-is the server's masked 404, absent OR unauthorized; the walk warns on it
-today, and the rule that decides what a clean deletion may claim from it is
-the deletion ceremony's. The server admits the child under the client-annex
-clause's third predicate: a ladder-signed delegation whose target is a bare
-Space URL equal to its parent's unchanged (the parent a delegated
-capability or the Space's own root) and whose action set is exactly
-`['DELETE']` or exactly `['GET']`. The clause's locked property, restated
-with it: every ladder delegation either needs a loud companion entry to
-resolve, can only write a log, or is a target-exact single-verb read or
-delete of one Space of the delegator's own account. That delete is the one
-ladder authority whose exercise leaves no record, the trade the account
-deletion design states. Both run BEFORE the fatal wipe, because resolving the
-auxiliary Space's controller reads the account log out of the account Space.
-A wipe failure after them leaves other methods' logins already destroyed,
-accepted since the intent was deletion.
+Account deletion clears it through the shared wipe enumeration below,
+beside the keyring retirement. The ceremony runs from any session type. It
+re-derives the credential fresh at its own confirm step (a) rather than
+trusting the live session's cached key, so a passphrase re-typed or a
+passkey re-asserted there is what signs every delete that follows; a
+session held by anyone but the credential's owner cannot complete it. A
+remembered session also stops background replication and closes the local
+replica first, before anything is deleted, so replication cannot race the
+local wipe at the end.
+
+Discovery comes next. The walk verifies the account log under the visit's
+pins and requires this credential's ladder VM in the resolved document,
+refusing the whole ceremony when the document anchors none. It reads the
+unlock-methods registry under the visit's own authority and refuses on a
+failed read, since a partial walk over an unreadable registry would strand
+Spaces the account can no longer name once its own registry is gone; a
+registry sealed to a superseded user key is repaired in place instead of
+refusing. A pending-shaped passphrase entry, and a standing credential the
+registry never recorded, are not refusals either: each names an unlock
+Space the walk cannot reach, so it is reported as a residue instead, named
+again at the confirm below, and left for that credential's own next login
+to remove. Discovery also enumerates every `#DelegatedClients` value the
+account log's history ever published, unioned with the acting record's own
+sibling target, since a superseded pointer entry is append-only and its
+Space can still be live. Every Space discovery finds gets its own probe, so
+the deletes that follow have a basis for reading a 404 as already-deleted
+rather than as a masked refusal.
+
+Once discovery is done, a second confirm names what was found before
+anything is deleted: every other standing unlock method by label and kind,
+the enrolled clients, and the count of Spaces. The first confirm speaks for
+the account; this one speaks for the credentials and clients nobody there
+was asked about.
+
+The walk then deletes, in this order: the auxiliary annex Space(s); the KMS
+keystore, when one exists, through its own route once that route exists
+(skipped and reported until then); the sibling unlock Spaces other than the
+acting credential's; the account Space; and, last, the acting credential's
+own unlock Space, before the local wipe. Everything before the account
+Space runs first because every ladder-signed delegation the walk mints
+verifies against the account document, which lives in the account Space, so
+only the stages that need nothing from the account follow it. Each delete
+but the last two rides a capability minted immediately before its own
+DELETE and used once: on a transient session, a ten-minute DELETE-only
+child of the Space's own root, delegated to and invoked by the ladder VM's
+own bare did:key re-derived at (a), which resolves from its own bytes and
+so outlives every Space the walk deletes; a sibling unlock Space instead
+through a freshly minted DELETE-only child of that entry's management zcap,
+the parent's `invocationTarget` copied verbatim. A remembered session
+root-invokes the account and annex Spaces as an enrolled client always
+could, minting no delegation, and signs a sibling's child with the enrolled
+client's own account key. Five states on a sibling refuse locally before
+anything is minted and are reported as named residues rather than refusing
+the run or skipping in silence: an entry recording no management zcap, one
+already expired, one naming a delegatee this session cannot act as (an
+entry bound before promotion), one whose target is not the URL this
+deployment addresses, and one whose recorded actions do not include the
+verb the child would carry. That credential's own next login re-delegates.
+The verb check splits discovery from deletion: a management zcap allowing
+DELETE but not GET leaves its Space deletable and unprobeable, so the walk
+skips the probe and the 404 rule grades that Space's delete from an unknown
+discovery rather than refusing the whole run. A sibling's DELETE is its
+REMOTE half alone: every other credential's browser-local state waits for
+the local wipe past the pivot, so a run that refuses at the account Space
+has not quietly un-remembered this browser for credentials whose account it
+just told the user is untouched. A
+`not-found` from any of these deletes is the server's masked 404, absent OR
+unauthorized. Every discovery probe is status-exact for the same reason: a
+read that resolves empty for a 404 and for an unparsable success alike could
+record a live Space as absent, and an absence is what lets a later 404 grade
+as a deletion. The server admits the ladder-signed child under the
+client-annex clause's third predicate: a ladder-signed delegation whose
+target is a bare Space URL equal to its parent's unchanged (the parent a
+delegated capability or the Space's own root) and whose action set is
+exactly `['DELETE']` or exactly `['GET']`. The clause's locked property,
+restated with it: every ladder delegation either needs a loud companion
+entry to resolve, can only write a log, or is a target-exact single-verb
+read or delete of one Space of the delegator's own account. That delete is
+the one ladder authority whose exercise leaves no record, the trade the
+account deletion design states.
+
+The account Space's delete is the pivot: past it the account is gone for
+the acting credential, and nothing after it can fail the run. A 404 on a
+Space's first delete counts as already-deleted only when discovery's own
+probe of that same Space already returned 404 and the account Space's
+world-readable log independently corroborates the absence, or when this run
+already sent that same delete and got a success; every other 404 fails the
+run, since the server masks a refused delegation as the same 404 an absent
+Space returns. Every phase before the pivot refuses the whole run on
+failure, so a torn annex-Space or sibling-Space delete leaves the account
+alive, enterable, and re-runnable. The acting credential's own unlock Space
+is the one exception: being past the pivot, a failed delete there is
+retried in-run and, failing that, reported rather than failed, since the
+account is already gone and reporting failure would tell the user it
+survived; the next login with that credential offers to remove it instead.
+A wipe failure after the account Space is gone is accepted the same way: it
+names the surviving replica as an unverified residue rather than reporting
+the whole run failed, since the intent was deletion and the remote account
+is already gone.
 
 **The shared wipe enumeration** (`src/session/wipe.ts`) is the one list of
 browser-local state an account leaves on a browser, and the one executor
@@ -689,7 +758,13 @@ recoverable, plaintext `public-credentials` rows included; the CHAPI popup's
 partitioned third-party buckets are unreachable from any top-level wipe; and
 the mediator-origin (authn.io) handler-registration bit records that a
 wallet was used in this browser. Only clearing the browser profile removes
-those.
+those. One more, on the client axis: a SIBLING enrolled client's replica
+and caches on this same browser survive a deletion run from a transient
+session. The client-keyed families are named by the acting session's own
+client did:key, and a sibling's did:key lives only inside its client-key
+record, which is sealed to its own unlock credential and unreadable here.
+That client's keys die with the record the unlock-Space walk removes, so
+what survives is ciphertext with no key, but it survives.
 
 **The forget affordance** (`src/session/forget.ts`) removes this browser
 from an account, in two grades split by whether the unlock credential is in
@@ -1206,8 +1281,8 @@ invariant needs a client-key record to persist into. The account-management
 ceremonies refuse from a transient session with `StepUpRequiredError`:
 passphrase change, passphrase add, passkey add, passkey remove, client
 revocation, enrollment approval, recovery-code issuance and revocation,
-account deletion, the forget ceremony and the last-client transition, and
-Space export and import.
+the forget ceremony and the last-client transition, and Space export and
+import.
 
 That is what the default session type cannot reach today. None of those
 ceremonies can be performed from a transient session at all, so performing
@@ -1582,7 +1657,7 @@ the standing passphrase and passkey credentials' bridge delegations: the
 cascade walks every registry entry recording one, and a standing
 credential's own login refreshes its bridge inside the renewal window or
 when its signing key has left the account document (the signer-rot axis a
-self-enrollment's ladder-VM removal makes routine).
+credential retirement's ladder-VM strike produces).
 
 ## Client revocation and the epoch cascade
 
@@ -2425,23 +2500,23 @@ trigger a credential-only visit can fire, or a remembered-login sweep on a
 ceremony only a remembered session runs. A residue left to that chain on an
 account that may never run one is an open gap instead, listed below.
 
-| Ceremony                                  | Entry point                                              | Module                                                            | Shared half                 | Mender                                                                                      |
-| ----------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------- |
-| Credential-anchored genesis               | every WAS signup, remembered or not (the default)        | `src/session/credentialAnchoredGenesis.ts`                        | `/clientAnnex`              | re-run; the transient login's heal branch                                                   |
-| Recovery spend (remembered and transient) | `/recover`                                               | `src/session/recovery.ts`                                         | `/recovery`, `/clientAnnex` | remembered: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)   |
-| Self-enrollment at login                  | remembered login on a fresh browser                      | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex`              | pending record pre-pivot; the next remembered login's resume                                |
-| Client enrollment (two-party)             | Settings > Connected wallets, login page                 | `src/components/EnrolledClientsSection.tsx`                       | `/enrollment`               | re-run with the same connect code                                                           |
-| Client revocation + epoch cascade         | Settings > Connected wallets                             | `src/session/revocation.ts`                                       | `/clients`                  | re-run; the cascade-completion sweep                                                        |
-| Recovery-code issuance                    | Settings > Recovery codes                                | `src/session/recovery.ts`                                         | `/recovery`                 | re-run before the confirm; a tear after the document entry has no mender                    |
-| Recovery-code revocation                  | Settings > Recovery codes                                | `src/session/recovery.ts`                                         | `/recovery`                 | re-run; the cascade-completion sweep                                                        |
-| Unlock-credential rotation                | Settings (passphrase change, passkey removal)            | `src/session/credentialRotation.ts`                               | `/unlock`                   | torn-retirement repair at the next passphrase login; remembered-login sweep; re-seal repair |
-| Forget ceremony                           | Settings > Connected wallets, own row                    | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next remembered login                 |
-| Last-client transition                    | same row, `lastClient` confirm                           | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run; the re-mint refusal is a retryable stop                                             |
-| Update-key rotation                       | Settings                                                 | `src/session/accountSettings.ts`                                  | `/webvh`                    | re-run (persist-before-publish)                                                             |
-| Account genesis (plain)                   | a no-WAS deployment's signup only; healed at every login | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                              |
-| Account deletion                          | Settings                                                 | `src/session/accountSettings.ts` + `wipe.ts`                      | app-side phase order        | re-run; a wipe failure after the unlock-method walk is accepted                             |
-| Shared wipe (executor, not user-facing)   | consumed by the deletion-shaped ceremonies               | `src/session/wipe.ts`                                             | app-side                    | re-probe verification; the `unverified` report                                              |
-| Step-up ceremony                          | designed, not built                                      | ---                                                               | ---                         | ---                                                                                         |
+| Ceremony                                  | Entry point                                              | Module                                                            | Shared half                 | Mender                                                                                                                                                    |
+| ----------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Credential-anchored genesis               | every WAS signup, remembered or not (the default)        | `src/session/credentialAnchoredGenesis.ts`                        | `/clientAnnex`              | re-run; the transient login's heal branch                                                                                                                 |
+| Recovery spend (remembered and transient) | `/recover`                                               | `src/session/recovery.ts`                                         | `/recovery`, `/clientAnnex` | remembered: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)                                                                 |
+| Self-enrollment at login                  | remembered login on a fresh browser                      | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex`              | pending record pre-pivot; the next remembered login's resume                                                                                              |
+| Client enrollment (two-party)             | Settings > Connected wallets, login page                 | `src/components/EnrolledClientsSection.tsx`                       | `/enrollment`               | re-run with the same connect code                                                                                                                         |
+| Client revocation + epoch cascade         | Settings > Connected wallets                             | `src/session/revocation.ts`                                       | `/clients`                  | re-run; the cascade-completion sweep                                                                                                                      |
+| Recovery-code issuance                    | Settings > Recovery codes                                | `src/session/recovery.ts`                                         | `/recovery`                 | re-run before the confirm; a tear after the document entry has no mender                                                                                  |
+| Recovery-code revocation                  | Settings > Recovery codes                                | `src/session/recovery.ts`                                         | `/recovery`                 | re-run; the cascade-completion sweep                                                                                                                      |
+| Unlock-credential rotation                | Settings (passphrase change, passkey removal)            | `src/session/credentialRotation.ts`                               | `/unlock`                   | torn-retirement repair at the next passphrase login; remembered-login sweep; re-seal repair                                                               |
+| Forget ceremony                           | Settings > Connected wallets, own row                    | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next remembered login                                                                               |
+| Last-client transition                    | same row, `lastClient` confirm                           | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run; the re-mint refusal is a retryable stop                                                                                                           |
+| Update-key rotation                       | Settings                                                 | `src/session/accountSettings.ts`                                  | `/webvh`                    | re-run (persist-before-publish)                                                                                                                           |
+| Account genesis (plain)                   | a no-WAS deployment's signup only; healed at every login | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                                                                                            |
+| Account deletion                          | Settings, any session type                               | `src/session/accountSettings.ts` + `wipe.ts`                      | app-side phase order        | re-run; an in-run retry for the acting credential's own unlock Space; otherwise the next login with that credential offering to remove it (not yet built) |
+| Shared wipe (executor, not user-facing)   | consumed by the deletion-shaped ceremonies               | `src/session/wipe.ts`                                             | app-side                    | re-probe verification; the `unverified` report                                                                                                            |
+| Step-up ceremony                          | designed, not built                                      | ---                                                               | ---                         | ---                                                                                                                                                       |
 
 Claims the cells cannot hold. A WAS signup's remembered and passkey flavors
 continue into the self-enrollment row. The credential-anchored genesis heal
@@ -2465,30 +2540,23 @@ document entry leaves a saved code that locates no account, plus a document
 `keyAgreement` entry and a roster wrap nothing names. The login sweep
 rotates the orphan wrap away, but the registry-driven health check cannot
 see the code, so the retire-and-reissue mender for the orphaned document
-entry is still unbuilt (see "Recovery codes").
+entry is still unbuilt (see "Recovery codes"). A fifth and sixth come from
+account deletion: a sibling unlock Space whose credential is never used
+again has no mender at all, since the only mender is that credential's own
+next use, and an unspent recovery code is the sharp case; and on a KMS
+deployment, a keystore orphaned by a deletion that ran before the
+keystore-deletion route lands is permanent, since the server-side reaper
+that could otherwise catch it is not a wallet mender.
 
-Mender unreachable. A self-enrollment strikes every ladder VM in the entry
-that publishes the new client. Three artifacts signed under it stop
-verifying at once: the unlock record's bridge delegation, its
+Mender unreachable was self-enrollment's cost before FW-356. The add entry
+that publishes a new client used to strike every ladder VM the document
+listed, rotting every other standing credential's bridge delegation, its
 `delegatedClients` sibling, and the pointed generation's embedded generation
-delegation. Replacements are attempted on the un-awaited login chain, so a
-tab closed in that window leaves the acting credential's dead. The strike is
-account-wide but that refresh is not: it handles the login credential alone,
-so every other standing credential's bridge and sibling stay rotted until
-that credential's own remembered login, a revocation cascade, or the
-last-client transition runs. A plain forget re-mints nothing by design, and
-a cascade skips a pending or failed entry, so both leave the same state.
-
-No credential-only visit mends any of it. The rotted bridge is the
-credential's one log-write path, and on an account with enrolled clients the
-readiness stage refuses at its ladder-VM gate before writing anything, so
-the sibling has no credential-only mender there either. What is left is a
-remembered login on a browser that already holds a client-key record.
-FW-354 moves the acting credential's reseal into an awaited stage. FW-208
-does not reach the rest: the step-up ceremony writes its entries through the
-same bridge, so it cannot start on an account whose bridge is dead and whose
-ladder VM is struck. Only a mender that keeps the ladder VM standing, or a
-log-write path that does not depend on one, reaches these states.
+delegation at once, with a credential-only mender for the login credential
+alone and none for the rest until that credential's own remembered login, a
+revocation cascade, or the last-client transition ran. The add entry now
+leaves every ladder VM exactly where it stood, so a self-enrollment strikes
+nothing and this class of residue no longer arises from it.
 
 The annex generation GC is the same class: it runs from the remembered-login
 chain only. On a client-less account the pointed generation's log grows by
@@ -2733,7 +2801,12 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   entry is loud that the key exists and may delegate; what that key later
   delegates, to whom, and for how long is minted offline and leaves no entry
   anywhere. A mechanism "fails loudness" when it lets a credential exercise
-  authority with no logged record at all.
+  authority with no logged record at all. Account deletion is a stated,
+  scoped exception rather than a failure of the property: destroying the
+  account Space destroys the very log a record of that destruction would
+  live in, so its ladder-signed DELETE-only capabilities are minted and
+  exercised with no entry, and the ceremony's own consent surface stands
+  in for the missing record (`decisions/0002`'s 2026-09-01 amendment).
 - **Continuity pin** -- remembered evidence of what this client last saw,
   checked against what the host now serves. Two kinds: a log's verified
   chain head (`persistence.logPins`, one slot per log) and the user key

@@ -31,6 +31,10 @@ const ACCOUNT_DID = 'did:webvh:QmScid:example.com:space:acct-space'
 const ACCOUNT_SPACE_ID = 'acct-space'
 const PASSPHRASE_UNLOCK_SPACE = 'unlock-space-passphrase'
 const PASSKEY_UNLOCK_SPACE = 'unlock-space-passkey'
+/** The account controller (the first client's did:key). */
+const ACCOUNT_CONTROLLER = 'did:key:z6MkAccountAccountAccountAcct'
+/** A transient visit's per-visit annex key, which names nothing on disk. */
+const VISIT_DID = 'did:key:z6MkVisitVisitVisitVisitVisit'
 
 const registry = {
   version: 1,
@@ -81,17 +85,22 @@ function createFakeLocalStorage(): {
 function sessionFixture({
   isGuest = false,
   storage,
-  unlockSpaceId
+  unlockSpaceId,
+  clientDid = CLIENT_DID,
+  accountController
 }: {
   isGuest?: boolean
   storage?: { wipeLocalStorage: () => Promise<void> }
   unlockSpaceId?: string
+  clientDid?: string
+  accountController?: string
 } = {}): Session {
   return {
-    user: { id: CLIENT_DID },
+    user: { id: clientDid },
     isGuest,
     storage,
     profile: {
+      ...(accountController ? { accountController } : {}),
       ...(unlockSpaceId
         ? {
             unlockMethod: { type: 'passphrase', unlockSpaceId },
@@ -288,6 +297,99 @@ describe('the shared wipe enumeration', () => {
     })
     expect(failed).toEqual([])
     expect(unverified).toEqual(['replica'])
+  })
+
+  it('keys the client families on the account, not on a per-visit annex key', async () => {
+    const { idb, sessionStore } = createFakeSessionIdb()
+    await seedSessionDatabase(idb)
+    // What a remembered login on this browser wrote, keyed on the account
+    // controller rather than on the visiting key.
+    await saveUnlockMethodsCache({
+      controller: ACCOUNT_CONTROLLER,
+      record: registry,
+      idb
+    })
+    await savePasskeySafetyNotice({
+      controller: ACCOUNT_CONTROLLER,
+      backupEligibility: true,
+      backupState: true,
+      idb
+    })
+    localStorageBacking.set(
+      `freewallet:plaintext-migrated:${deriveSpaceId(ACCOUNT_CONTROLLER)}`,
+      '2026'
+    )
+    const session = sessionFixture({
+      clientDid: VISIT_DID,
+      accountController: ACCOUNT_CONTROLLER
+    })
+    const targets = snapshotWipeTargets({ session, registry })
+    expect(sessionStore.has(`unlock-methods/${ACCOUNT_CONTROLLER}`)).toBe(true)
+    expect(sessionStore.has(`passkey-safety/${ACCOUNT_CONTROLLER}`)).toBe(true)
+    expect(targets.accountDids).toEqual([ACCOUNT_CONTROLLER, ACCOUNT_DID])
+    expect(targets.cacheScopes).toContain(`local:${ACCOUNT_CONTROLLER}`)
+
+    await executeLocalWipe({ targets, idb })
+
+    // The account-keyed families go even though this visit's own did:key
+    // names none of them.
+    expect(sessionStore.has(`unlock-methods/${ACCOUNT_CONTROLLER}`)).toBe(false)
+    expect(sessionStore.has(`passkey-safety/${ACCOUNT_CONTROLLER}`)).toBe(false)
+    expect(
+      localStorageBacking.has(
+        `freewallet:plaintext-migrated:${deriveSpaceId(ACCOUNT_CONTROLLER)}`
+      )
+    ).toBe(false)
+  })
+
+  it("enumerates a sibling enrolled client's own families and replica prefix", async () => {
+    // A sibling enrolled client's caches and replica live under ITS did:key,
+    // which the consumer reads off the verified account document. Without it
+    // a transient deletion leaves that client's whole replica on the browser.
+    const siblingDid = 'did:key:z6MkSiblingSiblingSiblingSib'
+    const { idb, sessionStore } = createFakeSessionIdb()
+    await seedSessionDatabase(idb)
+    await saveUnlockMethodsCache({
+      controller: siblingDid,
+      record: registry,
+      idb
+    })
+    await savePasskeySafetyNotice({
+      controller: siblingDid,
+      backupEligibility: true,
+      backupState: true,
+      idb
+    })
+    localStorageBacking.set(
+      `freewallet:plaintext-migrated:${deriveSpaceId(siblingDid)}`,
+      '2026'
+    )
+    const session = sessionFixture({
+      clientDid: VISIT_DID,
+      accountController: ACCOUNT_CONTROLLER
+    })
+
+    const targets = snapshotWipeTargets({
+      session,
+      registry,
+      enrolledClientDids: [siblingDid]
+    })
+
+    expect(targets.accountDids).toContain(siblingDid)
+    // The replica-database prefix the by-name delete uses, and the
+    // localStorage cache scope, both derive from that did:key.
+    expect(targets.cacheScopes).toContain(`local:${siblingDid}`)
+    expect(deriveSpaceId(siblingDid)).toBeTruthy()
+
+    await executeLocalWipe({ targets, idb })
+
+    expect(sessionStore.has(`unlock-methods/${siblingDid}`)).toBe(false)
+    expect(sessionStore.has(`passkey-safety/${siblingDid}`)).toBe(false)
+    expect(
+      localStorageBacking.has(
+        `freewallet:plaintext-migrated:${deriveSpaceId(siblingDid)}`
+      )
+    ).toBe(false)
   })
 
   it('keeps the writer id unless the consumer asks (deleteAccount, guest)', async () => {

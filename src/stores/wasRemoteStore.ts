@@ -1094,14 +1094,48 @@ export class WASRemoteStore {
     }
   }
 
-  async wipeStorage() {
+  /**
+   * Deletes this store's whole remote Space.
+   *
+   * By default the request root-invokes through this store's bound
+   * capability, which is what an enrolled client holds. A session whose bound
+   * capability cannot name the bare Space URL -- a transient session rides a
+   * generation delegation scoped to the Space's items subtree -- passes its
+   * own single-verb DELETE capability and the signer that capability names as
+   * its delegatee, and both travel together on this one request.
+   *
+   * The 404 is REPORTED rather than decided: the server masks an
+   * authorization refusal as 404, so a caller that needs "already gone" must
+   * establish it by its own prior discovery.
+   *
+   * @param [options] {object}
+   * @param [options.capability] {IZcap}   an explicit DELETE capability on
+   *   this Space's own URL
+   * @param [options.zcapClient] {ZcapClient}   the client invoking it (the
+   *   capability's delegatee), when it is not this store's own
+   * @returns {Promise<{ outcome: 'deleted' | 'not-found' }>}
+   */
+  async wipeStorage({
+    capability,
+    zcapClient
+  }: {
+    capability?: IZcap
+    zcapClient?: ZcapClient
+  } = {}): Promise<{ outcome: 'deleted' | 'not-found' }> {
     try {
-      await this.#space().delete()
+      const was = zcapClient
+        ? new WasClient({ serverUrl: this.storageServerUrl, zcapClient })
+        : this.was
+      const space = capability
+        ? was.space(this.spaceId, { capability })
+        : this.#space()
+      const result = await space.deleteWithOutcome()
+      log.info('Remote space deleted', { outcome: result.outcome })
+      return result
     } catch (err) {
       log.error('Error deleting space', { err })
       throw new Error('Failed to delete remote space.', { cause: err })
     }
-    log.info('Remote space deleted')
   }
 
   async getSpaceQuotas(): Promise<SpaceQuotaReport | null> {

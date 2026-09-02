@@ -2268,7 +2268,7 @@ export async function standingLadderSeed({
  *   ladder seed, so a ceremony that verifies before retiring holds the
  *   attribution seed without a second record fetch
  */
-async function verifyUnlockSecret({
+export async function verifyUnlockSecret({
   controller,
   secret,
   kdf,

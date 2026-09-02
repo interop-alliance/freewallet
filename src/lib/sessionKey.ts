@@ -318,6 +318,13 @@ export async function deleteClientKeyRecord({
  * unlock method owns locally, so a further per-credential artifact is added
  * here rather than at every retiring site.
  *
+ * Create-nothing: a browser holding no session database has nothing of this
+ * method to delete, and opening one to delete from it would leave a
+ * residue-zero visit (the account-deletion walk's default session type) with
+ * a `freewallet-session` database it never had. A failing probe proceeds
+ * anyway -- deleting from an existing database must not be skippable by a
+ * probe hiccup.
+ *
  * @param options {object}
  * @param options.spaceId {string}   the unlock Space id
  * @param [options.idb] {IDBFactory}
@@ -330,6 +337,10 @@ export async function deleteUnlockLocalState({
   spaceId: string
   idb?: IDBFactory
 }): Promise<void> {
+  const exists = await sessionDatabaseExists({ idb }).catch(() => true)
+  if (!exists) {
+    return
+  }
   await deleteKeyringCache({ spaceId, idb })
   await deleteClientKeyRecord({ spaceId, idb })
 }
@@ -667,7 +678,10 @@ export async function sessionDatabaseExists({
     const request = idb.open(SESSION_DB_NAME)
     let absent = false
     request.onupgradeneeded = event => {
-      if ((event as IDBVersionChangeEvent).oldVersion === 0) {
+      // The event is optional-chained: a factory that fires the handler with
+      // no event (a test double) must not throw inside a callback the probe's
+      // promise cannot catch, which would hang the caller.
+      if ((event as IDBVersionChangeEvent | undefined)?.oldVersion === 0) {
         absent = true
         request.transaction?.abort()
       }

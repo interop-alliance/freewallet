@@ -92,11 +92,6 @@ import type {
   LastEnrolledClientForgetResult
 } from '@interop/wallet-core/clientAnnex'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
-import { getUnlockKeyringWithCapability } from '@interop/wallet-core/keyring'
-import {
-  unlockKeyVmId,
-  unlockRecordSealedTo
-} from '@interop/wallet-core/unlock'
 import {
   userKeyRosterDescriptorStore,
   userKeyRosterLogSigner
@@ -108,12 +103,8 @@ import {
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import {
   accountLogPinId,
-  clientKeyAgreementController,
   clientSigningKeyMultibase,
   isWebvhDid,
-  keyAgreementCommitment,
-  relationIds,
-  resolvedKeyAgreementMethods,
   updateKeyMultibase,
   verifyAccountLog
 } from '@interop/wallet-core/webvh'
@@ -138,14 +129,16 @@ import {
   recoveryEntriesOf,
   remintEntriesOf
 } from '@/session/recovery'
+import {
+  findPendingPassphraseEntries,
+  findUnrecordedCredentials
+} from '@/session/credentialCoverage'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { unlockLogStore } from '@/session/standingUnlock'
 import {
   getUnlockMethods,
   managementZcapClient,
-  refreshStandingDelegationFields,
-  type PassphraseUnlockMethod,
-  type UnlockMethod
+  refreshStandingDelegationFields
 } from '@/session/unlockMethods'
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import { cascadeCollections } from '@/session/userKeyCascade'
@@ -876,6 +869,7 @@ async function wipeClientResidue({
   const targets: WipeTargets = {
     clientDid,
     ...(accountSpaceId ? { accountSpaceId } : {}),
+    accountDids: [],
     unlockSpaceIds: [unlockSpaceId],
     registryUnread: false,
     cacheScopes: [
@@ -1219,42 +1213,19 @@ async function assertNoPendingPassphraseEntry({
   pointer: Parameters<typeof delegateLogWrite>[0]['pointer']
   registry: { methods?: unknown[] } | null
 }): Promise<void> {
-  const entries = (
-    (registry?.methods ?? []) as PassphraseUnlockMethod[]
-  ).filter(method => method.type === 'passphrase')
-  for (const entry of entries) {
-    if (!entry.manageCapability || !entry.unlockKeyAgreementKeyMultibase) {
-      continue
-    }
-    let sealedToEntry: boolean
-    try {
-      const record = await getUnlockKeyringWithCapability({
-        storageServerUrl: WAS_SERVER_URL ?? pointer.host,
-        zcapClient: managementZcapClient({
-          session,
-          capability: entry.manageCapability
-        }),
-        spaceId: entry.unlockSpaceId,
-        capability: entry.manageCapability
-      })
-      // Inside the same try: a malformed frame or a degenerate descriptor
-      // is a record this ceremony could not settle, not a pending entry and
-      // not a generic ceremony failure.
-      sealedToEntry = unlockRecordSealedTo({
-        record,
-        keyAgreementKeyMultibase: entry.unlockKeyAgreementKeyMultibase
-      })
-    } catch (err) {
-      throw new Error(
-        'Could not read the sign-in record the unlock-methods registry ' +
-          'names, which the last-client forget must settle before it runs; ' +
-          'try again.',
-        { cause: err }
-      )
-    }
-    if (!sealedToEntry) {
-      throw new PendingRetirementForgetError()
-    }
+  const pending = await findPendingPassphraseEntries({
+    registry,
+    host: pointer.host,
+    readerFor: async entry => ({
+      zcapClient: managementZcapClient({
+        session,
+        capability: entry.manageCapability!
+      }),
+      capability: entry.manageCapability!
+    })
+  })
+  if (pending.length > 0) {
+    throw new PendingRetirementForgetError()
   }
 }
 
@@ -1304,37 +1275,11 @@ async function assertRegistryCoversStandingCredentials({
     profile: session.profile,
     pointer
   })
-  const credentialVmIds = credentialKeyAgreementVmIds({
+  const unrecorded = await findUnrecordedCredentials({
     doc,
-    did: pointer.did
+    did: pointer.did,
+    registry
   })
-  if (credentialVmIds.length === 0) {
-    return
-  }
-  const covered = new Set<string>()
-  const multibases = ((registry?.methods ?? []) as UnlockMethod[]).flatMap(
-    method =>
-      typeof method?.keyAgreementKeyMultibase === 'string'
-        ? [method.keyAgreementKeyMultibase]
-        : []
-  )
-  for (const keyAgreementKeyMultibase of multibases) {
-    covered.add(
-      unlockKeyVmId({
-        did: pointer.did,
-        keyAgreement: { publicKeyMultibase: keyAgreementKeyMultibase }
-      })
-    )
-    covered.add(
-      unlockKeyVmId({
-        did: pointer.did,
-        keyAgreement: {
-          commitment: await keyAgreementCommitment({ keyAgreementKeyMultibase })
-        }
-      })
-    )
-  }
-  const unrecorded = credentialVmIds.filter(vmId => !covered.has(vmId))
   if (unrecorded.length > 0) {
     log.warn(
       'The last-client forget refused: the unlock-methods registry does not name these credential key-agreement methods',
@@ -1344,57 +1289,4 @@ async function assertRegistryCoversStandingCredentials({
       unrecorded: unrecorded.length
     })
   }
-}
-
-/**
- * The verification-method ids of the standing credentials' `keyAgreement`
- * entries in a verified account document: every resolved key-agreement
- * method whose `controller` is not an enrolled client's marker (the did:key
- * of a signing key the document lists under `capabilityInvocation`). A
- * method carrying no id of its own is named by the id its published key
- * material implies, the form {@link unlockKeyVmId} builds.
- *
- * @param options {object}
- * @param options.doc {object}   the verified account document
- * @param options.did {string}   the account's did:webvh
- * @returns {string[]}
- */
-function credentialKeyAgreementVmIds({
-  doc,
-  did
-}: {
-  doc: object
-  did: string
-}): string[] {
-  const invocation = (
-    doc as { capabilityInvocation?: Array<string | { id?: string }> }
-  ).capabilityInvocation
-  const markers = new Set(
-    relationIds(invocation).map(id =>
-      clientKeyAgreementController({
-        signingKeyMultibase: id.slice(id.lastIndexOf('#') + 1)
-      })
-    )
-  )
-  const vmIds: string[] = []
-  for (const method of resolvedKeyAgreementMethods({ doc })) {
-    if (method.controller && markers.has(method.controller)) {
-      continue
-    }
-    const fragment = method.publicKeyMultibase ?? method.publicKeyCommitment
-    const vmId =
-      method.id ??
-      (fragment
-        ? unlockKeyVmId({
-            did,
-            keyAgreement: method.publicKeyMultibase
-              ? { publicKeyMultibase: method.publicKeyMultibase }
-              : { commitment: method.publicKeyCommitment! }
-          })
-        : undefined)
-    if (vmId) {
-      vmIds.push(vmId)
-    }
-  }
-  return [...new Set(vmIds)]
 }

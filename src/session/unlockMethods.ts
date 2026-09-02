@@ -390,13 +390,18 @@ export function emptyUnlockMethodsRegistry(): UnlockMethodsRecord {
  *
  * @param options {object}
  * @param options.session {Session}
+ * @param [options.capability] {IZcap}   an invocation capability the record
+ *   GET rides (a transient session's generation delegation, which is the only
+ *   authority that session has); the root capability is invoked otherwise
  * @returns {Promise<UnlockMethodsRecord | null>}
  * @throws {UnlockRegistryStaleSealError}
  */
 export async function getUnlockMethods({
-  session
+  session,
+  capability
 }: {
   session: Session
+  capability?: IZcap
 }): Promise<UnlockMethodsRecord | null> {
   const controller = session.user.id
   const { unlockMethodsCache } = session.profile.persistence
@@ -423,7 +428,8 @@ export async function getUnlockMethods({
   const stored = await getUnlockMethodsRecord({
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: session.profile.zcapClient,
-    spaceId: requireSpaceId(session)
+    spaceId: requireSpaceId(session),
+    ...(capability ? { capability } : {})
   })
   if (!stored) {
     await unlockMethodsCache.delete({ controller })
@@ -853,6 +859,9 @@ export async function getUnlockMethodsWithClient({
  * @param options.to {object}   the post-rotation vault keys
  * @param options.to.keyAgreementKey {IKeyAgreementKey}
  * @param options.to.keyResolver {IKeyResolver}
+ * @param [options.capability] {IZcap}   an invocation capability every request
+ *   rides (a transient session's generation delegation); the root capability
+ *   is invoked otherwise
  * @returns {Promise<void>}
  */
 export async function rewrapUnlockMethodsRecord({
@@ -860,20 +869,23 @@ export async function rewrapUnlockMethodsRecord({
   zcapClient,
   spaceId,
   from,
-  to
+  to,
+  capability
 }: {
   storageServerUrl: string
   zcapClient: ZcapClient
   spaceId: string
   from: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
   to: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
+  capability?: IZcap
 }): Promise<void> {
   let lastError: unknown
   for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
     const stored = await getUnlockMethodsRecord({
       storageServerUrl,
       zcapClient,
-      spaceId
+      spaceId,
+      ...(capability ? { capability } : {})
     })
     if (!stored) {
       return
@@ -900,6 +912,7 @@ export async function rewrapUnlockMethodsRecord({
         zcapClient,
         spaceId,
         record: wrapped,
+        ...(capability ? { capability } : {}),
         ifMatch: stored.etag
       })
       return
@@ -1058,8 +1071,11 @@ export function managementZcapClient({
  *   than the one this deployment addresses (an entry minted before the target
  *   was built with was-client's path helpers carries a root-anchored URL on a
  *   sub-path deployment). Same residue, same mender.
+ * - `unsupported-capability` -- the recorded management zcap's `allowedAction`
+ *   does not carry the verb the caller asked for, so a child of it would
+ *   verify nowhere. Same residue, same mender.
  *
- * The last four are refused locally, before anything is minted or sent. A
+ * The last five are refused locally, before anything is minted or sent. A
  * child the server would refuse comes back as a 404 like an absent Space,
  * and a walk reading that as `not-found` would drop the entry and its local
  * state around a Space that in fact still stands.
@@ -1072,6 +1088,7 @@ export type UnlockSpaceDeletionOutcome =
   | 'expired-capability'
   | 'foreign-controller'
   | 'stale-target'
+  | 'unsupported-capability'
 
 /**
  * The identities this session's own management-zcap signer can act as: this
@@ -1113,22 +1130,35 @@ function sessionDelegatorIdentities({
  * @param options {object}
  * @param options.session {Session}
  * @param options.entry {UnlockMethod}
- * @param [options.signer] {object}   an explicit delegator and delegatee
+ * @param [options.signer] {object}   an explicit delegator, invoker and
+ *   delegatee
  * @param options.signer.zcapClient {ZcapClient}
+ * @param [options.signer.invoker] {ZcapClient}
  * @param options.signer.controller {string}
+ * @param [options.verb] {string}   the verb the child would carry; defaults
+ *   to `DELETE`, the deletion walk's own. A discovery probe asks for `GET`,
+ *   and a parent that does not allow it is unprobeable rather than
+ *   undeletable
  * @returns {UnlockSpaceDeletionOutcome | undefined}
  */
 export function unlockSpaceDeletionRefusal({
   session,
   entry,
-  signer
+  signer,
+  verb = 'DELETE'
 }: {
   session: Session
   entry: UnlockMethod
-  signer?: { zcapClient: ZcapClient; controller: string }
+  signer?: { zcapClient: ZcapClient; invoker?: ZcapClient; controller: string }
+  verb?: 'GET' | 'PUT' | 'DELETE'
 }): UnlockSpaceDeletionOutcome | undefined {
   const parent = entry.manageCapability as
-    | { controller?: string; invocationTarget?: string; expires?: string }
+    | {
+        controller?: string
+        invocationTarget?: string
+        expires?: string
+        allowedAction?: string | string[]
+      }
     | undefined
   if (!parent?.controller || !parent.invocationTarget) {
     return 'no-capability'
@@ -1150,6 +1180,15 @@ export function unlockSpaceDeletionRefusal({
   if (parent.invocationTarget !== target) {
     return 'stale-target'
   }
+  // The verb check `mintSpaceVerbCapability` makes as a throw, made here as a
+  // reported outcome: an absent `allowedAction` delegates every action.
+  const allowed = parent.allowedAction
+  if (allowed !== undefined) {
+    const actions = Array.isArray(allowed) ? allowed : [allowed]
+    if (actions.length > 0 && !actions.includes(verb)) {
+      return 'unsupported-capability'
+    }
+  }
   return undefined
 }
 
@@ -1169,12 +1208,23 @@ export function unlockSpaceDeletionRefusal({
  * names -- unless the caller supplies its own signer, which is how a session
  * with no enrolled-client key (the ladder VM's bare did:key) deletes.
  *
+ * Delegating and invoking are two different keys there, and mixing them is a
+ * masked 404: the child's parent must be signed by the parent's own
+ * controller (the ladder VM under `<accountDid>#<multibase>`), while the
+ * child's own DELETE must be sent by the child's controller -- the ladder
+ * VM's bare did:key, which carries no `capabilityInvocation` relation in the
+ * account document and so can delegate but never invoke under its account
+ * form. The caller's `invoker` is that sender; absent, the delegator sends
+ * its own child, which is the remembered session's management-zcap path.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @param options.entry {UnlockMethod}   the method whose Space to delete
- * @param [options.signer] {object}   an explicit delegator and delegatee, for
- *   a caller not signing as an enrolled client
- * @param options.signer.zcapClient {ZcapClient}
+ * @param [options.signer] {object}   an explicit delegator, invoker and
+ *   delegatee, for a caller not signing as an enrolled client
+ * @param options.signer.zcapClient {ZcapClient}   the delegating signer
+ * @param [options.signer.invoker] {ZcapClient}   the client that sends the
+ *   DELETE; defaults to the delegating signer
  * @param options.signer.controller {string}
  * @returns {Promise<UnlockSpaceDeletionOutcome>}
  */
@@ -1185,7 +1235,7 @@ export async function deleteUnlockSpaceForEntry({
 }: {
   session: Session
   entry: UnlockMethod
-  signer?: { zcapClient: ZcapClient; controller: string }
+  signer?: { zcapClient: ZcapClient; invoker?: ZcapClient; controller: string }
 }): Promise<UnlockSpaceDeletionOutcome> {
   if (!WAS_SERVER_URL) {
     return 'no-server'
@@ -1201,12 +1251,14 @@ export async function deleteUnlockSpaceForEntry({
   const parent = entry.manageCapability as IZcap
   const controller =
     signer?.controller ?? (parent as { controller?: string }).controller
-  const zcapClient =
+  const delegator =
     signer?.zcapClient ?? managementZcapClient({ session, capability: parent })
+  // The child's own controller sends it; the delegator only signs it.
+  const invoker = signer?.invoker ?? delegator
   let capability
   try {
     capability = await mintSpaceVerbCapability({
-      zcapClient,
+      zcapClient: delegator,
       parent,
       verb: 'DELETE',
       controller: controller as string,
@@ -1222,7 +1274,7 @@ export async function deleteUnlockSpaceForEntry({
   }
   const { outcome } = await deleteUnlockSpaceWithCapability({
     storageServerUrl: WAS_SERVER_URL,
-    zcapClient,
+    zcapClient: invoker,
     spaceId: entry.unlockSpaceId,
     capability
   })
@@ -1320,46 +1372,53 @@ export async function revokeUnlockMethod({
 }
 
 /**
- * Deletes one unlock method's artifacts, ceremony-free -- the
- * account-deletion walk's per-entry unit. Server-side, the entry's unlock
- * Space (holding its unlock record, and with it the sealed bridge and
- * `delegatedClients` delegations) goes through a DELETE-only child of the
- * recorded management zcap; an entry recording none, or one whose recorded
- * capability has expired, keeps its Space and says so on the returned outcome
- * -- the walk is best-effort by design, and the account behind the record is
- * dead either way. Client-side, the entry's local state (keyring cache,
- * client-key record) is dropped whatever the server did.
- * Deliberately NO rotation and NO registry rewrite: the registry
- * and the roster die with the account Space the caller is about to wipe.
+ * Deletes one unlock method's unlock SPACE, ceremony-free -- the
+ * account-deletion walk's per-entry unit. The Space holds that method's
+ * unlock record, and with it the sealed bridge and `delegatedClients`
+ * delegations, and it goes through a DELETE-only child of the recorded
+ * management zcap; an entry recording none, or one whose recorded capability
+ * has expired or does not allow the verb, keeps its Space and says so on the
+ * returned outcome -- the account behind the record is dead either way.
+ *
+ * The REMOTE half only. That method's browser-local state (its keyring cache
+ * and client-key record) is left for the caller's own local-wipe stage, which
+ * runs past the pivot: these DELETEs run before it, so a run that refuses at
+ * the account Space must leave this browser exactly as it found it rather
+ * than having quietly un-remembered every other credential on it.
+ * Deliberately NO rotation and NO registry rewrite either: the registry and
+ * the roster die with the account Space the caller is about to wipe.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.entry {UnlockMethod}
- * @param [options.idb] {IDBFactory}
- * @param [options.signer] {object}   an explicit delegator and delegatee for
- *   the DELETE-only child, for a caller not signing as an enrolled client
+ * @param [options.signer] {object}   an explicit delegator, invoker and
+ *   delegatee for the DELETE-only child, for a caller not signing as an
+ *   enrolled client
  * @param options.signer.zcapClient {ZcapClient}
+ * @param [options.signer.invoker] {ZcapClient}
  * @param options.signer.controller {string}
  * @returns {Promise<{ unlockSpaceId: string, space: UnlockSpaceDeletionOutcome }>}
  *   what became of the entry's unlock Space
  */
-export async function deleteUnlockMethodArtifacts({
+export async function deleteUnlockMethodSpace({
   session,
   entry,
-  idb,
   signer
 }: {
   session: Session
   entry: UnlockMethod
-  idb?: IDBFactory
-  signer?: { zcapClient: ZcapClient; controller: string }
+  signer?: { zcapClient: ZcapClient; invoker?: ZcapClient; controller: string }
 }): Promise<{ unlockSpaceId: string; space: UnlockSpaceDeletionOutcome }> {
   const space = await deleteUnlockSpaceForEntry({
     session,
     entry,
     ...(signer ? { signer } : {})
   })
-  if (space === 'no-capability' || space === 'expired-capability') {
+  if (
+    space === 'no-capability' ||
+    space === 'expired-capability' ||
+    space === 'unsupported-capability'
+  ) {
     // Not a refusal and not a silent skip: the Space survives the run and is
     // named on the outcome, mended by that credential's own next login (which
     // re-delegates the management zcap) or by its next use once the account
@@ -1370,7 +1429,6 @@ export async function deleteUnlockMethodArtifacts({
       reason: space
     })
   }
-  await deleteUnlockLocalState({ spaceId: entry.unlockSpaceId, idb })
   return { unlockSpaceId: entry.unlockSpaceId, space }
 }
 

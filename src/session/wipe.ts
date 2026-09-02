@@ -33,7 +33,7 @@ import {
   sessionDatabaseExists
 } from '@/lib/sessionKey'
 import { clearWriterId } from '@/lib/writerId'
-import { migrationMarkerKeys } from '@/stores/browserStore'
+import { BrowserStore, migrationMarkerKeys } from '@/stores/browserStore'
 import { deleteLocalCacheFamilies } from '@/session/persistence'
 import type { UnlockMethodsRecord } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
@@ -61,6 +61,21 @@ export interface WipeTargets {
    * The account data Space id; keys the Space-to-DID mapping.
    */
   accountSpaceId?: string
+  /**
+   * The account's own identifiers -- the account controller did:key and the
+   * account did:webvh where the pointer names one -- unioned with every
+   * ENROLLED CLIENT's own did:key, as the consumer read them off the verified
+   * account document (`did:key:<the signing method's multibase>`).
+   *
+   * The client-keyed families are enumerated under these BESIDE `clientDid`,
+   * because a transient visit's `clientDid` is a per-visit annex key that
+   * names none of the state an enrolled client of the same account left here:
+   * its unlock-methods cache, its passkey-safety notice, its local-mode cache
+   * scope, its migration markers, and -- the one that holds real credential
+   * data -- its replica database, whose prefix is `deriveSpaceId(did:key)`.
+   * Enumerating a superset costs a no-op delete per absent key.
+   */
+  accountDids: string[]
   /**
    * Every unlock method's unlock Space id -- each keys that method's local
    * state (keyring cache, client-key record): the whole registry, unioned
@@ -103,33 +118,48 @@ export interface WipeTargets {
  * @param [options.registry] {UnlockMethodsRecord | null}
  * @param [options.registryUnread] {boolean}   the consumer's registry read
  *   failed (default false: the registry was read, or the consumer has none)
+ * @param [options.enrolledClientDids] {string[]}   every enrolled client's own
+ *   did:key, from the consumer's verified account document; absent, only this
+ *   session's own client and the account's identifiers are enumerated, and a
+ *   sibling client's replica survives
  * @returns {WipeTargets}
  */
 export function snapshotWipeTargets({
   session,
   registry,
-  registryUnread = false
+  registryUnread = false,
+  enrolledClientDids = []
 }: {
   session: Session
   registry?: UnlockMethodsRecord | null
   registryUnread?: boolean
+  enrolledClientDids?: string[]
 }): WipeTargets {
   const clientDid = session.user.id
   const accountSpaceId = session.profile.accountPointer?.spaceId
-  const { unlockMethod, standingUnlock } = session.profile
+  const { unlockMethod, standingUnlock, accountController, accountPointer } =
+    session.profile
   const unlockSpaceIds = new Set<string>([
     ...(unlockMethod ? [unlockMethod.unlockSpaceId] : []),
     ...(standingUnlock ? [standingUnlock.unlockSpaceId] : []),
     ...(registry?.methods ?? []).map(entry => entry.unlockSpaceId)
   ])
+  const accountDids = [
+    ...new Set(
+      [accountController, accountPointer?.did, ...enrolledClientDids].filter(
+        (did): did is string => typeof did === 'string' && did !== clientDid
+      )
+    )
+  ]
   return {
     clientDid,
     accountSpaceId,
+    accountDids,
     unlockSpaceIds: [...unlockSpaceIds],
     registryUnread,
     cacheScopes: [
       ...(accountSpaceId ? [accountSpaceId] : []),
-      `local:${clientDid}`
+      ...[clientDid, ...accountDids].map(did => `local:${did}`)
     ]
   }
 }
@@ -147,6 +177,12 @@ export function snapshotWipeTargets({
  * `indexedDB.databases()` cannot re-probe a replica delete. The delete is
  * issued regardless -- skipping it would leave real data behind -- and the
  * consumer states the unconfirmed outcome instead of claiming a clean wipe.
+ *
+ * The replica stage runs twice: once through the session's own store (which
+ * carries the cross-tab teardown for the database this session has open), and
+ * once per enumerated client did:key by name, which is the only pass that
+ * reaches a transient session's replica-less browser and a SIBLING enrolled
+ * client's database. Deleting an absent database is a no-op.
  *
  * @param options {object}
  * @param options.targets {WipeTargets}
@@ -190,6 +226,13 @@ export async function executeLocalWipe({
   }
 
   // The replica databases first (cross-tab teardown rides inside).
+  //
+  // Two passes, because the session's own StorageManager reaches only the
+  // replica this session opened: a transient session opened none at all, and
+  // no session ever opens a SIBLING enrolled client's. The second pass names
+  // each enumerated client's replica by its own prefix and deletes it
+  // through the same `BrowserStore.wipeStorage` path (teardown broadcast and
+  // verified re-probe included), which needs no live store and no keys.
   if (storage) {
     await stage('replica', async () => {
       const result = await storage.wipeLocalStorage()
@@ -197,6 +240,17 @@ export async function executeLocalWipe({
         unverified.push('replica')
       }
     })
+  }
+  if (typeof indexedDB !== 'undefined') {
+    for (const did of [targets.clientDid, ...targets.accountDids]) {
+      const dbPrefix = deriveSpaceId(did)
+      await stage(`replica:${dbPrefix}`, async () => {
+        const { verified } = await new BrowserStore({ dbPrefix }).wipeStorage()
+        if (!verified) {
+          unverified.push(`replica:${dbPrefix}`)
+        }
+      })
+    }
   }
 
   // The session database's families -- guarded by a create-nothing probe, so
@@ -216,12 +270,18 @@ export async function executeLocalWipe({
         await deleteAccountDidForSpace({ spaceId, idb })
       })
     }
-    await stage('unlock-methods-cache', async () => {
-      await deleteUnlockMethodsCache({ controller: targets.clientDid, idb })
-    })
-    await stage('passkey-safety-notice', async () => {
-      await deletePasskeySafetyNotice({ controller: targets.clientDid, idb })
-    })
+    // Keyed on this browser's own client did:key AND on the account: a
+    // transient visit's client did:key is a per-visit annex key, so the
+    // families an enrolled client of the same account left here are named by
+    // the account instead. An absent key deletes as a no-op.
+    for (const controller of [targets.clientDid, ...targets.accountDids]) {
+      await stage(`unlock-methods-cache:${controller}`, async () => {
+        await deleteUnlockMethodsCache({ controller, idb })
+      })
+      await stage(`passkey-safety-notice:${controller}`, async () => {
+        await deletePasskeySafetyNotice({ controller, idb })
+      })
+    }
   }
 
   // The per-account localStorage families, last (markers after state).
@@ -234,9 +294,11 @@ export async function executeLocalWipe({
     if (typeof localStorage === 'undefined') {
       return
     }
-    const markers = migrationMarkerKeys(deriveSpaceId(targets.clientDid))
-    localStorage.removeItem(markers.plaintext)
-    localStorage.removeItem(markers.publicCids)
+    for (const did of [targets.clientDid, ...targets.accountDids]) {
+      const markers = migrationMarkerKeys(deriveSpaceId(did))
+      localStorage.removeItem(markers.plaintext)
+      localStorage.removeItem(markers.publicCids)
+    }
   })
   if (clearWriter) {
     await stage('writer-id', () => {

@@ -4,6 +4,95 @@
 
 ### Changed
 
+- Account deletion runs from a transient session. `deleteAccount` no longer
+  refuses with `StepUpRequiredError`; it authenticates by deriving the
+  credential, its unlock record, and its ladder seed fresh from the typed
+  passphrase (or a passkey re-assertion bound to this session's own
+  credential id), then signs every Space DELETE as that credential's ladder
+  VM. The run order is authenticate, quiesce, discover, the auxiliary annex
+  Spaces, the keystore slot, the sibling unlock Spaces, the account Space
+  (the pivot), the acting credential's own unlock Space, the local wipe.
+- Each annex and account Space DELETE rides a DELETE-only child of that
+  Space's root, minted immediately before its own request and delegated to
+  the ladder VM's bare did:key. A remembered session root-invokes both as
+  before and mints nothing.
+- The deletion's discovery stage refuses the whole run, with nothing deleted,
+  on a document anchoring no ladder VM of this credential, on a registry it
+  cannot read, on a stale registry seal it cannot mend in place, on either
+  coverage detector it cannot settle, and on a discovery read that failed for
+  anything but a 404. It verifies the account log fresh rather than from the
+  session's memo; a log that answers 404 means the remote half is already
+  finished, so the run carries straight to the acting credential's own unlock
+  Space and the local wipe and reports a deletion.
+- A registry read that comes back empty on a promoted account is treated as
+  the masked 404 it is and refuses, rather than walking an empty sibling list
+  that would strand every sibling unlock Space behind a deleted account. Only
+  an unpromoted account and a no-WAS deployment may genuinely carry no
+  registry. The transient session's generation delegation is renewed before
+  the first read that rides it -- the passkey confirm's own registry read
+  included -- and a renewal that could not run refuses.
+- Every discovery probe is status-exact rather than was-client's
+  `Space.describe()`, which resolves empty for a 404 and for an unparsable
+  success alike; only a 404 records an absence, and an absence is what lets a
+  later 404 grade as a deletion. An unpromoted account, which publishes no
+  log to corroborate with, uses its root-invoked read instead: no refusal can
+  be masked for the Space's own controller.
+- The discovery stage reads the unlock-methods registry under the visit's own
+  generation delegation, repairs a registry sealed to a superseded user key
+  in place from the roster's escrow, renews an expiring generation delegation
+  before anything destructive runs, and enumerates the auxiliary annex Spaces
+  from every `#DelegatedClients` pointer in the account log's history unioned
+  with the acting record's own sibling target.
+- A pending-shaped passphrase entry and a standing credential the registry
+  does not record are reported as named residues rather than refusing the
+  run: the account Space's own deletion is their mender. Both checks moved to
+  `src/session/credentialCoverage.ts`, shared with the last-client
+  transition, which still refuses on either.
+- A Space DELETE that answers 404 is graded rather than assumed. A Space the
+  run read successfully fails the run, since the server masks an
+  authorization refusal as a 404; a Space found absent at discovery is
+  reported deleted only where the account Space's world-readable log
+  corroborates the absence, and `unconfirmed` otherwise. The account Space's
+  own DELETE re-probes under a freshly minted GET-only child before surfacing
+  a failure, and refuses the run rather than reporting a clean deletion when
+  its 404 stands over a log that still answers. No failure past the pivot
+  reports as a failed deletion, and the acting credential's unlock Space gets
+  one in-run retry before it is reported as a standing residue.
+- The deletion walk creates no `freewallet-session` database on a browser
+  that holds none, and the local wipe enumerates the client-keyed families
+  under the account's own identifiers and under every enrolled client's
+  did:key (read off the verified document's `capabilityInvocation` entries)
+  beside the visiting key, so a sibling client's replica database and caches
+  are reached from a transient visit and deleted by name. Every sibling
+  unlock method's own local state moved to that stage too: (b1) sends the
+  remote DELETE only, so a run refused at the pivot leaves this browser as it
+  found it. A replica that survives
+  the wipe past the pivot is reported as `deleted-unverified` rather than as
+  a failed deletion; only a run with no pivot (a guest, a no-WAS deployment),
+  where the replica IS the account, still reports it as a failure.
+- A sibling unlock Space whose management zcap allows the walk's verb is
+  minted from as before; one allowing DELETE but not GET is deleted unprobed
+  rather than refusing the run, and one allowing no DELETE is reported as a
+  named residue (`unsupported-capability`) beside the other four.
+- Settings takes a second confirm, scoped to what the discovery stage found:
+  the other unlock methods by label and kind, the enrolled clients, the Space
+  count, and every Space the walk cannot reach. The dialog adds the
+  shared-computer hazard sentence, per-phase progress with keep-this-tab-open
+  copy, an unload guard, and a catch that renders every refusal in place
+  rather than letting it escape as an unhandled rejection. The confirm field
+  ships with autofill disabled. A guest and a no-WAS run keep the single
+  ungated confirm, having enumerated nothing. Every outcome past the pivot
+  logs out; one carrying residue shows its copy first and logs out on the
+  acknowledge, and a replica this browser could not confirm gone is offered
+  the browser-scoped forget beside it.
+- `WASRemoteStore.wipeStorage` and `StorageManager.wipeRemoteStorage` report
+  `deleted` or `not-found` and accept an explicit DELETE capability with the
+  client that capability names as its delegatee.
+- `repairStaleUnlockRegistrySeal`'s core is available without a session
+  (`resealRegistryFromEscrow`), and the registry read, the re-wrap, and the
+  roster store all accept an invocation capability, so a transient session
+  can drive them.
+
 - A standing credential's retirement refuses when it cannot claim the retired
   credential's ladder VM (wallet-core's name-stable
   `UnclaimedLadderVmRetirementError`, raised before anything publishes). The
@@ -56,6 +145,15 @@
   pending-shaped one, rides the visit's generation delegation inside the
   registry's compare-and-swap, warns and skips on a read that throws, is not
   awaited (no login blocks on it), and is skipped in the CHAPI popup.
+- An e2e spec for the deletion (`tests/e2e-was/account-deletion.spec.ts`),
+  over a store-side oracle that reads the teaching server's FileSystem
+  backend directly (`tests/e2e-was/storeOracle.ts`). An HTTP probe cannot
+  answer "is this Space gone": once the account Space is deleted, every
+  survivor its did:webvh controlled answers the same masked 404 whether it
+  was deleted or stranded. The spec covers a completed deletion from a
+  transient visit (no account, unlock, or auxiliary annex Space left, and no
+  local residue), a discovery refusal that renders in the dialog with nothing
+  deleted, and a run torn before the acting credential's own unlock Space.
 
 ## 0.44.0 - TBD
 
